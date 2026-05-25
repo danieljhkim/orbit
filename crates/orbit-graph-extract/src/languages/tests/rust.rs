@@ -193,3 +193,111 @@ fn drive(runner: Runner) {
             && reference.confidence == "fuzzy_name"
     }));
 }
+
+#[test]
+fn extracts_clap_subcommand_handlers_from_simple_match_arms() {
+    let file = extract(
+        r#"
+use clap::Subcommand;
+
+#[derive(Subcommand)]
+enum TaskSubcommand {
+    Add(AddArgs),
+}
+
+struct AddArgs;
+
+fn dispatch(command: TaskSubcommand) {
+    match command {
+        TaskSubcommand::Add(args) => add(args),
+    }
+}
+
+fn add(_args: AddArgs) {}
+"#,
+    );
+
+    let command = file
+        .commands
+        .iter()
+        .find(|command| command.name == "task add")
+        .expect("task add command");
+    assert_eq!(command.handler_symbol.as_deref(), Some("add"));
+}
+
+#[test]
+fn extracts_nested_clap_subcommands_with_name_overrides() {
+    let file = extract(
+        r#"
+use clap::Subcommand;
+
+#[derive(Subcommand)]
+enum RootSubcommand {
+    Task(TaskSubcommand),
+}
+
+#[derive(Subcommand)]
+enum TaskSubcommand {
+    Add(AddArgs),
+    #[command(name = "review-thread")]
+    ReviewThread(ReviewArgs),
+}
+
+struct AddArgs;
+struct ReviewArgs;
+
+fn dispatch(command: TaskSubcommand) {
+    match command {
+        TaskSubcommand::Add(args) => add(args),
+        TaskSubcommand::ReviewThread(args) => review(args),
+    }
+}
+
+fn add(_args: AddArgs) {}
+fn review(_args: ReviewArgs) {}
+"#,
+    );
+
+    assert!(file.commands.iter().any(|command| {
+        command.name == "root task add" && command.handler_symbol.as_deref() == Some("add")
+    }));
+    assert!(file.commands.iter().any(|command| {
+        command.name == "root task review-thread"
+            && command.handler_symbol.as_deref() == Some("review")
+    }));
+}
+
+#[test]
+fn emits_clap_subcommand_when_arm_has_no_single_handler() {
+    let file = extract(
+        r#"
+use clap::Subcommand;
+
+#[derive(Subcommand)]
+enum JobSubcommand {
+    Run(RunArgs),
+}
+
+struct RunArgs;
+
+fn dispatch(command: JobSubcommand) {
+    match command {
+        JobSubcommand::Run(args) => {
+            audit();
+            run(args)
+        }
+    }
+}
+
+fn audit() {}
+fn run(_args: RunArgs) {}
+"#,
+    );
+
+    let command = file
+        .commands
+        .iter()
+        .find(|command| command.name == "job run")
+        .expect("job run command");
+    assert_eq!(command.handler_symbol, None);
+}

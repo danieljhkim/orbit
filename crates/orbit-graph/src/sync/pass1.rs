@@ -469,6 +469,16 @@ fn insert_configs(tx: &Transaction<'_>, configs: &[RawConfig]) -> Result<(), Gra
 }
 
 fn delete_fts_for_file(tx: &Transaction<'_>, file_path: &str) -> Result<(), GraphError> {
+    // L-0056: cross-file command handler FKs must be cleared before refreshing symbol rows.
+    tx.execute(
+        "UPDATE commands
+         SET handler_symbol = NULL
+         WHERE handler_symbol IN (
+             SELECT id FROM symbols WHERE file_path = ?1
+         )",
+        params![file_path],
+    )
+    .map_err(|source| GraphError::sqlite("clear command handlers for refreshed file", source))?;
     tx.execute(
         "DELETE FROM symbols_fts WHERE rowid IN (
             SELECT id FROM symbols WHERE file_path = ?1
@@ -499,11 +509,13 @@ fn insert_commands(
     symbol_ids: &BTreeMap<String, i64>,
 ) -> Result<(), GraphError> {
     for command in commands {
-        let handler_symbol = command
-            .handler_symbol
-            .as_ref()
-            .and_then(|qualified| symbol_ids.get(qualified))
-            .copied();
+        let handler_symbol = match command.handler_symbol.as_ref() {
+            Some(qualified) => match symbol_ids.get(qualified) {
+                Some(symbol_id) => Some(*symbol_id),
+                None => unique_symbol_id_for_qualified(tx, qualified)?,
+            },
+            None => None,
+        };
         tx.execute(
             "INSERT INTO commands (name, file_path, span_start, handler_symbol)
              VALUES (?1, ?2, ?3, ?4)",
@@ -517,6 +529,25 @@ fn insert_commands(
         .map_err(|source| GraphError::sqlite("insert graph command row", source))?;
     }
     Ok(())
+}
+
+fn unique_symbol_id_for_qualified(
+    tx: &Transaction<'_>,
+    qualified: &str,
+) -> Result<Option<i64>, GraphError> {
+    let mut stmt = tx
+        .prepare_cached("SELECT id FROM symbols WHERE qualified = ?1 ORDER BY id LIMIT 2")
+        .map_err(|source| GraphError::sqlite("prepare command handler symbol lookup", source))?;
+    let ids = stmt
+        .query_map(params![qualified], |row| row.get::<_, i64>(0))
+        .map_err(|source| GraphError::sqlite("query command handler symbol", source))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| GraphError::sqlite("collect command handler symbol", source))?;
+    if ids.len() == 1 {
+        Ok(ids.first().copied())
+    } else {
+        Ok(None)
+    }
 }
 
 fn count_files(conn: &Connection) -> Result<usize, GraphError> {

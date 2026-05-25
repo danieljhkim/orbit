@@ -83,6 +83,65 @@ fn deleted_file_row_cascades_all_pass1_tables() {
 }
 
 #[test]
+fn full_sync_rebuilds_cross_file_command_handlers() {
+    let worktree = TestWorktree::new("cross-file-command-handler");
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+    worktree.write(
+        "src/add.rs",
+        r#"
+struct TaskAddArgs;
+
+trait Execute {
+    fn execute(self);
+}
+
+impl Execute for TaskAddArgs {
+    fn execute(self) {
+        helper();
+    }
+}
+
+fn helper() {}
+"#,
+    );
+    worktree.write(
+        "src/command.rs",
+        r#"
+use clap::Subcommand;
+
+#[derive(Subcommand)]
+enum TaskSubcommand {
+    Add(TaskAddArgs),
+}
+
+fn dispatch(command: TaskSubcommand) {
+    match command {
+        TaskSubcommand::Add(args) => args.execute(),
+    }
+}
+"#,
+    );
+
+    graph.sync(SyncMode::Full).expect("initial full sync");
+    graph
+        .sync(SyncMode::Full)
+        .expect("second full sync keeps cross-file command handlers valid");
+
+    let conn = open_test_connection(worktree.path());
+    let handler = conn
+        .query_row(
+            "SELECT s.qualified
+             FROM commands c
+             JOIN symbols s ON s.id = c.handler_symbol
+             WHERE c.name = 'task add'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("resolved task add handler");
+    assert_eq!(handler, "<TaskAddArgs as Execute>::execute");
+}
+
+#[test]
 fn pass1_writes_relations_but_not_refs() {
     let worktree = TestWorktree::new("relations-no-refs");
     let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");

@@ -35,7 +35,7 @@ mod tests;
 /// incompatibly. Older graph DB files then become invisible to the active
 /// graph handle and are removed by the next sync.
 // L-0052: FTS population invariants require a fresh DB when old indexes may be empty.
-pub const EXTRACTOR_VERSION: u32 = 3;
+pub const EXTRACTOR_VERSION: u32 = 4;
 
 /// Default graph distance used by callers that do not supply `--depth`.
 pub const DEFAULT_IMPACT_DEPTH: u8 = 3;

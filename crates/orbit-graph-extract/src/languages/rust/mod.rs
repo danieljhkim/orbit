@@ -5,7 +5,9 @@ use std::path::Path;
 use tree_sitter::{Node, Parser};
 
 use super::common::{dedup_imports, dedup_refs, dedup_relations, dedup_symbols, normalize_path};
-use crate::{ExtractedFile, Extractor, RawImport, RawRef, RawRelation, RawSymbol};
+use crate::{ExtractedFile, Extractor, RawCommand, RawImport, RawRef, RawRelation, RawSymbol};
+
+mod commands;
 
 /// Extracts Rust source files into raw graph rows.
 pub struct RustExtractor;
@@ -38,7 +40,9 @@ impl Extractor for RustExtractor {
 
         let mut state = ExtractionState::new(path);
         let module = ModuleScope::root();
-        extract_items(tree.root_node(), source, &module, None, None, &mut state);
+        let root = tree.root_node();
+        extract_items(root, source, &module, None, None, &mut state);
+        commands::extract_commands(root, source, &mut state);
         state.finish()
     }
 }
@@ -49,6 +53,7 @@ struct ExtractionState {
     refs: Vec<RawRef>,
     relations: Vec<RawRelation>,
     imports: Vec<RawImport>,
+    commands: Vec<RawCommand>,
 }
 
 impl ExtractionState {
@@ -59,6 +64,7 @@ impl ExtractionState {
             refs: Vec::new(),
             relations: Vec::new(),
             imports: Vec::new(),
+            commands: Vec::new(),
         }
     }
 
@@ -67,6 +73,7 @@ impl ExtractionState {
         dedup_refs(&mut self.refs);
         dedup_relations(&mut self.relations);
         dedup_imports(&mut self.imports);
+        dedup_commands(&mut self.commands);
         ExtractedFile {
             symbols: self.symbols,
             refs: self.refs,
@@ -74,7 +81,7 @@ impl ExtractionState {
             imports: self.imports,
             strings: Vec::new(),
             configs: Vec::new(),
-            commands: Vec::new(),
+            commands: self.commands,
         }
     }
 
@@ -122,6 +129,19 @@ impl ExtractionState {
             target_qualified,
             kind: kind.to_string(),
             confidence: confidence.to_string(),
+        });
+    }
+
+    fn push_command(&mut self, name: String, node: Node, handler_symbol: Option<String>) {
+        if name.is_empty() {
+            return;
+        }
+
+        self.commands.push(RawCommand {
+            name,
+            file_path: self.file_path.clone(),
+            span_start: node.start_byte(),
+            handler_symbol,
         });
     }
 }
@@ -933,4 +953,19 @@ fn import_target_path(segments: &[String]) -> String {
         return segments.first().cloned().unwrap_or_default();
     }
     segments[..segments.len() - 1].join("::")
+}
+
+fn dedup_commands(commands: &mut Vec<RawCommand>) {
+    commands.sort_by(|left, right| {
+        left.span_start
+            .cmp(&right.span_start)
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.handler_symbol.cmp(&right.handler_symbol))
+    });
+    commands.dedup_by(|left, right| {
+        left.file_path == right.file_path
+            && left.name == right.name
+            && left.span_start == right.span_start
+            && left.handler_symbol == right.handler_symbol
+    });
 }
