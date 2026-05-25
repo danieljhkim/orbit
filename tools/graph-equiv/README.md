@@ -1,33 +1,64 @@
 # graph-equiv
 
-`graph-equiv` is the scaffold for the `orbit-knowledge` v1 to `orbit-graph`
-v2 equivalence harness described in `docs/design/orbit-graph/specs/GRAPH_SPEC.md`
-§16.
+`graph-equiv` is the CI equivalence harness for the `orbit-knowledge` v1 to
+`orbit-graph` v2 migration described in
+`docs/design/orbit-graph/specs/GRAPH_SPEC.md` §16.
 
-This crate intentionally lands only the harness shape:
+The harness reads a frozen corpus from `tools/graph-equiv/corpus/`. There is one
+line-oriented selector list per language:
 
-- a backend trait with `search`, `show`, `refs`, `callees`, and `impact`
-- a v1 backend wired to the current `orbit-knowledge` command surface for
-  `search`, `show`, and `refs`
-- a v2 backend whose methods are `unimplemented!("orbit-graph not yet wired")`
-- a local smoke command for checking that v1 can query a knowledge graph
+- `rust.txt`
+- `typescript.txt`
+- `python.txt`
+- `go.txt`
 
-`callees` and `impact` are present on the backend trait so P6.1 can fill the
-equivalence table without changing the dispatch shape; the v1 backend returns
-an unsupported error for them until the exact v1 adapter is added. This scaffold
-does not include the frozen selector corpus, per-query diff logic, waivers, a
-Make target, or CI enforcement. The harness is not CI-enforced yet. P6.1 is the
-follow-on that will add the corpus, equivalence comparison, and CI wiring.
+Each non-empty, non-comment line starts with one query kind followed by its
+argument, for example:
 
-Local checks:
-
-```sh
-cargo build -p graph-equiv
-cargo test -p graph-equiv
+```text
+search rust_helper
+show symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_entry:function
+refs symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_helper:function
+callees symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_entry:function
+impact symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_isolated:function
 ```
 
-Optional v1 smoke check against an existing graph:
+At startup the runner checks the committed corpus checksum. If a selector list
+changes without updating the expected checksum in code, the run exits before any
+backend query. This keeps corpus drift explicit in review.
+
+## Tolerances
+
+The diff logic implements the five GRAPH_SPEC §16 rules:
+
+- `search <q>` compares the unordered set of `(kind, file, name)` triples. v2
+  `string` and `config` extras are ignored; missing v1 symbol matches and extra
+  v2 symbol matches fail.
+- `show <sel>` compares source bytes byte-for-byte.
+- `refs <sym>` compares `(file, line, kind)` triples after v2 is queried at the
+  `same_module` confidence floor.
+- `callees <sym>` compares `(file, line, target_name)` triples.
+- `impact <sym>` compares the depth-3 set of touched symbol qualified names.
+
+Output is a structured JSON report. Any out-of-tolerance diff exits non-zero and
+includes the language, corpus file line, query kind, selector, tolerance, and
+offending rows.
+
+## Running
+
+`make ci-equiv` builds `orbit-graph-cli`, builds `graph-equiv`, then runs:
 
 ```sh
-cargo run -p graph-equiv -- smoke --workspace . --query GraphCommandContext
+cargo run -p graph-equiv -- check --workspace .
 ```
+
+The v2 backend invokes `orbit-graph-cli` as a subprocess. Set
+`ORBIT_GRAPH_CLI=/path/to/orbit-graph-cli` or pass `--orbit-graph-cli PATH` to
+test a specific binary.
+
+## Waivers
+
+Per-query waivers live in `bench/equiv-waivers.md`. A waiver is a reviewed
+blocker with rationale, owner, selector, query, and planned removal criteria. It
+is not a free pass: CI should continue to fail until the waiver has been reviewed
+and the follow-up disposition is explicit.

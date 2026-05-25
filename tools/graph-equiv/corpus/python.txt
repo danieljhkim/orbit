@@ -1,0 +1,8 @@
+# Frozen graph-equiv selectors for Python fixture coverage.
+search py_helper
+search PyWidget
+show symbol:tools/graph-equiv/fixtures/python/sample.py#py_entry:function
+refs symbol:tools/graph-equiv/fixtures/python/sample.py#py_helper:function
+refs symbol:tools/graph-equiv/fixtures/python/sample.py#py_isolated:function
+callees symbol:tools/graph-equiv/fixtures/python/sample.py#py_entry:function
+impact symbol:tools/graph-equiv/fixtures/python/sample.py#py_isolated:function
