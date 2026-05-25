@@ -282,6 +282,7 @@ fn delete_file_transaction(conn: &mut Connection, rel_path: &Path) -> Result<(),
     let tx = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|source| GraphError::sqlite("begin pass1 delete transaction", source))?;
+    delete_fts_for_file(&tx, &normalize_path(rel_path))?;
     tx.execute(
         "DELETE FROM files WHERE path = ?1",
         params![normalize_path(rel_path)],
@@ -299,6 +300,7 @@ fn write_file_transaction(
     let tx = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|source| GraphError::sqlite("begin pass1 file transaction", source))?;
+    delete_fts_for_file(&tx, &file.file_path)?;
     tx.execute("DELETE FROM files WHERE path = ?1", params![file.file_path])
         .map_err(|source| GraphError::sqlite("delete prior graph file rows", source))?;
     tx.execute(
@@ -348,7 +350,14 @@ fn insert_symbols(
             ],
         )
         .map_err(|source| GraphError::sqlite("insert graph symbol row", source))?;
-        symbol_ids.insert(symbol.qualified.clone(), tx.last_insert_rowid());
+        let symbol_id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO symbols_fts (rowid, name, qualified, signature)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![symbol_id, symbol.name, symbol.qualified, symbol.signature],
+        )
+        .map_err(|source| GraphError::sqlite("insert graph symbol fts row", source))?;
+        symbol_ids.insert(symbol.qualified.clone(), symbol_id);
     }
 
     for symbol in symbols {
@@ -427,6 +436,12 @@ fn insert_strings(
             ],
         )
         .map_err(|source| GraphError::sqlite("insert graph string row", source))?;
+        let string_id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO strings_fts (rowid, value) VALUES (?1, ?2)",
+            params![string_id, string.value],
+        )
+        .map_err(|source| GraphError::sqlite("insert graph string fts row", source))?;
     }
     Ok(())
 }
@@ -444,7 +459,38 @@ fn insert_configs(tx: &Transaction<'_>, configs: &[RawConfig]) -> Result<(), Gra
             ],
         )
         .map_err(|source| GraphError::sqlite("insert graph config row", source))?;
+        let config_id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO configs_fts (rowid, key) VALUES (?1, ?2)",
+            params![config_id, config.key],
+        )
+        .map_err(|source| GraphError::sqlite("insert graph config fts row", source))?;
     }
+    Ok(())
+}
+
+fn delete_fts_for_file(tx: &Transaction<'_>, file_path: &str) -> Result<(), GraphError> {
+    tx.execute(
+        "DELETE FROM symbols_fts WHERE rowid IN (
+            SELECT id FROM symbols WHERE file_path = ?1
+         )",
+        params![file_path],
+    )
+    .map_err(|source| GraphError::sqlite("delete prior symbol fts rows", source))?;
+    tx.execute(
+        "DELETE FROM strings_fts WHERE rowid IN (
+            SELECT id FROM strings WHERE file_path = ?1
+         )",
+        params![file_path],
+    )
+    .map_err(|source| GraphError::sqlite("delete prior string fts rows", source))?;
+    tx.execute(
+        "DELETE FROM configs_fts WHERE rowid IN (
+            SELECT id FROM configs WHERE file_path = ?1
+         )",
+        params![file_path],
+    )
+    .map_err(|source| GraphError::sqlite("delete prior config fts rows", source))?;
     Ok(())
 }
 

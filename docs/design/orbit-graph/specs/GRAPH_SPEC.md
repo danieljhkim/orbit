@@ -517,8 +517,8 @@ impl Graph {
     pub fn open(worktree_root: &Path, policy: SyncPolicy) -> Result<Self, GraphError>;
     pub fn sync(&self, mode: SyncMode) -> Result<SyncReport, GraphError>;
 
-    pub fn search(&self, q: &SearchQuery) -> Result<Vec<Match>, GraphError>;
-    pub fn show(&self, sel: &Selector) -> Result<Option<NodeView>, GraphError>;
+    pub fn search(&self, q: &SearchQuery) -> Result<SearchResult, GraphError>;
+    pub fn show(&self, sel: &Selector, max_bytes: usize) -> Result<Option<NodeView>, GraphError>;
     pub fn refs(&self, sel: &Selector, opts: &RefOpts) -> Result<RefResult, GraphError>;
     pub fn callees(&self, sel: &Selector) -> Result<Vec<CalleeEdge>, GraphError>;
     pub fn impact(&self, sel: &Selector, depth: u8) -> Result<ImpactResult, GraphError>;
@@ -616,4 +616,3 @@ These are deliberately deferred — not blockers for shipping the spec, but list
 - A long list of "why not LSP." Not actually a live option in this codebase.
 - Embedding / semantic search plans. Separate spec if and when needed.
 - A rollback story beyond Step 3's env var. If we get to Step 4 and need to roll back, that's a crisis, not a planned mode.
-
