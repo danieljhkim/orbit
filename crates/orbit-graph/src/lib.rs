@@ -38,8 +38,14 @@ pub const EXTRACTOR_VERSION: u32 = 2;
 /// Default graph distance used by callers that do not supply `--depth`.
 pub const DEFAULT_IMPACT_DEPTH: u8 = 3;
 
+/// Default call-tree distance used by command traces when depth is omitted.
+pub const DEFAULT_TRACE_DEPTH: u8 = 5;
+
 /// Maximum number of impacted symbols returned by bounded traversals.
 pub const IMPACT_NODE_CAP: usize = 200;
+
+/// Maximum number of trace nodes returned by command traces.
+pub const TRACE_NODE_CAP: usize = 200;
 
 /// Opaque handle to a worktree-scoped graph database.
 pub struct Graph {
@@ -129,8 +135,8 @@ impl Graph {
 
     /// Trace the call tree rooted at a command handler.
     pub fn trace(&self, command: &str, depth: u8) -> Result<TraceResult, GraphError> {
-        let _ = (self, command, depth);
-        todo!("trace graph command")
+        self.ensure_synced()?;
+        query::trace::run(self, command, depth)
     }
 }
 
@@ -530,5 +536,35 @@ pub struct ImpactEntry {
 }
 
 /// Command trace result returned by [`Graph::trace`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TraceResult;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TraceResult {
+    /// Root command handler node, or `None` when the command is unknown.
+    pub root: Option<TraceNode>,
+    /// Whether traversal stopped because [`TRACE_NODE_CAP`] was reached.
+    pub truncated: bool,
+    /// Number of nodes returned in the trace tree, including the root.
+    pub visited_nodes: usize,
+}
+
+impl TraceResult {
+    pub(crate) fn empty() -> Self {
+        Self {
+            root: None,
+            truncated: false,
+            visited_nodes: 0,
+        }
+    }
+}
+
+/// A node in a command-handler call tree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TraceNode {
+    /// Short name as written at the call site, or the handler symbol name for the root.
+    pub name: String,
+    /// Resolved qualified symbol name when the call target was resolved.
+    pub qualified_name: Option<String>,
+    /// Resolver confidence for the edge into this node; `None` for the root.
+    pub confidence: Option<String>,
+    /// Nested callees reached from this symbol.
+    pub children: Vec<TraceNode>,
+}

@@ -455,6 +455,8 @@ orbit graph trace job-run
 
 Resolves command name to its handler symbol via `commands.handler_symbol`, then BFS over `callees` with depth 5. Returns the call tree as nested JSON.
 
+Unknown command names return an empty result (`root: null`, `visited_nodes: 0`). Resolved commands return a single root node for the handler; each nested `children` list contains outbound call targets reached from that symbol. `confidence` is `null` on the root and carries the resolver confidence string on call edges.
+
 Like `impact`, `trace` is capped at **200 visited nodes** regardless of `--depth`. When the cap fires, the response carries `truncated: true` and `visited_nodes: 200`; callers can split into multiple narrower traces (e.g. trace from a sub-handler). This keeps the response within reasonable context-window bounds — depth 5 with branching factor 5 is otherwise ~3k nodes worst-case.
 
 This is the "structural feature expansion" capability — concrete, bounded, no semantic guessing.
@@ -523,6 +525,19 @@ impl Graph {
     pub fn callees(&self, sel: &Selector) -> Result<Vec<CalleeEdge>, GraphError>;
     pub fn impact(&self, sel: &Selector, depth: u8) -> Result<ImpactResult, GraphError>;
     pub fn trace(&self, command: &str, depth: u8) -> Result<TraceResult, GraphError>;
+}
+
+pub struct TraceResult {
+    pub root: Option<TraceNode>,
+    pub truncated: bool,
+    pub visited_nodes: usize,
+}
+
+pub struct TraceNode {
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub confidence: Option<String>,
+    pub children: Vec<TraceNode>,
 }
 
 pub enum SyncMode { Auto, Full }
