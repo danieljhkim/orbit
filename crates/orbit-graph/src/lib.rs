@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
+
 //! SQLite-backed graph store and query API skeleton.
 //!
 //! This crate owns the durable graph database path contract, sync policy, and
