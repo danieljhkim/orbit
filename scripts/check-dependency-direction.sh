@@ -32,7 +32,7 @@ allowed_internal_deps() {
       echo "orbit-graph orbit-graph-extract"
       ;;
     orbit-tools)
-      echo "orbit-common orbit-exec orbit-knowledge orbit-policy"
+      echo "orbit-common orbit-exec orbit-graph orbit-graph-extract orbit-knowledge orbit-policy"
       ;;
     orbit-agent)
       echo "orbit-common orbit-tools"

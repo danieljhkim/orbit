@@ -110,11 +110,26 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - The stale-DB sweep removes detached DBs whose commits are no longer reachable from any local ref, while preserving the active DB family.
 - Cost: **more files during commit-hopping workflows.** Bisects and cherry-picks can create O(N) detached DBs until reachability cleanup prunes the unreachable ones.
 
+## ADR-0191 — Cut over graph query tools to orbit-graph
+
+**Status:** Proposed · 2026-05-25 · [ORB-00338]
+
+**Context.** MCP graph tools already used `orbit-graph`, but the CLI tool registry still routed graph queries through `orbit-knowledge`. ORB-00338 extended the fixture-scoped equivalence corpus to 34 selectors across sync, search, show, refs, callees, impact, and trace before making the cutover call.
+
+**Decision.** Cut over the graph query tool surface to the seven `orbit-graph` query/sync tools only. Do not add a runtime backend selector, environment toggle, audit-row backend column, or shadow-diff logger; rollback is `git revert <cutover-sha>`.
+
+**Consequences.**
+- Equivalence report: 34/34 passed; zero `bug-in-new`, zero `improvement-over-legacy`, and zero uncategorized diffs.
+- Perf report: v1 median 8us / p95 16us; v2 median 6870us / p95 7780us, with v2 measured through subprocess CLI dispatch.
+- Rollback verification is pending the commit/PR step because this executor does not create the cutover commit SHA.
+- Cost: the agent-facing CLI graph surface drops legacy `orbit-knowledge` helpers (`pack`, `overview`, `callers`, `implementors`, `deps`) in favor of the smaller seven-tool surface.
+
 ---
 
 ## Task References
 
 - [ORB-00294] allocated the six initial orbit-graph ADR IDs (ADR-0184 through ADR-0189).
 - [ORB-00331] allocated ADR-0190 and shipped the detached-HEAD per-commit DB layout.
+- [ORB-00338] allocated ADR-0191 and cut graph query tools over to orbit-graph.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

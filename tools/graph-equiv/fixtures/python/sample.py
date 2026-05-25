@@ -1,3 +1,6 @@
+import click
+
+
 class PyWidget:
     def render(self) -> str:
         return "python"
@@ -8,6 +11,11 @@ def py_helper() -> str:
 
 
 def py_entry() -> str:
+    return py_helper()
+
+
+@click.command()
+def py_ship() -> str:
     return py_helper()
 
 
