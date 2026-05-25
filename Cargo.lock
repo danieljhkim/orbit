@@ -2333,8 +2333,12 @@ name = "orbit-mcp"
 version = "0.7.1"
 dependencies = [
  "orbit-common",
+ "orbit-graph",
+ "orbit-graph-extract",
  "rmcp",
+ "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

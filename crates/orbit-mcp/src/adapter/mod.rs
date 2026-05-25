@@ -1,10 +1,12 @@
 //! The `dispatch` submodule owns MCP `tools/list` and `tools/call` wire framing and fans advertised tool names into host dispatch.
+//! The `graph` submodule owns direct orbit-graph MCP wrappers that live in this long-running process.
 //! The `structured` submodule owns the final `structuredContent` framing for strict MCP clients.
 //! The `schema` submodule emits JSON input schemas from Orbit tool metadata.
 //! The `name_map` submodule owns canonical-to-advertised tool name mapping and collision detection.
 //! The `learning_sidecar` submodule owns learning reminder lookup, session admission, and response sidecar injection.
 
 mod dispatch;
+mod graph;
 mod learning_sidecar;
 mod name_map;
 mod schema;
@@ -42,6 +44,7 @@ use crate::McpHost;
 /// ambiguous dispatch.
 pub struct OrbitToolServer {
     host: Arc<dyn McpHost>,
+    graph_tools: Arc<graph::GraphToolRegistry>,
     name_map: RwLock<HashMap<String, String>>,
     session_context: RwLock<ToolSessionContext>,
     learning_session_id: Option<String>,
@@ -63,6 +66,7 @@ impl OrbitToolServer {
         learning_states.insert(key, LearningInjectionState::default());
         Self {
             host,
+            graph_tools: Arc::new(graph::GraphToolRegistry::new()),
             name_map: RwLock::new(HashMap::new()),
             session_context: RwLock::new(ToolSessionContext::default()),
             learning_session_id,
@@ -85,6 +89,7 @@ impl OrbitToolServer {
         learning_states.insert(key, initial_state);
         Self {
             host,
+            graph_tools: Arc::new(graph::GraphToolRegistry::new()),
             name_map: RwLock::new(HashMap::new()),
             session_context: RwLock::new(ToolSessionContext::default()),
             learning_session_id,

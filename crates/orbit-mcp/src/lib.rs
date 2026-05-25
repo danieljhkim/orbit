@@ -11,10 +11,13 @@
 //! MCP (Model Context Protocol) server that exposes an Orbit tool surface to
 //! any MCP-capable client.
 //!
-//! The crate is a thin transport adapter between rmcp's server runtime and an
-//! Orbit-supplied [`McpHost`]. `orbit-mcp` itself performs no tool dispatch,
-//! no policy evaluation, and no audit logging — it delegates each
-//! `tools/call` to the host. In the default `orbit-cli` wiring the host is
+//! The crate is primarily a thin transport adapter between rmcp's server
+//! runtime and an Orbit-supplied [`McpHost`]. Most tool dispatch, policy
+//! evaluation, and audit logging is delegated to the host. The exception is
+//! the read-only `orbit.graph.*` surface backed by `orbit-graph`; those
+//! wrappers live in-process so a long-running MCP server can reuse one graph
+//! handle per worktree and apply the MCP `Windowed { 500ms }` sync policy. In
+//! the default `orbit-cli` wiring the host is
 //! `RuntimeMcpHost`, which brackets every call with an audit boundary
 //! (`audited_mcp_call`): the wrapper records a failure-status audit row when
 //! preflight rejects an unknown / unexposed tool name, and otherwise dispatches
@@ -25,9 +28,9 @@
 //! can be filtered apart from CLI tool runs (which carry `"run"`).
 //!
 //! # Role
-//! Depends on `orbit-types` and `orbit-tools` only (for [`orbit_common::types::ToolSchema`]
-//! and MCP-shape helpers). The CLI constructs a runtime-backed [`McpHost`] and
-//! hands it to [`serve_stdio`]. No dependency on `orbit-core` is introduced.
+//! Depends on `orbit-common`, `orbit-graph`, and `orbit-graph-extract`. The
+//! CLI constructs a runtime-backed [`McpHost`] and hands it to [`serve_stdio`].
+//! No dependency on `orbit-core` is introduced.
 //!
 //! # Transport
 //! Only stdio is supported in this cut. HTTP/SSE/streamable-http transports
