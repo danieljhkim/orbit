@@ -106,6 +106,39 @@ pub fn detect(probe: &dyn AgentEnvProbe) -> DetectedAgents {
     }
 }
 
+/// Agent families available for crew-backed config seeding.
+///
+/// The order intentionally mirrors [`default_provider`] for the overlapping
+/// families, excluding `ollama` because Orbit does not ship an `ollama` crew.
+pub fn available_crew_families(detected: &DetectedAgents) -> Vec<&'static str> {
+    let mut families = Vec::new();
+    if detected.claude_cli || detected.anthropic_api_key {
+        families.push("claude");
+    }
+    if detected.codex_cli || detected.openai_api_key {
+        families.push("codex");
+    }
+    if detected.gemini_cli || detected.gemini_api_key {
+        families.push("gemini");
+    }
+    if detected.grok_cli {
+        families.push("grok");
+    }
+    families
+}
+
+/// Default crew name frozen into newly seeded config.
+///
+/// Falling back to `codex` preserves the historical no-detection template
+/// behavior even though [`default_provider`] still falls back to `claude` for
+/// role prompt defaults.
+pub fn default_crew_name(detected: &DetectedAgents) -> &'static str {
+    available_crew_families(detected)
+        .first()
+        .copied()
+        .unwrap_or("codex")
+}
+
 /// Hardcoded "latest known good" model per provider. Returned to seed prompt
 /// defaults; users can override at the prompt. Update this map when new
 /// flagship models ship.
