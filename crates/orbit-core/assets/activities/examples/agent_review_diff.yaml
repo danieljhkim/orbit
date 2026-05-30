@@ -47,7 +47,7 @@ spec:
     converges instead of rediscovering the same issues each iteration.
   tools:
     - fs.read
-    - orbit.audit.loop.*
+    - orbit.audit.*
   on_denial: terminate
   max_iterations: 1
   role: reviewer

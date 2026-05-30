@@ -40,7 +40,7 @@ Orbit-docs indexes any configured Markdown root with valid frontmatter; it does 
 
 ## Learning vs Doc
 
-Learning = a load-bearing rule with a known failure mode. It is managed through the active `orbit.learning.add/show/update/upvote/supersede/comment.add/comment.list` tools plus CLI-only audit/list/prune/comment.delete workflows, has scope-glob push injection, and can be updated, superseded, or pruned.
+Learning = a load-bearing rule with a known failure mode. It is managed through the active `orbit.learning.add/show/update/supersede/comment.add` tools plus CLI-only audit/list/prune/comment.list/comment.delete/upvote workflows, has scope-glob push injection, and can be updated, superseded, or pruned.
 
 Doc = explanatory context. It is PR-reviewed Markdown, retrieved by agents through `orbit.search --kind doc`, and has no supersede flow. Link to load-bearing learnings with `related_artifacts: [L-NNNN]` when useful.
 
