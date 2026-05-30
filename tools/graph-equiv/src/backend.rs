@@ -250,29 +250,17 @@ impl Backend for V2Backend {
                 "callees requires a file-backed selector: {selector}"
             ))
         })?;
-        let source_path = self.workspace_root.join(file.as_str());
-        let source = fs::read(source_path.as_path()).map_err(|source| BackendError::ReadFile {
-            path: source_path,
-            source,
-        })?;
         let value = self.run_cli(&["callees", selector])?;
         let output: V2CalleesResult = serde_json::from_value(value).map_err(BackendError::Json)?;
-        output
+        Ok(output
             .callees
             .into_iter()
-            .map(|entry| {
-                let offset = usize::try_from(entry.from_span).map_err(|source| {
-                    BackendError::InvalidData(format!(
-                        "invalid callee span for {selector}: {source}"
-                    ))
-                })?;
-                Ok(CalleeEntry {
-                    file: file.clone(),
-                    line: line_for_byte(&source, offset),
-                    target_name: entry.target_name,
-                })
+            .map(|entry| CalleeEntry {
+                file: file.clone(),
+                line: entry.line,
+                target_name: entry.target_name,
             })
-            .collect()
+            .collect())
     }
 
     fn impact(&self, selector: &str, depth: u8) -> BackendResult<ImpactOutput> {
@@ -468,7 +456,7 @@ struct V2CalleesResult {
 #[derive(Debug, Deserialize)]
 struct V2CalleeEntry {
     target_name: String,
-    from_span: i64,
+    line: usize,
 }
 
 #[derive(Debug, Deserialize)]
