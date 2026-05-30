@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.2
+
+### Fixes
+
+- **Intel-macOS semantic companion dropped from the release**: `orbit-search-companion` cannot link on `x86_64-apple-darwin` — `ort-sys` (2.0.0-rc.12) ships no ONNX Runtime prebuilt for Intel macOS. The Intel-mac release leg now builds the `orbit` CLI only, and the release publishes companion binaries for macOS-arm64, Linux x86_64, and Linux arm64 only. The Intel-mac CLI tarball still ships; semantic search is unsupported on Intel Macs (it never successfully shipped). Together with the glibc fix in 0.8.1, this completes recovery of the `v0.8.0` release, whose GitHub Release never published while `@orbit-tools/cli@0.8.0` was already on npm. ([ORB-00351])
+
 ## 0.8.1
 
 ### Fixes

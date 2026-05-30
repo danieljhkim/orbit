@@ -29,13 +29,15 @@ jobs:
             companion: true
             cli_asset: orbit-aarch64-apple-darwin.tar.gz
             companion_asset: orbit-search-companion-macos-aarch64
+          # Intel macOS: CLI only. ort-sys (rc.12) has no ONNX Runtime
+          # prebuilt for x86_64-apple-darwin, so the companion can't link
+          # here; semantic search is unsupported on Intel macs.
           - slug: darwin-x86_64
             target: x86_64-apple-darwin
             runs_on: macos-15-intel
             cli: true
-            companion: true
+            companion: false
             cli_asset: orbit-x86_64-apple-darwin.tar.gz
-            companion_asset: orbit-search-companion-macos-x86_64
           # Linux CLI builds on ubuntu-22.04 (glibc 2.35) to keep the CLI's
           # runtime compatibility floor low for older distros.
           - slug: linux-x86_64-cli
@@ -156,7 +158,6 @@ jobs:
               orbit-x86_64-apple-darwin.tar.gz
               orbit-x86_64-unknown-linux-gnu.tar.gz
               orbit-search-companion-macos-aarch64
-              orbit-search-companion-macos-x86_64
               orbit-search-companion-linux-aarch64
               orbit-search-companion-linux-x86_64
             )
@@ -228,7 +229,6 @@ jobs:
             dist/orbit-x86_64-apple-darwin.tar.gz
             dist/orbit-x86_64-unknown-linux-gnu.tar.gz
             dist/orbit-search-companion-macos-aarch64
-            dist/orbit-search-companion-macos-x86_64
             dist/orbit-search-companion-linux-aarch64
             dist/orbit-search-companion-linux-x86_64
             dist/orbit-checksums.txt
