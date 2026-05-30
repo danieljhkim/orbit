@@ -17,12 +17,8 @@ pub const DEFAULT_SHOW_MAX_BYTES: usize = 64 * 1024;
 /// Source and metadata view returned by [`Graph::show`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NodeView {
-    /// UTF-8 source text from the resolved span, bounded by the caller's byte budget.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
-    /// Source bytes from the resolved span when the payload is not valid UTF-8.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bytes: Option<Vec<u8>>,
+    /// Source bytes from the resolved span, bounded by the caller's budget.
+    pub bytes: Vec<u8>,
     /// Metadata for the resolved source span.
     pub metadata: NodeMetadata,
 }
@@ -42,7 +38,7 @@ pub struct NodeMetadata {
     /// Qualified symbol name when one exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qualified: Option<String>,
-    /// Whether the returned `text` or fallback `bytes` is shorter than the resolved source span.
+    /// Whether `bytes` is shorter than the resolved source span.
     pub truncated: bool,
 }
 
@@ -187,12 +183,12 @@ fn materialize_view(
         resolved.file.as_str(),
     )?;
     let full = &source[span.start..span.end];
-    let payload = source_payload(full, max_bytes);
-    let truncated = payload.byte_count < full.len();
+    let byte_count = full.len().min(max_bytes);
+    let bytes = full[..byte_count].to_vec();
+    let truncated = byte_count < full.len();
 
     Ok(NodeView {
-        text: payload.text,
-        bytes: payload.bytes,
+        bytes,
         metadata: NodeMetadata {
             file: resolved.file,
             span,
@@ -202,35 +198,6 @@ fn materialize_view(
             truncated,
         },
     })
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SourcePayload {
-    text: Option<String>,
-    bytes: Option<Vec<u8>>,
-    byte_count: usize,
-}
-
-fn source_payload(full: &[u8], max_bytes: usize) -> SourcePayload {
-    let capped_len = full.len().min(max_bytes);
-    match std::str::from_utf8(full) {
-        Ok(source) => {
-            let mut text_len = capped_len;
-            while !source.is_char_boundary(text_len) {
-                text_len -= 1;
-            }
-            SourcePayload {
-                text: Some(source[..text_len].to_string()),
-                bytes: None,
-                byte_count: text_len,
-            }
-        }
-        Err(_) => SourcePayload {
-            text: None,
-            bytes: Some(full[..capped_len].to_vec()),
-            byte_count: capped_len,
-        },
-    }
 }
 
 fn validate_span(

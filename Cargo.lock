@@ -2422,8 +2422,6 @@ dependencies = [
  "chrono",
  "orbit-common",
  "orbit-exec",
- "orbit-graph",
- "orbit-graph-extract",
  "orbit-knowledge",
  "orbit-policy",
  "regex",

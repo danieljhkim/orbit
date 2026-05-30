@@ -5,17 +5,9 @@ use orbit_graph_extract::Selector;
 use super::{CliError, CommandContext, json_value};
 
 #[derive(Debug, Args)]
-#[command(
-    about = "Show source text and metadata for an orbit-graph selector; non-UTF-8 source returns fallback bytes."
-)]
 pub(crate) struct ShowCommand {
-    #[arg(help = "Selector to show.")]
     selector: String,
-    #[arg(
-        long,
-        default_value_t = DEFAULT_SHOW_MAX_BYTES,
-        help = "Maximum source bytes returned in text or fallback bytes."
-    )]
+    #[arg(long, default_value_t = DEFAULT_SHOW_MAX_BYTES)]
     max_bytes: usize,
 }
 

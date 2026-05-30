@@ -51,13 +51,14 @@ pub(crate) const FRICTION_TOOL_NAMES: &[&str] = &[
 ];
 
 pub(crate) const GRAPH_READ_TOOL_NAMES: &[&str] = &[
-    "orbit.graph.callees",
-    "orbit.graph.impact",
+    "orbit.graph.callers",
+    "orbit.graph.deps",
+    "orbit.graph.implementors",
+    "orbit.graph.overview",
+    "orbit.graph.pack",
     "orbit.graph.refs",
     "orbit.graph.search",
     "orbit.graph.show",
-    "orbit.graph.sync",
-    "orbit.graph.trace",
 ];
 
 pub(crate) const SEARCH_TOOL_NAMES: &[&str] = &["orbit.search"];

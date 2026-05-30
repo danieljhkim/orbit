@@ -15,7 +15,6 @@ pub(crate) type ShowOutput = Option<Vec<u8>>;
 pub(crate) type RefsOutput = Vec<RefEntry>;
 pub(crate) type CalleesOutput = Vec<CalleeEntry>;
 pub(crate) type ImpactOutput = Vec<String>;
-pub(crate) type TraceOutput = Vec<TracePath>;
 
 pub(crate) trait Backend {
     fn sync(&self) -> BackendResult<()> {
@@ -27,14 +26,12 @@ pub(crate) trait Backend {
     fn refs(&self, selector: &str) -> BackendResult<RefsOutput>;
     fn callees(&self, selector: &str) -> BackendResult<CalleesOutput>;
     fn impact(&self, selector: &str, depth: u8) -> BackendResult<ImpactOutput>;
-    fn trace(&self, command: &str, depth: u8) -> BackendResult<TraceOutput>;
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct V1Backend {
     symbols: Vec<IndexedSymbol>,
     files: Vec<IndexedFile>,
-    commands: Vec<IndexedCommand>,
     limit: usize,
 }
 
@@ -44,11 +41,10 @@ impl V1Backend {
         _knowledge_dir: Option<PathBuf>,
     ) -> BackendResult<Self> {
         // L-0054: Keep v1 parity checks fixture-scoped so CI does not refresh the full legacy graph.
-        let (files, symbols, commands) = load_fixture_index(workspace_root.as_path())?;
+        let (files, symbols) = load_fixture_index(workspace_root.as_path())?;
         Ok(Self {
             symbols,
             files,
-            commands,
             limit: 200,
         })
     }
@@ -85,14 +81,6 @@ impl Backend for V1Backend {
                 .files
                 .iter()
                 .find(|entry| entry.path == file)
-                .map(|entry| entry.source.as_bytes().to_vec()));
-        }
-        if let Some(command) = selector.strip_prefix("command:") {
-            return Ok(self
-                .commands
-                .iter()
-                .find(|entry| entry.name == command)
-                .and_then(|entry| self.symbol_by_name(entry.handler_symbol.as_str()))
                 .map(|entry| entry.source.as_bytes().to_vec()));
         }
 
@@ -148,53 +136,6 @@ impl Backend for V1Backend {
 
     fn impact(&self, _selector: &str, _depth: u8) -> BackendResult<ImpactOutput> {
         Ok(Vec::new())
-    }
-
-    fn trace(&self, command: &str, depth: u8) -> BackendResult<TraceOutput> {
-        let Some(command) = self.commands.iter().find(|entry| entry.name == command) else {
-            return Ok(Vec::new());
-        };
-        let Some(root) = self.symbol_by_name(command.handler_symbol.as_str()) else {
-            return Ok(Vec::new());
-        };
-        let mut paths = Vec::new();
-        self.trace_symbol(root, depth, vec![root.name.clone()], &mut paths);
-        paths.sort();
-        paths.dedup();
-        Ok(paths)
-    }
-}
-
-impl V1Backend {
-    fn symbol_by_name(&self, name: &str) -> Option<&IndexedSymbol> {
-        self.symbols.iter().find(|symbol| symbol.name == name)
-    }
-
-    fn trace_symbol(
-        &self,
-        symbol: &IndexedSymbol,
-        depth: u8,
-        path: Vec<String>,
-        out: &mut Vec<TracePath>,
-    ) {
-        out.push(TracePath {
-            names: path.clone(),
-        });
-        if depth == 0 {
-            return;
-        }
-        for callee in extract_call_sites(
-            symbol.file.as_str(),
-            symbol.source.as_str(),
-            symbol.start_line,
-        ) {
-            let Some(next_symbol) = self.symbol_by_name(callee.target_name.as_str()) else {
-                continue;
-            };
-            let mut next_path = path.clone();
-            next_path.push(next_symbol.name.clone());
-            self.trace_symbol(next_symbol, depth.saturating_sub(1), next_path, out);
-        }
     }
 }
 
@@ -311,7 +252,7 @@ impl Backend for V2Backend {
         })?;
         let value = self.run_cli(&["callees", selector])?;
         let output: V2CalleesResult = serde_json::from_value(value).map_err(BackendError::Json)?;
-        let callees = output
+        Ok(output
             .callees
             .into_iter()
             .map(|entry| CalleeEntry {
@@ -319,8 +260,7 @@ impl Backend for V2Backend {
                 line: entry.line,
                 target_name: entry.target_name,
             })
-            .collect::<Vec<_>>();
-        Ok(callees)
+            .collect())
     }
 
     fn impact(&self, selector: &str, depth: u8) -> BackendResult<ImpactOutput> {
@@ -332,19 +272,6 @@ impl Backend for V2Backend {
             .into_iter()
             .map(|entry| entry.qualified_name)
             .collect())
-    }
-
-    fn trace(&self, command: &str, depth: u8) -> BackendResult<TraceOutput> {
-        let depth = depth.to_string();
-        let value = self.run_cli(&["trace", command, "--depth", depth.as_str()])?;
-        let output: V2TraceResult = serde_json::from_value(value).map_err(BackendError::Json)?;
-        let mut paths = Vec::new();
-        if let Some(root) = output.root {
-            collect_trace_paths(&root, Vec::new(), &mut paths);
-        }
-        paths.sort();
-        paths.dedup();
-        Ok(paths)
     }
 }
 
@@ -365,15 +292,9 @@ struct IndexedSymbol {
     start_line: usize,
 }
 
-#[derive(Debug, Clone)]
-struct IndexedCommand {
-    name: String,
-    handler_symbol: String,
-}
-
 fn load_fixture_index(
     workspace_root: &Path,
-) -> BackendResult<(Vec<IndexedFile>, Vec<IndexedSymbol>, Vec<IndexedCommand>)> {
+) -> BackendResult<(Vec<IndexedFile>, Vec<IndexedSymbol>)> {
     let fixture_root = workspace_root.join("tools/graph-equiv/fixtures");
     let mut paths = Vec::new();
     collect_files(fixture_root.as_path(), &mut paths)?;
@@ -381,7 +302,6 @@ fn load_fixture_index(
 
     let mut files = Vec::new();
     let mut symbols = Vec::new();
-    let mut commands = Vec::new();
     for path in paths {
         let Some(language) = path
             .extension()
@@ -401,7 +321,6 @@ fn load_fixture_index(
             path: rel_path.clone(),
             source: source.clone(),
         });
-        commands.extend(extract_fixture_commands(rel_path.as_str(), source.as_str()));
         symbols.extend(extracted.leaves.into_iter().map(|leaf| IndexedSymbol {
             selector: format!("symbol:{}#{}:{}", rel_path, leaf.qualified_name, leaf.kind),
             file: rel_path.clone(),
@@ -412,40 +331,7 @@ fn load_fixture_index(
             start_line: leaf.start_line,
         }));
     }
-    Ok((files, symbols, commands))
-}
-
-fn extract_fixture_commands(file: &str, source: &str) -> Vec<IndexedCommand> {
-    if file.ends_with(".py") {
-        return extract_python_click_commands(source);
-    }
-    Vec::new()
-}
-
-fn extract_python_click_commands(source: &str) -> Vec<IndexedCommand> {
-    let mut commands = Vec::new();
-    let mut pending_click_command = false;
-    for line in source.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("@click.command") {
-            pending_click_command = true;
-            continue;
-        }
-        if pending_click_command {
-            pending_click_command = false;
-            if let Some(function_name) = trimmed
-                .strip_prefix("def ")
-                .and_then(|rest| rest.split_once('(').map(|(name, _)| name.trim()))
-                .filter(|name| !name.is_empty())
-            {
-                commands.push(IndexedCommand {
-                    name: function_name.replace('_', "-"),
-                    handler_symbol: function_name.to_string(),
-                });
-            }
-        }
-    }
-    commands
+    Ok((files, symbols))
 }
 
 fn collect_files(root: &Path, out: &mut Vec<PathBuf>) -> BackendResult<()> {
@@ -504,11 +390,6 @@ pub(crate) struct CalleeEntry {
     pub(crate) file: String,
     pub(crate) line: usize,
     pub(crate) target_name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub(crate) struct TracePath {
-    pub(crate) names: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -586,27 +467,6 @@ struct V2ImpactResult {
 #[derive(Debug, Deserialize)]
 struct V2ImpactEntry {
     qualified_name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct V2TraceResult {
-    root: Option<V2TraceNode>,
-}
-
-#[derive(Debug, Deserialize)]
-struct V2TraceNode {
-    name: String,
-    children: Vec<V2TraceNode>,
-}
-
-fn collect_trace_paths(node: &V2TraceNode, mut path: Vec<String>, out: &mut Vec<TracePath>) {
-    path.push(node.name.clone());
-    out.push(TracePath {
-        names: path.clone(),
-    });
-    for child in &node.children {
-        collect_trace_paths(child, path.clone(), out);
-    }
 }
 
 #[derive(Debug)]

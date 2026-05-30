@@ -1,6 +1,6 @@
 schema_version: 1
 id: L-0057
-status: active
+status: superseded
 scope:
   paths:
   - crates/orbit-mcp/src/adapter/**/*.rs
@@ -13,7 +13,8 @@ body: The MCP adapter owns the advertised `orbit.graph.*` surface. When `OrbitTo
 evidence:
 - kind: task
   reference: ORB-00339
+superseded_by: L-0058
 created_at: 2026-05-25T20:58:10.585426Z
-updated_at: 2026-05-25T20:58:10.585426Z
+updated_at: 2026-05-25T21:43:37.064615Z
 created_by: codex
 priority: 120

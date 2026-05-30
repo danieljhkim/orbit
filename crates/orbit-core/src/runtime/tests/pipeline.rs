@@ -1,17 +1,12 @@
 //! Sibling tests for `pipeline.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
-
 use crate::OrbitRuntime;
 use orbit_common::types::Role;
 use orbit_tools::ToolContext;
 
 use orbit_common::types::{TaskPriority, TaskStatus, TaskType};
 use orbit_store::TaskCreateParams;
-use rusqlite::Connection;
 use serde_json::json;
-use tempfile::tempdir;
 
 #[test]
 fn run_tool_context_allowlist_honors_task_wildcard() {
@@ -65,150 +60,4 @@ fn run_tool_context_allowlist_honors_task_wildcard() {
         .expect("wildcard activity context should permit orbit.task.show");
 
     assert_eq!(output["id"], task.id);
-}
-
-#[test]
-fn graph_tool_sync_from_linked_worktree_attributes_to_worktree_branch() {
-    let fixture = GitWorktreeFixture::new();
-    let runtime =
-        OrbitRuntime::from_roots(&fixture.global_root, &fixture.main_orbit).expect("build runtime");
-
-    runtime
-        .run_tool_with_context_and_role(
-            "orbit.graph.sync",
-            json!({
-                "full": true,
-                "workspace_path": fixture.worktree.to_string_lossy(),
-            }),
-            Role::Admin,
-            ToolContext {
-                cwd: Some(fixture.worktree.to_string_lossy().into_owned()),
-                ..Default::default()
-            },
-        )
-        .expect("sync from worktree");
-
-    let graph_db = worktree_branch_graph_db(&fixture.worktree);
-    assert_eq!(graph_meta(&graph_db, "branch"), "orbit/ORB-00099-test");
-    assert_eq!(
-        graph_meta(&graph_db, "commit_sha"),
-        git_output(&fixture.worktree, &["rev-parse", "HEAD"])
-    );
-}
-
-struct GitWorktreeFixture {
-    _root: tempfile::TempDir,
-    global_root: PathBuf,
-    main_orbit: PathBuf,
-    worktree: PathBuf,
-}
-
-impl GitWorktreeFixture {
-    fn new() -> Self {
-        let root = tempdir().expect("create tempdir");
-        let global_root = root.path().join("global");
-        let main_repo = root.path().join("repo");
-        let worktree = main_repo.join(".orbit/state/worktrees/orb-00099-test");
-        std::fs::create_dir_all(main_repo.join("src")).expect("create src dir");
-        std::fs::create_dir_all(&global_root).expect("create global root");
-
-        run_git(
-            root.path(),
-            &["init", main_repo.to_str().expect("main repo path")],
-        );
-        run_git(&main_repo, &["config", "user.email", "test@example.com"]);
-        run_git(&main_repo, &["config", "user.name", "Test User"]);
-        std::fs::write(
-            main_repo.join("Cargo.toml"),
-            "[package]\nname = \"orb_00099_fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n",
-        )
-        .expect("write manifest");
-        std::fs::write(main_repo.join("src/lib.rs"), "pub fn main_branch() {}\n")
-            .expect("write lib");
-        run_git(&main_repo, &["add", "Cargo.toml", "src/lib.rs"]);
-        run_git(&main_repo, &["commit", "-m", "initial"]);
-        run_git(&main_repo, &["branch", "-M", "agent-main"]);
-
-        let main_orbit = main_repo.join(".orbit");
-        std::fs::create_dir_all(&main_orbit).expect("create main orbit dir");
-        run_git(
-            &main_repo,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                "orbit/ORB-00099-test",
-                worktree.to_str().expect("worktree path"),
-            ],
-        );
-        std::fs::write(worktree.join("src/lib.rs"), "pub fn worktree_branch() {}\n")
-            .expect("write worktree lib");
-        run_git(&worktree, &["add", "src/lib.rs"]);
-        run_git(&worktree, &["commit", "-m", "worktree change"]);
-
-        Self {
-            _root: root,
-            global_root,
-            main_orbit,
-            worktree,
-        }
-    }
-}
-
-fn run_git(cwd: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .expect("run git");
-    assert!(
-        output.status.success(),
-        "git {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-fn git_output(cwd: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .expect("run git");
-    assert!(
-        output.status.success(),
-        "git {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout)
-        .expect("git stdout is utf8")
-        .trim()
-        .to_string()
-}
-
-fn worktree_branch_graph_db(worktree: &Path) -> PathBuf {
-    let graph_dir = worktree.join(".orbit").join("graph");
-    let mut matches = std::fs::read_dir(&graph_dir)
-        .expect("read graph dir")
-        .map(|entry| entry.expect("graph entry").path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| {
-                    name.starts_with("orbit_ORB-00099-test.") && name.ends_with(".db")
-                })
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(matches.len(), 1, "expected one worktree branch graph DB");
-    matches.remove(0)
-}
-
-fn graph_meta(path: &Path, key: &str) -> String {
-    Connection::open(path)
-        .expect("open graph db")
-        .query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| {
-            row.get(0)
-        })
-        .expect("read graph meta")
 }
