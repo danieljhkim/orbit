@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1
+
+### Fixes
+
+- **Linux release build of the semantic companion**: `orbit-search-companion` failed to link on the release runners — its prebuilt ONNX Runtime (via `ort` / `fastembed`) references glibc 2.38+ symbols (`__isoc23_*`) that don't exist on `ubuntu-22.04` (glibc 2.35), failing both Linux build legs and blocking the GitHub Release. The release workflow now builds the Linux companion on `ubuntu-24.04` (glibc 2.39) while keeping the `orbit` CLI on `ubuntu-22.04`, so the CLI's glibc-2.35 compatibility floor is preserved. This fixes forward after the `v0.8.0` GitHub Release failed to publish while `@orbit-tools/cli@0.8.0` had already been published to npm. ([ORB-00350])
+
 ## 0.8.0
 
 ### Breaking Changes

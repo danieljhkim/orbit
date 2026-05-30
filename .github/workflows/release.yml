@@ -13,7 +13,7 @@ env:
 
 jobs:
   build-release:
-    name: Build ${{ matrix.target }}
+    name: Build ${{ matrix.slug }}
     runs-on: ${{ matrix.runs_on }}
     permissions:
       contents: read
@@ -21,17 +21,50 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: aarch64-apple-darwin
+          # macOS builds both binaries on one runner — no glibc constraint.
+          - slug: darwin-arm64
+            target: aarch64-apple-darwin
             runs_on: macos-15
+            cli: true
+            companion: true
+            cli_asset: orbit-aarch64-apple-darwin.tar.gz
             companion_asset: orbit-search-companion-macos-aarch64
-          - target: x86_64-apple-darwin
+          - slug: darwin-x86_64
+            target: x86_64-apple-darwin
             runs_on: macos-15-intel
+            cli: true
+            companion: true
+            cli_asset: orbit-x86_64-apple-darwin.tar.gz
             companion_asset: orbit-search-companion-macos-x86_64
-          - target: x86_64-unknown-linux-gnu
+          # Linux CLI builds on ubuntu-22.04 (glibc 2.35) to keep the CLI's
+          # runtime compatibility floor low for older distros.
+          - slug: linux-x86_64-cli
+            target: x86_64-unknown-linux-gnu
             runs_on: ubuntu-22.04
-            companion_asset: orbit-search-companion-linux-x86_64
-          - target: aarch64-unknown-linux-gnu
+            cli: true
+            companion: false
+            cli_asset: orbit-x86_64-unknown-linux-gnu.tar.gz
+          - slug: linux-arm64-cli
+            target: aarch64-unknown-linux-gnu
             runs_on: ubuntu-22.04-arm
+            cli: true
+            companion: false
+            cli_asset: orbit-aarch64-unknown-linux-gnu.tar.gz
+          # Linux companion builds on ubuntu-24.04 (glibc 2.39): the prebuilt
+          # ONNX Runtime that orbit-search-companion links references glibc
+          # 2.38+ symbols (__isoc23_*) absent on 22.04. The companion already
+          # requires glibc 2.38+ at runtime regardless of build host.
+          - slug: linux-x86_64-companion
+            target: x86_64-unknown-linux-gnu
+            runs_on: ubuntu-24.04
+            cli: false
+            companion: true
+            companion_asset: orbit-search-companion-linux-x86_64
+          - slug: linux-arm64-companion
+            target: aarch64-unknown-linux-gnu
+            runs_on: ubuntu-24.04-arm
+            cli: false
+            companion: true
             companion_asset: orbit-search-companion-linux-aarch64
     steps:
       - name: Checkout
@@ -48,36 +81,43 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.slug }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-cargo-release-
+            ${{ runner.os }}-${{ runner.arch }}-${{ matrix.slug }}-cargo-release-
             ${{ runner.os }}-${{ runner.arch }}-cargo-release-
 
       - name: Build release binary
         shell: bash
         run: |
-          cargo build -p orbit-cli --release --locked --target "${{ matrix.target }}"
-          cargo build -p orbit-search-companion --release --locked --target "${{ matrix.target }}"
-          "./target/${{ matrix.target }}/release/orbit" --version
-          "./target/${{ matrix.target }}/release/orbit-search-companion" --version-info
+          set -euo pipefail
+          if [ "${{ matrix.cli }}" = "true" ]; then
+            cargo build -p orbit-cli --release --locked --target "${{ matrix.target }}"
+            "./target/${{ matrix.target }}/release/orbit" --version
+          fi
+          if [ "${{ matrix.companion }}" = "true" ]; then
+            cargo build -p orbit-search-companion --release --locked --target "${{ matrix.target }}"
+            "./target/${{ matrix.target }}/release/orbit-search-companion" --version-info
+          fi
 
       - name: Package release assets
         shell: bash
         run: |
-          ASSET="orbit-${{ matrix.target }}.tar.gz"
-          COMPANION_ASSET="${{ matrix.companion_asset }}"
-          tar -czf "$ASSET" -C "target/${{ matrix.target }}/release" orbit
-          cp "target/${{ matrix.target }}/release/orbit-search-companion" "$COMPANION_ASSET"
-          chmod 755 "$COMPANION_ASSET"
-          ls -lh "$ASSET" "$COMPANION_ASSET"
+          set -euo pipefail
+          mkdir -p dist
+          if [ "${{ matrix.cli }}" = "true" ]; then
+            tar -czf "dist/${{ matrix.cli_asset }}" -C "target/${{ matrix.target }}/release" orbit
+          fi
+          if [ "${{ matrix.companion }}" = "true" ]; then
+            cp "target/${{ matrix.target }}/release/orbit-search-companion" "dist/${{ matrix.companion_asset }}"
+            chmod 755 "dist/${{ matrix.companion_asset }}"
+          fi
+          ls -lh dist
 
       - name: Upload packaged artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: release-${{ matrix.target }}
-          path: |
-            orbit-${{ matrix.target }}.tar.gz
-            ${{ matrix.companion_asset }}
+          name: release-${{ matrix.slug }}
+          path: dist/*
           if-no-files-found: error
 
   publish-release:
