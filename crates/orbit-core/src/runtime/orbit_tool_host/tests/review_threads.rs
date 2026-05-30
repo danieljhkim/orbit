@@ -164,7 +164,7 @@ fn review_thread_list_round_trips_task_level_anchor_kind() {
 
     runtime
         .execute_tool_command(
-            "orbit.review-thread.add",
+            "orbit.task.review_thread.add",
             json!({
                 "id": task.id,
                 "body": "Task-level ask.",
@@ -177,7 +177,7 @@ fn review_thread_list_round_trips_task_level_anchor_kind() {
 
     let output = runtime
         .execute_tool_command(
-            "orbit.review-thread.list",
+            "orbit.task.review_thread.list",
             json!({ "task_id": task.id }),
             None,
             None,
@@ -207,7 +207,7 @@ fn review_thread_add_uses_active_task_env_when_id_is_omitted() {
 
     runtime
         .execute_tool_command(
-            "orbit.review-thread.add",
+            "orbit.task.review_thread.add",
             json!({
                 "body": "Active task ask.",
                 "model": "human",
@@ -219,7 +219,7 @@ fn review_thread_add_uses_active_task_env_when_id_is_omitted() {
 
     let output = runtime
         .execute_tool_command(
-            "orbit.review-thread.list",
+            "orbit.task.review_thread.list",
             json!({ "task_id": task.id }),
             None,
             None,

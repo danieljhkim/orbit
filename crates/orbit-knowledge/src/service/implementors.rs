@@ -12,7 +12,7 @@ use tree_sitter::{Node, Parser};
 use crate::error::KnowledgeError;
 use crate::graph::navigator::GraphNodeRef;
 use crate::graph::nodes::{CodebaseGraphV1, LeafKind, LeafNode};
-use crate::selector::Selector;
+use orbit_graph_extract::Selector;
 
 use super::GraphContextService;
 

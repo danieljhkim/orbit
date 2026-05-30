@@ -1,0 +1,16 @@
+{
+  "touched": [
+    {
+      "qualified_name": "crate::a",
+      "distance": 1,
+      "edge_kind": "call"
+    },
+    {
+      "qualified_name": "crate::Impl",
+      "distance": 2,
+      "edge_kind": "impl"
+    }
+  ],
+  "truncated": false,
+  "visited_nodes": 2
+}

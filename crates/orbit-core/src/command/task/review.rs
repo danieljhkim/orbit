@@ -362,7 +362,7 @@ mod tests {
         assert!(first_message.github_comment_id.is_none());
 
         let summary = runtime
-            .generate_scoreboard_summary()
+            .generate_scoreboard_summary(None)
             .expect("generate scoreboard summary");
         let reviewer = summary.agents.get("codex").expect("reviewer summary");
         assert_eq!(reviewer.task_review.threads, 1);

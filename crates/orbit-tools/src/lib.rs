@@ -15,7 +15,7 @@
 //! network tools. External (user-defined) tools are also supported via the registry.
 //!
 //! # Role
-//! Depends on `orbit-exec` for process spawning and `orbit-types` for shared
+//! Depends on `orbit-exec` for process spawning and `orbit-common` for shared
 //! types. Consumed by `orbit-engine` and `orbit-core`, which pass a configured
 //! [`ToolRegistry`] into the execution context.
 //!
@@ -35,7 +35,7 @@
 //! process allowlists, and the narrow Orbit host surface used by Orbit builtins.
 //!
 //! # Dependency direction
-//! `orbit-types` → `orbit-exec` → `orbit-tools` → orbit-engine, orbit-core
+//! `orbit-common` → `orbit-exec` → `orbit-tools` → orbit-engine, orbit-core
 
 pub(crate) mod builtin;
 pub mod external;

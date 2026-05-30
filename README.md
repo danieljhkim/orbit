@@ -198,7 +198,7 @@ Two install surfaces. The CLI gives you the full power of Orbit. Choose the plug
 
 ## Orbit MCP Tool Surface
 
-`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin. The table below is the full advertised surface — what `orbit mcp serve` returns from `tools/list`. Run `orbit tool list` for the live registry (it's the source of truth; this table can drift).
+`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin. The table below is a tool reference; inactive or CLI/operator-only rows are called out separately from the active agent MCP surface. Run `orbit tool list` for the live registry (it's the source of truth; this table can drift).
 
 Not every tool is intended for agent calls. Lifecycle/admin operations (`docs.index`, `docs.migrate`, `semantic.*`, `learning.sync`, `task.locks.*`, `friction.*` reads/updates, `graph.history`) are typically driven by humans via the CLI; the recommended agent permission profile auto-allows discovery/write tools and prompts on the rest. See `.claude/settings.json` (and `.codex/`, `.grok/`, `.gemini/` equivalents) in the seeded workspace for the default agent-facing subset.
 
@@ -206,7 +206,7 @@ Not every tool is intended for agent calls. Lifecycle/admin operations (`docs.in
 <summary><strong>Full tool reference</strong> — task, review, graph, search, semantic, adr, docs, learning, friction (click to expand)
 </summary>
 
-Agents discover project docs through `orbit.search`; docs, lock, semantic setup/index/status, graph history, learning sync/list, and friction stats operations are CLI-only admin/setup workflows. Six further admin/destructive tools — `orbit.task.delete`, `orbit.task.lint`, `orbit.semantic.uninstall`, `orbit.adr.list` (use `orbit search --kind adr` from agents), `orbit.learning.prune`, `orbit.learning.comment.delete` — remain registered for CLI use (`orbit task delete`, `orbit adr list`, etc.) but are hidden from the agent MCP surface (ORB-00289).
+Agents discover project docs through `orbit.search`; docs, lock, semantic setup/index/status, graph history, learning sync/list/comment.list/upvote, and friction stats operations are CLI-only admin/setup workflows. Six further admin/destructive tools — `orbit.task.delete`, `orbit.task.lint`, `orbit.semantic.uninstall`, `orbit.adr.list` (use `orbit search --kind adr` from agents), `orbit.learning.prune`, `orbit.learning.comment.delete` — remain registered for CLI use (`orbit task delete`, `orbit adr list`, etc.) but are hidden from the agent MCP surface (ORB-00289).
 
 | Namespace | Tool | Purpose |
 |---|---|---|
@@ -246,7 +246,7 @@ Agents discover project docs through `orbit.search`; docs, lock, semantic setup/
 | | `orbit.learning.supersede` | Mark a learning superseded |
 | | `orbit.learning.upvote` | Record a task-anchored upvote |
 | | `orbit.learning.comment.add` | Append a footnote-style comment to a learning |
-| | `orbit.learning.comment.list` | List comments for a learning |
+| | `orbit.learning.comment.list` | List comments for a learning (CLI/operator-only; inactive on agent MCP surface) |
 | **friction** | `orbit.friction.add` | Record an operational friction |
 | | `orbit.friction.update` | Edit a friction |
 | | `orbit.friction.show` | Fetch a friction |

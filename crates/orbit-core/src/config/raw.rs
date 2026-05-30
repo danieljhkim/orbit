@@ -23,7 +23,7 @@ pub(super) struct RawRuntimeConfig {
     pub(super) crews: Option<BTreeMap<String, RawCrewEntry>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(super) struct RawWorkflowConfig {
     /// `workflow.base_branch` — repo-level default base branch for ship and
     /// duel-plan workflows. When absent, defaults to `main`.
@@ -35,7 +35,7 @@ pub(super) struct RawWorkflowConfig {
     pub(super) default_crew: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(super) struct RawDuelSection {
     pub(super) candidates: Option<Vec<String>>,
     pub(super) models: Option<BTreeMap<String, String>>,

@@ -437,7 +437,13 @@ impl TestWorkspace {
     fn add_review_thread(&self, task_id: &str, body: &str, model: &str) {
         let input = json!({ "task_id": task_id, "body": body, "model": model }).to_string();
         self.run_json(
-            &["tool", "run", "orbit.review-thread.add", "--input", &input],
+            &[
+                "tool",
+                "run",
+                "orbit.task.review_thread.add",
+                "--input",
+                &input,
+            ],
             "add review thread",
         );
     }
@@ -450,7 +456,7 @@ impl TestWorkspace {
             &[
                 "tool",
                 "run",
-                "orbit.review-thread.reply",
+                "orbit.task.review_thread.reply",
                 "--input",
                 &input,
             ],
@@ -464,7 +470,7 @@ impl TestWorkspace {
             &[
                 "tool",
                 "run",
-                "orbit.review-thread.resolve",
+                "orbit.task.review_thread.resolve",
                 "--input",
                 &input,
             ],
@@ -475,7 +481,13 @@ impl TestWorkspace {
     fn review_thread_id(&self, task_id: &str) -> String {
         let input = json!({ "task_id": task_id }).to_string();
         let threads = self.run_json(
-            &["tool", "run", "orbit.review-thread.list", "--input", &input],
+            &[
+                "tool",
+                "run",
+                "orbit.task.review_thread.list",
+                "--input",
+                &input,
+            ],
             "list review threads",
         );
         threads[0]["thread_id"]

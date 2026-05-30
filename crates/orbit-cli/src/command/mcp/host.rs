@@ -29,9 +29,9 @@ pub(crate) const TASK_TOOL_NAMES: &[&str] = &[
     "orbit.task.artifact.put",
     // ORB-00289: `orbit.task.delete` and `orbit.task.lint` are admin-only
     // and remain reachable through the CLI / `runtime.run_tool` path,
-    // but are not exposed on the agent MCP surface.
+    // but are not exposed on the agent MCP surface. `orbit.task.reject`
+    // is also CLI-only — task rejection is a human/operator decision.
     "orbit.task.list",
-    "orbit.task.reject",
     "orbit.task.review_thread.add",
     "orbit.task.review_thread.list",
     "orbit.task.review_thread.reply",
@@ -41,11 +41,10 @@ pub(crate) const TASK_TOOL_NAMES: &[&str] = &[
     "orbit.task.update",
 ];
 
+// Agent surface intentionally narrow: agents file friction via `add`; triage
+// (list/show/resolve) belongs to operators on the CLI / dashboard path.
 pub(crate) const FRICTION_TOOL_NAMES: &[&str] = &[
     "orbit.friction.add",
-    "orbit.friction.list",
-    "orbit.friction.resolve",
-    "orbit.friction.show",
     "orbit.friction.tags",
     "orbit.friction.update",
 ];
@@ -88,11 +87,12 @@ pub(crate) const LEARNING_TOOL_NAMES: &[&str] = &[
     // ORB-00289: `orbit.learning.comment.delete` and `orbit.learning.prune`
     // are destructive admin-only operations and are not exposed on the
     // agent MCP surface; the CLI / `runtime.run_tool` path retains them.
-    "orbit.learning.comment.list",
+    // `orbit.learning.comment.list` and `orbit.learning.upvote` are also
+    // CLI-only — agents discover learnings via `orbit.search`, and upvote
+    // telemetry is an operator concern.
     "orbit.learning.show",
     "orbit.learning.update",
     "orbit.learning.supersede",
-    "orbit.learning.upvote",
 ];
 
 pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {

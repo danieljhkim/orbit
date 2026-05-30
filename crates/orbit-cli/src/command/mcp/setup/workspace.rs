@@ -36,6 +36,7 @@ pub(super) fn resolve_workspace_layout_for_cwd(cwd: &Path) -> Result<WorkspaceLa
     // Skip the user's global $HOME/.orbit during ancestor walk-up. It is the
     // global Orbit root, not a workspace, so adopting it would silently write
     // workspace-scope MCP configs to home-scope paths.
+    let home = env_home_dir();
     for ancestor in cwd.ancestors() {
         let orbit_root = ancestor.join(".orbit");
         if orbit_root.is_dir() && !is_global_orbit_dir(&orbit_root) {
@@ -43,6 +44,12 @@ pub(super) fn resolve_workspace_layout_for_cwd(cwd: &Path) -> Result<WorkspaceLa
                 repo_root: ancestor.to_path_buf(),
                 orbit_root,
             });
+        }
+        if home
+            .as_deref()
+            .is_some_and(|home| paths_equivalent(ancestor, home))
+        {
+            break;
         }
     }
 

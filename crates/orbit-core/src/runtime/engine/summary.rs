@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 use orbit_common::types::{AdrStatus, OrbitError};
 use orbit_store::JobRunQuery;
-use orbit_store::scoreboard_summary::ScoreboardInputs;
+use orbit_store::scoreboard_summary::{ScoreboardInputs, ScoreboardWindow};
 
 use crate::OrbitRuntime;
 
@@ -12,19 +12,30 @@ const RECENT_WINDOW_DAYS: i64 = 7;
 const TOP_TOOLS_LIMIT: usize = 50;
 
 impl OrbitRuntime {
+    /// Build a scoreboard summary for the workspace.
+    ///
+    /// `window`: `None` (or `Some(ScoreboardWindow::All)`) preserves the
+    /// legacy lifetime view. A finite window scopes audit-sourced fields
+    /// to the matching SQL cutoff and zeroes snapshot-sourced fields
+    /// (see [`ScoreboardWindow`] for per-source semantics). `recent_7d`
+    /// stays fixed at 7d regardless of `window`.
     pub fn generate_scoreboard_summary(
         &self,
+        window: Option<ScoreboardWindow>,
     ) -> Result<orbit_store::scoreboard_summary::ScoreboardSummary, OrbitError> {
+        let window = window.unwrap_or_default();
         let tasks = self.list_tasks()?;
 
         let now = Utc::now();
         let since_recent = now - Duration::days(RECENT_WINDOW_DAYS);
+        let since_window = window.duration().map(|d| now - d);
 
-        let audit_tool_calls = self.audit_tool_call_counts_by_role(None)?;
-        let audit_tool_calls_by_surface = self.audit_tool_call_counts_by_surface_and_role(None)?;
+        let audit_tool_calls = self.audit_tool_call_counts_by_role(since_window.as_ref())?;
+        let audit_tool_calls_by_surface =
+            self.audit_tool_call_counts_by_surface_and_role(since_window.as_ref())?;
         let audit_tool_calls_by_surface_recent =
             self.audit_tool_call_counts_by_surface_and_role(Some(&since_recent))?;
-        let top_tool_calls = self.audit_top_tool_calls(None, TOP_TOOLS_LIMIT)?;
+        let top_tool_calls = self.audit_top_tool_calls(since_window.as_ref(), TOP_TOOLS_LIMIT)?;
         let job_runs = self
             .stores()
             .jobs()
@@ -64,6 +75,7 @@ impl OrbitRuntime {
                 adrs: &adrs,
                 frictions: &frictions,
                 now: Some(now),
+                window,
             },
         )?;
         let _ =

@@ -156,7 +156,7 @@ impl KnowledgePackResult {
 
     pub(crate) fn from_error(
         knowledge_dir: impl Into<String>,
-        selectors: &[crate::Selector],
+        selectors: &[orbit_graph_extract::Selector],
         error: crate::KnowledgeError,
     ) -> Self {
         let unresolved_selectors = selectors

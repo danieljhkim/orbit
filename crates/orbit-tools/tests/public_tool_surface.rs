@@ -178,32 +178,55 @@ fn global_search_schema_drops_retired_semantic_tuning_params() {
 
 #[test]
 fn friction_surface_supports_artifact_triage() {
-    let names = registered_tool_names();
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+    let active: BTreeSet<String> = registry
+        .schemas()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+    let all: BTreeSet<String> = registry
+        .all_schemas()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
 
     for retained in [
         "orbit.friction.add",
-        "orbit.friction.list",
-        "orbit.friction.resolve",
-        "orbit.friction.show",
         "orbit.friction.tags",
         "orbit.friction.update",
     ] {
         assert!(
-            names.contains(retained),
-            "friction tool missing: {retained}"
+            active.contains(retained),
+            "agent-facing friction tool missing from active surface: {retained}"
         );
     }
 
     for removed in ["orbit.friction.delete", "orbit.friction.reject"] {
         assert!(
-            !names.contains(removed),
+            !all.contains(removed),
             "destructive friction tool registered: {removed}"
         );
     }
-    assert!(
-        !names.contains("orbit.friction.stats"),
-        "friction stats is CLI-only and must stay hidden from the default registry surface"
-    );
+
+    // Triage surface (list/show/resolve) and stats are CLI / dashboard only:
+    // registered for `runtime.run_tool` but hidden from the default agent
+    // surface.
+    for cli_only in [
+        "orbit.friction.list",
+        "orbit.friction.resolve",
+        "orbit.friction.show",
+        "orbit.friction.stats",
+    ] {
+        assert!(
+            !active.contains(cli_only),
+            "{cli_only} must stay hidden from the default registry surface"
+        );
+        assert!(
+            all.contains(cli_only),
+            "{cli_only} must remain reachable via `runtime.run_tool`"
+        );
+    }
 }
 
 #[test]

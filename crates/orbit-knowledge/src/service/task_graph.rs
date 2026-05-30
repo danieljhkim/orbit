@@ -1,13 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::OrbitError;
+use orbit_graph_extract::Selector;
 
 use crate::extract::{self, Language};
 use crate::graph::object_store::{GraphObjectStore, GraphReadOptions, resolve_graph_read_target};
 use crate::lock::GraphLockGuard;
 use crate::pipeline::context::BuildConfig;
 use crate::{
-    KnowledgeError, KnowledgePackResult, KnowledgeStore, Selector, WorkingGraph, WorkingLeaf,
+    KnowledgeError, KnowledgePackResult, KnowledgeStore, WorkingGraph, WorkingLeaf,
     load_task_working_graph, overlay_pack_with_working_graph, pack_from_working_graph,
     save_task_working_graph,
 };
@@ -298,7 +299,7 @@ fn lock_targets_for_mutation(selector: &Selector, extra_files: &[&str]) -> Vec<S
             targets.push(selector.to_string());
             targets.push(format!("file:{path}"));
         }
-        Selector::Dir { .. } => {}
+        Selector::Dir { .. } | Selector::Module { .. } | Selector::Command { .. } => {}
     }
 
     for file in extra_files {

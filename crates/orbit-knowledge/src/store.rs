@@ -16,7 +16,7 @@ mod types;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::selector::SelectorLookupKey;
+use orbit_graph_extract::selector::SelectorLookupKey;
 
 pub use object_cache::{
     DEFAULT_BLOB_CACHE_CAPACITY, DEFAULT_OBJECT_CACHE_CAPACITY, GraphObjectCache,

@@ -666,3 +666,222 @@ fn summary_exposes_friction_reported_counts_from_records() {
     let grok = summary.agents.get("grok").expect("grok summary");
     assert_eq!(grok.friction.reported, 0);
 }
+
+// ----- ORB-00337: window-aware summary tests -----
+
+/// Helper: write `pr.json` + `tokens.json` snapshots into a tempdir.
+fn write_snapshot_fixtures(dir: &std::path::Path) {
+    fs::create_dir_all(dir).expect("create scoreboard dir");
+    fs::write(
+        dir.join("pr.json"),
+        r#"{
+              "pr-review-comments": { "codex": 4 },
+              "pr-count-without-revision": { "codex": 2 },
+              "pr-count-with-revision": { "claude": 1 }
+            }"#,
+    )
+    .expect("write pr.json");
+    fs::write(
+        dir.join("tokens.json"),
+        r#"{
+              "agents": [
+                {
+                  "agent": "claude",
+                  "model": "claude-opus-4-7",
+                  "total_tokens": 1000,
+                  "total_output_tokens": 250,
+                  "total_tool_calls": 7
+                }
+              ]
+            }"#,
+    )
+    .expect("write tokens.json");
+}
+
+#[test]
+fn snapshot_sourced_fields_zero_under_non_all_window() {
+    // ORB-00337 AC#4 — snapshot reads (pr.json, tokens.json) have no
+    // per-event timestamp, so anything other than `ScoreboardWindow::All`
+    // must zero out those fields.
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_snapshot_fixtures(temp.path());
+
+    let summary_all = generate_summary_with_inputs(
+        temp.path(),
+        &[],
+        &ScoreboardInputs {
+            window: ScoreboardWindow::All,
+            now: Some(Utc::now()),
+            ..ScoreboardInputs::default()
+        },
+    )
+    .expect("generate summary all");
+    let codex_all = summary_all.agents.get("codex").expect("codex (all)");
+    assert_eq!(codex_all.pr.review_comments, 4, "lifetime preserves pr");
+    assert_eq!(codex_all.pr.merged_clean, 2);
+    let claude_all = summary_all.agents.get("claude").expect("claude (all)");
+    assert_eq!(claude_all.tokens.total, 1000);
+    assert_eq!(claude_all.tokens.output, 250);
+    assert_eq!(summary_all.window, "all");
+    assert!(summary_all.window_since.is_none());
+
+    let summary_day = generate_summary_with_inputs(
+        temp.path(),
+        &[],
+        &ScoreboardInputs {
+            window: ScoreboardWindow::Day,
+            now: Some(Utc::now()),
+            ..ScoreboardInputs::default()
+        },
+    )
+    .expect("generate summary day");
+    let codex_day = summary_day.agents.get("codex").expect("codex (day)");
+    assert_eq!(codex_day.pr.review_comments, 0, "windowed must zero pr");
+    assert_eq!(codex_day.pr.merged_clean, 0);
+    let claude_day = summary_day.agents.get("claude").expect("claude (day)");
+    assert_eq!(claude_day.tokens.total, 0, "windowed must zero tokens");
+    assert_eq!(claude_day.tokens.output, 0);
+    assert_eq!(summary_day.window, "24h");
+    assert!(summary_day.window_since.is_some());
+}
+
+#[test]
+fn audit_inputs_flow_through_under_windowed_call() {
+    // ORB-00337 AC#5 (scoreboard_summary layer) — the function honors the
+    // caller-supplied `audit_tool_calls` slice unchanged under `window =
+    // Day`. The caller (`orbit-core::OrbitRuntime`) is responsible for
+    // re-querying the audit store with the matching cutoff; the
+    // end-to-end runtime path is exercised separately.
+    let temp = tempfile::tempdir().expect("create tempdir");
+
+    let audit_windowed = vec![AuditToolCallCountsByRole {
+        role: "codex / gpt-5".to_string(),
+        total: 2,
+        failed: 0,
+    }];
+    let surface_windowed = vec![AuditToolCallCountsBySurfaceAndRole {
+        surface: "graph".to_string(),
+        role: "codex / gpt-5".to_string(),
+        total: 2,
+        failed: 0,
+    }];
+
+    let summary = generate_summary_with_inputs(
+        temp.path(),
+        &[],
+        &ScoreboardInputs {
+            audit_tool_calls: &audit_windowed,
+            audit_tool_calls_by_surface: &surface_windowed,
+            window: ScoreboardWindow::Day,
+            now: Some(Utc::now()),
+            ..ScoreboardInputs::default()
+        },
+    )
+    .expect("generate summary day");
+
+    let codex = summary.agents.get("codex").expect("codex summary");
+    assert_eq!(codex.tool_calls, 2, "windowed audit slice flows through");
+    assert_eq!(codex.tool_calls_by_surface.get("graph").copied(), Some(2));
+}
+
+#[test]
+fn windowed_tasks_filter_by_created_at_and_done_at() {
+    // ORB-00337 AC#5 (tasks-filter spirit) — under `window = Day` only
+    // tasks whose `created_at` (for created/planned) or `task_done_at`
+    // (for completed) falls within the last 24h are counted.
+    let temp = tempfile::tempdir().expect("create tempdir");
+
+    let now = Utc::now();
+    let inside = now - chrono::Duration::hours(1);
+    let outside = now - chrono::Duration::days(7);
+
+    let mut t_in_created = test_task(
+        "T-in-c",
+        TaskStatus::Backlog,
+        "claude-opus-4-7",
+        "claude-opus-4-7",
+    );
+    t_in_created.created_at = inside;
+
+    let mut t_in_done = test_task("T-in-d", TaskStatus::Done, "gpt-5.5", "gpt-5.5");
+    t_in_done.created_at = outside; // not in created/planned window
+    t_in_done.updated_at = inside; // task_done_at == updated_at, in window
+    t_in_done.implemented_by = Some("gpt-5.5".to_string());
+
+    let mut t_out = test_task(
+        "T-out",
+        TaskStatus::Done,
+        "claude-opus-4-7",
+        "claude-opus-4-7",
+    );
+    t_out.created_at = outside;
+    t_out.updated_at = outside;
+    t_out.implemented_by = Some("claude-opus-4-7".to_string());
+
+    let tasks = vec![t_in_created, t_in_done, t_out];
+
+    let summary_all = generate_summary_with_inputs(
+        temp.path(),
+        &tasks,
+        &ScoreboardInputs {
+            window: ScoreboardWindow::All,
+            now: Some(now),
+            ..ScoreboardInputs::default()
+        },
+    )
+    .expect("generate summary all");
+    let claude_all = summary_all.agents.get("claude").expect("claude (all)");
+    assert_eq!(
+        claude_all.tasks_created, 2,
+        "lifetime counts both claude tasks"
+    );
+    assert_eq!(claude_all.tasks_completed, 1, "lifetime counts old done");
+
+    let summary_day = generate_summary_with_inputs(
+        temp.path(),
+        &tasks,
+        &ScoreboardInputs {
+            window: ScoreboardWindow::Day,
+            now: Some(now),
+            ..ScoreboardInputs::default()
+        },
+    )
+    .expect("generate summary day");
+    let claude_day = summary_day.agents.get("claude").expect("claude (day)");
+    assert_eq!(
+        claude_day.tasks_created, 1,
+        "windowed drops the old created task"
+    );
+    assert_eq!(
+        claude_day.tasks_completed, 0,
+        "windowed drops the old done (updated_at outside window)"
+    );
+    let codex_day = summary_day.agents.get("codex").expect("codex (day)");
+    assert_eq!(
+        codex_day.tasks_completed, 1,
+        "old-created-but-recent-updated task counts as completed in window"
+    );
+    assert_eq!(
+        codex_day.tasks_created, 0,
+        "but does not re-count as created (created_at is old)"
+    );
+}
+
+#[test]
+fn window_string_round_trips_for_all_variants() {
+    // ORB-00337 AC#1 — every variant must round-trip through `as_str`/
+    // `from_str`, and unknown strings yield `OrbitError::InvalidInput`.
+    for w in [
+        ScoreboardWindow::Hour,
+        ScoreboardWindow::Day,
+        ScoreboardWindow::Week,
+        ScoreboardWindow::Month,
+        ScoreboardWindow::All,
+    ] {
+        assert_eq!(w.as_str().parse::<ScoreboardWindow>().ok(), Some(w));
+    }
+    assert!(matches!(
+        "bogus".parse::<ScoreboardWindow>(),
+        Err(OrbitError::InvalidInput(_))
+    ));
+}

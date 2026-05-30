@@ -129,20 +129,12 @@ where
 }
 
 #[cfg(unix)]
-fn read_pid_pair(path: &Path) -> (u32, u32) {
-    let raw = std::fs::read_to_string(path).expect("read pid file");
+fn read_pid_pair(path: &Path) -> Option<(u32, u32)> {
+    let raw = std::fs::read_to_string(path).ok()?;
     let mut parts = raw.split_whitespace();
-    let owner = parts
-        .next()
-        .expect("owner pid")
-        .parse()
-        .expect("parse owner pid");
-    let child = parts
-        .next()
-        .expect("child pid")
-        .parse()
-        .expect("parse child pid");
-    (owner, child)
+    let owner = parts.next()?.parse().ok()?;
+    let child = parts.next()?.parse().ok()?;
+    Some((owner, child))
 }
 
 #[cfg(unix)]
@@ -218,11 +210,17 @@ fn cancel_job_run_terminates_owner_process_group_and_child() {
         });
     }
     let mut owner = owner.spawn().expect("spawn owner");
+    let mut pid_pair = None;
     assert!(
-        wait_until(StdDuration::from_secs(2), || pid_file.exists()),
+        wait_until(StdDuration::from_secs(2), || {
+            pid_pair = read_pid_pair(&pid_file);
+            pid_pair.is_some()
+        }),
         "owner did not write pid file"
     );
-    let (owner_pid, child_pid) = read_pid_pair(&pid_file);
+    let Some((owner_pid, child_pid)) = pid_pair else {
+        panic!("owner did not write pid file");
+    };
     assert_eq!(owner.id(), owner_pid);
     runtime
         .stores()

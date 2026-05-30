@@ -1,0 +1,90 @@
+name: Graph Bench
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+    paths:
+      - "crates/**/*.rs"
+      - "tools/**/*.rs"
+      - "Cargo.toml"
+      - "crates/**/Cargo.toml"
+      - "tools/**/Cargo.toml"
+      - "Cargo.lock"
+      - "bench/baselines.json"
+      - "bench/check_baseline.sh"
+      - "bench/run_graph_bench_ci.sh"
+      - ".github/workflows/ci-bench.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  GRAPH_BENCH_RUNS: 3
+  GRAPH_BENCH_RUNNER_IMAGE: ubuntu-24.04
+
+jobs:
+  ci-bench:
+    name: Graph Bench
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable (2026-05-07)
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-graph-bench-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-graph-bench-cargo-
+            ${{ runner.os }}-cargo-
+
+      - name: Verify runner profile
+        run: |
+          set -euo pipefail
+          cores="$(getconf _NPROCESSORS_ONLN)"
+          memory_mib="$(awk '/MemTotal/ { print int($2 / 1024) }' /proc/meminfo)"
+          if [[ "$cores" -ne 4 || "$memory_mib" -lt 15000 || "$memory_mib" -gt 17000 ]]; then
+            echo "::error::Graph benchmark requires ubuntu-24.04 with 4 vCPU and approximately 16GB RAM; saw ${cores} cores and ${memory_mib} MiB."
+            exit 1
+          fi
+
+      - name: Run graph benchmark
+        run: ./bench/run_graph_bench_ci.sh
+
+      - name: Upload graph benchmark results
+        if: always() && hashFiles('target/bench/results.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: graph-bench-results
+          path: target/bench/results.json
+          if-no-files-found: error
+
+      - name: Validate baseline bump justification
+        id: baseline_bump
+        run: |
+          set -euo pipefail
+          has_bump_label="$(jq -r 'any(.pull_request.labels[]?; .name == "bench-baseline-bump")' "$GITHUB_EVENT_PATH")"
+          echo "has_bump_label=${has_bump_label}" >> "$GITHUB_OUTPUT"
+
+          if [[ "$has_bump_label" == "true" ]]; then
+            if ! jq -e '(.pull_request.body // "") | test("^\\s*bench-baseline-bump\\s*:\\s*\\S"; "im")' "$GITHUB_EVENT_PATH" >/dev/null; then
+              echo "::error::PRs labeled bench-baseline-bump must include a one-line PR body justification like 'bench-baseline-bump: <reason>'."
+              exit 1
+            fi
+          fi
+
+      - name: Check graph benchmark baseline
+        if: steps.baseline_bump.outputs.has_bump_label != 'true'
+        run: ./bench/check_baseline.sh --results target/bench/results.json --baseline bench/baselines.json
+
+      - name: Note baseline bump bypass
+        if: steps.baseline_bump.outputs.has_bump_label == 'true'
+        run: echo "bench-baseline-bump label present; baseline regression check bypassed after PR-body justification validation."

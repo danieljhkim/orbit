@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::error::KnowledgeError;
 use crate::graph::object_store::{GraphObjectStore, RefName};
-use crate::selector::SelectorLookupKey;
+use orbit_graph_extract::selector::SelectorLookupKey;
 
 use super::KnowledgeStore;
 use super::graph_io::read_json_file;

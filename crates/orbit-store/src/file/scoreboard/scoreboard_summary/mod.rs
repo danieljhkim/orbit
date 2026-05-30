@@ -22,13 +22,91 @@ const SUMMARY_FILENAME: &str = "summary.json";
 // recent_7d window block. v4 adds per-agent knowledge counters and a
 // planning-duel head-to-head matrix. v5 adds per-agent `friction.reported`
 // (from append-only `.orbit/frictions/` records, matching `orbit.friction.stats`).
+// v6 ([ORB-00337]) adds top-level `window` + `window_since` fields and the
+// `ScoreboardInputs.window` plumbing — snapshot-sourced per-agent fields
+// (`tokens`, `pr`, `duels`, `task_review.threads`) zero out under non-`All`
+// windows because we lack a timestamped snapshot log to filter against.
 // Older readers ignore unknown fields.
-const CURRENT_SCHEMA_VERSION: u32 = 5;
+const CURRENT_SCHEMA_VERSION: u32 = 6;
 const TASK_REVIEW_THREADS_METRIC: &str = "task-review-threads";
 const LEGACY_TASK_REVIEW_MESSAGES_METRIC: &str = "task-review-messages";
 const RECENT_WINDOW_DAYS: i64 = 7;
 
 type FamilyScoreboard = BTreeMap<String, BTreeMap<String, u64>>;
+
+/// Time window for a scoreboard summary. `All` is the legacy lifetime view —
+/// every non-`All` variant carries a finite `duration()` used as the cutoff
+/// for windowed source filtering inside [`generate_summary_with_inputs`].
+///
+/// String forms (used in the dashboard query param and the serialized
+/// `ScoreboardSummary.window` field): `1h`, `24h`, `7d`, `30d`, `all`.
+///
+/// Snapshot-sourced fields (`tokens`, `pr`, `duels`, `task_review.threads`)
+/// have no per-event timestamp, so they zero out under any non-`All` window;
+/// see the v6 schema comment. Per-(role) audit aggregates are filtered at
+/// query time by the caller (the runtime in `orbit-core`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScoreboardWindow {
+    Hour,
+    Day,
+    Week,
+    Month,
+    #[default]
+    All,
+}
+
+impl ScoreboardWindow {
+    /// Window length, or `None` for `All` (no cutoff).
+    pub fn duration(self) -> Option<Duration> {
+        match self {
+            ScoreboardWindow::Hour => Some(Duration::hours(1)),
+            ScoreboardWindow::Day => Some(Duration::hours(24)),
+            ScoreboardWindow::Week => Some(Duration::days(7)),
+            ScoreboardWindow::Month => Some(Duration::days(30)),
+            ScoreboardWindow::All => None,
+        }
+    }
+
+    /// Canonical short string used in the dashboard query param and the
+    /// serialized `ScoreboardSummary.window` field.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScoreboardWindow::Hour => "1h",
+            ScoreboardWindow::Day => "24h",
+            ScoreboardWindow::Week => "7d",
+            ScoreboardWindow::Month => "30d",
+            ScoreboardWindow::All => "all",
+        }
+    }
+}
+
+impl std::str::FromStr for ScoreboardWindow {
+    type Err = OrbitError;
+
+    /// Parse a canonical window string. Accepts exactly `"1h"`, `"24h"`,
+    /// `"7d"`, `"30d"`, or `"all"`. Any other input returns
+    /// [`OrbitError::InvalidInput`] so HTTP callers can render an exact 400.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "1h" => Ok(ScoreboardWindow::Hour),
+            "24h" => Ok(ScoreboardWindow::Day),
+            "7d" => Ok(ScoreboardWindow::Week),
+            "30d" => Ok(ScoreboardWindow::Month),
+            "all" => Ok(ScoreboardWindow::All),
+            other => Err(OrbitError::InvalidInput(format!(
+                "unknown scoreboard window '{other}' (expected one of 1h, 24h, 7d, 30d, all)"
+            ))),
+        }
+    }
+}
+
+impl TryFrom<&str> for ScoreboardWindow {
+    type Error = OrbitError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TokenSummary {
@@ -150,7 +228,10 @@ pub struct ScoreboardSummary {
     /// `orbit.*` tool names. Already sorted desc by count.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub top_tools: Vec<TopToolCall>,
-    /// Recency window for headline deltas on the public scoreboard.
+    /// Recency window for headline deltas on the public scoreboard. The
+    /// 7d boundary here is independent of the user-selected scoreboard
+    /// `window` — `recent_7d` is a "is this still being used" signal,
+    /// always over the same fixed period, not a leaderboard.
     /// Optional so older readers / unit tests that don't wire it tolerate
     /// its absence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -158,6 +239,15 @@ pub struct ScoreboardSummary {
     /// Planning-duel reports that are not naturally per-agent columns.
     #[serde(default)]
     pub planning_duels: PlanningDuelSummary,
+    /// Selected scoreboard window in canonical short form (`"1h"`,
+    /// `"24h"`, `"7d"`, `"30d"`, `"all"`). v6+. Older readers tolerate
+    /// the field's absence via `#[serde(default)]`.
+    #[serde(default)]
+    pub window: String,
+    /// RFC3339 lower bound of the scoreboard window, or `None` when the
+    /// window is `All` (lifetime). v6+.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_since: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -215,6 +305,11 @@ pub struct ScoreboardInputs<'a> {
     /// Reference "now" for recency windowing. `None` means no recency
     /// section is emitted (used by legacy callers).
     pub now: Option<DateTime<Utc>>,
+    /// User-selected scoreboard window. `All` (the default) keeps the
+    /// historical lifetime view. Non-`All` variants zero out snapshot-
+    /// sourced fields and filter timestamp-bearing slices to the window.
+    /// See [`ScoreboardWindow`] for the per-source semantics. v6+.
+    pub window: ScoreboardWindow,
 }
 
 impl<'a> Default for ScoreboardInputs<'a> {
@@ -237,6 +332,7 @@ impl<'a> Default for ScoreboardInputs<'a> {
             adrs: &EMPTY_ADR,
             frictions: &[],
             now: None,
+            window: ScoreboardWindow::All,
         }
     }
 }
@@ -272,55 +368,71 @@ pub fn generate_summary_with_inputs(
     let mut agents: BTreeMap<String, AgentSummary> = BTreeMap::new();
     seed_known_family_agents(&mut agents);
 
-    let pr = read_model_scoreboard(scoreboard_dir, "pr.json")?;
-    overlay_nested_metric(&mut agents, &pr, "pr-review-comments", |summary, value| {
-        summary.pr.review_comments = summary.pr.review_comments.saturating_add(value);
-    });
-    overlay_nested_metric(
-        &mut agents,
-        &pr,
-        "pr-count-without-revision",
-        |summary, value| {
-            summary.pr.merged_clean = summary.pr.merged_clean.saturating_add(value);
-        },
-    );
-    overlay_nested_metric(
-        &mut agents,
-        &pr,
-        "pr-count-with-revision",
-        |summary, value| {
-            summary.pr.merged_with_revision = summary.pr.merged_with_revision.saturating_add(value);
-        },
-    );
+    // Window cutoff. `None` (i.e. `window == All`) preserves the legacy
+    // lifetime behavior; `Some(since)` triggers per-source filtering and
+    // skips snapshot reads (which lack per-event timestamps).
+    let now_for_window = inputs.now.unwrap_or_else(Utc::now);
+    let since: Option<DateTime<Utc>> = inputs.window.duration().map(|d| now_for_window - d);
+    let windowed = since.is_some();
 
-    let task_review = read_model_scoreboard(scoreboard_dir, "task_review.json")?;
-    overlay_nested_metric(
-        &mut agents,
-        &task_review,
-        TASK_REVIEW_THREADS_METRIC,
-        |summary, value| {
-            summary.task_review.threads = summary.task_review.threads.saturating_add(value);
-        },
-    );
+    // Snapshot reads (pr.json, task_review.json, tokens.json,
+    // planning_duels.json) have no per-event timestamp, so they only run
+    // for the lifetime (`All`) window. Under a windowed view they zero
+    // out — the frontend renders 0 as `—` via emptyScoreboardNode().
+    // TODO(phase-3+): timestamped snapshot logs would unblock real
+    // windowing of these columns.
+    if !windowed {
+        let pr = read_model_scoreboard(scoreboard_dir, "pr.json")?;
+        overlay_nested_metric(&mut agents, &pr, "pr-review-comments", |summary, value| {
+            summary.pr.review_comments = summary.pr.review_comments.saturating_add(value);
+        });
+        overlay_nested_metric(
+            &mut agents,
+            &pr,
+            "pr-count-without-revision",
+            |summary, value| {
+                summary.pr.merged_clean = summary.pr.merged_clean.saturating_add(value);
+            },
+        );
+        overlay_nested_metric(
+            &mut agents,
+            &pr,
+            "pr-count-with-revision",
+            |summary, value| {
+                summary.pr.merged_with_revision =
+                    summary.pr.merged_with_revision.saturating_add(value);
+            },
+        );
 
-    for token_row in read_token_agents(scoreboard_dir)? {
-        let Some(model) = token_row
-            .model
-            .as_deref()
-            .map(family_key)
-            .filter(|value| !value.is_empty())
-        else {
-            continue;
-        };
-        let summary = agents.entry(model).or_default();
-        summary.tokens.total = summary.tokens.total.saturating_add(token_row.total_tokens);
-        summary.tokens.output = summary
-            .tokens
-            .output
-            .saturating_add(token_row.total_output_tokens);
-        summary.tool_calls = summary
-            .tool_calls
-            .saturating_add(token_row.total_tool_calls);
+        let task_review = read_model_scoreboard(scoreboard_dir, "task_review.json")?;
+        overlay_nested_metric(
+            &mut agents,
+            &task_review,
+            TASK_REVIEW_THREADS_METRIC,
+            |summary, value| {
+                summary.task_review.threads = summary.task_review.threads.saturating_add(value);
+            },
+        );
+
+        for token_row in read_token_agents(scoreboard_dir)? {
+            let Some(model) = token_row
+                .model
+                .as_deref()
+                .map(family_key)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            let summary = agents.entry(model).or_default();
+            summary.tokens.total = summary.tokens.total.saturating_add(token_row.total_tokens);
+            summary.tokens.output = summary
+                .tokens
+                .output
+                .saturating_add(token_row.total_output_tokens);
+            summary.tool_calls = summary
+                .tool_calls
+                .saturating_add(token_row.total_tool_calls);
+        }
     }
 
     overlay_audit_tool_calls(&mut agents, audit_tool_calls);
@@ -328,8 +440,13 @@ pub fn generate_summary_with_inputs(
 
     // Planning-duel rows are the "who actually ran?" scoreboard projection:
     // metrics are recorded from invocation family + slot, while the stored
-    // roles identify the selected family for each slot.
-    let planning_duel_runs = planning_duel_scoreboard::load_runs(scoreboard_dir)?;
+    // roles identify the selected family for each slot. Skipped under
+    // windowed views — see the snapshot-zeroing comment above.
+    let planning_duel_runs = if windowed {
+        Vec::new()
+    } else {
+        planning_duel_scoreboard::load_runs(scoreboard_dir)?
+    };
     for run in &planning_duel_runs {
         let planner_a = agents
             .entry(run.roles.planner_a.family.to_string())
@@ -368,11 +485,12 @@ pub fn generate_summary_with_inputs(
         }
     }
 
-    overlay_knowledge_counters(&mut agents, inputs);
-    overlay_friction_reported(&mut agents, inputs.frictions);
+    overlay_knowledge_counters(&mut agents, inputs, since);
+    overlay_friction_reported(&mut agents, inputs.frictions, since);
 
     for task in tasks {
         if matches!(task.status, TaskStatus::Done | TaskStatus::Archived)
+            && in_window(task_done_at(task), since)
             && let Some(model) = normalize_optional_attribution_label(
                 task.implemented_by.as_deref(),
                 task.implemented_by.as_deref(),
@@ -384,27 +502,31 @@ pub fn generate_summary_with_inputs(
 
         // Created/Planned count *all* statuses — see [T20260508-16]: rejected
         // and friction tasks still represent real work the agent produced.
-        if let Some(label) = task
-            .created_by
-            .as_deref()
-            .map(|raw| normalize_attribution_label(raw, None))
-            .filter(|value| !value.is_empty())
-        {
-            let summary = agents.entry(family_key(&label)).or_default();
-            summary.tasks_created = summary.tasks_created.saturating_add(1);
-        }
-        if let Some(label) = task
-            .planned_by
-            .as_deref()
-            .map(|raw| normalize_attribution_label(raw, None))
-            .filter(|value| !value.is_empty())
-        {
-            let summary = agents.entry(family_key(&label)).or_default();
-            summary.tasks_planned = summary.tasks_planned.saturating_add(1);
+        // Windowed views filter by `created_at` so an old task created
+        // outside the window doesn't get re-counted today.
+        if in_window(Some(task.created_at), since) {
+            if let Some(label) = task
+                .created_by
+                .as_deref()
+                .map(|raw| normalize_attribution_label(raw, None))
+                .filter(|value| !value.is_empty())
+            {
+                let summary = agents.entry(family_key(&label)).or_default();
+                summary.tasks_created = summary.tasks_created.saturating_add(1);
+            }
+            if let Some(label) = task
+                .planned_by
+                .as_deref()
+                .map(|raw| normalize_attribution_label(raw, None))
+                .filter(|value| !value.is_empty())
+            {
+                let summary = agents.entry(family_key(&label)).or_default();
+                summary.tasks_planned = summary.tasks_planned.saturating_add(1);
+            }
         }
     }
 
-    let workflows_run = aggregate_workflows_run(inputs.job_runs);
+    let workflows_run = aggregate_workflows_run(inputs.job_runs, since);
     let top_tools: Vec<TopToolCall> = inputs
         .top_tool_calls
         .iter()
@@ -414,6 +536,9 @@ pub fn generate_summary_with_inputs(
             count: row.total,
         })
         .collect();
+    // recent_7d intentionally uses the full (unfiltered) tasks slice —
+    // its 7d boundary is a fixed "is this still being used" signal,
+    // independent of the user-selected `window`.
     let recent_7d = inputs
         .now
         .map(|now| build_recent_summary(now, tasks, inputs));
@@ -429,13 +554,25 @@ pub fn generate_summary_with_inputs(
         top_tools,
         recent_7d,
         planning_duels,
+        window: inputs.window.as_str().to_string(),
+        window_since: since.map(|t| t.to_rfc3339()),
     })
 }
 
-fn aggregate_workflows_run(runs: &[JobRun]) -> Vec<WorkflowRunCount> {
+/// `true` when `timestamp` is at or after `since`. `since == None` means
+/// the lifetime window — everything is in-window.
+fn in_window(timestamp: Option<DateTime<Utc>>, since: Option<DateTime<Utc>>) -> bool {
+    match (timestamp, since) {
+        (_, None) => true,
+        (Some(ts), Some(cut)) => ts >= cut,
+        (None, Some(_)) => false,
+    }
+}
+
+fn aggregate_workflows_run(runs: &[JobRun], since: Option<DateTime<Utc>>) -> Vec<WorkflowRunCount> {
     let mut counts: BTreeMap<String, u64> = BTreeMap::new();
     for run in runs {
-        if run.state == JobRunState::Success {
+        if run.state == JobRunState::Success && in_window(Some(run_completed_at(run)), since) {
             *counts.entry(run.job_id.to_string()).or_insert(0) += 1;
         }
     }
@@ -613,8 +750,12 @@ fn overlay_audit_tool_calls(
 fn overlay_knowledge_counters(
     agents: &mut BTreeMap<String, AgentSummary>,
     inputs: &ScoreboardInputs<'_>,
+    since: Option<DateTime<Utc>>,
 ) {
     for learning in inputs.learnings {
+        if !in_window(Some(learning.created_at), since) {
+            continue;
+        }
         let Some(created_by) = learning
             .created_by
             .as_deref()
@@ -635,6 +776,9 @@ fn overlay_knowledge_counters(
     }
 
     for adr in inputs.adrs {
+        if !in_window(Some(adr.created_at), since) {
+            continue;
+        }
         let owner = normalize_attribution_label(&adr.owner, None);
         if owner.is_empty() {
             continue;
@@ -654,9 +798,13 @@ fn overlay_knowledge_counters(
 fn overlay_friction_reported(
     agents: &mut BTreeMap<String, AgentSummary>,
     frictions: &[StoredFrictionRecord],
+    since: Option<DateTime<Utc>>,
 ) {
     let mut counts: BTreeMap<String, u64> = BTreeMap::new();
     for stored in frictions {
+        if !in_window(Some(stored.record.created_at), since) {
+            continue;
+        }
         let family = {
             let normalized = normalize_optional_attribution_label(Some(&stored.record.model), None)
                 .unwrap_or_default();

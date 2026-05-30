@@ -4,21 +4,10 @@ use serde_json::Value;
 use crate::{OrbitBuiltinAction, Tool, ToolContext};
 
 pub struct OrbitReviewThreadListTool;
-pub struct OrbitReviewThreadListAliasTool;
 
 impl Tool for OrbitReviewThreadListTool {
     fn schema(&self) -> ToolSchema {
         list_schema("orbit.task.review_thread.list")
-    }
-
-    fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
-        super::super::execute_host_action(ctx, input, OrbitBuiltinAction::ReviewThreadList)
-    }
-}
-
-impl Tool for OrbitReviewThreadListAliasTool {
-    fn schema(&self) -> ToolSchema {
-        list_schema("orbit.review-thread.list")
     }
 
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {

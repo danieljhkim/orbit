@@ -73,6 +73,17 @@ const TASK_UPDATE_STATUS_ENUM: &[&str] = &[
 
 const TASK_COMPLEXITY_ENUM: &[&str] = &["low", "medium", "hard"];
 const AGENT_FAMILY_ENUM: &[&str] = &["codex", "claude", "gemini", "grok"];
+const GRAPH_SEARCH_KIND_ENUM: &[&str] = &["symbol", "string", "config"];
+const GRAPH_REF_CONFIDENCE_ENUM: &[&str] = &["exact", "import", "same_module", "fuzzy"];
+const GRAPH_REF_KIND_ENUM: &[&str] = &[
+    "call",
+    "type",
+    "use",
+    "trait_bound",
+    "impl",
+    "extends",
+    "implements",
+];
 
 pub(super) fn enum_values_for(
     tool_name: &str,
@@ -83,6 +94,9 @@ pub(super) fn enum_values_for(
         ("orbit.task.update", "type") => Some(TASK_TYPE_ENUM),
         ("orbit.task.update", "status") => Some(TASK_UPDATE_STATUS_ENUM),
         ("orbit.task.add", "complexity") => Some(TASK_COMPLEXITY_ENUM),
+        ("orbit.graph.search", "kind") => Some(GRAPH_SEARCH_KIND_ENUM),
+        ("orbit.graph.refs", "confidence") => Some(GRAPH_REF_CONFIDENCE_ENUM),
+        ("orbit.graph.refs", "kind") => Some(GRAPH_REF_KIND_ENUM),
         (_, "model") => Some(AGENT_FAMILY_ENUM),
         _ => None,
     }

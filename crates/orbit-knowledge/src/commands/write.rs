@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use orbit_common::types::OrbitError;
 use serde_json::Value;
 
+use crate::KnowledgeError;
 use crate::commands::{GraphCommandContext, knowledge_error_from_orbit};
-use crate::{KnowledgeError, Selector};
+use orbit_graph_extract::Selector;
 
 #[derive(Debug, Clone)]
 pub struct MutationContext {
@@ -101,9 +102,9 @@ fn write(
         ));
     }
     let selector = parse_selector(&selector_str)?;
-    if matches!(selector, Selector::Dir { .. }) {
+    if !matches!(selector, Selector::File { .. } | Selector::Symbol { .. }) {
         return Err(KnowledgeError::invalid_data(
-            "graph.write does not accept dir selectors".to_string(),
+            "graph.write requires a file or symbol selector".to_string(),
         ));
     }
     let position_selector = parse_position_selector(position.as_deref())?;
@@ -156,7 +157,9 @@ fn write(
                             .map_err(write_err_to_orbit)
                     }
                 }
-                Selector::Dir { .. } => unreachable!(),
+                Selector::Dir { .. } | Selector::Module { .. } | Selector::Command { .. } => {
+                    unreachable!()
+                }
             },
         )
         .map_err(knowledge_error_from_orbit)?;

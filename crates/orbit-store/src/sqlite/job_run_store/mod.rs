@@ -6,6 +6,7 @@ use orbit_common::types::{
     OrbitError, PipelineState, RunEvent,
 };
 use orbit_common::utility::process_identity::process_start_identity_token;
+use rusqlite::TransactionBehavior;
 
 use crate::backend::{JobRunQuery, JobRunStepParams, JobRunStoreBackend};
 use crate::file::layout::validate_path_stem;
@@ -35,13 +36,17 @@ impl SqliteJobRunStore {
         run_id: &str,
         update: impl FnOnce(&mut JobRun) -> Result<(), OrbitError>,
     ) -> Result<bool, OrbitError> {
-        let Some(mut run) = self.read_run(run_id)? else {
-            return Ok(false);
-        };
-        update(&mut run)?;
         self.store
-            .upsert_job_run_for_workspace(&self.workspace_id, &run, None)?;
-        Ok(true)
+            .with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+                let Some(mut run) =
+                    get_job_run_for_workspace_conn(&tx.tx, &self.workspace_id, run_id)?
+                else {
+                    return Ok(false);
+                };
+                update(&mut run)?;
+                upsert_job_run_for_workspace_conn(&tx.tx, &self.workspace_id, &run, None)?;
+                Ok(true)
+            })
     }
 
     fn next_run_id(&self, job_id: &str) -> Result<String, OrbitError> {
@@ -352,65 +357,11 @@ impl Store {
         run: &JobRun,
         pipeline_state: Option<&PipelineState>,
     ) -> Result<(), OrbitError> {
-        let input_json = optional_json(&run.input, "job run input")?;
-        let knowledge_metrics_json =
-            optional_json(&run.knowledge_metrics, "job run knowledge metrics")?;
-        let pipeline_state_json = optional_json(&pipeline_state, "job run pipeline state")?;
         let conn = self
             .conn
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
-        conn.execute(
-            r#"INSERT INTO job_runs(
-                run_id, workspace_id, job_id, attempt, state, scheduled_at,
-                started_at, finished_at, duration_ms, created_at, pid, pid_start_time,
-                input_json, retry_source_run_id, knowledge_metrics_json, resolved_crew,
-                planner_model, implementer_model, reviewer_model, pipeline_state_json
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
-            ON CONFLICT(workspace_id, run_id) DO UPDATE SET
-                job_id = excluded.job_id,
-                attempt = excluded.attempt,
-                state = excluded.state,
-                scheduled_at = excluded.scheduled_at,
-                started_at = excluded.started_at,
-                finished_at = excluded.finished_at,
-                duration_ms = excluded.duration_ms,
-                created_at = excluded.created_at,
-                pid = excluded.pid,
-                pid_start_time = excluded.pid_start_time,
-                input_json = excluded.input_json,
-                retry_source_run_id = excluded.retry_source_run_id,
-                knowledge_metrics_json = excluded.knowledge_metrics_json,
-                resolved_crew = excluded.resolved_crew,
-                planner_model = excluded.planner_model,
-                implementer_model = excluded.implementer_model,
-                reviewer_model = excluded.reviewer_model,
-                pipeline_state_json = COALESCE(excluded.pipeline_state_json, job_runs.pipeline_state_json)"#,
-            rusqlite::params![
-                run.run_id,
-                workspace_id,
-                run.job_id,
-                i64::from(run.attempt),
-                run.state.to_string(),
-                run.scheduled_at.to_rfc3339(),
-                run.started_at.map(|ts| ts.to_rfc3339()),
-                run.finished_at.map(|ts| ts.to_rfc3339()),
-                run.duration_ms.map(|value| value as i64),
-                run.created_at.to_rfc3339(),
-                run.pid.map(i64::from),
-                run.pid_start_time,
-                input_json,
-                run.retry_source_run_id,
-                knowledge_metrics_json,
-                run.resolved_crew,
-                run.planner_model,
-                run.implementer_model,
-                run.reviewer_model,
-                pipeline_state_json,
-            ],
-        )
-        .map_err(|e| OrbitError::Store(e.to_string()))?;
-        Ok(())
+        upsert_job_run_for_workspace_conn(&conn, workspace_id, run, pipeline_state)
     }
 
     pub fn upsert_job_run_step_for_workspace(
@@ -470,22 +421,7 @@ impl Store {
             .conn
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT run_id, job_id, attempt, state, scheduled_at, started_at, finished_at, \
-                 duration_ms, created_at, pid, pid_start_time, input_json, retry_source_run_id, \
-                 knowledge_metrics_json, resolved_crew, planner_model, implementer_model, reviewer_model \
-                 FROM job_runs WHERE workspace_id = ?1 AND run_id = ?2",
-            )
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-        let mut run = match stmt.query_row(rusqlite::params![workspace_id, run_id], row_to_job_run)
-        {
-            Ok(run) => run,
-            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
-            Err(err) => return Err(OrbitError::Store(err.to_string())),
-        };
-        run.steps = read_steps(&conn, workspace_id, run_id)?;
-        Ok(Some(run))
+        get_job_run_for_workspace_conn(&conn, workspace_id, run_id)
     }
 
     pub fn list_job_runs_for_workspace(
@@ -608,6 +544,91 @@ impl Store {
         .map(|count| count > 0)
         .map_err(|e| OrbitError::Store(e.to_string()))
     }
+}
+
+fn upsert_job_run_for_workspace_conn(
+    conn: &rusqlite::Connection,
+    workspace_id: &str,
+    run: &JobRun,
+    pipeline_state: Option<&PipelineState>,
+) -> Result<(), OrbitError> {
+    let input_json = optional_json(&run.input, "job run input")?;
+    let knowledge_metrics_json =
+        optional_json(&run.knowledge_metrics, "job run knowledge metrics")?;
+    let pipeline_state_json = optional_json(&pipeline_state, "job run pipeline state")?;
+    conn.execute(
+        r#"INSERT INTO job_runs(
+            run_id, workspace_id, job_id, attempt, state, scheduled_at,
+            started_at, finished_at, duration_ms, created_at, pid, pid_start_time,
+            input_json, retry_source_run_id, knowledge_metrics_json, resolved_crew,
+            planner_model, implementer_model, reviewer_model, pipeline_state_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+        ON CONFLICT(workspace_id, run_id) DO UPDATE SET
+            job_id = excluded.job_id,
+            attempt = excluded.attempt,
+            state = excluded.state,
+            scheduled_at = excluded.scheduled_at,
+            started_at = excluded.started_at,
+            finished_at = excluded.finished_at,
+            duration_ms = excluded.duration_ms,
+            created_at = excluded.created_at,
+            pid = excluded.pid,
+            pid_start_time = excluded.pid_start_time,
+            input_json = excluded.input_json,
+            retry_source_run_id = excluded.retry_source_run_id,
+            knowledge_metrics_json = excluded.knowledge_metrics_json,
+            resolved_crew = excluded.resolved_crew,
+            planner_model = excluded.planner_model,
+            implementer_model = excluded.implementer_model,
+            reviewer_model = excluded.reviewer_model,
+            pipeline_state_json = COALESCE(excluded.pipeline_state_json, job_runs.pipeline_state_json)"#,
+        rusqlite::params![
+            run.run_id,
+            workspace_id,
+            run.job_id,
+            i64::from(run.attempt),
+            run.state.to_string(),
+            run.scheduled_at.to_rfc3339(),
+            run.started_at.map(|ts| ts.to_rfc3339()),
+            run.finished_at.map(|ts| ts.to_rfc3339()),
+            run.duration_ms.map(|value| value as i64),
+            run.created_at.to_rfc3339(),
+            run.pid.map(i64::from),
+            run.pid_start_time,
+            input_json,
+            run.retry_source_run_id,
+            knowledge_metrics_json,
+            run.resolved_crew,
+            run.planner_model,
+            run.implementer_model,
+            run.reviewer_model,
+            pipeline_state_json,
+        ],
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))?;
+    Ok(())
+}
+
+fn get_job_run_for_workspace_conn(
+    conn: &rusqlite::Connection,
+    workspace_id: &str,
+    run_id: &str,
+) -> Result<Option<JobRun>, OrbitError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT run_id, job_id, attempt, state, scheduled_at, started_at, finished_at, \
+             duration_ms, created_at, pid, pid_start_time, input_json, retry_source_run_id, \
+             knowledge_metrics_json, resolved_crew, planner_model, implementer_model, reviewer_model \
+             FROM job_runs WHERE workspace_id = ?1 AND run_id = ?2",
+        )
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    let mut run = match stmt.query_row(rusqlite::params![workspace_id, run_id], row_to_job_run) {
+        Ok(run) => run,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+        Err(err) => return Err(OrbitError::Store(err.to_string())),
+    };
+    run.steps = read_steps(conn, workspace_id, run_id)?;
+    Ok(Some(run))
 }
 
 fn row_to_job_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRun> {
@@ -744,8 +765,13 @@ fn parse_job_target_type(raw: &str) -> rusqlite::Result<JobTargetType> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+    use std::time::Duration;
+
     use chrono::Utc;
     use orbit_common::types::JobTargetType;
+    use tempfile::TempDir;
 
     use super::*;
 
@@ -792,5 +818,58 @@ mod tests {
             .expect("some");
         assert_eq!(loaded.state, JobRunState::Success);
         assert_eq!(loaded.steps.len(), 1);
+    }
+
+    #[test]
+    fn update_run_serializes_concurrent_mutations_without_torn_write() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("orbit.db");
+        let backend_a = SqliteJobRunStore::new(Store::open(&db_path).expect("store a"), "ws_a");
+        let backend_b = SqliteJobRunStore::new(Store::open(&db_path).expect("store b"), "ws_a");
+        let scheduled_at = Utc::now();
+        let run = backend_a
+            .insert_job_run("job-a", 1, scheduled_at, None, None)
+            .expect("insert");
+        let run_id = run.run_id.clone();
+        let barrier = Arc::new(Barrier::new(2));
+
+        let run_id_a = run_id.clone();
+        let barrier_a = Arc::clone(&barrier);
+        let writer_a = thread::spawn(move || {
+            backend_a.update_run(&run_id_a, |run| {
+                run.resolved_crew = Some("crew-a".to_string());
+                barrier_a.wait();
+                thread::sleep(Duration::from_millis(100));
+                Ok(())
+            })
+        });
+
+        barrier.wait();
+        let run_id_b = run_id.clone();
+        let writer_b = thread::spawn(move || {
+            backend_b.update_run(&run_id_b, |run| {
+                run.knowledge_metrics = Some(KnowledgeRunMetrics {
+                    raw_read_token_baseline: 100,
+                    knowledge_pack_tokens: Some(50),
+                    compression_ratio: Some(2.0),
+                    actual_fs_read_tokens_during_run: 25,
+                    double_read_rate: Some(0.0),
+                    knowledge_pack_used: true,
+                    knowledge_pack_unresolved_count: 0,
+                    total_llm_input_tokens: 75,
+                });
+                Ok(())
+            })
+        });
+
+        assert!(writer_a.join().expect("writer a").expect("update a"));
+        assert!(writer_b.join().expect("writer b").expect("update b"));
+
+        let loaded = SqliteJobRunStore::new(Store::open(&db_path).expect("store c"), "ws_a")
+            .get_job_run(&run_id)
+            .expect("read")
+            .expect("run");
+        assert_eq!(loaded.resolved_crew.as_deref(), Some("crew-a"));
+        assert!(loaded.knowledge_metrics.is_some());
     }
 }

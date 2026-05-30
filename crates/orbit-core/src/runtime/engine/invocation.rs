@@ -1,7 +1,7 @@
 use orbit_common::types::OrbitError;
 use orbit_store::{
-    ActivityInvocationMetrics, AgentInvocationMetrics, InvocationQuery, InvocationRecord, Store,
-    TaskInvocationMetrics, ToolInvocationMetrics,
+    ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,
+    InvocationRecord, Store, TaskInvocationMetrics, ToolInvocationMetrics,
 };
 use serde_json::Value;
 
@@ -68,6 +68,13 @@ impl OrbitRuntime {
         query: InvocationQuery,
     ) -> Result<Vec<InvocationRecord>, OrbitError> {
         open_invocation_store(self)?.list_invocation_records(&query)
+    }
+
+    pub fn insert_invocation_trace_record(
+        &self,
+        params: &InvocationInsertParams,
+    ) -> Result<(), OrbitError> {
+        open_invocation_store(self)?.insert_invocation_trace_record(params)
     }
 }
 

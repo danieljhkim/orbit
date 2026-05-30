@@ -1133,6 +1133,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "graph-equiv"
+version = "0.8.2"
+dependencies = [
+ "orbit-knowledge",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "h2"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2086,7 +2096,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orbit-agent"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "chrono",
  "orbit-common",
@@ -2101,7 +2111,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-cli"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "assert_cmd",
  "chrono",
@@ -2130,7 +2140,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-common"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "chrono",
  "clap",
@@ -2152,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-core"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "chrono",
  "fs2",
@@ -2177,7 +2187,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-dashboard"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "axum",
  "chrono",
@@ -2198,7 +2208,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-engine"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "chrono",
  "jsonschema",
@@ -2221,7 +2231,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-exec"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "libc",
  "orbit-common",
@@ -2230,8 +2240,64 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbit-graph"
+version = "0.8.2"
+dependencies = [
+ "blake3",
+ "fs2",
+ "git2",
+ "ignore",
+ "orbit-graph-extract",
+ "rayon",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "orbit-graph-cli"
+version = "0.8.2"
+dependencies = [
+ "assert_cmd",
+ "clap",
+ "git2",
+ "orbit-graph",
+ "orbit-graph-extract",
+ "predicates",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "orbit-graph-extract"
+version = "0.8.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror",
+ "toml",
+ "tree-sitter",
+ "tree-sitter-c",
+ "tree-sitter-c-sharp",
+ "tree-sitter-go",
+ "tree-sitter-java",
+ "tree-sitter-javascript",
+ "tree-sitter-kotlin-ng",
+ "tree-sitter-python",
+ "tree-sitter-ruby",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
+]
+
+[[package]]
 name = "orbit-knowledge"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "chrono",
  "fs2",
@@ -2239,6 +2305,7 @@ dependencies = [
  "libc",
  "lru",
  "orbit-common",
+ "orbit-graph-extract",
  "proptest",
  "rayon",
  "regex",
@@ -2267,11 +2334,15 @@ dependencies = [
 
 [[package]]
 name = "orbit-mcp"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "orbit-common",
+ "orbit-graph",
+ "orbit-graph-extract",
  "rmcp",
+ "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2279,7 +2350,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-policy"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "chrono",
  "orbit-common",
@@ -2288,7 +2359,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-registry"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "git2",
  "orbit-common",
@@ -2297,7 +2368,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-search"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "blake3",
  "chrono",
@@ -2315,7 +2386,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-search-companion"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "clap",
  "fastembed",
@@ -2326,7 +2397,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-store"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "blake3",
  "chrono",
@@ -2346,7 +2417,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-tools"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "chrono",
  "orbit-common",

@@ -13,11 +13,23 @@ allowed_internal_deps() {
     orbit-registry)
       echo "orbit-common"
       ;;
-    orbit-policy | orbit-exec | orbit-knowledge | orbit-store | orbit-search)
+    orbit-policy | orbit-exec | orbit-store | orbit-search)
       echo "orbit-common"
+      ;;
+    orbit-knowledge)
+      echo "orbit-common orbit-graph-extract"
       ;;
     orbit-search-companion)
       echo "orbit-common orbit-search"
+      ;;
+    orbit-graph-extract)
+      echo ""
+      ;;
+    orbit-graph)
+      echo "orbit-graph-extract"
+      ;;
+    orbit-graph-cli)
+      echo "orbit-graph orbit-graph-extract"
       ;;
     orbit-tools)
       echo "orbit-common orbit-exec orbit-knowledge orbit-policy"
@@ -32,10 +44,13 @@ allowed_internal_deps() {
       echo "orbit-common orbit-search orbit-engine orbit-knowledge orbit-policy orbit-store orbit-tools"
       ;;
     orbit-mcp)
-      echo "orbit-common orbit-tools"
+      echo "orbit-common orbit-graph orbit-graph-extract orbit-tools"
       ;;
     orbit-dashboard)
       echo "orbit-common orbit-core orbit-knowledge"
+      ;;
+    graph-equiv)
+      echo "orbit-knowledge"
       ;;
     orbit-cli)
       echo "orbit-common orbit-core orbit-mcp orbit-dashboard"
@@ -66,19 +81,22 @@ import sys
 metadata = json.load(sys.stdin)
 workspace_members = set(metadata["workspace_members"])
 workspace_crates = sorted(
-    package["name"]
+    (package["name"], package["manifest_path"])
     for package in metadata["packages"]
-    if package["id"] in workspace_members and package["name"].startswith("orbit-")
+    if package["id"] in workspace_members
+    and (package["name"].startswith("orbit-") or package["name"] == "graph-equiv")
 )
-for crate in workspace_crates:
-    print(crate)
+for crate, manifest_path in workspace_crates:
+    print(f"{crate}\t{manifest_path}")
 '
 }
 
 workspace_crates=()
-while IFS= read -r crate; do
+workspace_manifests=()
+while IFS=$'\t' read -r crate manifest; do
   if [[ -n "$crate" ]]; then
     workspace_crates+=("$crate")
+    workspace_manifests+=("$manifest")
   fi
 done < <(load_workspace_crates)
 
@@ -87,8 +105,9 @@ if [[ "${#workspace_crates[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-for crate in "${workspace_crates[@]}"; do
-  manifest="$repo_root/crates/${crate}/Cargo.toml"
+for index in "${!workspace_crates[@]}"; do
+  crate="${workspace_crates[$index]}"
+  manifest="${workspace_manifests[$index]}"
   if [[ ! -f "$manifest" ]]; then
     echo "missing manifest for ${crate}: ${manifest}"
     fail=1

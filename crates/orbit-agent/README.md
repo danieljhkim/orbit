@@ -23,7 +23,7 @@ crates/orbit-agent/src/loop_engine/
   session.rs        Session (id, provider, model, system_prompt, history)
   transport.rs      LoopTransport trait + Message/ContentBlock/TurnRequest/TurnResponse
   tool_dispatch.rs  Thin adapter around orbit_tools::ToolRegistry::execute
-  audit/            LoopAuditEvent, AuditSink, JsonlFileSink, BlobStore, redaction
+  audit/            LoopAuditEvent, AuditSink, InMemorySink, BlobStore, redaction
 ```
 
 - `AgentLoop::run(session, cfg, transport, registry, ctx, sink, prompt)`
@@ -132,18 +132,19 @@ Every event carries `run_id`, `session_id`, optional `task_id`, and
 
 ### Default sink layout
 
-`JsonlFileSink::open(audit_root, run_id)` prepares:
+Orbit runtime callers construct the v2 audit writer in `orbit-engine` with a
+SQLite-backed sink. Loop and envelope events are inserted into the v2 audit
+tables under the runtime audit database; redacted payload bodies still use the
+content-addressed blob store:
 
 ```
 {audit_root}/
-  loop/{run_id}.jsonl              one JSON object per line, append-only, created on first event
   blobs/{hash[..2]}/{hash}         content-addressed redacted payloads
 ```
 
-The JSONL file and blob store are designed to be read by a later
-`orbit.audit.loop.*` query tool family (split to its own follow-up
-task). Humans can inspect them today as JSONL/blob files; `orbit audit`
-queries the separate SQLite command-audit store.
+The SQLite rows and blob store are designed to be read by Orbit's v2 audit
+query surfaces. Humans can inspect blob payloads by hash; event metadata and
+payload JSON are queried from SQLite rather than per-run JSONL files.
 
 Orbit runtime callers pass `.orbit/state/audit` as `audit_root`; standalone
 examples use temporary roots under the system temp directory.

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.8.2
+
+### Fixes
+
+- **Intel-macOS semantic companion dropped from the release**: `orbit-search-companion` cannot link on `x86_64-apple-darwin` — `ort-sys` (2.0.0-rc.12) ships no ONNX Runtime prebuilt for Intel macOS. The Intel-mac release leg now builds the `orbit` CLI only, and the release publishes companion binaries for macOS-arm64, Linux x86_64, and Linux arm64 only. The Intel-mac CLI tarball still ships; semantic search is unsupported on Intel Macs (it never successfully shipped). Together with the glibc fix in 0.8.1, this completes recovery of the `v0.8.0` release, whose GitHub Release never published while `@orbit-tools/cli@0.8.0` was already on npm. ([ORB-00351])
+
+## 0.8.1
+
+### Fixes
+
+- **Linux release build of the semantic companion**: `orbit-search-companion` failed to link on the release runners — its prebuilt ONNX Runtime (via `ort` / `fastembed`) references glibc 2.38+ symbols (`__isoc23_*`) that don't exist on `ubuntu-22.04` (glibc 2.35), failing both Linux build legs and blocking the GitHub Release. The release workflow now builds the Linux companion on `ubuntu-24.04` (glibc 2.39) while keeping the `orbit` CLI on `ubuntu-22.04`, so the CLI's glibc-2.35 compatibility floor is preserved. This fixes forward after the `v0.8.0` GitHub Release failed to publish while `@orbit-tools/cli@0.8.0` had already been published to npm. ([ORB-00350])
+
+## 0.8.0
+
+### Breaking Changes
+
+- **Agent MCP surface slimmed; `orbit.review-thread.*` alias dropped**: six tools moved off the agent-facing MCP surface to `register_inactive` — `orbit.task.reject`, `orbit.friction.list`, `orbit.friction.show`, `orbit.friction.resolve`, `orbit.learning.comment.list`, and `orbit.learning.upvote`. They stay reachable via the CLI (`orbit tool run`) and `runtime.run_tool`, but `tools/list` over MCP no longer advertises them and `orbit mcp serve` rejects agent calls to them — these are operator/triage actions, while agents file friction via `orbit.friction.add` and discover learnings via `orbit.search`. Separately, the duplicate `orbit.review-thread.*` alias (added in ORB-00273) is removed; the canonical `orbit.task.review_thread.*` form that the README, the `orbit-review-task` skill, and the audit/redaction policy reference is unchanged. Seeded activity allowlists and skill docs were updated to drop the stale references. `EXPECTED_INACTIVE_TOOL_NAMES` length canary moves 21 → 27. ([ORB-00346], [ORB-00348])
+
+### Highlights
+
+- **Dashboard and scoreboard redesign**: the dashboard adopts the new visual mock and the scoreboard gets a phase-1 reskin plus a window-aware backend — a `?window=` selector (1h / 24h / 7d / 30d / all) now scopes scoreboard metrics, on an additive snapshot schema bump (v5 → v6). ([ORB-00345], [ORB-00336], [ORB-00337])
+- **Crew and duel composition adapt to detected agents**: `[workflow].default_crew` and `[duel].candidates` are now derived from the agent families detected at `orbit init` rather than hard-coded, so a workspace's defaults match the agents actually installed. ([ORB-00347])
+- **Semantic-companion install hardened**: the release workflow now publishes the standalone `orbit-search-companion-*` binaries alongside the CLI tarballs, so `orbit semantic install` can resolve signed companion assets from the GitHub Release. ([ORB-00299])
+
 ## 0.7.1
 
 ### Fixes

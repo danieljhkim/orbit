@@ -644,5 +644,4 @@ fn table_has_foreign_key_to(
 }
 
 #[cfg(test)]
-#[cfg(test)]
 mod tests;

@@ -14,4 +14,5 @@ mod log;
 mod metrics;
 mod review_threads;
 mod runs;
+mod scoreboard;
 mod tasks;

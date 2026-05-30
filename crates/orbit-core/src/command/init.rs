@@ -15,7 +15,11 @@ use crate::command::skill::{
 };
 use orbit_common::utility::fs::{atomic_write_text, create_dir_symlink, remove_path_if_exists};
 
-use crate::config::{RawAgentRoleConfig, RuntimeConfig, seed_default_config};
+use crate::config::{
+    RawAgentRoleConfig, RuntimeConfig,
+    agent_detect::{DetectedAgents, RealAgentEnvProbe, detect},
+    seed_default_config,
+};
 use crate::runtime::resolve_global_root;
 
 const LEGACY_WORKSPACE_SEEDED_SKILL_IDS: [&str; 2] = ["orbit-approve-task", "orbit-pr"];
@@ -51,6 +55,9 @@ pub struct InitOptions {
     /// the default crew template". Ignored when config.toml already exists
     /// — init remains idempotent.
     pub role_settings: Option<BTreeMap<String, RawAgentRoleConfig>>,
+    /// Agent availability snapshot used to freeze agent-dependent config at
+    /// init time. When omitted, init probes the real host environment.
+    pub detected: Option<DetectedAgents>,
 }
 
 impl OrbitRuntime {
@@ -151,7 +158,11 @@ pub fn init_workspace_at_root(
     };
     let created_config = if options.global_only {
         let config_path = orbit_root.join("config.toml");
-        seed_default_config(&config_path, options.role_settings.as_ref())?
+        let detected = options
+            .detected
+            .clone()
+            .unwrap_or_else(|| detect(&RealAgentEnvProbe));
+        seed_default_config(&config_path, &detected, options.role_settings.as_ref())?
     } else {
         false
     };
@@ -199,6 +210,7 @@ pub fn init_workspace_at_root(
                 global_only: true,
                 link_global_skills: options.link_global_skills || options.refresh_defaults,
                 role_settings: options.role_settings.clone(),
+                detected: options.detected.clone(),
                 ..Default::default()
             },
         )?;
@@ -614,6 +626,7 @@ mod tests {
             None,
             InitOptions {
                 refresh_defaults: true,
+                detected: Some(DetectedAgents::default()),
                 ..Default::default()
             },
         );
@@ -693,6 +706,7 @@ mod tests {
             InitOptions {
                 refresh_defaults: true,
                 global_root_override: Some(home.path().join(".orbit")),
+                detected: Some(DetectedAgents::default()),
                 ..Default::default()
             },
         );
@@ -765,6 +779,7 @@ mod tests {
             InitOptions {
                 refresh_defaults: true,
                 role_settings: Some(roles),
+                detected: Some(DetectedAgents::default()),
                 ..Default::default()
             },
         );
@@ -839,6 +854,7 @@ mod tests {
             InitOptions {
                 refresh_defaults: true,
                 role_settings: Some(roles),
+                detected: Some(DetectedAgents::default()),
                 ..Default::default()
             },
         );
@@ -865,6 +881,7 @@ mod tests {
             InitOptions {
                 refresh_defaults: true,
                 role_settings: None,
+                detected: Some(DetectedAgents::default()),
                 ..Default::default()
             },
         );

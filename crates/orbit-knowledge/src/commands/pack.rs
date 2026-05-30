@@ -1,7 +1,8 @@
 use crate::commands::{GraphCommandContext, knowledge_error_from_orbit};
 use crate::graph::GraphReadOptions;
 use crate::graph::object_store::{GraphObjectStore, resolve_graph_read_target};
-use crate::{KnowledgeError, KnowledgePackResult, Selector};
+use crate::{KnowledgeError, KnowledgePackResult};
+use orbit_graph_extract::Selector;
 
 #[derive(Debug, Clone)]
 pub struct PackInput {

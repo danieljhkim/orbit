@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use orbit_common::types::OrbitError;
 
 use crate::io::write_text_atomic_durable;
-use crate::selector::Selector;
 use crate::working_graph::{WorkingGraph, WorkingLeaf};
+use orbit_graph_extract::Selector;
 
 use super::pack::unresolved_entry;
 use super::types::{KnowledgeEntryKind, KnowledgePack, KnowledgePackEntry};

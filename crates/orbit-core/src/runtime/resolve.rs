@@ -124,8 +124,11 @@ fn resolve_roots(
         ));
     }
 
-    // 5. Walk up from cwd to find first workspace .orbit/ directory
-    if let Some(orbit_dir) = find_orbit_dir_walk_up(cwd) {
+    // 5. Walk up from cwd to find first workspace .orbit/ directory. Bootstrap
+    // flows stop at the current git root, or cwd when there is no git root, so
+    // unrelated parent directories with `.orbit/` cannot capture new workspaces.
+    let walk_up_boundaries = walk_up_boundaries(cwd, explicit_root_mode);
+    if let Some(orbit_dir) = find_orbit_dir_walk_up(cwd, &walk_up_boundaries) {
         let root = resolve_orbit_dir_candidate(&orbit_dir)?;
         return Ok(log_resolved_roots(
             cwd,
@@ -194,15 +197,42 @@ fn local_worktree_orbit_dir(cwd: &Path) -> PathBuf {
 /// `orbit workspace init` in a repo under `$HOME` with no local `.orbit/` would
 /// discover the global root before the git-repo bootstrap fallback and then
 /// write workspace state into `$HOME/.orbit`.
-fn find_orbit_dir_walk_up(start: &Path) -> Option<PathBuf> {
+fn find_orbit_dir_walk_up(start: &Path, boundaries: &[PathBuf]) -> Option<PathBuf> {
     let mut current = start;
     loop {
         let candidate = current.join(".orbit");
         if candidate.is_dir() && !is_global_orbit_dir(&candidate) {
             return Some(candidate);
         }
+        if boundaries
+            .iter()
+            .any(|boundary| paths_equivalent(current, boundary))
+        {
+            return None;
+        }
         current = current.parent()?;
     }
+}
+
+fn walk_up_boundaries(cwd: &Path, explicit_root_mode: ExplicitRootMode) -> Vec<PathBuf> {
+    let mut boundaries = Vec::new();
+    if explicit_root_mode == ExplicitRootMode::AllowUninitialized {
+        boundaries.push(paths::find_git_worktree_root(cwd).unwrap_or_else(|| cwd.to_path_buf()));
+    }
+    if let Some(home) = home_dir_boundary()
+        && !boundaries
+            .iter()
+            .any(|boundary| paths_equivalent(boundary, &home))
+    {
+        boundaries.push(home);
+    }
+    boundaries
+}
+
+fn home_dir_boundary() -> Option<PathBuf> {
+    workspace_registry::global_orbit_dir()
+        .ok()
+        .and_then(|global| global.parent().map(Path::to_path_buf))
 }
 
 fn is_global_orbit_dir(candidate: &Path) -> bool {
@@ -389,7 +419,8 @@ pub(crate) fn try_resolve_initialized_roots(
         )));
     }
 
-    if let Some(orbit_dir) = find_orbit_dir_walk_up(cwd)
+    let walk_up_boundaries = walk_up_boundaries(cwd, ExplicitRootMode::RequireInitialized);
+    if let Some(orbit_dir) = find_orbit_dir_walk_up(cwd, &walk_up_boundaries)
         && is_initialized_orbit_root(&orbit_dir)
     {
         let root = resolve_orbit_dir_candidate(&orbit_dir)?;

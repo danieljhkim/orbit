@@ -1,7 +1,7 @@
 use clap::Args;
 use orbit_core::command::init::{InitOptions, init_global};
 use orbit_core::config::RawAgentRoleConfig;
-use orbit_core::config::agent_detect::{RealAgentEnvProbe, detect};
+use orbit_core::config::agent_detect::{DetectedAgents, RealAgentEnvProbe, detect};
 use orbit_core::config::agent_prompt::{StdinPrompter, collect_role_settings};
 use orbit_core::workspace_registry::global_orbit_dir;
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -17,21 +17,25 @@ pub struct InitCommand {
     #[arg(long)]
     pub force: bool,
 
-    /// Skip interactive prompts. config.toml is seeded without `[agent.*]`
-    /// blocks so a CI runner that pipes nothing into stdin will not hang.
+    /// Skip interactive prompts. config.toml is still seeded from detected
+    /// agent surfaces, but a CI runner that pipes nothing into stdin will not
+    /// hang.
     #[arg(long)]
     pub non_interactive: bool,
 }
 
 impl Execute for InitCommand {
     fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let role_settings = collect_role_settings_for_init(None, self.force, self.non_interactive)?;
+        let detected = detect(&RealAgentEnvProbe);
+        let role_settings =
+            collect_role_settings_for_init(None, self.force, self.non_interactive, &detected)?;
         let result = init_global(
             None,
             InitOptions {
                 force: self.force,
                 refresh_defaults: true,
                 role_settings,
+                detected: Some(detected),
                 ..Default::default()
             },
         )?;
@@ -53,14 +57,20 @@ impl Execute for InitCommand {
 
 impl InitCommand {
     pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
-        let role_settings =
-            collect_role_settings_for_init(root_override, self.force, self.non_interactive)?;
+        let detected = detect(&RealAgentEnvProbe);
+        let role_settings = collect_role_settings_for_init(
+            root_override,
+            self.force,
+            self.non_interactive,
+            &detected,
+        )?;
         let result = init_global(
             root_override,
             InitOptions {
                 force: self.force,
                 refresh_defaults: true,
                 role_settings,
+                detected: Some(detected),
                 ..Default::default()
             },
         )?;
@@ -90,6 +100,7 @@ pub(crate) fn collect_role_settings_for_init(
     root_override: Option<&Path>,
     force: bool,
     non_interactive: bool,
+    detected: &DetectedAgents,
 ) -> Result<Option<BTreeMap<String, RawAgentRoleConfig>>, OrbitError> {
     if non_interactive {
         return Ok(None);
@@ -100,10 +111,8 @@ pub(crate) fn collect_role_settings_for_init(
         return Ok(None);
     }
 
-    let probe = RealAgentEnvProbe;
-    let detected = detect(&probe);
     let mut prompter = StdinPrompter;
-    let collected = collect_role_settings(&detected, &mut prompter)
+    let collected = collect_role_settings(detected, &mut prompter)
         .map_err(|err| OrbitError::Io(format!("agent prompts failed: {err}")))?;
     Ok(Some(collected))
 }

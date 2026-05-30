@@ -50,9 +50,11 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(groundhog::checkpoint_failure::OrbitGroundhogCheckpointFailureTool);
     registry.register(groundhog::side_effect::OrbitGroundhogSideEffectTool);
     registry.register(friction::add::OrbitFrictionAddTool);
-    registry.register(friction::list::OrbitFrictionListTool);
-    registry.register(friction::resolve::OrbitFrictionResolveTool);
-    registry.register(friction::show::OrbitFrictionShowTool);
+    // Triage surface: CLI / dashboard only. Agents file friction via `add`;
+    // listing / inspection / resolution belong to operators.
+    registry.register_inactive(friction::list::OrbitFrictionListTool);
+    registry.register_inactive(friction::resolve::OrbitFrictionResolveTool);
+    registry.register_inactive(friction::show::OrbitFrictionShowTool);
     registry.register_inactive(friction::stats::OrbitFrictionStatsTool);
     registry.register(friction::tags::OrbitFrictionTagsTool);
     registry.register(friction::update::OrbitFrictionUpdateTool);
@@ -67,7 +69,8 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register_inactive(task::locks_reserve::OrbitTaskLocksReserveTool);
     registry.register_inactive(task::locks_release::OrbitTaskLocksReleaseTool);
     registry.register(task::start::OrbitTaskStartTool);
-    registry.register(task::reject::OrbitTaskRejectTool);
+    // Task rejection is a human/operator decision — CLI / dashboard only.
+    registry.register_inactive(task::reject::OrbitTaskRejectTool);
     registry.register(task::show::OrbitTaskShowTool);
     registry.register(task::list::OrbitTaskListTool);
     registry.register(task::update::OrbitTaskUpdateTool);
@@ -86,7 +89,9 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(learning::comment_add::OrbitLearningCommentAddTool);
     // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
     registry.register_inactive(learning::comment_delete::OrbitLearningCommentDeleteTool);
-    registry.register(learning::comment_list::OrbitLearningCommentListTool);
+    // Agents discover learnings via `orbit.search`; comment listing is a
+    // review-time / operator concern — CLI / dashboard only.
+    registry.register_inactive(learning::comment_list::OrbitLearningCommentListTool);
     registry.register_inactive(learning::list::OrbitLearningListTool);
     // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
     registry.register_inactive(learning::prune::OrbitLearningPruneTool);
@@ -94,17 +99,14 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(learning::show::OrbitLearningShowTool);
     registry.register(learning::supersede::OrbitLearningSupersedeTool);
     registry.register(learning::update::OrbitLearningUpdateTool);
-    registry.register(learning::upvote::OrbitLearningUpvoteTool);
+    // Upvote telemetry is an operator concern — CLI / dashboard only.
+    registry.register_inactive(learning::upvote::OrbitLearningUpvoteTool);
     registry.register(pipeline::invoke::OrbitPipelineInvokeTool);
     registry.register(pipeline::wait::OrbitPipelineWaitTool);
     registry.register(review_thread::add::OrbitReviewThreadAddTool);
-    registry.register(review_thread::add::OrbitReviewThreadAddAliasTool);
     registry.register(review_thread::list::OrbitReviewThreadListTool);
-    registry.register(review_thread::list::OrbitReviewThreadListAliasTool);
     registry.register(review_thread::reply::OrbitReviewThreadReplyTool);
-    registry.register(review_thread::reply::OrbitReviewThreadReplyAliasTool);
     registry.register(review_thread::resolve::OrbitReviewThreadResolveTool);
-    registry.register(review_thread::resolve::OrbitReviewThreadResolveAliasTool);
     registry.register(search::OrbitSearchTool);
     registry.register_inactive(semantic::install::OrbitSemanticInstallTool);
     // ORB-00289: destructive teardown of the local semantic index —

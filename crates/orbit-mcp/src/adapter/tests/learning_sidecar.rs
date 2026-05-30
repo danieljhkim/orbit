@@ -35,7 +35,7 @@ async fn learning_sidecar_present_with_summary_only_on_path_match() {
 
     let result = server
         .call_tool_request(request_with_args(
-            "orbit.graph.show",
+            "orbit.task.show",
             json!({"selector": "file:crates/orbit-engine/src/lib.rs"}),
         ))
         .await
@@ -78,7 +78,7 @@ async fn learning_sidecar_absent_when_no_learning_matches() {
 
     let result = server
         .call_tool_request(request_with_args(
-            "orbit.graph.refs",
+            "orbit.task.show",
             json!({"selector": "file:crates/orbit-engine/src/lib.rs"}),
         ))
         .await
@@ -165,7 +165,7 @@ async fn learning_sidecar_enforces_per_session_hard_cap() {
     for call_idx in 0..5 {
         let result = server
             .call_tool_request(request_with_args(
-                "orbit.graph.show",
+                "orbit.task.show",
                 json!({"selector": format!("file:p{call_idx}.rs")}),
             ))
             .await
@@ -219,7 +219,7 @@ async fn learning_sidecar_session_id_persists_admission_through_host_state() {
 
     let result = server
         .call_tool_request(request_with_args(
-            "orbit.graph.show",
+            "orbit.task.show",
             json!({"selector": "file:crates/orbit-engine/src/lib.rs"}),
         ))
         .await
@@ -244,7 +244,7 @@ async fn learning_sidecar_session_id_persists_admission_through_host_state() {
     );
     let result = server
         .call_tool_request(request_with_args(
-            "orbit.graph.show",
+            "orbit.task.show",
             json!({"selector": "file:crates/orbit-engine/src/lib.rs"}),
         ))
         .await

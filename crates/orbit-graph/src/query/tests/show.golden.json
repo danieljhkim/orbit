@@ -1,0 +1,35 @@
+{
+  "bytes": [
+    112,
+    117,
+    98,
+    32,
+    102,
+    110,
+    32,
+    104,
+    97,
+    110,
+    100,
+    108,
+    101,
+    114,
+    40,
+    41,
+    32,
+    123,
+    125,
+    10
+  ],
+  "metadata": {
+    "file": "src/lib.rs",
+    "span": {
+      "start": 0,
+      "end": 20
+    },
+    "kind": "function",
+    "name": "handler",
+    "qualified": "crate::handler",
+    "truncated": false
+  }
+}

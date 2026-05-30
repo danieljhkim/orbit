@@ -281,32 +281,5 @@ impl Drop for ParentStackGuard<'_> {
 }
 
 fn event_type_of(kind: &V2AuditEventKind) -> &'static str {
-    match kind {
-        V2AuditEventKind::RunStarted { .. } => "run.started",
-        V2AuditEventKind::RunFinished { .. } => "run.finished",
-        V2AuditEventKind::StepStarted { .. } => "step.started",
-        V2AuditEventKind::StepFinished { .. } => "step.finished",
-        V2AuditEventKind::StepSkipped { .. } => "step.skipped",
-        V2AuditEventKind::StepRetry { .. } => "step.retry",
-        V2AuditEventKind::StepRecoveryAttempted { .. } => "step.recovery_attempted",
-        V2AuditEventKind::StepDenied { .. } => "step.denied",
-        V2AuditEventKind::StepJoin { .. } => "step.join",
-        V2AuditEventKind::FanoutDispatched { .. } => "fanout.dispatched",
-        V2AuditEventKind::WorkerState { .. } => "worker.state",
-        V2AuditEventKind::FaninJoined { .. } => "fanin.joined",
-        V2AuditEventKind::LoopIterationStart { .. } => "loop.iteration.start",
-        V2AuditEventKind::LoopIterationEnd { .. } => "loop.iteration.end",
-        V2AuditEventKind::LoopDidNotConverge { .. } => "loop.did_not_converge",
-        V2AuditEventKind::ActivityStarted { .. } => "activity.started",
-        V2AuditEventKind::ActivityFinished { .. } => "activity.finished",
-        V2AuditEventKind::FsCallRequest { .. } => "fs.call.request",
-        V2AuditEventKind::FsCallResult { .. } => "fs.call.result",
-        V2AuditEventKind::FsCallDenied { .. } => "fs.call.denied",
-        V2AuditEventKind::ToolDenied { .. } => "tool.denied",
-        V2AuditEventKind::ToolAllowlistHarnessDelegated { .. } => {
-            "tool_allowlist.harness_delegated"
-        }
-        V2AuditEventKind::CliInvocationStarted { .. } => "cli.invocation.started",
-        V2AuditEventKind::CliInvocationFinished { .. } => "cli.invocation.finished",
-    }
+    kind.event_type()
 }
