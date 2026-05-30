@@ -1134,7 +1134,7 @@ dependencies = [
 
 [[package]]
 name = "graph-equiv"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "orbit-knowledge",
  "serde",
@@ -2096,7 +2096,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orbit-agent"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "orbit-common",
@@ -2111,7 +2111,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-cli"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "assert_cmd",
  "chrono",
@@ -2140,7 +2140,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-common"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "clap",
@@ -2162,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-core"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "fs2",
@@ -2187,7 +2187,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-dashboard"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "axum",
  "chrono",
@@ -2208,7 +2208,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-engine"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "jsonschema",
@@ -2231,7 +2231,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-exec"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "libc",
  "orbit-common",
@@ -2241,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-graph"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "blake3",
  "fs2",
@@ -2257,7 +2257,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-graph-cli"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -2275,7 +2275,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-graph-extract"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2297,7 +2297,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-knowledge"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "fs2",
@@ -2334,7 +2334,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-mcp"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "orbit-common",
  "orbit-graph",
@@ -2350,7 +2350,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-policy"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "orbit-common",
@@ -2359,7 +2359,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-registry"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "git2",
  "orbit-common",
@@ -2368,7 +2368,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-search"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "blake3",
  "chrono",
@@ -2386,7 +2386,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-search-companion"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "clap",
  "fastembed",
@@ -2397,7 +2397,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-store"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "blake3",
  "chrono",
@@ -2417,7 +2417,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-tools"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "orbit-common",
