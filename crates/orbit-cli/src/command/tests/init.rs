@@ -4,19 +4,9 @@ use tempfile::tempdir;
 
 use crate::InitCommand;
 use crate::command::init::collect_role_settings_for_init;
+use orbit_core::config::agent_detect::DetectedAgents;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-fn restore_home(previous_home: Option<std::ffi::OsString>) {
-    match previous_home {
-        Some(value) => unsafe {
-            std::env::set_var("HOME", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOME");
-        },
-    }
-}
 
 /// `collect_role_settings_for_init` short-circuits when --non-interactive
 /// is set, regardless of whether config.toml exists. No prompts are
@@ -26,7 +16,8 @@ fn restore_home(previous_home: Option<std::ffi::OsString>) {
 fn non_interactive_short_circuits_before_prompts() {
     let _guard = ENV_LOCK.lock().expect("lock env");
     let home = tempdir().expect("home tempdir");
-    let result = collect_role_settings_for_init(Some(home.path()), false, true);
+    let detected = DetectedAgents::default();
+    let result = collect_role_settings_for_init(Some(home.path()), false, true, &detected);
     assert!(matches!(result, Ok(None)));
 }
 
@@ -39,27 +30,24 @@ fn existing_config_short_circuits_before_prompts() {
     let config_path = root.path().join("config.toml");
     fs::write(&config_path, "# pre-existing\n").expect("preseed");
 
-    let result = collect_role_settings_for_init(Some(root.path()), false, false);
+    let detected = DetectedAgents::default();
+    let result = collect_role_settings_for_init(Some(root.path()), false, false, &detected);
     assert!(matches!(result, Ok(None)));
 }
 
 /// End-to-end: `InitCommand { non_interactive: true }` produces a fresh
-/// config.toml that contains no uncommented `[agent.*]` sections.
+/// config.toml with generated crew tables and no uncommented `[agent.*]`
+/// sections. The exact default crew/duel set depends on the runner PATH.
 #[test]
-fn non_interactive_init_writes_no_active_agent_sections() {
+fn non_interactive_init_writes_generated_crew_config() {
     let _guard = ENV_LOCK.lock().expect("lock env");
     let home = tempdir().expect("home tempdir");
-    let previous_home = std::env::var_os("HOME");
-    unsafe {
-        std::env::set_var("HOME", home.path());
-    }
 
     let cmd = InitCommand {
         force: false,
         non_interactive: true,
     };
     let outcome = cmd.execute_without_runtime(Some(&home.path().join(".orbit")));
-    restore_home(previous_home);
 
     outcome.expect("init succeeded");
 
@@ -71,4 +59,9 @@ fn non_interactive_init_writes_no_active_agent_sections() {
             "unexpected uncommented agent section: {line}",
         );
     }
+    assert!(contents.contains("[crews.claude]"));
+    assert!(contents.contains("[crews.codex]"));
+    assert!(contents.contains("[crews.gemini]"));
+    assert!(contents.contains("[crews.grok]"));
+    toml::from_str::<toml::Value>(&contents).expect("seeded config parses");
 }
