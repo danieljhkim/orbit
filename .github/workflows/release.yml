@@ -336,11 +336,11 @@ jobs:
           test -f "$HOME/.orbit/embed/models/bge-small/orbit-model.json"
 
   smoke-install-ubuntu:
-    name: Smoke test installer on Ubuntu 22.04
+    name: Smoke test installer on Ubuntu 24.04
     needs: publish-release
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     container:
-      image: ubuntu:22.04
+      image: ubuntu:24.04
     steps:
       - name: Install prerequisites
         shell: bash
