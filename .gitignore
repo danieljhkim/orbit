@@ -83,3 +83,6 @@ build/
 .locks
 *.lock
 .codegraph
+.vscode
+.grok
+.gemini
