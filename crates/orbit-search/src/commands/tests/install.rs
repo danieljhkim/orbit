@@ -9,11 +9,13 @@
 use super::super::install::path_execution_fallback_rationale;
 use super::super::install::{
     CompanionIntegrity, CompanionLaunchMode, ManagedCompanion, SemanticInstallParams,
-    checksum_from_manifest, companion_launch_mode, resolve_download_source, run, sha256_hex,
-    verify_release_checksum_signature_with_key,
+    checksum_from_manifest, companion_launch_mode, default_release_download_source, run,
+    sha256_hex, verify_release_checksum_signature_with_key,
 };
 
-use crate::companion::unsafe_companion_overrides_enabled;
+use crate::companion::{
+    ensure_semantic_search_supported_for_platform, unsafe_companion_overrides_enabled,
+};
 use crate::{CompanionPaths, locate_companion, platform_companion_filename};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -191,6 +193,41 @@ fn companion_launch_mode_matches_platform_support() {
 }
 
 #[test]
+fn semantic_install_rejects_intel_mac_platform_before_download() {
+    let error = ensure_semantic_search_supported_for_platform("macos-x86_64", None)
+        .expect_err("Intel macOS should not have a released semantic companion");
+
+    assert!(
+        error
+            .to_string()
+            .contains("semantic search unsupported on this platform (macos-x86_64)"),
+        "{error}"
+    );
+}
+
+#[test]
+fn semantic_install_accepts_released_companion_platforms() {
+    ensure_semantic_search_supported_for_platform("macos-aarch64", None)
+        .expect("macOS arm64 companion is released");
+    ensure_semantic_search_supported_for_platform("linux-x86_64", Some("2.38"))
+        .expect("Linux x86_64 companion is released on glibc 2.38+");
+    ensure_semantic_search_supported_for_platform("linux-aarch64", Some("2.39"))
+        .expect("Linux aarch64 companion is released on glibc 2.38+");
+}
+
+#[test]
+fn semantic_install_rejects_linux_glibc_below_floor() {
+    let error = ensure_semantic_search_supported_for_platform("linux-x86_64", Some("2.35"))
+        .expect_err("glibc 2.35 should be below the companion runtime floor");
+
+    assert!(
+        error.to_string().contains("requires glibc >= 2.38"),
+        "{error}"
+    );
+    assert!(error.to_string().contains("detected glibc 2.35"), "{error}");
+}
+
+#[test]
 #[cfg(unix)]
 fn checksum_mismatch_rejects_replacement_before_install() {
     let _guard = EnvGuard::new();
@@ -253,7 +290,8 @@ fn default_download_source_requires_release_checksum_manifest() {
     remove_env("ORBIT_SEARCH_COMPANION_SHA256");
     remove_env("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE");
 
-    let source = resolve_download_source().expect("default source");
+    let source = default_release_download_source("orbit-search-companion-linux-x86_64".to_string())
+        .expect("default source");
 
     match source.integrity {
         CompanionIntegrity::ReleaseSignedChecksum {
@@ -263,7 +301,7 @@ fn default_download_source_requires_release_checksum_manifest() {
         } => {
             assert!(checksums_url.ends_with("/orbit-checksums.txt"));
             assert!(signature_url.ends_with("/orbit-checksums.txt.sig"));
-            assert_eq!(asset_name, platform_companion_filename());
+            assert_eq!(asset_name, "orbit-search-companion-linux-x86_64");
         }
         other => panic!("default source should require signed release checksum: {other:?}"),
     }

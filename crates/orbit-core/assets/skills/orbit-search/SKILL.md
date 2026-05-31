@@ -76,6 +76,10 @@ Do not use search for "find every symbol matching pattern X"; use `orbit.graph.s
 | Show status | CLI-only | `orbit semantic stats` |
 | Rebuild embeddings | CLI-only | `orbit semantic index --kind tasks|docs|learnings|adrs|all [--model MODEL] [--force]` |
 
+The released semantic companion supports macOS arm64 and Linux x86_64/aarch64
+with glibc >= 2.38. Intel macOS can run the CLI, but semantic search is
+unsupported because there is no x86_64-apple-darwin companion asset.
+
 Do not run `install` without operator consent. If a semantic query fails because the companion is missing, fall back to plain `orbit search --kind <kind> <query>` (lexical) and continue unless the user explicitly asked to enable embeddings.
 
 ## Result Shape

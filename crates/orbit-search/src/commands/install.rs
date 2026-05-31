@@ -28,8 +28,9 @@ use sha2::{Digest, Sha256};
 
 use crate::commands::{DEFAULT_RELEASE_BASE_URL, parse_model};
 use crate::companion::{
-    COMPANION_OVERRIDE_ENV, UNSAFE_COMPANION_OVERRIDE_ENV, unsafe_companion_overrides_enabled,
-    validate_companion_override_path, validate_managed_companion_path,
+    COMPANION_OVERRIDE_ENV, UNSAFE_COMPANION_OVERRIDE_ENV, ensure_semantic_search_supported,
+    unsafe_companion_overrides_enabled, validate_companion_override_path,
+    validate_managed_companion_path,
 };
 use crate::{CompanionPaths, platform_companion_filename};
 
@@ -203,7 +204,13 @@ pub(crate) fn resolve_download_source() -> Result<CompanionDownloadSource, Orbit
         )));
     }
 
-    let asset_name = platform_companion_filename();
+    ensure_semantic_search_supported()?;
+    default_release_download_source(platform_companion_filename())
+}
+
+pub(crate) fn default_release_download_source(
+    asset_name: String,
+) -> Result<CompanionDownloadSource, OrbitError> {
     let url = format!("{DEFAULT_RELEASE_BASE_URL}/{asset_name}");
     validate_download_url(&url)?;
     Ok(CompanionDownloadSource {

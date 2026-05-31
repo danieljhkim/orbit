@@ -64,7 +64,7 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 > 3. Clone `https://github.com/danieljhkim/orbit` into the location from step 1, then run `make install`. This builds with cargo and copies the `orbit` binary to `$INSTALL_BIN_DIR` (default: `~/.cargo/bin`). Confirm the install path with me before running. Verify with `orbit --version`.
 > 4. Run `orbit init` to initialize global state at `~/.orbit`.
 > 5. From *this* repository (not the Orbit clone), run `orbit workspace init --mcp`. This creates `.orbit/` here and auto-registers Orbit's MCP server with installed agent CLIs (Claude Code, Codex, Gemini).
-> 6. Ask me whether to enable semantic search (**optional**). `orbit semantic install` downloads a small embedder companion plus the default bge-small model (lives under `~/.orbit/embed/`) and powers `orbit search <query> --hybrid` / `orbit search similar <task-id>` over tasks. Don't install without my OK. If I accept and tasks already exist in this workspace, also run `orbit semantic index` to backfill the corpus.
+> 6. Ask me whether to enable semantic search (**optional**). `orbit semantic install` downloads a small embedder companion plus the default bge-small model (lives under `~/.orbit/embed/`) and powers `orbit search <query> --hybrid` / `orbit search similar <task-id>` over tasks. It requires macOS arm64 or Linux x86_64/aarch64 with glibc >= 2.38; Intel macOS is unsupported for semantic search. Don't install without my OK. If I accept and tasks already exist in this workspace, also run `orbit semantic index` to backfill the corpus.
 > 7. Read the key documents so you actually understand the model:
 >    - `README.md` — feature surface, install model, plugin vs CLI
 >    - `docs/POSITIONING.md` — what Orbit is for, what it isn't (especially "who this is for")
@@ -136,6 +136,11 @@ Customizing crews (which model runs planner/implementer/reviewer), the base bran
 ## Semantic Search (optional)
 
 `orbit search` is the unified query surface for tasks, docs, learnings, and ADRs. It defaults to lexical matching. Opt into hybrid embedding ranking over task fields or indexed docs with `--hybrid`, or find cosine-neighbor tasks with `orbit search similar <task-id>`. The embedder runs as a separate companion subprocess, so semantic search has zero cost when unused.
+
+The semantic companion is released for macOS arm64 and Linux x86_64/aarch64
+with glibc >= 2.38 (Ubuntu 24.04 or equivalent). Intel macOS can run the
+Orbit CLI, but semantic search is unsupported because there is no Intel macOS
+companion asset.
 
 ```bash
 orbit semantic install    # one-time: download companion + default model (bge-small)
