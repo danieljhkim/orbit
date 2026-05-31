@@ -95,7 +95,16 @@ Each step names the exact file or command. Do them in order.
    - `smoke-install-macos` — installs the tagged macOS arm64 CLI, then runs
      `orbit semantic install --json` with isolated runtime state.
    - `smoke-install-ubuntu` — installs the tagged Linux x86_64 CLI, then runs
-     `orbit semantic install --json` with isolated runtime state.
+     `orbit semantic install --json` with isolated runtime state inside an
+     Ubuntu 24.04 container.
+
+   The Linux CLI release binaries still build on Ubuntu 22.04 to keep the CLI
+   runtime floor low. The semantic companion is stricter: ONNX Runtime requires
+   glibc >= 2.38 at runtime, so Linux companion builds and semantic smoke tests
+   use Ubuntu 24.04 or newer. Released semantic companion assets currently
+   cover macOS arm64 and Linux x86_64/aarch64 with glibc >= 2.38. Intel macOS
+   receives a CLI asset, but semantic search is unsupported because the
+   companion has no x86_64-apple-darwin ONNX Runtime prebuilt.
 
    All five must be green before step 7.
 

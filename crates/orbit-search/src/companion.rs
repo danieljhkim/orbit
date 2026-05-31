@@ -7,6 +7,8 @@
 //! `CompanionNotInstalled` shape so callers can surface a clean install hint.
 
 use std::env;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+use std::ffi::CStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -15,6 +17,9 @@ use orbit_common::types::OrbitError;
 pub(crate) const COMPANION_OVERRIDE_ENV: &str = "ORBIT_SEARCH_COMPANION";
 pub(crate) const UNSAFE_COMPANION_OVERRIDE_ENV: &str = "ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE";
 pub const INSTALL_REMEDIATION: &str = "Semantic search not enabled. Run `orbit semantic install` to download the inference companion.";
+const MIN_LINUX_GLIBC_MAJOR: u32 = 2;
+const MIN_LINUX_GLIBC_MINOR: u32 = 38;
+const MIN_LINUX_GLIBC_DISPLAY: &str = "2.38";
 
 #[derive(Debug, Clone)]
 pub struct CompanionPaths {
@@ -68,6 +73,75 @@ pub fn platform_id() -> &'static str {
         ("windows", "x86_64") => "windows-x86_64",
         _ => "unknown",
     }
+}
+
+pub(crate) fn ensure_semantic_search_supported() -> Result<(), OrbitError> {
+    let glibc_version = current_glibc_version();
+    ensure_semantic_search_supported_for_platform(platform_id(), glibc_version.as_deref())
+}
+
+pub(crate) fn ensure_semantic_search_supported_for_platform(
+    platform: &str,
+    glibc_version: Option<&str>,
+) -> Result<(), OrbitError> {
+    match platform {
+        "macos-aarch64" => Ok(()),
+        "linux-aarch64" | "linux-x86_64" => ensure_linux_glibc_supported(platform, glibc_version),
+        _ => Err(unsupported_semantic_platform(platform)),
+    }
+}
+
+fn ensure_linux_glibc_supported(
+    platform: &str,
+    glibc_version: Option<&str>,
+) -> Result<(), OrbitError> {
+    let Some(glibc_version) = glibc_version else {
+        return Ok(());
+    };
+    let Some((major, minor)) = parse_glibc_major_minor(glibc_version) else {
+        return Ok(());
+    };
+    if (major, minor) < (MIN_LINUX_GLIBC_MAJOR, MIN_LINUX_GLIBC_MINOR) {
+        return Err(OrbitError::InvalidInput(format!(
+            "semantic search unsupported on this Linux system ({platform}): orbit-search-companion requires glibc >= {MIN_LINUX_GLIBC_DISPLAY}; detected glibc {glibc_version}. Use Ubuntu 24.04 or another Linux distribution with glibc >= {MIN_LINUX_GLIBC_DISPLAY}."
+        )));
+    }
+    Ok(())
+}
+
+fn unsupported_semantic_platform(platform: &str) -> OrbitError {
+    OrbitError::InvalidInput(format!(
+        "semantic search unsupported on this platform ({platform}); supported companion platforms are macOS arm64 and Linux x86_64/aarch64 with glibc >= {MIN_LINUX_GLIBC_DISPLAY}"
+    ))
+}
+
+fn parse_glibc_major_minor(version: &str) -> Option<(u32, u32)> {
+    let mut pieces = version.split('.');
+    let major = pieces.next()?.parse::<u32>().ok()?;
+    let minor = pieces.next()?.parse::<u32>().ok()?;
+    Some((major, minor))
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn current_glibc_version() -> Option<String> {
+    let version = {
+        // SAFETY: gnu_get_libc_version returns a process-static NUL-terminated
+        // string pointer, or null on failure; we only read it when non-null.
+        unsafe { libc::gnu_get_libc_version() }
+    };
+    if version.is_null() {
+        return None;
+    }
+    let version = {
+        // SAFETY: non-null gnu_get_libc_version result points at a valid C string.
+        unsafe { CStr::from_ptr(version) }
+    };
+    version.to_str().ok().map(str::to_string)
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn current_glibc_version() -> Option<String> {
+    None
 }
 
 pub fn locate_companion() -> Result<PathBuf, OrbitError> {
