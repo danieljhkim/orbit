@@ -42,4 +42,20 @@ mod matching {
         let path = normalize_glob_path("foo/bar/baz.rs").expect("normalize");
         assert!(!match_glob("foo/*.rs", &path).expect("match"));
     }
+
+    #[test]
+    fn dotenv_variant_patterns_match_prefix_and_suffix_forms() {
+        for (rule, path) in [
+            ("**/.env", ".env"),
+            ("**/.env.*", ".env.local"),
+            ("**/.env.*", "foo/.env.production"),
+            ("**/*.env.*", "foo/secrets.env.bak"),
+        ] {
+            let path = normalize_glob_path(path).expect("normalize");
+            assert!(
+                match_glob(rule, &path).expect("match"),
+                "rule `{rule}` should match `{path}`"
+            );
+        }
+    }
 }

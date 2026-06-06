@@ -5,10 +5,16 @@ metadata:
 spec:
   description: Default filesystem profile policy for Orbit activity runs
   denyRead:
+    - "**/.env"
+    - "**/.env.*"
     - "**/*.env"
+    - "**/*.env.*"
   denyModify:
     - .orbit/**
+    - "**/.env"
+    - "**/.env.*"
     - "**/*.env"
+    - "**/*.env.*"
   fsProfiles:
     implementer:
       read:
