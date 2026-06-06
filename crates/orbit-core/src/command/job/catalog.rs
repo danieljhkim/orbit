@@ -149,27 +149,11 @@ impl OrbitRuntime {
 
     fn v2_job_asset_dirs(&self) -> Vec<PathBuf> {
         let mut dirs = Vec::new();
-        let mut seen: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
-        let push_unique = |dirs: &mut Vec<PathBuf>,
-                           seen: &mut std::collections::BTreeSet<PathBuf>,
-                           path: PathBuf| {
-            let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-            if seen.insert(canonical) {
-                dirs.push(path);
-            }
-        };
+        let mut seen = std::collections::BTreeSet::new();
 
-        let env_dirs = std::env::var("ORBIT_JOB_DIR")
-            .ok()
-            .or_else(|| std::env::var("ORBIT_V2_JOB_DIR").ok());
-        if let Some(raw) = env_dirs {
-            for entry in raw.split(':').filter(|value| !value.is_empty()) {
-                push_unique(&mut dirs, &mut seen, PathBuf::from(entry));
-            }
-        }
-
-        push_unique(&mut dirs, &mut seen, self.paths().jobs_dir.clone());
-        push_unique(
+        push_v2_job_env_dirs(&mut dirs, &mut seen);
+        push_unique_path(&mut dirs, &mut seen, self.paths().jobs_dir.clone());
+        push_unique_path(
             &mut dirs,
             &mut seen,
             self.paths().global_dir.join("resources/jobs"),
@@ -182,7 +166,7 @@ impl OrbitRuntime {
         job_id: &str,
     ) -> Result<(PathBuf, JobV2), OrbitError> {
         let mut selected = None;
-        for dir in self.v2_job_asset_dirs() {
+        for dir in self.v2_job_asset_dirs_for_execution(job_id) {
             if dir.is_dir()
                 && let Some(found) = find_v2_job_asset_in_dir(&dir, job_id)?
                 && selected.is_none()
@@ -192,6 +176,51 @@ impl OrbitRuntime {
         }
         selected.ok_or_else(|| OrbitError::not_found(NotFoundKind::Job, job_id.to_string()))
     }
+
+    fn v2_job_asset_dirs_for_execution(&self, job_id: &str) -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+
+        // L-0060: Name-based execution keeps shipped defaults authoritative over workspace catalogs.
+        push_v2_job_env_dirs(&mut dirs, &mut seen);
+        push_unique_path(
+            &mut dirs,
+            &mut seen,
+            self.paths().global_dir.join("resources/jobs"),
+        );
+        if !is_default_job_name(job_id) {
+            push_unique_path(&mut dirs, &mut seen, self.paths().jobs_dir.clone());
+        }
+        dirs
+    }
+}
+
+fn push_v2_job_env_dirs(dirs: &mut Vec<PathBuf>, seen: &mut std::collections::BTreeSet<PathBuf>) {
+    let env_dirs = std::env::var("ORBIT_JOB_DIR")
+        .ok()
+        .or_else(|| std::env::var("ORBIT_V2_JOB_DIR").ok());
+    if let Some(raw) = env_dirs {
+        for entry in raw.split(':').filter(|value| !value.is_empty()) {
+            push_unique_path(dirs, seen, PathBuf::from(entry));
+        }
+    }
+}
+
+fn push_unique_path(
+    dirs: &mut Vec<PathBuf>,
+    seen: &mut std::collections::BTreeSet<PathBuf>,
+    path: PathBuf,
+) {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+    if seen.insert(canonical) {
+        dirs.push(path);
+    }
+}
+
+fn is_default_job_name(job_id: &str) -> bool {
+    DEFAULT_JOB_FILES
+        .iter()
+        .any(|(default_job_id, _)| *default_job_id == job_id)
 }
 
 fn matches_job_filter(kind: JobKind, filter: JobCatalogFilter) -> bool {
@@ -936,7 +965,7 @@ spec:
     }
 
     #[test]
-    fn workspace_job_overrides_global_default_in_name_lookup() {
+    fn workspace_job_overrides_global_default_in_catalog_lookup_but_not_execution_lookup() {
         let (_root, runtime, global_root, workspace_root) = test_runtime();
         let global_job = global_root.join("resources/jobs/task_auto_pipeline.yaml");
         let workspace_job = workspace_root.join("resources/jobs/task_auto_pipeline.yaml");
@@ -952,8 +981,8 @@ spec:
         let (path, spec) = runtime
             .load_v2_job_asset_by_name("task_auto_pipeline")
             .expect("job lookup");
-        assert_eq!(path, workspace_job);
-        assert_eq!(spec.max_active_runs, 7);
+        assert_eq!(path, global_job);
+        assert_eq!(spec.max_active_runs, 1);
     }
 
     #[test]
