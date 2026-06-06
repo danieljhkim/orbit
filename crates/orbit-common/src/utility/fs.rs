@@ -24,6 +24,48 @@ use fs2::FileExt;
 
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(unix)]
+const PRIVATE_FILE_MODE: u32 = 0o600;
+
+#[cfg(unix)]
+const PRIVATE_DIR_MODE: u32 = 0o700;
+
+/// Creates a directory tree for secret-bearing Orbit state.
+///
+/// On Unix, every directory this call creates is immediately restricted to the
+/// current user (`0o700`) instead of relying on the process umask. Existing
+/// directories are left unchanged so callers do not unexpectedly chmod a
+/// workspace root or home directory.
+pub(crate) fn create_private_dir_all(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        create_private_dir_all_unix(path)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(path)
+    }
+}
+
+/// Create a new secret-bearing file for writing.
+///
+/// On Unix, the file is opened with and then set to `0o600` so group/other bits
+/// cannot leak in through the process umask.
+pub(crate) fn create_new_private_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create_new(true).truncate(true).write(true);
+    open_private_file(path, &mut options)
+}
+
+/// Open a secret-bearing append-only file, creating it if needed.
+///
+/// On Unix, newly created and pre-existing files are set to `0o600`.
+pub(crate) fn append_private_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    open_private_file(path, &mut options)
+}
+
 /// Atomically write `content` to `path`, then fsync the parent directory so
 /// the rename survives a crash. Creates parent directories as needed.
 pub fn atomic_write_text(path: &Path, content: &str) -> io::Result<()> {
@@ -40,14 +82,10 @@ pub fn atomic_write_bytes(path: &Path, content: &[u8]) -> io::Result<()> {
             format!("no parent dir for {}", path.display()),
         )
     })?;
-    fs::create_dir_all(parent)?;
+    create_private_dir_all(parent)?;
 
     let temp_path = temp_path_for(path);
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .truncate(true)
-        .write(true)
-        .open(&temp_path)?;
+    let mut file = create_new_private_file(&temp_path)?;
 
     if let Ok(metadata) = fs::metadata(path) {
         fs::set_permissions(&temp_path, metadata.permissions())?;
@@ -96,14 +134,10 @@ impl StagedTextFile {
                 format!("no parent dir for {}", target_path.display()),
             )
         })?;
-        fs::create_dir_all(parent)?;
+        create_private_dir_all(parent)?;
 
         let temp_path = temp_path_for(target_path);
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .truncate(true)
-            .write(true)
-            .open(&temp_path)?;
+        let mut file = create_new_private_file(&temp_path)?;
 
         if let Ok(metadata) = fs::metadata(target_path) {
             fs::set_permissions(&temp_path, metadata.permissions())?;
@@ -227,18 +261,18 @@ where
             format!("cannot determine parent for '{}'", target_path.display()),
         )
     })?;
-    fs::create_dir_all(parent)?;
+    create_private_dir_all(parent)?;
 
     let lock_path = lock_path_for(target_path)?;
-    let lock_file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .map_err(|e| {
-            io::Error::other(format!("open {label} lock '{}': {e}", lock_path.display()))
-        })?;
+    let mut options = OpenOptions::new();
+    options.create(true).read(true).write(true).truncate(false);
+    apply_private_file_mode(&mut options);
+    let lock_file = options.open(&lock_path).map_err(|e| {
+        io::Error::other(format!("open {label} lock '{}': {e}", lock_path.display()))
+    })?;
+    set_private_file_permissions(&lock_path).map_err(|e| {
+        io::Error::other(format!("chmod {label} lock '{}': {e}", lock_path.display()))
+    })?;
     lock_file
         .lock_exclusive()
         .map_err(|e| io::Error::other(format!("lock {label} '{}': {e}", lock_path.display())))?;
@@ -254,4 +288,80 @@ fn lock_path_for(path: &Path) -> io::Result<PathBuf> {
         )
     })?;
     Ok(path.with_file_name(format!(".{file_name}.lock")))
+}
+
+fn open_private_file(path: &Path, options: &mut OpenOptions) -> io::Result<File> {
+    apply_private_file_mode(options);
+    let file = options.open(path)?;
+    set_private_file_permissions(path)?;
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn create_private_dir_all_unix(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        if current.as_os_str().is_empty() {
+            continue;
+        }
+
+        match fs::metadata(&current) {
+            Ok(metadata) if metadata.is_dir() => continue,
+            Ok(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("{} exists and is not a directory", current.display()),
+                ));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let mut builder = fs::DirBuilder::new();
+                builder.mode(PRIVATE_DIR_MODE);
+                match builder.create(&current) {
+                    Ok(()) => {
+                        fs::set_permissions(
+                            &current,
+                            fs::Permissions::from_mode(PRIVATE_DIR_MODE),
+                        )?;
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                        if !current.is_dir() {
+                            return Err(io::Error::new(
+                                io::ErrorKind::AlreadyExists,
+                                format!("{} exists and is not a directory", current.display()),
+                            ));
+                        }
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn apply_private_file_mode(options: &mut OpenOptions) {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    options.mode(PRIVATE_FILE_MODE);
+}
+
+#[cfg(not(unix))]
+fn apply_private_file_mode(_options: &mut OpenOptions) {}
+
+#[cfg(unix)]
+fn set_private_file_permissions(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_FILE_MODE))
+}
+
+#[cfg(not(unix))]
+fn set_private_file_permissions(_path: &Path) -> io::Result<()> {
+    Ok(())
 }

@@ -31,9 +31,7 @@
 
 use std::{
     collections::BTreeMap,
-    fmt as std_fmt,
-    fs::{self, OpenOptions},
-    io,
+    fmt as std_fmt, io,
     path::{Path, PathBuf},
     sync::OnceLock,
 };
@@ -58,7 +56,10 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
 };
 
-use super::redaction;
+use super::{
+    fs::{append_private_file, create_private_dir_all},
+    redaction,
+};
 
 static FILE_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 
@@ -423,7 +424,7 @@ where
     S: tracing::Subscriber + for<'lookup> LookupSpan<'lookup>,
 {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
+        create_private_dir_all(parent).map_err(|err| {
             io::Error::new(
                 err.kind(),
                 format!(
@@ -434,16 +435,12 @@ where
         })?;
     }
 
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|err| {
-            io::Error::new(
-                err.kind(),
-                format!("cannot open JSONL tracing log {}: {err}", path.display()),
-            )
-        })?;
+    let file = append_private_file(path).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("cannot open JSONL tracing log {}: {err}", path.display()),
+        )
+    })?;
     let (writer, guard) = tracing_appender::non_blocking(file);
     let layer = fmt::layer()
         .event_format(RedactingJsonEventFormat)
