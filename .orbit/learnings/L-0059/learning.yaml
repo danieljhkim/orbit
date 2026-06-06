@@ -1,0 +1,21 @@
+schema_version: 1
+id: L-0059
+status: active
+scope:
+  paths:
+  - deny.toml
+  - Cargo.toml
+  - crates/*/Cargo.toml
+  - tools/*/Cargo.toml
+  tags:
+  - supply-chain
+  - cargo-deny
+summary: Keep workspace packages private when cargo-deny denies wildcard dependencies
+body: |
+  When enabling `cargo deny` with `[bans] wildcards = "deny"`, versionless workspace path dependencies are treated as wildcard dependencies unless cargo-deny can see the owning package is private. Keep root `[workspace.package] publish = false`, have workspace packages inherit it with `publish.workspace = true`, and use `allow-wildcard-paths = true` so local path deps pass while registry wildcard requirements still fail.
+evidence:
+- kind: task
+  reference: ORB-00353
+created_at: 2026-06-06T19:09:23.989315Z
+updated_at: 2026-06-06T19:09:23.989315Z
+priority: 120

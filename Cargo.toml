@@ -26,6 +26,8 @@ resolver = "2"
 version = "0.8.2"
 edition = "2024"
 license = "MIT"
+# L-0059: cargo-deny needs workspace crates marked private before allowing local path wildcards.
+publish = false
 
 # Workspace-wide lint config. Each crate opts in via `[lints] workspace = true`.
 # Keep this list short — only rules that are mechanically true everywhere.

@@ -1,0 +1,35 @@
+# Supply-chain + license gate. Run locally with: cargo deny check
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+ignore = [
+    # RUSTSEC-2024-0436: pre-existing transitive paste use via tokenizers/fastembed; no safe upgrade is available.
+    "RUSTSEC-2024-0436",
+    # RUSTSEC-2023-0071: pre-existing rsa advisory; Orbit uses rsa only for public-key signature verification of the search companion.
+    "RUSTSEC-2023-0071",
+]
+# v2 defaults: vulnerabilities/unsound/yanked = deny, unmaintained = workspace.
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "MPL-2.0",
+    "Unicode-3.0", "Unicode-DFS-2016", "CC0-1.0", "Unlicense", "OpenSSL",
+    "CDLA-Permissive-2.0",
+]
+# rusqlite bundles SQLite (public-domain "blessing"); add a [[licenses.clarify]]
+# entry if it gets flagged after the first run.
+
+[bans]
+multiple-versions = "warn"   # duplicate transitive versions are common; warn, don't block
+wildcards = "deny"
+# L-0059: publish=false keeps local path deps allowed while registry wildcards stay denied.
+allow-wildcard-paths = true  # workspace path deps omit version requirements; registry wildcards remain denied
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
