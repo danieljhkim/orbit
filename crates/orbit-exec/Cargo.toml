@@ -17,3 +17,6 @@ wait-timeout.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+
+[dev-dependencies]
+regex.workspace = true

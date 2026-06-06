@@ -20,7 +20,7 @@
 
 use std::path::{Component, Path};
 
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 
 use crate::types::OrbitError;
 
@@ -92,15 +92,15 @@ pub fn match_glob(rule: &str, path: &str) -> Result<bool, OrbitError> {
 /// hundreds of candidate paths in a hot path).
 pub fn compile_glob_regex(rule: &str) -> Result<Regex, regex::Error> {
     if rule == "." {
-        return Regex::new(r"^$");
+        return compile_filesystem_regex(r"^$");
     }
 
     if let Some(prefix) = rule.strip_suffix("/**") {
         if prefix.is_empty() {
-            return Regex::new(r"^.*$");
+            return compile_filesystem_regex(r"^.*$");
         }
         let escaped = regex::escape(prefix);
-        return Regex::new(&format!("^{escaped}(?:/.*)?$"));
+        return compile_filesystem_regex(&format!("^{escaped}(?:/.*)?$"));
     }
 
     let chars: Vec<char> = rule.chars().collect();
@@ -133,5 +133,16 @@ pub fn compile_glob_regex(rule: &str) -> Result<Regex, regex::Error> {
         index += 1;
     }
     pattern.push('$');
-    Regex::new(&pattern)
+    compile_filesystem_regex(&pattern)
+}
+
+fn compile_filesystem_regex(pattern: &str) -> Result<Regex, regex::Error> {
+    // L-0061: Match policy globs using the target filesystem's case identity.
+    RegexBuilder::new(pattern)
+        .case_insensitive(filesystem_globs_are_case_insensitive())
+        .build()
+}
+
+fn filesystem_globs_are_case_insensitive() -> bool {
+    cfg!(any(target_os = "macos", windows))
 }

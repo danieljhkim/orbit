@@ -2235,6 +2235,7 @@ version = "0.8.2"
 dependencies = [
  "libc",
  "orbit-common",
+ "regex",
  "tempfile",
  "wait-timeout",
 ]
