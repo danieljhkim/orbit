@@ -28,6 +28,9 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(delete::FsDeleteTool);
 }
 
+#[cfg(test)]
+mod tests;
+
 /// Checks that `path` resolves inside the context workspace root.
 ///
 /// Symlink escapes are blocked because the path is canonicalized before the check.
