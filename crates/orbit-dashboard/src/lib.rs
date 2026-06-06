@@ -29,9 +29,12 @@ use orbit_core::{OrbitError, OrbitRuntime};
 
 const INDEX_HTML: &str = include_str!("../assets/dashboard/index.html");
 const DASHBOARD_CSS: &str = include_str!("../assets/dashboard/dashboard.css");
+const MARKED_JS: &str = include_str!("../assets/dashboard/marked.umd.js");
+const PURIFY_JS: &str = include_str!("../assets/dashboard/purify.min.js");
 // L-0021: Keep embedded dashboard JS modules in sync with /static routes.
 const APP_JS: &str = include_str!("../assets/dashboard/app.js");
 const COMMON_JS: &str = include_str!("../assets/dashboard/common.js");
+const MARKDOWN_JS: &str = include_str!("../assets/dashboard/markdown.js");
 const TASKS_JS: &str = include_str!("../assets/dashboard/tasks.js");
 const AUDIT_JS: &str = include_str!("../assets/dashboard/audit.js");
 const SCOREBOARD_JS: &str = include_str!("../assets/dashboard/scoreboard.js");
@@ -41,6 +44,17 @@ const ROUTER_JS: &str = include_str!("../assets/dashboard/router.js");
 const RUNS_JS: &str = include_str!("../assets/dashboard/runs.js");
 const RUN_DETAIL_JS: &str = include_str!("../assets/dashboard/run-detail.js");
 const REVIEW_THREADS_JS: &str = include_str!("../assets/dashboard/review-threads.js");
+const DASHBOARD_CSP: &str = concat!(
+    "default-src 'self'; ",
+    "script-src 'self'; ",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; ",
+    "font-src 'self' https://fonts.gstatic.com; ",
+    "img-src 'self' data:; ",
+    "connect-src 'self'; ",
+    "object-src 'none'; ",
+    "base-uri 'none'; ",
+    "frame-ancestors 'none'"
+);
 
 /// Arguments for `orbit web serve` (and the library entry point).
 #[derive(Args, Clone)]
@@ -73,8 +87,11 @@ pub fn serve(runtime: &OrbitRuntime, args: ServeArgs) -> Result<(), OrbitError> 
     let app = Router::new()
         .route("/", get(serve_index))
         .route("/static/dashboard.css", get(serve_dashboard_css))
+        .route("/static/marked.umd.js", get(serve_marked_js))
+        .route("/static/purify.min.js", get(serve_purify_js))
         .route("/static/app.js", get(serve_app_js))
         .route("/static/common.js", get(serve_common_js))
+        .route("/static/markdown.js", get(serve_markdown_js))
         .route("/static/tasks.js", get(serve_tasks_js))
         .route("/static/audit.js", get(serve_audit_js))
         .route("/static/scoreboard.js", get(serve_scoreboard_js))
@@ -117,14 +134,7 @@ pub fn serve(runtime: &OrbitRuntime, args: ServeArgs) -> Result<(), OrbitError> 
 }
 
 async fn serve_index() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/html; charset=utf-8"),
-        )],
-        INDEX_HTML,
-    )
-        .into_response()
+    dashboard_response("text/html; charset=utf-8", INDEX_HTML)
 }
 
 async fn serve_dashboard_css() -> Response {
@@ -138,125 +148,73 @@ async fn serve_dashboard_css() -> Response {
         .into_response()
 }
 
+async fn serve_marked_js() -> Response {
+    dashboard_response("application/javascript; charset=utf-8", MARKED_JS)
+}
+
+async fn serve_purify_js() -> Response {
+    dashboard_response("application/javascript; charset=utf-8", PURIFY_JS)
+}
+
 async fn serve_app_js() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/javascript; charset=utf-8"),
-        )],
-        APP_JS,
-    )
-        .into_response()
+    dashboard_response("application/javascript; charset=utf-8", APP_JS)
 }
 
 async fn serve_common_js() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/javascript; charset=utf-8"),
-        )],
-        COMMON_JS,
-    )
-        .into_response()
+    dashboard_response("application/javascript; charset=utf-8", COMMON_JS)
+}
+
+async fn serve_markdown_js() -> Response {
+    dashboard_response("application/javascript; charset=utf-8", MARKDOWN_JS)
 }
 
 async fn serve_tasks_js() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/javascript; charset=utf-8"),
-        )],
-        TASKS_JS,
-    )
-        .into_response()
+    dashboard_response("application/javascript; charset=utf-8", TASKS_JS)
 }
 
 async fn serve_audit_js() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/javascript; charset=utf-8"),
-        )],
-        AUDIT_JS,
-    )
-        .into_response()
+    dashboard_response("application/javascript; charset=utf-8", AUDIT_JS)
 }
 
 async fn serve_scoreboard_js() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/javascript; charset=utf-8"),
-        )],
-        SCOREBOARD_JS,
-    )
-        .into_response()
+    dashboard_response("application/javascript; charset=utf-8", SCOREBOARD_JS)
 }
 
 async fn serve_log_tail_js() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/javascript; charset=utf-8"),
-        )],
-        LOG_TAIL_JS,
-    )
-        .into_response()
+    dashboard_response("application/javascript; charset=utf-8", LOG_TAIL_JS)
 }
 
 async fn serve_diagnostics_js() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/javascript; charset=utf-8"),
-        )],
-        DIAGNOSTICS_JS,
-    )
-        .into_response()
+    dashboard_response("application/javascript; charset=utf-8", DIAGNOSTICS_JS)
 }
 
 async fn serve_router_js() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/javascript; charset=utf-8"),
-        )],
-        ROUTER_JS,
-    )
-        .into_response()
+    dashboard_response("application/javascript; charset=utf-8", ROUTER_JS)
 }
 
 async fn serve_runs_js() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/javascript; charset=utf-8"),
-        )],
-        RUNS_JS,
-    )
-        .into_response()
+    dashboard_response("application/javascript; charset=utf-8", RUNS_JS)
 }
 
 async fn serve_run_detail_js() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/javascript; charset=utf-8"),
-        )],
-        RUN_DETAIL_JS,
-    )
-        .into_response()
+    dashboard_response("application/javascript; charset=utf-8", RUN_DETAIL_JS)
 }
 
 async fn serve_review_threads_js() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/javascript; charset=utf-8"),
-        )],
-        REVIEW_THREADS_JS,
+    dashboard_response("application/javascript; charset=utf-8", REVIEW_THREADS_JS)
+}
+
+fn dashboard_response(content_type: &'static str, body: &'static str) -> Response {
+    let mut response = (
+        [(header::CONTENT_TYPE, HeaderValue::from_static(content_type))],
+        body,
     )
-        .into_response()
+        .into_response();
+    response.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(DASHBOARD_CSP),
+    );
+    response
 }
 
 async fn healthz() -> (StatusCode, &'static str) {

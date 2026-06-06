@@ -2,6 +2,7 @@
 // Pure vanilla JS, split into ES modules with no build step.
 
 import { el, statusPill, patchJson, syncNodes } from './common.js';
+import { renderMarkdown, renderMarkdownInline } from './markdown.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -384,9 +385,10 @@ function artifactMediaType(artifact, response) {
 }
 
 function renderArtifactText(mediaType, text) {
-  if (mediaType === "text/markdown" && typeof marked !== "undefined") {
+  const rendered = mediaType === "text/markdown" ? renderMarkdown(text) : null;
+  if (rendered !== null) {
     const view = el("div", { class: "markdown-body" });
-    view.innerHTML = marked.parse(text);
+    view.innerHTML = rendered;
     return view;
   }
   return el("pre", { text });
@@ -475,8 +477,9 @@ function buildTaskDetail(task, context) {
 
   if (task.description && task.description.trim()) {
     const view = el("div", { class: "markdown-body" });
-    if (typeof marked !== "undefined") {
-      view.innerHTML = marked.parse(task.description);
+    const rendered = renderMarkdown(task.description);
+    if (rendered !== null) {
+      view.innerHTML = rendered;
     } else {
       view.textContent = task.description;
     }
@@ -486,9 +489,10 @@ function buildTaskDetail(task, context) {
   if (Array.isArray(task.acceptance_criteria) && task.acceptance_criteria.length > 0) {
     const ul = el("ul", { class: "ac-list" });
     for (const ac of task.acceptance_criteria) {
-      if (typeof marked !== "undefined") {
+      const rendered = renderMarkdownInline(ac);
+      if (rendered !== null) {
         const li = el("li");
-        li.innerHTML = marked.parseInline(ac);
+        li.innerHTML = rendered;
         ul.appendChild(li);
       } else {
         ul.appendChild(el("li", { text: ac }));
@@ -499,8 +503,9 @@ function buildTaskDetail(task, context) {
 
   if (task.plan && task.plan.trim()) {
     const view = el("div", { class: "markdown-body" });
-    if (typeof marked !== "undefined") {
-      view.innerHTML = marked.parse(task.plan);
+    const rendered = renderMarkdown(task.plan);
+    if (rendered !== null) {
+      view.innerHTML = rendered;
     } else {
       view.textContent = task.plan;
     }
@@ -509,8 +514,9 @@ function buildTaskDetail(task, context) {
 
   if (task.execution_summary && task.execution_summary.trim()) {
     const view = el("div", { class: "markdown-body" });
-    if (typeof marked !== "undefined") {
-      view.innerHTML = marked.parse(task.execution_summary);
+    const rendered = renderMarkdown(task.execution_summary);
+    if (rendered !== null) {
+      view.innerHTML = rendered;
     } else {
       view.textContent = task.execution_summary;
     }
