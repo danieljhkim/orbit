@@ -12,7 +12,7 @@ use crate::loop_engine::transport::{
     ContentBlock, LoopTransport, Message, MessageRole, StopReason, ToolSpec, TransportError,
     TurnRequest, TurnResponse, TurnUsage,
 };
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, RequestBuilder};
 use reqwest::header::{CONTENT_TYPE, HeaderName, HeaderValue};
 
 use super::wire::{
@@ -22,6 +22,7 @@ use super::wire::{
 };
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com";
+const GEMINI_API_KEY_HEADER: &str = "x-goog-api-key";
 
 pub struct GeminiHttpTransport {
     client: Client,
@@ -69,16 +70,32 @@ impl GeminiHttpTransport {
 
     fn generate_content_endpoint(&self) -> String {
         format!(
-            "{}/v1beta/models/{}:generateContent?key={}",
-            self.base_url, self.model, self.api_key
+            "{}/v1beta/models/{}:generateContent",
+            self.base_url, self.model
         )
     }
 
     fn cached_contents_endpoint(&self) -> String {
-        format!(
-            "{}/v1beta/cachedContents?key={}",
-            self.base_url, self.api_key
-        )
+        format!("{}/v1beta/cachedContents", self.base_url)
+    }
+
+    fn post_json_request(&self, endpoint: &str) -> Result<RequestBuilder, TransportError> {
+        let mut request = self
+            .client
+            .post(endpoint)
+            .header(CONTENT_TYPE, "application/json")
+            .header(GEMINI_API_KEY_HEADER, self.api_key_header_value()?);
+
+        for (name, value) in &self.custom_headers {
+            request = request.header(name.clone(), value.clone());
+        }
+
+        Ok(request)
+    }
+
+    fn api_key_header_value(&self) -> Result<HeaderValue, TransportError> {
+        HeaderValue::from_str(&self.api_key)
+            .map_err(|e| TransportError::Other(format!("invalid Gemini API key header value: {e}")))
     }
 
     fn try_create_cached_content(
@@ -98,24 +115,15 @@ impl GeminiHttpTransport {
         let body_bytes = serde_json::to_vec(&req)
             .map_err(|e| TransportError::Decode(format!("serialize cache request: {e}")))?;
 
-        let mut request = self
-            .client
-            .post(self.cached_contents_endpoint())
-            .header(CONTENT_TYPE, "application/json");
+        let endpoint = self.cached_contents_endpoint();
+        let request = self.post_json_request(&endpoint)?;
 
-        for (name, value) in &self.custom_headers {
-            request = request.header(name.clone(), value.clone());
-        }
-
-        let response = request
-            .body(body_bytes)
-            .send()
-            .map_err(|e| TransportError::Network(e.to_string()))?;
+        let response = request.body(body_bytes).send().map_err(network_error)?;
 
         let http_status = response.status().as_u16();
         let response_bytes = response
             .bytes()
-            .map_err(|e| TransportError::Network(format!("read body: {e}")))?
+            .map_err(|e| network_error_with_context("read body", e))?
             .to_vec();
 
         if !(200..300).contains(&http_status) {
@@ -208,24 +216,17 @@ impl LoopTransport for GeminiHttpTransport {
             .map_err(|e| TransportError::Decode(format!("serialize request: {e}")))?;
 
         let endpoint = self.generate_content_endpoint();
-        let mut request = self
-            .client
-            .post(&endpoint)
-            .header(CONTENT_TYPE, "application/json");
-
-        for (name, value) in &self.custom_headers {
-            request = request.header(name.clone(), value.clone());
-        }
+        let request = self.post_json_request(&endpoint)?;
 
         let response = request
             .body(body_bytes.clone())
             .send()
-            .map_err(|e| TransportError::Network(e.to_string()))?;
+            .map_err(network_error)?;
 
         let http_status = response.status().as_u16();
         let response_bytes = response
             .bytes()
-            .map_err(|e| TransportError::Network(format!("read body: {e}")))?
+            .map_err(|e| network_error_with_context("read body", e))?
             .to_vec();
 
         if !(200..300).contains(&http_status) {
@@ -373,6 +374,18 @@ fn build_client(timeout: Duration) -> Result<Client, TransportError> {
         .map_err(|e| TransportError::Other(format!("reqwest build: {e}")))
 }
 
+fn network_error(error: reqwest::Error) -> TransportError {
+    TransportError::Network(reqwest_error_message(error))
+}
+
+fn network_error_with_context(context: &str, error: reqwest::Error) -> TransportError {
+    TransportError::Network(format!("{context}: {}", reqwest_error_message(error)))
+}
+
+fn reqwest_error_message(error: reqwest::Error) -> String {
+    error.without_url().to_string()
+}
+
 fn normalize_base_url(base_url: String) -> String {
     let trimmed = base_url.trim();
     let normalized = if trimmed.is_empty() {
@@ -397,4 +410,125 @@ fn validate_headers(
             Ok((header_name, header_value))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::Duration;
+
+    use super::*;
+    use crate::loop_engine::transport::{CacheHint, Message};
+
+    const GEMINI_API_KEY: &str = "AIzaSyDoNotLeakThisGeminiApiKeyValue";
+
+    #[test]
+    fn send_turn_sends_api_key_header_without_key_query_param() {
+        let response_body = r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"cachedContentTokenCount":0}}"#;
+        let (base_url, server) = spawn_one_request_server(response_body);
+        let transport = GeminiHttpTransport::new(GEMINI_API_KEY, "gemini-test", None)
+            .expect("transport")
+            .with_base_url(base_url);
+        let messages = [Message::user_text("hello")];
+        let req = TurnRequest {
+            system: None,
+            messages: &messages,
+            tools: &[],
+            cache_hint: CacheHint::None,
+            max_response_tokens: 0,
+        };
+
+        let response = transport.send_turn(&req).expect("send turn");
+        let captured_request = server.join().expect("server thread");
+        let request_line = captured_request.lines().next().unwrap_or_default();
+
+        assert!(
+            request_line.starts_with("POST /v1beta/models/gemini-test:generateContent "),
+            "unexpected request line: {request_line}"
+        );
+        assert!(
+            !request_line.to_ascii_lowercase().contains("key="),
+            "request URL must not contain an API key query param: {request_line}"
+        );
+        assert!(
+            captured_request.contains(&format!("{GEMINI_API_KEY_HEADER}: {GEMINI_API_KEY}")),
+            "request must send the Gemini API key header"
+        );
+        assert!(!response.endpoint.to_ascii_lowercase().contains("key="));
+    }
+
+    #[test]
+    fn endpoint_builders_do_not_include_api_key_query_params() {
+        let transport =
+            GeminiHttpTransport::new(GEMINI_API_KEY, "gemini-test", None).expect("transport");
+
+        let generate_endpoint = transport.generate_content_endpoint();
+        let cached_endpoint = transport.cached_contents_endpoint();
+
+        assert!(!generate_endpoint.to_ascii_lowercase().contains("key="));
+        assert!(!cached_endpoint.to_ascii_lowercase().contains("key="));
+        assert!(!generate_endpoint.contains(GEMINI_API_KEY));
+        assert!(!cached_endpoint.contains(GEMINI_API_KEY));
+    }
+
+    #[test]
+    fn reqwest_transport_errors_strip_url_before_stringifying() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
+        let addr = listener.local_addr().expect("listener address");
+        drop(listener);
+        let url = format!("http://{addr}/fail?key={GEMINI_API_KEY}");
+        let err = Client::builder()
+            .timeout(Duration::from_millis(50))
+            .build()
+            .expect("client")
+            .get(url)
+            .send()
+            .expect_err("unbound local port should fail");
+
+        let TransportError::Network(message) = network_error(err) else {
+            panic!("expected network error");
+        };
+
+        assert!(!message.contains(GEMINI_API_KEY));
+        assert!(!message.to_ascii_lowercase().contains("key="));
+    }
+
+    fn spawn_one_request_server(
+        response_body: &'static str,
+    ) -> (String, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
+        let addr = listener.local_addr().expect("listener address");
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("set read timeout");
+            let mut request_bytes = Vec::new();
+            let mut buf = [0_u8; 1024];
+            loop {
+                let n = stream.read(&mut buf).expect("read request");
+                if n == 0 {
+                    break;
+                }
+                request_bytes.extend_from_slice(&buf[..n]);
+                if request_bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+            String::from_utf8(request_bytes).expect("request utf8")
+        });
+
+        (format!("http://{addr}"), handle)
+    }
 }

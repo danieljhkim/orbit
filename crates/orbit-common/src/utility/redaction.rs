@@ -194,17 +194,17 @@ pub fn is_sensitive_env_name(name: &str) -> bool {
 /// Regex-driven scrubber for HTTP-shape and argv-shape secrets.
 ///
 /// Builds to `default()` give you the same coverage as the former
-/// `RedactionMiddleware` (Authorization / x-api-key / Bearer / raw header
-/// lines). Use [`PatternRedactor::with_argv_secrets`] to also catch bare
-/// `sk-…` tokens — needed when scrubbing subprocess argv where a provider
-/// key sometimes ends up mis-configured.
+/// `RedactionMiddleware` (Authorization / x-api-key / URL key params /
+/// Bearer / raw header lines). Use [`PatternRedactor::with_argv_secrets`] to
+/// also catch bare `sk-…` tokens — needed when scrubbing subprocess argv where
+/// a provider key sometimes ends up mis-configured.
 pub struct PatternRedactor {
     patterns: Vec<(Regex, &'static str)>,
 }
 
 impl PatternRedactor {
-    /// HTTP-only default: Authorization / x-api-key / api_key / Bearer in
-    /// both JSON and raw-header form.
+    /// HTTP-only default: Authorization / x-api-key / api_key / URL key
+    /// params / Bearer in both JSON and raw-header form.
     pub fn http_default() -> Self {
         let patterns = vec![
             (
@@ -233,6 +233,10 @@ impl PatternRedactor {
             ),
             (
                 Regex::new(r"(?im)^(\s*api[_-]?key\s*:\s*).+$").expect("valid regex"),
+                "${1}[REDACTED_AUTH]",
+            ),
+            (
+                Regex::new(r"(?i)([?&]key=)[^&\s]+").expect("valid regex"),
                 "${1}[REDACTED_AUTH]",
             ),
             (
