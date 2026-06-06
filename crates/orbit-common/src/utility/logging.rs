@@ -25,9 +25,10 @@
 //!
 //! Redaction integration: both the stderr formatter and global JSONL formatter
 //! use [`RedactingFields`], which applies [`super::redaction::redact_all`] to
-//! string field values, `Debug`-formatted values, and unstructured `message`
-//! text before output is written. [`redact_event_text`] remains available for
-//! non-tracing surfaces that must scrub text before writing it elsewhere.
+//! string field values, `Error` chains, byte slices, `Debug`-formatted values,
+//! and unstructured `message` text before output is written.
+//! [`redact_event_text`] remains available for non-tracing surfaces that must
+//! scrub text before writing it elsewhere.
 
 use std::{
     collections::BTreeMap,
@@ -237,17 +238,31 @@ where
     }
 
     fn record_bytes(&mut self, field: &Field, value: &[u8]) {
-        self.inner.record_bytes(field, value);
+        let decoded = String::from_utf8_lossy(value);
+        let redacted = redaction::redact_all(decoded.as_ref());
+        self.inner.record_str(field, &redacted);
     }
 
     fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
-        self.inner.record_error(field, value);
+        let redacted = redaction::redact_all(&format_error_chain(value));
+        self.inner.record_str(field, &redacted);
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn std_fmt::Debug) {
         let redacted = redaction::redact_all(&format!("{value:?}"));
         self.inner.record_debug(field, &RedactedDebug(redacted));
     }
+}
+
+fn format_error_chain(value: &(dyn std::error::Error + 'static)) -> String {
+    let mut formatted = value.to_string();
+    let mut source = value.source();
+    while let Some(error) = source {
+        formatted.push_str(": ");
+        formatted.push_str(&error.to_string());
+        source = error.source();
+    }
+    formatted
 }
 
 impl<V> VisitOutput<std_fmt::Result> for RedactingVisitor<V>
