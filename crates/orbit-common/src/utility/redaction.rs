@@ -244,6 +244,45 @@ impl PatternRedactor {
                 "[REDACTED_SECRET]",
             ),
             (
+                Regex::new(r"AIza[0-9A-Za-z_\-]{35}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"glpat-[A-Za-z0-9_\-]{20,}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"github_pat_[A-Za-z0-9_]{22,}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"gh[opsur]_[A-Za-z0-9]{36,}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"AKIA[0-9A-Z]{16}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r#"(?i)("aws[_-]?secret[_-]?access[_-]?key"\s*:\s*")[^"]*""#)
+                    .expect("valid regex"),
+                "${1}[REDACTED_SECRET]\"",
+            ),
+            (
+                Regex::new(r"(?i)\b(aws[_-]?secret[_-]?access[_-]?key\s*=\s*)[^&\s]+")
+                    .expect("valid regex"),
+                "${1}[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"npm_[A-Za-z0-9]{36}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"([A-Za-z][A-Za-z0-9+.\-]*://[^/\s:@?#]+:)[^@\s/?#]+(@)")
+                    .expect("valid regex"),
+                "${1}[REDACTED_SECRET]${2}",
+            ),
+            (
                 Regex::new(r"ghp_[A-Za-z0-9]{36}").expect("valid regex"),
                 "[REDACTED_SECRET]",
             ),
@@ -333,6 +372,18 @@ fn high_confidence_single_token_patterns() -> &'static [Regex] {
         .get_or_init(|| {
             vec![
                 Regex::new(r"^sk-[A-Za-z0-9_\-]{20,}$").expect("valid regex"),
+                Regex::new(r"^AIza[0-9A-Za-z_\-]{35}$").expect("valid regex"),
+                Regex::new(r"^glpat-[A-Za-z0-9_\-]{20,}$").expect("valid regex"),
+                Regex::new(r"^github_pat_[A-Za-z0-9_]{22,}$").expect("valid regex"),
+                Regex::new(r"^gh[opsur]_[A-Za-z0-9]{36,}$").expect("valid regex"),
+                Regex::new(r"^AKIA[0-9A-Z]{16}$").expect("valid regex"),
+                Regex::new(r"(?i)^aws[_-]?secret[_-]?access[_-]?key=[^&\s]+$")
+                    .expect("valid regex"),
+                Regex::new(r"^npm_[A-Za-z0-9]{36}$").expect("valid regex"),
+                Regex::new(
+                    r"^[A-Za-z][A-Za-z0-9+.\-]*://[^/\s:@?#]+:[^@\s/?#]+@[^/\s?#]+(?:[/?#]\S*)?$",
+                )
+                .expect("valid regex"),
                 Regex::new(r"^ghp_[A-Za-z0-9]{36}$").expect("valid regex"),
                 Regex::new(r"^xox[baprs]-[A-Za-z0-9\-]{10,}$").expect("valid regex"),
             ]
