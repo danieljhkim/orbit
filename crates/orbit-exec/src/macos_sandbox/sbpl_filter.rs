@@ -38,7 +38,9 @@ fn contains_glob(value: &str) -> bool {
 }
 
 fn glob_rule_to_regex(rule: &str) -> String {
-    let mut out = String::from("^");
+    // L-0061: SBPL filters run on macOS, where default volumes resolve paths
+    // case-insensitively, so regex filters must follow that identity model.
+    let mut out = String::from("(?i)^");
     let chars: Vec<char> = rule.chars().collect();
     let mut i = 0;
     while i < chars.len() {

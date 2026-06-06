@@ -27,7 +27,9 @@ fn compile_uses_regex_for_non_subpath_positive_modify_glob() {
     );
     let text = compile_with_env(&resolved, EnvOverrides::default());
     assert!(
-        text.contains("(allow file-write* (regex \"^/Users/test/\\\\.orbit/orbit\\\\.db[^/]*$\"))"),
+        text.contains(
+            "(allow file-write* (regex \"(?i)^/Users/test/\\\\.orbit/orbit\\\\.db[^/]*$\"))"
+        ),
         "missing regex allow for SQLite sidecar glob: {text}"
     );
     assert!(
@@ -90,7 +92,7 @@ fn compile_uses_regex_for_non_subpath_negated_read_glob() {
     resolved.read.push("!/Users/test/repo/**/*.env".to_string());
     let text = compile_with_env(&resolved, EnvOverrides::default());
     assert!(
-        text.contains("(deny file-read* (regex \"^/Users/test/repo/(?:.*/)?[^/]*\\\\.env$\"))"),
+        text.contains("(deny file-read* (regex \"(?i)^/Users/test/repo/(?:.*/)?[^/]*\\\\.env$\"))"),
         "missing regex read deny: {text}"
     );
 }
@@ -103,11 +105,47 @@ fn compile_uses_regex_for_non_subpath_negated_modify_glob() {
         .push("!/Users/test/repo/**/*.env".to_string());
     let text = compile_with_env(&resolved, EnvOverrides::default());
     assert!(
-        text.contains("(deny file-write* (regex \"^/Users/test/repo/(?:.*/)?[^/]*\\\\.env$\"))"),
+        text.contains(
+            "(deny file-write* (regex \"(?i)^/Users/test/repo/(?:.*/)?[^/]*\\\\.env$\"))"
+        ),
         "missing regex deny for env glob: {text}"
     );
     assert!(
         !text.contains("(deny file-write* (subpath \"/Users/test/repo\"))"),
         "env glob must not collapse to a repo-wide deny: {text}"
     );
+}
+
+#[test]
+fn regex_deny_filters_match_case_variant_secret_paths() {
+    let env_regex = regex_from_filter(&super::super::sbpl_filter::sbpl_filter_for_deny_rule(
+        "/Users/test/repo/**/*.env",
+    ));
+    assert!(
+        env_regex.is_match("/Users/test/repo/Secret.ENV"),
+        "env deny regex should match case-varied root dotenv paths"
+    );
+    assert!(
+        env_regex.is_match("/Users/test/repo/config/Secret.ENV"),
+        "env deny regex should match case-varied nested dotenv paths"
+    );
+
+    let orbit_regex = regex_from_filter(&super::super::sbpl_filter::sbpl_filter_for_deny_rule(
+        "/Users/test/repo/**/.orbit/**",
+    ));
+    assert!(
+        orbit_regex.is_match("/Users/test/repo/.Orbit/state/task.json"),
+        "orbit deny regex should match case-varied .orbit paths"
+    );
+}
+
+fn regex_from_filter(filter: &str) -> regex::Regex {
+    let prefix = "(regex \"";
+    let suffix = "\")";
+    let escaped_regex = filter
+        .strip_prefix(prefix)
+        .and_then(|rest| rest.strip_suffix(suffix))
+        .expect("regex filter shape");
+    let regex = escaped_regex.replace("\\\\", "\\").replace("\\\"", "\"");
+    regex::Regex::new(&regex).expect("valid emitted regex")
 }
