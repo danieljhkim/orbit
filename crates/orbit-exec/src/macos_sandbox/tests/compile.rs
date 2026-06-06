@@ -13,6 +13,43 @@ fn compile_emits_deny_default_and_broad_read_with_modify_subpath() {
 }
 
 #[test]
+fn compile_default_profile_denies_well_known_credential_reads() {
+    let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
+    let text = compile_with_env(
+        &resolved,
+        EnvOverrides {
+            home: Some("/Users/test"),
+            ..Default::default()
+        },
+    );
+
+    for credential_root in [
+        "/Users/test/.ssh",
+        "/Users/test/.aws",
+        "/Users/test/.config/gh",
+        "/Users/test/Library/Keychains",
+        "/Library/Keychains",
+        "/System/Library/Keychains",
+    ] {
+        let clause = format!("(deny file-read* (subpath \"{credential_root}\"))");
+        assert!(
+            text.contains(&clause),
+            "missing default credential read deny for {credential_root}: {text}"
+        );
+    }
+
+    let allow_pos = text.find("(allow file-read*)").expect("broad read allow");
+    let ssh_deny = "(deny file-read* (subpath \"/Users/test/.ssh\"))";
+    let ssh_deny_pos = text
+        .find(ssh_deny)
+        .expect("default ~/.ssh read deny for private keys such as ~/.ssh/id_rsa");
+    assert!(
+        allow_pos < ssh_deny_pos,
+        "credential read denies must follow broad read allow for last-match-wins: {text}"
+    );
+}
+
+#[test]
 fn compile_grants_write_access_to_global_orbit_log_dir() {
     // The agent CLI inherits the sandbox into `orbit mcp serve` and any
     // other `orbit ...` calls. The JSONL tracing layer resolves its
