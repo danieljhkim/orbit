@@ -406,6 +406,28 @@ mod subscriber {
         assert_eq!(appended["fields"]["line"], "after-sentinel");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn jsonl_file_and_created_state_dirs_are_private() {
+        let _env = ENV_LOCK.lock().expect("lock env");
+        let _rust_log = EnvVarGuard::remove("RUST_LOG");
+        let dir = tempdir().expect("tempdir");
+        let orbit_dir = dir.path().join(".orbit");
+        let state_dir = orbit_dir.join("state");
+        let log_dir = state_dir.join("logs");
+        let log_path = log_dir.join("orbit.jsonl");
+
+        with_test_subscriber_at_path("info", &log_path, io::sink, || {
+            tracing::info!(line = "private-log");
+        })
+        .expect("subscriber should run");
+
+        assert_eq!(mode(&log_path), 0o600);
+        assert_eq!(mode(&orbit_dir), 0o700);
+        assert_eq!(mode(&state_dir), 0o700);
+        assert_eq!(mode(&log_dir), 0o700);
+    }
+
     #[test]
     fn file_layer_failure_falls_back_to_stderr_layer() {
         let _env = ENV_LOCK.lock().expect("lock env");
@@ -427,5 +449,12 @@ mod subscriber {
             .expect("stderr utf8");
         assert!(stderr_text.contains("failed to initialize JSONL tracing log"));
         assert!(stderr_text.contains("stderr-still-works"));
+    }
+
+    #[cfg(unix)]
+    fn mode(path: &std::path::Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::metadata(path).expect("metadata").permissions().mode() & 0o777
     }
 }

@@ -91,6 +91,22 @@ fn caller_redaction_can_add_stronger_patterns() {
     assert_eq!(hash, sha256_hex(expected.as_bytes()));
 }
 
+#[cfg(unix)]
+#[test]
+fn write_creates_private_blob_file_and_dirs() {
+    let temp = tempdir().expect("tempdir");
+    let root = temp.path().join("audit").join("blobs");
+    let store = BlobStore::new(&root);
+
+    let hash = store.write(b"audit payload").expect("write blob");
+    let shard_dir = root.join(&hash[..2]);
+    let blob_path = shard_dir.join(&hash);
+
+    assert_eq!(mode(&blob_path), 0o600);
+    assert_eq!(mode(&root), 0o700);
+    assert_eq!(mode(&shard_dir), 0o700);
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -100,4 +116,15 @@ fn sha256_hex(bytes: &[u8]) -> String {
         out.push_str(&format!("{:02x}", byte));
     }
     out
+}
+
+#[cfg(unix)]
+fn mode(path: &std::path::Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::metadata(path)
+        .expect("metadata")
+        .permissions()
+        .mode()
+        & 0o777
 }

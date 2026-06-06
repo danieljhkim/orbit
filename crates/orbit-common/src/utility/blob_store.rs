@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+use super::fs::{create_new_private_file, create_private_dir_all};
 use super::redaction::{PatternRedactor, redact_all};
 
 pub struct BlobStore {
@@ -47,20 +48,16 @@ impl BlobStore {
         let redacted = self.redact_for_storage(content);
         let hash = sha256_hex(&redacted);
         let dir = self.root.join(&hash[..2]);
-        fs::create_dir_all(&dir)?;
+        create_private_dir_all(&dir)?;
         let path = dir.join(&hash);
         if !path.exists() {
-            let mut f = fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-                .or_else(|err| {
-                    if err.kind() == io::ErrorKind::AlreadyExists {
-                        fs::OpenOptions::new().write(true).open(&path)
-                    } else {
-                        Err(err)
-                    }
-                })?;
+            let mut f = create_new_private_file(&path).or_else(|err| {
+                if err.kind() == io::ErrorKind::AlreadyExists {
+                    fs::OpenOptions::new().write(true).open(&path)
+                } else {
+                    Err(err)
+                }
+            })?;
             f.write_all(&redacted)?;
             f.flush()?;
         }
