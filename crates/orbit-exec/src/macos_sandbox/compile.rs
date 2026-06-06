@@ -7,9 +7,9 @@ use orbit_common::types::{OrbitError, ResolvedFsProfile};
 ///
 /// The emitted profile:
 /// - denies everything by default;
-/// - allows broad reads (`file-read*`) — agent CLIs read from `/usr`,
-///   `/System`, `/Library`, dyld caches, fonts, and similar locations that
-///   are not realistic to enumerate;
+/// - allows broad reads (`file-read*`) for agent CLI compatibility, then
+///   appends default read denies for well-known credential locations so those
+///   paths still lose under SBPL's last-match-wins evaluation;
 /// - allows the syscall classes agent CLIs rely on (process, signal, mach,
 ///   ipc, sysctl, iokit) and unrestricted network — agents call out to
 ///   provider APIs;
@@ -144,6 +144,36 @@ pub(super) fn compile_macos_sandbox_profile_with_env(
             ));
         }
     }
+    emit_default_credential_read_denies(home, &mut out);
 
     Ok(out)
+}
+
+fn emit_default_credential_read_denies(home: Option<&OsStr>, out: &mut String) {
+    if let Some(home) = super::provider_dirs::non_empty_env_path(home) {
+        let home = home.display().to_string();
+        for suffix in [
+            ".ssh",
+            ".aws",
+            ".config/gh",
+            "Library/Keychains",
+            "Library/Application Support/Google/Chrome",
+            "Library/Application Support/Chromium",
+            "Library/Application Support/BraveSoftware/Brave-Browser",
+            "Library/Application Support/Firefox",
+        ] {
+            emit_read_deny_subpath(&format!("{home}/{suffix}"), out);
+        }
+    }
+
+    for path in ["/Library/Keychains", "/System/Library/Keychains"] {
+        emit_read_deny_subpath(path, out);
+    }
+}
+
+fn emit_read_deny_subpath(path: &str, out: &mut String) {
+    out.push_str(&format!(
+        "(deny file-read* (subpath \"{}\"))\n",
+        super::sbpl_filter::sbpl_escape(path)
+    ));
 }
