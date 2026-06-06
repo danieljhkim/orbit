@@ -179,7 +179,7 @@ spec:
 }
 
 #[test]
-fn workspace_activity_overrides_global_default_in_catalog() {
+fn global_default_activity_wins_over_workspace_shadow_in_execution_catalog() {
     let (_root, runtime, global_root, workspace_root) = test_runtime();
     write_activity(
         &global_root.join("resources/activities/pr_open.yaml"),
@@ -194,7 +194,7 @@ fn workspace_activity_overrides_global_default_in_catalog() {
 
     let catalog = runtime.v2_activity_catalog().expect("activity catalog");
     let activity = catalog.get("pr_open").expect("pr_open activity");
-    assert_eq!(activity.description, "workspace description");
+    assert_eq!(activity.description, "global description");
 }
 
 #[test]
