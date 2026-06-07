@@ -137,7 +137,7 @@ pub fn compile_glob_regex(rule: &str) -> Result<Regex, regex::Error> {
 }
 
 fn compile_filesystem_regex(pattern: &str) -> Result<Regex, regex::Error> {
-    // L-0061: Match policy globs using the target filesystem's case identity.
+    // L-0062: Match policy globs using the target filesystem's case identity.
     RegexBuilder::new(pattern)
         .case_insensitive(filesystem_globs_are_case_insensitive())
         .build()

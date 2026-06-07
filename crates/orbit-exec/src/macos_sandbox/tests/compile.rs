@@ -530,3 +530,65 @@ fn compiled_profile_denies_env_glob_without_blocking_other_writes() {
         "env file should not exist: {env_target:?}"
     );
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn compiled_profile_with_mid_path_glob_rule_is_accepted_by_sandbox_exec() {
+    // Regression for ORB-00372. A modify rule with a mid-path glob — like the
+    // default `orbit.db*` / `semantic.db*` SQLite-sidecar rules emitted on
+    // every run — takes the glob->regex path in `glob_rule_to_regex`. The
+    // emitted regex must compile under real `sandbox-exec`. Prefixing it with
+    // the Perl `(?i)` inline flag made sandbox-exec reject the whole profile
+    // with "unexpected ^ operator in middle of expression" (exit 65,
+    // EX_DATAERR), killing every macOS CLI run before the agent started.
+    use std::process::Command;
+
+    if !sandbox_exec_can_apply() {
+        return;
+    }
+
+    let resolved = ResolvedFsProfile {
+        name: "default".to_string(),
+        read: vec!["/Users/test/repo".to_string()],
+        modify: vec![
+            "/Users/test/.orbit/orbit.db*".to_string(),
+            "/Users/test/repo/.orbit/state/semantic.db*".to_string(),
+            "/Users/test/repo/**/*.env".to_string(),
+        ],
+    };
+    let profile_text = compile_macos_sandbox_profile(&resolved).expect("compile sbpl");
+    assert!(
+        !profile_text.contains("(?i)"),
+        "compiled profile must not contain the unsupported (?i) inline flag: {profile_text}"
+    );
+
+    let mut profile_file = tempfile::Builder::new()
+        .prefix("orbit-sandbox-glob-")
+        .suffix(".sb")
+        .tempfile()
+        .expect("tempfile");
+    use std::io::Write;
+    profile_file
+        .write_all(profile_text.as_bytes())
+        .expect("write profile");
+    profile_file.flush().expect("flush");
+
+    let output = Command::new(sandbox_exec_path_for_test())
+        .arg("-f")
+        .arg(profile_file.path())
+        .arg("/usr/bin/true")
+        .output()
+        .expect("run sandbox-exec");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unexpected ^ operator"),
+        "sandbox-exec rejected the compiled profile regex: {stderr}"
+    );
+    // Exit 65 (EX_DATAERR) is sandbox-exec's profile-compile failure. Any other
+    // outcome — success, or a runtime denial — means the profile compiled.
+    assert_ne!(
+        output.status.code(),
+        Some(65),
+        "sandbox-exec failed to compile the mid-path-glob profile (exit 65); stderr: {stderr}"
+    );
+}
