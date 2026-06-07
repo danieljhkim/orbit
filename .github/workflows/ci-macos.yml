@@ -1,0 +1,55 @@
+name: macOS Sandbox
+
+# The orbit-exec macOS sandbox tests (`#[cfg(target_os = "macos")]`, gated on
+# `sandbox_exec_can_apply()`) compile generated SBPL profiles through the real
+# `/usr/bin/sandbox-exec`. The primary CI workflow runs on Linux, where those
+# tests are compiled out entirely — which is how ORB-00366's `(?i)` SBPL
+# breakage (ORB-00372) reached agent-main undetected. This leg runs them on a
+# real macOS runner. Path-filtered so the (cost-weighted) macOS runner only
+# fires on PRs that touch sandbox-relevant code.
+
+on:
+  push:
+    branches: [main, agent-main]
+  pull_request:
+    paths:
+      - "crates/orbit-exec/**"
+      - "crates/orbit-common/src/utility/glob.rs"
+      - "Cargo.lock"
+      - ".github/workflows/ci-macos.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos-sandbox:
+    name: macOS Sandbox
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable (2026-05-07)
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-macos-sandbox-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-macos-sandbox-
+            ${{ runner.os }}-cargo-
+
+      # Exercises the real-`sandbox-exec` regex regression test added by
+      # ORB-00372 plus the existing macOS sandbox suite. If a future macOS
+      # runner forbids `sandbox-exec`, `sandbox_exec_can_apply()` self-skips the
+      # apply-time tests rather than failing — never worse than the Linux gate.
+      - name: Run orbit-exec sandbox tests (real sandbox-exec)
+        run: cargo test -p orbit-exec --locked
