@@ -234,8 +234,21 @@ impl LearningFileStore {
         &self,
         record: &IdAllocationRecord,
     ) -> Result<Option<Learning>, OrbitError> {
+        // ORB-00373: the canonical copy under `self.root` is the source of
+        // truth (docs/design/project-learnings/2_design.md). Resolve it FIRST,
+        // ahead of the allocator's recorded `body_path`. A learning first
+        // allocated inside a job-run worktree records that worktree's path; a
+        // later supersede/update/sync rewrites only the canonical `self.root`
+        // copy (+ the SQLite index), leaving stale worktree copies behind. If
+        // we read the recorded `body_path` first, `list`/`show` report
+        // superseded learnings as active (F2026-06-001). The `body_path` is a
+        // fallback only for learnings genuinely absent from `self.root`
+        // (sibling-worktree / remote stubs).
+        if let Some(local) = self.get_learning(&record.id)? {
+            return Ok(Some(local));
+        }
         let Some(path) = record.resolved_body_path() else {
-            return self.get_learning(&record.id);
+            return Ok(None);
         };
         if !path.is_file() {
             return Ok(None);

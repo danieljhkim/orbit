@@ -238,6 +238,83 @@ fn shared_allocator_assigns_distinct_learning_ids_across_divergent_worktrees() {
 }
 
 #[test]
+fn canonical_self_root_copy_wins_over_stale_worktree_body_path() {
+    // F2026-06-001 / ORB-00373. A learning first allocated inside a job-run
+    // worktree records that worktree's `body_path` in the shared allocator. A
+    // later supersede/update rewrites only the canonical `self.root` copy,
+    // leaving the worktree copy active. `list`/`show` must report the canonical
+    // (superseded) status — the YAML under `self.root` is the source of truth —
+    // not the stale worktree copy the allocator points at.
+    let dir = tempdir().expect("tempdir");
+    let shared_orbit = dir.path().join("shared/.orbit");
+    let worktree_a = dir.path().join("worktree-a"); // canonical store we operate from
+    let worktree_b = dir.path().join("worktree-b"); // stale allocator-recorded copy
+    std::fs::create_dir_all(shared_orbit.join("learnings")).expect("shared learnings");
+    std::fs::create_dir_all(worktree_a.join(".orbit/learnings")).expect("worktree a");
+    std::fs::create_dir_all(worktree_b.join(".orbit/learnings")).expect("worktree b");
+
+    // Allocate from worktree-b so the shared allocator records the body_path
+    // against worktree-b's copy (which stays active).
+    let store_b = learning_store_for_worktree(&shared_orbit, &worktree_b);
+    let learning = store_b
+        .create_learning(create_params(
+            "case identity rule",
+            vec!["crates/**"],
+            vec!["macos"],
+        ))
+        .expect("create in worktree-b");
+
+    // Canonical copy under worktree-a (the store we operate) is superseded,
+    // while worktree-b's allocator-recorded copy remains active — the exact
+    // on-disk divergence observed in the field.
+    let canonical = worktree_a
+        .join(".orbit/learnings")
+        .join(&learning.id)
+        .join("learning.yaml");
+    std::fs::create_dir_all(canonical.parent().expect("canonical parent")).expect("canonical dir");
+    std::fs::write(
+        &canonical,
+        super::test_support::legacy_learning_yaml(
+            &learning.id,
+            "superseded",
+            "case identity rule",
+            1,
+        ),
+    )
+    .expect("write superseded canonical copy");
+
+    let store_a = learning_store_for_worktree(&shared_orbit, &worktree_a);
+
+    // `show` (federated) must reflect the canonical superseded status.
+    let shown = store_a
+        .get_learning_federated(&learning.id)
+        .expect("federated get")
+        .expect("present");
+    assert_eq!(
+        shown.status,
+        LearningStatus::Superseded,
+        "federated get must prefer the canonical self.root copy, not the stale worktree body_path",
+    );
+
+    // `list --status active` must exclude it; `list --status superseded` must
+    // include it as a Local entry.
+    let active = store_a
+        .list_learning_entries(Some(LearningStatus::Active), false)
+        .expect("active entries");
+    assert!(
+        !entry_has_id(&active, &learning.id),
+        "superseded learning must not appear under --status active",
+    );
+    let superseded = store_a
+        .list_learning_entries(Some(LearningStatus::Superseded), false)
+        .expect("superseded entries");
+    assert!(
+        entry_is_local(&superseded, &learning.id),
+        "superseded learning must appear (Local) under --status superseded",
+    );
+}
+
+#[test]
 fn learnings_index_partial_index_present_after_apply_schema() {
     let store = Store::open_in_memory().expect("open in-memory store");
     let conn_arc = store.connection();
