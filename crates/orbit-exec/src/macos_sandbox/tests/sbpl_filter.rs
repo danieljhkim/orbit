@@ -28,9 +28,16 @@ fn compile_uses_regex_for_non_subpath_positive_modify_glob() {
     let text = compile_with_env(&resolved, EnvOverrides::default());
     assert!(
         text.contains(
-            "(allow file-write* (regex \"(?i)^/Users/test/\\\\.orbit/orbit\\\\.db[^/]*$\"))"
+            "(allow file-write* (regex \"^/[Uu][Ss][Ee][Rr][Ss]/[Tt][Ee][Ss][Tt]/\\\\.[Oo][Rr][Bb][Ii][Tt]/[Oo][Rr][Bb][Ii][Tt]\\\\.[Dd][Bb][^/]*$\"))"
         ),
         "missing regex allow for SQLite sidecar glob: {text}"
+    );
+    // SBPL has no `(?i)` inline flag — case-insensitivity is expressed via
+    // per-letter character classes (ORB-00372). A stray `(?i)` makes
+    // sandbox-exec reject the whole profile.
+    assert!(
+        !text.contains("(?i)"),
+        "emitted SBPL must not contain the unsupported (?i) inline flag: {text}"
     );
     assert!(
         !text.contains("(allow file-write* (subpath \"/Users/test/.orbit\"))"),
@@ -92,8 +99,12 @@ fn compile_uses_regex_for_non_subpath_negated_read_glob() {
     resolved.read.push("!/Users/test/repo/**/*.env".to_string());
     let text = compile_with_env(&resolved, EnvOverrides::default());
     assert!(
-        text.contains("(deny file-read* (regex \"(?i)^/Users/test/repo/(?:.*/)?[^/]*\\\\.env$\"))"),
+        text.contains("(deny file-read* (regex \"^/[Uu][Ss][Ee][Rr][Ss]/[Tt][Ee][Ss][Tt]/[Rr][Ee][Pp][Oo]/(?:.*/)?[^/]*\\\\.[Ee][Nn][Vv]$\"))"),
         "missing regex read deny: {text}"
+    );
+    assert!(
+        !text.contains("(?i)"),
+        "emitted SBPL must not contain the unsupported (?i) inline flag: {text}"
     );
 }
 
@@ -106,9 +117,13 @@ fn compile_uses_regex_for_non_subpath_negated_modify_glob() {
     let text = compile_with_env(&resolved, EnvOverrides::default());
     assert!(
         text.contains(
-            "(deny file-write* (regex \"(?i)^/Users/test/repo/(?:.*/)?[^/]*\\\\.env$\"))"
+            "(deny file-write* (regex \"^/[Uu][Ss][Ee][Rr][Ss]/[Tt][Ee][Ss][Tt]/[Rr][Ee][Pp][Oo]/(?:.*/)?[^/]*\\\\.[Ee][Nn][Vv]$\"))"
         ),
         "missing regex deny for env glob: {text}"
+    );
+    assert!(
+        !text.contains("(?i)"),
+        "emitted SBPL must not contain the unsupported (?i) inline flag: {text}"
     );
     assert!(
         !text.contains("(deny file-write* (subpath \"/Users/test/repo\"))"),
