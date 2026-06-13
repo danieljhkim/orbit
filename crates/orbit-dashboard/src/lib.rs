@@ -80,6 +80,8 @@ pub struct ServeArgs {
 /// args. All routes, response shapes, and side-effects (browser open, banner)
 /// are unchanged from the prior CLI-embedded version.
 pub fn serve(runtime: &OrbitRuntime, args: ServeArgs) -> Result<(), OrbitError> {
+    check_bindable_host(args.host, args.port)?;
+
     let addr = SocketAddr::new(args.host, args.port);
     let url = format!("http://{addr}");
     let runtime = Arc::new(runtime.clone());
@@ -131,6 +133,29 @@ pub fn serve(runtime: &OrbitRuntime, args: ServeArgs) -> Result<(), OrbitError> 
 
         Ok::<(), OrbitError>(())
     })
+}
+
+/// Reject binding the dashboard to anything other than a loopback address.
+///
+/// SECURITY (ORB-00360): the dashboard has no authentication of its own. The
+/// only request-level check is [`api::require_localhost_origin`], a
+/// browser-CSRF mitigation that inspects the client-supplied `Origin` header
+/// and is trivially spoofable by any non-browser client (curl, a LAN script).
+/// It is NOT an access-control boundary. Binding to a non-loopback address
+/// would expose the full unauthenticated read/write API to the network, so we
+/// refuse. For remote access, bind loopback and front the dashboard with an
+/// authenticated tunnel/reverse proxy (e.g. `ssh -L`).
+fn check_bindable_host(host: IpAddr, port: u16) -> Result<(), OrbitError> {
+    if host.is_loopback() {
+        return Ok(());
+    }
+    Err(OrbitError::InvalidInput(format!(
+        "refusing to bind dashboard to non-loopback address {host}: the \
+         dashboard is unauthenticated and the Origin check is not an \
+         access-control boundary. Bind a loopback address (127.0.0.1 or ::1) \
+         and use an authenticated tunnel/reverse proxy (e.g. \
+         `ssh -L {port}:localhost:{port} <host>`) for remote access."
+    )))
 }
 
 async fn serve_index() -> Response {
