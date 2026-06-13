@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-05-16
+last_updated: 2026-06-12
 status: Draft
 feature: activity-job
 doc_role: design
@@ -42,7 +42,6 @@ and then flattens one `ActivityV2Spec` variant:
 - `AgentLoop(AgentLoopSpec)`
 - `Groundhog(GroundhogSpec)`
 - `Deterministic(DeterministicSpec)`
-- `Shell(ShellSpec)`
 
 The common `agent_loop` fields are:
 
@@ -57,7 +56,7 @@ The common `agent_loop` fields are:
 
 Groundhog has its own `GroundhogSpec`, but `as_agent_loop_spec()` projects it into an HTTP-backed agent loop when the runner needs the shared transport path. That sibling kind landed in [T20260420-0510-2].
 
-`DeterministicSpec` is just `{ action, config }`. `ShellSpec` is a direct subprocess surface with `program`, `args`, `allowed_programs`, `timeout_seconds`, and `expected_exit_codes`.
+`DeterministicSpec` is just `{ action, config }`. A fourth variant, `Shell(ShellSpec)`, was removed in [ORB-00374] as a fail-closed security fix (see [ADR-0194](./4_decisions.md)); `type: shell` now fails to deserialize at load rather than spawning an unsandboxed subprocess.
 
 ---
 
@@ -181,7 +180,6 @@ That host wiring arrived in [T20260418-2143]. The cleanup in [T20260418-2210] ke
 - `agent_loop` → HTTP or CLI path
 - `groundhog` → Groundhog runner
 - `deterministic` → host callback
-- `shell` → direct subprocess execution
 
 That keeps the dispatch tree readable while provider/session construction stays below the boundary.
 
@@ -256,8 +254,6 @@ Agents running inside an activity step pass durable data to later steps through 
 - `orbit.task.update` stays the right tool for task artifacts (`execution_summary`, `pr_status`, comments, lifecycle state). That is task persistence, not pipeline-state handoff.
 - `orbit.state.*` is only callable when the activity allowlist includes those tools. Currently only [step_failure_recovery](../../../crates/orbit-core/assets/activities/step_failure_recovery.yaml) grants them; other activities thread data through `{{ steps.<id>.output.* }}` or purpose-built tools (e.g. `orbit.duel.plan.winner`).
 
-For `run_command` or any shell-based step, there is no implicit structured output path beyond `exit_code`. If the command must feed downstream steps, have it invoke `orbit.state.set` explicitly. Downstream jobs read the persisted state instead of parsing shell stdout.
-
 ### 8.2 `when` and `retry`
 
 `when` is evaluated once, before retry. A skipped step is a successful no-op and does not retry.
@@ -268,7 +264,6 @@ The retry wrapper re-runs the whole step body up to `max_attempts`, with exponen
 
 - tool denial
 - unknown deterministic action
-- shell allowlist violation
 - host-required / backend-resolution structural errors
 - job validation errors
 
@@ -547,5 +542,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260509-38]** — Run legacy parallel-batch workers through cancellable pipeline runs so timeout failure paths return promptly.
 - **[T20260509-40]** — Run CLI subprocesses in killable process groups and bound timeout-path output reader joins.
 - **[ORB-00016]** — Treat no-repository-diff `task_pr_pipeline` handoffs as successful no-PR completions.
+- **[ORB-00374]** — Remove the `shell` activity variant and `run_shell` dispatch (fail-closed resolution of security bug [ORB-00363]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

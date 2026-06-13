@@ -136,7 +136,7 @@ fn activity_tool_allowlist(activity: &ActivityV2) -> Option<&[String]> {
     match &activity.spec {
         ActivityV2Spec::AgentLoop(spec) => Some(&spec.tools),
         ActivityV2Spec::Groundhog(spec) => Some(&spec.tools),
-        ActivityV2Spec::Deterministic(_) | ActivityV2Spec::Shell(_) => None,
+        ActivityV2Spec::Deterministic(_) => None,
     }
 }
 

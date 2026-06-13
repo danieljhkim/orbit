@@ -239,7 +239,7 @@ pub struct TargetRef {
 
 /// Retry modifier (§4.1). Applied per-step wrapper; counts re-runs of the
 /// step body. Non-retryable errors (tool denial, unknown deterministic action,
-/// shell allowlist violation) bypass retry.
+/// validation) bypass retry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RetrySpec {
     pub max_attempts: u32,
