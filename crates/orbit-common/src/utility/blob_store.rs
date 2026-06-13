@@ -72,7 +72,12 @@ impl BlobStore {
                 .extra_redactor
                 .apply_str(&redact_all(text))
                 .into_bytes(),
-            Err(_) => self.extra_redactor.apply_bytes(content),
+            Err(_) => {
+                let lossy_text = String::from_utf8_lossy(content);
+                self.extra_redactor
+                    .apply_str(&redact_all(&lossy_text))
+                    .into_bytes()
+            }
         }
     }
 
