@@ -663,9 +663,16 @@ impl ExecutionEnvPolicy {
     fn from_raw(raw: Option<RawExecutionEnvConfig>) -> Result<Self, OrbitError> {
         match raw {
             Some(raw) => {
-                let inherit = raw.inherit.unwrap_or(DEFAULT_ENV_INHERIT);
+                // Env inheritance is fixed at DEFAULT_ENV_INHERIT and cannot be
+                // overridden by config — an untrusted workspace config.toml must
+                // not be able to widen passthrough to the full host environment
+                // (secrets/tokens). Only the `pass` allowlist is configurable.
+                // See ORB-00365.
                 let pass = normalize_pass_list(raw.pass.unwrap_or_else(default_pass_list))?;
-                Ok(Self { inherit, pass })
+                Ok(Self {
+                    inherit: DEFAULT_ENV_INHERIT,
+                    pass,
+                })
             }
             None => Ok(Self::default()),
         }
