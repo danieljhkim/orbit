@@ -379,23 +379,31 @@ fn resolve_worktree(
         Some(path) => Some(path),
         None => optional_string(input, "workspace")?,
     };
-    let raw_path = requested
-        .as_deref()
-        .or(session_context.workspace.as_deref());
-    let candidate = match raw_path {
+
+    // Anchor root for containment: the announced session workspace if present,
+    // otherwise the process working directory. A client-supplied path is ALWAYS
+    // scoped against this root, even when no session workspace was announced —
+    // otherwise an unannounced session lets a client open/read an arbitrary
+    // directory (CWE-22, ORB-00361).
+    let anchor_root = match session_context.workspace.as_deref() {
+        Some(workspace) => canonicalize_dir(absolutize(workspace)?.as_path(), "workspace")?,
+        None => canonicalize_dir(
+            env::current_dir().map_err(OrbitError::from)?.as_path(),
+            "workspace",
+        )?,
+    };
+
+    let candidate = match requested.as_deref() {
         Some(raw) => absolutize(raw)?,
-        None => env::current_dir().map_err(OrbitError::from)?,
+        None => anchor_root.clone(),
     };
     let canonical = canonicalize_dir(candidate.as_path(), "worktree")?;
 
-    if let (Some(session_workspace), Some(_)) = (session_context.workspace.as_deref(), requested) {
-        let session_root = canonicalize_dir(absolutize(session_workspace)?.as_path(), "workspace")?;
-        if !canonical.starts_with(session_root.as_path()) {
-            return Err(OrbitError::InvalidInput(format!(
-                "`workspace_path` must stay within initialized workspace `{}`",
-                session_root.display()
-            )));
-        }
+    if requested.is_some() && !canonical.starts_with(anchor_root.as_path()) {
+        return Err(OrbitError::InvalidInput(format!(
+            "`workspace_path` must stay within initialized workspace `{}`",
+            anchor_root.display()
+        )));
     }
 
     Ok(canonical)
