@@ -226,17 +226,20 @@ struct OrbitIgnoreMatcher {
 impl OrbitIgnoreMatcher {
     fn load(repo_path: &Path) -> Result<Self, GraphError> {
         let mut builder = GitignoreBuilder::new(repo_path);
-        for pattern in DEFAULT_ORBITIGNORE_PATTERNS {
-            builder.add_line(None, pattern).map_err(|error| {
-                GraphError::invalid_data(
-                    "load default .orbitignore patterns",
-                    format!("invalid default .orbitignore pattern `{pattern}`: {error}"),
-                )
-            })?;
-        }
+        add_default_orbitignore_patterns(&mut builder)?;
+        let default_orbitignore = Self {
+            gitignore: builder.build().map_err(|error| {
+                GraphError::invalid_data("build default .orbitignore matcher", error.to_string())
+            })?,
+        };
 
         let mut orbitignore_files = Vec::new();
-        collect_orbitignore_files(repo_path, repo_path, &mut orbitignore_files)?;
+        collect_orbitignore_files(
+            repo_path,
+            repo_path,
+            &default_orbitignore,
+            &mut orbitignore_files,
+        )?;
         orbitignore_files.sort_by(|left, right| {
             let left_rel = left.strip_prefix(repo_path).unwrap_or(left.as_path());
             let right_rel = right.strip_prefix(repo_path).unwrap_or(right.as_path());
@@ -267,6 +270,18 @@ impl OrbitIgnoreMatcher {
             .matched_path_or_any_parents(rel_path, is_dir)
             .is_ignore()
     }
+}
+
+fn add_default_orbitignore_patterns(builder: &mut GitignoreBuilder) -> Result<(), GraphError> {
+    for pattern in DEFAULT_ORBITIGNORE_PATTERNS {
+        builder.add_line(None, pattern).map_err(|error| {
+            GraphError::invalid_data(
+                "load default .orbitignore patterns",
+                format!("invalid default .orbitignore pattern `{pattern}`: {error}"),
+            )
+        })?;
+    }
+    Ok(())
 }
 
 fn load_file_rows(conn: &Connection) -> Result<BTreeMap<PathBuf, FileRow>, GraphError> {
@@ -357,6 +372,7 @@ fn walk_dir(
 fn collect_orbitignore_files(
     root: &Path,
     dir: &Path,
+    default_orbitignore: &OrbitIgnoreMatcher,
     out: &mut Vec<PathBuf>,
 ) -> Result<(), GraphError> {
     let entries =
@@ -372,10 +388,15 @@ fn collect_orbitignore_files(
             .map_err(|source| GraphError::io("read file type", path.as_path(), source))?;
 
         if file_type.is_dir() {
+            if let Ok(rel) = path.strip_prefix(root)
+                && default_orbitignore.is_ignored(rel, true)
+            {
+                continue;
+            }
             if name.starts_with('.') {
                 continue;
             }
-            collect_orbitignore_files(root, path.as_path(), out)?;
+            collect_orbitignore_files(root, path.as_path(), default_orbitignore, out)?;
         } else if file_type.is_file() && name.as_ref() == ORBITIGNORE_FILE_NAME {
             let relative = path.strip_prefix(root).map_err(|error| {
                 GraphError::invalid_data("strip .orbitignore prefix", error.to_string())

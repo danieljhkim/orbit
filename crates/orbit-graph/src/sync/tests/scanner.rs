@@ -5,10 +5,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use ignore::gitignore::GitignoreBuilder;
 use rusqlite::{Connection, params};
 
 use super::{
-    ContentHasher, DbLockGuard, OrbitIgnoreMatcher, Scanner, mtime_ns, scan_count, scan_diff,
+    ContentHasher, DbLockGuard, OrbitIgnoreMatcher, Scanner, add_default_orbitignore_patterns,
+    collect_orbitignore_files, mtime_ns, scan_count, scan_diff,
 };
 use crate::sync::{SyncLeaderGate, set_sync_leader_gate, sync_leader_count};
 use crate::{EXTRACTOR_VERSION, Graph, SyncMode, SyncPolicy, resolve_db_path};
@@ -179,6 +181,67 @@ fn orbitignore_semantics_match_orbit_knowledge_fixture_corpus() {
 }
 
 #[test]
+fn orbitignore_discovery_prunes_default_ignored_directories() {
+    let worktree = TestWorktree::new("orbitignore-discovery-prunes-defaults");
+    worktree.write(".orbitignore", "# root rules\n");
+    worktree.write("src/.orbitignore", "generated.rs\n");
+
+    for ignored_dir in [
+        "target",
+        "node_modules",
+        "dist",
+        "build",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "crate.egg-info",
+        ".orbit",
+    ] {
+        worktree.write(&format!("{ignored_dir}/.orbitignore"), "*.rs\n");
+        worktree.write(&format!("{ignored_dir}/nested/.orbitignore"), "*.rs\n");
+    }
+
+    let default_orbitignore = default_orbitignore_matcher(worktree.path());
+    let mut orbitignore_files = Vec::new();
+    collect_orbitignore_files(
+        worktree.path(),
+        worktree.path(),
+        &default_orbitignore,
+        &mut orbitignore_files,
+    )
+    .expect("collect .orbitignore files");
+
+    let mut relative_files = orbitignore_files
+        .into_iter()
+        .map(|path| {
+            path.strip_prefix(worktree.path())
+                .expect("strip worktree prefix")
+                .to_path_buf()
+        })
+        .collect::<Vec<_>>();
+    relative_files.sort();
+
+    assert_eq!(
+        relative_files,
+        vec![
+            PathBuf::from(".orbitignore"),
+            PathBuf::from("src/.orbitignore")
+        ]
+    );
+}
+
+#[test]
+fn nested_orbitignore_in_non_ignored_directory_is_discovered() {
+    let worktree = TestWorktree::new("nested-orbitignore-discovered");
+    worktree.write("subdir/.orbitignore", "ignored.rs\n");
+
+    let matcher = OrbitIgnoreMatcher::load(worktree.path()).expect("load matcher");
+
+    assert!(matcher.is_ignored(Path::new("subdir/ignored.rs"), false));
+    assert!(!matcher.is_ignored(Path::new("subdir/kept.rs"), false));
+}
+
+#[test]
 fn dropping_scanner_releases_flock() {
     let worktree = TestWorktree::new("flock-release");
     let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
@@ -300,6 +363,14 @@ fn graph_db_path(worktree: &Path) -> PathBuf {
     resolve_db_path(worktree, "HEAD", EXTRACTOR_VERSION)
         .path()
         .to_path_buf()
+}
+
+fn default_orbitignore_matcher(worktree: &Path) -> OrbitIgnoreMatcher {
+    let mut builder = GitignoreBuilder::new(worktree);
+    add_default_orbitignore_patterns(&mut builder).expect("add default .orbitignore patterns");
+    OrbitIgnoreMatcher {
+        gitignore: builder.build().expect("build default .orbitignore matcher"),
+    }
 }
 
 struct TestWorktree {
