@@ -1,16 +1,18 @@
 //! Write path: schema creation, WAL, and three-phase ingestion for the graph SQLite index.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{Connection, TransactionBehavior, params};
 
-use super::super::nodes::{BaseNodeFields, CodebaseGraphV1, FileNode};
+use super::super::nodes::{BaseNodeFields, CodebaseGraphV1, FileNode, LeafKind};
 use super::GRAPH_SQLITE_INDEX_SCHEMA_VERSION;
 use super::rows::{dir_selector, file_selector, leaf_selector, selector_counts, stable_selector};
 use crate::error::KnowledgeError;
+use crate::graph::call_extraction::rust_callee_names;
+use crate::graph::source_match::is_identifier_char;
 
 pub(crate) fn write_graph_index(
     path: &Path,
@@ -45,6 +47,8 @@ pub(crate) fn write_graph_index(
         DROP TABLE IF EXISTS node;
         DROP TABLE IF EXISTS child;
         DROP TABLE IF EXISTS file_summary;
+        DROP TABLE IF EXISTS source_mention;
+        DROP TABLE IF EXISTS call_edge;
 
         CREATE TABLE meta (
           key TEXT PRIMARY KEY,
@@ -92,6 +96,30 @@ pub(crate) fn write_graph_index(
           path TEXT NOT NULL
         );
         CREATE INDEX idx_file_symbol_count ON file_summary(symbol_count DESC);
+
+        -- Inverted source mention index for `orbit.graph.refs`. Terms mirror
+        -- GraphContextService::find_references for the common selector terms:
+        -- identifier terms use identifier boundaries, and qualified-looking
+        -- terms (`Foo::bar`, `Foo.bar`) are indexed as complete source runs.
+        -- Rows point at the referencing leaf or file node, so reads
+        -- materialize only matching rows.
+        CREATE TABLE source_mention (
+          term TEXT NOT NULL,
+          node_id TEXT NOT NULL,
+          PRIMARY KEY (term, node_id)
+        );
+        CREATE INDEX idx_source_mention_term ON source_mention(term);
+
+        -- Build-time Rust call edges for `orbit.graph.callers`. This stores
+        -- the same simple-name call graph the legacy read path built by
+        -- reparsing every Rust function/method leaf on demand.
+        CREATE TABLE call_edge (
+          callee_name TEXT NOT NULL,
+          caller_id TEXT NOT NULL,
+          caller_scan_order INTEGER NOT NULL,
+          PRIMARY KEY (callee_name, caller_id)
+        );
+        CREATE INDEX idx_call_edge_callee ON call_edge(callee_name, caller_scan_order);
         "#,
     )
     .map_err(|error| sqlite_error(path, "initialize graph sqlite index schema", error))?;
@@ -245,6 +273,24 @@ pub(crate) fn write_graph_index(
         for file in &graph.files {
             insert_file_summary(path, &mut file_summary_insert, file)?;
         }
+    }
+
+    {
+        let mut source_mention_insert = tx
+            .prepare("INSERT OR IGNORE INTO source_mention (term, node_id) VALUES (?1, ?2)")
+            .map_err(|error| {
+                sqlite_error(path, "prepare graph sqlite source_mention insert", error)
+            })?;
+        insert_source_mentions(path, &mut source_mention_insert, graph)?;
+    }
+
+    {
+        let mut call_edge_insert = tx
+            .prepare(
+                "INSERT OR REPLACE INTO call_edge (callee_name, caller_id, caller_scan_order) VALUES (?1, ?2, ?3)",
+            )
+            .map_err(|error| sqlite_error(path, "prepare graph sqlite call_edge insert", error))?;
+        insert_call_edges(path, &mut call_edge_insert, graph)?;
     }
 
     tx.execute(
@@ -445,6 +491,118 @@ fn insert_file_summary(
             file.base.location.as_str()
         ])
         .map_err(|error| sqlite_error(path, "insert graph sqlite file_summary", error))?;
+    Ok(())
+}
+
+fn insert_source_mentions(
+    path: &Path,
+    statement: &mut rusqlite::Statement<'_>,
+    graph: &CodebaseGraphV1,
+) -> Result<(), KnowledgeError> {
+    for leaf in &graph.leaves {
+        insert_terms_for_source(path, statement, leaf.base.id.as_str(), leaf.source.as_str())?;
+    }
+
+    for file in &graph.files {
+        let source = if file.imports.is_empty() {
+            file.source.clone()
+        } else if file.source.is_empty() {
+            file.imports.join("\n")
+        } else {
+            format!("{}\n{}", file.imports.join("\n"), file.source)
+        };
+        insert_terms_for_source(path, statement, file.base.id.as_str(), source.as_str())?;
+    }
+
+    Ok(())
+}
+
+fn insert_terms_for_source(
+    path: &Path,
+    statement: &mut rusqlite::Statement<'_>,
+    node_id: &str,
+    source: &str,
+) -> Result<(), KnowledgeError> {
+    if source.is_empty() {
+        return Ok(());
+    }
+
+    for term in source_terms(source) {
+        statement
+            .execute(params![term.as_str(), node_id])
+            .map_err(|error| sqlite_error(path, "insert graph sqlite source mention", error))?;
+    }
+    Ok(())
+}
+
+fn source_terms(source: &str) -> HashSet<String> {
+    let mut terms = HashSet::new();
+    let mut identifier = String::new();
+    let mut qualified = String::new();
+    for ch in source.chars() {
+        if is_identifier_char(ch) {
+            identifier.push(ch);
+            qualified.push(ch);
+        } else {
+            if !identifier.is_empty() {
+                terms.insert(std::mem::take(&mut identifier));
+            }
+            if is_qualified_symbol_char(ch) {
+                qualified.push(ch);
+            } else if !qualified.is_empty() {
+                push_qualified_term(&mut terms, &mut qualified);
+            }
+        }
+    }
+    if !identifier.is_empty() {
+        terms.insert(identifier);
+    }
+    push_qualified_term(&mut terms, &mut qualified);
+    terms
+}
+
+fn is_qualified_symbol_char(ch: char) -> bool {
+    matches!(ch, ':' | '.' | '_' | '#' | '<' | '>')
+}
+
+fn push_qualified_term(terms: &mut HashSet<String>, qualified: &mut String) {
+    let term = qualified.trim_matches(is_qualified_trim_char);
+    if term
+        .chars()
+        .any(|ch| matches!(ch, ':' | '.' | '#' | '<' | '>'))
+        && term.chars().any(is_identifier_char)
+    {
+        terms.insert(term.to_string());
+    }
+    qualified.clear();
+}
+
+fn is_qualified_trim_char(ch: char) -> bool {
+    !is_identifier_char(ch)
+}
+
+fn insert_call_edges(
+    path: &Path,
+    statement: &mut rusqlite::Statement<'_>,
+    graph: &CodebaseGraphV1,
+) -> Result<(), KnowledgeError> {
+    for (scan_order, leaf) in graph.leaves.iter().enumerate() {
+        if leaf.base.language != "rust" {
+            continue;
+        }
+        if !matches!(leaf.kind, LeafKind::Function | LeafKind::Method) {
+            continue;
+        }
+        for callee in rust_callee_names(&leaf.source)? {
+            statement
+                .execute(params![
+                    callee.as_str(),
+                    leaf.base.id.as_str(),
+                    scan_order as i64,
+                ])
+                .map_err(|error| sqlite_error(path, "insert graph sqlite call edge", error))?;
+        }
+    }
     Ok(())
 }
 

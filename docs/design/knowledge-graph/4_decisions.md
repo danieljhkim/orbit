@@ -3,7 +3,7 @@ summary: "Knowledge Graph — Decisions"
 type: design
 title: "Knowledge Graph — Decisions"
 owner: claude
-last_updated: 2026-05-17
+last_updated: 2026-06-13
 status: Draft
 feature: knowledge-graph
 doc_role: decisions
@@ -619,6 +619,23 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
+## ADR-040 — Serve hot graph reads from the SQLite index
+
+**Status:** Accepted · 2026-06 · [ORB-00380]
+**Author:** codex
+
+**Context.** `orbit.graph.show`, `orbit.graph.refs`, and `orbit.graph.callers` are hot navigation reads. The legacy command paths hydrated the full content-addressed graph for each call: one object-envelope open and JSON parse per node, plus leaf blob hydration for `refs` and a tree-sitter reparse of every Rust function/method leaf for `callers`. On the Orbit repository this meant roughly 18k object reads per call before returning one selector or a small result set.
+
+**Decision.** Treat the graph SQLite sidecar as the read index for these hot paths. `show` resolves selectors through `node.selector -> object_hash` and reads only the selected object plus bounded context rows. `refs` reads a build-time `source_mention` inverted index keyed by source terms and materializes only matching node rows. `callers` reads a build-time `call_edge` table populated from the same Rust call extractor previously used on demand. The sidecar schema version is bumped so older indexes fall back rather than mixing missing edge tables with new readers.
+
+**Consequences.**
+- Steady-state `show`, `refs`, and `callers` scale with matching rows plus bounded context instead of total repository node count.
+- Persist now pays the cost to populate `source_mention` and `call_edge`, moving caller parsing from every read to graph build time.
+- Output-equivalence tests keep the JSON/read_graph path as the oracle for refs and callers fixtures, and command tests remove object/blob files to prove the SQL path does not hydrate the graph.
+- Cost: `source_mention` is intentionally term-oriented, not a byte-offset reference resolver. It preserves the existing name-scan semantics for identifier terms and qualified-looking source runs; future semantic references should build on the orbit-graph refs/relations model rather than overloading this legacy command index.
+
+---
+
 ## Task References
 
 Tasks cited by ADRs above:
@@ -679,5 +696,6 @@ Tasks cited by ADRs above:
 - **[T20260510-5]** — Extract `orbit_knowledge::commands::*` as the canonical graph command surface and thin graph tools to dispatch/envelope shaping.
 - **[T20260510-7]** — Make leaf IDs unique across extractors so SQL fast paths preserve every symbol.
 - **[ORB-00099]** — Decouple graph refresh branch attribution from shared `.orbit` root resolution for linked worktrees.
+- **[ORB-00380]** — Make `show`, `refs`, and `callers` read from the SQLite graph index instead of hydrating the full graph per call.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

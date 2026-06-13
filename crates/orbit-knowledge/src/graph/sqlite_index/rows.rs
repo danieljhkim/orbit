@@ -28,6 +28,27 @@ pub struct GraphIndexSearchRow {
     pub scan_order: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphIndexReferenceRow {
+    pub id: String,
+    pub node_type: String,
+    pub kind: Option<String>,
+    pub name: String,
+    pub location: String,
+    pub selector: Option<String>,
+    pub scan_order: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphIndexCallerRow {
+    pub selector: String,
+    pub name: String,
+    pub file: String,
+    pub kind: String,
+    pub distance: usize,
+    pub via: String,
+}
+
 pub(crate) fn graph_index_node_from_row(row: &Row<'_>) -> rusqlite::Result<GraphIndexNodeRow> {
     Ok(GraphIndexNodeRow {
         id: row.get(0)?,
@@ -44,6 +65,20 @@ pub(crate) fn graph_index_search_row_from_row(
     row: &Row<'_>,
 ) -> rusqlite::Result<GraphIndexSearchRow> {
     Ok(GraphIndexSearchRow {
+        id: row.get(0)?,
+        node_type: row.get(1)?,
+        kind: row.get(2)?,
+        name: row.get(3)?,
+        location: row.get(4)?,
+        selector: row.get(5)?,
+        scan_order: row.get(6)?,
+    })
+}
+
+pub(crate) fn graph_index_reference_row_from_row(
+    row: &Row<'_>,
+) -> rusqlite::Result<GraphIndexReferenceRow> {
+    Ok(GraphIndexReferenceRow {
         id: row.get(0)?,
         node_type: row.get(1)?,
         kind: row.get(2)?,
