@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use orbit_common::utility::output_capture::OUTPUT_TRUNCATED_MARKER;
 use tempfile::tempdir;
 
 use super::super::supervisor::{SpawnTraceContext, SpawnWithTimeoutRequest, spawn_with_timeout};
@@ -24,6 +25,7 @@ fn spawn_test_request<'a>(
         timeout,
         sandbox: None,
         trace,
+        output_capture_limit: None,
     }
 }
 
@@ -149,6 +151,38 @@ fn spawn_with_timeout_kills_timed_out_process_and_keeps_partial_output() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].field("stream"), Some("stdout"));
     assert_eq!(events[0].field("line"), Some("before timeout"));
+}
+
+#[test]
+fn spawn_with_timeout_kills_when_output_capture_limit_is_exceeded() {
+    let args = sh_args("yes capped-output");
+    let mut request = spawn_test_request(
+        "/bin/sh",
+        &args,
+        None,
+        Duration::from_secs(5),
+        SpawnTraceContext {
+            provider: "codex",
+            job_run_id: "job-output-cap",
+            task_id: Some("TCAP"),
+            cwd: None,
+        },
+    );
+    request.output_capture_limit = Some(64);
+
+    let started = std::time::Instant::now();
+    let (stdout, stderr, exit_code, _duration, timed_out) =
+        spawn_with_timeout(request).expect("spawn succeeds");
+
+    assert!(!timed_out);
+    assert_eq!(exit_code, None);
+    assert!(stderr.is_empty());
+    assert!(stdout.ends_with(OUTPUT_TRUNCATED_MARKER));
+    assert!(stdout.len() <= 64 + OUTPUT_TRUNCATED_MARKER.len());
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "output cap should kill the subprocess promptly"
+    );
 }
 
 #[cfg(unix)]

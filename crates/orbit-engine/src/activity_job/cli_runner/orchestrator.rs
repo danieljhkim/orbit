@@ -182,6 +182,8 @@ pub fn run_cli_backend(
                 task_id: task_id_from_input(input),
                 cwd: subprocess_cwd_string.as_deref(),
             },
+            #[cfg(test)]
+            output_capture_limit: None,
         })
         .map_err(|err| DispatchError::CliInvocationFailed(err.to_string()))?;
 
@@ -205,9 +207,9 @@ pub fn run_cli_backend(
     // and pre-T20260508-17 the dispatcher recorded that as success. The
     // structured envelope is now authoritative when present.
     let exit_success = !timed_out && matches!(exit_code, Some(0));
-    let stdout_text = String::from_utf8_lossy(&stdout).into_owned();
-    let envelope_status = peek_response_status(&stdout_text);
-    let stdout_preview = stdout_text_preview(&stdout_text, &redaction);
+    let stdout_text = String::from_utf8_lossy(&stdout);
+    let envelope_status = peek_response_status(stdout_text.as_ref());
+    let stdout_preview = stdout_text_preview(stdout_text.as_ref(), &redaction);
     let envelope_indicates_failure =
         matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"));
     let success = exit_success && !envelope_indicates_failure;
