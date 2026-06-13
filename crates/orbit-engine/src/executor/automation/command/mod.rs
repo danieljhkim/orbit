@@ -8,7 +8,7 @@ use tempfile::tempdir;
 
 use super::StateExecutionContext;
 use crate::context::{EnvironmentHost, RuntimeHost, TaskHost};
-use crate::template::{TemplateContext, render};
+use crate::template::{TemplateContext, render, render_shell_command};
 
 #[derive(Debug, Deserialize)]
 struct RunCommandInput {
@@ -56,7 +56,7 @@ pub(super) fn run_command<H: RuntimeHost + TaskHost + EnvironmentHost + ?Sized>(
         steps: steps_outputs.clone(),
     };
 
-    let command = render(&spec.command, &template_ctx)?;
+    let (command, command_values) = render_shell_command(&spec.command, &template_ctx)?;
     let working_dir = spec
         .working_dir
         .as_deref()
@@ -97,12 +97,13 @@ pub(super) fn run_command<H: RuntimeHost + TaskHost + EnvironmentHost + ?Sized>(
         );
     }
 
+    let mut shell_args = vec!["-lc".to_string(), command, "orbit-run-command".to_string()];
+    shell_args.extend(command_values);
+
     let exec_result = run_process(
         &ExecRequest {
-            // `command` is documented as a shell command string, so execute it
-            // through a shell instead of treating the full string as argv[0].
             program: "sh".to_string(),
-            args: vec!["-lc".to_string(), command],
+            args: shell_args,
             current_dir: working_dir,
             timeout_ms: Some(spec.timeout_seconds.saturating_mul(1000)),
             stdin_mode: StdinMode::Null,
@@ -123,3 +124,6 @@ pub(super) fn run_command<H: RuntimeHost + TaskHost + EnvironmentHost + ?Sized>(
 
     Ok(json!({ "exit_code": exit_code }))
 }
+
+#[cfg(test)]
+mod tests;
