@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use orbit_common::types::ToolSessionContext;
+use orbit_common::types::{ToolParam, ToolSessionContext};
 use rmcp::model::{ClientCapabilities, Implementation, InitializeRequestParams, Meta};
 
 use super::super::dispatch::session_context_from_initialize;
@@ -84,6 +84,57 @@ fn task_dependency_schemas_accept_string_or_string_array() {
             .iter()
             .any(|schema| schema.get("type").and_then(Value::as_str) == Some("string")),
         "orbit.task.update dependencies must accept a string"
+    );
+}
+
+/// ORB-00382: `orbit.graph.pack`'s handler requires `selectors`, so the
+/// published MCP schema must advertise it in `required` (as a string|array
+/// union) — otherwise a caller following the schema omits it and the backend
+/// rejects the call with `missing selectors`. This pins the adapter contract
+/// that a handler-required param surfaces in the published `required` set.
+#[test]
+fn graph_pack_mcp_schema_marks_required_selectors_as_string_or_array() {
+    let selectors = ToolParam {
+        name: "selectors".to_string(),
+        description: "Graph selector string or array.".to_string(),
+        param_type: "string_list".to_string(),
+        required: true,
+    };
+    let summary = param_with_type("summary", "boolean");
+    let schema = build_input_schema("orbit.graph.pack", &[selectors, summary]);
+
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .expect("required array present");
+    assert!(
+        required.iter().any(|value| value == "selectors"),
+        "selectors must be advertised as required: {required:?}"
+    );
+    assert!(
+        !required.iter().any(|value| value == "summary"),
+        "optional params must not appear in required: {required:?}"
+    );
+
+    // Advertised as a string|array union so a bare string or an array validate.
+    let properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .expect("properties");
+    let any_of = properties["selectors"]["anyOf"]
+        .as_array()
+        .expect("selectors string-list union");
+    assert!(
+        any_of
+            .iter()
+            .any(|shape| shape.get("type").and_then(Value::as_str) == Some("array")),
+        "selectors must accept an array: {any_of:?}"
+    );
+    assert!(
+        any_of
+            .iter()
+            .any(|shape| shape.get("type").and_then(Value::as_str) == Some("string")),
+        "selectors must accept a bare string: {any_of:?}"
     );
 }
 

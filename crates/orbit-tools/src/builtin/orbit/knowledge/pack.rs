@@ -20,12 +20,12 @@ impl Tool for OrbitKnowledgePackTool {
         ToolSchema {
             name: "orbit.graph.pack".to_string(),
             description:
-                "Use when you need exact selectors with context. Prefer over grep when raw text pulls the wrong symbols. Behavior: `file:` stays metadata-only; `summary` hides leaf bodies unless false."
+                "Use when you need exact selectors with context. Prefer over grep when raw text pulls the wrong symbols. Requires at least one `selectors` entry (a string or array) — e.g. `symbol:crates/orbit-graph/src/lib.rs#RefResult` or `file:crates/orbit-graph/src/lib.rs`; it packs the selectors you name, not the whole workspace. Behavior: `file:` stays metadata-only; `summary` hides leaf bodies unless false."
                     .to_string(),
             parameters: vec![
                 ToolParam {
                     name: "selectors".to_string(),
-                    description: "Selector string or array.".to_string(),
+                    description: "Required. Graph selector string or array naming what to pack. Forms: `symbol:<file>#<name>` (e.g. `symbol:crates/orbit-graph/src/lib.rs#RefResult`), `file:<path>` for file-level metadata, or `<name>:<kind>`. At least one is required — this tool extracts context for the named selectors and does not pack the whole workspace.".to_string(),
                     param_type: "string_list".to_string(),
                     required: true,
                 },
@@ -95,7 +95,10 @@ impl Tool for OrbitKnowledgePackTool {
     }
 }
 
-fn parse_selector_strings(input: &Value) -> Result<Vec<String>, OrbitError> {
+// pub(super) so the sibling test (`knowledge/tests/pack.rs`) can assert that the
+// handler enforces exactly the `selectors` field the schema marks required —
+// schema/handler agreement for ORB-00382. See docs/design-patterns/test_layout.md.
+pub(super) fn parse_selector_strings(input: &Value) -> Result<Vec<String>, OrbitError> {
     let selectors = if let Some(selectors) = optional_string_list_alias(input, &["selectors"])? {
         selectors
     } else if let Some(file) = optional_string(input, "file")? {
