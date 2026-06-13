@@ -15,6 +15,52 @@ pub struct TemplateContext {
 }
 
 pub fn render(template: &str, ctx: &TemplateContext) -> Result<String, OrbitError> {
+    render_with_tokens(template, ctx, |output, value| {
+        output.push_str(value);
+    })
+}
+
+/// Render a shell command while passing template values as positional argv.
+///
+/// The returned command string contains shell parameter references (`${1}`,
+/// `${2}`, ...) and the returned vector contains the corresponding values.
+pub fn render_shell_command(
+    template: &str,
+    ctx: &TemplateContext,
+) -> Result<(String, Vec<String>), OrbitError> {
+    let mut output = String::with_capacity(template.len());
+    let mut remaining = template;
+    let mut values = Vec::new();
+    let mut quote_state = ShellQuoteState::Unquoted;
+
+    while let Some(start) = remaining.find("{{") {
+        let literal = &remaining[..start];
+        output.push_str(literal);
+        quote_state = advance_shell_quote_state(quote_state, literal);
+
+        let after_start = &remaining[start + 2..];
+        let end = after_start.find("}}").ok_or_else(|| {
+            OrbitError::InvalidInput(format!("unterminated template token in '{template}'"))
+        })?;
+        let token = after_start[..end].trim();
+        let value = resolve_token(token, ctx)?;
+        values.push(value.to_string());
+        push_shell_positional(&mut output, values.len(), quote_state);
+        remaining = &after_start[end + 2..];
+    }
+
+    output.push_str(remaining);
+    Ok((output, values))
+}
+
+fn render_with_tokens<F>(
+    template: &str,
+    ctx: &TemplateContext,
+    mut write_token: F,
+) -> Result<String, OrbitError>
+where
+    F: FnMut(&mut String, &str),
+{
     let mut output = String::with_capacity(template.len());
     let mut remaining = template;
 
@@ -25,12 +71,69 @@ pub fn render(template: &str, ctx: &TemplateContext) -> Result<String, OrbitErro
             OrbitError::InvalidInput(format!("unterminated template token in '{template}'"))
         })?;
         let token = after_start[..end].trim();
-        output.push_str(&resolve_token(token, ctx)?);
+        let value = resolve_token(token, ctx)?;
+        write_token(&mut output, &value);
         remaining = &after_start[end + 2..];
     }
 
     output.push_str(remaining);
     Ok(output)
+}
+
+#[derive(Clone, Copy)]
+enum ShellQuoteState {
+    Unquoted,
+    Single,
+    Double,
+}
+
+fn push_shell_positional(output: &mut String, index: usize, quote_state: ShellQuoteState) {
+    match quote_state {
+        ShellQuoteState::Unquoted => {
+            output.push_str("\"${");
+            output.push_str(&index.to_string());
+            output.push_str("}\"");
+        }
+        ShellQuoteState::Single => {
+            output.push_str("'\"${");
+            output.push_str(&index.to_string());
+            output.push_str("}\"'");
+        }
+        ShellQuoteState::Double => {
+            output.push_str("${");
+            output.push_str(&index.to_string());
+            output.push('}');
+        }
+    }
+}
+
+fn advance_shell_quote_state(mut state: ShellQuoteState, literal: &str) -> ShellQuoteState {
+    let mut chars = literal.chars();
+    while let Some(ch) = chars.next() {
+        match state {
+            ShellQuoteState::Unquoted => match ch {
+                '\\' => {
+                    let _ = chars.next();
+                }
+                '\'' => state = ShellQuoteState::Single,
+                '"' => state = ShellQuoteState::Double,
+                _ => {}
+            },
+            ShellQuoteState::Single => {
+                if ch == '\'' {
+                    state = ShellQuoteState::Unquoted;
+                }
+            }
+            ShellQuoteState::Double => match ch {
+                '\\' => {
+                    let _ = chars.next();
+                }
+                '"' => state = ShellQuoteState::Unquoted,
+                _ => {}
+            },
+        }
+    }
+    state
 }
 
 fn resolve_token(token: &str, ctx: &TemplateContext) -> Result<String, OrbitError> {
