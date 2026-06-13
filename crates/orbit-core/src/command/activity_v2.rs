@@ -115,7 +115,6 @@ impl OrbitRuntime {
             orbit_common::types::activity_job::ActivityV2Spec::AgentLoop(_) => "agent_loop",
             orbit_common::types::activity_job::ActivityV2Spec::Groundhog(_) => "groundhog",
             orbit_common::types::activity_job::ActivityV2Spec::Deterministic(_) => "deterministic",
-            orbit_common::types::activity_job::ActivityV2Spec::Shell(_) => "shell",
         };
 
         let dispatch = dispatch_v2_activity(V2DispatchInput {
@@ -201,24 +200,6 @@ spec:
         std::fs::write(path, yaml).expect("write activity yaml");
     }
 
-    #[cfg(unix)]
-    fn write_failing_shell_activity(path: &Path, name: &str) {
-        let yaml = format!(
-            r#"schemaVersion: 2
-kind: Activity
-metadata:
-  name: {name}
-spec:
-  type: shell
-  description: Test failing shell.
-  program: /bin/sh
-  args: ["-c", "exit 7"]
-  allowed_programs: ["/bin/sh"]
-"#
-        );
-        std::fs::write(path, yaml).expect("write activity yaml");
-    }
-
     fn write_agent_loop_activity(path: &Path, name: &str, tool: &str) {
         let yaml = format!(
             r#"schemaVersion: 2
@@ -265,44 +246,6 @@ spec:
             Some(SYSTEM_AUDIT_IDENTITY)
         );
         assert_eq!(run_started.agent_identity, SYSTEM_AUDIT_IDENTITY);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn direct_activity_run_finished_audit_carries_non_success_message() {
-        let (_root, runtime, repo_root) = test_runtime();
-        let yaml_path = repo_root.join("qa_activity_shell_fail.yaml");
-        write_failing_shell_activity(&yaml_path, "qa_activity_shell_fail");
-
-        let result = runtime
-            .run_activity_v2_from_yaml(&yaml_path, json!({}), None)
-            .expect("shell activity returns structural non-success");
-
-        assert!(!result.success);
-        assert_eq!(result.message.as_deref(), Some("exit 7 not in [0]"));
-
-        let rows = runtime
-            .list_v2_audit_events(V2AuditEventFilter {
-                run_id: Some(result.run_id.clone()),
-                ..Default::default()
-            })
-            .expect("list v2 audit events");
-        let run_finished = rows
-            .iter()
-            .find(|row| row.event_type == "run.finished")
-            .expect("run.finished audit row");
-        let event: serde_json::Value =
-            serde_json::from_str(&run_finished.payload_json).expect("parse run_finished");
-        assert_eq!(
-            event.get("outcome").and_then(serde_json::Value::as_str),
-            Some("failed")
-        );
-        assert_eq!(
-            event
-                .get("error_message")
-                .and_then(serde_json::Value::as_str),
-            Some("exit 7 not in [0]")
-        );
     }
 
     #[test]

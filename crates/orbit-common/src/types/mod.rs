@@ -57,7 +57,7 @@ pub use activity_job::{
     AUDIT_ENVELOPE_SCHEMA_VERSION, ActivityAsset, ActivityV2, ActivityV2Spec, AgentLoopSpec,
     AssetLoadError, BackoffStrategy, BranchOutcome, DeterministicSpec, FanInSpec, FanOutBlock,
     JobAsset, JobKind, JobV2, JobV2Step, JobV2StepBody, JoinMode, LoopBlock, OnDenial,
-    ParallelBlock, PipelineRef, RetrySpec, SchemaHeader, ShellSpec, TargetStep, ToolAllowlistError,
+    ParallelBlock, PipelineRef, RetrySpec, SchemaHeader, TargetStep, ToolAllowlistError,
     V2_TOOL_WILDCARD_ROOTS, V2AuditEnvelope, V2AuditEvent, V2AuditEventKind, load_activity_asset,
     load_job_asset, tool_allowed, validate_tool_allowlist,
 };

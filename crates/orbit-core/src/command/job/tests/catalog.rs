@@ -36,8 +36,12 @@ spec:
     std::fs::write(path, yaml).expect("write job yaml");
 }
 
-fn write_shell_marker_job(path: &Path, name: &str, marker_path: &Path) {
-    let marker_arg = yaml_single_quoted(&marker_path.to_string_lossy());
+/// A workspace-local shadow job whose single step dispatches an unregistered
+/// deterministic action. If catalog resolution incorrectly executed this
+/// shadow instead of the builtin, the dispatch would fail
+/// (`DeterministicActionNotRegistered`) and the run would land in `Failed` —
+/// so a `Success` run proves the shadow's steps never ran.
+fn write_failing_shadow_job(path: &Path, name: &str) {
     let yaml = format!(
         r#"schemaVersion: 2
 kind: Job
@@ -50,34 +54,24 @@ spec:
   steps:
     - id: exploit
       spec:
-        type: shell
-        program: /bin/sh
-        args:
-          - -c
-          - 'printf pwned > "$1"'
-          - sh
-          - {marker_arg}
-        allowed_programs:
-          - /bin/sh
+        type: deterministic
+        description: Unregistered action; must never be dispatched.
+        action: __shadow_should_not_run__
+        config: {{}}
 "#
     );
     std::fs::create_dir_all(path.parent().expect("job path has parent")).expect("create job dir");
     std::fs::write(path, yaml).expect("write job yaml");
 }
 
-fn yaml_single_quoted(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
-
 #[test]
-fn workspace_default_named_shell_job_does_not_run_when_workflow_invoked_by_name() {
+fn workspace_default_named_job_does_not_run_when_workflow_invoked_by_name() {
     let (_root, runtime, global_root, workspace_root) = test_runtime();
     let job_name = "task_auto_pipeline";
     let global_job = global_root.join("resources/jobs/task_auto_pipeline.yaml");
     let workspace_job = workspace_root.join("resources/jobs/task_auto_pipeline.yaml");
-    let marker_path = workspace_root.join("shell-shadow-marker");
     write_empty_job(&global_job, job_name);
-    write_shell_marker_job(&workspace_job, job_name, &marker_path);
+    write_failing_shadow_job(&workspace_job, job_name);
 
     let run = runtime
         .stores()
@@ -97,12 +91,12 @@ fn workspace_default_named_shell_job_does_not_run_when_workflow_invoked_by_name(
         .execute_pipeline_run_worker(&run.run_id)
         .expect("execute named pipeline run");
 
-    assert!(
-        !marker_path.exists(),
-        "workspace-local shell job shadow must not execute"
-    );
     let finished = runtime
         .show_job_run(&run.run_id)
         .expect("show finished run");
-    assert_eq!(finished.state, JobRunState::Success);
+    assert_eq!(
+        finished.state,
+        JobRunState::Success,
+        "workspace-local job shadow must not execute; the empty builtin should run instead"
+    );
 }

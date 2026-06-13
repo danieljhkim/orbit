@@ -9,9 +9,8 @@
 
 //! Phase 2b v2 runtime smoke, updated for Phase 2d + Phase 3:
 //!
-//! 1. Shell reference — self-contained via std::process::Command.
-//! 2. Deterministic reference — a stub `V2RuntimeHost` echoes the action.
-//! 3. Agent_loop reference — exercised via `drive_agent_loop` under
+//! 1. Deterministic reference — a stub `V2RuntimeHost` echoes the action.
+//! 2. Agent_loop reference — exercised via `drive_agent_loop` under
 //!    `ORBIT_V2_REPLAY=tool_denial`. Phase 3 surfaces `DispatchError::ToolDenied`
 //!    structurally, so the expected result is `Err(ToolDenied)` and the §7
 //!    `tool.denied` envelope event is present.
@@ -42,14 +41,6 @@ fn main() -> ExitCode {
     let _ = std::fs::create_dir_all(&tmp_audit_root);
 
     {
-        let path = references_dir.join("shell_reference.yaml");
-        match smoke_dispatch_shell(&path, &tmp_audit_root) {
-            Ok(()) => println!("shell reference: OK"),
-            Err(err) => failures.push(format!("shell reference: {err}")),
-        }
-    }
-
-    {
         let path = references_dir.join("deterministic_reference.yaml");
         match smoke_dispatch_deterministic(&path, &tmp_audit_root) {
             Ok(()) => println!("deterministic reference: OK"),
@@ -75,50 +66,6 @@ fn main() -> ExitCode {
         }
         ExitCode::FAILURE
     }
-}
-
-fn smoke_dispatch_shell(
-    path: &std::path::Path,
-    audit_root: &std::path::Path,
-) -> Result<(), String> {
-    let yaml = std::fs::read_to_string(path).map_err(|e| format!("read: {e}"))?;
-    let asset = load_v2(&yaml)?;
-
-    let run_id = "smoke-shell-001";
-    let (writer, envelope, _inner) = build_writer_and_sinks(audit_root, run_id);
-
-    let _ = writer
-        .emit(V2AuditEventKind::RunStarted {
-            job_name: "smoke_shell".into(),
-            retry_source_run_id: None,
-        })
-        .map_err(|e| format!("audit: {e:?}"))?;
-
-    let outcome = dispatch_v2_activity(V2DispatchInput {
-        activity_name: &asset.name,
-        spec: &asset.spec.spec,
-        fs_profile: asset.spec.fs_profile.as_deref(),
-        input: Value::Null,
-        audit: writer.clone(),
-        run_id,
-        host: None,
-    })
-    .map_err(|e| format!("dispatch: {e}"))?;
-
-    let _ = writer.emit(V2AuditEventKind::RunFinished {
-        outcome: if outcome.success { "success" } else { "failed" }.into(),
-        error_message: if outcome.success {
-            None
-        } else {
-            outcome.message.clone()
-        },
-    });
-
-    if !outcome.success {
-        return Err(format!("shell returned non-success: {outcome:?}"));
-    }
-    assert_sqlite_nonempty(&envelope)?;
-    Ok(())
 }
 
 fn smoke_dispatch_deterministic(

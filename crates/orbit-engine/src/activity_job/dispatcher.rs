@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
 
 use orbit_common::types::activity_job::V2AuditEventKind;
 use orbit_common::types::activity_job::{
-    ActivityV2Spec, AgentLoopSpec, AgentRole, Backend, DeterministicSpec, ShellSpec,
+    ActivityV2Spec, AgentLoopSpec, AgentRole, Backend, DeterministicSpec,
 };
 
 use crate::context::AgentRoleConfig;
@@ -220,15 +219,6 @@ pub enum DispatchError {
     #[error("deterministic action `{action}` failed: {message}")]
     DeterministicActionFailed { action: String, message: String },
 
-    #[error("shell program `{0}` not in allowed_programs")]
-    ShellProgramNotAllowed(String),
-
-    #[error("shell spawn failed: {0}")]
-    ShellSpawnFailed(String),
-
-    #[error("shell exited with code {code}; expected one of {expected:?}")]
-    ShellExitedUnexpected { code: i32, expected: Vec<i32> },
-
     #[error("agent_loop run failed: {0}")]
     AgentLoopFailed(String),
 
@@ -275,15 +265,14 @@ pub enum DispatchError {
 
 impl DispatchError {
     /// Whether this error should bypass the retry wrapper. Tool denials,
-    /// unknown deterministic actions, shell allowlist violations, and
-    /// validation errors are non-retryable (§4.3: "Non-retryable errors —
-    /// schema violations, allowlist denials, cancellation — skip retry").
+    /// unknown deterministic actions, and validation errors are non-retryable
+    /// (§4.3: "Non-retryable errors — schema violations, allowlist denials,
+    /// cancellation — skip retry").
     pub fn is_non_retryable(&self) -> bool {
         matches!(
             self,
             DispatchError::ToolDenied { .. }
                 | DispatchError::DeterministicActionNotRegistered(_)
-                | DispatchError::ShellProgramNotAllowed(_)
                 | DispatchError::JobValidation(_)
                 | DispatchError::HostRequired(_)
                 | DispatchError::UnwiredHttpTransport { .. }
@@ -317,7 +306,6 @@ fn dispatch_v2_activity_inner(
         ActivityV2Spec::AgentLoop(_) => "agent_loop",
         ActivityV2Spec::Groundhog(_) => "groundhog",
         ActivityV2Spec::Deterministic(_) => "deterministic",
-        ActivityV2Spec::Shell(_) => "shell",
     };
 
     let activity_event_id = input
@@ -374,7 +362,6 @@ fn dispatch_v2_activity_inner(
             ),
             None => Err(DispatchError::HostRequired("deterministic")),
         },
-        ActivityV2Spec::Shell(spec) => run_shell(spec),
     };
 
     let _ = input.audit.pop_parent();
@@ -605,38 +592,4 @@ impl FsAuditLogger for V2FsAuditLogger {
 
 pub(crate) fn v2_fs_audit_logger(audit: Arc<V2AuditWriter>) -> Arc<dyn FsAuditLogger> {
     Arc::new(V2FsAuditLogger { audit })
-}
-
-fn run_shell(spec: &ShellSpec) -> Result<DispatchOutcome, DispatchError> {
-    if !spec.allowed_programs.contains(&spec.program) {
-        return Err(DispatchError::ShellProgramNotAllowed(spec.program.clone()));
-    }
-    let output = Command::new(&spec.program)
-        .args(&spec.args)
-        .output()
-        .map_err(|err| DispatchError::ShellSpawnFailed(format!("{err}")))?;
-
-    let exit_code = output.status.code().unwrap_or(-1);
-    let expected = if spec.expected_exit_codes.is_empty() {
-        vec![0]
-    } else {
-        spec.expected_exit_codes.clone()
-    };
-    let success = expected.contains(&exit_code);
-
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-
-    Ok(DispatchOutcome {
-        success,
-        output: serde_json::json!({
-            "program": spec.program,
-            "args": spec.args,
-            "exit_code": exit_code,
-            "stdout": stdout,
-            "stderr": stderr,
-        }),
-        message: (!success).then(|| format!("exit {exit_code} not in {expected:?}")),
-        invocation: None,
-    })
 }

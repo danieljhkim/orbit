@@ -166,10 +166,6 @@ pub(super) fn print_v2_step(step: &JobV2Step, indent: usize) {
                     println!("{pad}{} deterministic", bold("Activity Type:"));
                     println!("{pad}{} {}", bold("Action:"), spec.action.as_str());
                 }
-                ActivityV2Spec::Shell(spec) => {
-                    println!("{pad}{} shell", bold("Activity Type:"));
-                    println!("{pad}{} {}", bold("Program:"), spec.program.as_str());
-                }
             }
             if let Some(session) = &target.session {
                 println!("{pad}{} {}", bold("Session:"), session);
@@ -223,7 +219,6 @@ fn v2_step_target_summary(step: &JobV2Step) -> (String, String) {
             ActivityV2Spec::Deterministic(spec) => {
                 ("deterministic".to_string(), spec.action.clone())
             }
-            ActivityV2Spec::Shell(spec) => ("shell".to_string(), spec.program.clone()),
         },
         JobV2StepBody::Parallel { .. } => ("parallel".to_string(), step.id.clone()),
         JobV2StepBody::FanOut { .. } => ("fan_out".to_string(), step.id.clone()),

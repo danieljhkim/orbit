@@ -143,7 +143,6 @@ pub(super) fn target_activity_label(target: &TargetStep) -> String {
         ActivityV2Spec::AgentLoop(_) => "agent_loop".to_string(),
         ActivityV2Spec::Groundhog(_) => "groundhog".to_string(),
         ActivityV2Spec::Deterministic(spec) => spec.action.clone(),
-        ActivityV2Spec::Shell(spec) => format!("shell:{}", spec.program),
     }
 }
 

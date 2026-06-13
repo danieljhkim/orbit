@@ -30,14 +30,13 @@ pub struct ActivityV2 {
 }
 
 /// v2 activity type discriminator. Serialized as
-/// `type: agent_loop|groundhog|deterministic|shell`.
+/// `type: agent_loop|groundhog|deterministic`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ActivityV2Spec {
     AgentLoop(AgentLoopSpec),
     Groundhog(GroundhogSpec),
     Deterministic(DeterministicSpec),
-    Shell(ShellSpec),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -79,7 +78,7 @@ pub struct AgentLoopSpec {
     /// Program allowlist enforced before `proc.spawn` executes a request.
     /// `None` means `proc.spawn` is not constrained at the activity layer
     /// (legacy / human-driven paths); an empty `Some(vec![])` denies all
-    /// programs (fail-closed). Mirrors `ShellSpec::allowed_programs`.
+    /// programs (fail-closed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proc_allowed_programs: Option<Vec<String>>,
 }
@@ -214,21 +213,6 @@ pub struct DeterministicSpec {
     pub config: Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ShellSpec {
-    /// Program to invoke. Must be in `allowed_programs`.
-    pub program: String,
-    #[serde(default)]
-    pub args: Vec<String>,
-    /// Program allowlist enforced before spawn.
-    pub allowed_programs: Vec<String>,
-    #[serde(default = "default_timeout_seconds")]
-    pub timeout_seconds: u64,
-    /// Exit codes treated as success. Empty means `[0]`.
-    #[serde(default)]
-    pub expected_exit_codes: Vec<i32>,
-}
-
 /// Role tag for an `agent_loop` / `groundhog` activity (ADR-029). Maps to
 /// `[agent.<role>]` blocks in `config.toml`; the dispatcher resolves the
 /// effective role to a `(provider, model, backend)` triple before invoking
@@ -273,10 +257,6 @@ pub enum OnDenial {
 
 const fn default_max_iterations() -> u32 {
     25
-}
-
-const fn default_timeout_seconds() -> u64 {
-    60
 }
 
 const fn default_cli_wall_clock_timeout_seconds() -> u64 {
