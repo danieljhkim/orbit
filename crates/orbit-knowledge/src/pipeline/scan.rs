@@ -25,16 +25,18 @@ pub(crate) struct OrbitIgnoreMatcher {
 impl OrbitIgnoreMatcher {
     pub(crate) fn load(repo_path: &Path) -> Result<Self, KnowledgeError> {
         let mut builder = GitignoreBuilder::new(repo_path);
-        for pattern in DEFAULT_ORBITIGNORE_PATTERNS {
-            builder.add_line(None, pattern).map_err(|error| {
-                KnowledgeError::invalid_data(format!(
-                    "invalid default .orbitignore pattern `{pattern}`: {error}"
-                ))
-            })?;
-        }
+        add_default_orbitignore_patterns(&mut builder)?;
 
+        let discovery_matcher = OrbitIgnoreMatcher {
+            gitignore: build_default_orbitignore(repo_path)?,
+        };
         let mut orbitignore_files = Vec::new();
-        collect_orbitignore_files(repo_path, repo_path, &mut orbitignore_files)?;
+        collect_orbitignore_files(
+            repo_path,
+            repo_path,
+            &discovery_matcher,
+            &mut orbitignore_files,
+        )?;
         orbitignore_files.sort_by(|left, right| {
             let left_rel = left.strip_prefix(repo_path).unwrap_or(left.as_path());
             let right_rel = right.strip_prefix(repo_path).unwrap_or(right.as_path());
@@ -65,6 +67,26 @@ impl OrbitIgnoreMatcher {
             .matched_path_or_any_parents(rel_path, is_dir)
             .is_ignore()
     }
+}
+
+fn build_default_orbitignore(repo_path: &Path) -> Result<Gitignore, KnowledgeError> {
+    let mut builder = GitignoreBuilder::new(repo_path);
+    add_default_orbitignore_patterns(&mut builder)?;
+    builder.build().map_err(|error| {
+        KnowledgeError::invalid_data(format!("build default .orbitignore matcher: {error}"))
+    })
+}
+
+fn add_default_orbitignore_patterns(builder: &mut GitignoreBuilder) -> Result<(), KnowledgeError> {
+    for pattern in DEFAULT_ORBITIGNORE_PATTERNS {
+        builder.add_line(None, pattern).map_err(|error| {
+            KnowledgeError::invalid_data(format!(
+                "invalid default .orbitignore pattern `{pattern}`: {error}"
+            ))
+        })?;
+    }
+
+    Ok(())
 }
 
 /// Scan the repo, populating `ctx.file_paths` with relative paths.
@@ -143,6 +165,7 @@ fn walk_dir(
 fn collect_orbitignore_files(
     root: &Path,
     dir: &Path,
+    discovery_matcher: &OrbitIgnoreMatcher,
     out: &mut Vec<PathBuf>,
 ) -> Result<(), KnowledgeError> {
     let entries = std::fs::read_dir(dir)
@@ -162,7 +185,12 @@ fn collect_orbitignore_files(
             if name.starts_with('.') {
                 continue;
             }
-            collect_orbitignore_files(root, &path, out)?;
+            if let Ok(rel) = path.strip_prefix(root)
+                && discovery_matcher.is_ignored(rel, true)
+            {
+                continue;
+            }
+            collect_orbitignore_files(root, &path, discovery_matcher, out)?;
         } else if file_type.is_file() && name.as_ref() == ORBITIGNORE_FILE_NAME {
             let relative = path
                 .strip_prefix(root)
