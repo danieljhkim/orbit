@@ -232,6 +232,50 @@ async fn graph_tool_errors_are_structured_mcp_tool_errors() {
     );
 }
 
+#[tokio::test]
+async fn graph_show_rejects_out_of_workspace_path_without_session_workspace() {
+    // ORB-00361: with no announced session workspace, a client-supplied
+    // `workspace_path` outside the process working directory must be rejected
+    // before any graph is opened or indexed — no arbitrary-directory source read.
+    let outside = TempDir::new().expect("temp dir outside cwd");
+    fs::create_dir_all(outside.path().join("src")).expect("create src");
+    fs::write(outside.path().join("src/lib.rs"), "pub fn secret() {}\n").expect("write file");
+
+    let host = Arc::new(StubHost {
+        schemas: Vec::new(),
+    });
+    let server = OrbitToolServer::new(host);
+    // Intentionally do NOT announce a session workspace: session_context.workspace
+    // stays None, which is the unguarded path before this fix.
+
+    let result = server
+        .call_tool_request(request_with_args(
+            "orbit.graph.show",
+            json!({
+                "workspace_path": outside.path().display().to_string(),
+                "selector": "symbol:src/lib.rs#secret:function",
+                "max_bytes": 256
+            }),
+        ))
+        .await
+        .expect("MCP request resolves with a tool-error payload");
+
+    assert!(result.is_error.unwrap_or(false), "call must be rejected");
+    let payload = result.structured_content.expect("structured error payload");
+    assert_eq!(payload["code"], "invalid_input");
+    assert!(
+        payload["message"]
+            .as_str()
+            .expect("message")
+            .contains("must stay within initialized workspace"),
+        "unexpected error message: {payload}"
+    );
+    // No source bytes were returned and no graph was opened/indexed for the
+    // out-of-bounds directory.
+    assert!(payload.get("bytes").is_none());
+    assert_eq!(server.graph_tools.cached_worktree_count(), 0);
+}
+
 async fn call_json(server: &OrbitToolServer, name: &str, args: Value) -> Value {
     let result = server
         .call_tool_request(request_with_args(name, args))

@@ -261,6 +261,15 @@ pub(super) fn server_error(e: orbit_core::OrbitError) -> Response {
         .into_response()
 }
 
+/// Browser-CSRF mitigation only — NOT an access-control boundary.
+///
+/// This rejects cross-origin state-changing requests originating from a
+/// browser on another site. It inspects the client-supplied `Origin` header,
+/// which any non-browser client (curl, a LAN script) can set arbitrarily, so
+/// it provides no authentication and no protection against direct API access.
+/// Network exposure is prevented separately by refusing to bind to a
+/// non-loopback address in `serve()` (ORB-00360); the dashboard itself is
+/// unauthenticated and assumes only local processes can reach it.
 async fn require_localhost_origin(request: Request<Body>, next: Next) -> Response {
     let unsafe_method = matches!(
         *request.method(),
