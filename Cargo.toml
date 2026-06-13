@@ -49,6 +49,7 @@ fs2 = "0.4"
 futures-core = "0.3"
 git2 = { version = "0.20", default-features = false }
 ignore = "0.4.25"
+notify = "8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync"] }
 jsonschema = { version = "0.18", default-features = false }
 libc = "0.2"

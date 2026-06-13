@@ -47,6 +47,12 @@ pub(crate) struct Diff {
     pub(crate) deleted: Vec<PathBuf>,
 }
 
+impl Diff {
+    pub(crate) fn has_changes(&self) -> bool {
+        !(self.modified.is_empty() && self.new.is_empty() && self.deleted.is_empty())
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn scan_diff(
     db_path: &Path,
@@ -502,7 +508,7 @@ fn note_scan_started(worktree_root: &Path) {
 fn note_scan_started(_worktree_root: &Path) {}
 
 #[cfg(test)]
-fn scan_count(worktree_root: &Path) -> usize {
+pub(crate) fn scan_count(worktree_root: &Path) -> usize {
     scan_counts()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)

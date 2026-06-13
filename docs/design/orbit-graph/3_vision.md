@@ -3,7 +3,7 @@ summary: "Orbit Graph — Vision"
 type: design
 title: "Orbit Graph — Vision"
 owner: claude
-last_updated: 2026-05-24
+last_updated: 2026-06-13
 status: Draft
 feature: orbit-graph
 doc_role: vision
@@ -81,7 +81,7 @@ If five worktrees on the same machine share unchanged files, V1 re-extracts five
 
 ### 1.5 Watcher reliability
 
-`notify` has known issues on Linux with mass-rename operations (e.g. `git checkout` of a branch that moved 100 files). V1's safety net is `SyncPolicy::Windowed` plus explicit `sync`. We should still measure: how often does the watcher silently miss an event, and does the windowed fallback close the gap within a tolerable window?
+`notify` has known issues on Linux with mass-rename operations (e.g. `git checkout` of a branch that moved 100 files). V1's hard freshness barrier is explicit `sync`; watcher errors schedule a conservative auto sync, and `SyncPolicy::Windowed` remains available only for callers that cannot run a watcher. We should still measure stale-result reports and event-miss patterns.
 
 ### 1.6 MCP daemon Graph handle lifetime
 
@@ -144,6 +144,6 @@ The reframe in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §2 — "the graph is a 
 
 ## Task References
 
-No Orbit tasks have been allocated for this feature yet.
+- [ORB-00377] moved watcher-backed graph reads from open question to the V1 design contract; the remaining watcher concern is operational reliability measurement.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

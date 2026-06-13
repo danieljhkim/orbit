@@ -10,6 +10,7 @@
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use git2::Repository;
@@ -54,6 +55,9 @@ pub struct Graph {
     db_path: GraphDbPath,
     worktree_root: PathBuf,
     policy: SyncPolicy,
+    read_conn: Mutex<Connection>,
+    last_auto_sync_at: Mutex<i64>,
+    _watcher: Option<sync::watcher::SyncWatcher>,
 }
 
 impl Graph {
@@ -63,16 +67,42 @@ impl Graph {
         let _ensure_synced: fn(&Self) -> Result<(), GraphError> = Self::ensure_synced;
         let opened = store::open(worktree_root, policy)?;
         clean_old_databases_excluding(worktree_root, opened.db_path.path())?;
-        Ok(Self {
+        let read_conn = open_read_connection(opened.db_path.path(), "open graph read connection")?;
+        let last_auto_sync_at = read_last_incremental_at(
+            &read_conn,
+            "read graph last incremental sync metadata at open",
+        )?;
+        let watcher = if let SyncPolicy::Watch { debounce } = policy {
+            Some(sync::watcher::SyncWatcher::start(
+                opened.db_path.path().to_path_buf(),
+                worktree_root.to_path_buf(),
+                debounce,
+            )?)
+        } else {
+            None
+        };
+
+        let graph = Self {
             db_path: opened.db_path,
             worktree_root: worktree_root.to_path_buf(),
             policy,
-        })
+            read_conn: Mutex::new(read_conn),
+            last_auto_sync_at: Mutex::new(last_auto_sync_at),
+            _watcher: watcher,
+        };
+        if matches!(policy, SyncPolicy::Watch { .. }) {
+            graph.sync(SyncMode::Auto)?;
+        }
+        Ok(graph)
     }
 
     /// Synchronize indexed rows with files on disk.
     pub fn sync(&self, mode: SyncMode) -> Result<SyncReport, GraphError> {
-        sync::run(self.db_path.path(), self.worktree_root.as_path(), mode)
+        let report = sync::run(self.db_path.path(), self.worktree_root.as_path(), mode)?;
+        if mode == SyncMode::Auto {
+            self.record_auto_sync_now()?;
+        }
+        Ok(report)
     }
 
     /// Return the resolved database path backing this graph handle.
@@ -84,8 +114,9 @@ impl Graph {
         match self.policy {
             SyncPolicy::Manual => Ok(()),
             SyncPolicy::OnRead => self.sync(SyncMode::Auto).map(|_| ()),
+            SyncPolicy::Watch { .. } => Ok(()),
             SyncPolicy::Windowed { window } => {
-                if sync_window_elapsed(self.last_incremental_at()?, window)? {
+                if sync_window_elapsed(self.last_auto_sync_at(), window)? {
                     self.sync(SyncMode::Auto)?;
                 }
                 Ok(())
@@ -93,19 +124,32 @@ impl Graph {
         }
     }
 
-    fn last_incremental_at(&self) -> Result<i64, GraphError> {
-        let conn = Connection::open(self.db_path.path())
-            .map_err(|source| GraphError::sqlite("open graph database for sync policy", source))?;
-        let value = conn
-            .query_row(
-                "SELECT value FROM meta WHERE key = 'last_incremental_at'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .map_err(|source| {
-                GraphError::sqlite("read graph last incremental sync metadata", source)
-            })?;
-        parse_epoch_nanos("read graph last incremental sync metadata", &value)
+    fn last_auto_sync_at(&self) -> i64 {
+        *self
+            .last_auto_sync_at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn record_auto_sync_now(&self) -> Result<(), GraphError> {
+        let now = now_epoch_nanos("record graph auto sync timestamp")?;
+        let mut last_auto_sync_at = self
+            .last_auto_sync_at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *last_auto_sync_at = now;
+        Ok(())
+    }
+
+    pub(crate) fn with_read_connection<T>(
+        &self,
+        run: impl FnOnce(&Connection) -> Result<T, GraphError>,
+    ) -> Result<T, GraphError> {
+        let conn = self
+            .read_conn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        run(&conn)
     }
 
     /// Search indexed symbols, strings, and config keys.
@@ -176,6 +220,24 @@ fn sync_window_elapsed(last_incremental_at: i64, window: Duration) -> Result<boo
     })? > window.as_nanos())
 }
 
+fn open_read_connection(db_path: &Path, operation: &'static str) -> Result<Connection, GraphError> {
+    let conn = Connection::open(db_path).map_err(|source| GraphError::sqlite(operation, source))?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(|source| GraphError::sqlite("enable foreign keys for graph read", source))?;
+    Ok(conn)
+}
+
+fn read_last_incremental_at(conn: &Connection, operation: &'static str) -> Result<i64, GraphError> {
+    let value = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'last_incremental_at'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|source| GraphError::sqlite(operation, source))?;
+    parse_epoch_nanos(operation, &value)
+}
+
 fn parse_epoch_nanos(operation: &'static str, value: &str) -> Result<i64, GraphError> {
     value
         .parse::<i64>()
@@ -209,15 +271,12 @@ pub(crate) struct SymbolSpan {
 /// (including non-Symbol variants and unknown names). Used by read queries
 /// that then perform containment or adjacency lookups.
 pub(crate) fn resolve_symbol_span(
-    db_path: &Path,
+    conn: &Connection,
     sel: &Selector,
 ) -> Result<Option<SymbolSpan>, GraphError> {
     let Selector::Symbol { path, symbol, kind } = sel else {
         return Ok(None);
     };
-
-    let conn = Connection::open(db_path)
-        .map_err(|source| GraphError::sqlite("open graph database for symbol resolve", source))?;
 
     // Match on either short name or qualified; apply kind filter when provided.
     // Paths in DB are normalized (slash-separated, relative to worktree).
@@ -360,6 +419,11 @@ pub enum SyncPolicy {
     Windowed {
         /// Maximum age of the last successful sync before reads refresh.
         window: Duration,
+    },
+    /// Run an initial sync at open, then keep the index fresh with a background watcher.
+    Watch {
+        /// Event coalescing window before a background sync starts.
+        debounce: Duration,
     },
 }
 

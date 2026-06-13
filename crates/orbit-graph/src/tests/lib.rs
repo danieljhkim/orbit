@@ -5,10 +5,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, params};
 
-use crate::sync::{fail_next_sync_after_scan, sync_leader_count};
+use crate::sync::{fail_next_sync_after_scan, scanner::scan_count, sync_leader_count};
 use crate::{
-    CalleeEdge, EXTRACTOR_VERSION, Graph, GraphError, Selector, SyncPolicy, resolve_db_path,
-    resolve_db_path_for_commit,
+    CalleeEdge, EXTRACTOR_VERSION, Graph, GraphError, SearchQuery, Selector, SyncPolicy,
+    resolve_db_path, resolve_db_path_for_commit,
 };
 
 #[test]
@@ -132,8 +132,8 @@ fn windowed_policy_respects_recent_and_expired_sync_windows() {
 }
 
 #[test]
-fn windowed_policy_reads_last_incremental_at_from_db_each_check() {
-    let worktree = TestWorktree::new("windowed-out-of-band");
+fn windowed_policy_uses_process_local_success_timestamp_between_checks() {
+    let worktree = TestWorktree::new("windowed-local-timestamp");
     worktree.write("src/lib.rs", "pub fn stale_meta() {}\n");
     let graph = Graph::open(
         worktree.path(),
@@ -148,7 +148,14 @@ fn windowed_policy_reads_last_incremental_at_from_db_each_check() {
     set_meta_value(worktree.path(), "last_incremental_at", 1);
     graph
         .ensure_synced()
-        .expect("windowed ensure after out-of-band metadata update");
+        .expect("recent windowed ensure after out-of-band metadata update");
+
+    assert_eq!(sync_leader_count(db_path.as_path()), 1);
+
+    thread::sleep(Duration::from_millis(600));
+    graph
+        .ensure_synced()
+        .expect("expired windowed ensure after local timestamp elapses");
 
     assert_eq!(sync_leader_count(db_path.as_path()), 2);
 }
@@ -196,6 +203,89 @@ fn windowed_policy_retries_after_sync_failure_without_advancing_timestamp() {
     );
 }
 
+#[test]
+fn watch_policy_repeated_reads_do_not_rescan_without_file_events() {
+    let worktree = TestWorktree::new("watch-read-no-rescan");
+    worktree.write("src/lib.rs", "pub fn watched_read_marker() {}\n");
+    let graph = Graph::open(
+        worktree.path(),
+        SyncPolicy::Watch {
+            debounce: Duration::from_millis(25),
+        },
+    )
+    .expect("open graph");
+
+    for _ in 0..10 {
+        let result = graph
+            .search(&SearchQuery::new("watched_read_marker"))
+            .expect("watch-backed search");
+        assert_eq!(result.matches.len(), 1);
+    }
+
+    assert!(
+        scan_count(worktree.path()) <= 1,
+        "watch-backed reads should not trigger scanner walks"
+    );
+}
+
+#[test]
+fn watch_policy_refreshes_query_results_after_file_edit() {
+    let worktree = TestWorktree::new("watch-freshness");
+    worktree.write("src/lib.rs", "pub fn before_edit() {}\n");
+    let graph = Graph::open(
+        worktree.path(),
+        SyncPolicy::Watch {
+            debounce: Duration::from_millis(25),
+        },
+    )
+    .expect("open graph");
+
+    let before = graph
+        .search(&SearchQuery::new("before_edit"))
+        .expect("initial watched search");
+    assert_eq!(before.matches.len(), 1);
+
+    worktree.write("src/lib.rs", "pub fn fresh_after_edit() {}\n");
+
+    assert!(
+        wait_until(Duration::from_secs(5), || {
+            graph
+                .search(&SearchQuery::new("fresh_after_edit"))
+                .expect("watched search after edit")
+                .matches
+                .len()
+                == 1
+        }),
+        "watch-backed graph query did not observe edited file within freshness window"
+    );
+}
+
+#[test]
+fn clean_auto_sync_skips_pass_writes_and_preserves_persisted_sync_timestamp() {
+    let worktree = TestWorktree::new("clean-auto-sync");
+    worktree.write("src/lib.rs", "pub fn clean_auto_sync() {}\n");
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+
+    graph
+        .sync(crate::SyncMode::Auto)
+        .expect("initial auto sync");
+    let conn = open_test_connection(worktree.path());
+    let initial_incremental_at = meta_value(&conn, "last_incremental_at");
+    drop(conn);
+
+    let report = graph.sync(crate::SyncMode::Auto).expect("clean auto sync");
+
+    assert_eq!(report.files_changed, 0);
+    assert_eq!(report.files_removed, 0);
+    assert_eq!(
+        meta_value(
+            &open_test_connection(worktree.path()),
+            "last_incremental_at"
+        ),
+        initial_incremental_at
+    );
+}
+
 fn open_test_connection(worktree: &Path) -> Connection {
     let conn = Connection::open(graph_db_path(worktree)).expect("open graph database");
     conn.pragma_update(None, "foreign_keys", "ON")
@@ -231,6 +321,17 @@ fn set_meta_value(worktree: &Path, key: &str, value: i64) {
             params![value.to_string(), key],
         )
         .expect("update meta value");
+}
+
+fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
+    let started = std::time::Instant::now();
+    while started.elapsed() < timeout {
+        if condition() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    condition()
 }
 
 struct TestWorktree {

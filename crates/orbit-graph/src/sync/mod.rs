@@ -3,11 +3,14 @@
 pub(crate) mod pass1;
 pub(crate) mod pass2;
 pub(crate) mod scanner;
+pub(crate) mod watcher;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Instant;
+
+use rusqlite::Connection;
 
 use crate::{GraphError, SyncMode, SyncReport};
 
@@ -29,6 +32,15 @@ fn run_once(
     let diff = scanner::scan_diff_with_lock_held(db_path, worktree_root, mode)?;
     maybe_fail_after_scan(db_path)?;
     maybe_wait_after_scan(db_path);
+    if !diff.has_changes() {
+        let duration = started.elapsed();
+        return Ok(SyncReport {
+            files_indexed: count_indexed_files(db_path)?,
+            files_changed: 0,
+            files_removed: 0,
+            duration,
+        });
+    }
     let pass1 = pass1::run(db_path, worktree_root, mode, &diff)?;
     pass2::run(db_path, mode, pass1.refs)?;
     let duration = started.elapsed();
@@ -105,6 +117,16 @@ where
 fn in_flight_syncs() -> &'static Mutex<HashMap<PathBuf, Arc<InFlightSync>>> {
     static IN_FLIGHT_SYNCS: OnceLock<Mutex<HashMap<PathBuf, Arc<InFlightSync>>>> = OnceLock::new();
     IN_FLIGHT_SYNCS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn count_indexed_files(db_path: &Path) -> Result<usize, GraphError> {
+    let conn = Connection::open(db_path)
+        .map_err(|source| GraphError::sqlite("open graph database for sync count", source))?;
+    let count = conn
+        .query_row("SELECT count(*) FROM files", [], |row| row.get::<_, i64>(0))
+        .map_err(|source| GraphError::sqlite("count indexed graph files", source))?;
+    usize::try_from(count)
+        .map_err(|source| GraphError::invalid_data("count indexed graph files", source.to_string()))
 }
 
 #[cfg(test)]

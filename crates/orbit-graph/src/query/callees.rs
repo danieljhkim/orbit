@@ -9,14 +9,18 @@ use rusqlite::{Connection, params};
 use crate::{CalleeEdge, Graph, GraphError, SymbolSpan, resolve_symbol_span};
 
 pub(crate) fn run(graph: &Graph, sel: &Selector) -> Result<Vec<CalleeEdge>, GraphError> {
-    let symbol = match resolve_symbol_span(graph.db_path.path(), sel)? {
-        Some(s) => s,
+    let resolved = graph.with_read_connection(|conn| {
+        let Some(symbol) = resolve_symbol_span(conn, sel)? else {
+            return Ok(None);
+        };
+        let edges = edges_for_symbol(conn, &symbol)?;
+        Ok(Some((symbol, edges)))
+    })?;
+    let (symbol, edges) = match resolved {
+        Some(resolved) => resolved,
         None => return Ok(vec![]),
     };
 
-    let conn = Connection::open(graph.db_path.path())
-        .map_err(|source| GraphError::sqlite("open graph database for callees", source))?;
-    let edges = edges_for_symbol(&conn, &symbol)?;
     materialize_edges(
         graph.worktree_root.as_path(),
         symbol.file_path.as_str(),

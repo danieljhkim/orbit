@@ -18,44 +18,44 @@ const CONFIDENCE_SAME_MODULE: &str = "same_module";
 const CONFIDENCE_FUZZY_NAME: &str = "fuzzy_name";
 
 pub(crate) fn run(graph: &Graph, sel: &Selector, opts: &RefOpts) -> Result<RefResult, GraphError> {
-    let conn = Connection::open(graph.db_path.path())
-        .map_err(|source| GraphError::sqlite("open graph database for refs query", source))?;
-    let target = resolve_target(&conn, sel)?;
-    let Some(qualified) = target.qualified.as_deref() else {
-        return Ok(empty_result(target));
-    };
-
     let mut line_cache = LineCache::new(graph.worktree_root.as_path());
-    let mut skipped_low_confidence = 0;
-    let refs = if should_query_refs(opts.kind) {
-        query_refs(
-            &conn,
-            qualified,
-            target.name.as_str(),
-            opts,
-            &mut line_cache,
-            &mut skipped_low_confidence,
-        )?
-    } else {
-        Vec::new()
-    };
-    let relations = if should_query_relations(opts.kind) {
-        query_relations(
-            &conn,
-            qualified,
-            opts,
-            &mut line_cache,
-            &mut skipped_low_confidence,
-        )?
-    } else {
-        Vec::new()
-    };
+    graph.with_read_connection(|conn| {
+        let target = resolve_target(conn, sel)?;
+        let Some(qualified) = target.qualified.as_deref() else {
+            return Ok(empty_result(target));
+        };
 
-    Ok(RefResult {
-        target,
-        refs,
-        relations,
-        skipped_low_confidence,
+        let mut skipped_low_confidence = 0;
+        let refs = if should_query_refs(opts.kind) {
+            query_refs(
+                conn,
+                qualified,
+                target.name.as_str(),
+                opts,
+                &mut line_cache,
+                &mut skipped_low_confidence,
+            )?
+        } else {
+            Vec::new()
+        };
+        let relations = if should_query_relations(opts.kind) {
+            query_relations(
+                conn,
+                qualified,
+                opts,
+                &mut line_cache,
+                &mut skipped_low_confidence,
+            )?
+        } else {
+            Vec::new()
+        };
+
+        Ok(RefResult {
+            target,
+            refs,
+            relations,
+            skipped_low_confidence,
+        })
     })
 }
 

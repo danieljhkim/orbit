@@ -56,9 +56,8 @@ pub(crate) fn run(
     selector: &Selector,
     max_bytes: usize,
 ) -> Result<Option<NodeView>, GraphError> {
-    let conn = Connection::open(graph.db_path.path())
-        .map_err(|source| GraphError::sqlite("open graph database for show", source))?;
-    let Some(resolved) = resolve_selector(&conn, selector)? else {
+    let Some(resolved) = graph.with_read_connection(|conn| resolve_selector(conn, selector))?
+    else {
         return Ok(None);
     };
     materialize_view(graph, resolved, max_bytes).map(Some)

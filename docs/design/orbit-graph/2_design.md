@@ -3,7 +3,7 @@ summary: "Orbit Graph — Design"
 type: design
 title: "Orbit Graph — Design"
 owner: claude
-last_updated: 2026-05-25
+last_updated: 2026-06-13
 status: Draft
 feature: orbit-graph
 doc_role: design
@@ -164,12 +164,15 @@ pub enum SyncPolicy {
     Manual,                              // never auto-sync
     OnRead,                              // sync inline on every query
     Windowed { window: Duration },       // sync if older than window
+    Watch { debounce: Duration },        // initial sync, then watcher-backed background sync
 }
 ```
 
-CLI default: `Manual` (CLI users are explicit). MCP server default: `Windowed { window: 500ms }`. `orbit graph watch` uses `Manual` because the watcher fires sync directly.
+CLI default: `Manual` (CLI users are explicit). MCP server default: `Watch { debounce: 250ms }`, which performs one initial auto sync when the handle opens and then leaves query methods as pure SQLite reads while a `notify` watcher coalesces file events into background auto syncs. `Windowed` remains available as an explicit fallback for callers that cannot keep a watcher alive.
 
-The previous hardcoded "10ms stat budget, 500ms cache window" heuristic was an implicit contract baked into the library that didn't scale past ~5000 files. Moving the decision to `open` makes it explicit, testable, and per-entry-point.
+The freshness contract for watcher-backed reads is eventual: after a same-process file edit, a read may return the old graph until the watcher observes the event and the debounced sync finishes. Callers that need a hard read-after-write barrier call `Graph::sync` or `orbit.graph.sync` before querying. Repeated reads with no intervening file event do not run the scanner.
+
+The previous hardcoded "10ms stat budget, 500ms cache window" heuristic was an implicit contract baked into the library that didn't scale past ~5000 files. Moving the decision to `open` makes it explicit, testable, and per-entry-point. [ADR-0195](./4_decisions.md) records the watcher-backed read-path decision.
 
 ## 6. Query Surface
 
@@ -224,13 +227,13 @@ No async on the public surface. SQLite and tree-sitter are both sync. If the MCP
 - **No cross-language refs.** A Rust function called from TypeScript via FFI/N-API is two unrelated nodes in the graph. Cross-language matching is a separate problem (see [3_vision.md](./3_vision.md) §1.2).
 - **No persistent history.** Use git for time travel. The graph reflects the *current* on-disk state of the worktree.
 - **Same-machine worktree dedup is not done.** Five worktrees on the same machine re-extract unchanged files five times. Acceptable today; revisit if it bites.
-- **Watcher reliability.** `notify` has known issues on Linux with mass-rename operations. `SyncPolicy::Windowed` is the safety net; we should still measure.
+- **Watcher reliability.** `notify` has known issues on Linux with mass-rename operations. Watcher errors schedule a conservative auto sync, and explicit `sync` remains the hard freshness barrier, but stale-result reports should still be measured.
 - **No public mutation API in V1.** Agents edit files via normal tools; the graph reflects the result. The V2 write surface — Rename, ReplaceBody, Move, with a working-graph overlay and patch compiler — is sketched in [3_vision.md](./3_vision.md) §1.1 but deliberately not in the V1 contract.
 
 ---
 
 ## Task References
 
-No Orbit tasks have been allocated for this feature yet.
+- [ORB-00377] moved long-lived MCP graph reads to watcher-backed background sync and documented the freshness contract in ADR-0195.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
