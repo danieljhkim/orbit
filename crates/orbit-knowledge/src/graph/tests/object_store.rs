@@ -101,8 +101,19 @@ fn write_graph_creates_sqlite_index_schema_and_rows() {
 
     let conn = Connection::open(&index_path).expect("open sqlite index");
     let tables = sqlite_master_names(&conn, "table");
-    assert_eq!(tables, vec!["child", "file_summary", "meta", "node"]);
+    assert_eq!(
+        tables,
+        vec![
+            "call_edge",
+            "child",
+            "file_summary",
+            "meta",
+            "node",
+            "source_mention"
+        ]
+    );
     let indexes = sqlite_master_names(&conn, "index");
+    assert!(indexes.contains(&"idx_call_edge_callee".to_string()));
     assert!(indexes.contains(&"idx_child_parent_ordinal".to_string()));
     assert!(indexes.contains(&"idx_file_symbol_count".to_string()));
     assert!(indexes.contains(&"idx_node_location_lower".to_string()));
@@ -110,9 +121,10 @@ fn write_graph_creates_sqlite_index_schema_and_rows() {
     assert!(indexes.contains(&"idx_node_parent".to_string()));
     assert!(indexes.contains(&"idx_node_parent_ordinal".to_string()));
     assert!(indexes.contains(&"idx_node_selector".to_string()));
+    assert!(indexes.contains(&"idx_source_mention_term".to_string()));
 
     let meta = sqlite_meta(&conn);
-    assert_eq!(meta.get("schema_version").map(String::as_str), Some("6"));
+    assert_eq!(meta.get("schema_version").map(String::as_str), Some("7"));
     assert_eq!(
         meta.get("graph_ref").map(String::as_str),
         Some(current_ref.root_graph_hash.as_str())
@@ -169,6 +181,24 @@ fn write_graph_creates_sqlite_index_schema_and_rows() {
         .expect("file summary");
     assert_eq!(symbol_count, 1);
     assert_eq!(path, "src/Lib.rs");
+
+    let helper_mentions: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM source_mention WHERE term = 'helper'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("helper source mention count");
+    assert_eq!(helper_mentions, 2);
+
+    let helper_callers: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM call_edge WHERE callee_name = 'helper' AND caller_id = 'leaf-greet'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("helper call edge count");
+    assert_eq!(helper_callers, 1);
 }
 
 #[test]

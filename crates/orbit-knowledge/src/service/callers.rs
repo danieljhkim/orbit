@@ -13,9 +13,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use tree_sitter::{Node, Parser};
-
 use crate::error::KnowledgeError;
+use crate::graph::call_extraction::rust_callee_names;
 use crate::graph::navigator::GraphNodeRef;
 use crate::graph::nodes::{CodebaseGraphV1, LeafKind};
 use orbit_graph_extract::Selector;
@@ -119,11 +118,6 @@ pub fn transitive_callers<'a>(
 fn build_call_index(
     graph: &CodebaseGraphV1,
 ) -> Result<HashMap<String, Vec<String>>, KnowledgeError> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_rust::LANGUAGE.into())
-        .map_err(|e| KnowledgeError::invalid_data(format!("tree-sitter init: {e}")))?;
-
     let mut index: HashMap<String, Vec<String>> = HashMap::new();
 
     for leaf in &graph.leaves {
@@ -133,74 +127,11 @@ fn build_call_index(
         if !matches!(leaf.kind, LeafKind::Function | LeafKind::Method) {
             continue;
         }
-        let Some(tree) = parser.parse(&leaf.source, None) else {
-            continue;
-        };
-        let mut callees: HashSet<String> = HashSet::new();
-        collect_callees(tree.root_node(), &leaf.source, &mut callees);
+        let callees = rust_callee_names(&leaf.source)?;
         for callee in callees {
             index.entry(callee).or_default().push(leaf.base.id.clone());
         }
     }
 
     Ok(index)
-}
-
-fn collect_callees(node: Node<'_>, source: &str, out: &mut HashSet<String>) {
-    match node.kind() {
-        "call_expression" => {
-            if let Some(func) = node.child_by_field_name("function")
-                && let Some(name) = trailing_ident(func, source)
-            {
-                out.insert(name);
-            }
-        }
-        "method_call_expression" => {
-            if let Some(method) = node.child_by_field_name("method")
-                && let Some(name) = ident_text(method, source)
-            {
-                out.insert(name);
-            }
-        }
-        _ => {}
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_callees(child, source, out);
-    }
-}
-
-/// For a `call_expression`'s `function` child — typically an identifier or a
-/// `scoped_identifier` / `field_expression` — return the trailing simple
-/// identifier (`foo::bar::baz` → `baz`, `obj.baz` → `baz`, `baz` → `baz`).
-fn trailing_ident(node: Node<'_>, source: &str) -> Option<String> {
-    match node.kind() {
-        "identifier" => ident_text(node, source),
-        "scoped_identifier" => node
-            .child_by_field_name("name")
-            .and_then(|n| ident_text(n, source)),
-        "field_expression" => node
-            .child_by_field_name("field")
-            .and_then(|n| ident_text(n, source)),
-        _ => {
-            // Last-resort: search descendants for the final identifier token.
-            let mut last: Option<String> = None;
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if let Some(ident) = trailing_ident(child, source) {
-                    last = Some(ident);
-                }
-            }
-            last
-        }
-    }
-}
-
-fn ident_text(node: Node<'_>, source: &str) -> Option<String> {
-    let text = source.get(node.start_byte()..node.end_byte())?.trim();
-    if text.is_empty() {
-        None
-    } else {
-        Some(text.to_string())
-    }
 }

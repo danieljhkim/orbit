@@ -1,6 +1,6 @@
 use crate::KnowledgeError;
 use crate::commands::GraphCommandContext;
-use crate::graph::GraphReadOptions;
+use crate::graph::{GraphIndexCallerRow, GraphReadOptions};
 use crate::service::GraphContextService;
 use crate::service::callers::{CallerHit, MAX_CALLER_DEPTH, transitive_callers};
 use orbit_graph_extract::Selector;
@@ -28,6 +28,18 @@ pub fn run(input: CallersInput) -> Result<CallersResult, KnowledgeError> {
         .map_err(|error| KnowledgeError::invalid_data(format!("{error}")))?;
     let requested_depth = input.requested_depth.unwrap_or(DEFAULT_DEPTH);
     let depth = requested_depth.min(MAX_CALLER_DEPTH);
+
+    if let Some(callers) =
+        try_callers_via_sql_index(&input.context, input.selector.as_str(), depth)?
+    {
+        return Ok(CallersResult {
+            target: input.selector,
+            requested_depth,
+            depth,
+            callers,
+        });
+    }
+
     let graph = input.context.read_graph(GraphReadOptions {
         hydrate_leaf_source: true,
         ..Default::default()
@@ -42,4 +54,31 @@ pub fn run(input: CallersInput) -> Result<CallersResult, KnowledgeError> {
         depth,
         callers,
     })
+}
+
+fn try_callers_via_sql_index(
+    context: &GraphCommandContext,
+    selector: &str,
+    depth: usize,
+) -> Result<Option<Vec<CallerHit>>, KnowledgeError> {
+    let Some(reader) = context.open_current_graph_index()? else {
+        return Ok(None);
+    };
+    let Some(rows) = reader.transitive_callers(selector, depth)? else {
+        return Ok(None);
+    };
+    Ok(Some(
+        rows.into_iter().map(caller_hit_from_index_row).collect(),
+    ))
+}
+
+fn caller_hit_from_index_row(row: GraphIndexCallerRow) -> CallerHit {
+    CallerHit {
+        selector: row.selector,
+        name: row.name,
+        file: row.file,
+        kind: row.kind,
+        distance: row.distance,
+        via: row.via,
+    }
 }

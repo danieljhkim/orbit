@@ -13,8 +13,10 @@ mod writer;
 mod tests;
 
 pub use reader::GraphIndexReader;
-pub use rows::{GraphIndexNodeRow, GraphIndexSearchRow};
+pub use rows::{
+    GraphIndexCallerRow, GraphIndexNodeRow, GraphIndexReferenceRow, GraphIndexSearchRow,
+};
 pub(crate) use writer::write_graph_index;
 
-pub(crate) const GRAPH_SQLITE_INDEX_SCHEMA_VERSION: u32 = 6;
+pub(crate) const GRAPH_SQLITE_INDEX_SCHEMA_VERSION: u32 = 7;
 pub(crate) const GRAPH_SQLITE_INDEX_FILENAME: &str = "graph_index.sqlite";

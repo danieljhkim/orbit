@@ -1,14 +1,15 @@
 //! `GraphIndexReader` and all read/query paths over the SQLite graph index.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 use super::GRAPH_SQLITE_INDEX_SCHEMA_VERSION;
 use super::rows::{
-    GraphIndexNodeRow, GraphIndexSearchRow, graph_index_node_from_row,
-    graph_index_search_row_from_row, sqlite_like_substring_pattern,
+    GraphIndexCallerRow, GraphIndexNodeRow, GraphIndexReferenceRow, GraphIndexSearchRow,
+    graph_index_node_from_row, graph_index_reference_row_from_row, graph_index_search_row_from_row,
+    sqlite_like_substring_pattern,
 };
 use super::writer::{
     graph_index_debug_force_fallback, query_meta, sqlite_error, u64_from_i64, usize_from_i64,
@@ -255,6 +256,107 @@ impl GraphIndexReader {
         }
     }
 
+    pub fn find_references(
+        &self,
+        terms: &[String],
+        definition_selector: Option<&str>,
+    ) -> Result<Vec<GraphIndexReferenceRow>, KnowledgeError> {
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let definition_file_selector =
+            definition_selector.and_then(file_selector_for_definition_selector);
+        let mut leaf_by_id = BTreeMap::<i64, GraphIndexReferenceRow>::new();
+        let mut seen_leaf_ids = HashSet::new();
+        let mut leaf_hit_files = HashSet::new();
+
+        for term in terms {
+            for row in self.reference_rows_for_term(term, "leaf")? {
+                let selector = selector_for_reference_row(&row);
+                if definition_selector == Some(selector.as_str()) {
+                    continue;
+                }
+                if !seen_leaf_ids.insert(row.id.clone()) {
+                    continue;
+                }
+                leaf_hit_files.insert(file_for_reference_row(&row));
+                leaf_by_id.insert(row.scan_order, row);
+            }
+        }
+
+        let mut file_by_id = BTreeMap::<i64, GraphIndexReferenceRow>::new();
+        let mut seen_file_ids = HashSet::new();
+        for term in terms {
+            for row in self.reference_rows_for_term(term, "file")? {
+                let selector = selector_for_reference_row(&row);
+                if definition_file_selector.as_deref() == Some(selector.as_str())
+                    || leaf_hit_files.contains(&row.location)
+                    || !seen_file_ids.insert(row.id.clone())
+                {
+                    continue;
+                }
+                file_by_id.insert(row.scan_order, row);
+            }
+        }
+
+        Ok(leaf_by_id
+            .into_values()
+            .chain(file_by_id.into_values())
+            .collect())
+    }
+
+    pub fn transitive_callers(
+        &self,
+        selector: &str,
+        depth: usize,
+    ) -> Result<Option<Vec<GraphIndexCallerRow>>, KnowledgeError> {
+        if depth == 0 {
+            return Ok(Some(Vec::new()));
+        }
+
+        let Some(target) = self.caller_target_by_selector(selector)? else {
+            return Ok(None);
+        };
+        if target.node_type != "leaf" {
+            return Err(KnowledgeError::invalid_data(format!(
+                "`{selector}` does not resolve to a symbol"
+            )));
+        }
+        let target_selector = selector_for_reference_row(&target);
+
+        let mut visited = HashSet::new();
+        visited.insert(target_selector.clone());
+
+        let mut queue = VecDeque::new();
+        queue.push_back((target_selector, target.name.clone(), 0usize));
+
+        let mut hits = Vec::new();
+        while let Some((_current_selector, current_name, current_distance)) = queue.pop_front() {
+            if current_distance >= depth {
+                continue;
+            }
+            for caller in self.callers_for_callee(&current_name)? {
+                let caller_selector = selector_for_reference_row(&caller);
+                if !visited.insert(caller_selector.clone()) {
+                    continue;
+                }
+                let distance = current_distance + 1;
+                hits.push(GraphIndexCallerRow {
+                    selector: caller_selector.clone(),
+                    name: caller.name.clone(),
+                    file: file_for_reference_row(&caller),
+                    kind: caller.kind.clone().unwrap_or_default(),
+                    distance,
+                    via: current_name.clone(),
+                });
+                queue.push_back((caller_selector, caller.name, distance));
+            }
+        }
+
+        Ok(Some(hits))
+    }
+
     pub fn overview_counts(&self) -> Result<(usize, usize, usize), KnowledgeError> {
         Ok((
             self.node_count("dir")?,
@@ -402,6 +504,76 @@ impl GraphIndexReader {
         Ok(files)
     }
 
+    fn reference_rows_for_term(
+        &self,
+        term: &str,
+        node_type: &str,
+    ) -> Result<Vec<GraphIndexReferenceRow>, KnowledgeError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
+                SELECT n.id, n.node_type, n.kind, n.name, n.location, n.selector, n.scan_order
+                FROM source_mention sm
+                JOIN node n ON n.id = sm.node_id
+                WHERE sm.term = ?1 AND n.node_type = ?2
+                ORDER BY n.scan_order ASC
+                "#,
+            )
+            .map_err(|error| {
+                sqlite_error(&self.path, "prepare graph sqlite reference query", error)
+            })?;
+        let rows = stmt
+            .query_map(params![term, node_type], graph_index_reference_row_from_row)
+            .map_err(|error| sqlite_error(&self.path, "query graph sqlite references", error))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| sqlite_error(&self.path, "read graph sqlite reference row", error))
+    }
+
+    fn caller_target_by_selector(
+        &self,
+        selector: &str,
+    ) -> Result<Option<GraphIndexReferenceRow>, KnowledgeError> {
+        self.conn
+            .query_row(
+                r#"
+                SELECT id, node_type, kind, name, location, selector, scan_order
+                FROM node
+                WHERE selector = ?1
+                LIMIT 1
+                "#,
+                params![selector],
+                graph_index_reference_row_from_row,
+            )
+            .optional()
+            .map_err(|error| sqlite_error(&self.path, "query graph sqlite caller target", error))
+    }
+
+    fn callers_for_callee(
+        &self,
+        callee_name: &str,
+    ) -> Result<Vec<GraphIndexReferenceRow>, KnowledgeError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
+                SELECT n.id, n.node_type, n.kind, n.name, n.location, n.selector, n.scan_order
+                FROM call_edge ce
+                JOIN node n ON n.id = ce.caller_id
+                WHERE ce.callee_name = ?1
+                ORDER BY ce.caller_scan_order ASC, n.id ASC
+                "#,
+            )
+            .map_err(|error| {
+                sqlite_error(&self.path, "prepare graph sqlite callers query", error)
+            })?;
+        let rows = stmt
+            .query_map(params![callee_name], graph_index_reference_row_from_row)
+            .map_err(|error| sqlite_error(&self.path, "query graph sqlite callers", error))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| sqlite_error(&self.path, "read graph sqlite caller row", error))
+    }
+
     fn node_count(&self, node_type: &str) -> Result<usize, KnowledgeError> {
         let count: i64 = self
             .conn
@@ -439,4 +611,34 @@ impl GraphIndexReader {
         }
         Ok(counts)
     }
+}
+
+fn file_selector_for_definition_selector(selector: &str) -> Option<String> {
+    selector
+        .strip_prefix("symbol:")
+        .and_then(|rest| rest.split_once('#').map(|(path, _)| format!("file:{path}")))
+}
+
+fn selector_for_reference_row(row: &GraphIndexReferenceRow) -> String {
+    row.selector
+        .clone()
+        .unwrap_or_else(|| match row.node_type.as_str() {
+            "dir" => {
+                let path = row.location.trim_end_matches('/');
+                format!("dir:{path}")
+            }
+            "file" => format!("file:{}", row.location),
+            "leaf" => {
+                let kind = row.kind.as_deref().unwrap_or_default();
+                format!("symbol:{}:{kind}", row.location)
+            }
+            _ => row.id.clone(),
+        })
+}
+
+fn file_for_reference_row(row: &GraphIndexReferenceRow) -> String {
+    row.location
+        .split_once('#')
+        .map(|(path, _)| path.to_string())
+        .unwrap_or_else(|| row.location.clone())
 }

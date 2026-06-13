@@ -1,74 +1,43 @@
 #![allow(missing_docs)]
 
-// Tests for commands/refs.rs live here as sibling under commands/tests/ per
-// docs/design-patterns/test_layout.md. Explicit imports.
-
 use crate::commands::{GraphCommandContext, TaskGraphScope};
 use crate::graph::object_store::{GraphObjectStore, RefName};
 use crate::graph::{BaseNodeFields, CodebaseGraphV1, DirNode, FileNode, LeafKind, LeafNode};
 
-use super::super::refs::{
-    RefInclude, RefKind, RefsInput, classify_ref_kind, run, simple_selector_symbol_name,
-};
+use super::super::callers::{CallersInput, run};
 
 #[test]
-fn simple_selector_symbol_name_handles_qualified_leaf_ids() {
-    let cases = [
-        ("User.save", "save"),
-        ("Outer.Inner.run#2", "run"),
-        ("Client::connect#1#2", "connect"),
-        ("<Foo as Runnable>::run", "run"),
-        ("load#3", "load"),
-        ("plain_function", "plain_function"),
-    ];
-
-    for (symbol, expected) in cases {
-        assert_eq!(simple_selector_symbol_name(symbol), expected);
-    }
-}
-
-#[test]
-fn ref_kind_classification_matches_snapshot() {
-    let snapshot = [
-        ("src/main.rs", RefKind::Code),
-        ("docs/guide.md", RefKind::Doc),
-        ("orbit.toml", RefKind::Config),
-        ("config/settings.jsonc", RefKind::Config),
-    ];
-
-    for (path, expected) in snapshot {
-        assert_eq!(classify_ref_kind(path), expected);
-    }
-}
-
-#[test]
-fn include_all_expands_every_kind() {
-    let include = RefInclude::from_names(vec!["all".to_string()]).expect("include");
-    assert!(include.includes(RefKind::Code));
-    assert!(include.includes(RefKind::Doc));
-    assert!(include.includes(RefKind::Config));
-}
-
-#[test]
-fn refs_uses_sql_index_without_object_hydration() {
-    let (temp_dir, context) = context_for_graph(&refs_graph());
+fn callers_uses_sql_index_without_object_hydration_or_reparse_on_read() {
+    let (temp_dir, context) = context_for_graph(&callers_graph());
     std::fs::remove_dir_all(temp_dir.path().join("graph/objects")).expect("remove objects");
     std::fs::remove_dir_all(temp_dir.path().join("graph/blobs")).expect("remove blobs");
 
-    let result = run(RefsInput {
+    let result = run(CallersInput {
         context,
         selector: "symbol:src/lib.rs#target:function".to_string(),
-        include_simple_name: false,
-        include: RefInclude::code_only(),
-        limit: 10,
-        per_file_limit: 10,
+        requested_depth: Some(2),
     })
-    .expect("refs via sqlite index");
+    .expect("callers via sqlite index");
 
-    assert_eq!(result.code_refs.len(), 1);
+    let hits = result
+        .callers
+        .into_iter()
+        .map(|hit| (hit.selector, hit.distance, hit.via))
+        .collect::<Vec<_>>();
     assert_eq!(
-        result.code_refs[0].selector,
-        "symbol:src/lib.rs#direct:function"
+        hits,
+        vec![
+            (
+                "symbol:src/lib.rs#direct:function".to_string(),
+                1,
+                "target".to_string()
+            ),
+            (
+                "symbol:src/lib.rs#indirect:function".to_string(),
+                2,
+                "direct".to_string()
+            ),
+        ]
     );
 }
 
@@ -76,7 +45,7 @@ fn context_for_graph(graph: &CodebaseGraphV1) -> (tempfile::TempDir, GraphComman
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let store = GraphObjectStore::new(temp_dir.path().join("graph"));
     let current_ref = store.write_graph(graph).expect("write graph");
-    let ref_name = RefName::new("refs-test").expect("valid ref name");
+    let ref_name = RefName::new("callers-test").expect("valid ref name");
     store
         .write_ref_atomic(&ref_name, &current_ref)
         .expect("write graph ref");
@@ -90,11 +59,12 @@ fn context_for_graph(graph: &CodebaseGraphV1) -> (tempfile::TempDir, GraphComman
     (temp_dir, context)
 }
 
-fn refs_graph() -> CodebaseGraphV1 {
+fn callers_graph() -> CodebaseGraphV1 {
     let dir_id = "dir:.";
     let file_id = "file:src/lib.rs";
     let target_id = "symbol:src/lib.rs#target:function";
     let direct_id = "symbol:src/lib.rs#direct:function";
+    let indirect_id = "symbol:src/lib.rs#indirect:function";
     CodebaseGraphV1 {
         root_dir_id: dir_id.to_string(),
         dirs: vec![DirNode {
@@ -110,7 +80,11 @@ fn refs_graph() -> CodebaseGraphV1 {
             imports: Vec::new(),
             exports: Vec::new(),
             re_exports: Vec::new(),
-            leaf_children: vec![target_id.to_string(), direct_id.to_string()],
+            leaf_children: vec![
+                target_id.to_string(),
+                direct_id.to_string(),
+                indirect_id.to_string(),
+            ],
         }],
         leaves: vec![
             leaf_node(
@@ -126,6 +100,13 @@ fn refs_graph() -> CodebaseGraphV1 {
                 "src/lib.rs#direct",
                 file_id,
                 "fn direct() { target(); }",
+            ),
+            leaf_node(
+                indirect_id,
+                "indirect",
+                "src/lib.rs#indirect",
+                file_id,
+                "fn indirect() { direct(); }",
             ),
         ],
     }

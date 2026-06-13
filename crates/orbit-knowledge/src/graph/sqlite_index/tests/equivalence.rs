@@ -22,6 +22,9 @@ use crate::graph::object_store::{GraphObjectStore, RefName};
 use crate::graph::{GraphIndexReader, navigator::GraphNavigator};
 use crate::pipeline;
 use crate::pipeline::context::BuildConfig;
+use crate::service::GraphContextService;
+use crate::service::callers::transitive_callers;
+use orbit_graph_extract::Selector;
 
 const PYTHON_DUP_METHODS: &str = r#"
 class Alpha:
@@ -164,6 +167,82 @@ fn nested_class_fixture() -> CodebaseGraphV1 {
                 Some(file_id),
                 LeafKind::Method,
                 Vec::new(),
+            ),
+        ],
+    }
+}
+
+fn refs_and_callers_fixture() -> CodebaseGraphV1 {
+    let dir_id = "dir-root";
+    let file_id = "file-lib";
+    let doc_id = "file-guide";
+    let target_id = "leaf-target";
+    let direct_id = "leaf-direct";
+    let indirect_id = "leaf-indirect";
+    let boundary_id = "leaf-boundary";
+
+    CodebaseGraphV1 {
+        root_dir_id: dir_id.to_string(),
+        dirs: vec![DirNode {
+            base: harness_base(dir_id, ".", ".", None),
+            dir_children: Vec::new(),
+            file_children: vec![file_id.to_string(), doc_id.to_string()],
+        }],
+        files: vec![
+            FileNode {
+                base: harness_base(file_id, "lib.rs", "src/lib.rs", Some(dir_id)),
+                extension: Some("rs".to_string()),
+                source_blob_hash: None,
+                source: String::new(),
+                imports: Vec::new(),
+                exports: Vec::new(),
+                re_exports: Vec::new(),
+                leaf_children: vec![
+                    target_id.to_string(),
+                    direct_id.to_string(),
+                    indirect_id.to_string(),
+                    boundary_id.to_string(),
+                ],
+            },
+            FileNode {
+                base: harness_base(doc_id, "guide.md", "docs/guide.md", Some(dir_id)),
+                extension: Some("md".to_string()),
+                source_blob_hash: None,
+                source: String::new(),
+                imports: vec!["target".to_string()],
+                exports: Vec::new(),
+                re_exports: Vec::new(),
+                leaf_children: Vec::new(),
+            },
+        ],
+        leaves: vec![
+            harness_rust_leaf(
+                target_id,
+                "target",
+                "src/lib.rs#target",
+                Some(file_id),
+                "fn target() {}",
+            ),
+            harness_rust_leaf(
+                direct_id,
+                "direct",
+                "src/lib.rs#direct",
+                Some(file_id),
+                "fn direct() { target(); }",
+            ),
+            harness_rust_leaf(
+                indirect_id,
+                "indirect",
+                "src/lib.rs#indirect",
+                Some(file_id),
+                "fn indirect() { direct(); }",
+            ),
+            harness_rust_leaf(
+                boundary_id,
+                "boundary",
+                "src/lib.rs#boundary",
+                Some(file_id),
+                "fn boundary() { target_extra(); }",
             ),
         ],
     }
@@ -357,6 +436,95 @@ fn find_node_by_selector_matches_in_memory_resolution() {
 }
 
 #[test]
+fn sql_references_match_legacy_source_scan() {
+    let graph = refs_and_callers_fixture();
+    let (_tmp, reader) = open_reader(&graph);
+    let svc = GraphContextService::new(&graph);
+    let selector = "symbol:src/lib.rs#target:function";
+    let terms = vec!["target".to_string()];
+
+    let fallback = svc
+        .find_references(None, &terms, Some(selector))
+        .into_iter()
+        .map(|hit| (hit.selector, hit.name, hit.file, hit.kind))
+        .collect::<Vec<_>>();
+    let sql = reader
+        .find_references(&terms, Some(selector))
+        .expect("sql references")
+        .into_iter()
+        .map(|row| {
+            let file = row
+                .location
+                .split_once('#')
+                .map(|(path, _)| path.to_string())
+                .unwrap_or_else(|| row.location.clone());
+            let selector = row
+                .selector
+                .unwrap_or_else(|| match row.node_type.as_str() {
+                    "file" => format!("file:{}", row.location),
+                    "leaf" => format!(
+                        "symbol:{}:{}",
+                        row.location,
+                        row.kind.as_deref().unwrap_or_default()
+                    ),
+                    _ => row.id.clone(),
+                });
+            (
+                selector,
+                row.name,
+                file,
+                row.kind.unwrap_or_else(|| "file".to_string()),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(sql, fallback);
+}
+
+#[test]
+fn sql_callers_match_legacy_tree_sitter_callers() {
+    let graph = refs_and_callers_fixture();
+    let (_tmp, reader) = open_reader(&graph);
+    let svc = GraphContextService::new(&graph);
+    let selector: Selector = "symbol:src/lib.rs#target:function"
+        .parse()
+        .expect("valid selector");
+
+    let fallback = transitive_callers(&svc, &graph, &selector, 2)
+        .expect("fallback callers")
+        .into_iter()
+        .map(|hit| {
+            (
+                hit.selector,
+                hit.name,
+                hit.file,
+                hit.kind,
+                hit.distance,
+                hit.via,
+            )
+        })
+        .collect::<Vec<_>>();
+    let sql = reader
+        .transitive_callers(&selector.to_string(), 2)
+        .expect("sql callers")
+        .expect("selector resolved in sql index")
+        .into_iter()
+        .map(|hit| {
+            (
+                hit.selector,
+                hit.name,
+                hit.file,
+                hit.kind,
+                hit.distance,
+                hit.via,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(sql, fallback);
+}
+
+#[test]
 fn sql_leaves_equal_fallback_leaves_python_dup_methods() {
     assert_sql_leaves_equal_fallback_leaves("src/fixture.py", PYTHON_DUP_METHODS);
 }
@@ -533,5 +701,31 @@ fn harness_leaf(
         start_line: Some(1),
         end_line: Some(1),
         children,
+    }
+}
+
+fn harness_rust_leaf(
+    id: &str,
+    name: &str,
+    location: &str,
+    parent_id: Option<&str>,
+    source: &str,
+) -> LeafNode {
+    LeafNode {
+        base: BaseNodeFields {
+            language: "rust".to_string(),
+            ..harness_base(id, name, location, parent_id)
+        },
+        kind: LeafKind::Function,
+        source: source.to_string(),
+        source_blob_hash: None,
+        source_hash: None,
+        file_hash_at_capture: None,
+        history: Vec::new(),
+        input_signature: Vec::new(),
+        output_signature: Vec::new(),
+        start_line: Some(1),
+        end_line: Some(1),
+        children: Vec::new(),
     }
 }
