@@ -3,7 +3,7 @@ summary: "Activity / Job — Overview"
 type: design
 title: "Activity / Job — Overview"
 owner: codex
-last_updated: 2026-05-17
+last_updated: 2026-06-12
 status: Draft
 feature: activity-job
 doc_role: overview
@@ -22,7 +22,7 @@ Activity / Job is Orbit's execution substrate. Activities describe runnable unit
 
 Orbit needs a runtime layer that humans can inspect and code can execute. Activity / Job solves four practical problems:
 
-1. **Typed execution.** Agent loops, deterministic actions, shell steps, and Groundhog attempts share one schema family after [T20260418-2010].
+1. **Typed execution.** Agent loops, deterministic actions, and Groundhog attempts share one schema family after [T20260418-2010].
 2. **Durable local control flow.** Retry, parallelism, fan-out, and loops survive outside one model turn via `JobV2` DAG constructs from [T20260418-2018].
 3. **Clean runtime boundaries.** orbit-core coordinates runs without naming `orbit-agent` internals through the `V2RuntimeHost` work in [T20260418-2143] and [T20260418-2210].
 4. **One canonical schema.** `schemaVersion: 1` assets fail load-time parsing after [T20260419-2156].
@@ -38,9 +38,8 @@ An `ActivityV2` carries shared metadata plus one runtime spec:
 - `agent_loop`
 - `groundhog`
 - `deterministic`
-- `shell`
 
-The shared shape shipped in [T20260418-2010]. Groundhog became a sibling activity kind in [T20260420-0510-2], not another `agent_loop` flag.
+The shared shape shipped in [T20260418-2010]. Groundhog became a sibling activity kind in [T20260420-0510-2], not another `agent_loop` flag. The `shell` type was removed as a fail-closed security fix in [ORB-00374]; see [ADR-0194](./4_decisions.md).
 
 ### 2.2 Jobs are the orchestration grammar
 
@@ -126,5 +125,6 @@ This layer also owns:
 - **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
 - **[T20260430-19]** — Shorten the Activity / Job design docs while preserving required structure.
 - **[T20260509-2]** — Split the v2 job executor into responsibility-focused modules without changing runtime behavior.
+- **[ORB-00374]** — Remove the `shell` activity variant and `run_shell` dispatch (fail-closed resolution of security bug [ORB-00363]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

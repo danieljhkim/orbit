@@ -79,8 +79,10 @@ pub(super) fn run_step_with_retry(
                 if outcome.success {
                     return Ok(outcome);
                 }
-                // Treat a "not-success-but-no-error" outcome (e.g. shell
-                // exited non-zero) as retryable: another attempt may succeed.
+                // Treat a "not-success-but-no-error" outcome as retryable:
+                // another attempt may succeed. No built-in dispatch leaf
+                // produces this today (leaves signal failure via `Err`); it is
+                // retained as the block-level outcome contract. See ADR-0194.
                 last_err = None;
             }
             Err(err) if err.is_non_retryable() => {

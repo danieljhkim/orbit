@@ -185,9 +185,9 @@ pub struct V2DispatchInput<'a> {
     pub input: Value,
     pub audit: Arc<V2AuditWriter>,
     pub run_id: &'a str,
-    /// Runtime host for agent_loop + deterministic paths. Callers that only
-    /// dispatch shell activities may pass `None`; shell is self-contained
-    /// via `std::process::Command`.
+    /// Runtime host for agent_loop + deterministic paths. A `None` host is only
+    /// valid for callers that never dispatch a host-backed activity; host-backed
+    /// specs return `DispatchError::HostRequired` when it is absent.
     pub host: Option<&'a dyn V2RuntimeHost>,
 }
 

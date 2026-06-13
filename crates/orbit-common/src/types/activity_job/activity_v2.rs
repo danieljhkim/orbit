@@ -8,7 +8,7 @@ use serde_json::Value;
 /// metadata:
 ///   name: <name>
 /// spec:
-///   type: agent_loop | groundhog | deterministic | shell
+///   type: agent_loop | groundhog | deterministic
 ///   description: <text>
 ///   input_schema_json: {...}
 ///   output_schema_json: {...}

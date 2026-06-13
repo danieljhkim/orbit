@@ -31,7 +31,7 @@ pub struct V2ActivityRunResult {
     pub run_id: String,
     pub events_emitted: usize,
     /// Resolved execution backend applied to the asset at load time. `None`
-    /// when the activity isn't `agent_loop` (deterministic/shell ignore
+    /// when the activity isn't `agent_loop` (deterministic ignores
     /// `backend:`).
     pub resolved_backend: Option<Backend>,
 }
