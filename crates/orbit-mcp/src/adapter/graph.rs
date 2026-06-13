@@ -33,7 +33,7 @@ const GRAPH_TOOL_NAMES: &[&str] = &[
     GRAPH_TRACE_TOOL,
 ];
 
-const GRAPH_SYNC_WINDOW: Duration = Duration::from_millis(500);
+const GRAPH_SYNC_DEBOUNCE: Duration = Duration::from_millis(250);
 
 pub(super) struct GraphToolRegistry {
     graphs: Mutex<HashMap<PathBuf, Arc<Graph>>>,
@@ -89,8 +89,8 @@ impl GraphToolRegistry {
         let graph = Arc::new(
             Graph::open(
                 worktree,
-                SyncPolicy::Windowed {
-                    window: GRAPH_SYNC_WINDOW,
+                SyncPolicy::Watch {
+                    debounce: GRAPH_SYNC_DEBOUNCE,
                 },
             )
             .map_err(graph_error_to_orbit)?,

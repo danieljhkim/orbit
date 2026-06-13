@@ -338,9 +338,11 @@ Idempotent. Compares mtime+content_hash for each indexable file:
 
 The full-build path uses `rayon` for parallel extraction, single-writer transaction for inserts. Cold build target: **<3s for 200k LOC**.
 
-### 8.2 Watcher (optional)
+### 8.2 Watcher-backed reads
 
-`orbit graph watch` runs `notify` with 200ms debounce, calls sync on changes. Useful for the MCP daemon and dev loops. **Not load-bearing** — every read path can call `sync` on demand cheaply.
+Long-lived graph handles can run `notify` with a debounce and call sync on changes in the background. The MCP daemon uses this model: opening the handle performs one initial auto sync, then reads are pure SQLite queries against the cached graph while file events schedule coalesced auto syncs.
+
+Freshness is eventual. After a same-process file edit, a read may return stale graph rows until the watcher observes the event and the debounced sync completes. `Graph::sync`/`orbit.graph.sync` is the hard read-after-write barrier.
 
 ### 8.3 Sync policy
 
@@ -355,8 +357,11 @@ pub enum SyncPolicy {
     /// pays the stat cost on every call.
     OnRead,
     /// Sync inline only if the last successful sync is older than `window`.
-    /// Recommended for long-lived processes (MCP server, watch mode).
+    /// Explicit fallback for processes that cannot run a watcher.
     Windowed { window: Duration },
+    /// Sync once at open, then refresh from background watcher events.
+    /// Recommended for long-lived processes (MCP server).
+    Watch { debounce: Duration },
 }
 ```
 
@@ -365,10 +370,10 @@ Defaults by entry point:
 | Entry point | Default policy |
 |---|---|
 | `orbit graph <cmd>` (CLI) | `Manual` — CLI users are explicit |
-| MCP server | `Windowed { window: 500ms }` |
+| MCP server | `Watch { debounce: 250ms }` |
 | `orbit graph watch` | `Manual` (watcher fires sync directly) |
 
-The previous "10ms stat budget at 5000 files" heuristic is gone — it didn't scale and was an implicit contract baked into the library. Moving the policy out makes the decision explicit and testable.
+The previous "10ms stat budget at 5000 files" heuristic is gone — it didn't scale and was an implicit contract baked into the library. Moving the policy out makes the decision explicit and testable. [ADR-0195](../4_decisions.md) records the read-path freshness contract.
 
 ### 8.4 Dirty files (uncommitted)
 
@@ -554,7 +559,7 @@ pub struct TraceNode {
 }
 
 pub enum SyncMode { Auto, Full }
-pub enum SyncPolicy { Manual, OnRead, Windowed { window: Duration } }
+pub enum SyncPolicy { Manual, OnRead, Windowed { window: Duration }, Watch { debounce: Duration } }
 
 pub struct GraphDbPath { /* opaque */ }
 
@@ -646,7 +651,7 @@ These are deliberately deferred — not blockers for shipping the spec, but list
 1. **MCP daemon model.** Does the MCP server keep a `Graph` handle open across calls, or open-on-each-call? Open-on-each is simpler but adds ~5ms per call. Likely answer: keep open, sync on request, but worth benchmarking.
 2. **Pack rendering.** Today `KnowledgePack` mixes query, budget, and prompt assembly. Lifting it into a separate `orbit-context` crate is right but out of scope for this spec.
 3. **Cross-worktree dedup.** If 5 worktrees on the same machine share unchanged files, we re-extract 5 times. Acceptable today; revisit if a user complains.
-4. **Watcher reliability.** `notify` has known issues on Linux with mass-rename operations. `SyncPolicy::Windowed` is the safety net; we should still measure.
+4. **Watcher reliability.** `notify` has known issues on Linux with mass-rename operations. Watcher errors schedule a conservative auto sync and explicit `sync` is the freshness barrier; we should still measure stale-result reports.
 5. **V2 write surface.** Rename, ReplaceBody, Delete, InsertAfter, Move — with an in-memory working-graph overlay, optimistic per-file hash verification on commit, and a patch compiler that turns graph edits into source diffs. Sketch lives in [`../3_vision.md`](../3_vision.md) §1.1. Out of scope for V1, but the V1 read model (per-worktree DB, qualified-name resolution, ephemeral symbol IDs) is deliberately compatible with adding writes later without a schema break.
 
 ## 18. What this spec deliberately does *not* include

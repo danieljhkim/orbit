@@ -16,8 +16,8 @@
 //! evaluation, and audit logging is delegated to the host. The exception is
 //! the read-only `orbit.graph.*` surface backed by `orbit-graph`; those
 //! wrappers live in-process so a long-running MCP server can reuse one graph
-//! handle per worktree and apply the MCP `Windowed { 500ms }` sync policy. In
-//! the default `orbit-cli` wiring the host is
+//! handle per worktree and apply the MCP watcher-backed sync policy. In the
+//! default `orbit-cli` wiring the host is
 //! `RuntimeMcpHost`, which brackets every call with an audit boundary
 //! (`audited_mcp_call`): the wrapper records a failure-status audit row when
 //! preflight rejects an unknown / unexposed tool name, and otherwise dispatches

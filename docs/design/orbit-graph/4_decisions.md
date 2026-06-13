@@ -3,7 +3,7 @@ summary: "Orbit Graph — Decisions"
 type: design
 title: "Orbit Graph — Decisions"
 owner: claude
-last_updated: 2026-05-25
+last_updated: 2026-06-13
 status: Draft
 feature: orbit-graph
 doc_role: decisions
@@ -21,7 +21,7 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ## ADR-0184 — Graph is a derived index, not a versioned store
 
-**Status:** Proposed · 2026-05 · [ORB-00294]
+**Status:** Superseded by ADR-0195 · 2026-06-13 · [ORB-00294] [ORB-00377]
 
 **Context.** `orbit-knowledge` was built as a git-like history layer: content-addressed objects, mutable refs, atomic swaps, lock protocols. In practice the graph is consumed as "fresh queryable index of the current code" — none of the version-store affordances are used by agents.
 
@@ -124,6 +124,20 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - Lost for now: cutover-only `callees`, `impact`, `trace`, the changed `sync` shape, and the extended graph-equiv corpus.
 - Cost: **cutover pauses.** The `orbit-graph` backend remains available for development, but agents lose the new cutover-only APIs until the root causes are fixed and a new cutover passes the gates.
 
+## ADR-0195 — Watcher-backed graph reads
+
+**Status:** Accepted · 2026-06-13 · [ORB-00377] · Supersedes ADR-0188
+
+**Context.** ORB-00377 found that the MCP `orbit.graph.*` read path was effectively poll-on-read: the 500ms `Windowed` policy elapsed between most agent calls, so each query paid for a full worktree diff before running the SQLite lookup. Lengthening the window would reduce frequency but would keep query latency coupled to repository size.
+
+**Decision.** Long-lived MCP graph handles use a watcher-backed policy: `Graph::open` performs one initial auto sync, starts a `notify` watcher scoped to the worktree, coalesces relevant filesystem events behind a debounce, and runs sync in the background. Query methods do not run inline sync for this policy; they read from a cached SQLite connection. The freshness contract is eventual: after a same-process file edit, graph reads may remain stale until the watcher observes and syncs the event, normally within the debounce plus sync duration; callers needing a hard read-after-write barrier must call `Graph::sync`/`orbit.graph.sync` before querying.
+
+**Consequences.**
+- Repeated graph reads with no intervening edits are pure SQLite lookups and do not initiate scanner walks.
+- Watcher overflow or watcher errors request a coalesced auto sync, preserving the conservative fallback path.
+- `Windowed` remains available as an explicit fallback policy, but it is no longer the MCP default.
+- Cost: the MCP process now depends on platform filesystem watcher behavior and may serve stale graph data during the documented debounce-plus-sync window.
+
 ---
 
 ## Task References
@@ -131,5 +145,6 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - [ORB-00294] allocated the six initial orbit-graph ADR IDs (ADR-0184 through ADR-0189).
 - [ORB-00331] allocated ADR-0190 and shipped the detached-HEAD per-commit DB layout.
 - [ORB-00344] allocated ADR-0192 and restored `orbit-knowledge` as the primary graph tool backend.
+- [ORB-00377] allocated ADR-0195, superseded ADR-0188, and moved long-lived MCP graph reads to a watcher-backed sync policy.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

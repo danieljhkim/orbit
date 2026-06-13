@@ -17,55 +17,55 @@ pub(crate) fn run(
     depth: u8,
     min_confidence: RefConfidence,
 ) -> Result<ImpactResult, GraphError> {
-    let conn = Connection::open(graph.db_path.path())
-        .map_err(|source| GraphError::sqlite("open graph database for impact", source))?;
-    let Some(origin) = resolve_selector(&conn, sel)? else {
-        return Ok(empty_result());
-    };
+    graph.with_read_connection(|conn| {
+        let Some(origin) = resolve_selector(conn, sel)? else {
+            return Ok(empty_result());
+        };
 
-    let max_depth = usize::from(if depth == 0 {
-        DEFAULT_IMPACT_DEPTH
-    } else {
-        depth
-    });
-    let mut queue = VecDeque::from([(origin.clone(), 0usize)]);
-    let mut seen = HashSet::from([origin.qualified]);
-    let mut touched = Vec::new();
-    let mut truncated = false;
+        let max_depth = usize::from(if depth == 0 {
+            DEFAULT_IMPACT_DEPTH
+        } else {
+            depth
+        });
+        let mut queue = VecDeque::from([(origin.clone(), 0usize)]);
+        let mut seen = HashSet::from([origin.qualified]);
+        let mut touched = Vec::new();
+        let mut truncated = false;
 
-    'bfs: while let Some((symbol, distance)) = queue.pop_front() {
-        if distance >= max_depth {
-            continue;
-        }
-        let next_distance = distance + 1;
-        for neighbor in neighbors(&conn, &symbol, min_confidence)? {
-            if seen.contains(neighbor.qualified_name.as_str()) {
+        'bfs: while let Some((symbol, distance)) = queue.pop_front() {
+            if distance >= max_depth {
                 continue;
             }
-            if touched.len() >= IMPACT_NODE_CAP {
-                truncated = true;
-                break 'bfs;
-            }
+            let next_distance = distance + 1;
+            for neighbor in neighbors(conn, &symbol, min_confidence)? {
+                if seen.contains(neighbor.qualified_name.as_str()) {
+                    continue;
+                }
+                if touched.len() >= IMPACT_NODE_CAP {
+                    truncated = true;
+                    break 'bfs;
+                }
 
-            seen.insert(neighbor.qualified_name.clone());
-            if next_distance < max_depth
-                && let Some(next_symbol) =
-                    resolve_symbol_by_qualified(&conn, neighbor.qualified_name.as_str())?
-            {
-                queue.push_back((next_symbol, next_distance));
+                seen.insert(neighbor.qualified_name.clone());
+                if next_distance < max_depth
+                    && let Some(next_symbol) =
+                        resolve_symbol_by_qualified(conn, neighbor.qualified_name.as_str())?
+                {
+                    queue.push_back((next_symbol, next_distance));
+                }
+                touched.push(ImpactEntry {
+                    qualified_name: neighbor.qualified_name,
+                    distance: next_distance,
+                    edge_kind: neighbor.edge_kind,
+                });
             }
-            touched.push(ImpactEntry {
-                qualified_name: neighbor.qualified_name,
-                distance: next_distance,
-                edge_kind: neighbor.edge_kind,
-            });
         }
-    }
 
-    Ok(ImpactResult {
-        visited_nodes: touched.len(),
-        touched,
-        truncated,
+        Ok(ImpactResult {
+            visited_nodes: touched.len(),
+            touched,
+            truncated,
+        })
     })
 }
 

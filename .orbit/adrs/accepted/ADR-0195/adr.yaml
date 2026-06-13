@@ -1,0 +1,25 @@
+schema_version: 2
+id: ADR-0195
+title: Watcher-backed graph reads
+status: accepted
+owner: codex
+created_at: 2026-06-13T18:14:02.778412Z
+accepted_at: 2026-06-13T18:14:06.367874Z
+last_updated: 2026-06-13T18:21:22.286516Z
+related_features:
+- orbit-graph
+related_tasks:
+- ORB-00377
+tags:
+- sync
+- performance
+paths:
+- crates/orbit-graph/**
+- crates/orbit-mcp/**
+- docs/design/orbit-graph/**
+- ARCHITECTURE.md
+supersedes:
+- ADR-0188
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none
