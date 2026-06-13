@@ -808,6 +808,28 @@ pub struct RefResult {
     pub relations: Vec<RelationEntry>,
     /// Number of candidate rows excluded by the confidence floor.
     pub skipped_low_confidence: usize,
+    /// Lower-confidence references surfaced because the precise floor found no
+    /// textual `refs`. Present only when the precise result was empty and a
+    /// lower-confidence (`fuzzy_name`) match exists — see [`RefFallback`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<RefFallback>,
+}
+
+/// Lower-confidence references surfaced when the precise floor returned no refs.
+///
+/// Cross-crate call sites routed through `pub use` re-exports resolve only at
+/// `fuzzy_name` (name-only) confidence, which the default `same_module` floor
+/// excludes. When the precise `refs` list is empty, the query falls back to the
+/// fuzzy floor so a genuinely-referenced public API does not look unreferenced.
+/// These matches are name-only and may include unrelated symbols sharing the name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RefFallback {
+    /// Confidence floor used to produce the fallback references (`fuzzy_name`).
+    pub confidence: RefConfidence,
+    /// Fallback references, each labelled with its own resolution confidence.
+    pub refs: Vec<RefEntry>,
+    /// Human-readable explanation of why these lower-confidence refs are shown.
+    pub note: String,
 }
 
 /// Target metadata included in a [`RefResult`].

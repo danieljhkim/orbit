@@ -9,6 +9,11 @@ pub(crate) struct ImpactCommand {
     selector: String,
     #[arg(long, default_value_t = DEFAULT_IMPACT_DEPTH)]
     depth: u8,
+    /// Minimum resolution confidence floor (default: same_module).
+    ///
+    /// The default traverses precise edges only. Cross-crate edges routed
+    /// through `pub use` re-exports resolve at `fuzzy_name`; pass
+    /// `--confidence fuzzy` to include them in the blast radius.
     #[arg(long, value_enum, default_value_t = ConfidenceArg::SameModule)]
     confidence: ConfidenceArg,
 }

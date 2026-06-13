@@ -7,6 +7,13 @@ use super::{CliError, CommandContext, json_value};
 #[derive(Debug, Args)]
 pub(crate) struct RefsCommand {
     symbol: String,
+    /// Minimum resolution confidence floor (default: same_module).
+    ///
+    /// The default keeps precise results. If the precise floor finds no
+    /// references, the result auto-includes lower-confidence `fuzzy_name`
+    /// (name-only) matches under a `fallback` field — so cross-crate callers
+    /// routed through `pub use` re-exports are not silently hidden. Pass
+    /// `--confidence fuzzy` to query those matches directly in `refs`.
     #[arg(long, value_enum, default_value_t = ConfidenceArg::SameModule)]
     confidence: ConfidenceArg,
     #[arg(long, value_enum)]
