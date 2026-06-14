@@ -67,6 +67,24 @@ fn synthetic_command_with_three_level_call_tree_returns_full_tree() {
 }
 
 #[test]
+fn command_selector_prefix_resolves_like_bare_command_name() {
+    let worktree = TestWorktree::new("trace-command-selector");
+    let graph = open_graph(&worktree, SyncPolicy::Manual);
+    let conn = open_connection(&worktree);
+
+    let root_id = seed_symbol(&conn, "src/root.rs", "handler", "crate::handler");
+    insert_command(&conn, "job-run", "src/root.rs", root_id);
+
+    let result = graph
+        .trace("command:job-run", 5, RefConfidence::SameModule)
+        .expect("trace command selector");
+
+    assert_eq!(result.visited_nodes, 1);
+    let root = result.root.expect("trace root");
+    assert_eq!(root.qualified_name.as_deref(), Some("crate::handler"));
+}
+
+#[test]
 fn branching_factor_five_depth_five_caps_at_200_nodes() {
     let worktree = TestWorktree::new("trace-cap");
     let graph = open_graph(&worktree, SyncPolicy::Manual);
@@ -172,6 +190,62 @@ fn helper() {}
     let root = result.root.expect("trace root");
     assert_eq!(root.name, "add");
     assert_eq!(root.qualified_name.as_deref(), Some("add"));
+    assert_eq!(child_names(&root), vec!["helper"]);
+}
+
+#[test]
+fn trace_resolves_rust_clap_handler_from_later_file_after_full_sync() {
+    let worktree = TestWorktree::new("trace-rust-cross-file-clap-handler");
+    worktree.write(
+        "src/command.rs",
+        r#"
+use clap::Subcommand;
+
+#[derive(Subcommand)]
+enum AuditSubcommand {
+    List(AuditListArgs),
+}
+
+struct AuditListArgs;
+
+fn dispatch(command: AuditSubcommand) {
+    match command {
+        AuditSubcommand::List(args) => args.execute(),
+    }
+}
+"#,
+    );
+    worktree.write(
+        "src/handler.rs",
+        r#"
+struct AuditListArgs;
+trait Execute {
+    fn execute(self);
+}
+
+impl Execute for AuditListArgs {
+    fn execute(self) {
+        helper();
+    }
+}
+
+fn helper() {}
+"#,
+    );
+    let graph = open_graph(&worktree, SyncPolicy::Manual);
+    graph.sync(SyncMode::Full).expect("sync rust clap fixture");
+
+    let result = graph
+        .trace("audit list", 3, RefConfidence::SameModule)
+        .expect("trace rust cross-file clap command");
+
+    assert!(result.visited_nodes > 0);
+    let root = result.root.expect("trace root");
+    assert_eq!(root.name, "execute");
+    assert_eq!(
+        root.qualified_name.as_deref(),
+        Some("<AuditListArgs as Execute>::execute")
+    );
     assert_eq!(child_names(&root), vec!["helper"]);
 }
 

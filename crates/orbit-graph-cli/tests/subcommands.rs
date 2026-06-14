@@ -97,6 +97,25 @@ fn query_and_admin_subcommands_emit_json() -> TestResult {
     assert!(trace["root"].is_null());
     assert_eq!(trace["visited_nodes"], 0);
 
+    let trace_selector = run_json(
+        worktree.path(),
+        [
+            "trace",
+            "command:ship",
+            "--depth",
+            "2",
+            "--confidence",
+            "same_module",
+        ],
+    )?;
+    assert!(trace_selector["root"].is_object());
+    assert!(
+        trace_selector["visited_nodes"]
+            .as_u64()
+            .is_some_and(|visited_nodes| visited_nodes > 0),
+        "command selector should trace a non-empty tree in {trace_selector}"
+    );
+
     let version = run_json(worktree.path(), ["version"])?;
     assert_eq!(version["crate_version"], env!("CARGO_PKG_VERSION"));
     assert!(
@@ -196,6 +215,19 @@ pub fn entry() -> i32 {
 pub fn caller() -> i32 {
     entry()
 }
+"#,
+    )?;
+    fs::write(
+        tempdir.path().join("src/cli.py"),
+        r#"
+import click
+
+@click.command()
+def ship():
+    helper()
+
+def helper():
+    return "ok"
 "#,
     )?;
     fs::write(
