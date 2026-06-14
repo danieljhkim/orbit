@@ -16,9 +16,6 @@ allowed_internal_deps() {
     orbit-policy | orbit-exec | orbit-store | orbit-search)
       echo "orbit-common"
       ;;
-    orbit-knowledge)
-      echo "orbit-common orbit-graph-extract"
-      ;;
     orbit-search-companion)
       echo "orbit-common orbit-search"
       ;;
@@ -32,7 +29,7 @@ allowed_internal_deps() {
       echo "orbit-graph orbit-graph-extract"
       ;;
     orbit-tools)
-      echo "orbit-common orbit-exec orbit-knowledge orbit-policy"
+      echo "orbit-common orbit-exec orbit-policy"
       ;;
     orbit-agent)
       echo "orbit-common orbit-tools"
@@ -41,13 +38,13 @@ allowed_internal_deps() {
       echo "orbit-agent orbit-common orbit-exec orbit-store orbit-tools"
       ;;
     orbit-core)
-      echo "orbit-common orbit-search orbit-engine orbit-knowledge orbit-policy orbit-store orbit-tools"
+      echo "orbit-common orbit-search orbit-engine orbit-policy orbit-store orbit-tools"
       ;;
     orbit-mcp)
       echo "orbit-common orbit-graph orbit-graph-extract orbit-tools"
       ;;
     orbit-dashboard)
-      echo "orbit-common orbit-core orbit-knowledge"
+      echo "orbit-common orbit-core"
       ;;
     orbit-cli)
       echo "orbit-common orbit-core orbit-mcp orbit-dashboard"

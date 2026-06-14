@@ -397,15 +397,32 @@ impl OrbitRuntime {
                 }
             }
         }
-        let registered_tools: Vec<String> = self
+        let registered_tools = self.allowlist_known_tool_names();
+        catalog.validate_tool_allowlists(registered_tools.iter().map(String::as_str))?;
+
+        Ok(catalog)
+    }
+
+    /// Tool names valid as activity allowlist targets.
+    ///
+    /// ORB-00391: this is the registry's builtin schemas plus the v2 graph
+    /// adapter tools (`orbit.graph.*`). The latter are served in-process by the
+    /// orbit-mcp graph adapter rather than registered as builtins, so they are
+    /// absent from `tool_registry().schemas()` but are still legitimate targets
+    /// under the `orbit.graph.` wildcard root.
+    pub(crate) fn allowlist_known_tool_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
             .tool_registry()
             .schemas()
             .into_iter()
             .map(|schema| schema.name)
             .collect();
-        catalog.validate_tool_allowlists(registered_tools.iter().map(String::as_str))?;
-
-        Ok(catalog)
+        names.extend(
+            orbit_common::types::activity_job::V2_GRAPH_ADAPTER_TOOL_NAMES
+                .iter()
+                .map(|name| (*name).to_string()),
+        );
+        names
     }
 
     fn v2_activity_catalog_dirs(&self) -> Vec<V2ActivityCatalogDir> {

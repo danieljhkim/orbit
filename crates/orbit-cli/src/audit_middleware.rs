@@ -522,25 +522,6 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 job_run_id: None,
             }
         }
-        Commands::Graph(cmd) => {
-            let sub = match &cmd.subcommand {
-                crate::command::graph::GraphSubcommand::Build(_) => "build",
-                crate::command::graph::GraphSubcommand::Update(_) => "update",
-                crate::command::graph::GraphSubcommand::Show(_) => "show",
-                crate::command::graph::GraphSubcommand::Search(_) => "search",
-                crate::command::graph::GraphSubcommand::History(_) => "history",
-            };
-            CommandMeta {
-                command: "graph".to_string(),
-                subcommand: Some(sub.to_string()),
-                tool_name: None,
-                target_type: Some("graph".to_string()),
-                target_id: None,
-                role: "admin".to_string(),
-                arguments_json: None,
-                job_run_id: None,
-            }
-        }
         Commands::Policy(cmd) => {
             use crate::command::policy::PolicySubcommand;
             let (sub, target_id) = match &cmd.command {

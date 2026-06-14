@@ -243,27 +243,44 @@ pub fn init_workspace_at_root(
     })
 }
 
+/// Default `.orbitignore` patterns seeded into a freshly initialized
+/// workspace. Kept in sync with the orbit-graph (v2) scanner baseline in
+/// `orbit_graph::sync::scanner` so the seeded file matches what the indexer
+/// applies by default. Relocated here from the decommissioned orbit-knowledge
+/// crate in ORB-00391.
+const DEFAULT_ORBITIGNORE_PATTERNS: &[&str] = &[
+    ".orbit/",
+    "node_modules/",
+    "target/",
+    "dist/",
+    "build/",
+    ".venv/",
+    "venv/",
+    "__pycache__/",
+    "*.egg-info/",
+];
+
+/// Render the default `.orbitignore` file content for `orbit workspace init`.
+pub fn default_orbitignore_template() -> String {
+    let mut content = String::from(
+        "# Common generated/artifact directories that should stay out of the orbit graph.\n",
+    );
+    for pattern in DEFAULT_ORBITIGNORE_PATTERNS {
+        content.push_str(pattern);
+        content.push('\n');
+    }
+    content
+}
+
 pub fn seed_default_orbitignore(workspace_root: &Path) -> Result<bool, OrbitError> {
     let orbitignore_path = workspace_root.join(".orbitignore");
     if orbitignore_path.exists() {
         return Ok(false);
     }
-    let template = crate::command::graph::default_orbitignore_template();
+    let template = default_orbitignore_template();
     atomic_write_text(&orbitignore_path, &template)
         .map_err(|error| OrbitError::Io(error.to_string()))?;
     Ok(true)
-}
-
-pub fn build_initial_graph(
-    workspace_root: &Path,
-    orbit_dir: &Path,
-) -> Result<crate::command::graph::GraphBuildOutput, OrbitError> {
-    crate::command::graph::build_graph(crate::command::graph::GraphBuildOptions {
-        data_root: orbit_dir.to_path_buf(),
-        repo_override: Some(workspace_root.to_path_buf()),
-        ref_name: None,
-        incremental: false,
-    })
 }
 
 pub(crate) fn global_skills_dir(global_root: &Path) -> PathBuf {

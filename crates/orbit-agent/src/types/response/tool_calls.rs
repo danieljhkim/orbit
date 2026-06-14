@@ -235,7 +235,9 @@ fn normalize_captured_payload(value: &Value) -> Value {
 }
 
 fn should_capture_result_payload(tool_name: &str) -> bool {
-    matches!(tool_name, "fs.read" | "orbit.graph.pack")
+    // ORB-00391: orbit.graph.pack was removed with orbit-knowledge (v1); only
+    // fs.read payloads now feed the knowledge-stats double-read metric.
+    matches!(tool_name, "fs.read")
 }
 
 fn is_tool_use_kind(kind: &str) -> bool {

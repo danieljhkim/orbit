@@ -25,7 +25,6 @@ const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.semantic.index",
     "orbit.semantic.install",
     "orbit.semantic.stats",
-    "orbit.graph.history",
     "orbit.learning.sync",
     "orbit.learning.list",
     "orbit.friction.stats",
@@ -64,14 +63,10 @@ const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.task.review_thread.reply",
     "orbit.task.review_thread.resolve",
     "orbit.task.start",
-    "orbit.graph.search",
-    "orbit.graph.show",
-    "orbit.graph.pack",
-    "orbit.graph.overview",
-    "orbit.graph.refs",
-    "orbit.graph.callers",
-    "orbit.graph.deps",
-    "orbit.graph.implementors",
+    // ORB-00391: the v1 orbit.graph.* builtins were decommissioned. The agent
+    // graph surface is now served by the in-process orbit-graph (v2) adapter in
+    // orbit-mcp (see crates/orbit-mcp/src/adapter/graph.rs and its tests), not by
+    // the orbit-tools runtime registry, so no orbit.graph.* tool appears here.
     "orbit.adr.add",
     "orbit.adr.show",
     "orbit.adr.supersede",
@@ -99,7 +94,7 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
 #[test]
 fn inactive_tools_are_not_in_the_mcp_safe_surface() {
     let safe_names: BTreeSet<&str> = safe_mcp_tool_names().into_iter().collect();
-    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 27);
+    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 26);
 
     for name in EXPECTED_INACTIVE_TOOL_NAMES {
         assert!(
@@ -210,7 +205,7 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
 }
 
 #[test]
-fn runtime_mcp_host_lists_safe_graph_tools_for_clients() {
+fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
     let runtime = OrbitRuntime::in_memory().expect("build test runtime");
     let host = RuntimeMcpHost { runtime };
     let listed: BTreeSet<String> = host
@@ -240,36 +235,17 @@ fn runtime_mcp_host_lists_safe_graph_tools_for_clients() {
         );
     }
 
-    for name in [
-        "orbit.graph.add",
-        "orbit.graph.delete",
-        "orbit.graph.move",
-        "orbit.graph.write",
-    ] {
-        assert!(
-            !listed.contains(name),
-            "client-visible MCP tool list exposes graph write tool: {name}"
-        );
-    }
-
-    // ORB-00195: MCP `tools/list` (via schema_to_tool) must advertise allow_fuzzy for
-    // the sanitized orbit_graph_search so agents discover the fuzzy fallback.
-    let search_schema = host
-        .list_tool_schemas()
-        .into_iter()
-        .find(|s| s.name == "orbit.graph.search")
-        .expect("orbit.graph.search schema must be exposed to MCP");
-    let fuzzy = search_schema
-        .parameters
-        .iter()
-        .find(|p| p.name == "allow_fuzzy")
-        .expect("allow_fuzzy must be declared in ToolSchema for discoverability");
-    assert_eq!(fuzzy.param_type, "boolean", "allow_fuzzy is boolean input");
-    assert!(!fuzzy.required, "allow_fuzzy is optional");
+    // ORB-00391: the orbit-tools runtime host must expose NO `orbit.graph.*`
+    // tool. The orbit-mcp adapter gates its in-process orbit-graph (v2) tools on
+    // exactly this condition (`host_exposes_graph_tools` → false), so any graph
+    // tool leaking back into the host surface would silently disable v2.
     assert!(
-        fuzzy.description.contains("fuzzy") || fuzzy.description.contains("fallback"),
-        "description must mention fuzzy fallback: {}",
-        fuzzy.description
+        !listed.iter().any(|name| name.starts_with("orbit.graph.")),
+        "host must expose no orbit.graph.* tool after the v2 cutover, found: {:?}",
+        listed
+            .iter()
+            .filter(|name| name.starts_with("orbit.graph."))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -495,33 +471,11 @@ mod audited_mcp_call_tests {
         );
     }
 
-    #[test]
-    fn mcp_graph_search_accepts_allow_fuzzy_and_returns_result_shape() {
-        let runtime = OrbitRuntime::in_memory().expect("build test runtime");
-        // MCP-path (preflight + audited dispatch) regression for ORB-00195.
-        // Exercises allow_fuzzy passthrough for both canonical and (via adapter) sanitized names.
-        // In-memory test runtime has no graph data, so execution may yield knowledge err;
-        // the important check is that preflight accepts the exposed tool+param (no "not found").
-        let res = audited_mcp_call(
-            &runtime,
-            "orbit.graph.search",
-            json!({"query": "TypoForFuzzyTest", "allow_fuzzy": true, "limit": 3}),
-        );
-        match res {
-            Ok(body) => {
-                assert!(body.get("total").is_some());
-                assert!(body.get("results").is_some());
-            }
-            Err(e) => {
-                let msg = e.to_string().to_lowercase();
-                assert!(
-                    !msg.contains("not found") && !msg.contains("unknown") && !msg.contains("tool"),
-                    "preflight must accept orbit.graph.search (MCP-exposed); execution err ok in empty fixture: {}",
-                    e
-                );
-            }
-        }
-    }
+    // ORB-00391: the former `mcp_graph_search_accepts_allow_fuzzy_and_returns_result_shape`
+    // test exercised the v1 orbit-knowledge `orbit.graph.search` builtin over the
+    // host dispatch path. That builtin was decommissioned; the v2 graph search is
+    // served by the in-process orbit-graph adapter in orbit-mcp and is covered by
+    // `orbit-mcp/src/adapter/tests/graph.rs` (`graph_tools_invoke_in_process_fixture`).
 
     struct EnvGuard {
         _lock: MutexGuard<'static, ()>,

@@ -34,8 +34,8 @@ pub use job_v2::{
 };
 pub use schema_header::SchemaHeader;
 pub use tool_allowlist::{
-    ToolAllowlistError, V2_INTENTIONALLY_EMPTY_TOOL_WILDCARD_ROOTS, V2_TOOL_WILDCARD_ROOTS,
-    tool_allowed, validate_activity_tool_allowlist,
+    ToolAllowlistError, V2_GRAPH_ADAPTER_TOOL_NAMES, V2_INTENTIONALLY_EMPTY_TOOL_WILDCARD_ROOTS,
+    V2_TOOL_WILDCARD_ROOTS, tool_allowed, validate_activity_tool_allowlist,
     validate_activity_tool_allowlist_against_registered_tools, validate_tool_allowlist,
     validate_tool_allowlist_against_registered_tools,
 };

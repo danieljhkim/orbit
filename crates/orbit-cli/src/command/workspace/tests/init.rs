@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use tempfile::tempdir;
 
-use orbit_core::command::graph::default_orbitignore_template;
+use orbit_core::command::init::default_orbitignore_template;
 use orbit_core::workspace_registry;
 
 use super::super::init::WorkspaceInitArgs;

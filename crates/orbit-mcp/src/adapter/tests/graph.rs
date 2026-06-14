@@ -25,6 +25,9 @@ fn graph_tool_schemas_cover_cli_parameters() {
             "orbit.graph.callees",
             "orbit.graph.impact",
             "orbit.graph.trace",
+            "orbit.graph.overview",
+            "orbit.graph.implementors",
+            "orbit.graph.deps",
         ]
     );
 
@@ -50,6 +53,9 @@ fn graph_tool_schemas_cover_cli_parameters() {
         &schemas[6],
         &with_workspace_params(&["command_name", "depth", "confidence"]),
     );
+    assert_param_names(&schemas[7], &with_workspace_params(&["scope", "format"]));
+    assert_param_names(&schemas[8], &with_workspace_params(&["selector"]));
+    assert_param_names(&schemas[9], &with_workspace_params(&["selector"]));
     assert_workspace_params_optional_strings(&schemas);
 }
 
@@ -203,6 +209,44 @@ async fn graph_tools_invoke_in_process_fixture() {
     .await;
     assert!(trace["root"].is_null());
     assert_eq!(trace["visited_nodes"], 0);
+
+    let overview = call_json(
+        &server,
+        "orbit.graph.overview",
+        json!({
+            "format": "full"
+        }),
+    )
+    .await;
+    assert_eq!(overview["format"], "full");
+    assert!(overview["total_files"].as_u64().expect("total_files") >= 1);
+    assert!(
+        overview["total_symbols"].as_u64().expect("total_symbols") >= 3,
+        "fixture defines helper/entry/caller: {overview}"
+    );
+    assert_array_field(&overview, "files");
+
+    let implementors = call_json(
+        &server,
+        "orbit.graph.implementors",
+        json!({
+            "selector": "symbol:src/lib.rs#Missing:trait"
+        }),
+    )
+    .await;
+    assert_eq!(implementors["trait_name"], "Missing");
+    assert_array_field(&implementors, "implementors");
+
+    let deps = call_json(
+        &server,
+        "orbit.graph.deps",
+        json!({
+            "selector": "file:src/lib.rs"
+        }),
+    )
+    .await;
+    assert_eq!(deps["scope"], "file:src/lib.rs");
+    assert_array_field(&deps, "imports");
 
     assert_eq!(server.graph_tools.cached_worktree_count(), 1);
 }

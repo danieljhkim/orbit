@@ -1183,17 +1183,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hashbrown"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
-dependencies = [
- "allocator-api2",
- "equivalent",
- "foldhash",
-]
-
-[[package]]
 name = "hashlink"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1766,15 +1755,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
-name = "lru"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e0b564323a0fb6d54b864f625ae139de9612e27edb944dda37c109f05aac531"
-dependencies = [
- "hashbrown 0.17.0",
-]
-
-[[package]]
 name = "lzma-rust2"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2237,7 +2217,6 @@ dependencies = [
  "libc",
  "orbit-common",
  "orbit-engine",
- "orbit-knowledge",
  "orbit-policy",
  "orbit-search",
  "orbit-store",
@@ -2248,6 +2227,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "tempfile",
+ "tiktoken-rs",
  "toml",
  "tracing",
 ]
@@ -2262,7 +2242,6 @@ dependencies = [
  "futures-core",
  "orbit-common",
  "orbit-core",
- "orbit-knowledge",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2351,43 +2330,6 @@ dependencies = [
  "serde_yaml",
  "thiserror",
  "toml",
- "tree-sitter",
- "tree-sitter-c",
- "tree-sitter-c-sharp",
- "tree-sitter-go",
- "tree-sitter-java",
- "tree-sitter-javascript",
- "tree-sitter-kotlin-ng",
- "tree-sitter-python",
- "tree-sitter-ruby",
- "tree-sitter-rust",
- "tree-sitter-typescript",
-]
-
-[[package]]
-name = "orbit-knowledge"
-version = "0.9.0"
-dependencies = [
- "chrono",
- "fs2",
- "ignore",
- "libc",
- "lru",
- "orbit-common",
- "orbit-graph-extract",
- "proptest",
- "rayon",
- "regex",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "tempfile",
- "thiserror",
- "tiktoken-rs",
- "toml",
- "tracing",
  "tree-sitter",
  "tree-sitter-c",
  "tree-sitter-c-sharp",
@@ -2491,7 +2433,6 @@ dependencies = [
  "chrono",
  "orbit-common",
  "orbit-exec",
- "orbit-knowledge",
  "orbit-policy",
  "regex",
  "rusqlite",

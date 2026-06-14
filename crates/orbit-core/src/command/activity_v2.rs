@@ -55,12 +55,7 @@ impl OrbitRuntime {
         let mut asset = load_activity_asset(&yaml).map_err(|err| {
             OrbitError::InvalidInput(format!("load {}: {err}", yaml_path.display()))
         })?;
-        let registered_tools: Vec<String> = self
-            .tool_registry()
-            .schemas()
-            .into_iter()
-            .map(|schema| schema.name)
-            .collect();
+        let registered_tools = self.allowlist_known_tool_names();
         validate_activity_tool_allowlist_against_registered_tools(
             &asset.spec,
             registered_tools.iter().map(String::as_str),

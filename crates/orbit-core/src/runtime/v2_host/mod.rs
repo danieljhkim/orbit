@@ -29,7 +29,6 @@ use orbit_common::types::{
 };
 use orbit_engine::{AgentRoleConfig, EnvironmentHost};
 use orbit_engine::{DispatchError, ResolvedCliExecutor, ResolvedSandbox, V2RuntimeHost};
-use orbit_knowledge::metrics::merge_invocation_trace;
 use orbit_store::{InvocationInsertParams, Store, token_scoreboard};
 use orbit_tools::{FsAuditLogger, ReservationOwnerContext, ToolContext};
 use serde_json::Value;
@@ -203,7 +202,7 @@ impl V2RuntimeHost for OrbitRuntime {
                 DispatchError::JobExecution(format!("read job run for knowledge metrics: {error}"))
             })?
             .and_then(|run| run.knowledge_metrics);
-        if let Some(metrics) = merge_invocation_trace(existing.as_ref(), trace) {
+        if let Some(metrics) = crate::metrics::merge_invocation_trace(existing.as_ref(), trace) {
             self.stores()
                 .jobs()
                 .record_run_knowledge_metrics(job_run_id, metrics)
@@ -398,7 +397,10 @@ mod tests {
     }
 
     #[test]
-    fn persist_invocation_trace_records_pack_metrics_before_terminal_state() {
+    fn persist_invocation_trace_no_longer_measures_removed_pack_tool() {
+        // ORB-00391: orbit.graph.pack was removed with orbit-knowledge (v1). A trace
+        // whose only payload tool is the former pack tool records no knowledge metrics,
+        // because merge_invocation_trace now measures fs.read exclusively.
         let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
         let run_id = seed_running_job_run(&runtime, "knowledge_pack_job");
         let trace = trace_with_tool_calls(
@@ -419,59 +421,18 @@ mod tests {
 
         let run = runtime.show_job_run(&run_id).expect("show job run");
         assert_eq!(run.state, JobRunState::Running);
-        let metrics = run.knowledge_metrics.expect("knowledge metrics recorded");
-        assert!(metrics.knowledge_pack_used);
-        assert_eq!(metrics.raw_read_token_baseline, 400);
-        assert_eq!(metrics.knowledge_pack_tokens, Some(100));
-        assert_eq!(metrics.compression_ratio, Some(4.0));
-        assert_eq!(metrics.actual_fs_read_tokens_during_run, 0);
-        assert_eq!(metrics.double_read_rate, Some(0.0));
-        assert_eq!(metrics.knowledge_pack_unresolved_count, 0);
-        assert_eq!(metrics.total_llm_input_tokens, 155);
-
+        assert!(
+            run.knowledge_metrics.is_none(),
+            "the removed pack tool must not produce knowledge metrics"
+        );
         assert_eq!(run.job_id, "knowledge_pack_job");
     }
 
     #[test]
-    fn persist_invocation_trace_records_fallback_and_double_read_metrics() {
+    fn persist_invocation_trace_records_fs_read_double_read_metrics() {
+        // ORB-00391: with the pack baseline gone, every fs.read is "double read"
+        // relative to itself, so double_read_rate is 1.0 for an fs.read-only run.
         let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
-
-        let double_read_run_id = seed_running_job_run(&runtime, "knowledge_double_read_job");
-        let double_read_trace = trace_with_tool_calls(
-            90,
-            vec![
-                payload_tool_call(
-                    1,
-                    "orbit.graph.pack",
-                    serde_json::json!({
-                        "raw_read_token_baseline": 100,
-                        "knowledge_pack_tokens": 25,
-                        "entries": [{ "selector": "file:src/main.rs" }],
-                        "unresolved_selectors": ["file:src/missing.rs"],
-                    }),
-                ),
-                byte_count_tool_call(2, "fs.read", 80),
-            ],
-        );
-
-        persist_test_trace(&runtime, &double_read_run_id, &double_read_trace);
-
-        let double_read_run = runtime
-            .show_job_run(&double_read_run_id)
-            .expect("show double-read job run");
-        let metrics = double_read_run
-            .knowledge_metrics
-            .expect("double-read metrics recorded");
-        assert!(metrics.knowledge_pack_used);
-        assert_eq!(metrics.raw_read_token_baseline, 120);
-        assert_eq!(metrics.knowledge_pack_tokens, Some(25));
-        assert_eq!(metrics.knowledge_pack_unresolved_count, 1);
-        assert_eq!(metrics.actual_fs_read_tokens_during_run, 20);
-        assert!(
-            metrics
-                .double_read_rate
-                .is_some_and(|rate| (rate - (20.0 / 120.0)).abs() < f64::EPSILON)
-        );
 
         let fallback_run_id = seed_running_job_run(&runtime, "knowledge_fallback_job");
         let fallback_trace =

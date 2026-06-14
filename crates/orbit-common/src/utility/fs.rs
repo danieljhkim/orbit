@@ -1,9 +1,9 @@
 //! Atomic filesystem primitives.
 //!
-//! Consolidates the three variants that exist across the workspace today:
+//! Consolidates the variants that historically existed across the workspace:
 //! - `orbit-core::fs_utils::atomic_write_text` (volatile)
 //! - `orbit-store::file::fs_utils::write_atomic` (volatile, with separate flock helper)
-//! - `orbit-knowledge::io::write_text_atomic_durable` (durable, parent-dir fsync)
+//! - the former `orbit-knowledge` durable write (parent-dir fsync), since removed
 //!
 //! The durable variant is the canonical one: rename-into-place plus
 //! parent-directory fsync so the rename itself is flushed. Volatile is

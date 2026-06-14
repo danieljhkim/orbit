@@ -1,8 +1,8 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
-**Last updated:** 2026-06-14 (ORB-00389 restored `overview`/`implementors`/`deps` as dedicated query commands; surface budget 7 → 10)
-**Relation to `orbit-knowledge`:** Coexists initially. Both crates run side-by-side under a feature flag; whether `orbit-knowledge` is eventually phased out depends on the head-to-head effectiveness measurement in §16 Step 4 — it is not a foregone conclusion of this spec.
+**Last updated:** 2026-06-14 (ORB-00391 completed the v2 cutover and removed `orbit-knowledge`; orbit-graph is now the sole graph surface)
+**Relation to `orbit-knowledge`:** Decommissioned. `orbit-knowledge` (v1) was removed in ORB-00391; orbit-graph is the sole graph backend. The two no longer coexist. See §16 for the migration outcome.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
 
@@ -626,6 +626,8 @@ No async on the public surface. SQLite + tree-sitter are both sync. If the MCP s
 Estimated landing: ~24k → ~10k LOC. More capability (string / command / config indexes), fewer surfaces.
 
 ## 16. Migration plan
+
+> **Status — completed (ORB-00391, 2026-06).** The migration is done: `orbit-graph` (v2) is the sole graph surface and the `orbit-knowledge` (v1) crate has been removed. The agent-facing `orbit.graph.*` tools are served by the in-process orbit-graph adapter in `orbit-mcp`; the v1 builtins, the `orbit graph` CLI command, the init-time graph build, and the v1 metrics pipeline were decommissioned (the knowledge-stats computation moved to `orbit_core::metrics`). Step 4's automated effectiveness/equivalence harness was never rebuilt after ADR-0197 removed it; the accepted measurement bar for the final cutover was **manual QA plus a v1-vs-v2 spot-check**, not the harness described below. See ADR-0192 (superseded by ADR-0198). The four-step plan below is retained as the historical design record.
 
 A four-step Orbit epic. Each step is one or more tasks; each task is independently shippable.
 

@@ -4,9 +4,7 @@ use chrono::Utc;
 use clap::Args;
 use orbit_common::types::{Workspace, WorkspaceStatus};
 use orbit_core::command::agent_rules::{InjectionAction, inject_agent_rules};
-use orbit_core::command::init::{
-    InitOptions, build_initial_graph, init_workspace_at_root, seed_default_orbitignore,
-};
+use orbit_core::command::init::{InitOptions, init_workspace_at_root, seed_default_orbitignore};
 use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
 
@@ -94,18 +92,9 @@ impl WorkspaceInitArgs {
             }
         }
 
-        eprintln!("graph build: scanning {}", init_result.root.display());
-        match build_initial_graph(&init_result.root, &init_result.orbit_dir) {
-            Ok(summary) => {
-                eprintln!(
-                    "graph build: {} dirs, {} files, {} symbols",
-                    summary.dirs, summary.files, summary.leaves,
-                );
-            }
-            Err(e) => {
-                eprintln!("graph build: failed ({e}), run `orbit graph build` manually");
-            }
-        }
+        // The code graph is served by orbit-graph (v2), which indexes lazily on
+        // first query — no build step at init time (ORB-00391).
+        println!("  graph:     indexed on demand by orbit-graph");
 
         Ok(())
     }
