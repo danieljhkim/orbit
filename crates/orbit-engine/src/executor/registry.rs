@@ -6,6 +6,7 @@ use tracing::warn;
 use super::automation::AutomationExecutor;
 use super::cli_command::CliCommandExecutor;
 use super::direct_agent::DirectAgentExecutor;
+use super::external::ExternalExecutor;
 use super::traits::ActivityExecutor;
 
 pub struct ActivityExecutorRegistry {
@@ -71,6 +72,17 @@ impl ActivityExecutorRegistry {
                 }
                 ExecutorType::CliCommand => {
                     self.register_named(def.name.clone(), Box::new(CliCommandExecutor));
+                }
+                ExecutorType::External => {
+                    if def.command.is_some() {
+                        let executor = ExternalExecutor::from_executor_def(def.clone());
+                        self.register_named(def.name.clone(), Box::new(executor));
+                    } else {
+                        warn!(
+                            executor_name = %def.name,
+                            "external executor def missing 'command' field, skipping"
+                        );
+                    }
                 }
             }
         }
