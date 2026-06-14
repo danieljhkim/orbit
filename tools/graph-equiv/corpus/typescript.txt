@@ -1,9 +1,0 @@
-# Frozen graph-equiv selectors for TypeScript fixture coverage.
-search tsHelper
-search TsWidget
-show symbol:tools/graph-equiv/fixtures/typescript/sample.ts#tsEntry:function
-show file:tools/graph-equiv/fixtures/typescript/sample.ts
-refs symbol:tools/graph-equiv/fixtures/typescript/sample.ts#tsHelper:function
-refs symbol:tools/graph-equiv/fixtures/typescript/sample.ts#tsIsolated:function
-callees symbol:tools/graph-equiv/fixtures/typescript/sample.ts#tsEntry:function
-impact symbol:tools/graph-equiv/fixtures/typescript/sample.ts#tsIsolated:function
