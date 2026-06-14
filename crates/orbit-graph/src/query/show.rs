@@ -1,10 +1,12 @@
 //! Selector resolution and bounded source reads.
 
 use std::fs;
+use std::str;
 
 use orbit_graph_extract::Selector;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
+use serde::ser::{SerializeStruct, Serializer};
 
 use crate::{Graph, GraphError};
 
@@ -15,12 +17,39 @@ use crate::{Graph, GraphError};
 pub const DEFAULT_SHOW_MAX_BYTES: usize = 64 * 1024;
 
 /// Source and metadata view returned by [`Graph::show`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeView {
     /// Source bytes from the resolved span, bounded by the caller's budget.
     pub bytes: Vec<u8>,
     /// Metadata for the resolved source span.
     pub metadata: NodeMetadata,
+}
+
+impl Serialize for NodeView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct("NodeView", 2)?;
+        match str::from_utf8(self.bytes.as_slice()) {
+            Ok(source) => state.serialize_field("source", source)?,
+            Err(_) => state.serialize_field("source", &ByteFallback::new(self.bytes.as_slice()))?,
+        }
+        state.serialize_field("metadata", &self.metadata)?;
+        state.end()
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ByteFallback<'a> {
+    encoding: &'static str,
+    bytes: &'a [u8],
+}
+
+impl<'a> ByteFallback<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            encoding: "bytes",
+            bytes,
+        }
+    }
 }
 
 /// Metadata for a [`NodeView`].
@@ -38,7 +67,7 @@ pub struct NodeMetadata {
     /// Qualified symbol name when one exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qualified: Option<String>,
-    /// Whether `bytes` is shorter than the resolved source span.
+    /// Whether the returned source is shorter than the resolved source span.
     pub truncated: bool,
 }
 
@@ -182,7 +211,7 @@ fn materialize_view(
         resolved.file.as_str(),
     )?;
     let full = &source[span.start..span.end];
-    let byte_count = full.len().min(max_bytes);
+    let byte_count = bounded_source_len(full, max_bytes);
     let bytes = full[..byte_count].to_vec();
     let truncated = byte_count < full.len();
 
@@ -197,6 +226,17 @@ fn materialize_view(
             truncated,
         },
     })
+}
+
+fn bounded_source_len(source: &[u8], max_bytes: usize) -> usize {
+    let mut byte_count = source.len().min(max_bytes);
+    let Ok(source) = str::from_utf8(source) else {
+        return byte_count;
+    };
+    while !source.is_char_boundary(byte_count) {
+        byte_count -= 1;
+    }
+    byte_count
 }
 
 fn validate_span(
