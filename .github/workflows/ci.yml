@@ -77,30 +77,3 @@ jobs:
             }'
           )"
           cargo run -p orbit-cli --bin orbit -- tool run orbit.task.add --input "$payload"
-
-  graph-equiv:
-    name: Graph Equivalence
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable (2026-05-07)
-        with:
-          components: rustfmt, clippy
-
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-equiv-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-equiv-
-            ${{ runner.os }}-cargo-
-
-      - name: Run graph equivalence harness
-        run: make ci-equiv

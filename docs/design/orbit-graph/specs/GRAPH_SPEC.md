@@ -1,7 +1,7 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
-**Last updated:** 2026-05-25 (ORB-00330 Rust command extraction; ORB-00331 detached-HEAD DB layout)
+**Last updated:** 2026-06-13 (ORB-00385 / ADR-0197 removed the equivalence + benchmark harness)
 **Relation to `orbit-knowledge`:** Coexists initially. Both crates run side-by-side under a feature flag; whether `orbit-knowledge` is eventually phased out depends on the head-to-head effectiveness measurement in §16 Step 4 — it is not a foregone conclusion of this spec.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
@@ -522,9 +522,9 @@ Agents that need stronger guarantees should fall back to `rg` and read source. T
 **Measurement contract.**
 
 - **Hardware.** Numbers above are for the CI runner profile (`ubuntu-24.04`, 4-core, 16GB). Local dev measurements are advisory and not gated.
-- **Baseline source.** `bench/baselines.json` is checked into the repo. The regression gate compares a run against this committed baseline, **not** the previous merged run — otherwise the gate ratchets up to whatever the last commit happened to measure and the budget silently erodes.
+- **Baseline source.** A committed baseline file (formerly `bench/baselines.json`, removed with the benchmark scaffolding — see ADR-0197) anchors the regression gate: the run is compared against the committed baseline, **not** the previous merged run — otherwise the gate ratchets up to whatever the last commit happened to measure and the budget silently erodes. The baseline is recommitted when this gate is wired.
 - **Updating the baseline** requires a PR with the `bench-baseline-bump` label and a one-line justification in the PR body. Routine perf wins → bump down; routine drift → no bump, fix the regression instead.
-- **Wire `graph_bench.rs`** (already exists) to CI; results are written to `target/bench/` artifacts and diffed against `bench/baselines.json`. Gate fires when any row is >20% slower than baseline.
+- **Wire `graph_bench.rs`** (already exists) to CI; results are written to `target/bench/` artifacts and diffed against the recommitted baseline (the prior `bench/baselines.json` was removed — see ADR-0197). Gate fires when any row is >20% slower than baseline.
 
 ## 13. Public Rust API
 
@@ -614,7 +614,7 @@ Create `orbit-graph-extract`. Move language modules from `orbit-knowledge::extra
 **Step 2 — Land `orbit-graph` behind a feature flag.**
 New crate, full schema, full query surface. MCP tools accept `ORBIT_GRAPH_BACKEND=v2` env var to switch. Old crate remains default. Dual-run for one release cycle; compare outputs in CI.
 
-**Equivalence relation.** A `tools/graph-equiv` binary runs both backends against a frozen corpus of ~30 representative selectors covering rust, ts, python, and go, and fails CI on any diff outside the documented tolerances:
+**Equivalence relation.** When a v2 cutover is active, both backends must agree on the relation below — enforced in CI by dual-running them against a frozen corpus of ~30 representative selectors (rust, ts, python, go) and failing on any diff outside the documented tolerances. The in-tree harness that did this (`tools/graph-equiv` + the `bench/` baselines) was removed while the cutover is paused (see ADR-0197) and is reintroduced fresh when a cutover is rescheduled. The relation it must satisfy:
 
 | Query | v1 vs v2 must agree on |
 |---|---|
@@ -624,13 +624,13 @@ New crate, full schema, full query surface. MCP tools accept `ORBIT_GRAPH_BACKEN
 | `callees <sym>` | set of `(file, line, target_name)` triples |
 | `impact <sym>` (depth=3) | set of touched symbol qualified names |
 
-Promotion to default (Step 3) requires zero diffs for a full release cycle. Per-query waivers — if any prove necessary — are documented in `bench/equiv-waivers.md` with rationale, and the waiver itself blocks until reviewed.
+Promotion to default (Step 3) requires zero diffs for a full release cycle. Per-query waivers — if any prove necessary — are documented alongside the reintroduced harness with rationale, and the waiver itself blocks until reviewed.
 
 **Step 3 — Flip the default to v2.**
 After equivalence holds for a week of real agent usage, flip the default backend to v2. `orbit-knowledge` remains reachable via env var indefinitely — this step opens the head-to-head evaluation window for Step 4, it does not commit to deletion.
 
 **Step 4 — Measure effectiveness, then decide.**
-Run a head-to-head measurement harness (`tools/graph-effectiveness/`, separate from the equivalence harness in `tools/graph-equiv/`) over a defined evaluation window of at least one full release cycle. Signals that matter:
+Run a head-to-head measurement harness (a planned `tools/graph-effectiveness/`, separate from the equivalence harness) over a defined evaluation window of at least one full release cycle. Signals that matter:
 
 | Signal | Operationalization |
 |---|---|

@@ -1,4 +1,4 @@
-.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci ci-fast ci-equiv bench stability release-check cleanup-branches
+.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci ci-fast bench stability release-check cleanup-branches
 
 # ------------------------------------------------------------
 # Config
@@ -50,7 +50,6 @@ help:
 	@echo "  make tree         Print dependency tree"
 	@echo "  make ci           Full CI pass (clippy + tests + doc + guardrails; also runs on PRs)"
 	@echo "  make ci-fast      Pre-handoff gate for agents (fmt-check + guardrail scripts; no compile)"
-	@echo "  make ci-equiv     Run v1/v2 graph equivalence harness"
 	@echo "  make stability    Verify per-crate stability tier markers"
 	@echo "  make release-check  Verify /plugin install orbit version lockstep (see docs/RELEASE.md)"
 	@echo "  make install      Install CLI locally (INSTALL_PROFILE=debug optional)"
@@ -121,10 +120,6 @@ ci-fast:
 	./scripts/check-stability.sh
 	./scripts/check-learning-layout.sh
 	./scripts/check-artifact-redaction-guardrail.sh
-
-ci-equiv:
-	$(CARGO) build -p orbit-graph-cli -p graph-equiv
-	$(CARGO) run -p graph-equiv -- check --workspace .
 
 # Verify every workspace crate declares its stability tier
 stability:

@@ -37,7 +37,6 @@ flowchart LR
   MCP --> Common
   Dashboard["orbit-dashboard"] --> Core
   Dashboard --> Knowledge
-  GraphEquiv["graph-equiv"] --> Knowledge
   Core --> Common
   Registry["orbit-registry"] --> Common
 ```
@@ -65,7 +64,6 @@ flowchart LR
 - **orbit-engine**: activity/job execution, template rendering, retry logic, subprocess execution, and tool-aware automation. Owns the `backend: cli` subprocess runner (`activity_job::cli_runner`), which references `orbit-agent::{Agent, AgentConfig}` directly so orbit-core stays clean of orbit-agent types. Depends on `orbit-agent`, `orbit-common`, `orbit-exec`, `orbit-store`, and `orbit-tools`.
 - **orbit-core**: runtime bootstrap, config layering, command dispatch, default asset seeding, and thin command facades for graph, policy, tool, store, engine, and search features. Surfaces the `OrbitRuntime` API used by `orbit-cli`; does NOT depend on `orbit-agent`.
 - **orbit-cli**: clap-based CLI entry point.
-- **tools/graph-equiv**: internal workspace binary for the `orbit-knowledge` v1 to `orbit-graph` v2 equivalence harness. The scaffold depends only on `orbit-knowledge`; P6.1 owns the frozen corpus, diff logic, and CI wiring.
 
 ---
 
@@ -96,7 +94,6 @@ Each workspace crate declares a stability tier in its `Cargo.toml` under `[packa
 | orbit-dashboard       | internal     |
 | orbit-policy          | internal     |
 | orbit-tools           | internal     |
-| graph-equiv           | internal     |
 
 ---
 

@@ -49,9 +49,6 @@ allowed_internal_deps() {
     orbit-dashboard)
       echo "orbit-common orbit-core orbit-knowledge"
       ;;
-    graph-equiv)
-      echo "orbit-knowledge"
-      ;;
     orbit-cli)
       echo "orbit-common orbit-core orbit-mcp orbit-dashboard"
       ;;
@@ -84,7 +81,7 @@ workspace_crates = sorted(
     (package["name"], package["manifest_path"])
     for package in metadata["packages"]
     if package["id"] in workspace_members
-    and (package["name"].startswith("orbit-") or package["name"] == "graph-equiv")
+    and package["name"].startswith("orbit-")
 )
 for crate, manifest_path in workspace_crates:
     print(f"{crate}\t{manifest_path}")

@@ -112,7 +112,7 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ## ADR-0192 — Roll back orbit-graph tool cutover to orbit-knowledge
 
-**Status:** Accepted · 2026-05-25 · [ORB-00344] · Supersedes ADR-0191
+**Status:** Accepted · 2026-05-25 · [ORB-00344] · Supersedes ADR-0191 · Amended by ADR-0197 (equivalence-harness retention reversed)
 
 **Context.** ORB-00338 cut the active graph query tools over from `orbit-knowledge` to `orbit-graph`, but audit data and post-cutover testing found unacceptable steady-state regressions: 13.5x p50 search slowdown, a roughly 9s cold-call floor, deleted high-use tools, incomplete plugin MCP exposure, byte-array `show` output, empty `trace` results for real enum-dispatch commands, and direction-confused `impact` output.
 
@@ -138,6 +138,20 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - `Windowed` remains available as an explicit fallback policy, but it is no longer the MCP default.
 - Cost: the MCP process now depends on platform filesystem watcher behavior and may serve stale graph data during the documented debounce-plus-sync window.
 
+## ADR-0197 — Remove the orbit-graph equivalence and benchmark harness
+
+**Status:** Accepted · 2026-06-13 · [ORB-00385] · Amends ADR-0192
+
+**Context.** ADR-0192 kept the `orbit-graph` crate and the equivalence harness in tree to gate a future v2 cutover. The harness — the `tools/graph-equiv` workspace binary (plus its frozen corpus) and the `bench/` baseline scripts — dual-ran both backends over a frozen corpus and failed CI (`make ci-equiv`, the `graph-equiv` CI job) on diffs outside documented tolerances. With the cutover paused indefinitely and none scheduled, that gate carried standing cost (a workspace member, a CI job, a Makefile target, a dependency-direction guardrail entry) for an inactive migration step.
+
+**Decision.** Remove `tools/graph-equiv/` and `bench/` and unwire them from the build — the Cargo workspace member, the `make ci-equiv` target, the `graph-equiv` CI job, and the `check-dependency-direction.sh` allowlist entry. This amends ADR-0192's "keep the equivalence harness in tree" consequence *only*; ADR-0192's rollback decision and pre-cutover gates remain in force, and the `orbit-graph` crate is kept. The equivalence relation in [`GRAPH_SPEC.md`](specs/GRAPH_SPEC.md) still defines what a future cutover must satisfy; the harness is reintroduced fresh when a cutover is rescheduled rather than carried as an inactive scaffold.
+
+**Consequences.**
+- The workspace drops one crate and the `graph-equiv` CI job; `make ci-equiv` no longer exists.
+- The documented v1↔v2 equivalence relation is now plan-only — no in-tree binary enforces it until a cutover is rescheduled.
+- ADR-0192's harness-retention consequence is amended here; its rollback decision is unchanged.
+- Cost: a future cutover must rebuild the equivalence + benchmark harness (binary, frozen corpus, baselines, CI wiring) from scratch; the existing corpus and baseline history are lost.
+
 ---
 
 ## Task References
@@ -146,5 +160,6 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - [ORB-00331] allocated ADR-0190 and shipped the detached-HEAD per-commit DB layout.
 - [ORB-00344] allocated ADR-0192 and restored `orbit-knowledge` as the primary graph tool backend.
 - [ORB-00377] allocated ADR-0195, superseded ADR-0188, and moved long-lived MCP graph reads to a watcher-backed sync policy.
+- [ORB-00385] allocated ADR-0197 and removed the orbit-graph equivalence + benchmark harness, amending ADR-0192.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -3,7 +3,7 @@ summary: "Orbit Graph — Overview"
 type: design
 title: "Orbit Graph — Overview"
 owner: claude
-last_updated: 2026-05-24
+last_updated: 2026-06-13
 status: Draft
 feature: orbit-graph
 doc_role: overview
@@ -56,7 +56,6 @@ The root cause: the graph was designed as a versioned store when the actual job 
 | Query API: search/show/refs/callees/impact/trace | `crates/orbit-graph/src/query/` | (unscheduled) |
 | CLI subcommands + MCP wrappers | `crates/orbit-graph-cli/src/` | (unscheduled) |
 | Selector parser (back-compat with skills) | `crates/orbit-graph-extract/src/selector.rs` | (unscheduled) |
-| Equivalence harness for v1↔v2 dual-run | `tools/graph-equiv/` | (unscheduled) |
 
 The four-step migration plan — landing orbit-graph alongside orbit-knowledge, dual-running them through an equivalence harness, then measuring effectiveness head-to-head before any phase-out decision — is laid out in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16.
 
