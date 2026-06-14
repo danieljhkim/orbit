@@ -1,7 +1,10 @@
 //! Read-only graph query implementations.
 
 pub(crate) mod callees;
+pub(crate) mod deps;
 pub(crate) mod impact;
+pub(crate) mod implementors;
+pub(crate) mod overview;
 pub(crate) mod refs;
 pub(crate) mod search;
 pub(crate) mod show;
