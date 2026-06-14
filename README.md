@@ -32,6 +32,8 @@ The constraints are the point — they're what keep agent-assisted code shippabl
 
 - **Sandboxed-by-default execution.** Dispatched agent CLIs run under an OS-level sandbox out of the box — FS access scoped to the worktree, network egress gated by per-activity policy. **macOS only today** (via `sandbox-exec`); on Linux/Windows the agent subprocess runs unsandboxed, with in-process FS guards still covering HTTP tools. → [docs/design/policy-sandbox](docs/design/policy-sandbox/)
 
+- **Pluggable executors, no fork.** Register a homegrown out-of-process executor — any binary or script — through a config-only `executor_type: external` def: Orbit spawns it, streams the JSON request envelope over stdin, and maps its exit code to the activity outcome. No recompile, no linking, language-agnostic; copy the [example def](crates/orbit-core/assets/executors/external.example.yaml) to get started. → [docs/design/executors/specs/external-executor-protocol.md](docs/design/executors/specs/external-executor-protocol.md)
+
 ---
 
 ## Quick Start

@@ -45,6 +45,30 @@ fn roundtrips_sandbox_and_allow_fallback_fields() {
 }
 
 #[test]
+fn roundtrips_external_executor_type() {
+    let dir = tempdir().expect("tempdir");
+    let store = ExecutorDefFileStore::new(dir.path().to_path_buf());
+
+    let mut def = baseline_def("acme-harness");
+    def.executor_type = ExecutorType::External;
+    store.upsert_executor_def(&def).expect("upsert");
+
+    let loaded = store
+        .get_executor_def("acme-harness")
+        .expect("get")
+        .expect("present");
+    assert_eq!(loaded.executor_type, ExecutorType::External);
+    assert_eq!(loaded.command.as_deref(), Some("acme-harness"));
+
+    let on_disk =
+        std::fs::read_to_string(dir.path().join("acme-harness.yaml")).expect("read on-disk def");
+    assert!(
+        on_disk.contains("executor_type: external"),
+        "external executor_type should persist to disk: {on_disk}"
+    );
+}
+
+#[test]
 fn roundtrips_model_flag_field() {
     let dir = tempdir().expect("tempdir");
     let store = ExecutorDefFileStore::new(dir.path().to_path_buf());

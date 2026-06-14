@@ -1,0 +1,10 @@
+**Context.** Orbit's `ExecutorType` is a sealed enum and `load_from_defs` is a closed `match`, so a homegrown executor can only be added by forking orbit-engine — an `internal`-tier crate with no downstream guarantees. Yet `DirectAgentExecutor` already implements an out-of-process transport (spawn `command`, write a prompt envelope to stdin, map a stdout result envelope to an outcome): the capability exists but is undocumented and coupled to the agent-family `direct_agent` path.
+
+**Decision.** Promote that transport into a documented, versioned **External Executor Protocol v1** and expose it through a new `ExecutorType::External` (wire value `external`). A homegrown executor is registered by dropping a YAML executor def that points at a binary/script speaking the protocol — no recompile, no linking, language-agnostic. In-process Rust extension (an `ExecutorFactory` registry plus a runtime injection seam) is explicitly deferred to a separate Tier 2 decision.
+
+**Consequences.**
+- Most homegrown executors become config-only: a YAML def plus a conforming binary, with zero changes to Orbit.
+- The stdin/stdout envelope becomes a stability commitment — once v1 ships, the request/result shape is a contract that must be versioned, not changed in place.
+- `external` reuses the existing `FsProfile`→sandbox path, so dynamic registration does not widen the sandbox-bypass surface relative to `direct_agent`.
+- Executors needing a non-subprocess transport (in-process SDK, gRPC, internal queue) are NOT served by Tier 1 and must wait for Tier 2.
+- Cost: a documented wire protocol is a long-lived backward-compatibility obligation — every future executor capability must be expressible as an additive, versioned envelope field, and a conformance harness must be maintained so adopters do not silently depend on undocumented behavior.

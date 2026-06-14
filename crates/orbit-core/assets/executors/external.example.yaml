@@ -1,0 +1,35 @@
+# Example: a homegrown out-of-process executor registered via the External
+# Executor Protocol v1 (executor_type: external). See ORB-00384 / ADR-0196 and
+# docs/design/executors/specs/external-executor-protocol.md for the full contract.
+#
+# This file is a TEMPLATE, not a seeded default: it is deliberately NOT listed in
+# DEFAULT_EXECUTOR_FILES (crates/orbit-core/src/command/executor.rs), so `orbit
+# init` never registers it. Copy it, point `command` at your own binary/script,
+# rename `metadata.name`, and upsert it into the executor def store to register —
+# no recompile, no linking, language-agnostic.
+#
+# At run time Orbit spawns `command`, writes a UTF-8 JSON request envelope
+# (schemaVersion: 1) to the subprocess STDIN, and maps the process EXIT CODE to
+# the activity outcome (0 -> Success, non-zero -> Failed, signal -> Cancelled,
+# timeout -> Timeout). The executor MUST drain stdin to EOF before exiting, or
+# Orbit observes a broken pipe and reports an invocation failure. stdout is
+# captured as audit data but is NOT parsed into workflow state in v1.
+schemaVersion: 2
+kind: Executor
+metadata:
+  name: acme-harness          # registry key; must match the file stem and metadata.name
+spec:
+  executor_type: external     # selects the External Executor Protocol transport
+  command: /opt/acme/bin/harness   # REQUIRED — a def with no command is skipped at registration
+  args:                       # operator-fixed args, passed before any runtime args
+    - run
+    - --json
+  env:                        # injected into the subprocess environment (wins on conflict)
+    ACME_PROFILE: ci
+  model_flag: "--model"       # OPTIONAL — if set and the step carries a runtime model,
+                              # Orbit appends [model_flag, model] AFTER args. Unlike
+                              # direct_agent, external has no model_pair_override.
+  timeout_seconds: 1800       # OPTIONAL — wall-clock budget; exceeding it -> Timeout outcome
+  # sandbox: macos-sandbox-exec  # INERT in Tier 1 — the registry-path transport runs
+                              # NoSandbox (exact parity with direct_agent); real
+                              # FsProfile->OS sandbox is deferred to Tier 2. See ADR-0196.
