@@ -1,5 +1,8 @@
+use std::fs;
+
 use orbit_graph_extract::Selector;
 use rusqlite::{Connection, params};
+use serde_json::json;
 
 use super::{DEFAULT_SHOW_MAX_BYTES, NodeMetadata, NodeView, SourceSpan};
 use crate::SyncPolicy;
@@ -176,6 +179,83 @@ fn show_truncates_source_when_max_bytes_is_shorter_than_span() {
         }
     );
     assert!(view.metadata.truncated);
+}
+
+#[test]
+fn show_serializes_truncated_utf8_source_on_char_boundary() {
+    let worktree = TestWorktree::new("show-truncate-utf8");
+    let source = "pub fn cafe() -> &'static str { \"cafeé\" }\n";
+    worktree.write("src/lib.rs", source);
+    let graph = open_graph(&worktree, SyncPolicy::Manual);
+    let conn = open_connection(&worktree);
+    insert_file(&conn, "src/lib.rs", "rust", source);
+    insert_symbol(
+        &conn,
+        "src/lib.rs",
+        "cafe",
+        "crate::cafe",
+        "function",
+        0,
+        source.len(),
+    );
+    let max_bytes = source.find("é").expect("accent byte") + 1;
+
+    let view = graph
+        .show(
+            &"symbol:src/lib.rs#cafe:function".parse().expect("selector"),
+            max_bytes,
+        )
+        .expect("show symbol")
+        .expect("symbol resolves");
+    let json = serde_json::to_value(&view).expect("serialize view");
+
+    assert!(
+        json["source"]
+            .as_str()
+            .expect("source string")
+            .ends_with("cafe")
+    );
+    assert!(json.get("bytes").is_none());
+    assert!(view.metadata.truncated);
+}
+
+#[test]
+fn show_serializes_non_utf8_source_with_labeled_byte_fallback() {
+    let worktree = TestWorktree::new("show-non-utf8");
+    let source = b"valid prefix \xFF invalid\n";
+    let path = worktree.path().join("src/lib.bin");
+    fs::create_dir_all(path.parent().expect("source parent")).expect("create source parent");
+    fs::write(path.as_path(), source).expect("write non-utf8 source");
+    let graph = open_graph(&worktree, SyncPolicy::Manual);
+    let conn = open_connection(&worktree);
+    conn.execute(
+        "INSERT INTO files (path, content_hash, mtime_ns, lang, byte_len, extracted_at)
+         VALUES (?1, x'00', 1, ?2, ?3, 2)",
+        params![
+            "src/lib.bin",
+            "binary",
+            i64::try_from(source.len()).expect("source length fits")
+        ],
+    )
+    .expect("insert non-utf8 file row");
+
+    let view = graph
+        .show(
+            &"file:src/lib.bin".parse().expect("file selector"),
+            DEFAULT_SHOW_MAX_BYTES,
+        )
+        .expect("show file")
+        .expect("file resolves");
+    let json = serde_json::to_value(&view).expect("serialize view");
+
+    assert_eq!(
+        json["source"],
+        json!({
+            "encoding": "bytes",
+            "bytes": source
+        })
+    );
+    assert!(json.get("bytes").is_none());
 }
 
 #[test]

@@ -146,7 +146,13 @@ async fn graph_tools_invoke_in_process_fixture() {
     )
     .await;
     assert_eq!(show["metadata"]["file"], "src/lib.rs");
-    assert_array_field(&show, "bytes");
+    assert!(
+        show["source"]
+            .as_str()
+            .is_some_and(|source| source.contains("pub fn entry")),
+        "source should be UTF-8 text in {show}"
+    );
+    assert!(show.get("bytes").is_none());
 
     let refs = call_json(
         &server,
@@ -233,6 +239,51 @@ async fn graph_tool_errors_are_structured_mcp_tool_errors() {
 }
 
 #[tokio::test]
+async fn graph_show_returns_labeled_byte_fallback_for_non_utf8_source() {
+    let worktree = fixture_worktree();
+    let source = b"pub fn broken() { \xFF }\n";
+    fs::write(worktree.path().join("src/non_utf8.rs"), source).expect("write non-utf8 source");
+    run_git(worktree.path(), ["add", "src/non_utf8.rs"]);
+    run_git(worktree.path(), ["commit", "-m", "add non-utf8 fixture"]);
+
+    let host = Arc::new(StubHost {
+        schemas: Vec::new(),
+    });
+    let server = OrbitToolServer::new(host);
+    // L-0053: graph MCP tests must pin the worktree to their temp fixture.
+    server.replace_session_context(ToolSessionContext::with_workspace(
+        worktree.path().display().to_string(),
+    ));
+
+    call_json(
+        &server,
+        "orbit.graph.sync",
+        json!({
+            "full": true
+        }),
+    )
+    .await;
+    let show = call_json(
+        &server,
+        "orbit.graph.show",
+        json!({
+            "selector": "file:src/non_utf8.rs",
+            "max_bytes": 256
+        }),
+    )
+    .await;
+
+    assert_eq!(
+        show["source"],
+        json!({
+            "encoding": "bytes",
+            "bytes": source
+        })
+    );
+    assert!(show.get("bytes").is_none());
+}
+
+#[tokio::test]
 async fn graph_show_rejects_out_of_workspace_path_without_session_workspace() {
     // ORB-00361: with no announced session workspace, a client-supplied
     // `workspace_path` outside the process working directory must be rejected
@@ -273,6 +324,7 @@ async fn graph_show_rejects_out_of_workspace_path_without_session_workspace() {
     // No source bytes were returned and no graph was opened/indexed for the
     // out-of-bounds directory.
     assert!(payload.get("bytes").is_none());
+    assert!(payload.get("source").is_none());
     assert_eq!(server.graph_tools.cached_worktree_count(), 0);
 }
 

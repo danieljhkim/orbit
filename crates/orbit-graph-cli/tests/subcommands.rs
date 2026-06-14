@@ -40,7 +40,13 @@ fn query_and_admin_subcommands_emit_json() -> TestResult {
         ],
     )?;
     assert_eq!(show["metadata"]["file"], "src/lib.rs");
-    assert_array_field(&show, "bytes");
+    assert!(
+        show["source"]
+            .as_str()
+            .is_some_and(|source| source.contains("pub fn entry")),
+        "source should be UTF-8 text in {show}"
+    );
+    assert!(show.get("bytes").is_none());
 
     let refs = run_json(
         worktree.path(),
