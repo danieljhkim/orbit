@@ -11,7 +11,10 @@ use thiserror::Error;
 mod callees;
 mod clean;
 mod db_path;
+mod deps;
 mod impact;
+mod implementors;
+mod overview;
 mod refs;
 mod search;
 mod show;
@@ -37,6 +40,9 @@ impl Cli {
             Command::Callees(command) => command.run(&context),
             Command::Impact(command) => command.run(&context),
             Command::Trace(command) => command.run(&context),
+            Command::Overview(command) => command.run(&context),
+            Command::Implementors(command) => command.run(&context),
+            Command::Deps(command) => command.run(&context),
             Command::Version(command) => command.run(),
             Command::DbPath(command) => command.run(&context),
             Command::Clean(command) => command.run(&context),
@@ -53,6 +59,9 @@ enum Command {
     Callees(callees::CalleesCommand),
     Impact(impact::ImpactCommand),
     Trace(trace::TraceCommand),
+    Overview(overview::OverviewCommand),
+    Implementors(implementors::ImplementorsCommand),
+    Deps(deps::DepsCommand),
     Version(version::VersionCommand),
     DbPath(db_path::DbPathCommand),
     Clean(clean::CleanCommand),

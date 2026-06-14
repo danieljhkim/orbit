@@ -1,7 +1,7 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
-**Last updated:** 2026-06-13 (ORB-00385 / ADR-0197 removed the equivalence + benchmark harness)
+**Last updated:** 2026-06-14 (ORB-00389 restored `overview`/`implementors`/`deps` as dedicated query commands; surface budget 7 → 10)
 **Relation to `orbit-knowledge`:** Coexists initially. Both crates run side-by-side under a feature flag; whether `orbit-knowledge` is eventually phased out depends on the head-to-head effectiveness measurement in §16 Step 4 — it is not a foregone conclusion of this spec.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
@@ -33,7 +33,7 @@ Git is the source of truth. The graph is reproducible from `(commit_sha, dirty_f
 - **Fresh.** Incremental refresh under 50ms p95 per file change.
 - **Concurrent-safe by construction.** Two worktrees on the same branch cannot corrupt each other.
 - **Honest.** Edge confidence is part of the schema, not a footnote.
-- **Small.** ≤7 query/sync commands on the agent-facing surface; admin commands (`version`, `db-path`, `clean`) are separate and not counted. Total crate footprint ≤10k LOC.
+- **Small.** ≤10 query/sync commands on the agent-facing surface (`sync`, `search`, `show`, `refs`, `callees`, `impact`, `trace`, `overview`, `implementors`, `deps`); admin commands (`version`, `db-path`, `clean`) are separate and not counted. The budget grew from 7 to 10 in ORB-00389 to restore the `overview`/`implementors`/`deps` navigation queries required for `orbit-knowledge` parity (an ADR-0192 pre-cutover gate); see §9.7 for why these are dedicated commands rather than `refs` filters. Total crate footprint ≤10k LOC.
 
 ## 4. Non-goals
 
@@ -110,12 +110,12 @@ crates/
 │       ├── selector.rs         # selector parser kept for shared addressing
 │       ├── store/              # schema, transactions, row reads/writes
 │       ├── sync/               # scanner, diff, extraction pipeline, resolver
-│       └── query/              # search, show, refs, callees, impact, trace
+│       └── query/              # search, show, refs, callees, impact, trace, overview, implementors, deps
 │
 └── orbit-graph-cli/
     └── src/
         ├── main.rs
-        ├── commands/           # sync, search, show, refs, callees, impact, trace
+        ├── commands/           # sync, search, show, refs, callees, impact, trace, overview, implementors, deps
         └── mcp/                # 1:1 tool wrappers over command/query surfaces
 ```
 
@@ -446,7 +446,7 @@ Output:
 }
 ```
 
-Replaces today's `callers`, `implementors`, `deps`, `lineage` — they're all this one command with different filters. (`callers` → `refs --kind call`; `implementors` → `refs --kind impl`; `deps` → `refs --kind use`.)
+Replaces today's `callers` and `lineage` (`callers` → `refs --kind call`). `implementors` and `deps` were originally intended as `refs` filters too (`refs --kind impl` / `refs --kind use`), but ORB-00389 restored them as dedicated commands instead — see §9.7. In short: `refs` is inbound-only, so it cannot express a file's *outbound* module imports (`deps`); and `refs --kind impl` resolves the trait selector to a single `symbols.qualified` and matches `relations.to_qualified` exactly, so it silently misses implementors when the trait is referenced by a differently-qualified path (e.g. `run::LoopTransport` vs `LoopTransport`) or the selector does not point at the trait's definition file.
 
 ### 9.4 `callees`
 
@@ -469,6 +469,22 @@ Unknown command names return an empty result (`root: null`, `visited_nodes: 0`).
 Like `impact`, `trace` is capped at **200 visited nodes** regardless of `--depth`. When the cap fires, the response carries `truncated: true` and `visited_nodes: 200`; callers can split into multiple narrower traces (e.g. trace from a sub-handler). This keeps the response within reasonable context-window bounds — depth 5 with branching factor 5 is otherwise ~3k nodes worst-case.
 
 This is the "structural feature expansion" capability — concrete, bounded, no semantic guessing.
+
+### 9.7 `overview`, `implementors`, `deps` (orbit-knowledge parity)
+
+Restored in ORB-00389 to close the ADR-0192 pre-cutover gate "replacements exist for heavily used surfaces." Each maps onto the existing schema; none requires new tables.
+
+```bash
+orbit graph overview [dir:… | file:…] [--format summary|full]
+orbit graph implementors <trait-selector>
+orbit graph deps <file:… | dir:…>
+```
+
+- **`overview`** — repository shape. Aggregates `files` (per-language counts) and `symbols` (per-kind counts) within an optional `dir:`/`file:` scope (default: whole worktree). `summary` returns the counts plus the highest-symbol files; `full` additionally lists every in-scope file with its symbols. (No auto-downgrade — unlike v1, the requested format is always honored.)
+
+- **`implementors`** — concrete types implementing a trait. Reads `relations WHERE kind IN ('impl','implements')`, matching the trait by its trailing path segment (`Display` matches `std::fmt::Display`; `LoopTransport` matches both `LoopTransport` and `run::LoopTransport`). This is *not* equivalent to `refs --kind impl`: `refs` resolves the selector to one `symbols.qualified` and matches `relations.to_qualified` exactly, so it misses qualified-path variants and returns empty unless the selector points at the trait's definition file. `implementors` keys on the trait *name* and is therefore path-agnostic.
+
+- **`deps`** — outbound module/import edges for the files addressed by a `file:`/`dir:` selector, read from the `imports` table. **Intentional divergence from v1:** v1 `orbit.graph.deps` reported the Cargo *crate* dependency graph; the v2 graph models source-level module/use edges, not Cargo edges, so v2 `deps` answers "what does this file import," not "what crates does this crate depend on." `refs --kind use` is not a substitute — `refs` is inbound (who imports *this* symbol), the opposite direction.
 
 ## 10. Concurrency model
 
@@ -543,6 +559,11 @@ impl Graph {
     pub fn callees(&self, sel: &Selector) -> Result<Vec<CalleeEdge>, GraphError>;
     pub fn impact(&self, sel: &Selector, depth: u8, min_confidence: Confidence) -> Result<ImpactResult, GraphError>;
     pub fn trace(&self, command: &str, depth: u8, min_confidence: Confidence) -> Result<TraceResult, GraphError>;
+
+    // orbit-knowledge parity surface (ORB-00389, §9.7).
+    pub fn overview(&self, scope: Option<&Selector>, format: OverviewFormat) -> Result<OverviewResult, GraphError>;
+    pub fn implementors(&self, sel: &Selector) -> Result<ImplementorsResult, GraphError>;
+    pub fn deps(&self, sel: &Selector) -> Result<DepsResult, GraphError>;
 }
 
 pub struct TraceResult {
