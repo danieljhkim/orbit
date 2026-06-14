@@ -917,6 +917,31 @@ pub struct ImpactResult {
     pub truncated: bool,
     /// Number of impacted symbols returned in `touched`.
     pub visited_nodes: usize,
+    /// Lower-confidence impact surfaced because the precise floor found no
+    /// touched nodes. Present only when a lower-confidence (`fuzzy_name`) match
+    /// exists; see [`ImpactFallback`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<ImpactFallback>,
+}
+
+/// Lower-confidence impact surfaced when the precise floor returned no nodes.
+///
+/// `fuzzy_name` edges are name-only and may include unrelated symbols sharing
+/// the same short name. The top-level [`ImpactResult`] remains the result for
+/// the requested confidence floor; this fallback is an explicit hint that a
+/// lower-confidence blast radius exists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImpactFallback {
+    /// Confidence floor used to produce the fallback impact (`fuzzy_name`).
+    pub confidence: RefConfidence,
+    /// Impacted symbols found at the fallback floor.
+    pub touched: Vec<ImpactEntry>,
+    /// Whether fallback traversal stopped because [`IMPACT_NODE_CAP`] was reached.
+    pub truncated: bool,
+    /// Number of impacted symbols returned in `touched`.
+    pub visited_nodes: usize,
+    /// Human-readable explanation of why these lower-confidence nodes are shown.
+    pub note: String,
 }
 
 /// A symbol reached by [`Graph::impact`].

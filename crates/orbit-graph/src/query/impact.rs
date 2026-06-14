@@ -7,8 +7,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::query::callees;
 use crate::{
-    DEFAULT_IMPACT_DEPTH, Graph, GraphError, IMPACT_NODE_CAP, ImpactEntry, ImpactResult,
-    RefConfidence, RefKind, SymbolSpan,
+    DEFAULT_IMPACT_DEPTH, Graph, GraphError, IMPACT_NODE_CAP, ImpactEntry, ImpactFallback,
+    ImpactResult, RefConfidence, RefKind, SymbolSpan,
 };
 
 pub(crate) fn run(
@@ -27,44 +27,20 @@ pub(crate) fn run(
         } else {
             depth
         });
-        let mut queue = VecDeque::from([(origin.clone(), 0usize)]);
-        let mut seen = HashSet::from([origin.qualified]);
-        let mut touched = Vec::new();
-        let mut truncated = false;
-
-        'bfs: while let Some((symbol, distance)) = queue.pop_front() {
-            if distance >= max_depth {
-                continue;
-            }
-            let next_distance = distance + 1;
-            for neighbor in neighbors(conn, &symbol, min_confidence)? {
-                if seen.contains(neighbor.qualified_name.as_str()) {
-                    continue;
-                }
-                if touched.len() >= IMPACT_NODE_CAP {
-                    truncated = true;
-                    break 'bfs;
-                }
-
-                seen.insert(neighbor.qualified_name.clone());
-                if next_distance < max_depth
-                    && let Some(next_symbol) =
-                        resolve_symbol_by_qualified(conn, neighbor.qualified_name.as_str())?
-                {
-                    queue.push_back((next_symbol, next_distance));
-                }
-                touched.push(ImpactEntry {
-                    qualified_name: neighbor.qualified_name,
-                    distance: next_distance,
-                    edge_kind: neighbor.edge_kind,
-                });
-            }
-        }
+        let traversal = traverse(conn, origin.clone(), max_depth, min_confidence)?;
+        let fallback = maybe_fuzzy_fallback(
+            conn,
+            &origin,
+            max_depth,
+            min_confidence,
+            traversal.touched.as_slice(),
+        )?;
 
         Ok(ImpactResult {
-            visited_nodes: touched.len(),
-            touched,
-            truncated,
+            visited_nodes: traversal.touched.len(),
+            touched: traversal.touched,
+            truncated: traversal.truncated,
+            fallback,
         })
     })
 }
@@ -74,6 +50,91 @@ fn empty_result() -> ImpactResult {
         touched: Vec::new(),
         truncated: false,
         visited_nodes: 0,
+        fallback: None,
+    }
+}
+
+fn traverse(
+    conn: &Connection,
+    origin: ImpactSymbol,
+    max_depth: usize,
+    min_confidence: RefConfidence,
+) -> Result<ImpactTraversal, GraphError> {
+    let mut queue = VecDeque::from([(origin.clone(), 0usize)]);
+    let mut seen = HashSet::from([origin.qualified]);
+    let mut touched = Vec::new();
+    let mut truncated = false;
+
+    'bfs: while let Some((symbol, distance)) = queue.pop_front() {
+        if distance >= max_depth {
+            continue;
+        }
+        let next_distance = distance + 1;
+        for neighbor in neighbors(conn, &symbol, min_confidence)? {
+            if seen.contains(neighbor.qualified_name.as_str()) {
+                continue;
+            }
+            if touched.len() >= IMPACT_NODE_CAP {
+                truncated = true;
+                break 'bfs;
+            }
+
+            seen.insert(neighbor.qualified_name.clone());
+            if next_distance < max_depth
+                && let Some(next_symbol) =
+                    resolve_symbol_by_qualified(conn, neighbor.qualified_name.as_str())?
+            {
+                queue.push_back((next_symbol, next_distance));
+            }
+            touched.push(ImpactEntry {
+                qualified_name: neighbor.qualified_name,
+                distance: next_distance,
+                edge_kind: neighbor.edge_kind,
+            });
+        }
+    }
+
+    Ok(ImpactTraversal { touched, truncated })
+}
+
+fn maybe_fuzzy_fallback(
+    conn: &Connection,
+    origin: &ImpactSymbol,
+    max_depth: usize,
+    min_confidence: RefConfidence,
+    touched: &[ImpactEntry],
+) -> Result<Option<ImpactFallback>, GraphError> {
+    if !touched.is_empty() || min_confidence == RefConfidence::FuzzyName {
+        return Ok(None);
+    }
+
+    let fallback = traverse(conn, origin.clone(), max_depth, RefConfidence::FuzzyName)?;
+    if fallback.touched.is_empty() {
+        return Ok(None);
+    }
+
+    let note = format!(
+        "No impacted symbols resolved at the `{}` confidence floor; showing {} match(es) found at \
+         the `fuzzy_name` fallback floor. These are name-only matches and may include unrelated \
+         symbols sharing the name; check each entry before acting.",
+        confidence_label(min_confidence),
+        fallback.touched.len(),
+    );
+    Ok(Some(ImpactFallback {
+        confidence: RefConfidence::FuzzyName,
+        visited_nodes: fallback.touched.len(),
+        touched: fallback.touched,
+        truncated: fallback.truncated,
+        note,
+    }))
+}
+
+fn confidence_label(confidence: RefConfidence) -> &'static str {
+    match confidence {
+        RefConfidence::Exact => "exact",
+        RefConfidence::ImportResolved => "import_resolved",
+        RefConfidence::SameModule => "same_module",
+        RefConfidence::FuzzyName => "fuzzy_name",
     }
 }
 
@@ -398,6 +459,11 @@ struct ImpactSymbol {
 struct ImpactNeighbor {
     qualified_name: String,
     edge_kind: RefKind,
+}
+
+struct ImpactTraversal {
+    touched: Vec<ImpactEntry>,
+    truncated: bool,
 }
 
 struct RawNeighborRow {

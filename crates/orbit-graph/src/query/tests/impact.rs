@@ -29,6 +29,7 @@ fn impact_result_shape_matches_golden_fixture() {
         ],
         truncated: false,
         visited_nodes: 2,
+        fallback: None,
     };
 
     crate::query::tests::support::assert_json_matches_fixture(
@@ -328,7 +329,9 @@ fn fuzzy_name_inbound_ref_with_null_qualified_is_visible_at_fuzzy_floor() {
     seed_symbol(&conn, "src/caller.rs", "caller", "crate::caller", 0, 200);
     insert_fuzzy_call_ref(&conn, "src/caller.rs", 10, 11, "did_you_mean");
 
-    // Below the fuzzy floor the edge stays excluded, matching `refs` semantics.
+    // Below the fuzzy floor the precise result stays empty, but the result now
+    // carries the same labeled fallback hint that `refs` emits for name-only
+    // fuzzy matches.
     let same_module = graph
         .impact(
             &symbol_selector("src/target.rs", "did_you_mean"),
@@ -337,6 +340,18 @@ fn fuzzy_name_inbound_ref_with_null_qualified_is_visible_at_fuzzy_floor() {
         )
         .expect("query impact below fuzzy floor");
     assert!(same_module.touched.is_empty());
+    assert_eq!(same_module.visited_nodes, 0);
+    let fallback = same_module.fallback.expect("fallback populated");
+    assert_eq!(fallback.confidence, RefConfidence::FuzzyName);
+    assert_eq!(fallback.visited_nodes, 1);
+    assert_eq!(fallback.touched.len(), 1);
+    assert_eq!(fallback.touched[0].qualified_name, "crate::caller");
+    assert_eq!(fallback.touched[0].edge_kind, RefKind::Call);
+    assert!(
+        fallback.note.contains("same_module") && fallback.note.contains("fuzzy_name"),
+        "note names both the precise floor and the fallback floor: {}",
+        fallback.note
+    );
 
     // At the fuzzy floor the caller is surfaced.
     let fuzzy = graph
@@ -354,6 +369,7 @@ fn fuzzy_name_inbound_ref_with_null_qualified_is_visible_at_fuzzy_floor() {
         .collect();
     assert_eq!(names, vec!["crate::caller"]);
     assert_eq!(fuzzy.touched[0].edge_kind, RefKind::Call);
+    assert!(fuzzy.fallback.is_none());
 }
 
 fn seed_symbol(
