@@ -72,16 +72,20 @@ fn run_with_backend(
     }
 
     let mut refs = Vec::new();
+    let mut commands = Vec::new();
     let mut files_written = 0;
     for mut file in extracted {
         let file_refs = std::mem::take(&mut file.rows.refs);
+        let file_commands = std::mem::take(&mut file.rows.commands);
         write_file_transaction(&mut conn, &file)?;
         refs.push(ExtractedFileRefs {
             file_path: file.file_path.clone(),
             refs: file_refs,
         });
+        commands.extend(file_commands);
         files_written += 1;
     }
+    insert_commands_transaction(&mut conn, &commands)?;
 
     let files_indexed = count_files(&conn)?;
 
@@ -321,10 +325,26 @@ fn write_file_transaction(
     insert_relations(&tx, &file.rows.relations)?;
     insert_strings(&tx, &file.rows.strings, &symbol_ids)?;
     insert_configs(&tx, &file.rows.configs)?;
-    insert_commands(&tx, &file.rows.commands, &symbol_ids)?;
 
     tx.commit()
         .map_err(|source| GraphError::sqlite("commit pass1 file transaction", source))?;
+    Ok(())
+}
+
+fn insert_commands_transaction(
+    conn: &mut Connection,
+    commands: &[RawCommand],
+) -> Result<(), GraphError> {
+    if commands.is_empty() {
+        return Ok(());
+    }
+
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|source| GraphError::sqlite("begin pass1 command transaction", source))?;
+    insert_commands(&tx, commands)?;
+    tx.commit()
+        .map_err(|source| GraphError::sqlite("commit pass1 command transaction", source))?;
     Ok(())
 }
 
@@ -503,17 +523,10 @@ fn delete_fts_for_file(tx: &Transaction<'_>, file_path: &str) -> Result<(), Grap
     Ok(())
 }
 
-fn insert_commands(
-    tx: &Transaction<'_>,
-    commands: &[RawCommand],
-    symbol_ids: &BTreeMap<String, i64>,
-) -> Result<(), GraphError> {
+fn insert_commands(tx: &Transaction<'_>, commands: &[RawCommand]) -> Result<(), GraphError> {
     for command in commands {
         let handler_symbol = match command.handler_symbol.as_ref() {
-            Some(qualified) => match symbol_ids.get(qualified) {
-                Some(symbol_id) => Some(*symbol_id),
-                None => unique_symbol_id_for_qualified(tx, qualified)?,
-            },
+            Some(qualified) => unique_symbol_id_for_qualified(tx, qualified)?,
             None => None,
         };
         tx.execute(

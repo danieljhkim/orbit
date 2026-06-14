@@ -16,6 +16,7 @@ pub(crate) fn run(
     depth: u8,
     min_confidence: RefConfidence,
 ) -> Result<TraceResult, GraphError> {
+    let command = normalize_command_selector(command);
     graph.with_read_connection(|conn| {
         let Some(origin) = resolve_command_handler(conn, command)? else {
             return Ok(TraceResult::empty());
@@ -72,6 +73,14 @@ pub(crate) fn run(
             visited_nodes: arena.len(),
         })
     })
+}
+
+fn normalize_command_selector(command: &str) -> &str {
+    command
+        .trim()
+        .strip_prefix("command:")
+        .map(str::trim)
+        .unwrap_or_else(|| command.trim())
 }
 
 fn confidence_visible_at_floor(

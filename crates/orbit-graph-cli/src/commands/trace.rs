@@ -21,11 +21,19 @@ impl TraceCommand {
     pub(crate) fn run(&self, context: &CommandContext) -> Result<serde_json::Value, CliError> {
         let graph = context.open_graph()?;
         json_value(graph.trace(
-            self.command_name.as_str(),
+            normalize_command_selector(self.command_name.as_str()),
             self.depth,
             self.confidence.into_graph(),
         )?)
     }
+}
+
+fn normalize_command_selector(command: &str) -> &str {
+    command
+        .trim()
+        .strip_prefix("command:")
+        .map(str::trim)
+        .unwrap_or_else(|| command.trim())
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

@@ -7,6 +7,10 @@ use tree_sitter::Node;
 use super::{ExtractionState, ModuleScope, get_name, node_text, normalize_qualified_name};
 
 pub(super) fn extract_commands(root: Node, source: &str, state: &mut ExtractionState) {
+    if !is_orbit_cli_command_surface(&state.file_path) {
+        return;
+    }
+
     let mut extraction = CommandExtraction::default();
     collect_command_items(root, source, &ModuleScope::root(), &mut extraction);
 
@@ -532,6 +536,10 @@ fn crate_name_from_path(path: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn is_orbit_cli_command_surface(path: &str) -> bool {
+    crate_name_from_path(path).is_none_or(|crate_name| crate_name == "orbit-cli")
 }
 
 fn enum_variant_payload_type(node: Node, source: &str) -> Option<String> {
