@@ -20,7 +20,6 @@ pub mod backend_resolver;
 pub mod diagnostics;
 pub mod docs;
 pub mod executor;
-pub mod graph;
 pub mod hook_install;
 pub mod init;
 pub mod job;

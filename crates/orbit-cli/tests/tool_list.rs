@@ -20,7 +20,6 @@ const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.semantic.index",
     "orbit.semantic.install",
     "orbit.semantic.stats",
-    "orbit.graph.history",
     "orbit.learning.sync",
     "orbit.learning.list",
     "orbit.friction.stats",

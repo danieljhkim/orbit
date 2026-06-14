@@ -11,7 +11,6 @@ members = [
   "crates/orbit-graph",
   "crates/orbit-graph-cli",
   "crates/orbit-graph-extract",
-  "crates/orbit-knowledge",
   "crates/orbit-store",
   "crates/orbit-policy",
   "crates/orbit-exec",

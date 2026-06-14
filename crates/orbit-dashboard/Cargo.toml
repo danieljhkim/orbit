@@ -17,7 +17,6 @@ clap.workspace = true
 futures-core.workspace = true
 orbit-common = { path = "../orbit-common" }
 orbit-core = { path = "../orbit-core" }
-orbit-knowledge = { path = "../orbit-knowledge" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

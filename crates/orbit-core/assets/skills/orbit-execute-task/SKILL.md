@@ -53,7 +53,7 @@ orbit tool run orbit.task.list --input '{"status": "backlog", "model": "<agent-f
 **If given an existing task ID**, load it with `orbit.task.show`. Extract:
 - `description` and `acceptance_criteria` — these define the required outcome.
 - `plan` — if blank or placeholder, author a plan before starting.
-- `context_files` — treat these as selectors first. Prefer `file:`, `dir:`, or `symbol:` forms, use `orbit.graph.pack` when available, and fall back to `fs.read` only for unresolved selectors.
+- `context_files` — treat these as selectors first. Prefer `file:`, `dir:`, or `symbol:` forms, resolve them with `orbit_graph_show` (or `orbit_graph_overview` for a `dir:` scope), and fall back to `fs.read` only for unresolved selectors.
 - `status` — confirm the task is ready to start.
 
 Then, if `orbit.search` is available, call it with `semantic: "<task-id>"` and `limit: 5`. Rationale: surface prior tasks the original author may not have linked via `context_files` — past decisions, prior attempts at the same problem, related review threads. Skim snippets; usually one hit is genuinely useful and the rest are noise. **This step is non-blocking** — if the companion binary is missing (install-pointer error) or no hit is relevant, continue. See `orbit-search`.
@@ -82,7 +82,7 @@ orbit tool run orbit.task.start --input '{"id": "<task-id>", "note": "<why this 
 
 ### Step 4: Implement and validate
 
-Follow the task's `plan` step by step. Use selector-first context from `context_files` before touching code: prefer `orbit.graph.pack`, and read files directly only for unresolved selectors or when the graph is unavailable. Run the repo-approved verification commands from the plan. If repo instructions forbid tests, honor that and use the allowed validation path instead.
+Follow the task's `plan` step by step. Use selector-first context from `context_files` before touching code: resolve selectors with `orbit_graph_show`/`orbit_graph_overview`, and read files directly only for unresolved selectors or when the graph is unavailable. Run the repo-approved verification commands from the plan. If repo instructions forbid tests, honor that and use the allowed validation path instead.
 
 ### Step 5: Summarize and hand off
 

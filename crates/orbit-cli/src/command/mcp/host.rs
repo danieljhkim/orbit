@@ -49,16 +49,15 @@ pub(crate) const FRICTION_TOOL_NAMES: &[&str] = &[
     "orbit.friction.update",
 ];
 
-pub(crate) const GRAPH_READ_TOOL_NAMES: &[&str] = &[
-    "orbit.graph.callers",
-    "orbit.graph.deps",
-    "orbit.graph.implementors",
-    "orbit.graph.overview",
-    "orbit.graph.pack",
-    "orbit.graph.refs",
-    "orbit.graph.search",
-    "orbit.graph.show",
-];
+// ORB-00391: the agent `orbit.graph.*` surface is now served by the in-process
+// orbit-graph (v2) adapter in `orbit-mcp` (`adapter::graph::GraphToolRegistry`),
+// not by orbit-knowledge (v1) builtins. The adapter is gated off whenever the
+// host exposes ANY `orbit.graph.*` schema (`host_exposes_graph_tools`), so this
+// allowlist is intentionally empty — the host must expose no graph tool for the
+// v2 adapter to activate. The constant is kept (empty) so the aggregation in
+// `safe_mcp_tool_names` and the `mcp/tests/mod.rs` chain stay structurally
+// symmetric. See ADR-0192 and GRAPH_SPEC §16.
+pub(crate) const GRAPH_READ_TOOL_NAMES: &[&str] = &[];
 
 pub(crate) const SEARCH_TOOL_NAMES: &[&str] = &["orbit.search"];
 

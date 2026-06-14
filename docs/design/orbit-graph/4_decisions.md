@@ -112,7 +112,7 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ## ADR-0192 — Roll back orbit-graph tool cutover to orbit-knowledge
 
-**Status:** Accepted · 2026-05-25 · [ORB-00344] · Supersedes ADR-0191 · Amended by ADR-0197 (equivalence-harness retention reversed)
+**Status:** Superseded · 2026-05-25 · [ORB-00344] · Supersedes ADR-0191 · Amended by ADR-0197 (equivalence-harness retention reversed) · Superseded by ADR-0198 (ORB-00391 re-cutover + orbit-knowledge decommission)
 
 **Context.** ORB-00338 cut the active graph query tools over from `orbit-knowledge` to `orbit-graph`, but audit data and post-cutover testing found unacceptable steady-state regressions: 13.5x p50 search slowdown, a roughly 9s cold-call floor, deleted high-use tools, incomplete plugin MCP exposure, byte-array `show` output, empty `trace` results for real enum-dispatch commands, and direction-confused `impact` output.
 
@@ -152,6 +152,21 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - ADR-0192's harness-retention consequence is amended here; its rollback decision is unchanged.
 - Cost: a future cutover must rebuild the equivalence + benchmark harness (binary, frozen corpus, baselines, CI wiring) from scratch; the existing corpus and baseline history are lost.
 
+## ADR-0198 — Cut over to orbit-graph (v2) and decommission orbit-knowledge
+
+**Status:** Accepted · 2026-06-14 · [ORB-00391] · Supersedes ADR-0192
+
+**Context.** ADR-0192 rolled back the ORB-00338 v2 cutover and restored `orbit-knowledge` (v1) as the active graph backend, gating any future cutover on a set of pre-cutover correctness/latency learnings. ORB-00386/00387/00389/00390 closed those gates against the watcher-backed orbit-graph (v2): UTF-8 `show` boundaries, trace/impact correctness, the `overview`/`implementors`/`deps` navigation queries (restoring v1 parity), and the `refs` fuzzy fallback. The automated equivalence/effectiveness harness that ADR-0192/§16 envisioned was removed by ADR-0197 and never rebuilt; with the gates closed, rebuilding it as a precondition carried no proportionate value.
+
+**Decision.** Cut the agent graph surface over to orbit-graph (v2) and remove `orbit-knowledge` entirely. The v2 tools (`sync`, `search`, `show`, `refs`, `callees`, `impact`, `trace`, `overview`, `implementors`, `deps`) are served by the in-process `GraphToolRegistry` in `orbit-mcp`, which activates whenever the host exposes no `orbit.graph.*` schema. The v1 builtins, the `orbit graph` CLI command, the init-time graph build, and the v1 metrics pipeline are removed; the knowledge-stats computation moves to `orbit_core::metrics`. The measurement bar for this cutover is **manual QA plus a v1-vs-v2 spot-check**, accepted in place of the never-rebuilt automated harness. The `pack` tool is dropped rather than ported (ORB-00388 rejected); `callers` is subsumed by `refs`.
+
+**Consequences.**
+- orbit-graph is the sole graph surface; `orbit-knowledge` is deleted from the workspace (~24k LOC, plus the v1 builtins and the `orbit graph` CLI command).
+- Agents reach the graph only through `orbit-mcp`; there is no `orbit graph` subcommand. The standalone `orbit-graph-cli` binary remains for direct CLI use.
+- The dashboard knowledge-stats panel keeps working via `orbit_core::metrics::aggregate`; pack-compression fields degrade to defaults (pack is gone), matching the pre-existing pack-less code path.
+- ADR-0192's rollback decision is reversed; its `SyncPolicy::Manual` default note is superseded by the watcher-backed policy (ADR-0195) for long-lived MCP handles.
+- Cost: the v1 content-addressed store, working-graph write surface, and graph-history attribution are gone; there is no automated equivalence gate guarding regressions against the (now-removed) v1 backend.
+
 ---
 
 ## Task References
@@ -161,5 +176,6 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - [ORB-00344] allocated ADR-0192 and restored `orbit-knowledge` as the primary graph tool backend.
 - [ORB-00377] allocated ADR-0195, superseded ADR-0188, and moved long-lived MCP graph reads to a watcher-backed sync policy.
 - [ORB-00385] allocated ADR-0197 and removed the orbit-graph equivalence + benchmark harness, amending ADR-0192.
+- [ORB-00391] allocated ADR-0198, cut the agent graph surface over to orbit-graph (v2), and decommissioned `orbit-knowledge`.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -20,7 +20,11 @@ use crate::error::tool_error_result;
 impl OrbitToolServer {
     pub(super) fn combined_tool_schemas(&self) -> Vec<ToolSchema> {
         let mut schemas = self.host.list_tool_schemas();
-        // L-0058: legacy host graph schemas stay visible while orbit-knowledge owns orbit.graph.*.
+        // ORB-00391: the v1 orbit-knowledge graph builtins were decommissioned,
+        // so the host exposes no `orbit.graph.*` schema and the in-process
+        // orbit-graph (v2) adapter is the sole graph surface. The gate stays as a
+        // safety net: if any host ever re-exposes a graph tool, the adapter backs
+        // off rather than colliding on names.
         if !host_exposes_graph_tools(&schemas) {
             schemas.extend(self.graph_tools.schemas());
         }

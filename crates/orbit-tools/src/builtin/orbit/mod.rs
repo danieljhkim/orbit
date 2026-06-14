@@ -2,9 +2,7 @@ pub mod adr;
 pub mod docs;
 pub mod duel;
 pub mod friction;
-pub mod graph_history;
 pub mod groundhog;
-pub mod knowledge;
 pub mod learning;
 pub mod pipeline;
 pub mod review_thread;
@@ -23,7 +21,7 @@ use crate::{
     GroundhogBuiltinAction, OrbitBuiltinAction, OrbitTaskScope, ToolContext, ToolRegistry,
 };
 
-pub(super) use orbit_common::types::{optional_string, optional_string_alias, required_string};
+pub(super) use orbit_common::types::{optional_string_alias, required_string};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct OrbitIdentity {
@@ -76,15 +74,10 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(task::update::OrbitTaskUpdateTool);
     registry.register(duel::plan_add::OrbitDuelPlanAddTool);
     registry.register(duel::plan_winner::OrbitDuelPlanWinnerTool);
-    registry.register_inactive(graph_history::OrbitGraphHistoryTool);
-    registry.register(knowledge::callers::OrbitKnowledgeCallersTool);
-    registry.register(knowledge::deps::OrbitKnowledgeDepsTool);
-    registry.register(knowledge::implementors::OrbitKnowledgeImplementorsTool);
-    registry.register(knowledge::overview::OrbitKnowledgeOverviewTool);
-    registry.register(knowledge::pack::OrbitKnowledgePackTool);
-    registry.register(knowledge::refs::OrbitKnowledgeRefsTool);
-    registry.register(knowledge::search::OrbitKnowledgeSearchTool);
-    registry.register(knowledge::show::OrbitKnowledgeShowTool);
+    // ORB-00391: the v1 orbit-knowledge graph builtins (callers/deps/
+    // implementors/overview/pack/refs/search/show) and the graph.history
+    // compatibility stub were decommissioned. The agent graph surface is now
+    // served by the in-process orbit-graph (v2) adapter in orbit-mcp.
     registry.register(learning::add::OrbitLearningAddTool);
     registry.register(learning::comment_add::OrbitLearningCommentAddTool);
     // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
