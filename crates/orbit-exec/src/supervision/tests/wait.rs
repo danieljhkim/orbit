@@ -24,7 +24,18 @@ fn wait_kills_process_when_stdout_capture_limit_is_exceeded() {
         wait_with_timeout_and_output_limit(child, Some(5_000), false, None, 64).expect("wait");
 
     assert!(!result.exit_success);
-    assert_eq!(result.exit_code, None);
+    // Hitting the output cap terminates the process two valid ways, decided by
+    // thread scheduling: the supervisor may observe the cap signal first and
+    // SIGKILL the group (exit_code None), or — under load — be parked in
+    // child.wait_timeout when /bin/sh self-exits 141 because `yes` took SIGPIPE
+    // the instant the drain thread dropped the pipe read end (128 + 13 = 141).
+    // Both promptly kill the process and cap output (asserted below); only the
+    // reported exit_code differs by who delivered the kill.
+    assert!(
+        result.exit_code.is_none() || result.exit_code == Some(141),
+        "expected None (SIGKILL) or Some(141) (SIGPIPE cascade), got {:?}",
+        result.exit_code
+    );
     assert!(result.stderr.is_empty());
     assert!(result.stdout.ends_with(OUTPUT_TRUNCATED_MARKER));
     assert!(result.stdout.len() <= 64 + OUTPUT_TRUNCATED_MARKER.len());
