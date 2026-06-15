@@ -44,6 +44,16 @@ impl TaskRegistryStore {
 
         let conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
         enable_best_effort_wal_mode(&conn);
+        // The registry is the commit point that makes a created task official, so
+        // its writes must be durable against power loss the moment they ack. WAL's
+        // default synchronous=NORMAL only fsyncs the WAL at checkpoint, leaving an
+        // acked register_task_bundle exposed to rollback on a hard reset. FULL
+        // fsyncs the WAL on every commit, closing that window. The registry is
+        // low-write (≈one commit per task create/bind/unregister), so the extra
+        // fsync cost is negligible. Scoped to this connection only — the shared
+        // Store::open stays at NORMAL for higher-write stores.
+        conn.pragma_update(None, "synchronous", "FULL")
+            .map_err(|e| OrbitError::Store(format!("failed to set synchronous=FULL: {e}")))?;
         conn.pragma_update(None, "busy_timeout", "5000")
             .map_err(|e| OrbitError::Store(format!("failed to set busy_timeout: {e}")))?;
         conn.pragma_update(None, "foreign_keys", "ON")
