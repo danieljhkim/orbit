@@ -14,7 +14,6 @@ use orbit_common::types::{
 };
 use serde_json::json;
 
-use super::super::ActivityExecutor;
 use super::super::direct_agent::{build_subprocess_exec_request, run_subprocess_executor};
 use super::super::registry::ActivityExecutorRegistry;
 use crate::context::{
