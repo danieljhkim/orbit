@@ -116,8 +116,7 @@ impl TaskBundleStoreV2 {
         // otherwise left in the page cache. Without fsyncing the parent, a power
         // loss in the creation window can orphan the whole bundle even though
         // every file inside was durably written.
-        if let Err(err) =
-            sync_parent_dir(bundle_dir).map_err(|err| OrbitError::Io(err.to_string()))
+        if let Err(err) = sync_parent_dir(bundle_dir).map_err(|err| OrbitError::Io(err.to_string()))
         {
             cleanup_partial_bundle_best_effort(bundle_dir, "bundle dir fsync", &err);
             return Err(err);
