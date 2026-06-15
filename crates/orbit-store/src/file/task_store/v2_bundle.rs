@@ -12,7 +12,7 @@ use orbit_common::types::{
     TASK_COMMENTS_FILE_NAME, TASK_ENVELOPE_FILE_NAME, TASK_EVENTS_FILE_NAME, TaskCommentRowV2,
     TaskEnvelopeV2, TaskEventRowV2,
 };
-use orbit_common::utility::fs::{atomic_write_text, with_exclusive_file_lock};
+use orbit_common::utility::fs::{atomic_write_text, sync_parent_dir, with_exclusive_file_lock};
 
 use crate::sqlite::task_registry::{ProjectionRebuildResult, TaskRegistryStore};
 
@@ -108,6 +108,18 @@ impl TaskBundleStoreV2 {
 
         if let Err(err) = write_bundle_at(bundle_dir, bundle) {
             cleanup_partial_bundle_best_effort(bundle_dir, "bundle write", &err);
+            return Err(err);
+        }
+
+        // `write_bundle_at` fsyncs each artifact into `bundle_dir`, but the
+        // mkdir that created `bundle_dir` is an entry in its parent that is
+        // otherwise left in the page cache. Without fsyncing the parent, a power
+        // loss in the creation window can orphan the whole bundle even though
+        // every file inside was durably written.
+        if let Err(err) =
+            sync_parent_dir(bundle_dir).map_err(|err| OrbitError::Io(err.to_string()))
+        {
+            cleanup_partial_bundle_best_effort(bundle_dir, "bundle dir fsync", &err);
             return Err(err);
         }
 

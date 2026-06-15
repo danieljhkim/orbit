@@ -190,7 +190,15 @@ fn temp_path_for(target_path: &Path) -> PathBuf {
     target_path.with_file_name(temp_name)
 }
 
-fn sync_parent_dir(target_path: &Path) -> io::Result<()> {
+/// fsync the parent directory of `target_path` so the directory entry that
+/// names `target_path` is durable.
+///
+/// fsync on a file or directory persists that object's own data and inode, but
+/// not the entry in its *parent* that makes it reachable by path. After freshly
+/// creating a file, directory, or rename target, a crash can otherwise leave a
+/// fully-fsynced but unreferenced inode that recovery reclaims as an orphan.
+/// Call this on the newly created path to close that window.
+pub fn sync_parent_dir(target_path: &Path) -> io::Result<()> {
     let parent = target_path.parent().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
