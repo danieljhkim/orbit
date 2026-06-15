@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.1
+
+This release completes the orbit-graph v2 migration — v1 (orbit-knowledge) is fully decommissioned and v2 is now the only graph surface — and adds a stable protocol for plugging in out-of-process executors.
+
+### Highlights
+
+- **orbit-graph v2 is now the sole graph surface**: the orbit-knowledge (v1) crate and its `orbit.graph.*` builtin tools are removed, the `orbit graph` CLI command is dropped (the v2 graph ships as the standalone `orbit-graph-cli` binary plus an always-on in-process MCP adapter), and `orbit init` no longer builds a graph up front — v2 syncs on demand. The MCP graph surface is now search / show / refs / callees / impact / trace / overview / implementors / deps; `pack` is gone and `callers` is folded into `refs`. ([ORB-00391], [ORB-00389])
+- **External Executor Protocol v1**: register a homegrown agent or CLI as an Orbit executor without forking core, through a documented stdin/stdout envelope contract and dynamic out-of-process registration. ([ORB-00384])
+- **Graph reads are faster and more accurate**: queries are index-backed and decoupled from a full-worktree rescan, `show` returns UTF-8 text instead of a raw byte array, `trace` resolves far more command handlers, and `refs`/`impact` fall back to fuzzy-name matches when the precise floor is empty. ([ORB-00377], [ORB-00380], [ORB-00386], [ORB-00387], [ORB-00381])
+
 ## 0.9.0
 
 This is a security-hardening release: the bulk of the changes close secret-leak, sandbox-escape, network-exposure, and workspace-containment issues found in a focused audit (ORB-00355–ORB-00374).

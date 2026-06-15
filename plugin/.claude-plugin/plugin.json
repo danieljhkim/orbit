@@ -1,6 +1,6 @@
 {
   "name": "orbit",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Knowledge-graph code intelligence and task/activity orchestration for AI coding agents. Adds Orbit's MCP tool surface, skills, and orchestration subagents to Claude Code.",
   "hooks": "./hooks/hooks.json",
   "author": {
