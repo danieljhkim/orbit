@@ -1070,7 +1070,7 @@ pub struct Implementor {
 /// Outbound module/import edge result returned by [`Graph::deps`].
 ///
 /// Reports source-level import edges, not the Cargo crate dependency graph that
-/// v1 `orbit.graph.deps` returned. See [`query::deps`].
+/// v1 `orbit.graph.deps` returned. Computed by the internal `query::deps`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DepsResult {
     /// Selector scope echoed back.
