@@ -2170,6 +2170,7 @@ dependencies = [
  "orbit-common",
  "orbit-core",
  "orbit-dashboard",
+ "orbit-graph-cli",
  "orbit-mcp",
  "predicates",
  "regex",

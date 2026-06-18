@@ -17,33 +17,33 @@ You receive a specific question or exploration goal from the parent and return s
 - `Grep` — ripgrep-powered content search.
 - `Glob` — file pattern matching.
 
-**Orbit code graph (via `Bash` → `orbit-graph-cli`):**
-The Orbit code graph is a pre-parsed, symbol-level index of the codebase. Prefer it over raw grep for symbol lookups — it's faster, more precise, and prints structured JSON to stdout. Agents in-process reach the graph over MCP (`orbit_graph_*`); from a shell you reach the same queries through the standalone `orbit-graph-cli` binary. There is no `orbit tool run orbit.graph.*` path.
+**Orbit code graph (via `Bash` → `orbit graph`):**
+The Orbit code graph is a pre-parsed, symbol-level index of the codebase. Prefer it over raw grep for symbol lookups — it's faster, more precise, and prints structured JSON to stdout. Agents in-process reach the graph over MCP (`orbit_graph_*`); from a shell you reach the same queries through `orbit graph <subcommand>` (bundled in the main `orbit` binary) or, equivalently, the standalone `orbit-graph-cli` binary. There is no `orbit tool run orbit.graph.*` path.
 
 | Purpose | Command |
 |---|---|
-| Search nodes by name / string / config | `orbit-graph-cli search "<term>" --kind symbol` |
-| Show a node's source, lines, and metadata | `orbit-graph-cli show "<selector>"` |
-| Aggregate overview of a dir/file scope | `orbit-graph-cli overview "dir:<path>"` |
-| Find inbound references / callers of a symbol | `orbit-graph-cli refs "<selector>"` |
-| Find outbound calls from a symbol | `orbit-graph-cli callees "<selector>"` |
-| Bounded blast radius before a change | `orbit-graph-cli impact "<selector>" --depth 2` |
-| Find `impl Trait for Type` blocks | `orbit-graph-cli implementors "<Trait selector>"` |
-| List module/import edges out of a file/dir | `orbit-graph-cli deps "<file: or dir: selector>"` |
+| Search nodes by name / string / config | `orbit graph search "<term>" --kind symbol` |
+| Show a node's source, lines, and metadata | `orbit graph show "<selector>"` |
+| Aggregate overview of a dir/file scope | `orbit graph overview "dir:<path>"` |
+| Find inbound references / callers of a symbol | `orbit graph refs "<selector>"` |
+| Find outbound calls from a symbol | `orbit graph callees "<selector>"` |
+| Bounded blast radius before a change | `orbit graph impact "<selector>" --depth 2` |
+| Find `impl Trait for Type` blocks | `orbit graph implementors "<Trait selector>"` |
+| List module/import edges out of a file/dir | `orbit graph deps "<file: or dir: selector>"` |
 
 Selectors are `dir:<path>`, `file:<path>`, or `symbol:<path>#<name>:<kind>`. Output is JSON on stdout — pipe to `jq` to extract specific fields.
 
 ## When to prefer the graph over grep
 
-- Looking up a symbol by name → `orbit-graph-cli search` (structured) beats `Grep "fn foo"` (noisy).
-- Understanding where a function is called → `orbit-graph-cli refs` beats grepping for call sites.
-- Reading a focused slice of context → `orbit-graph-cli show` on a selector beats `Read` on a 2000-line file.
+- Looking up a symbol by name → `orbit graph search` (structured) beats `Grep "fn foo"` (noisy).
+- Understanding where a function is called → `orbit graph refs` beats grepping for call sites.
+- Reading a focused slice of context → `orbit graph show` on a selector beats `Read` on a 2000-line file.
 
 Fall back to `Read`/`Grep`/`Glob` when:
 - You need exact string matches the graph doesn't track (comments, strings, config).
 - A graph query errors or a selector doesn't resolve, or the file isn't indexed.
 - You need line-level context the graph summary omits.
-- `orbit-graph-cli` is not on `PATH` in this environment.
+- Neither `orbit` nor `orbit-graph-cli` is on `PATH` in this environment.
 
 ## Constraints
 

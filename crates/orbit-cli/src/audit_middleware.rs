@@ -588,6 +588,34 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             arguments_json: None,
             job_run_id: None,
         },
+        Commands::Graph(cmd) => {
+            use orbit_graph_cli::Command as GraphSubcommand;
+            let sub = match &cmd.command {
+                GraphSubcommand::Sync(_) => "sync",
+                GraphSubcommand::Search(_) => "search",
+                GraphSubcommand::Show(_) => "show",
+                GraphSubcommand::Refs(_) => "refs",
+                GraphSubcommand::Callees(_) => "callees",
+                GraphSubcommand::Impact(_) => "impact",
+                GraphSubcommand::Trace(_) => "trace",
+                GraphSubcommand::Overview(_) => "overview",
+                GraphSubcommand::Implementors(_) => "implementors",
+                GraphSubcommand::Deps(_) => "deps",
+                GraphSubcommand::Version(_) => "version",
+                GraphSubcommand::DbPath(_) => "db-path",
+                GraphSubcommand::Clean(_) => "clean",
+            };
+            CommandMeta {
+                command: "graph".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("graph".to_string()),
+                target_id: None,
+                role: "admin".to_string(),
+                arguments_json: None,
+                job_run_id: None,
+            }
+        }
         Commands::Workspace(cmd) => {
             use crate::command::workspace::WorkspaceSubcommand;
             let sub = match &cmd.command {

@@ -6,6 +6,7 @@ Layered Rust crates. Lower layers do not depend on higher layers.
 flowchart LR
   CLI["orbit-cli"] --> Core["orbit-core"]
   CLI --> MCP["orbit-mcp"]
+  CLI --> GraphCli["orbit-graph-cli"]
   Core --> Engine["orbit-engine"]
   Core --> Store["orbit-store"]
   Core --> Tools["orbit-tools"]
@@ -49,7 +50,7 @@ flowchart LR
 - **orbit-registry**: generic replicated registry substrate for publication flows. Opaque-bytes payloads + caller-chosen merge classes; optional `transport-git2` feature for git-backed replicas. Depends only on `orbit-common`.
 - **orbit-graph-extract**: pure graph extraction contracts and language-specific tree-sitter extractors for the orbit-graph migration. Owns `Extractor`, `ExtractedFile`, raw row shapes, and the stable `Selector` parser; no internal crate dependencies, storage, async, or filesystem traversal.
 - **orbit-graph**: SQLite graph store, sync policy, watcher-backed background refresh, and query API for the orbit-graph migration. Depends on `orbit-graph-extract` for selector/extraction contracts; the ORB-00377 watcher work adds only the external `notify` crate and no new internal crate edge.
-- **orbit-graph-cli**: clap-based JSON command surface for orbit-graph. Depends on `orbit-graph` for sync/query dispatch and `orbit-graph-extract` for selector parsing.
+- **orbit-graph-cli**: clap-based JSON command surface for orbit-graph. Depends on `orbit-graph` for sync/query dispatch and `orbit-graph-extract` for selector parsing. Exposes a small library surface (the `Command` subcommand enum and its `Command::run` dispatch) alongside the standalone binary, so `orbit-cli` can embed the same command layer under `orbit graph` without duplication (ADR-0199). Tier `internal`; the library surface is consumed only by `orbit-cli`.
 - **orbit-store**: layered store pattern (YAML + SQLite). Match existing modules when adding new ones. Depends only on `orbit-common`; the semantic vector schema is owned by `orbit-search::vector` (not `orbit-store`).
 - **orbit-tools**: tool registry plus built-in fs and policy-aware exec tools. Depends on `orbit-common`, `orbit-exec`, `orbit-policy`. (The v1 `orbit.graph.*` builtins were decommissioned in ORB-00391; the agent graph surface now lives in `orbit-mcp`'s in-process orbit-graph adapter.)
 - **orbit-mcp**: Model Context Protocol adapter using `rmcp`. Depends on `orbit-common` plus `orbit-graph` / `orbit-graph-extract` for the in-process read-only `orbit.graph.*` wrappers — the sole agent-facing graph surface since the ORB-00391 v2 cutover; consumed by `orbit-cli` via `orbit mcp serve`.
@@ -57,7 +58,7 @@ flowchart LR
 - **orbit-agent**: per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, openai_compat, anthropic, ollama, mock_agent). Implements `backend: cli`, hosts HTTP `LoopTransport` primitives, and routes loop tool calls through the shared `orbit-tools` registry. Depends on `orbit-common` and `orbit-tools`.
 - **orbit-engine**: activity/job execution, template rendering, retry logic, subprocess execution, and tool-aware automation. Owns the `backend: cli` subprocess runner (`activity_job::cli_runner`), which references `orbit-agent::{Agent, AgentConfig}` directly so orbit-core stays clean of orbit-agent types. Depends on `orbit-agent`, `orbit-common`, `orbit-exec`, `orbit-store`, and `orbit-tools`.
 - **orbit-core**: runtime bootstrap, config layering, command dispatch, default asset seeding, thin command facades for policy, tool, store, engine, and search features, and the `metrics` module (tool-invocation knowledge-stats computation migrated out of orbit-knowledge in ORB-00391). Surfaces the `OrbitRuntime` API used by `orbit-cli`; does NOT depend on `orbit-agent`.
-- **orbit-cli**: clap-based CLI entry point.
+- **orbit-cli**: clap-based CLI entry point. Embeds the `orbit-graph-cli` library as the `orbit graph` subcommand (ADR-0199), dispatching its worktree-scoped JSON queries directly rather than through `OrbitRuntime`.
 
 ---
 

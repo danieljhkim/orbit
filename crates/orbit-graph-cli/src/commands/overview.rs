@@ -5,7 +5,7 @@ use orbit_graph_extract::Selector;
 use super::{CliError, CommandContext, json_value};
 
 #[derive(Debug, Args)]
-pub(crate) struct OverviewCommand {
+pub struct OverviewCommand {
     /// Optional `dir:…` or `file:…` selector scoping the summary
     /// (default: whole worktree).
     scope: Option<String>,

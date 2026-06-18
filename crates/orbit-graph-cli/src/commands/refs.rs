@@ -5,7 +5,7 @@ use orbit_graph_extract::Selector;
 use super::{CliError, CommandContext, json_value};
 
 #[derive(Debug, Args)]
-pub(crate) struct RefsCommand {
+pub struct RefsCommand {
     symbol: String,
     /// Minimum resolution confidence floor (default: same_module).
     ///

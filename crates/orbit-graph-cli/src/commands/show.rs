@@ -5,7 +5,7 @@ use orbit_graph_extract::Selector;
 use super::{CliError, CommandContext, json_value};
 
 #[derive(Debug, Args)]
-pub(crate) struct ShowCommand {
+pub struct ShowCommand {
     selector: String,
     #[arg(long, default_value_t = DEFAULT_SHOW_MAX_BYTES)]
     max_bytes: usize,

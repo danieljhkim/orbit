@@ -5,6 +5,7 @@ pub mod config;
 pub mod docs;
 pub mod executor;
 pub mod friction;
+pub mod graph;
 pub mod hook;
 pub mod init;
 pub mod job;
@@ -62,6 +63,7 @@ Operate:
 
 Observe:
   search      Search tasks, docs, learnings, and ADRs
+  graph       Query and sync the code graph (symbols, refs, impact)
   audit       Query the audit event log
   log         Tail the unified Orbit log feed
 
@@ -107,6 +109,7 @@ pub enum Commands {
     Learning(learning::LearningCommand),
 
     // ── Observe ──
+    Graph(graph::GraphCommand),
     Audit(audit::AuditCommand),
     Log(log::LogCommand),
 
@@ -145,6 +148,7 @@ impl Execute for Commands {
             Commands::Adr(cmd) => cmd.execute(runtime),
             Commands::Friction(cmd) => cmd.execute(runtime),
             Commands::Learning(cmd) => cmd.execute(runtime),
+            Commands::Graph(cmd) => cmd.execute(runtime),
             Commands::Audit(cmd) => cmd.execute(runtime),
             Commands::Log(cmd) => cmd.execute(runtime),
             Commands::Activity(cmd) => cmd.execute(runtime),

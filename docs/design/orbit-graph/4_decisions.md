@@ -3,7 +3,7 @@ summary: "Orbit Graph — Decisions"
 type: design
 title: "Orbit Graph — Decisions"
 owner: claude
-last_updated: 2026-06-13
+last_updated: 2026-06-16
 status: Draft
 feature: orbit-graph
 doc_role: decisions
@@ -162,10 +162,26 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 **Consequences.**
 - orbit-graph is the sole graph surface; `orbit-knowledge` is deleted from the workspace (~24k LOC, plus the v1 builtins and the `orbit graph` CLI command).
-- Agents reach the graph only through `orbit-mcp`; there is no `orbit graph` subcommand. The standalone `orbit-graph-cli` binary remains for direct CLI use.
+- Agents reach the graph only through `orbit-mcp`; there is no `orbit graph` subcommand. The standalone `orbit-graph-cli` binary remains for direct CLI use. *(Amended by ADR-0199: `orbit graph` is reintroduced as a thin wrapper over the `orbit-graph-cli` library for human/script use; the agent surface stays MCP-only.)*
 - The dashboard knowledge-stats panel keeps working via `orbit_core::metrics::aggregate`; pack-compression fields degrade to defaults (pack is gone), matching the pre-existing pack-less code path.
 - ADR-0192's rollback decision is reversed; its `SyncPolicy::Manual` default note is superseded by the watcher-backed policy (ADR-0195) for long-lived MCP handles.
 - Cost: the v1 content-addressed store, working-graph write surface, and graph-history attribution are gone; there is no automated equivalence gate guarding regressions against the (now-removed) v1 backend.
+
+---
+
+## ADR-0199 — Reintroduce `orbit graph` as a thin wrapper over orbit-graph-cli
+
+**Status:** Accepted · 2026-06-16 · [ORB-00396] · Amends ADR-0198
+
+**Context.** ADR-0198 cut the agent graph surface to orbit-graph (v2) and, in doing so, removed the `orbit graph` CLI command — agents reach the graph in-process over MCP, and direct CLI users were pointed at the standalone `orbit-graph-cli` binary. In practice that binary is not always on `PATH` (the agent shell documented in [`plugin/agents/orbit-code-reader.md`](../../../plugin/agents/orbit-code-reader.md) notes "`orbit-graph-cli` is not on PATH in this environment"), leaving a shell user who holds only the `orbit` binary with no command-line path to the graph. Every other Orbit capability is reachable from the single `orbit` binary; the graph was the lone exception.
+
+**Decision.** Reintroduce `orbit graph` as a thin wrapper over the `orbit-graph-cli` command layer. `orbit-graph-cli` is lib-ified (lib + bin): its `Command` subcommand enum and `Command::run` dispatch move into a library surface that both the standalone binary and `orbit-cli` consume, so there is exactly one command layer and no duplication. `orbit-cli` embeds that enum under an `orbit graph` parent and prints the same JSON the standalone binary emits, mapping the graph CLI error into `OrbitError`. The graph subcommands stay worktree-scoped (the DB is discovered from the current git worktree) and do not route through `OrbitRuntime`. This amends only ADR-0198's "there is no `orbit graph` subcommand" consequence; the v2 cutover, the MCP adapter as the agent surface, and the removal of `orbit-knowledge` are unchanged.
+
+**Consequences.**
+- `orbit graph {sync, search, show, refs, callees, impact, trace, overview, implementors, deps, version, db-path, clean}` is available from the single `orbit` binary; output matches the standalone `orbit-graph-cli` (same library, same compact JSON).
+- New crate edge `orbit-cli → orbit-graph-cli` (recorded in [`ARCHITECTURE.md`](../../../ARCHITECTURE.md)). `orbit-graph-cli` now publishes a minimal library surface (`Command`, `Command::run`, `CliError`); the per-subcommand arg structs are made `pub` to keep the public enum's interface clean under `-D warnings`.
+- The agent-facing graph surface is unchanged: agents still use the in-process MCP adapter, not `orbit graph`. The new subcommand is for humans/scripts holding the `orbit` binary.
+- Cost: a second consumer of the orbit-graph-cli command layer means a subcommand change now ripples to two front ends' help/output expectations. The duplication-free lib split confines the implementation to one edit site, but the orbit-cli parse tests and any `orbit graph` doc references must track the surface.
 
 ---
 
@@ -177,5 +193,6 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - [ORB-00377] allocated ADR-0195, superseded ADR-0188, and moved long-lived MCP graph reads to a watcher-backed sync policy.
 - [ORB-00385] allocated ADR-0197 and removed the orbit-graph equivalence + benchmark harness, amending ADR-0192.
 - [ORB-00391] allocated ADR-0198, cut the agent graph surface over to orbit-graph (v2), and decommissioned `orbit-knowledge`.
+- [ORB-00396] allocated ADR-0199, lib-ified `orbit-graph-cli`, and reintroduced `orbit graph` as a thin CLI wrapper over it.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

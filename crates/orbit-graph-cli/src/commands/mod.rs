@@ -31,8 +31,19 @@ pub struct Cli {
 
 impl Cli {
     pub fn run(&self) -> Result<Value, CliError> {
+        self.command.run()
+    }
+}
+
+impl Command {
+    /// Dispatch this subcommand against a freshly discovered worktree context
+    /// and return the JSON payload the caller is expected to emit.
+    ///
+    /// Shared by the standalone `orbit-graph-cli` binary and the `orbit graph`
+    /// subcommand wired into `orbit-cli`.
+    pub fn run(&self) -> Result<Value, CliError> {
         let context = CommandContext::from_current_dir()?;
-        match &self.command {
+        match self {
             Command::Sync(command) => command.run(&context),
             Command::Search(command) => command.run(&context),
             Command::Show(command) => command.run(&context),
@@ -51,7 +62,7 @@ impl Cli {
 }
 
 #[derive(Debug, Subcommand)]
-enum Command {
+pub enum Command {
     Sync(sync::SyncCommand),
     Search(search::SearchCommand),
     Show(show::ShowCommand),

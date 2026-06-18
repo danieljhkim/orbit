@@ -5,6 +5,8 @@ mod init;
 
 use clap::{Parser, error::ErrorKind};
 
+use orbit_graph_cli::Command as GraphSubcommand;
+
 use super::{
     Cli, Commands,
     docs::DocsSubcommand,
@@ -47,6 +49,37 @@ fn cli_parses_mcp_serve() {
             _ => panic!("expected mcp serve"),
         },
         _ => panic!("expected top-level mcp command"),
+    }
+}
+
+#[test]
+fn cli_parses_graph_search() {
+    let cli = Cli::parse_from([
+        "orbit",
+        "graph",
+        "search",
+        "GraphCommand",
+        "--kind",
+        "symbol",
+    ]);
+    match cli.command {
+        Commands::Graph(command) => match command.command {
+            GraphSubcommand::Search(_) => {}
+            _ => panic!("expected graph search"),
+        },
+        _ => panic!("expected top-level graph command"),
+    }
+}
+
+#[test]
+fn cli_parses_graph_impact() {
+    let cli = Cli::parse_from(["orbit", "graph", "impact", "symbol:src/lib.rs#run:function"]);
+    match cli.command {
+        Commands::Graph(command) => match command.command {
+            GraphSubcommand::Impact(_) => {}
+            _ => panic!("expected graph impact"),
+        },
+        _ => panic!("expected top-level graph command"),
     }
 }
 

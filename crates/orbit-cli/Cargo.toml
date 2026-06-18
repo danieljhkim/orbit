@@ -22,6 +22,7 @@ comfy-table = "7"
 csv = "1"
 orbit-common = { path = "../orbit-common" }
 orbit-core = { path = "../orbit-core", features = ["clap"] }
+orbit-graph-cli = { path = "../orbit-graph-cli" }
 orbit-mcp = { path = "../orbit-mcp" }
 orbit-dashboard = { path = "../orbit-dashboard" }
 regex.workspace = true

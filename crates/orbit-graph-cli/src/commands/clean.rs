@@ -5,7 +5,7 @@ use serde::Serialize;
 use super::{CliError, CommandContext, json_value};
 
 #[derive(Debug, Args)]
-pub(crate) struct CleanCommand;
+pub struct CleanCommand;
 
 impl CleanCommand {
     pub(crate) fn run(&self, context: &CommandContext) -> Result<serde_json::Value, CliError> {

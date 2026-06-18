@@ -4,7 +4,7 @@ use orbit_graph_extract::Selector;
 use super::{CliError, CommandContext, json_value};
 
 #[derive(Debug, Args)]
-pub(crate) struct DepsCommand {
+pub struct DepsCommand {
     /// File or directory selector (`file:…` or `dir:…`) whose outbound module/
     /// import edges to list. Reports source-level imports, not Cargo crate edges.
     selector: String,

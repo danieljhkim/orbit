@@ -90,14 +90,14 @@ orbit workspace init --mcp
 
 ## Update the Graph
 
-`orbit workspace init` builds the initial repository graph automatically. Refresh it incrementally as the codebase changes:
+The code graph syncs on demand — a file watcher keeps it fresh as you work, so reads are normally up to date without a manual step (there is no separate init-time build). To force a refresh:
 
 ```bash
-orbit graph update
+orbit graph sync
 ```
 
-If the initial build fails during `orbit workspace init` (the command prints `graph build: failed (...), run \`orbit graph build\` manually`), retry it with:
+For a complete re-index — needed for full `trace` coverage, since incremental sync resolves fewer command handlers:
 
 ```bash
-orbit graph build
+orbit graph sync --full
 ```

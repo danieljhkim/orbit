@@ -4,7 +4,7 @@ use orbit_graph::{DEFAULT_TRACE_DEPTH, RefConfidence};
 use super::{CliError, CommandContext, json_value};
 
 #[derive(Debug, Args)]
-pub(crate) struct TraceCommand {
+pub struct TraceCommand {
     command_name: String,
     #[arg(long, default_value_t = DEFAULT_TRACE_DEPTH)]
     depth: u8,

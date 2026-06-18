@@ -5,7 +5,7 @@ use orbit_graph_extract::Selector;
 use super::{CliError, CommandContext, json_value};
 
 #[derive(Debug, Args)]
-pub(crate) struct ImpactCommand {
+pub struct ImpactCommand {
     selector: String,
     #[arg(long, default_value_t = DEFAULT_IMPACT_DEPTH)]
     depth: u8,

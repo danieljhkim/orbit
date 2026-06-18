@@ -5,7 +5,7 @@ use serde::Serialize;
 use super::{CliError, json_value};
 
 #[derive(Debug, Args)]
-pub(crate) struct VersionCommand;
+pub struct VersionCommand;
 
 impl VersionCommand {
     pub(crate) fn run(&self) -> Result<serde_json::Value, CliError> {

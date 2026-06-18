@@ -4,7 +4,7 @@ use orbit_graph::{SearchKind, SearchQuery};
 use super::{CliError, CommandContext, json_value};
 
 #[derive(Debug, Args)]
-pub(crate) struct SearchCommand {
+pub struct SearchCommand {
     query: String,
     #[arg(long, value_enum)]
     kind: Option<SearchKindArg>,

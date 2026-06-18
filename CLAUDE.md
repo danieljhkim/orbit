@@ -38,6 +38,7 @@ This repo has two semantic graphs available (no live LSP). Use them in this orde
 - **Find references / callers (who uses X?)** → **`orbit_graph_refs`** with `include: "all"`, *not* `*_callers`. Both graphs' `callers` indexes miss cross-crate calls that go through `pub use` re-exports (e.g. a symbol defined in `orbit-common`, re-exported from `orbit-core`, called in another crate), so they routinely return empty for real public functions. `orbit_graph_refs` surfaces the actual call sites plus re-export points.
 - **Blast radius before edits** → `codegraph_impact`.
 - **Ground-truth fallback** → `rg --type rust 'symbol_name'`. Use when `refs` looks incomplete or you need to see exact textual context (macro call sites, doc references, etc.).
+- **From a plain shell (no MCP/codegraph)** → the same orbit-graph queries are bundled in the main `orbit` binary as `orbit graph <sub>` (`search`/`show`/`refs`/`callees`/`impact`/`deps`/`trace`/`overview`/`implementors`, plus `sync`). In-process the tools above are faster — reach for the CLI only when the graph tools aren't available.
 
 ## Design Docs
 

@@ -13,7 +13,7 @@ The graph is served **in-process over MCP** by orbit-graph (v2). Call the tools 
 
 - `orbit_graph_sync`, `orbit_graph_search`, `orbit_graph_show`, `orbit_graph_refs`, `orbit_graph_callees`, `orbit_graph_impact`, `orbit_graph_trace`, `orbit_graph_overview`, `orbit_graph_implementors`, `orbit_graph_deps`.
 
-There is **no** `orbit tool run orbit.graph.*` path and **no** `orbit graph` subcommand — the graph is not in the CLI tool registry. For direct human/shell use, the standalone `orbit-graph-cli` binary exposes the same queries as subcommands (`orbit-graph-cli search …`, `orbit-graph-cli refs …`, etc.).
+There is **no** `orbit tool run orbit.graph.*` path — the graph is not in the CLI tool registry. For direct human/shell use, the `orbit graph` subcommand (a thin wrapper over the same library) and the standalone `orbit-graph-cli` binary expose these queries as subcommands (`orbit graph search …`, `orbit graph refs …`, or `orbit-graph-cli search …`). The agent-facing surface is still the in-process `orbit_graph_*` MCP tools above — reach for the CLI only from a shell without MCP.
 
 The graph handle auto-syncs on a file watcher, so reads are normally fresh without an explicit sync. Call `orbit_graph_sync` only to force a refresh; pass `{"full": true}` for a complete re-index (required for full `trace` coverage — incremental sync resolves far fewer command handlers).
 
@@ -60,7 +60,7 @@ Orbit `task_id` is local to the operator's workspace. For cross-engineer task re
 
 ## Minimal Commands
 
-These are MCP tool calls (JSON argument maps). The standalone `orbit-graph-cli` accepts the same fields as flags.
+These are MCP tool calls (JSON argument maps). The `orbit graph` subcommand and the standalone `orbit-graph-cli` accept the same fields as flags.
 
 ```jsonc
 // Exact symbol lookup
