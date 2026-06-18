@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.9.2
 
 ### Highlights
 
 - **`orbit graph` is back as a thin CLI wrapper**: the v2 graph is now reachable from the single `orbit` binary via `orbit graph {sync, search, show, refs, callees, impact, trace, overview, implementors, deps, version, db-path, clean}`, not only the standalone `orbit-graph-cli` binary or the in-process MCP adapter. `orbit-graph-cli` is lib-ified (lib + bin) so both front ends share one command layer with no duplication; the agent-facing graph surface is unchanged (still MCP-only). This amends the ADR-0198 consequence that dropped the subcommand. ([ORB-00396], ADR-0199)
+- **Task store crash durability hardened**: the task registry SQLite connection now runs with `synchronous=FULL`, and task-bundle creation fsyncs the bundle directory's parent before returning — so a power loss or OS crash mid-write can no longer leave the task store or a freshly-created bundle in a torn, unrecoverable state. ([ORB-00395], [ORB-00394])
 
 ## 0.9.1
 
