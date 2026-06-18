@@ -1,0 +1,20 @@
+schema_version: 2
+id: ADR-0188
+title: Sync policy is a property of the Graph handle
+status: superseded
+owner: codex
+created_at: 2026-05-24T21:05:03.084033Z
+last_updated: 2026-06-13T18:21:22.281926Z
+related_features:
+- orbit-graph
+related_tasks:
+- ORB-00294
+tags:
+- orbit-graph
+paths:
+- docs/design/orbit-graph/**
+supersedes: []
+superseded_by: ADR-0195
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none

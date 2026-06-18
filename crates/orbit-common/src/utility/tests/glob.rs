@@ -42,4 +42,46 @@ mod matching {
         let path = normalize_glob_path("foo/bar/baz.rs").expect("normalize");
         assert!(!match_glob("foo/*.rs", &path).expect("match"));
     }
+
+    #[test]
+    fn dotenv_variant_patterns_match_prefix_and_suffix_forms() {
+        for (rule, path) in [
+            ("**/.env", ".env"),
+            ("**/.env.*", ".env.local"),
+            ("**/.env.*", "foo/.env.production"),
+            ("**/*.env.*", "foo/secrets.env.bak"),
+        ] {
+            let path = normalize_glob_path(path).expect("normalize");
+            assert!(
+                match_glob(rule, &path).expect("match"),
+                "rule `{rule}` should match `{path}`"
+            );
+        }
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn deny_globs_match_case_variants_on_case_insensitive_platforms() {
+        for (rule, path) in [
+            (".orbit/**", ".Orbit/state/task.json"),
+            ("**/*.env", "Secret.ENV"),
+            ("**/*.env", "config/Secret.ENV"),
+        ] {
+            let path = normalize_glob_path(path).expect("normalize");
+            assert!(
+                match_glob(rule, &path).expect("match"),
+                "rule `{rule}` should match case variant `{path}`"
+            );
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", windows)))]
+    #[test]
+    fn globs_remain_case_sensitive_on_case_sensitive_platforms() {
+        let path = normalize_glob_path("Secret.ENV").expect("normalize");
+        assert!(
+            !match_glob("**/*.env", &path).expect("match"),
+            "case-sensitive platforms should preserve distinct path identities"
+        );
+    }
 }

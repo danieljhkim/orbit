@@ -13,8 +13,8 @@
 //! `orbit_engine::execute_job` and asserts the expected §7 envelope
 //! events appear (or — for the denial sample — don't appear).
 //!
-//! No credentials needed: shell samples exec real `sh`; the loop + denial
-//! samples use the replay path (`ORBIT_V2_REPLAY{,_FIXTURE}`).
+//! No credentials needed: the loop + denial samples use the replay path
+//! (`ORBIT_V2_REPLAY{,_FIXTURE}`).
 //!
 //! Usage:
 //!     cargo run -p orbit-engine --example v2_job_runtime_smoke
@@ -40,36 +40,8 @@ fn main() -> ExitCode {
 
     let results: Vec<(String, Result<(), String>)> = vec![
         (
-            "parallel_branches".into(),
-            smoke_parallel_success(&samples_dir, &tmp_audit_root),
-        ),
-        (
-            "parallel_branches_failing".into(),
-            smoke_parallel_failing(&samples_dir, &tmp_audit_root),
-        ),
-        (
-            "conditional_on_value (approved)".into(),
-            smoke_conditional_approved(&samples_dir, &tmp_audit_root),
-        ),
-        (
-            "conditional_on_value (rejected)".into(),
-            smoke_conditional_rejected(&samples_dir, &tmp_audit_root),
-        ),
-        (
-            "retry_backoff".into(),
-            smoke_retry(&samples_dir, &tmp_audit_root),
-        ),
-        (
-            "fanout_fanin".into(),
-            smoke_fanout(&samples_dir, &tmp_audit_root),
-        ),
-        (
             "loop_review_fix".into(),
             smoke_loop_converge(&samples_dir, &fixtures_dir, &tmp_audit_root),
-        ),
-        (
-            "loop_no_converge".into(),
-            smoke_loop_diverge(&samples_dir, &tmp_audit_root),
         ),
         (
             "tool_denial_no_retry".into(),
@@ -102,192 +74,6 @@ fn main() -> ExitCode {
 // ---------------------------------------------------------------------------
 // Smokes
 // ---------------------------------------------------------------------------
-
-fn smoke_parallel_success(samples: &Path, audit_root: &Path) -> Result<(), String> {
-    let events = run_sample(
-        samples.join("parallel_branches.yaml"),
-        audit_root,
-        "parallel-ok",
-        Value::Null,
-        true,
-        &[],
-    )?;
-    require_event_type(&events, "step.join")?;
-    let join = find_event(&events, "step.join").unwrap();
-    if let V2AuditEventKind::StepJoin {
-        branch_outcomes, ..
-    } = &join.kind
-    {
-        if branch_outcomes.len() != 3 {
-            return Err(format!(
-                "expected 3 branch outcomes, got {}",
-                branch_outcomes.len()
-            ));
-        }
-        if !branch_outcomes.iter().all(|b| b.outcome == "success") {
-            return Err("expected all branches to succeed".into());
-        }
-    }
-    Ok(())
-}
-
-fn smoke_parallel_failing(samples: &Path, audit_root: &Path) -> Result<(), String> {
-    let events = run_sample(
-        samples.join("parallel_branches_failing.yaml"),
-        audit_root,
-        "parallel-fail",
-        Value::Null,
-        false,
-        &[],
-    )?;
-    require_event_type(&events, "step.join")?;
-    let join = find_event(&events, "step.join").unwrap();
-    if let V2AuditEventKind::StepJoin {
-        branch_outcomes, ..
-    } = &join.kind
-        && !branch_outcomes.iter().any(|b| b.outcome == "failed")
-    {
-        return Err("expected at least one branch to fail".into());
-    }
-    Ok(())
-}
-
-fn smoke_conditional_approved(samples: &Path, audit_root: &Path) -> Result<(), String> {
-    let events = run_sample(
-        samples.join("conditional_on_value.yaml"),
-        audit_root,
-        "cond-approved",
-        serde_json::json!({"decision": "approved"}),
-        true,
-        &[],
-    )?;
-    let skipped = events
-        .iter()
-        .filter(|e| e.envelope.event_type == "step.skipped")
-        .count();
-    if skipped != 0 {
-        return Err(format!(
-            "approved path should not skip; got {skipped} skipped events"
-        ));
-    }
-    Ok(())
-}
-
-fn smoke_conditional_rejected(samples: &Path, audit_root: &Path) -> Result<(), String> {
-    let events = run_sample(
-        samples.join("conditional_on_value.yaml"),
-        audit_root,
-        "cond-rejected",
-        serde_json::json!({"decision": "rejected"}),
-        true,
-        &[],
-    )?;
-    let skipped_merge = events.iter().any(|e| {
-        e.envelope.event_type == "step.skipped"
-            && matches!(&e.kind, V2AuditEventKind::StepSkipped { step_id, .. } if step_id == "merge")
-    });
-    if !skipped_merge {
-        return Err("expected `merge` step to emit step.skipped under rejected".into());
-    }
-    Ok(())
-}
-
-fn smoke_retry(samples: &Path, audit_root: &Path) -> Result<(), String> {
-    // Ensure any leftover markers from previous runs don't skew behavior.
-    let _ = std::fs::remove_file("/tmp/orbit_retry_flake");
-    let _ = std::fs::remove_file("/tmp/orbit_retry_flake.2");
-    let events = run_sample(
-        samples.join("retry_backoff.yaml"),
-        audit_root,
-        "retry",
-        Value::Null,
-        true,
-        &[],
-    )?;
-    let retries: Vec<_> = events
-        .iter()
-        .filter(|e| e.envelope.event_type == "step.retry")
-        .collect();
-    if retries.len() < 2 {
-        return Err(format!(
-            "expected >=2 step.retry events, got {}",
-            retries.len()
-        ));
-    }
-    // AC #3: "doubling-then-capping behavior verified by inspecting the
-    // timestamp delta between attempts against the declared cap." The sample
-    // declares initial=100ms, cap=500ms, strategy=exponential — so the two
-    // recorded backoffs should be 100ms and 200ms (neither hitting the cap).
-    for (i, retry) in retries.iter().enumerate().take(2) {
-        if let V2AuditEventKind::StepRetry {
-            next_backoff_ms, ..
-        } = &retry.kind
-        {
-            let expected = 100u64 << i; // 100, 200, 400, ... capped at 500
-            let expected = expected.min(500);
-            if *next_backoff_ms != expected {
-                return Err(format!(
-                    "step.retry[{i}] next_backoff_ms={next_backoff_ms}, expected={expected}"
-                ));
-            }
-        }
-    }
-    // And the observed timestamp delta between the two step.retry events must
-    // be at least the first declared backoff (100ms) — tolerates scheduling
-    // jitter, rejects "didn't sleep at all".
-    if let (V2AuditEventKind::StepRetry { .. }, V2AuditEventKind::StepRetry { .. }) =
-        (&retries[0].kind, &retries[1].kind)
-    {
-        let t0 = retries[0].envelope.ts;
-        let t1 = retries[1].envelope.ts;
-        let delta = (t1 - t0).num_milliseconds();
-        if delta < 100 {
-            return Err(format!(
-                "step.retry timestamps too close: {delta}ms (expected >=100ms for exponential backoff)"
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn smoke_fanout(samples: &Path, audit_root: &Path) -> Result<(), String> {
-    let events = run_sample(
-        samples.join("fanout_fanin.yaml"),
-        audit_root,
-        "fanout",
-        serde_json::json!({"items": ["a", "b", "c"]}),
-        true,
-        &[],
-    )?;
-    let fanout = find_event(&events, "fanout.dispatched")
-        .ok_or_else(|| "no fanout.dispatched event".to_string())?;
-    if let V2AuditEventKind::FanoutDispatched { worker_count, .. } = &fanout.kind
-        && *worker_count != 3
-    {
-        return Err(format!("expected worker_count=3, got {worker_count}"));
-    }
-    let fanin =
-        find_event(&events, "fanin.joined").ok_or_else(|| "no fanin.joined event".to_string())?;
-    if let V2AuditEventKind::FaninJoined {
-        collected, failed, ..
-    } = &fanin.kind
-        && (*collected != 3 || *failed != 0)
-    {
-        return Err(format!(
-            "expected collected=3 failed=0, got collected={collected} failed={failed}"
-        ));
-    }
-    let worker_events = events
-        .iter()
-        .filter(|e| e.envelope.event_type == "worker.state")
-        .count();
-    if worker_events < 6 {
-        return Err(format!(
-            "expected >=6 worker.state events (3 workers * 2 states), got {worker_events}"
-        ));
-    }
-    Ok(())
-}
 
 fn smoke_loop_converge(samples: &Path, fixtures: &Path, audit_root: &Path) -> Result<(), String> {
     let fixture_path = fixtures.join("loop_review_fix.json");
@@ -369,21 +155,6 @@ fn smoke_loop_converge(samples: &Path, fixtures: &Path, audit_root: &Path) -> Re
         return Err(format!(
             "session_id varies across iterations: {session_ids:?}"
         ));
-    }
-    Ok(())
-}
-
-fn smoke_loop_diverge(samples: &Path, audit_root: &Path) -> Result<(), String> {
-    let events = run_sample(
-        samples.join("loop_no_converge.yaml"),
-        audit_root,
-        "loop-diverge",
-        Value::Null,
-        true,
-        &[],
-    )?;
-    if find_event(&events, "loop.did_not_converge").is_none() {
-        return Err("no loop.did_not_converge event".into());
     }
     Ok(())
 }
@@ -497,16 +268,6 @@ fn find_event<'a>(
     event_type: &str,
 ) -> Option<&'a orbit_common::types::activity_job::V2AuditEvent> {
     events.iter().find(|e| e.envelope.event_type == event_type)
-}
-
-fn require_event_type(
-    events: &[orbit_common::types::activity_job::V2AuditEvent],
-    event_type: &str,
-) -> Result<(), String> {
-    if find_event(events, event_type).is_none() {
-        return Err(format!("missing {event_type}"));
-    }
-    Ok(())
 }
 
 // Last-seen-buffers so the denial smoke can inspect events after a failed

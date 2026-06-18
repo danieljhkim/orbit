@@ -27,13 +27,7 @@ fn only_orbit_common_is_an_internal_dependency() {
         "orbit-registry must remain consumer-agnostic and depend only on orbit-common internally"
     );
 
-    for forbidden in [
-        "orbit-knowledge",
-        "orbit-store",
-        "orbit-tools",
-        "orbit-policy",
-        "orbit-exec",
-    ] {
+    for forbidden in ["orbit-store", "orbit-tools", "orbit-policy", "orbit-exec"] {
         assert!(
             !dependency_names.contains(forbidden),
             "forbidden internal dependency added: {forbidden}"

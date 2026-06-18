@@ -1,8 +1,8 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
-**Last updated:** 2026-05-25 (ORB-00330 Rust command extraction; ORB-00331 detached-HEAD DB layout)
-**Relation to `orbit-knowledge`:** Coexists initially. Both crates run side-by-side under a feature flag; whether `orbit-knowledge` is eventually phased out depends on the head-to-head effectiveness measurement in §16 Step 4 — it is not a foregone conclusion of this spec.
+**Last updated:** 2026-06-14 (ORB-00391 completed the v2 cutover and removed `orbit-knowledge`; orbit-graph is now the sole graph surface)
+**Relation to `orbit-knowledge`:** Decommissioned. `orbit-knowledge` (v1) was removed in ORB-00391; orbit-graph is the sole graph backend. The two no longer coexist. See §16 for the migration outcome.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
 
@@ -33,7 +33,7 @@ Git is the source of truth. The graph is reproducible from `(commit_sha, dirty_f
 - **Fresh.** Incremental refresh under 50ms p95 per file change.
 - **Concurrent-safe by construction.** Two worktrees on the same branch cannot corrupt each other.
 - **Honest.** Edge confidence is part of the schema, not a footnote.
-- **Small.** ≤7 query/sync commands on the agent-facing surface; admin commands (`version`, `db-path`, `clean`) are separate and not counted. Total crate footprint ≤10k LOC.
+- **Small.** ≤10 query/sync commands on the agent-facing surface (`sync`, `search`, `show`, `refs`, `callees`, `impact`, `trace`, `overview`, `implementors`, `deps`); admin commands (`version`, `db-path`, `clean`) are separate and not counted. The budget grew from 7 to 10 in ORB-00389 to restore the `overview`/`implementors`/`deps` navigation queries required for `orbit-knowledge` parity (an ADR-0192 pre-cutover gate); see §9.7 for why these are dedicated commands rather than `refs` filters. Total crate footprint ≤10k LOC.
 
 ## 4. Non-goals
 
@@ -110,12 +110,12 @@ crates/
 │       ├── selector.rs         # selector parser kept for shared addressing
 │       ├── store/              # schema, transactions, row reads/writes
 │       ├── sync/               # scanner, diff, extraction pipeline, resolver
-│       └── query/              # search, show, refs, callees, impact, trace
+│       └── query/              # search, show, refs, callees, impact, trace, overview, implementors, deps
 │
 └── orbit-graph-cli/
     └── src/
         ├── main.rs
-        ├── commands/           # sync, search, show, refs, callees, impact, trace
+        ├── commands/           # sync, search, show, refs, callees, impact, trace, overview, implementors, deps
         └── mcp/                # 1:1 tool wrappers over command/query surfaces
 ```
 
@@ -338,9 +338,11 @@ Idempotent. Compares mtime+content_hash for each indexable file:
 
 The full-build path uses `rayon` for parallel extraction, single-writer transaction for inserts. Cold build target: **<3s for 200k LOC**.
 
-### 8.2 Watcher (optional)
+### 8.2 Watcher-backed reads
 
-`orbit graph watch` runs `notify` with 200ms debounce, calls sync on changes. Useful for the MCP daemon and dev loops. **Not load-bearing** — every read path can call `sync` on demand cheaply.
+Long-lived graph handles can run `notify` with a debounce and call sync on changes in the background. The MCP daemon uses this model: opening the handle performs one initial auto sync, then reads are pure SQLite queries against the cached graph while file events schedule coalesced auto syncs.
+
+Freshness is eventual. After a same-process file edit, a read may return stale graph rows until the watcher observes the event and the debounced sync completes. `Graph::sync`/`orbit.graph.sync` is the hard read-after-write barrier.
 
 ### 8.3 Sync policy
 
@@ -355,8 +357,11 @@ pub enum SyncPolicy {
     /// pays the stat cost on every call.
     OnRead,
     /// Sync inline only if the last successful sync is older than `window`.
-    /// Recommended for long-lived processes (MCP server, watch mode).
+    /// Explicit fallback for processes that cannot run a watcher.
     Windowed { window: Duration },
+    /// Sync once at open, then refresh from background watcher events.
+    /// Recommended for long-lived processes (MCP server).
+    Watch { debounce: Duration },
 }
 ```
 
@@ -365,10 +370,10 @@ Defaults by entry point:
 | Entry point | Default policy |
 |---|---|
 | `orbit graph <cmd>` (CLI) | `Manual` — CLI users are explicit |
-| MCP server | `Windowed { window: 500ms }` |
+| MCP server | `Watch { debounce: 250ms }` |
 | `orbit graph watch` | `Manual` (watcher fires sync directly) |
 
-The previous "10ms stat budget at 5000 files" heuristic is gone — it didn't scale and was an implicit contract baked into the library. Moving the policy out makes the decision explicit and testable.
+The previous "10ms stat budget at 5000 files" heuristic is gone — it didn't scale and was an implicit contract baked into the library. Moving the policy out makes the decision explicit and testable. [ADR-0195](../4_decisions.md) records the read-path freshness contract.
 
 ### 8.4 Dirty files (uncommitted)
 
@@ -441,7 +446,7 @@ Output:
 }
 ```
 
-Replaces today's `callers`, `implementors`, `deps`, `lineage` — they're all this one command with different filters. (`callers` → `refs --kind call`; `implementors` → `refs --kind impl`; `deps` → `refs --kind use`.)
+Replaces today's `callers` and `lineage` (`callers` → `refs --kind call`). `implementors` and `deps` were originally intended as `refs` filters too (`refs --kind impl` / `refs --kind use`), but ORB-00389 restored them as dedicated commands instead — see §9.7. In short: `refs` is inbound-only, so it cannot express a file's *outbound* module imports (`deps`); and `refs --kind impl` resolves the trait selector to a single `symbols.qualified` and matches `relations.to_qualified` exactly, so it silently misses implementors when the trait is referenced by a differently-qualified path (e.g. `run::LoopTransport` vs `LoopTransport`) or the selector does not point at the trait's definition file.
 
 ### 9.4 `callees`
 
@@ -464,6 +469,22 @@ Unknown command names return an empty result (`root: null`, `visited_nodes: 0`).
 Like `impact`, `trace` is capped at **200 visited nodes** regardless of `--depth`. When the cap fires, the response carries `truncated: true` and `visited_nodes: 200`; callers can split into multiple narrower traces (e.g. trace from a sub-handler). This keeps the response within reasonable context-window bounds — depth 5 with branching factor 5 is otherwise ~3k nodes worst-case.
 
 This is the "structural feature expansion" capability — concrete, bounded, no semantic guessing.
+
+### 9.7 `overview`, `implementors`, `deps` (orbit-knowledge parity)
+
+Restored in ORB-00389 to close the ADR-0192 pre-cutover gate "replacements exist for heavily used surfaces." Each maps onto the existing schema; none requires new tables.
+
+```bash
+orbit graph overview [dir:… | file:…] [--format summary|full]
+orbit graph implementors <trait-selector>
+orbit graph deps <file:… | dir:…>
+```
+
+- **`overview`** — repository shape. Aggregates `files` (per-language counts) and `symbols` (per-kind counts) within an optional `dir:`/`file:` scope (default: whole worktree). `summary` returns the counts plus the highest-symbol files; `full` additionally lists every in-scope file with its symbols. (No auto-downgrade — unlike v1, the requested format is always honored.)
+
+- **`implementors`** — concrete types implementing a trait. Reads `relations WHERE kind IN ('impl','implements')`, matching the trait by its trailing path segment (`Display` matches `std::fmt::Display`; `LoopTransport` matches both `LoopTransport` and `run::LoopTransport`). This is *not* equivalent to `refs --kind impl`: `refs` resolves the selector to one `symbols.qualified` and matches `relations.to_qualified` exactly, so it misses qualified-path variants and returns empty unless the selector points at the trait's definition file. `implementors` keys on the trait *name* and is therefore path-agnostic.
+
+- **`deps`** — outbound module/import edges for the files addressed by a `file:`/`dir:` selector, read from the `imports` table. **Intentional divergence from v1:** v1 `orbit.graph.deps` reported the Cargo *crate* dependency graph; the v2 graph models source-level module/use edges, not Cargo edges, so v2 `deps` answers "what does this file import," not "what crates does this crate depend on." `refs --kind use` is not a substitute — `refs` is inbound (who imports *this* symbol), the opposite direction.
 
 ## 10. Concurrency model
 
@@ -517,9 +538,9 @@ Agents that need stronger guarantees should fall back to `rg` and read source. T
 **Measurement contract.**
 
 - **Hardware.** Numbers above are for the CI runner profile (`ubuntu-24.04`, 4-core, 16GB). Local dev measurements are advisory and not gated.
-- **Baseline source.** `bench/baselines.json` is checked into the repo. The regression gate compares a run against this committed baseline, **not** the previous merged run — otherwise the gate ratchets up to whatever the last commit happened to measure and the budget silently erodes.
+- **Baseline source.** A committed baseline file (formerly `bench/baselines.json`, removed with the benchmark scaffolding — see ADR-0197) anchors the regression gate: the run is compared against the committed baseline, **not** the previous merged run — otherwise the gate ratchets up to whatever the last commit happened to measure and the budget silently erodes. The baseline is recommitted when this gate is wired.
 - **Updating the baseline** requires a PR with the `bench-baseline-bump` label and a one-line justification in the PR body. Routine perf wins → bump down; routine drift → no bump, fix the regression instead.
-- **Wire `graph_bench.rs`** (already exists) to CI; results are written to `target/bench/` artifacts and diffed against `bench/baselines.json`. Gate fires when any row is >20% slower than baseline.
+- **Wire `graph_bench.rs`** (already exists) to CI; results are written to `target/bench/` artifacts and diffed against the recommitted baseline (the prior `bench/baselines.json` was removed — see ADR-0197). Gate fires when any row is >20% slower than baseline.
 
 ## 13. Public Rust API
 
@@ -538,6 +559,11 @@ impl Graph {
     pub fn callees(&self, sel: &Selector) -> Result<Vec<CalleeEdge>, GraphError>;
     pub fn impact(&self, sel: &Selector, depth: u8, min_confidence: Confidence) -> Result<ImpactResult, GraphError>;
     pub fn trace(&self, command: &str, depth: u8, min_confidence: Confidence) -> Result<TraceResult, GraphError>;
+
+    // orbit-knowledge parity surface (ORB-00389, §9.7).
+    pub fn overview(&self, scope: Option<&Selector>, format: OverviewFormat) -> Result<OverviewResult, GraphError>;
+    pub fn implementors(&self, sel: &Selector) -> Result<ImplementorsResult, GraphError>;
+    pub fn deps(&self, sel: &Selector) -> Result<DepsResult, GraphError>;
 }
 
 pub struct TraceResult {
@@ -554,7 +580,7 @@ pub struct TraceNode {
 }
 
 pub enum SyncMode { Auto, Full }
-pub enum SyncPolicy { Manual, OnRead, Windowed { window: Duration } }
+pub enum SyncPolicy { Manual, OnRead, Windowed { window: Duration }, Watch { debounce: Duration } }
 
 pub struct GraphDbPath { /* opaque */ }
 
@@ -601,6 +627,8 @@ Estimated landing: ~24k → ~10k LOC. More capability (string / command / config
 
 ## 16. Migration plan
 
+> **Status — completed (ORB-00391, 2026-06).** The migration is done: `orbit-graph` (v2) is the sole graph surface and the `orbit-knowledge` (v1) crate has been removed. The agent-facing `orbit.graph.*` tools are served by the in-process orbit-graph adapter in `orbit-mcp`; the v1 builtins, the `orbit graph` CLI command, the init-time graph build, and the v1 metrics pipeline were decommissioned (the knowledge-stats computation moved to `orbit_core::metrics`). Step 4's automated effectiveness/equivalence harness was never rebuilt after ADR-0197 removed it; the accepted measurement bar for the final cutover was **manual QA plus a v1-vs-v2 spot-check**, not the harness described below. See ADR-0192 (superseded by ADR-0198). The four-step plan below is retained as the historical design record.
+
 A four-step Orbit epic. Each step is one or more tasks; each task is independently shippable.
 
 **Step 1 — Lift extractors (no behavior change).**
@@ -609,7 +637,7 @@ Create `orbit-graph-extract`. Move language modules from `orbit-knowledge::extra
 **Step 2 — Land `orbit-graph` behind a feature flag.**
 New crate, full schema, full query surface. MCP tools accept `ORBIT_GRAPH_BACKEND=v2` env var to switch. Old crate remains default. Dual-run for one release cycle; compare outputs in CI.
 
-**Equivalence relation.** A `tools/graph-equiv` binary runs both backends against a frozen corpus of ~30 representative selectors covering rust, ts, python, and go, and fails CI on any diff outside the documented tolerances:
+**Equivalence relation.** When a v2 cutover is active, both backends must agree on the relation below — enforced in CI by dual-running them against a frozen corpus of ~30 representative selectors (rust, ts, python, go) and failing on any diff outside the documented tolerances. The in-tree harness that did this (`tools/graph-equiv` + the `bench/` baselines) was removed while the cutover is paused (see ADR-0197) and is reintroduced fresh when a cutover is rescheduled. The relation it must satisfy:
 
 | Query | v1 vs v2 must agree on |
 |---|---|
@@ -619,13 +647,13 @@ New crate, full schema, full query surface. MCP tools accept `ORBIT_GRAPH_BACKEN
 | `callees <sym>` | set of `(file, line, target_name)` triples |
 | `impact <sym>` (depth=3) | set of touched symbol qualified names |
 
-Promotion to default (Step 3) requires zero diffs for a full release cycle. Per-query waivers — if any prove necessary — are documented in `bench/equiv-waivers.md` with rationale, and the waiver itself blocks until reviewed.
+Promotion to default (Step 3) requires zero diffs for a full release cycle. Per-query waivers — if any prove necessary — are documented alongside the reintroduced harness with rationale, and the waiver itself blocks until reviewed.
 
 **Step 3 — Flip the default to v2.**
 After equivalence holds for a week of real agent usage, flip the default backend to v2. `orbit-knowledge` remains reachable via env var indefinitely — this step opens the head-to-head evaluation window for Step 4, it does not commit to deletion.
 
 **Step 4 — Measure effectiveness, then decide.**
-Run a head-to-head measurement harness (`tools/graph-effectiveness/`, separate from the equivalence harness in `tools/graph-equiv/`) over a defined evaluation window of at least one full release cycle. Signals that matter:
+Run a head-to-head measurement harness (a planned `tools/graph-effectiveness/`, separate from the equivalence harness) over a defined evaluation window of at least one full release cycle. Signals that matter:
 
 | Signal | Operationalization |
 |---|---|
@@ -646,7 +674,7 @@ These are deliberately deferred — not blockers for shipping the spec, but list
 1. **MCP daemon model.** Does the MCP server keep a `Graph` handle open across calls, or open-on-each-call? Open-on-each is simpler but adds ~5ms per call. Likely answer: keep open, sync on request, but worth benchmarking.
 2. **Pack rendering.** Today `KnowledgePack` mixes query, budget, and prompt assembly. Lifting it into a separate `orbit-context` crate is right but out of scope for this spec.
 3. **Cross-worktree dedup.** If 5 worktrees on the same machine share unchanged files, we re-extract 5 times. Acceptable today; revisit if a user complains.
-4. **Watcher reliability.** `notify` has known issues on Linux with mass-rename operations. `SyncPolicy::Windowed` is the safety net; we should still measure.
+4. **Watcher reliability.** `notify` has known issues on Linux with mass-rename operations. Watcher errors schedule a conservative auto sync and explicit `sync` is the freshness barrier; we should still measure stale-result reports.
 5. **V2 write surface.** Rename, ReplaceBody, Delete, InsertAfter, Move — with an in-memory working-graph overlay, optimistic per-file hash verification on commit, and a patch compiler that turns graph edits into source diffs. Sketch lives in [`../3_vision.md`](../3_vision.md) §1.1. Out of scope for V1, but the V1 read model (per-worktree DB, qualified-name resolution, ephemeral symbol IDs) is deliberately compatible with adding writes later without a schema break.
 
 ## 18. What this spec deliberately does *not* include

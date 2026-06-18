@@ -8,8 +8,8 @@ use orbit_graph_extract::Selector;
 use rusqlite::{Connection, Row, params};
 
 use crate::{
-    Graph, GraphError, RefConfidence, RefEntry, RefKind, RefOpts, RefResult, RefTarget,
-    RelationEntry,
+    Graph, GraphError, RefConfidence, RefEntry, RefFallback, RefKind, RefOpts, RefResult,
+    RefTarget, RelationEntry,
 };
 
 const CONFIDENCE_EXACT: &str = "exact";
@@ -18,45 +18,117 @@ const CONFIDENCE_SAME_MODULE: &str = "same_module";
 const CONFIDENCE_FUZZY_NAME: &str = "fuzzy_name";
 
 pub(crate) fn run(graph: &Graph, sel: &Selector, opts: &RefOpts) -> Result<RefResult, GraphError> {
-    let conn = Connection::open(graph.db_path.path())
-        .map_err(|source| GraphError::sqlite("open graph database for refs query", source))?;
-    let target = resolve_target(&conn, sel)?;
-    let Some(qualified) = target.qualified.as_deref() else {
-        return Ok(empty_result(target));
-    };
-
     let mut line_cache = LineCache::new(graph.worktree_root.as_path());
-    let mut skipped_low_confidence = 0;
-    let refs = if should_query_refs(opts.kind) {
-        query_refs(
-            &conn,
+    graph.with_read_connection(|conn| {
+        let target = resolve_target(conn, sel)?;
+        let Some(qualified) = target.qualified.as_deref() else {
+            return Ok(empty_result(target));
+        };
+
+        let mut skipped_low_confidence = 0;
+        let refs = if should_query_refs(opts.kind) {
+            query_refs(
+                conn,
+                qualified,
+                target.name.as_str(),
+                opts,
+                &mut line_cache,
+                &mut skipped_low_confidence,
+            )?
+        } else {
+            Vec::new()
+        };
+        let relations = if should_query_relations(opts.kind) {
+            query_relations(
+                conn,
+                qualified,
+                opts,
+                &mut line_cache,
+                &mut skipped_low_confidence,
+            )?
+        } else {
+            Vec::new()
+        };
+
+        let fallback = maybe_fuzzy_fallback(
+            conn,
             qualified,
             target.name.as_str(),
             opts,
+            &refs,
             &mut line_cache,
-            &mut skipped_low_confidence,
-        )?
-    } else {
-        Vec::new()
-    };
-    let relations = if should_query_relations(opts.kind) {
-        query_relations(
-            &conn,
-            qualified,
-            opts,
-            &mut line_cache,
-            &mut skipped_low_confidence,
-        )?
-    } else {
-        Vec::new()
-    };
+        )?;
 
-    Ok(RefResult {
-        target,
-        refs,
-        relations,
-        skipped_low_confidence,
+        Ok(RefResult {
+            target,
+            refs,
+            relations,
+            skipped_low_confidence,
+            fallback,
+        })
     })
+}
+
+/// When the precise floor yields no textual refs, re-query at the `fuzzy_name`
+/// floor so cross-crate call sites routed through `pub use` re-exports (which
+/// resolve only by name, with `target_qualified = NULL`) are still surfaced.
+///
+/// Returns `None` when refs were already found, when the caller already asked
+/// for the fuzzy floor (the matches are in `refs` directly), or when no
+/// lower-confidence match exists. See ORB-00383.
+fn maybe_fuzzy_fallback(
+    conn: &Connection,
+    qualified: &str,
+    target_name: &str,
+    opts: &RefOpts,
+    refs: &[RefEntry],
+    line_cache: &mut LineCache,
+) -> Result<Option<RefFallback>, GraphError> {
+    if !refs.is_empty()
+        || opts.confidence == RefConfidence::FuzzyName
+        || !should_query_refs(opts.kind)
+    {
+        return Ok(None);
+    }
+
+    let fallback_opts = RefOpts {
+        confidence: RefConfidence::FuzzyName,
+        kind: opts.kind,
+    };
+    let mut skipped = 0;
+    let fallback_refs = query_refs(
+        conn,
+        qualified,
+        target_name,
+        &fallback_opts,
+        line_cache,
+        &mut skipped,
+    )?;
+    if fallback_refs.is_empty() {
+        return Ok(None);
+    }
+
+    let note = format!(
+        "No references resolved at the `{}` confidence floor; showing {} match(es) found at the \
+         `fuzzy_name` fallback floor. These are name-only matches and may include unrelated \
+         symbols sharing the name — check each entry's `confidence`.",
+        confidence_label(opts.confidence),
+        fallback_refs.len(),
+    );
+    Ok(Some(RefFallback {
+        confidence: RefConfidence::FuzzyName,
+        refs: fallback_refs,
+        note,
+    }))
+}
+
+fn confidence_label(confidence: RefConfidence) -> &'static str {
+    match confidence {
+        RefConfidence::Exact => CONFIDENCE_EXACT,
+        RefConfidence::ImportResolved => CONFIDENCE_IMPORT_RESOLVED,
+        RefConfidence::SameModule => CONFIDENCE_SAME_MODULE,
+        RefConfidence::FuzzyName => CONFIDENCE_FUZZY_NAME,
+    }
 }
 
 fn resolve_target(conn: &Connection, sel: &Selector) -> Result<RefTarget, GraphError> {
@@ -100,6 +172,7 @@ fn empty_result(target: RefTarget) -> RefResult {
         refs: Vec::new(),
         relations: Vec::new(),
         skipped_low_confidence: 0,
+        fallback: None,
     }
 }
 

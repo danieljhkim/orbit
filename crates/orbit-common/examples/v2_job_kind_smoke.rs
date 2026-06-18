@@ -51,11 +51,10 @@ spec:
   steps:
     - id: echo
       spec:
-        type: shell
-        description: echoes workflow
-        program: sh
-        args: [-c, "echo workflow"]
-        allowed_programs: [sh]
+        type: deterministic
+        description: workflow step
+        action: noop
+        config: {}
 "#
 }
 
@@ -71,11 +70,10 @@ spec:
   steps:
     - id: echo
       spec:
-        type: shell
-        description: echoes subroutine
-        program: sh
-        args: [-c, "echo subroutine"]
-        allowed_programs: [sh]
+        type: deterministic
+        description: subroutine step
+        action: noop
+        config: {}
 "#
 }
 
@@ -90,10 +88,9 @@ spec:
   steps:
     - id: echo
       spec:
-        type: shell
-        description: echoes omitted kind
-        program: sh
-        args: [-c, "echo omitted"]
-        allowed_programs: [sh]
+        type: deterministic
+        description: omitted-kind step
+        action: noop
+        config: {}
 "#
 }

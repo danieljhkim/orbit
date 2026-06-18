@@ -170,12 +170,25 @@ impl Drop for EnvVarGuard {
 }
 
 mod redaction {
-    use std::{ffi::OsString, io};
+    use std::{ffi::OsString, fmt, io};
 
     use tempfile::tempdir;
 
     use super::super::super::logging::*;
-    use super::{ENV_LOCK, EnvVarGuard, read_jsonl_values, with_test_subscriber_at_path};
+    use super::{
+        BufferMakeWriter, ENV_LOCK, EnvVarGuard, read_jsonl_values, with_test_subscriber_at_path,
+    };
+
+    #[derive(Debug)]
+    struct SecretDisplayError;
+
+    impl fmt::Display for SecretDisplayError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("request failed with Authorization: Bearer error-secret")
+        }
+    }
+
+    impl std::error::Error for SecretDisplayError {}
 
     #[test]
     fn jsonl_redacting_fields_preserves_typed_values_and_redacts_strings() {
@@ -274,6 +287,60 @@ mod redaction {
             .expect("payload is string");
         assert!(payload.contains("[REDACTED_AUTH]"));
         assert!(!payload.contains("abc456"));
+    }
+
+    #[test]
+    fn redacting_fields_redacts_bare_error_values() {
+        let _env = ENV_LOCK.lock().expect("lock env");
+        let _rust_log = EnvVarGuard::remove("RUST_LOG");
+        let dir = tempdir().expect("tempdir");
+        let log_path = dir.path().join("orbit.jsonl");
+        let stderr = BufferMakeWriter::default();
+        let stderr_buffer = stderr.buffer();
+
+        with_test_subscriber_at_path("info", &log_path, stderr, || {
+            let error = SecretDisplayError;
+            tracing::error!(
+                error = &error as &(dyn std::error::Error + 'static),
+                "operation failed"
+            );
+        })
+        .expect("subscriber should run");
+
+        let stderr_text = String::from_utf8(stderr_buffer.lock().expect("stderr lock").clone())
+            .expect("stderr utf8");
+        assert!(stderr_text.contains("[REDACTED_AUTH]"));
+        assert!(!stderr_text.contains("error-secret"));
+
+        let values = read_jsonl_values(&log_path);
+        assert_eq!(values.len(), 1);
+        let error = values[0]["fields"]["error"]
+            .as_str()
+            .expect("error is string");
+        assert!(error.contains("[REDACTED_AUTH]"));
+        assert!(!error.contains("error-secret"));
+    }
+
+    #[test]
+    fn jsonl_redacting_fields_redacts_byte_values() {
+        let _env = ENV_LOCK.lock().expect("lock env");
+        let _rust_log = EnvVarGuard::remove("RUST_LOG");
+        let dir = tempdir().expect("tempdir");
+        let log_path = dir.path().join("orbit.jsonl");
+
+        with_test_subscriber_at_path("info", &log_path, io::sink, || {
+            let payload = b"Authorization: Bearer byte-secret".as_slice();
+            tracing::info!(payload = payload);
+        })
+        .expect("subscriber should run");
+
+        let values = read_jsonl_values(&log_path);
+        assert_eq!(values.len(), 1);
+        let payload = values[0]["fields"]["payload"]
+            .as_str()
+            .expect("payload is string");
+        assert!(payload.contains("[REDACTED_AUTH]"));
+        assert!(!payload.contains("byte-secret"));
     }
 
     #[test]
@@ -406,6 +473,28 @@ mod subscriber {
         assert_eq!(appended["fields"]["line"], "after-sentinel");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn jsonl_file_and_created_state_dirs_are_private() {
+        let _env = ENV_LOCK.lock().expect("lock env");
+        let _rust_log = EnvVarGuard::remove("RUST_LOG");
+        let dir = tempdir().expect("tempdir");
+        let orbit_dir = dir.path().join(".orbit");
+        let state_dir = orbit_dir.join("state");
+        let log_dir = state_dir.join("logs");
+        let log_path = log_dir.join("orbit.jsonl");
+
+        with_test_subscriber_at_path("info", &log_path, io::sink, || {
+            tracing::info!(line = "private-log");
+        })
+        .expect("subscriber should run");
+
+        assert_eq!(mode(&log_path), 0o600);
+        assert_eq!(mode(&orbit_dir), 0o700);
+        assert_eq!(mode(&state_dir), 0o700);
+        assert_eq!(mode(&log_dir), 0o700);
+    }
+
     #[test]
     fn file_layer_failure_falls_back_to_stderr_layer() {
         let _env = ENV_LOCK.lock().expect("lock env");
@@ -427,5 +516,12 @@ mod subscriber {
             .expect("stderr utf8");
         assert!(stderr_text.contains("failed to initialize JSONL tracing log"));
         assert!(stderr_text.contains("stderr-still-works"));
+    }
+
+    #[cfg(unix)]
+    fn mode(path: &std::path::Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::metadata(path).expect("metadata").permissions().mode() & 0o777
     }
 }

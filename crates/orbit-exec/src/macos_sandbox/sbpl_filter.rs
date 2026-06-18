@@ -38,6 +38,16 @@ fn contains_glob(value: &str) -> bool {
 }
 
 fn glob_rule_to_regex(rule: &str) -> String {
+    // L-0062: SBPL filters run on macOS, where default volumes resolve paths
+    // case-insensitively, so regex filters must follow that identity model.
+    //
+    // We express that case-insensitivity with per-letter character classes
+    // (`[Aa]`) rather than the Perl/PCRE inline flag `(?i)`. `sandbox-exec`'s
+    // SBPL regex engine does NOT support `(?i)`: it parses the `(?i)` token and
+    // then rejects the following `^` anchor with "unexpected ^ operator in
+    // middle of expression", failing the whole profile with exit 65 before the
+    // agent CLI starts (ORB-00372). Character classes are the SBPL-compatible
+    // way to fold case.
     let mut out = String::from("^");
     let chars: Vec<char> = rule.chars().collect();
     let mut i = 0;
@@ -61,13 +71,30 @@ fn glob_rule_to_regex(rule: &str) -> String {
                 i += 1;
             }
             c => {
-                push_regex_escaped(&mut out, c);
+                push_regex_literal_case_insensitive(&mut out, c);
                 i += 1;
             }
         }
     }
     out.push('$');
     out
+}
+
+/// Emit a single literal path character into an SBPL regex with macOS-style
+/// case-insensitivity (L-0062). ASCII letters become a two-element character
+/// class (`a` -> `[Aa]`) so the filter matches case-variant paths on
+/// case-insensitive volumes; every other character is metachar-escaped exactly
+/// as [`push_regex_escaped`] would. This deliberately avoids the `(?i)` inline
+/// flag, which `sandbox-exec` rejects (see [`glob_rule_to_regex`]).
+fn push_regex_literal_case_insensitive(out: &mut String, c: char) {
+    if c.is_ascii_alphabetic() {
+        out.push('[');
+        out.push(c.to_ascii_uppercase());
+        out.push(c.to_ascii_lowercase());
+        out.push(']');
+    } else {
+        push_regex_escaped(out, c);
+    }
 }
 
 pub(super) fn push_regex_escaped(out: &mut String, c: char) {

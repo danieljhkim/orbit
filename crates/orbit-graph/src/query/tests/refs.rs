@@ -21,6 +21,7 @@ fn refs_result_shape_matches_golden_fixture_and_skips_unresolved_qualified() {
         refs: Vec::new(),
         relations: Vec::new(),
         skipped_low_confidence: 0,
+        fallback: None,
     };
 
     crate::query::tests::support::assert_json_matches_fixture(
@@ -164,6 +165,146 @@ fn fuzzy_floor_includes_name_only_fuzzy_refs() {
     assert_eq!(result.refs[0].kind, RefKind::Call);
     assert_eq!(result.refs[0].confidence, RefConfidence::FuzzyName);
     assert_eq!(result.skipped_low_confidence, 0);
+}
+
+#[test]
+fn precise_floor_empty_falls_back_to_name_only_fuzzy_refs() {
+    // Repro for ORB-00383: a public symbol whose only callers resolve at
+    // `fuzzy_name` confidence (target_qualified = NULL) looks unreferenced at the
+    // default `same_module` floor. The precise query keys on `target_qualified`,
+    // so these rows are not even counted as skipped — the fallback must re-query.
+    let worktree = TestWorktree::new("fallback-name-only");
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+    let conn = open_test_connection(worktree.path());
+    seed_target(
+        &conn,
+        worktree.path(),
+        "src/target.rs",
+        "Target",
+        "crate::Target",
+    );
+    seed_file(&conn, worktree.path(), "src/caller.rs", "Target::a();\n");
+    insert_ref(
+        &conn,
+        "src/caller.rs",
+        "Target",
+        None,
+        "call",
+        "fuzzy_name",
+        0,
+    );
+
+    let result = graph
+        .refs(&target_selector(), &RefOpts::default())
+        .expect("query refs");
+
+    assert!(
+        result.refs.is_empty(),
+        "precise floor finds no qualified refs"
+    );
+    assert_eq!(
+        result.skipped_low_confidence, 0,
+        "fuzzy rows are not counted"
+    );
+    let fallback = result.fallback.expect("fallback populated");
+    assert_eq!(fallback.confidence, RefConfidence::FuzzyName);
+    assert_eq!(fallback.refs.len(), 1);
+    assert_eq!(fallback.refs[0].kind, RefKind::Call);
+    assert_eq!(fallback.refs[0].confidence, RefConfidence::FuzzyName);
+    assert!(
+        fallback.note.contains("same_module") && fallback.note.contains("fuzzy_name"),
+        "note names both the precise floor and the fallback floor: {}",
+        fallback.note
+    );
+}
+
+#[test]
+fn precise_match_suppresses_fuzzy_fallback() {
+    // A real precise caller plus a same-named fuzzy caller: the precise result is
+    // non-empty, so no fallback is emitted (no noise for symbols that resolve).
+    let worktree = TestWorktree::new("fallback-suppressed");
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+    let conn = open_test_connection(worktree.path());
+    seed_target(
+        &conn,
+        worktree.path(),
+        "src/target.rs",
+        "Target",
+        "crate::Target",
+    );
+    seed_file(
+        &conn,
+        worktree.path(),
+        "src/caller.rs",
+        "Target::a();\nTarget::b();\n",
+    );
+    insert_ref(
+        &conn,
+        "src/caller.rs",
+        "Target",
+        Some("crate::Target"),
+        "call",
+        "exact",
+        0,
+    );
+    insert_ref(
+        &conn,
+        "src/caller.rs",
+        "Target",
+        None,
+        "call",
+        "fuzzy_name",
+        2,
+    );
+
+    let result = graph
+        .refs(&target_selector(), &RefOpts::default())
+        .expect("query refs");
+
+    assert_eq!(result.refs.len(), 1);
+    assert!(
+        result.fallback.is_none(),
+        "fallback only fires when precise refs are empty"
+    );
+}
+
+#[test]
+fn fuzzy_floor_query_emits_no_fallback() {
+    // When the caller already requests the fuzzy floor, name-only matches appear
+    // in `refs` directly — there is nothing to fall back to.
+    let worktree = TestWorktree::new("fallback-explicit-fuzzy");
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+    let conn = open_test_connection(worktree.path());
+    seed_target(
+        &conn,
+        worktree.path(),
+        "src/target.rs",
+        "Target",
+        "crate::Target",
+    );
+    seed_file(&conn, worktree.path(), "src/caller.rs", "Target::a();\n");
+    insert_ref(
+        &conn,
+        "src/caller.rs",
+        "Target",
+        None,
+        "call",
+        "fuzzy_name",
+        0,
+    );
+
+    let result = graph
+        .refs(
+            &target_selector(),
+            &RefOpts {
+                confidence: RefConfidence::FuzzyName,
+                kind: None,
+            },
+        )
+        .expect("query refs at fuzzy floor");
+
+    assert_eq!(result.refs.len(), 1);
+    assert!(result.fallback.is_none());
 }
 
 #[test]

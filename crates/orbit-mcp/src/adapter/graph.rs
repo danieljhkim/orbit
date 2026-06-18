@@ -10,7 +10,7 @@ use orbit_common::types::{
 };
 use orbit_graph::{
     DEFAULT_IMPACT_DEPTH, DEFAULT_SHOW_MAX_BYTES, DEFAULT_TRACE_DEPTH, Graph, GraphError,
-    RefConfidence, RefKind, RefOpts, SearchKind, SearchQuery, SyncMode, SyncPolicy,
+    OverviewFormat, RefConfidence, RefKind, RefOpts, SearchKind, SearchQuery, SyncMode, SyncPolicy,
 };
 use orbit_graph_extract::{Selector, SelectorParseError};
 use serde_json::{Value, json};
@@ -22,6 +22,9 @@ const GRAPH_REFS_TOOL: &str = "orbit.graph.refs";
 const GRAPH_CALLEES_TOOL: &str = "orbit.graph.callees";
 const GRAPH_IMPACT_TOOL: &str = "orbit.graph.impact";
 const GRAPH_TRACE_TOOL: &str = "orbit.graph.trace";
+const GRAPH_OVERVIEW_TOOL: &str = "orbit.graph.overview";
+const GRAPH_IMPLEMENTORS_TOOL: &str = "orbit.graph.implementors";
+const GRAPH_DEPS_TOOL: &str = "orbit.graph.deps";
 
 const GRAPH_TOOL_NAMES: &[&str] = &[
     GRAPH_SYNC_TOOL,
@@ -31,9 +34,12 @@ const GRAPH_TOOL_NAMES: &[&str] = &[
     GRAPH_CALLEES_TOOL,
     GRAPH_IMPACT_TOOL,
     GRAPH_TRACE_TOOL,
+    GRAPH_OVERVIEW_TOOL,
+    GRAPH_IMPLEMENTORS_TOOL,
+    GRAPH_DEPS_TOOL,
 ];
 
-const GRAPH_SYNC_WINDOW: Duration = Duration::from_millis(500);
+const GRAPH_SYNC_DEBOUNCE: Duration = Duration::from_millis(250);
 
 pub(super) struct GraphToolRegistry {
     graphs: Mutex<HashMap<PathBuf, Arc<Graph>>>,
@@ -70,6 +76,9 @@ impl GraphToolRegistry {
             GRAPH_CALLEES_TOOL => graph_callees(graph.as_ref(), &input),
             GRAPH_IMPACT_TOOL => graph_impact(graph.as_ref(), &input),
             GRAPH_TRACE_TOOL => graph_trace(graph.as_ref(), &input),
+            GRAPH_OVERVIEW_TOOL => graph_overview(graph.as_ref(), &input),
+            GRAPH_IMPLEMENTORS_TOOL => graph_implementors(graph.as_ref(), &input),
+            GRAPH_DEPS_TOOL => graph_deps(graph.as_ref(), &input),
             _ => Err(OrbitError::not_found(
                 orbit_common::types::NotFoundKind::Tool,
                 name.to_string(),
@@ -89,8 +98,8 @@ impl GraphToolRegistry {
         let graph = Arc::new(
             Graph::open(
                 worktree,
-                SyncPolicy::Windowed {
-                    window: GRAPH_SYNC_WINDOW,
+                SyncPolicy::Watch {
+                    debounce: GRAPH_SYNC_DEBOUNCE,
                 },
             )
             .map_err(graph_error_to_orbit)?,
@@ -199,6 +208,44 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
                     false,
                 ),
             ],
+        ),
+        schema(
+            GRAPH_OVERVIEW_TOOL,
+            "Summarize indexed files and symbols, optionally scoped to a dir: or file: selector.",
+            vec![
+                param(
+                    "scope",
+                    "Optional dir: or file: selector to scope the summary. Defaults to the whole worktree.",
+                    "string",
+                    false,
+                ),
+                param(
+                    "format",
+                    "Output detail: summary (default) or full.",
+                    "string",
+                    false,
+                ),
+            ],
+        ),
+        schema(
+            GRAPH_IMPLEMENTORS_TOOL,
+            "List the concrete types implementing the trait addressed by a selector.",
+            vec![param(
+                "selector",
+                "Trait selector to resolve implementors for.",
+                "string",
+                true,
+            )],
+        ),
+        schema(
+            GRAPH_DEPS_TOOL,
+            "List outbound module/import edges for a file: or dir: selector.",
+            vec![param(
+                "selector",
+                "File or directory selector whose outbound imports to list.",
+                "string",
+                true,
+            )],
         ),
     ]
 }
@@ -312,6 +359,35 @@ fn graph_trace(graph: &Graph, input: &Value) -> Result<Value, OrbitError> {
     )
 }
 
+fn graph_overview(graph: &Graph, input: &Value) -> Result<Value, OrbitError> {
+    let scope = optional_string(input, "scope")?
+        .map(parse_selector)
+        .transpose()?;
+    let format = optional_string(input, "format")?
+        .map(|value| parse_overview_format(value.as_str()))
+        .transpose()?
+        .unwrap_or(OverviewFormat::Summary);
+    to_json(
+        graph
+            .overview(scope.as_ref(), format)
+            .map_err(graph_error_to_orbit)?,
+    )
+}
+
+fn graph_implementors(graph: &Graph, input: &Value) -> Result<Value, OrbitError> {
+    let selector = parse_selector(required_string(input, &["selector", "symbol"], "selector")?)?;
+    to_json(
+        graph
+            .implementors(&selector)
+            .map_err(graph_error_to_orbit)?,
+    )
+}
+
+fn graph_deps(graph: &Graph, input: &Value) -> Result<Value, OrbitError> {
+    let selector = parse_selector(required_string(input, &["selector"], "selector")?)?;
+    to_json(graph.deps(&selector).map_err(graph_error_to_orbit)?)
+}
+
 fn optional_confidence(input: &Value) -> Result<RefConfidence, OrbitError> {
     optional_string(input, "confidence")?
         .map(|value| parse_confidence(value.as_str()))
@@ -327,6 +403,16 @@ fn parse_search_kind(raw: &str) -> Result<SearchKind, OrbitError> {
     SearchKind::parse(raw).ok_or_else(|| {
         OrbitError::InvalidInput("`kind` must be one of symbol, string, config".to_string())
     })
+}
+
+fn parse_overview_format(raw: &str) -> Result<OverviewFormat, OrbitError> {
+    match raw {
+        "summary" => Ok(OverviewFormat::Summary),
+        "full" => Ok(OverviewFormat::Full),
+        _ => Err(OrbitError::InvalidInput(
+            "`format` must be one of summary, full".to_string(),
+        )),
+    }
 }
 
 fn parse_confidence(raw: &str) -> Result<RefConfidence, OrbitError> {
@@ -379,23 +465,31 @@ fn resolve_worktree(
         Some(path) => Some(path),
         None => optional_string(input, "workspace")?,
     };
-    let raw_path = requested
-        .as_deref()
-        .or(session_context.workspace.as_deref());
-    let candidate = match raw_path {
+
+    // Anchor root for containment: the announced session workspace if present,
+    // otherwise the process working directory. A client-supplied path is ALWAYS
+    // scoped against this root, even when no session workspace was announced —
+    // otherwise an unannounced session lets a client open/read an arbitrary
+    // directory (CWE-22, ORB-00361).
+    let anchor_root = match session_context.workspace.as_deref() {
+        Some(workspace) => canonicalize_dir(absolutize(workspace)?.as_path(), "workspace")?,
+        None => canonicalize_dir(
+            env::current_dir().map_err(OrbitError::from)?.as_path(),
+            "workspace",
+        )?,
+    };
+
+    let candidate = match requested.as_deref() {
         Some(raw) => absolutize(raw)?,
-        None => env::current_dir().map_err(OrbitError::from)?,
+        None => anchor_root.clone(),
     };
     let canonical = canonicalize_dir(candidate.as_path(), "worktree")?;
 
-    if let (Some(session_workspace), Some(_)) = (session_context.workspace.as_deref(), requested) {
-        let session_root = canonicalize_dir(absolutize(session_workspace)?.as_path(), "workspace")?;
-        if !canonical.starts_with(session_root.as_path()) {
-            return Err(OrbitError::InvalidInput(format!(
-                "`workspace_path` must stay within initialized workspace `{}`",
-                session_root.display()
-            )));
-        }
+    if requested.is_some() && !canonical.starts_with(anchor_root.as_path()) {
+        return Err(OrbitError::InvalidInput(format!(
+            "`workspace_path` must stay within initialized workspace `{}`",
+            anchor_root.display()
+        )));
     }
 
     Ok(canonical)

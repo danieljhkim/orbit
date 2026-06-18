@@ -62,8 +62,8 @@ Operate:
   learning    Create, search, and curate project learnings
 
 Observe:
-  graph       Query the knowledge graph
   search      Search tasks, docs, learnings, and ADRs
+  graph       Query and sync the code graph (symbols, refs, impact)
   audit       Query the audit event log
   log         Tail the unified Orbit log feed
 

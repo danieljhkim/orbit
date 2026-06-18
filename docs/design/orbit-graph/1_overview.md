@@ -3,7 +3,7 @@ summary: "Orbit Graph — Overview"
 type: design
 title: "Orbit Graph — Overview"
 owner: claude
-last_updated: 2026-05-24
+last_updated: 2026-06-13
 status: Draft
 feature: orbit-graph
 doc_role: overview
@@ -13,11 +13,11 @@ related_features: [knowledge-graph]
 
 # Orbit Graph — Overview
 
-Orbit Graph is a proposed code-intelligence layer that runs **alongside** `orbit-knowledge`, not as a drop-in replacement: a per-worktree SQLite-backed code index that agents can query for symbols, references, callees, impact, and command traces. Where `orbit-knowledge` is a content-addressed versioned store with mutable refs, locks, and a working-graph layer, Orbit Graph is a derived index — regenerable in seconds from `(file_contents, extractor_version)` — with no durable state beyond a single `.db` file per worktree.
+Orbit Graph is the code-intelligence layer for Orbit: a per-worktree SQLite-backed code index that agents can query for symbols, references, callees, impact, and command traces. It is a derived index — regenerable in seconds from `(file_contents, extractor_version)` — with no durable state beyond a single `.db` file per worktree. It replaced the former `orbit-knowledge` crate, a content-addressed versioned store with mutable refs, locks, and a working-graph layer.
 
-The two crates coexist while orbit-graph's effectiveness is measured on real agent workloads. Whether `orbit-knowledge` is eventually phased out is a downstream decision driven by that measurement — not a foregone conclusion. See [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16 Step 4 for the measurement-and-decide plan.
+The v2 cutover completed in ORB-00391: `orbit-knowledge` (v1) was decommissioned and orbit-graph is now the sole graph surface, served to agents through the in-process adapter in `orbit-mcp`. See [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16 for the migration outcome.
 
-This document is the entry point. The prescriptive V1 specification — schema, query surface, build pipeline, performance budgets, migration plan — lives in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) under `specs/`. [2_design.md](./2_design.md) is the long-form design discussion at a higher level of abstraction. [3_vision.md](./3_vision.md) captures the V2 write surface and other forward-looking items. [4_decisions.md](./4_decisions.md) is the ADR log (currently empty pending allocation via `orbit.adr.add`).
+This document is the entry point. The prescriptive V1 specification — schema, query surface, build pipeline, performance budgets, migration plan — lives in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) under `specs/`. [2_design.md](./2_design.md) is the long-form design discussion at a higher level of abstraction. [3_vision.md](./3_vision.md) captures the V2 write surface and other forward-looking items. [4_decisions.md](./4_decisions.md) is the ADR log; the v2 cutover + decommission is recorded in ADR-0198 (supersedes ADR-0192).
 
 ---
 
@@ -56,7 +56,6 @@ The root cause: the graph was designed as a versioned store when the actual job 
 | Query API: search/show/refs/callees/impact/trace | `crates/orbit-graph/src/query/` | (unscheduled) |
 | CLI subcommands + MCP wrappers | `crates/orbit-graph-cli/src/` | (unscheduled) |
 | Selector parser (back-compat with skills) | `crates/orbit-graph-extract/src/selector.rs` | (unscheduled) |
-| Equivalence harness for v1↔v2 dual-run | `tools/graph-equiv/` | (unscheduled) |
 
 The four-step migration plan — landing orbit-graph alongside orbit-knowledge, dual-running them through an equivalence harness, then measuring effectiveness head-to-head before any phase-out decision — is laid out in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16.
 
@@ -64,6 +63,6 @@ The four-step migration plan — landing orbit-graph alongside orbit-knowledge, 
 
 ## Task References
 
-No Orbit tasks have been allocated for this feature yet. Tasks will be created when the migration plan in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16 enters execution.
+The orbit-graph design and migration shipped across ORB-00294, ORB-00331, ORB-00344, ORB-00377, ORB-00385, and ORB-00391 (the v2 cutover + orbit-knowledge decommission). The per-ADR task mapping is in [4_decisions.md](./4_decisions.md) § Task References.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

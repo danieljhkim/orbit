@@ -1,6 +1,6 @@
 ---
 title: Write an Activity
-description: "Create a schemaVersion 2 activity file for agent, shell, deterministic, or Groundhog execution."
+description: "Create a schemaVersion 2 activity file for agent, deterministic, or Groundhog execution."
 sidebar:
   order: 3
 ---
@@ -13,10 +13,10 @@ Every activity uses this envelope:
 schemaVersion: 2
 kind: Activity
 metadata:
-  name: shell_reference
+  name: deterministic_reference
 spec:
-  type: shell
-  description: Run a narrow shell command.
+  type: deterministic
+  description: Run a registered deterministic action.
 ```
 
 ## Add Schemas
@@ -36,14 +36,12 @@ output_schema_json:
 
 ## Choose a Type
 
-For a shell activity, declare a program allowlist:
+For a deterministic activity, name a registered action and pass optional config:
 
 ```yaml
-program: echo
-args: [hello, v2]
-allowed_programs: [echo]
-timeout_seconds: 10
-expected_exit_codes: [0]
+type: deterministic
+action: example_action
+config: {}
 ```
 
 For an agent loop, declare instruction, tools, provider, and backend. v1 supports `backend: cli` only:

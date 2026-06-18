@@ -11,7 +11,7 @@ use super::cleanup::terminate_orphaned_process_group;
 use super::cleanup::{kill_process_group, terminate_process_group, termination_signal};
 #[cfg(unix)]
 use super::signal::{SignalHandlerGuard, signal_message};
-use super::tee::{spawn_stderr_drain, spawn_stdin_write, spawn_stdout_drain};
+use super::tee::{output_capture_limit, spawn_stderr_drain, spawn_stdin_write, spawn_stdout_drain};
 
 pub(crate) const WAIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -28,10 +28,26 @@ pub(crate) struct WaitResult {
 }
 
 pub(crate) fn wait_with_optional_timeout(
+    child: Child,
+    timeout_ms: Option<u64>,
+    debug: bool,
+    stdin_payload: Option<Vec<u8>>,
+) -> Result<WaitResult, OrbitError> {
+    wait_with_timeout_and_output_limit(
+        child,
+        timeout_ms,
+        debug,
+        stdin_payload,
+        output_capture_limit(),
+    )
+}
+
+pub(super) fn wait_with_timeout_and_output_limit(
     mut child: Child,
     timeout_ms: Option<u64>,
     debug: bool,
     stdin_payload: Option<Vec<u8>>,
+    output_limit: usize,
 ) -> Result<WaitResult, OrbitError> {
     // Drain stdout/stderr in background threads so the child never blocks on a
     // full pipe buffer (which would prevent it from exiting).
@@ -39,14 +55,15 @@ pub(crate) fn wait_with_optional_timeout(
     // In debug mode, both stdout and stderr are tee'd through redaction-aware
     // drains so the user sees live output without bypassing capture/redaction.
     let (stdin_result_rx, stdin_thread) = spawn_stdin_thread(&mut child, stdin_payload)?;
+    let (output_limit_tx, output_limit_rx) = mpsc::channel();
     let stdout_thread = child
         .stdout
         .take()
-        .map(|out| spawn_stdout_drain(out, debug));
+        .map(|out| spawn_stdout_drain(out, debug, output_limit, output_limit_tx.clone()));
     let stderr_thread = child
         .stderr
         .take()
-        .map(|err| spawn_stderr_drain(err, debug));
+        .map(|err| spawn_stderr_drain(err, debug, output_limit, output_limit_tx));
 
     #[cfg(unix)]
     let signal_guard = SignalHandlerGuard::install()?;
@@ -54,6 +71,11 @@ pub(crate) fn wait_with_optional_timeout(
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     let mut stdin_write_error = None;
     let (timed_out, interrupted_signal, exit_success, exit_code) = loop {
+        if output_limit_rx.try_recv().is_ok() {
+            terminate_process_group(&mut child, termination_signal(), WAIT_POLL_INTERVAL)?;
+            break (false, None, false, None);
+        }
+
         if let Some(rx) = stdin_result_rx.as_ref() {
             match rx.try_recv() {
                 Ok(Ok(())) => {}

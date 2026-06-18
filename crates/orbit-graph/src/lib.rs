@@ -7,9 +7,11 @@
 //! crate already owns database creation so downstream phases can write against
 //! the stable schema.
 
+use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use git2::Repository;
@@ -54,6 +56,9 @@ pub struct Graph {
     db_path: GraphDbPath,
     worktree_root: PathBuf,
     policy: SyncPolicy,
+    read_conn: Mutex<Connection>,
+    last_auto_sync_at: Mutex<i64>,
+    _watcher: Option<sync::watcher::SyncWatcher>,
 }
 
 impl Graph {
@@ -63,16 +68,42 @@ impl Graph {
         let _ensure_synced: fn(&Self) -> Result<(), GraphError> = Self::ensure_synced;
         let opened = store::open(worktree_root, policy)?;
         clean_old_databases_excluding(worktree_root, opened.db_path.path())?;
-        Ok(Self {
+        let read_conn = open_read_connection(opened.db_path.path(), "open graph read connection")?;
+        let last_auto_sync_at = read_last_incremental_at(
+            &read_conn,
+            "read graph last incremental sync metadata at open",
+        )?;
+        let watcher = if let SyncPolicy::Watch { debounce } = policy {
+            Some(sync::watcher::SyncWatcher::start(
+                opened.db_path.path().to_path_buf(),
+                worktree_root.to_path_buf(),
+                debounce,
+            )?)
+        } else {
+            None
+        };
+
+        let graph = Self {
             db_path: opened.db_path,
             worktree_root: worktree_root.to_path_buf(),
             policy,
-        })
+            read_conn: Mutex::new(read_conn),
+            last_auto_sync_at: Mutex::new(last_auto_sync_at),
+            _watcher: watcher,
+        };
+        if matches!(policy, SyncPolicy::Watch { .. }) {
+            graph.sync(SyncMode::Auto)?;
+        }
+        Ok(graph)
     }
 
     /// Synchronize indexed rows with files on disk.
     pub fn sync(&self, mode: SyncMode) -> Result<SyncReport, GraphError> {
-        sync::run(self.db_path.path(), self.worktree_root.as_path(), mode)
+        let report = sync::run(self.db_path.path(), self.worktree_root.as_path(), mode)?;
+        if mode == SyncMode::Auto {
+            self.record_auto_sync_now()?;
+        }
+        Ok(report)
     }
 
     /// Return the resolved database path backing this graph handle.
@@ -84,8 +115,9 @@ impl Graph {
         match self.policy {
             SyncPolicy::Manual => Ok(()),
             SyncPolicy::OnRead => self.sync(SyncMode::Auto).map(|_| ()),
+            SyncPolicy::Watch { .. } => Ok(()),
             SyncPolicy::Windowed { window } => {
-                if sync_window_elapsed(self.last_incremental_at()?, window)? {
+                if sync_window_elapsed(self.last_auto_sync_at(), window)? {
                     self.sync(SyncMode::Auto)?;
                 }
                 Ok(())
@@ -93,19 +125,32 @@ impl Graph {
         }
     }
 
-    fn last_incremental_at(&self) -> Result<i64, GraphError> {
-        let conn = Connection::open(self.db_path.path())
-            .map_err(|source| GraphError::sqlite("open graph database for sync policy", source))?;
-        let value = conn
-            .query_row(
-                "SELECT value FROM meta WHERE key = 'last_incremental_at'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .map_err(|source| {
-                GraphError::sqlite("read graph last incremental sync metadata", source)
-            })?;
-        parse_epoch_nanos("read graph last incremental sync metadata", &value)
+    fn last_auto_sync_at(&self) -> i64 {
+        *self
+            .last_auto_sync_at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn record_auto_sync_now(&self) -> Result<(), GraphError> {
+        let now = now_epoch_nanos("record graph auto sync timestamp")?;
+        let mut last_auto_sync_at = self
+            .last_auto_sync_at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *last_auto_sync_at = now;
+        Ok(())
+    }
+
+    pub(crate) fn with_read_connection<T>(
+        &self,
+        run: impl FnOnce(&Connection) -> Result<T, GraphError>,
+    ) -> Result<T, GraphError> {
+        let conn = self
+            .read_conn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        run(&conn)
     }
 
     /// Search indexed symbols, strings, and config keys.
@@ -156,6 +201,30 @@ impl Graph {
         self.ensure_synced()?;
         query::trace::run(self, command, depth, min_confidence)
     }
+
+    /// Summarize indexed files and symbols, optionally scoped to a `dir:` or
+    /// `file:` selector. Passing `None` summarizes the whole worktree.
+    pub fn overview(
+        &self,
+        scope: Option<&Selector>,
+        format: OverviewFormat,
+    ) -> Result<OverviewResult, GraphError> {
+        self.ensure_synced()?;
+        query::overview::run(self, scope, format)
+    }
+
+    /// Return the concrete types implementing the trait addressed by `sel`.
+    pub fn implementors(&self, sel: &Selector) -> Result<ImplementorsResult, GraphError> {
+        self.ensure_synced()?;
+        query::implementors::run(self, sel)
+    }
+
+    /// Return outbound module/import edges for the files addressed by `sel`
+    /// (a `file:` or `dir:` selector).
+    pub fn deps(&self, sel: &Selector) -> Result<DepsResult, GraphError> {
+        self.ensure_synced()?;
+        query::deps::run(self, sel)
+    }
 }
 
 fn sync_window_elapsed(last_incremental_at: i64, window: Duration) -> Result<bool, GraphError> {
@@ -174,6 +243,24 @@ fn sync_window_elapsed(last_incremental_at: i64, window: Duration) -> Result<boo
     Ok(u128::try_from(elapsed).map_err(|source| {
         GraphError::invalid_data("check graph sync policy window", source.to_string())
     })? > window.as_nanos())
+}
+
+fn open_read_connection(db_path: &Path, operation: &'static str) -> Result<Connection, GraphError> {
+    let conn = Connection::open(db_path).map_err(|source| GraphError::sqlite(operation, source))?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(|source| GraphError::sqlite("enable foreign keys for graph read", source))?;
+    Ok(conn)
+}
+
+fn read_last_incremental_at(conn: &Connection, operation: &'static str) -> Result<i64, GraphError> {
+    let value = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'last_incremental_at'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|source| GraphError::sqlite(operation, source))?;
+    parse_epoch_nanos(operation, &value)
 }
 
 fn parse_epoch_nanos(operation: &'static str, value: &str) -> Result<i64, GraphError> {
@@ -209,15 +296,12 @@ pub(crate) struct SymbolSpan {
 /// (including non-Symbol variants and unknown names). Used by read queries
 /// that then perform containment or adjacency lookups.
 pub(crate) fn resolve_symbol_span(
-    db_path: &Path,
+    conn: &Connection,
     sel: &Selector,
 ) -> Result<Option<SymbolSpan>, GraphError> {
     let Selector::Symbol { path, symbol, kind } = sel else {
         return Ok(None);
     };
-
-    let conn = Connection::open(db_path)
-        .map_err(|source| GraphError::sqlite("open graph database for symbol resolve", source))?;
 
     // Match on either short name or qualified; apply kind filter when provided.
     // Paths in DB are normalized (slash-separated, relative to worktree).
@@ -360,6 +444,11 @@ pub enum SyncPolicy {
     Windowed {
         /// Maximum age of the last successful sync before reads refresh.
         window: Duration,
+    },
+    /// Run an initial sync at open, then keep the index fresh with a background watcher.
+    Watch {
+        /// Event coalescing window before a background sync starts.
+        debounce: Duration,
     },
 }
 
@@ -744,6 +833,28 @@ pub struct RefResult {
     pub relations: Vec<RelationEntry>,
     /// Number of candidate rows excluded by the confidence floor.
     pub skipped_low_confidence: usize,
+    /// Lower-confidence references surfaced because the precise floor found no
+    /// textual `refs`. Present only when the precise result was empty and a
+    /// lower-confidence (`fuzzy_name`) match exists — see [`RefFallback`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<RefFallback>,
+}
+
+/// Lower-confidence references surfaced when the precise floor returned no refs.
+///
+/// Cross-crate call sites routed through `pub use` re-exports resolve only at
+/// `fuzzy_name` (name-only) confidence, which the default `same_module` floor
+/// excludes. When the precise `refs` list is empty, the query falls back to the
+/// fuzzy floor so a genuinely-referenced public API does not look unreferenced.
+/// These matches are name-only and may include unrelated symbols sharing the name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RefFallback {
+    /// Confidence floor used to produce the fallback references (`fuzzy_name`).
+    pub confidence: RefConfidence,
+    /// Fallback references, each labelled with its own resolution confidence.
+    pub refs: Vec<RefEntry>,
+    /// Human-readable explanation of why these lower-confidence refs are shown.
+    pub note: String,
 }
 
 /// Target metadata included in a [`RefResult`].
@@ -806,6 +917,31 @@ pub struct ImpactResult {
     pub truncated: bool,
     /// Number of impacted symbols returned in `touched`.
     pub visited_nodes: usize,
+    /// Lower-confidence impact surfaced because the precise floor found no
+    /// touched nodes. Present only when a lower-confidence (`fuzzy_name`) match
+    /// exists; see [`ImpactFallback`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<ImpactFallback>,
+}
+
+/// Lower-confidence impact surfaced when the precise floor returned no nodes.
+///
+/// `fuzzy_name` edges are name-only and may include unrelated symbols sharing
+/// the same short name. The top-level [`ImpactResult`] remains the result for
+/// the requested confidence floor; this fallback is an explicit hint that a
+/// lower-confidence blast radius exists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImpactFallback {
+    /// Confidence floor used to produce the fallback impact (`fuzzy_name`).
+    pub confidence: RefConfidence,
+    /// Impacted symbols found at the fallback floor.
+    pub touched: Vec<ImpactEntry>,
+    /// Whether fallback traversal stopped because [`IMPACT_NODE_CAP`] was reached.
+    pub truncated: bool,
+    /// Number of impacted symbols returned in `touched`.
+    pub visited_nodes: usize,
+    /// Human-readable explanation of why these lower-confidence nodes are shown.
+    pub note: String,
 }
 
 /// A symbol reached by [`Graph::impact`].
@@ -851,4 +987,106 @@ pub struct TraceNode {
     pub confidence: Option<String>,
     /// Nested callees reached from this symbol.
     pub children: Vec<TraceNode>,
+}
+
+/// Output format for [`Graph::overview`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OverviewFormat {
+    /// Aggregate counts plus the highest-symbol files, without per-file symbols.
+    Summary,
+    /// Aggregate counts plus every in-scope file and its symbols.
+    Full,
+}
+
+/// Repository shape summary returned by [`Graph::overview`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OverviewResult {
+    /// Format used to build this result.
+    pub format: OverviewFormat,
+    /// Scope path the summary was restricted to, or `None` for the whole worktree.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    /// Number of indexed files in scope.
+    pub total_files: usize,
+    /// Number of indexed symbols in scope.
+    pub total_symbols: usize,
+    /// File counts keyed by language.
+    pub languages: BTreeMap<String, usize>,
+    /// Symbol counts keyed by symbol kind.
+    pub symbol_kinds: BTreeMap<String, usize>,
+    /// Files in scope. In `summary` format these are the top files by symbol
+    /// count with empty `symbols`; in `full` format every in-scope file with
+    /// its symbols.
+    pub files: Vec<OverviewFile>,
+}
+
+/// A file entry in an [`OverviewResult`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OverviewFile {
+    /// Worktree-relative file path.
+    pub path: String,
+    /// Detected language.
+    pub lang: String,
+    /// Number of symbols defined in this file.
+    pub symbol_count: usize,
+    /// Symbols defined in this file; populated only in `full` format.
+    pub symbols: Vec<OverviewSymbol>,
+}
+
+/// A symbol entry in an [`OverviewFile`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OverviewSymbol {
+    /// Short symbol name.
+    pub name: String,
+    /// Symbol kind.
+    pub kind: String,
+    /// Fully-qualified symbol name.
+    pub qualified: String,
+}
+
+/// Trait implementor result returned by [`Graph::implementors`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImplementorsResult {
+    /// Trait name matched against, derived from the selector's trailing segment.
+    pub trait_name: String,
+    /// Concrete types implementing the trait.
+    pub implementors: Vec<Implementor>,
+}
+
+/// A single trait implementor entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Implementor {
+    /// Qualified name of the implementing type.
+    pub type_qualified: String,
+    /// Trait reference recorded at the impl site (`relations.to_qualified`).
+    pub trait_matched: String,
+    /// Structural relation kind (`impl` / `implements`).
+    pub kind: RefKind,
+    /// File defining the implementation.
+    pub file: String,
+}
+
+/// Outbound module/import edge result returned by [`Graph::deps`].
+///
+/// Reports source-level import edges, not the Cargo crate dependency graph that
+/// v1 `orbit.graph.deps` returned. Computed by the internal `query::deps`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DepsResult {
+    /// Selector scope echoed back.
+    pub scope: String,
+    /// Outbound import edges in scope.
+    pub imports: Vec<DepEdge>,
+}
+
+/// A single outbound import edge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DepEdge {
+    /// Source file that declares the import.
+    pub from_file: String,
+    /// Imported module path or specifier (language-specific opaque string).
+    pub target_path: String,
+    /// Imported symbol, or `None` for a whole-module import.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_symbol: Option<String>,
 }

@@ -99,7 +99,11 @@ pub(super) struct RawExecutionConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawExecutionEnvConfig {
-    pub(super) inherit: Option<bool>,
+    // `inherit` is intentionally not a field: env inheritance is not
+    // configurable. Agent subprocesses always run with a cleared environment
+    // plus the `pass` allowlist, never the orbit process's full environment.
+    // A stale `inherit = ...` key in an existing config.toml is silently
+    // ignored (no `deny_unknown_fields`). See ORB-00365.
     pub(super) pass: Option<Vec<String>>,
 }
 

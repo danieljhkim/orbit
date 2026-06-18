@@ -11,19 +11,17 @@ members = [
   "crates/orbit-graph",
   "crates/orbit-graph-cli",
   "crates/orbit-graph-extract",
-  "crates/orbit-knowledge",
   "crates/orbit-store",
   "crates/orbit-policy",
   "crates/orbit-exec",
   "crates/orbit-tools",
   "crates/orbit-mcp",
   "crates/orbit-dashboard",
-  "tools/graph-equiv",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.8.2"
+version = "0.9.1"
 edition = "2024"
 license = "MIT"
 
@@ -49,6 +47,7 @@ fs2 = "0.4"
 futures-core = "0.3"
 git2 = { version = "0.20", default-features = false }
 ignore = "0.4.25"
+notify = "8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync"] }
 jsonschema = { version = "0.18", default-features = false }
 libc = "0.2"

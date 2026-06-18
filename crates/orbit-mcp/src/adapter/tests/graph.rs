@@ -25,6 +25,9 @@ fn graph_tool_schemas_cover_cli_parameters() {
             "orbit.graph.callees",
             "orbit.graph.impact",
             "orbit.graph.trace",
+            "orbit.graph.overview",
+            "orbit.graph.implementors",
+            "orbit.graph.deps",
         ]
     );
 
@@ -50,6 +53,9 @@ fn graph_tool_schemas_cover_cli_parameters() {
         &schemas[6],
         &with_workspace_params(&["command_name", "depth", "confidence"]),
     );
+    assert_param_names(&schemas[7], &with_workspace_params(&["scope", "format"]));
+    assert_param_names(&schemas[8], &with_workspace_params(&["selector"]));
+    assert_param_names(&schemas[9], &with_workspace_params(&["selector"]));
     assert_workspace_params_optional_strings(&schemas);
 }
 
@@ -146,7 +152,13 @@ async fn graph_tools_invoke_in_process_fixture() {
     )
     .await;
     assert_eq!(show["metadata"]["file"], "src/lib.rs");
-    assert_array_field(&show, "bytes");
+    assert!(
+        show["source"]
+            .as_str()
+            .is_some_and(|source| source.contains("pub fn entry")),
+        "source should be UTF-8 text in {show}"
+    );
+    assert!(show.get("bytes").is_none());
 
     let refs = call_json(
         &server,
@@ -198,6 +210,44 @@ async fn graph_tools_invoke_in_process_fixture() {
     assert!(trace["root"].is_null());
     assert_eq!(trace["visited_nodes"], 0);
 
+    let overview = call_json(
+        &server,
+        "orbit.graph.overview",
+        json!({
+            "format": "full"
+        }),
+    )
+    .await;
+    assert_eq!(overview["format"], "full");
+    assert!(overview["total_files"].as_u64().expect("total_files") >= 1);
+    assert!(
+        overview["total_symbols"].as_u64().expect("total_symbols") >= 3,
+        "fixture defines helper/entry/caller: {overview}"
+    );
+    assert_array_field(&overview, "files");
+
+    let implementors = call_json(
+        &server,
+        "orbit.graph.implementors",
+        json!({
+            "selector": "symbol:src/lib.rs#Missing:trait"
+        }),
+    )
+    .await;
+    assert_eq!(implementors["trait_name"], "Missing");
+    assert_array_field(&implementors, "implementors");
+
+    let deps = call_json(
+        &server,
+        "orbit.graph.deps",
+        json!({
+            "selector": "file:src/lib.rs"
+        }),
+    )
+    .await;
+    assert_eq!(deps["scope"], "file:src/lib.rs");
+    assert_array_field(&deps, "imports");
+
     assert_eq!(server.graph_tools.cached_worktree_count(), 1);
 }
 
@@ -230,6 +280,96 @@ async fn graph_tool_errors_are_structured_mcp_tool_errors() {
             .expect("message")
             .contains("invalid selector")
     );
+}
+
+#[tokio::test]
+async fn graph_show_returns_labeled_byte_fallback_for_non_utf8_source() {
+    let worktree = fixture_worktree();
+    let source = b"pub fn broken() { \xFF }\n";
+    fs::write(worktree.path().join("src/non_utf8.rs"), source).expect("write non-utf8 source");
+    run_git(worktree.path(), ["add", "src/non_utf8.rs"]);
+    run_git(worktree.path(), ["commit", "-m", "add non-utf8 fixture"]);
+
+    let host = Arc::new(StubHost {
+        schemas: Vec::new(),
+    });
+    let server = OrbitToolServer::new(host);
+    // L-0053: graph MCP tests must pin the worktree to their temp fixture.
+    server.replace_session_context(ToolSessionContext::with_workspace(
+        worktree.path().display().to_string(),
+    ));
+
+    call_json(
+        &server,
+        "orbit.graph.sync",
+        json!({
+            "full": true
+        }),
+    )
+    .await;
+    let show = call_json(
+        &server,
+        "orbit.graph.show",
+        json!({
+            "selector": "file:src/non_utf8.rs",
+            "max_bytes": 256
+        }),
+    )
+    .await;
+
+    assert_eq!(
+        show["source"],
+        json!({
+            "encoding": "bytes",
+            "bytes": source
+        })
+    );
+    assert!(show.get("bytes").is_none());
+}
+
+#[tokio::test]
+async fn graph_show_rejects_out_of_workspace_path_without_session_workspace() {
+    // ORB-00361: with no announced session workspace, a client-supplied
+    // `workspace_path` outside the process working directory must be rejected
+    // before any graph is opened or indexed — no arbitrary-directory source read.
+    let outside = TempDir::new().expect("temp dir outside cwd");
+    fs::create_dir_all(outside.path().join("src")).expect("create src");
+    fs::write(outside.path().join("src/lib.rs"), "pub fn secret() {}\n").expect("write file");
+
+    let host = Arc::new(StubHost {
+        schemas: Vec::new(),
+    });
+    let server = OrbitToolServer::new(host);
+    // Intentionally do NOT announce a session workspace: session_context.workspace
+    // stays None, which is the unguarded path before this fix.
+
+    let result = server
+        .call_tool_request(request_with_args(
+            "orbit.graph.show",
+            json!({
+                "workspace_path": outside.path().display().to_string(),
+                "selector": "symbol:src/lib.rs#secret:function",
+                "max_bytes": 256
+            }),
+        ))
+        .await
+        .expect("MCP request resolves with a tool-error payload");
+
+    assert!(result.is_error.unwrap_or(false), "call must be rejected");
+    let payload = result.structured_content.expect("structured error payload");
+    assert_eq!(payload["code"], "invalid_input");
+    assert!(
+        payload["message"]
+            .as_str()
+            .expect("message")
+            .contains("must stay within initialized workspace"),
+        "unexpected error message: {payload}"
+    );
+    // No source bytes were returned and no graph was opened/indexed for the
+    // out-of-bounds directory.
+    assert!(payload.get("bytes").is_none());
+    assert!(payload.get("source").is_none());
+    assert_eq!(server.graph_tools.cached_worktree_count(), 0);
 }
 
 async fn call_json(server: &OrbitToolServer, name: &str, args: Value) -> Value {

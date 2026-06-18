@@ -9,6 +9,10 @@ fn extract(source: &str) -> crate::ExtractedFile {
     RustExtractor.extract(Path::new("src/sample.rs"), source.as_bytes())
 }
 
+fn extract_at(path: &str, source: &str) -> crate::ExtractedFile {
+    RustExtractor.extract(Path::new(path), source.as_bytes())
+}
+
 fn symbol_kinds(file: &crate::ExtractedFile) -> Vec<&str> {
     file.symbols
         .iter()
@@ -300,4 +304,33 @@ fn run(_args: RunArgs) {}
         .find(|command| command.name == "job run")
         .map(|command| command.handler_symbol.as_deref());
     assert_eq!(command, Some(None));
+}
+
+#[test]
+fn skips_command_extraction_for_non_orbit_workspace_crates() {
+    let file = extract_at(
+        "crates/orbit-graph-cli/src/commands/mod.rs",
+        r#"
+use clap::Subcommand;
+
+#[derive(Subcommand)]
+enum Command {
+    Trace(TraceCommand),
+}
+
+struct TraceCommand;
+
+fn dispatch(command: Command) {
+    match command {
+        Command::Trace(args) => args.run(),
+    }
+}
+
+impl TraceCommand {
+    fn run(self) {}
+}
+"#,
+    );
+
+    assert!(file.commands.is_empty());
 }

@@ -16,59 +16,71 @@ pub(crate) fn run(
     depth: u8,
     min_confidence: RefConfidence,
 ) -> Result<TraceResult, GraphError> {
-    let conn = Connection::open(graph.db_path.path())
-        .map_err(|source| GraphError::sqlite("open graph database for trace", source))?;
-    let Some(origin) = resolve_command_handler(&conn, command)? else {
-        return Ok(TraceResult::empty());
-    };
+    let command = normalize_command_selector(command);
+    graph.with_read_connection(|conn| {
+        let Some(origin) = resolve_command_handler(conn, command)? else {
+            return Ok(TraceResult::empty());
+        };
 
-    let max_depth = usize::from(if depth == 0 {
-        DEFAULT_TRACE_DEPTH
-    } else {
-        depth
-    });
-    let mut arena = vec![TraceNodeBuilder::root(&origin)];
-    let mut queue = VecDeque::from([(0usize, origin, 0usize)]);
-    let mut truncated = false;
+        let max_depth = usize::from(if depth == 0 {
+            DEFAULT_TRACE_DEPTH
+        } else {
+            depth
+        });
+        let mut arena = vec![TraceNodeBuilder::root(&origin)];
+        let mut queue = VecDeque::from([(0usize, origin, 0usize)]);
+        let mut truncated = false;
 
-    'bfs: while let Some((node_index, symbol, distance)) = queue.pop_front() {
-        if distance >= max_depth {
-            continue;
-        }
-
-        let next_distance = distance + 1;
-        for edge in callees::edges_for_symbol(&conn, &symbol.span())? {
-            if !confidence_visible_at_floor(edge.confidence.as_str(), min_confidence)? {
+        'bfs: while let Some((node_index, symbol, distance)) = queue.pop_front() {
+            if distance >= max_depth {
                 continue;
             }
-            if arena.len() >= TRACE_NODE_CAP {
-                truncated = true;
-                break 'bfs;
-            }
 
-            let child_symbol = match edge.target_qualified.as_deref() {
-                Some(qualified) => resolve_symbol_by_qualified(&conn, qualified)?,
-                None => None,
-            };
-            let child =
-                TraceNodeBuilder::callee(edge.target_name, edge.target_qualified, edge.confidence);
-            let child_index = arena.len();
-            arena.push(child);
-            arena[node_index].children.push(child_index);
+            let next_distance = distance + 1;
+            for edge in callees::edges_for_symbol(conn, &symbol.span())? {
+                if !confidence_visible_at_floor(edge.confidence.as_str(), min_confidence)? {
+                    continue;
+                }
+                if arena.len() >= TRACE_NODE_CAP {
+                    truncated = true;
+                    break 'bfs;
+                }
 
-            if next_distance < max_depth
-                && let Some(symbol) = child_symbol
-            {
-                queue.push_back((child_index, symbol, next_distance));
+                let child_symbol = match edge.target_qualified.as_deref() {
+                    Some(qualified) => resolve_symbol_by_qualified(conn, qualified)?,
+                    None => None,
+                };
+                let child = TraceNodeBuilder::callee(
+                    edge.target_name,
+                    edge.target_qualified,
+                    edge.confidence,
+                );
+                let child_index = arena.len();
+                arena.push(child);
+                arena[node_index].children.push(child_index);
+
+                if next_distance < max_depth
+                    && let Some(symbol) = child_symbol
+                {
+                    queue.push_back((child_index, symbol, next_distance));
+                }
             }
         }
-    }
 
-    Ok(TraceResult {
-        root: Some(build_tree(&arena, 0)),
-        truncated,
-        visited_nodes: arena.len(),
+        Ok(TraceResult {
+            root: Some(build_tree(&arena, 0)),
+            truncated,
+            visited_nodes: arena.len(),
+        })
     })
+}
+
+fn normalize_command_selector(command: &str) -> &str {
+    command
+        .trim()
+        .strip_prefix("command:")
+        .map(str::trim)
+        .unwrap_or_else(|| command.trim())
 }
 
 fn confidence_visible_at_floor(

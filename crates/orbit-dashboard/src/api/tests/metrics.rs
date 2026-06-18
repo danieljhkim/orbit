@@ -10,11 +10,11 @@ use axum::response::Response;
 use chrono::{Duration, SecondsFormat};
 use orbit_common::types::{InvocationTrace, KnowledgeRunMetrics, TokenUsage, ToolCallTrace};
 use orbit_core::command::job::JobRunListParams;
+use orbit_core::metrics::{KnowledgeStatsSummary, aggregate as aggregate_knowledge_stats};
 use orbit_core::{
     ActivityInvocationMetrics, InvocationInsertParams, InvocationQuery, InvocationRecord,
     JobRunState, OrbitRuntime, TaskInvocationMetrics, ToolInvocationMetrics,
 };
-use orbit_knowledge::metrics::{KnowledgeStatsSummary, aggregate as aggregate_knowledge_stats};
 use tower::ServiceExt;
 
 use super::super::router;

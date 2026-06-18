@@ -1,52 +1,46 @@
 ---
 name: orbit-graph
-description: Use when navigating and inspecting codebase via the knowledge graph instead of raw file reads.
+description: Use when navigating and inspecting the codebase via the orbit-graph code index instead of raw file reads.
 ---
 
 # Orbit Graph
 
-Use `orbit.graph.*` as your default way to navigate code. Start with the smallest tool that can answer the question.
+Use `orbit_graph_*` as your default way to navigate code. Start with the smallest tool that can answer the question.
 
 ## Tool Invocation
 
-Graph **read** tools are available via two surfaces; both accept identical JSON.
+The graph is served **in-process over MCP** by orbit-graph (v2). Call the tools directly from your toolbox:
 
-- **MCP** (plugin path): `orbit_graph_search`, `orbit_graph_show`, `orbit_graph_pack`, `orbit_graph_callers`, `orbit_graph_refs`, `orbit_graph_implementors`, `orbit_graph_deps`, `orbit_graph_overview`. Call them directly when loaded.
-- **CLI**: `orbit tool run orbit.graph.<action> --input '<json>'`.
+- `orbit_graph_sync`, `orbit_graph_search`, `orbit_graph_show`, `orbit_graph_refs`, `orbit_graph_callees`, `orbit_graph_impact`, `orbit_graph_trace`, `orbit_graph_overview`, `orbit_graph_implementors`, `orbit_graph_deps`.
 
-Mapping rule: `orbit.graph.<action>` ↔ `orbit_graph_<action>`. See the `orbit` skill for the full reference. Do not prefer shell just because the examples below use CLI syntax.
+There is **no** `orbit tool run orbit.graph.*` path — the graph is not in the CLI tool registry. For direct human/shell use, the `orbit graph` subcommand (a thin wrapper over the same library) and the standalone `orbit-graph-cli` binary expose these queries as subcommands (`orbit graph search …`, `orbit graph refs …`, or `orbit-graph-cli search …`). The agent-facing surface is still the in-process `orbit_graph_*` MCP tools above — reach for the CLI only from a shell without MCP.
 
-Graph **write** tools (build/update) are CLI-only — not exposed over MCP.
+The graph handle auto-syncs on a file watcher, so reads are normally fresh without an explicit sync. Call `orbit_graph_sync` only to force a refresh; pass `{"full": true}` for a complete re-index (required for full `trace` coverage — incremental sync resolves far fewer command handlers).
 
 ## Default Workflow
 
-1. **Search first** — Use `orbit.graph.search` when the prompt names a symbol, trait, function, type, or file. Add `type`, `kind`, `prefix`, and `source_regex` filters when you can. For content-shape questions ("every file/symbol matching pattern X"), see [Source-Regex Enumeration](#source-regex-enumeration) — one call usually answers the whole question.
-2. **Inspect the exact selector** — Use `orbit.graph.show` to confirm the definition, source, lines, or lineage of the match you found.
+1. **Search first** — `orbit_graph_search` when the prompt names a symbol, trait, function, type, string, or config key. Narrow with `kind` (`symbol`, `string`, or `config`), `lang`, and `limit`.
+2. **Inspect the exact selector** — `orbit_graph_show` to confirm the definition, source, and lines of the match you found.
 3. **Use one relationship tool only if needed**:
-   - `orbit.graph.implementors` for trait or interface implementation questions
-   - `orbit.graph.callers` for transitive caller-chain questions
-   - `orbit.graph.refs` for usages or cross-file symbol references; it returns `code_refs` by default and fills `doc_refs` / `config_refs` only when you pass `include`
-   - `orbit.graph.deps` for crate-level dependency direction
-   - `orbit.graph.history` has been removed from the agent tool surface; for task-to-commit lookup use `git log --grep '[T<task-id>]'`
-4. **Gather only when needed** — Use `orbit.graph.pack` only for a small set of exact selectors when you need multi-symbol context for synthesis, editing, or review. `file:` selectors return metadata and symbol summaries, not full file source, and leaf bodies stay hidden unless you pass `summary: false`.
-5. **Orient only when scope is unclear** — Use `orbit.graph.overview` when the subtree is unfamiliar or the task is architectural. Broad scopes default to `summary`; ask for `format: "full"` only when you need per-file symbol lists.
+   - `orbit_graph_implementors` for trait/interface implementation questions
+   - `orbit_graph_refs` for inbound usages, cross-file references, **and caller-chain questions** (refs returns the inbound call sites; there is no separate `callers` tool)
+   - `orbit_graph_callees` for outbound calls *from* a symbol
+   - `orbit_graph_impact` for a bounded blast-radius traversal before an edit
+   - `orbit_graph_trace` for a command handler's call tree (by command name)
+   - `orbit_graph_deps` for module/import edges out of a `file:` or `dir:` selector
+4. **Orient only when scope is unclear** — `orbit_graph_overview` when the subtree is unfamiliar or the task is architectural. Broad scopes default to `summary`; pass `format: "full"` only when you need per-file symbol lists.
 
-## Source-Regex Enumeration
+## Confidence Floors
 
-For content-shape questions ("every file/symbol matching pattern X"), call `orbit.graph.search` with `source_regex` ONCE on the broadest viable `prefix`. Do NOT iterate per-subdirectory or per-crate — a single call with the right scope returns the complete answer set, including `matched_lines: [{line_number, snippet}]` so you usually do not need a follow-up `show` or `pack`.
+`refs`, `impact`, and `trace` accept a `confidence` floor: `exact`, `import`, `same_module` (default), or `fuzzy`. Every cross-file reference carries one of these; raise the floor to drop weakly-resolved edges, lower it to `fuzzy` to recover trait-dispatch and dynamic calls that only resolve by name.
 
-Question shapes that fit:
+## Stop Rule
 
-- "every file that re-exports `X`" → `source_regex: "^\\s*pub\\s+use\\s+.*X"`
-- "every top-level constant" → `source_regex: "^\\s*pub\\s+const\\s+"`
-- "every cross-language `class ... implements IFoo`" → `source_regex: "class\\s+\\w+\\s+implements\\s+IFoo"`
+If `search + show`, or `search + implementors`, or a single `search` already answers the question, stop.
 
-Caveat: regex matches comments and string literals too. If a match looks suspicious, verify it with `show`. Do not refine by re-running with a narrower prefix — refine the regex instead.
+Do not also run `overview`, `refs`, `callees`, or `impact` unless they add information the task still requires.
 
-```bash
-# One call returns every file re-exporting OrbitError
-orbit tool run orbit.graph.search --input '{"type":"file","prefix":"crates/","source_regex":"^\\s*pub\\s+use\\s+.*OrbitError"}'
-```
+If you are about to call `show` on each candidate to verify which one matches, stop and reconsider — that is the verification-loop anti-pattern. Use the appropriate relation tool (`refs`, `callees`, `implementors`, `impact`) instead.
 
 ## Task IDs
 
@@ -58,52 +52,39 @@ git log --grep '[T20260421-0528]' --oneline
 
 Orbit `task_id` is local to the operator's workspace. For cross-engineer task references, prefer `external_refs`.
 
-## Stop Rule
-
-If `search + show`, or `search + implementors`, or a single `search` with `source_regex`, already answers the question, stop.
-
-Do not also run `overview`, `refs`, or `pack` unless they add information the task still requires.
-
-If you are about to call `pack` or `show` on each candidate to verify which one matches, stop and reconsider — that is the verification-loop anti-pattern. Either rephrase the question as a `source_regex` enumeration, or use the appropriate relation tool (`callers`, `implementors`, `refs`).
-
-## Fuzzy Fallback
-
-Pass `allow_fuzzy: true` to recover from typos and partial recall in symbol names or file basenames. The fuzzy pass is case-insensitive and only runs when the deterministic pass returns zero results; when any exact result exists, no fuzzy candidate appears. Each fuzzy hit is tagged `match_kind: "fuzzy"` and carries a `score` in [0.0, 1.0] (higher is closer; 1.0 is reserved for exact, which would have hit the deterministic path). Off by default. Source-regex queries ignore the flag. The `format: "selectors"` projection returns only selectors, so it intentionally drops `match_kind` and `score`.
-
-MCP surface (sanitized tool name under the loaded `orbit-graph` skill): invoke `orbit_graph_search` with `allow_fuzzy: true` in the arguments map (or as `<parameter name="allow_fuzzy">true</parameter>` in XML form). The same suppression and `match_kind`/`score` output rules apply.
-
 ## When `fs.read` Is Acceptable
 
-- Graph returned `knowledge_unavailable`
-- Some selectors were `unresolved_selectors` and you only fall back for those entries
-- You need a non-code file such as config, YAML, TOML, or markdown and `orbit.graph.search` defaulted to code-first results
+- A graph call errors or a selector does not resolve to a node
+- You need a non-code file (config, YAML, TOML, markdown) that the index does not cover, and `orbit_graph_search` with `kind: "config"` did not surface it
 - You need a few extra lines around a symbol you already found with graph tools
 
 ## Minimal Commands
 
-```bash
-# Exact symbol lookup
-orbit tool run orbit.graph.search --input '{"query":"hello","type":"symbol","kind":"function","limit":10}'
-orbit tool run orbit.graph.show --input '{"selector":"symbol:src/lib.rs#hello:function"}'
-orbit tool run orbit.graph.search --input '{"query":"AgentRuntime","include_non_code":true}'
-orbit tool run orbit.graph.search --input '{"query":"AgentRuntmie","allow_fuzzy":true}'
+These are MCP tool calls (JSON argument maps). The `orbit graph` subcommand and the standalone `orbit-graph-cli` accept the same fields as flags.
 
-# Trait/interface implementations
-orbit tool run orbit.graph.implementors --input '{"trait_selector":"symbol:src/lib.rs#Greeter:trait"}'
+```jsonc
+// Exact symbol lookup
+orbit_graph_search   {"query":"hello","kind":"symbol","limit":10}
+orbit_graph_show     {"selector":"symbol:src/lib.rs#hello:function"}
+orbit_graph_search   {"query":"AGENT_ENV","kind":"config"}
 
-# Callers / usages / dependency tracing
-orbit tool run orbit.graph.callers --input '{"selector":"symbol:src/lib.rs#hello:function"}'
-orbit tool run orbit.graph.refs --input '{"selector":"symbol:src/lib.rs#hello:function"}'
-orbit tool run orbit.graph.refs --input '{"selector":"symbol:src/lib.rs#hello:function","include":["all"]}'
-orbit tool run orbit.graph.deps --input '{"crate":"orbit-engine"}'
+// Trait/interface implementations
+orbit_graph_implementors {"selector":"symbol:src/lib.rs#Greeter:trait"}
 
-# Multi-symbol context
-orbit tool run orbit.graph.pack --input '{"selectors":["file:src/lib.rs","symbol:src/lib.rs#hello:function"]}'
-orbit tool run orbit.graph.pack --input '{"selectors":["symbol:src/lib.rs#hello:function"],"summary":false}'
+// Usages, caller chains, outbound calls, blast radius
+orbit_graph_refs     {"symbol":"symbol:src/lib.rs#hello:function"}
+orbit_graph_refs     {"symbol":"symbol:src/lib.rs#hello:function","confidence":"fuzzy"}
+orbit_graph_callees  {"symbol":"symbol:src/lib.rs#hello:function"}
+orbit_graph_impact   {"selector":"symbol:src/lib.rs#hello:function","depth":2}
 
-# High-level subtree shape
-orbit tool run orbit.graph.overview --input '{"prefix":"src/module"}'
-orbit tool run orbit.graph.overview --input '{"prefix":"src/module","format":"full"}'
+// Command handler call tree (run a full sync first for complete coverage)
+orbit_graph_sync     {"full":true}
+orbit_graph_trace    {"command_name":"orbit.task.add"}
+
+// Module/import edges and high-level shape
+orbit_graph_deps     {"selector":"dir:crates/orbit-engine/src"}
+orbit_graph_overview {"scope":"dir:src/module"}
+orbit_graph_overview {"scope":"dir:src/module","format":"full"}
 ```
 
 ## Selector Forms
@@ -117,14 +98,9 @@ Common symbol kinds: `function`, `method`, `struct`, `trait`, `impl`, `field`, `
 ## Avoid
 
 - Skipping graph tools and going straight to `fs.read`
-- Running `orbit.graph.overview` by default for exact symbol lookups
-- Forgetting that `orbit.graph.search` hides doc/config hits unless you ask for `include_non_code`
-- Using `orbit.graph.refs` for trait-implementation questions instead of `orbit.graph.implementors`
-- Using `orbit.graph.refs` for caller-chain questions instead of `orbit.graph.callers`
-- Using `orbit.graph.refs` for crate dependency questions instead of `orbit.graph.deps`
-- Expecting `orbit.graph.history` or `orbit.graph.search` to answer task attribution questions; `orbit.graph.history` is not agent-callable, and local task-to-commit lookup belongs to `git log --grep '[T<task-id>]'`
-- Packing broad directories or many selectors just to explore
-- Reading full files after `show` or `pack` already gave the needed context
-- Falling back to `fs.read` globally when only some selectors failed
-- Iterating `source_regex` per-crate or per-subdirectory when a single broad `prefix` returns the same set in one call
-- Using `pack` or `show` to verify each candidate from a `search` result one at a time — rephrase as `source_regex` or use `callers`/`implementors`/`refs` instead
+- Running `orbit_graph_overview` by default for exact symbol lookups
+- Reaching for `orbit.graph.pack`, `orbit.graph.callers`, or `orbit.graph.history` — those v1 tools no longer exist. Use `show` (per selector) for context, `refs` for callers, and `git log --grep` for task attribution.
+- Using `orbit_graph_refs` for trait-implementation questions instead of `orbit_graph_implementors`
+- Using `orbit_graph_refs` for crate dependency questions instead of `orbit_graph_deps`
+- Reading full files after `show` already gave the needed context
+- Falling back to `fs.read` for a symbol the graph can resolve

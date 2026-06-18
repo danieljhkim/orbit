@@ -220,7 +220,7 @@ fn context_entry_covers_path(entry: &str, mentioned_path: &str) -> bool {
 }
 
 fn lint_identity_cleanup(task: &Task, findings: &mut Vec<TaskLintFinding>) {
-    const STALE_IDENTITIES: &[(&str, &str)] = &[("orbit-map", "crates/orbit-knowledge")];
+    const STALE_IDENTITIES: &[(&str, &str)] = &[("orbit-map", "crates/orbit-graph")];
 
     for (needle, replacement) in STALE_IDENTITIES {
         let mut reported_locations = BTreeSet::new();

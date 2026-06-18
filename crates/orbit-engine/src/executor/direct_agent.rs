@@ -6,8 +6,7 @@ use orbit_exec::EnvironmentMode;
 use super::ActivityExecutor;
 use crate::context::{
     AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, AgentProtocolHost, AttemptOutcome, EnvironmentHost,
-    ExecutionContext, ExecutorHost, apply_env_set, execution_working_directory_with_task,
-    inject_state_env,
+    ExecutionContext, ExecutorHost, apply_env_set, execution_working_directory, inject_state_env,
 };
 
 fn inject_activity_tools(mode: EnvironmentMode, tools: &[String]) -> EnvironmentMode {
@@ -111,72 +110,98 @@ impl ActivityExecutor for DirectAgentExecutor {
     }
 
     fn execute(&self, host: ExecutorHost<'_>, execution: &ExecutionContext) -> AttemptOutcome {
-        let agent_host = host.agent();
-        let working_dir = execution_working_directory_with_task(&agent_host, execution);
+        run_subprocess_executor(&self.bound_executor, &host.agent(), execution)
+    }
+}
 
-        // --- Build stdin envelope ---
-        let stdin_payload = match agent_host.build_agent_stdin_envelope_payload(execution) {
-            Ok(payload) => payload,
-            Err(err) => return invocation_failed_outcome(err),
-        };
+/// Build the [`ExecRequest`] for an out-of-process subprocess executor.
+///
+/// `direct_agent` and `external` share this transport verbatim: the agent
+/// prompt/request envelope is written to the subprocess stdin, the command and
+/// args come from the bound [`ExecutorDef`], and the runtime model (when a
+/// `model_flag` is declared) is appended after the operator args. Splitting it
+/// out keeps the two executors byte-identical and gives tests a seam that does
+/// not require the full runtime host.
+pub(crate) fn build_subprocess_exec_request<H>(
+    def: &ExecutorDef,
+    host: &H,
+    execution: &ExecutionContext,
+) -> Result<ExecRequest, OrbitError>
+where
+    H: EnvironmentHost + AgentProtocolHost,
+{
+    let working_dir = execution_working_directory(execution);
 
-        // --- Resolve command + args from the bound ExecutorDef ---
-        let command = match self.bound_executor.command.as_ref() {
-            Some(cmd) => cmd.clone(),
-            None => {
-                return invocation_failed_outcome(OrbitError::InvalidInput(
-                    "direct_agent executor requires a 'command' field in the executor def"
-                        .to_string(),
-                ));
-            }
-        };
-        let mut args = self.bound_executor.args.clone();
-        append_runtime_model_args(
-            &mut args,
-            self.bound_executor.model_flag.as_deref(),
-            execution.model.as_deref(),
-        );
+    let stdin_payload = host.build_agent_stdin_envelope_payload(execution)?;
 
-        // --- Assemble environment ---
-        let label = self.bound_executor.name.clone();
-        let mut env_set = self.bound_executor.env.clone();
-        env_set.extend(execution.env_set.clone());
-        let environment_mode = apply_env_set(
-            inject_state_env(
-                inject_proc_allowed_programs(
-                    inject_agent_identity(
-                        inject_activity_tools(
-                            agent_host.execution_environment_mode(&execution.env_extra),
-                            &execution.activity.tools,
-                        ),
-                        &label,
-                        execution,
+    let command = def.command.clone().ok_or_else(|| {
+        OrbitError::InvalidInput(format!(
+            "{} executor '{}' requires a 'command' field in the executor def",
+            def.executor_type, def.name
+        ))
+    })?;
+    let mut args = def.args.clone();
+    append_runtime_model_args(
+        &mut args,
+        def.model_flag.as_deref(),
+        execution.model.as_deref(),
+    );
+
+    let label = def.name.clone();
+    let mut env_set = def.env.clone();
+    env_set.extend(execution.env_set.clone());
+    let environment_mode = apply_env_set(
+        inject_state_env(
+            inject_proc_allowed_programs(
+                inject_agent_identity(
+                    inject_activity_tools(
+                        host.execution_environment_mode(&execution.env_extra),
+                        &execution.activity.tools,
                     ),
-                    &execution.activity.proc_allowed_programs,
+                    &label,
+                    execution,
                 ),
-                execution,
+                &execution.activity.proc_allowed_programs,
             ),
-            &env_set,
-        );
+            execution,
+        ),
+        &env_set,
+    );
 
-        // --- Build ExecRequest and run ---
-        let exec_result = match run_process(
-            &ExecRequest {
-                program: command,
-                args,
-                current_dir: working_dir,
-                timeout_ms: Some(execution.timeout_seconds.saturating_mul(1000)),
-                stdin_mode: StdinMode::Bytes(stdin_payload),
-                environment_mode,
-                debug: execution.debug,
-            },
-            &NoSandbox,
-        ) {
-            Ok(result) => result,
-            Err(err) => return invocation_failed_outcome(err),
-        };
+    Ok(ExecRequest {
+        program: command,
+        args,
+        current_dir: working_dir,
+        timeout_ms: Some(execution.timeout_seconds.saturating_mul(1000)),
+        stdin_mode: StdinMode::Bytes(stdin_payload),
+        environment_mode,
+        debug: execution.debug,
+    })
+}
 
-        map_exec_result_to_outcome(&exec_result)
+/// Run an out-of-process subprocess executor and map its result to an
+/// [`AttemptOutcome`].
+///
+/// Tier 1 runs the subprocess unsandboxed (`NoSandbox`) — identical to the
+/// historical `direct_agent` transport. The registry-path `ExecutionContext`
+/// carries no `FsProfile`, so real `FsProfile`→OS sandbox for `external` is a
+/// Tier 2 item; see ADR-0196.
+pub(crate) fn run_subprocess_executor<H>(
+    def: &ExecutorDef,
+    host: &H,
+    execution: &ExecutionContext,
+) -> AttemptOutcome
+where
+    H: EnvironmentHost + AgentProtocolHost,
+{
+    let request = match build_subprocess_exec_request(def, host, execution) {
+        Ok(request) => request,
+        Err(err) => return invocation_failed_outcome(err),
+    };
+
+    match run_process(&request, &NoSandbox) {
+        Ok(result) => map_exec_result_to_outcome(&result),
+        Err(err) => invocation_failed_outcome(err),
     }
 }
 

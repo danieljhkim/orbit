@@ -8,6 +8,7 @@ import { renderScoreboard } from './scoreboard.js';
 import { fetchAndRender as fetchAndRenderReviewThreads, initReviewThreads, markCurrentAgentThreadsSeen } from './review-threads.js';
 import { initLogTail, fitLogPanelToViewport } from './log-tail.js';
 import { renderDiagnostics, renderImplementOneCard as renderImplOne, } from './diagnostics.js';
+import { renderMarkdown } from './markdown.js';
 import { initRouter, initTabs as iT, navigateToRun as nTR, setActiveTab as sAT, setRunDetailSubtab, } from './router.js';
 import { initRuns, mergeRunsWithFriction, renderRuns, runIsCancellable, buildCancelRunButton, buildReplayRunButton } from './runs.js';
 import {
@@ -215,12 +216,12 @@ function runDetailContext() {
 
 function renderBodyBlock(body, fallbackClass) {
   if (!body || !body.trim()) return null;
-  const isMarked = typeof marked !== "undefined";
-  const view = el(isMarked ? "div" : "pre", {
-    class: isMarked ? "markdown-body" : fallbackClass,
+  const rendered = renderMarkdown(body);
+  const view = el(rendered !== null ? "div" : "pre", {
+    class: rendered !== null ? "markdown-body" : fallbackClass,
   });
-  if (isMarked) {
-    view.innerHTML = marked.parse(body);
+  if (rendered !== null) {
+    view.innerHTML = rendered;
   } else {
     view.textContent = body;
   }
@@ -385,11 +386,12 @@ function detailGroup(title, content) {
 
 function markdownPanel(body, fallbackClass) {
   const text = body || "";
-  const view = el(typeof marked !== "undefined" ? "div" : "pre", {
-    class: typeof marked !== "undefined" ? "markdown-body" : fallbackClass,
+  const rendered = renderMarkdown(text || "_No body._");
+  const view = el(rendered !== null ? "div" : "pre", {
+    class: rendered !== null ? "markdown-body" : fallbackClass,
   });
-  if (typeof marked !== "undefined") {
-    view.innerHTML = marked.parse(text || "_No body._");
+  if (rendered !== null) {
+    view.innerHTML = rendered;
   } else {
     view.textContent = text || "No body.";
   }

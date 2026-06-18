@@ -4,7 +4,7 @@ use serde::Serialize;
 use super::{CliError, CommandContext, json_value};
 
 #[derive(Debug, Args)]
-pub(crate) struct DbPathCommand;
+pub struct DbPathCommand;
 
 impl DbPathCommand {
     pub(crate) fn run(&self, context: &CommandContext) -> Result<serde_json::Value, CliError> {

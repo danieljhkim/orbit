@@ -98,11 +98,10 @@ kind: Job
 metadata:
   name: mismatched
 spec:
-  type: shell
+  type: deterministic
   description: oops
-  program: echo
-  args: []
-  allowed_programs: [echo]
+  action: noop
+  config: {}
 "#;
     match load_activity_asset(mismatch_yaml) {
         Err(orbit_common::types::activity_job::AssetLoadError::KindMismatch {

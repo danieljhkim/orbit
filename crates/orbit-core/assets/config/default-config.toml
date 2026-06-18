@@ -1,5 +1,7 @@
 [execution.env]
-inherit = false
+# Agent subprocesses always run with a cleared environment plus the allowlist
+# below — the orbit process's full environment is never inherited (not
+# configurable, by design).
 # Baseline env vars passed to agent subprocesses.
 # User-specific vars (GITHUB_TOKEN, ANTHROPIC_API_KEY, etc.) are opt-in — add them as needed.
 pass = [

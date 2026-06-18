@@ -26,10 +26,10 @@ Orbit tools are reachable via two surfaces. Both accept identical JSON arguments
 
 - Task lifecycle (`orbit.task.*`): both surfaces.
 - ADR artifacts (`orbit.adr.*`): both surfaces.
-- Graph read tools (`search`, `show`, `pack`, `callers`, `refs`, `implementors`, `deps`, `overview`): both surfaces. Task-to-commit lookup is not a graph tool; use `git log --grep '[T<task-id>]'`.
+- Graph tools (`sync`, `search`, `show`, `refs`, `callees`, `impact`, `trace`, `overview`, `implementors`, `deps`): **MCP only** — served in-process by orbit-graph (v2). There is no `orbit tool run orbit.graph.*` path and no `orbit graph` subcommand; for direct human/CLI use run the standalone `orbit-graph-cli` binary. Task-to-commit lookup is not a graph tool; use `git log --grep '[T<task-id>]'`.
 - Unified search (`orbit.search`): both surfaces. Lexical search works without setup; `hybrid: true` and `semantic: "<task-id>"` require the search companion (`orbit semantic install`).
 - Semantic lifecycle is CLI-only (`orbit semantic install|stats|index|uninstall`); agents discover via `orbit.search --hybrid`.
-- State handoff (`orbit.state.*`), graph writes, and duel/scoreboard tools: **CLI only** — used inside activity steps where the agent has shell access.
+- State handoff (`orbit.state.*`) and duel/scoreboard tools: **CLI only** — used inside activity steps where the agent has shell access. (Graph sync/refresh is `orbit.graph.sync` over MCP; the handle also auto-syncs on a watcher.)
 
 **Always include `model` in the JSON** so Orbit can attribute the call to the right agent family. Here `model` means the canonical agent family: pass `codex`, `claude`, `gemini`, or `grok`. Full model strings are accepted and auto-normalized, but the family is the persisted identity.
 
@@ -113,7 +113,7 @@ Command surface determines provenance by default:
 - `orbit-review-task`: Review someone else's work and file findings as review threads, without transitioning the task.
 - `orbit-learning`: Author, search, update, supersede, and prune project learnings through `orbit.learning.*`. Use to preserve recurring gotchas, incident root-causes, and cross-session guidance.
 - `orbit-track-issues`: Capture agent-discovered, self-reported friction as append-only reports.
-- `orbit-graph`: Navigate or inspect the codebase via the knowledge graph when the activity allowlist includes graph tools.
+- `orbit-graph`: Navigate or inspect the codebase via the orbit-graph code index when the activity allowlist includes graph tools.
 - `orbit-search`: Find tasks, docs, learnings, and ADRs by topic; covers pre-create dedup checks and related-task lookups. Complementary to `orbit-graph` (corpus retrieval vs code structure).
 - `orbit-guide`: First-time onboarding when `.orbit/` is absent, or feature-tour requests ("what is orbit", "give me a tour"). Walks setup paths and hands off to `orbit-create-task`.
 

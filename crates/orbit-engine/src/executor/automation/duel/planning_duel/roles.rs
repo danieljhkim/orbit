@@ -35,21 +35,23 @@ Steps:
    - Your active planning-duel slot is in input.planning_duel_slot.
    - Your plan artifact path must be `planning-duel/<slot>.md`.
 
-3. Gather context with the graph surface BEFORE drafting. A single orbit.graph.pack
-   is NOT sufficient — pack returns bodies; refs and search return the import graph
-   that pack misses. You must:
-   - Start with orbit.graph.pack over task.context_files for breadth.
+3. Gather context with the graph surface BEFORE drafting. No single tool is
+   sufficient — show returns bodies; refs, callees, and search return the call
+   and import graph that bodies alone miss. You must:
+   - Start with orbit.graph.overview over the task's directories and
+     orbit.graph.show on each task.context_files selector for breadth.
    - For every symbol the task proposes to move, rename, remove, or add: call
-     orbit.graph.refs on it to enumerate callers and consumers BY NAME.
+     orbit.graph.refs on it to enumerate callers and consumers BY NAME, and
+     orbit.graph.impact to bound the blast radius.
    - For every module boundary you are drawing (new crate, new module, extracted
      file, renamed type): call orbit.graph.search to find call sites of moved
-     types and helpers across the workspace.
+     types and helpers across the workspace, and orbit.graph.deps to confirm the
+     import direction.
    - Use orbit.graph.show for full symbol bodies you need to read.
-   - Use orbit.graph.overview when pack returns knowledge_unavailable or you
-     need to map an unfamiliar area first.
+   - Use orbit.graph.overview to map an unfamiliar area first.
    - fs.read is a fallback only for selectors the graph cannot resolve (raw
      YAML, Markdown, assets the graph does not index, or unresolved selectors
-     pack reports).
+     the graph reports).
    - If you discover pub(crate) imports, helper coupling, call sites, or
      dependency edges not reflected in the task description, treat them as
      hidden coupling — they belong in step 1 of your plan body.
@@ -115,7 +117,7 @@ Steps:
 
 4. Use the graph surface to verify claims:
    - Prefer orbit.graph.overview, orbit.graph.search, orbit.graph.refs, orbit.graph.show,
-     and orbit.graph.pack for spot checks against the codebase.
+     and orbit.graph.impact for spot checks against the codebase.
    - Fall back to fs.read only when the graph does not have enough knowledge.
 
 5. Decide the winner:
@@ -251,11 +253,14 @@ pub(super) fn planner_activity() -> Activity {
         &[
             "orbit.task.show",
             "orbit.duel.plan.add",
-            "orbit.graph.pack",
+            "orbit.graph.overview",
             "orbit.graph.search",
             "orbit.graph.show",
-            "orbit.graph.overview",
             "orbit.graph.refs",
+            "orbit.graph.callees",
+            "orbit.graph.impact",
+            "orbit.graph.implementors",
+            "orbit.graph.deps",
             "fs.read",
         ],
     )
@@ -269,11 +274,14 @@ pub(super) fn arbiter_activity() -> Activity {
         &[
             "orbit.task.show",
             "orbit.duel.plan.winner",
-            "orbit.graph.pack",
+            "orbit.graph.overview",
             "orbit.graph.search",
             "orbit.graph.show",
-            "orbit.graph.overview",
             "orbit.graph.refs",
+            "orbit.graph.callees",
+            "orbit.graph.impact",
+            "orbit.graph.implementors",
+            "orbit.graph.deps",
             "fs.read",
         ],
     )

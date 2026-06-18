@@ -13,6 +13,12 @@ pub enum ExecutorType {
     AgentCli,
     DirectAgent,
     CliCommand,
+    /// Generic out-of-process executor speaking the External Executor Protocol
+    /// v1 (see `docs/design/executors/specs/external-executor-protocol.md`).
+    /// Lets operators register a homegrown binary/script without forking core.
+    /// Shares the `direct_agent` subprocess transport but carries no
+    /// agent-family `model_pair` semantics. See ADR-0196 / [ORB-00384].
+    External,
 }
 
 impl ExecutorType {
@@ -21,6 +27,7 @@ impl ExecutorType {
             Self::AgentCli => "agent_cli",
             Self::DirectAgent => "direct_agent",
             Self::CliCommand => "cli_command",
+            Self::External => "external",
         }
     }
 }
@@ -84,7 +91,8 @@ impl fmt::Display for StdoutFormat {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExecutorDef {
     pub name: String,
-    /// Executor family, serialized as "agent_cli", "direct_agent", or "cli_command".
+    /// Executor family, serialized as "agent_cli", "direct_agent",
+    /// "cli_command", or "external".
     pub executor_type: ExecutorType,
     /// For agent_cli: the CLI command (e.g., "claude", "codex")
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -1,8 +1,0 @@
-# Frozen graph-equiv selectors for Go fixture coverage.
-search goHelper
-search GoWidget
-show symbol:tools/graph-equiv/fixtures/go/sample.go#goEntry:function
-refs symbol:tools/graph-equiv/fixtures/go/sample.go#goHelper:function
-refs symbol:tools/graph-equiv/fixtures/go/sample.go#goIsolated:function
-callees symbol:tools/graph-equiv/fixtures/go/sample.go#goEntry:function
-impact symbol:tools/graph-equiv/fixtures/go/sample.go#goIsolated:function

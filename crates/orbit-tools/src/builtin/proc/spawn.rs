@@ -3,7 +3,7 @@ use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
 use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 use serde_json::Value;
 
-use crate::{Tool, ToolContext};
+use crate::{TIMEOUT_DEFAULT_MS, Tool, ToolContext};
 
 pub struct ProcSpawnTool;
 
@@ -78,7 +78,7 @@ impl Tool for ProcSpawnTool {
             })
             .unwrap_or_default();
 
-        let timeout_ms = input.get("timeout_ms").and_then(Value::as_u64);
+        let timeout_ms = proc_spawn_timeout_ms(&input);
 
         // Filter sensitive env vars instead of inheriting the full environment.
         let env_pairs: Vec<(String, String)> = std::env::vars()
@@ -95,7 +95,7 @@ impl Tool for ProcSpawnTool {
                 program,
                 args,
                 current_dir,
-                timeout_ms,
+                timeout_ms: Some(timeout_ms),
                 stdin_mode: StdinMode::Inherit,
                 environment_mode: EnvironmentMode::ClearAndSet(env_pairs),
                 debug: false,
@@ -114,3 +114,14 @@ fn is_sensitive_env_name(name: &str) -> bool {
     let patterns = ["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"];
     patterns.iter().any(|p| upper.contains(p))
 }
+
+fn proc_spawn_timeout_ms(input: &Value) -> u64 {
+    input
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(TIMEOUT_DEFAULT_MS)
+}
+
+#[cfg(test)]
+#[path = "tests/spawn.rs"]
+mod tests;

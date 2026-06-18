@@ -54,9 +54,9 @@ impl OrbitRuntime {
     pub fn replay_job_run(&self, source_run_id: &str) -> Result<V2JobRunResult, OrbitError> {
         let source = self.show_job_run(source_run_id)?;
         let input = source.input.clone().unwrap_or_else(|| json!({}));
-        let job = self.show_job_catalog_entry(&source.job_id)?;
+        let (job_path, _) = self.load_v2_job_asset_by_name(&source.job_id)?;
         self.run_job_v2_from_yaml_with_retry_source(
-            &job.path,
+            &job_path,
             input,
             None,
             Some(source.run_id.clone()),

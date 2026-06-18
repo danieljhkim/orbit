@@ -7,7 +7,7 @@ use serde::Serialize;
 use super::{CliError, CommandContext, json_value};
 
 #[derive(Debug, Args)]
-pub(crate) struct SyncCommand {
+pub struct SyncCommand {
     #[arg(long)]
     full: bool,
 }

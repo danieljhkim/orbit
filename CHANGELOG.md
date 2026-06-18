@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+### Highlights
+
+- **`orbit graph` is back as a thin CLI wrapper**: the v2 graph is now reachable from the single `orbit` binary via `orbit graph {sync, search, show, refs, callees, impact, trace, overview, implementors, deps, version, db-path, clean}`, not only the standalone `orbit-graph-cli` binary or the in-process MCP adapter. `orbit-graph-cli` is lib-ified (lib + bin) so both front ends share one command layer with no duplication; the agent-facing graph surface is unchanged (still MCP-only). This amends the ADR-0198 consequence that dropped the subcommand. ([ORB-00396], ADR-0199)
+
+## 0.9.1
+
+This release completes the orbit-graph v2 migration — v1 (orbit-knowledge) is fully decommissioned and v2 is now the only graph surface — and adds a stable protocol for plugging in out-of-process executors.
+
+### Highlights
+
+- **orbit-graph v2 is now the sole graph surface**: the orbit-knowledge (v1) crate and its `orbit.graph.*` builtin tools are removed, the `orbit graph` CLI command is dropped (the v2 graph ships as the standalone `orbit-graph-cli` binary plus an always-on in-process MCP adapter), and `orbit init` no longer builds a graph up front — v2 syncs on demand. The MCP graph surface is now search / show / refs / callees / impact / trace / overview / implementors / deps; `pack` is gone and `callers` is folded into `refs`. ([ORB-00391], [ORB-00389])
+- **External Executor Protocol v1**: register a homegrown agent or CLI as an Orbit executor without forking core, through a documented stdin/stdout envelope contract and dynamic out-of-process registration. ([ORB-00384])
+- **Graph reads are faster and more accurate**: queries are index-backed and decoupled from a full-worktree rescan, `show` returns UTF-8 text instead of a raw byte array, `trace` resolves far more command handlers, and `refs`/`impact` fall back to fuzzy-name matches when the precise floor is empty. ([ORB-00377], [ORB-00380], [ORB-00386], [ORB-00387], [ORB-00381])
+
+## 0.9.0
+
+This is a security-hardening release: the bulk of the changes close secret-leak, sandbox-escape, network-exposure, and workspace-containment issues found in a focused audit (ORB-00355–ORB-00374).
+
+### Breaking Changes
+
+- **`Shell` activity/job type removed**: the v2 `type: shell` activity surface is deleted end to end — a workspace activity or job declaring `type: shell` now fails to deserialize at load instead of executing. The shell program allowlist was self-asserted within the same workspace-supplied YAML (the gate was a tautology) and `run_shell` spawned with no OS sandbox, cwd confinement, or policy consultation. The `shell_reference` asset and the pure-shell job fixtures/demos are removed; use the sandboxed agent-CLI execution path instead. ([ORB-00374], [ORB-00363])
+- **`[execution.env] inherit` config key removed**: an auto-discovered workspace `config.toml` could set `inherit = true` and — because workspace config replaces global — flip agent subprocess spawning to full environment inheritance, leaking the orbit process's API keys and tokens into spawned agents. Env inheritance is now fixed to `false` and is no longer configurable; only the `pass` allowlist remains tunable. Stale `inherit` keys are silently ignored. ([ORB-00365])
+
+### Highlights
+
+- **Secret redaction hardened across audit and logs**: redaction now covers non-UTF-8 audit blobs (previously bypassed entirely), error/bytes fields recorded via `tracing`, and Gemini's HTTP transport no longer places the API key in the URL query string. The pattern redactor also learned major Google / SCM / cloud key formats it previously missed. ([ORB-00358], [ORB-00367], [ORB-00371], [ORB-00359])
+- **Sandbox and execution confinement tightened**: the macOS sandbox profile no longer grants unrestricted `file-read*` plus `network*`, an SBPL `(?i)` inline-flag bug that disabled sandbox-exec for all macOS CLI runs is fixed, the `run_command` automation action no longer shell-interpolates rendered templates, and unbounded child stdout/stderr capture (a memory-exhaustion DoS) is now bounded. ([ORB-00370], [ORB-00372], [ORB-00364], [ORB-00362])
+- **Dashboard network exposure closed**: `orbit web serve` now refuses to bind any non-loopback host (only `127.0.0.0/8` and `::1`) — the unauthenticated read/write API can no longer be exposed to the network via `--host 0.0.0.0`; bind loopback behind an authenticated tunnel/reverse proxy for remote access. Stored XSS from untrusted task/learning/ADR/friction content rendered in the dashboard is also fixed. ([ORB-00360], [ORB-00355])
+- **Secret-file policy matching fixed**: `denyRead`/`denyModify` globs now match dotenv-variant secret files (`.env.local`, etc.), policy glob matching is no longer case-sensitive on case-insensitive filesystems, and audit blobs and JSONL logs are no longer written world-readable. ([ORB-00357], [ORB-00366], [ORB-00368])
+- **Workspace containment enforced**: a malicious workspace can no longer override seeded `.orbit/resources/{jobs,activities}/` assets, and graph operations stay confined to the worktree even when an MCP session omits the workspace. ([ORB-00356], [ORB-00361])
+
 ## 0.8.2
 
 ### Fixes

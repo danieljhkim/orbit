@@ -2,17 +2,14 @@
 
 //! JSON CLI for the SQLite-backed Orbit graph.
 
-mod commands;
-
 use std::io::{self, Write};
 use std::process::ExitCode;
 
 use clap::Parser;
+use orbit_graph_cli::{Cli, CliError};
 use serde::Serialize;
 use serde_json::json;
 use tracing_subscriber::EnvFilter;
-
-use crate::commands::{Cli, CliError};
 
 fn main() -> ExitCode {
     init_tracing();

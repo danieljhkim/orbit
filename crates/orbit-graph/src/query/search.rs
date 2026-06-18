@@ -113,9 +113,7 @@ pub(crate) fn run(graph: &Graph, q: &SearchQuery) -> Result<SearchResult, GraphE
         });
     }
 
-    let conn = Connection::open(graph.db_path.path())
-        .map_err(|source| GraphError::sqlite("open graph database for search", source))?;
-    let raw_matches = query_matches(&conn, q, query, limit)?;
+    let raw_matches = graph.with_read_connection(|conn| query_matches(conn, q, query, limit))?;
     let matches = raw_matches
         .into_iter()
         .map(|raw| materialize_match(graph, raw))

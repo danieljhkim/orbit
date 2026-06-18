@@ -29,6 +29,7 @@ fn impact_result_shape_matches_golden_fixture() {
         ],
         truncated: false,
         visited_nodes: 2,
+        fallback: None,
     };
 
     crate::query::tests::support::assert_json_matches_fixture(
@@ -265,6 +266,112 @@ fn confidence_floor_filters_and_prevents_below_floor_expansion() {
     assert_eq!(exact_names, vec!["crate::exact"]);
 }
 
+#[test]
+fn inbound_ref_outside_any_symbol_span_is_attributed_to_source_file() {
+    // Regression for ORB-00381: a recorded inbound call site that does not fall
+    // within any indexed symbol span must not be silently dropped. `refs` surfaces
+    // such an edge (it only needs the call-site file/offset); `impact` previously
+    // resolved the source symbol via span containment and dropped the edge when that
+    // subquery returned NULL. The edge is now attributed to the source file node.
+    let worktree = TestWorktree::new("impact-null-source-span");
+    let graph = open_graph(&worktree, SyncPolicy::Manual);
+    let conn = open_connection(&worktree);
+
+    seed_symbol(&conn, "src/target.rs", "target", "crate::target", 0, 50);
+    // The caller file has a symbol, but the call site at offset 5..6 sits *before*
+    // that symbol's span (100..200), so no enclosing symbol exists for the edge.
+    seed_symbol(&conn, "src/caller.rs", "caller", "crate::caller", 100, 200);
+    insert_call_ref(
+        &conn,
+        "src/caller.rs",
+        5,
+        6,
+        "target",
+        "crate::target",
+        "exact",
+    );
+
+    let result = graph
+        .impact(
+            &symbol_selector("src/target.rs", "target"),
+            2,
+            RefConfidence::Exact,
+        )
+        .expect("query impact with unanchored inbound ref");
+
+    assert_eq!(result.visited_nodes, 1, "edge must not be dropped");
+    assert_eq!(result.touched.len(), 1);
+    let entry = &result.touched[0];
+    assert_eq!(entry.qualified_name, "src/caller.rs");
+    assert_eq!(entry.distance, 1);
+    assert_eq!(entry.edge_kind, RefKind::Call);
+    assert!(!result.truncated);
+}
+
+#[test]
+fn fuzzy_name_inbound_ref_with_null_qualified_is_visible_at_fuzzy_floor() {
+    // Regression for ORB-00381: `fuzzy_name` edges store a NULL `target_qualified`
+    // and are matchable only by `target_name`. Keying impact's inbound query solely
+    // on `target_qualified` made every fuzzy edge invisible — so a symbol that `refs
+    // --confidence fuzzy` reports as referenced returned an empty blast radius.
+    let worktree = TestWorktree::new("impact-fuzzy-null-qualified");
+    let graph = open_graph(&worktree, SyncPolicy::Manual);
+    let conn = open_connection(&worktree);
+
+    seed_symbol(
+        &conn,
+        "src/target.rs",
+        "did_you_mean",
+        "crate::did_you_mean",
+        0,
+        50,
+    );
+    seed_symbol(&conn, "src/caller.rs", "caller", "crate::caller", 0, 200);
+    insert_fuzzy_call_ref(&conn, "src/caller.rs", 10, 11, "did_you_mean");
+
+    // Below the fuzzy floor the precise result stays empty, but the result now
+    // carries the same labeled fallback hint that `refs` emits for name-only
+    // fuzzy matches.
+    let same_module = graph
+        .impact(
+            &symbol_selector("src/target.rs", "did_you_mean"),
+            2,
+            RefConfidence::SameModule,
+        )
+        .expect("query impact below fuzzy floor");
+    assert!(same_module.touched.is_empty());
+    assert_eq!(same_module.visited_nodes, 0);
+    let fallback = same_module.fallback.expect("fallback populated");
+    assert_eq!(fallback.confidence, RefConfidence::FuzzyName);
+    assert_eq!(fallback.visited_nodes, 1);
+    assert_eq!(fallback.touched.len(), 1);
+    assert_eq!(fallback.touched[0].qualified_name, "crate::caller");
+    assert_eq!(fallback.touched[0].edge_kind, RefKind::Call);
+    assert!(
+        fallback.note.contains("same_module") && fallback.note.contains("fuzzy_name"),
+        "note names both the precise floor and the fallback floor: {}",
+        fallback.note
+    );
+
+    // At the fuzzy floor the caller is surfaced.
+    let fuzzy = graph
+        .impact(
+            &symbol_selector("src/target.rs", "did_you_mean"),
+            2,
+            RefConfidence::FuzzyName,
+        )
+        .expect("query impact at fuzzy floor");
+    assert_eq!(fuzzy.visited_nodes, 1);
+    let names: Vec<_> = fuzzy
+        .touched
+        .iter()
+        .map(|entry| entry.qualified_name.as_str())
+        .collect();
+    assert_eq!(names, vec!["crate::caller"]);
+    assert_eq!(fuzzy.touched[0].edge_kind, RefKind::Call);
+    assert!(fuzzy.fallback.is_none());
+}
+
 fn seed_symbol(
     conn: &Connection,
     file_path: &str,
@@ -345,6 +452,30 @@ fn insert_call_ref(
         ],
     )
     .expect("insert call ref");
+}
+
+/// Insert a `fuzzy_name` call ref as the extractor records it: NULL `target_qualified`,
+/// matchable only by `target_name`.
+fn insert_fuzzy_call_ref(
+    conn: &Connection,
+    from_file: &str,
+    span_start: usize,
+    span_end: usize,
+    target_name: &str,
+) {
+    conn.execute(
+        "INSERT INTO refs (
+            from_file, from_span_start, from_span_end, target_name, target_qualified,
+            target_symbol_hint, kind, confidence
+         ) VALUES (?1, ?2, ?3, ?4, NULL, NULL, 'call', 'fuzzy_name')",
+        params![
+            from_file,
+            i64::try_from(span_start).expect("span start fits"),
+            i64::try_from(span_end).expect("span end fits"),
+            target_name,
+        ],
+    )
+    .expect("insert fuzzy call ref");
 }
 
 fn insert_relation(

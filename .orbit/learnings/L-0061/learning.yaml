@@ -1,0 +1,17 @@
+schema_version: 1
+id: L-0061
+status: superseded
+scope:
+  paths:
+  - crates/orbit-common/src/utility/glob.rs
+  - crates/orbit-exec/src/macos_sandbox/sbpl_filter.rs
+  tags: []
+summary: Keep filesystem policy glob regexes aligned with platform case semantics on macOS and Windows
+body: 'ORB-00366 fixed a deny bypass where policy glob regexes and SBPL regex filters were case-sensitive while macOS/Windows filesystem resolution is case-insensitive by default. Future changes to path-policy glob compilation or macOS sandbox regex emission should preserve the platform case model: shared policy globs use `RegexBuilder::case_insensitive(true)` on macOS/Windows, and SBPL glob regexes include an inline case-insensitive flag so case variants such as `Secret.ENV` or `.Orbit` cannot evade deny rules.'
+evidence:
+- kind: task
+  reference: ORB-00366
+superseded_by: L-0062
+created_at: 2026-06-06T20:29:28.690479Z
+updated_at: 2026-06-07T19:12:58.077887Z
+created_by: codex

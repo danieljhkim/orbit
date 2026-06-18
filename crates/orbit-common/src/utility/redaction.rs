@@ -194,17 +194,17 @@ pub fn is_sensitive_env_name(name: &str) -> bool {
 /// Regex-driven scrubber for HTTP-shape and argv-shape secrets.
 ///
 /// Builds to `default()` give you the same coverage as the former
-/// `RedactionMiddleware` (Authorization / x-api-key / Bearer / raw header
-/// lines). Use [`PatternRedactor::with_argv_secrets`] to also catch bare
-/// `sk-…` tokens — needed when scrubbing subprocess argv where a provider
-/// key sometimes ends up mis-configured.
+/// `RedactionMiddleware` (Authorization / x-api-key / URL key params /
+/// Bearer / raw header lines). Use [`PatternRedactor::with_argv_secrets`] to
+/// also catch bare `sk-…` tokens — needed when scrubbing subprocess argv where
+/// a provider key sometimes ends up mis-configured.
 pub struct PatternRedactor {
     patterns: Vec<(Regex, &'static str)>,
 }
 
 impl PatternRedactor {
-    /// HTTP-only default: Authorization / x-api-key / api_key / Bearer in
-    /// both JSON and raw-header form.
+    /// HTTP-only default: Authorization / x-api-key / api_key / URL key
+    /// params / Bearer in both JSON and raw-header form.
     pub fn http_default() -> Self {
         let patterns = vec![
             (
@@ -236,8 +236,51 @@ impl PatternRedactor {
                 "${1}[REDACTED_AUTH]",
             ),
             (
+                Regex::new(r"(?i)([?&]key=)[^&\s]+").expect("valid regex"),
+                "${1}[REDACTED_AUTH]",
+            ),
+            (
                 Regex::new(r"sk-[A-Za-z0-9_\-]{20,}").expect("valid regex"),
                 "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"AIza[0-9A-Za-z_\-]{35}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"glpat-[A-Za-z0-9_\-]{20,}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"github_pat_[A-Za-z0-9_]{22,}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"gh[opsur]_[A-Za-z0-9]{36,}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"AKIA[0-9A-Z]{16}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r#"(?i)("aws[_-]?secret[_-]?access[_-]?key"\s*:\s*")[^"]*""#)
+                    .expect("valid regex"),
+                "${1}[REDACTED_SECRET]\"",
+            ),
+            (
+                Regex::new(r"(?i)\b(aws[_-]?secret[_-]?access[_-]?key\s*=\s*)[^&\s]+")
+                    .expect("valid regex"),
+                "${1}[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"npm_[A-Za-z0-9]{36}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"([A-Za-z][A-Za-z0-9+.\-]*://[^/\s:@?#]+:)[^@\s/?#]+(@)")
+                    .expect("valid regex"),
+                "${1}[REDACTED_SECRET]${2}",
             ),
             (
                 Regex::new(r"ghp_[A-Za-z0-9]{36}").expect("valid regex"),
@@ -329,6 +372,18 @@ fn high_confidence_single_token_patterns() -> &'static [Regex] {
         .get_or_init(|| {
             vec![
                 Regex::new(r"^sk-[A-Za-z0-9_\-]{20,}$").expect("valid regex"),
+                Regex::new(r"^AIza[0-9A-Za-z_\-]{35}$").expect("valid regex"),
+                Regex::new(r"^glpat-[A-Za-z0-9_\-]{20,}$").expect("valid regex"),
+                Regex::new(r"^github_pat_[A-Za-z0-9_]{22,}$").expect("valid regex"),
+                Regex::new(r"^gh[opsur]_[A-Za-z0-9]{36,}$").expect("valid regex"),
+                Regex::new(r"^AKIA[0-9A-Z]{16}$").expect("valid regex"),
+                Regex::new(r"(?i)^aws[_-]?secret[_-]?access[_-]?key=[^&\s]+$")
+                    .expect("valid regex"),
+                Regex::new(r"^npm_[A-Za-z0-9]{36}$").expect("valid regex"),
+                Regex::new(
+                    r"^[A-Za-z][A-Za-z0-9+.\-]*://[^/\s:@?#]+:[^@\s/?#]+@[^/\s?#]+(?:[/?#]\S*)?$",
+                )
+                .expect("valid regex"),
                 Regex::new(r"^ghp_[A-Za-z0-9]{36}$").expect("valid regex"),
                 Regex::new(r"^xox[baprs]-[A-Za-z0-9\-]{10,}$").expect("valid regex"),
             ]

@@ -1,7 +1,7 @@
 // ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Child;
 use std::sync::{Arc, Mutex, mpsc};
@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use super::super::dispatcher::ResolvedSandbox;
 use super::spawn::{SpawnedChild, spawn_child_with_optional_sandbox};
+use orbit_common::utility::output_capture::{BoundedOutputCapture, capture_limit_from_env};
 
 /// Default wall-clock timeout when `AgentLoopSpec::wall_clock_timeout_seconds`
 /// is zero. Matches §7.6 guidance: CLI subprocesses must have a mandatory
@@ -19,6 +20,11 @@ pub(super) const DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS: u64 = 300;
 pub(super) type SpawnOutput = (Vec<u8>, Vec<u8>, Option<i32>, Duration, bool);
 
 const OUTPUT_READER_JOIN_TIMEOUT: Duration = Duration::from_millis(500);
+const CLI_RUNNER_OUTPUT_CAPTURE_LIMIT_ENV: &str = "ORBIT_CLI_RUNNER_OUTPUT_CAPTURE_LIMIT_BYTES";
+const DEFAULT_CLI_RUNNER_OUTPUT_CAPTURE_LIMIT_BYTES: usize = 1024 * 1024;
+const OUTPUT_LINE_EVENT_LIMIT_BYTES: usize = 64 * 1024;
+
+type SharedOutputCapture = Arc<Mutex<BoundedOutputCapture>>;
 
 pub(super) struct SpawnTraceContext<'a> {
     pub(super) provider: &'a str,
@@ -36,6 +42,8 @@ pub(super) struct SpawnWithTimeoutRequest<'a> {
     pub(super) timeout: Duration,
     pub(super) sandbox: Option<&'a ResolvedSandbox>,
     pub(super) trace: SpawnTraceContext<'a>,
+    #[cfg(test)]
+    pub(super) output_capture_limit: Option<usize>,
 }
 
 struct OutputReaderContext {
@@ -45,6 +53,7 @@ struct OutputReaderContext {
     task_id: Option<String>,
     cwd: Option<String>,
     dispatch: tracing::Dispatch,
+    limit_tx: mpsc::Sender<&'static str>,
 }
 
 struct OutputReaderHandle {
@@ -64,6 +73,8 @@ pub(super) fn spawn_with_timeout(
         timeout,
         sandbox,
         trace,
+        #[cfg(test)]
+        output_capture_limit,
     } = request;
 
     let started = Instant::now();
@@ -81,8 +92,13 @@ pub(super) fn spawn_with_timeout(
         });
     }
 
-    let stdout_buf = Arc::new(Mutex::new(Vec::new()));
-    let stderr_buf = Arc::new(Mutex::new(Vec::new()));
+    #[cfg(test)]
+    let output_limit = output_capture_limit.unwrap_or_else(default_output_capture_limit);
+    #[cfg(not(test))]
+    let output_limit = default_output_capture_limit();
+    let stdout_buf = Arc::new(Mutex::new(BoundedOutputCapture::new(output_limit)));
+    let stderr_buf = Arc::new(Mutex::new(BoundedOutputCapture::new(output_limit)));
+    let (output_limit_tx, output_limit_rx) = mpsc::channel();
     let dispatch = tracing::dispatcher::get_default(Clone::clone);
 
     let stdout_reader = child.stdout.take().map(|handle| {
@@ -96,6 +112,7 @@ pub(super) fn spawn_with_timeout(
                 task_id: trace.task_id.map(ToString::to_string),
                 cwd: trace.cwd.map(ToString::to_string),
                 dispatch: dispatch.clone(),
+                limit_tx: output_limit_tx.clone(),
             },
         )
     });
@@ -110,6 +127,7 @@ pub(super) fn spawn_with_timeout(
                 task_id: trace.task_id.map(ToString::to_string),
                 cwd: trace.cwd.map(ToString::to_string),
                 dispatch,
+                limit_tx: output_limit_tx,
             },
         )
     });
@@ -118,6 +136,12 @@ pub(super) fn spawn_with_timeout(
     let deadline = started + timeout;
     let exit_status;
     loop {
+        if output_limit_rx.try_recv().is_ok() {
+            kill_child_process_tree(&mut child);
+            exit_status = None;
+            break;
+        }
+
         match child.try_wait() {
             Ok(Some(status)) => {
                 cleanup_child_process_group(child.id());
@@ -145,16 +169,29 @@ pub(super) fn spawn_with_timeout(
         join_output_reader(h, reader_join_deadline);
     }
 
-    let stdout = stdout_buf.lock().map(|buf| buf.clone()).unwrap_or_default();
-    let stderr = stderr_buf.lock().map(|buf| buf.clone()).unwrap_or_default();
+    let stdout = stdout_buf
+        .lock()
+        .map(|buf| buf.as_bytes().to_vec())
+        .unwrap_or_default();
+    let stderr = stderr_buf
+        .lock()
+        .map(|buf| buf.as_bytes().to_vec())
+        .unwrap_or_default();
     let exit_code = exit_status.as_ref().and_then(|s| s.code());
     let duration = started.elapsed();
     Ok((stdout, stderr, exit_code, duration, timed_out))
 }
 
+fn default_output_capture_limit() -> usize {
+    capture_limit_from_env(
+        CLI_RUNNER_OUTPUT_CAPTURE_LIMIT_ENV,
+        DEFAULT_CLI_RUNNER_OUTPUT_CAPTURE_LIMIT_BYTES,
+    )
+}
+
 fn spawn_output_reader<R>(
     handle: R,
-    buf: Arc<Mutex<Vec<u8>>>,
+    buf: SharedOutputCapture,
     context: OutputReaderContext,
 ) -> OutputReaderHandle
 where
@@ -167,32 +204,50 @@ where
         task_id,
         cwd,
         dispatch,
+        limit_tx,
     } = context;
 
     let (finished_tx, finished) = mpsc::channel();
     let join = thread::spawn(move || {
         tracing::dispatcher::with_default(&dispatch, || {
-            let mut reader = BufReader::new(handle);
-            let mut raw_line = Vec::new();
+            let mut reader = handle;
+            let mut chunk = [0u8; 4096];
+            let mut line_buf = Vec::new();
             loop {
-                raw_line.clear();
-                match reader.read_until(b'\n', &mut raw_line) {
+                match reader.read(&mut chunk) {
                     Ok(0) => break,
-                    Ok(_) => {
-                        buf.lock()
+                    Ok(n) => {
+                        let raw = &chunk[..n];
+                        let exceeded = buf
+                            .lock()
                             .expect("subprocess output buf poisoned")
-                            .extend_from_slice(&raw_line);
-                        emit_output_line(
+                            .push(raw);
+                        emit_output_chunk(
                             &provider,
                             stream,
                             &job_run_id,
                             task_id.as_deref(),
                             cwd.as_deref(),
-                            &raw_line,
+                            raw,
+                            &mut line_buf,
                         );
+                        if exceeded {
+                            let _ = limit_tx.send(stream);
+                            break;
+                        }
                     }
                     Err(_) => break,
                 }
+            }
+            if !line_buf.is_empty() {
+                emit_output_line(
+                    &provider,
+                    stream,
+                    &job_run_id,
+                    task_id.as_deref(),
+                    cwd.as_deref(),
+                    &line_buf,
+                );
             }
         });
         let _ = finished_tx.send(());
@@ -249,6 +304,24 @@ fn signal_child_process_group(child_id: u32, signal: libc::c_int) -> std::io::Re
         Ok(())
     } else {
         Err(error)
+    }
+}
+
+fn emit_output_chunk(
+    provider: &str,
+    stream: &str,
+    job_run_id: &str,
+    task_id: Option<&str>,
+    cwd: Option<&str>,
+    raw: &[u8],
+    line_buf: &mut Vec<u8>,
+) {
+    for segment in raw.split_inclusive(|byte| *byte == b'\n') {
+        line_buf.extend_from_slice(segment);
+        if segment.ends_with(b"\n") || line_buf.len() >= OUTPUT_LINE_EVENT_LIMIT_BYTES {
+            emit_output_line(provider, stream, job_run_id, task_id, cwd, line_buf);
+            line_buf.clear();
+        }
     }
 }
 

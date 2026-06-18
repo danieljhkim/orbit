@@ -26,11 +26,13 @@ The constraints are the point — they're what keep agent-assisted code shippabl
 
 - **Structured audit log.** Every tool call, provider request/response, and task transition becomes a queryable event with agent identity attached — append-only, tamper-evident, exportable. → [docs/design/auditability/](docs/design/auditability/)
 
-- **Knowledge-graph–aware tooling.** Agents query a parsed, content-addressed graph (symbols, imports, callers, implementors) instead of grep. Branch-scoped and safe for parallel rebuild; numbers in [`benchmarks/graph/`](benchmarks/graph/). → [docs/design/knowledge-graph/](docs/design/knowledge-graph/)
+- **Code-graph–aware tooling.** Agents query a parsed SQLite code index (symbols, imports, references, implementors) instead of grep. Per-worktree and regenerable on demand; numbers in [`benchmarks/graph/`](benchmarks/graph/). → [docs/design/orbit-graph/](docs/design/orbit-graph/)
 
 - **Conflict-aware parallel execution.** For `orbit run ship`, each agent run lands in its own git worktree per task, and the gate pipeline reserves task `context_files` as locks before fanning out, rejecting overlapping reservations up front instead of producing merge conflicts later (see [merge throughput chart](docs/assets/merge-throughput.png)). → [docs/design/activity-job/](docs/design/activity-job/)
 
 - **Sandboxed-by-default execution.** Dispatched agent CLIs run under an OS-level sandbox out of the box — FS access scoped to the worktree, network egress gated by per-activity policy. **macOS only today** (via `sandbox-exec`); on Linux/Windows the agent subprocess runs unsandboxed, with in-process FS guards still covering HTTP tools. → [docs/design/policy-sandbox](docs/design/policy-sandbox/)
+
+- **Pluggable executors, no fork.** Register a homegrown out-of-process executor — any binary or script — through a config-only `executor_type: external` def: Orbit spawns it, streams the JSON request envelope over stdin, and maps its exit code to the activity outcome. No recompile, no linking, language-agnostic; copy the [example def](crates/orbit-core/assets/executors/external.example.yaml) to get started. → [docs/design/executors/specs/external-executor-protocol.md](docs/design/executors/specs/external-executor-protocol.md)
 
 ---
 
@@ -192,7 +194,7 @@ Two install surfaces. The CLI gives you the full power of Orbit. Choose the plug
 - `orbit-execute-task` — carry an approved task through implementation and review
 - `orbit-review-task` — file findings on another agent's work without transitioning status
 - `orbit-adr` — author, accept, or supersede an Architecture Decision Record
-- `orbit-graph` — query the parsed knowledge graph (callers, implementors, refs)
+- `orbit-graph` — query the parsed code graph (refs, callees, impact, implementors)
 - `orbit-search` — search tasks, docs, learnings, and ADRs; dedup and related-task lookups
 - `orbit-debug-job-failure` — diagnose failed, stuck, or cancelled runs
 - `orbit-track-issues` — capture agent-self-reported friction with Orbit tooling itself
@@ -228,14 +230,16 @@ Agents discover project docs through `orbit.search`; docs, lock, semantic setup/
 | | `orbit.task.review_thread.list` | List review threads on a task |
 | | `orbit.task.review_thread.reply` | Reply to a thread |
 | | `orbit.task.review_thread.resolve` | Close a thread |
-| **graph** | `orbit.graph.search` | Find symbols / files in the parsed graph |
-| | `orbit.graph.show` | Show a node by id |
+| **graph** | `orbit.graph.search` | Find symbols / strings / config in the parsed graph |
+| | `orbit.graph.show` | Show a node's source and metadata by selector |
 | | `orbit.graph.overview` | Crate / module structural summary |
-| | `orbit.graph.callers` | List callers of a symbol |
-| | `orbit.graph.deps` | List outbound dependencies |
+| | `orbit.graph.refs` | List inbound references / callers of a symbol |
+| | `orbit.graph.callees` | List outbound calls from a symbol |
+| | `orbit.graph.impact` | Bounded blast-radius traversal for a change |
+| | `orbit.graph.trace` | Trace a command handler's call tree |
 | | `orbit.graph.implementors` | List trait implementors |
-| | `orbit.graph.refs` | List references to a symbol |
-| | `orbit.graph.pack` | Bundle a connected slice of the graph for a prompt |
+| | `orbit.graph.deps` | List outbound module / import edges |
+| | `orbit.graph.sync` | Refresh the index (auto-syncs on a watcher) |
 | **search** | `orbit.search` | Unified search across tasks, docs, learnings, and ADRs. `kind` narrows the corpus; `hybrid: true` opts task results into BM25 + cosine ranking; `semantic: "<task-id>"` returns cosine neighbors. Cross-kind filters: `tag` (AND), `all` (kind-aware status widener), `status` (`kind:value` tokens), `path` (selector-mapping for tasks, glob-containment for learnings/ADRs; docs remain content-indexed). |
 | **adr** | `orbit.adr.add` | Author an Architecture Decision Record |
 | | `orbit.adr.update` | Edit an ADR |
@@ -275,7 +279,7 @@ Agents discover project docs through `orbit.search`; docs, lock, semantic setup/
 ├── adrs/                        # proposed/, accepted/, superseded/
 ├── learnings/                   # your team's durable knowledge
 ├── frictions/                   # local friction log + tags.yaml
-├── knowledge/                   # parsed graph artifacts
+├── graph/                       # parsed code-graph index (.db, per worktree)
 ├── resources/                   # activities, jobs, executors, policies (customizable)
 └── state/
     ├── audit/                   # append-only JSONL events

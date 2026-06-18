@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 chrono.workspace = true
 orbit-exec = { path = "../orbit-exec" }
-orbit-knowledge = { path = "../orbit-knowledge" }
 orbit-policy = { path = "../orbit-policy" }
 orbit-common = { path = "../orbit-common" }
 regex.workspace = true
