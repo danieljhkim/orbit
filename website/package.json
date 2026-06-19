@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@astrojs/starlight": "^0.38.4",
-    "astro": "^6.3.1"
+    "astro": "^6.4.6"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.8",
@@ -26,6 +26,8 @@
   },
   "overrides": {
     "yaml": "2.8.3",
-    "esbuild": "0.28.1"
+    "esbuild": "0.28.1",
+    "vite": "7.3.5",
+    "js-yaml": "4.2.0"
   }
 }
