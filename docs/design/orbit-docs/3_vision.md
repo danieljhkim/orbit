@@ -86,7 +86,7 @@ The boundary (rule-with-failure-mode vs. explanatory-context) is the load-bearin
 
 ### 2.2 Orbit ADRs
 
-[docs/design/adr-artifact/](../adr-artifact/) covers the ADR system. ADRs share with docs the "PR-reviewed Markdown" property but differ on lifecycle: ADRs have `proposed → accepted → superseded` and are tool-managed via `orbit.adr.add`. The locating principle ([ADR-0170]) puts them under `.orbit/adrs/`. Whether to fold them into orbit-docs is [ORB-00169].
+[.orbit/adrs/](../../../.orbit/adrs/) is the ADR artifact store. ADRs share with docs the "PR-reviewed Markdown" property but differ on lifecycle: ADRs have `proposed → accepted → superseded` and are tool-managed via `orbit.adr.add`. The locating principle ([ADR-0170]) puts them under `.orbit/adrs/`. Whether to fold them into orbit-docs is [ORB-00169].
 
 ### 2.3 Semantic search
 
@@ -94,7 +94,7 @@ The boundary (rule-with-failure-mode vs. explanatory-context) is the load-bearin
 
 ### 2.4 Knowledge graph
 
-[docs/design/knowledge-graph/](../knowledge-graph/) covers the code-symbol graph orbit-graph indexes. Orbit-docs is *not* a knowledge graph: it has no edges between docs except via `related_artifacts`. Cross-doc linking is plain Markdown relative paths. This is intentional — the knowledge graph is for code identifiers, not narrative content.
+[docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) covers the code-symbol graph orbit-graph indexes. Orbit-docs is *not* a knowledge graph: it has no edges between docs except via `related_artifacts`. Cross-doc linking is plain Markdown relative paths. This is intentional — the knowledge graph is for code identifiers, not narrative content.
 
 ### 2.5 External: docs.rs, devdocs.io
 
@@ -142,7 +142,7 @@ The strict / tolerant split lets the corpus be queryable on day one (tolerant in
 - [2_design.md](./2_design.md) — schema, walker, search, the six verbs
 - [4_decisions.md](./4_decisions.md) — accepted ADRs
 - [docs/design/project-learnings/](../project-learnings/) — sibling knowledge surface; rule-with-failure-mode shape
-- [docs/design/adr-artifact/](../adr-artifact/) — ADR surface; tool-managed lifecycle
+- [.orbit/adrs/](../../../.orbit/adrs/) — ADR artifact store; tool-managed lifecycle
 - [docs/design/orbit-search/](../orbit-search/) — embeddings infrastructure; v2 target for [ORB-00168]
 
 ### 4.2 External

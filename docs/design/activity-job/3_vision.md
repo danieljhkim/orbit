@@ -109,7 +109,7 @@ None of these are research contributions. Activity / Job earns its keep only if 
 - [specs/backend-resolution.md](./specs/backend-resolution.md) — backend concretization and HTTP-only session rule
 - [specs/audit-envelope.md](./specs/audit-envelope.md) — v2 audit event tree and persistence layout
 - [../groundhog/1_overview.md](../groundhog/1_overview.md) — sibling activity kind built on this substrate
-- [../knowledge-graph/1_overview.md](../knowledge-graph/1_overview.md) — graph substrate that sits beside this execution substrate
+- [../knowledge-graph/1_overview.md](../_archive/knowledge-graph/1_overview.md) — graph substrate that sits beside this execution substrate
 
 ### External
 

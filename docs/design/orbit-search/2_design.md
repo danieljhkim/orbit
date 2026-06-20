@@ -343,9 +343,9 @@ All embeddings stay local. Task content never leaves the workspace. This is stru
 
 ## 9. Phase-2 Graph Corpus (Designed, Deferred)
 
-**Status: Designed; deferred until [adr-artifact](../adr-artifact/) v2 ships and bandwidth is available.**
+**Status: Designed; deferred until a fresh ADR-vector indexing design is accepted and bandwidth is available.**
 
-Phase 2 extends the existing `embeddings` table to a second `source_kind` covering both code symbols and design-doc sections, with ADRs joining as a third `source_kind` once adr-artifact v2 lands ([adr-artifact §4.6](../adr-artifact/2_design.md)). No schema migration; the phase-1 `source_kind` discriminator is the seam this section commits against.
+Phase 2 extends the existing `embeddings` table to a second `source_kind` covering both code symbols and design-doc sections, with ADRs joining later as a third `source_kind` once ADR vector indexing has its own accepted design. No schema migration; the phase-1 `source_kind` discriminator is the seam this section commits against.
 
 The audience this corpus serves is the **task-creating / task-executing agent**. The five concrete use cases it enables — "find code that does X", duplicate / near-duplicate detection, task-creation grounding, "have we decided this before?", and glossary resolution — all collapse to one primitive: `orbit.search` filtered by `--kind`.
 
@@ -362,7 +362,7 @@ Allowlist for the first cut:
 
 Excluded as low-signal pending recall evidence: `Field`, `Property`, `Constant`, `ConfigKey`, `Column`, `Macro`, `Delegate`, `Event`, `Global`, `Namespace`, `Package`, `Object`, `CompanionObject`, `SingletonClass`, `SingletonMethod`, `FunctionDeclaration`, `Record`, `Interface`, `TypeAlias`, `Impl`.
 
-**ADR markdown (`docs/design/*/4_decisions.md`) is explicitly excluded** from the doc-section path. Those files are migrating into the ADR artifact store per [adr-artifact §1](../adr-artifact/1_overview.md) and will be retired as hand-maintained docs. Indexing them ahead of the migration would force a re-index pass to remove them.
+**ADR markdown (`docs/design/*/4_decisions.md`) is explicitly excluded** from the doc-section path. ADR bodies are lifecycle-owned under [.orbit/adrs/](../../../.orbit/adrs/), not docs-owned design sections. Indexing local `4_decisions.md` prose as docs would force a re-index pass if ADRs later join as `source_kind = "adr"`.
 
 ### 9.2 Schema reuse
 
@@ -412,11 +412,11 @@ This section deliberately does not commit to:
 - **Code-aware embedding model.** CodeBERT, voyage-code, and similar outperform general-text models on code retrieval but are larger and weaker on English. v1 ships with the BGE-small default ([ADR-001](./4_decisions.md#adr-001--fastembed-rs-onnx-backend-over-candle-llamacpp-or-external-ollama)) and revisits if recall on code queries underperforms.
 - **HNSW upgrade.** The graph corpus may cross the brute-force ceiling. Schema is already forward-compatible with `sqlite-vec` per [ADR-002](./4_decisions.md#adr-002--brute-force-cosine-over-sqlite-blobs-sqlite-vec-reserved-as-phase-2-upgrade); the decision to switch is a separate ADR at the point of operational evidence — see [3_vision.md §1.3](./3_vision.md).
 - **Free-floating file-scope comments.** Comments not attached to any leaf's source span (e.g. section dividers between two `fn`s) are not embedded. The project convention is "default to no comments" so this gap is small and low-signal.
-- **Multi-workspace ADR scoping.** ADRs flow in via the adr-artifact feature, which itself defers cross-workspace scoping ([adr-artifact §8.5](../adr-artifact/2_design.md)).
+- **Multi-workspace ADR scoping.** ADRs would flow in through the ADR store; cross-workspace ADR scoping remains a separate design question.
 
 ### 9.7 Sequencing
 
-Phase 2 is gated on adr-artifact v2 shipping. Implementing the doc-section indexer ahead of that migration would index every `4_decisions.md` and then re-index them out, churning the corpus and the doc-citation graph. Once ADRs are first-class artifacts, the doc-section indexer cleanly excludes `4_decisions.md` and ADRs join as `source_kind = "adr"` through `orbit-embed::vector` per [adr-artifact §4.6](../adr-artifact/2_design.md).
+Phase 2 no longer depends on the removed ADR artifact v2 proposal. Implementing the doc-section indexer should still exclude every `4_decisions.md` so local narrative ADR logs do not churn the doc corpus; ADRs can join as `source_kind = "adr"` through `orbit-embed::vector` when a fresh ADR-vector indexing design exists.
 
 ---
 

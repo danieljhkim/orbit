@@ -47,7 +47,7 @@ Probably some combination; this is a UX problem masquerading as a graph problem.
 - Should the taxonomy be a string-typed open enum, with consumers required to handle unknown types gracefully?
 - Or a closed enum, with type additions as schema migrations?
 
-The closed-enum tradeoff is type safety in Rust at the cost of every consumer having to be updated together. The open-enum tradeoff is flexibility at the cost of consumers needing tolerant code paths. Knowledge-graph chose closed enum + careful versioning ([knowledge-graph ADR-011](../knowledge-graph/4_decisions.md)); lineage may want the same constraint.
+The closed-enum tradeoff is type safety in Rust at the cost of every consumer having to be updated together. The open-enum tradeoff is flexibility at the cost of consumers needing tolerant code paths. Knowledge-graph chose closed enum + careful versioning ([archived knowledge-graph ADR-011](../_archive/knowledge-graph/4_decisions.md)); lineage may want the same constraint.
 
 ### 1.4 Can lineage edges become bidirectional rationale storage?
 
@@ -206,7 +206,7 @@ The honest reading: each of these distinctive properties is small in isolation. 
 
 ### §4.1 Orbit-internal
 
-- [docs/design/knowledge-graph/](../knowledge-graph/) — code-graph substrate; `task_ids` attribution restored in [4_decisions.md ADR-001](./4_decisions.md).
+- [docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) — code-graph substrate; `task_ids` attribution restored in [4_decisions.md ADR-001](./4_decisions.md).
 - [docs/design/task-sync/](../task-sync/) — local-task-id doctrine and external_refs spine.
 - [docs/design/project-learnings/](../project-learnings/) — sibling system; potential third-node-type integration (§1.5).
 - [docs/design/activity-job/](../activity-job/) — runtime parent/child edges via the run store.

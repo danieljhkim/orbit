@@ -20,7 +20,7 @@ The constraints are the point — they're what keep agent-assisted code shippabl
 
 - **Durable, intent-tracked task layer.** Lifecycle (`proposed → backlog → in-progress → review → done`) survives sessions and branches; every commit carries the `task_id`, so `orbit task show` reconstructs prompt, plan, execution trace, and review threads months later. → [docs/design/task-artifacts/](docs/design/task-artifacts/)
 
-- **ADRs as first-class state.** Capture load-bearing decisions as ADR artifacts with status lifecycle (`proposed → accepted → superseded`), owner, related_tasks/features, and supersession chains — authored and queried via `orbit.adr.*`, cross-referenced from task IDs and commit messages. → [docs/design/adr-artifact/](docs/design/adr-artifact/)
+- **ADRs as first-class state.** Capture load-bearing decisions as ADR artifacts with status lifecycle (`proposed → accepted → superseded`), owner, related_tasks/features, and supersession chains — authored and queried via `orbit.adr.*`, cross-referenced from task IDs and commit messages. → [.orbit/adrs/](.orbit/adrs/)
 
 - **Shared learnings, smarter agents.** Non-obvious knowledge — gotchas, root causes, validated approaches — captured once as scoped `L<date>-N` records that inject into any agent's context automatically when relevant code is touched (engine pre-prompt, MCP sidecar, optional `PreToolUse` hook). Authored via `orbit.learning.*`, checked into git so what one agent learns the next one inherits. → [docs/design/project-learnings/](docs/design/project-learnings/)
 

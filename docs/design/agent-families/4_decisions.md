@@ -75,7 +75,7 @@ See full ADR-0151 for context, alternatives considered, and cost analysis.
 
 ## ADR-0167 — Favor claude (opus) for planner role on planning duels and design-shaped plans
 
-**Status:** Proposed · 2026-05-18 · cites [AO-002](../../agent-observations/AO-002/observation.md) · (acceptance pending a related task — see lifecycle note in adr-artifact/2_design.md §5)
+**Status:** Proposed · 2026-05-18 · cites [AO-002](../../agent-observations/AO-002/observation.md) · (acceptance pending a related task — see [CONVENTIONS.md §4](../CONVENTIONS.md#4-adr-template-strict))
 
 **Context.** AO-002 ([Instruction surface shapes plan output, not tool selection](../../agent-observations/AO-002/observation.md)) closed on 2026-05-18 after four experiments spanning four Gemini-as-planner implementation/audit duels and one 4-model cross-read on an identical UX-design task. Three observations recurred across the thread:
 

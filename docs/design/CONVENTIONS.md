@@ -238,7 +238,7 @@ and uses the canonical agent family (`codex`, `claude`, `gemini`, or `grok`).
 | Executors | [docs/design/executors/](./executors/) | claude |
 | Global Store Consolidation | [docs/design/global-store-consolidation/](./global-store-consolidation/) | codex |
 | Groundhog | [docs/design/groundhog/](./groundhog/) | codex |
-| Knowledge graph | [docs/design/knowledge-graph/](./knowledge-graph/) | claude |
+| Knowledge graph | [docs/design/_archive/knowledge-graph/](./_archive/knowledge-graph/) | claude |
 | MCP Session Context | [docs/design/mcp-session-context/](./mcp-session-context/) | codex |
 | Orbit Docs | [docs/design/orbit-docs/](./orbit-docs/) | claude |
 | Orbit Graph | [docs/design/orbit-graph/](./orbit-graph/) | claude |

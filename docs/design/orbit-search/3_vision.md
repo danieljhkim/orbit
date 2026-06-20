@@ -74,13 +74,13 @@ Phase 1 indexes each review-thread message as a separate row. The alternative �
 
 ### 1.7 Phase-2 graph corpus (designed, deferred)
 
-Phase 2 extends the embeddings table to graph leaves — code symbols and design-doc sections, with ADRs joining once [adr-artifact](../adr-artifact/) v2 ships. The phase-2 design is sketched in [2_design.md §9](./2_design.md#9-phase-2-graph-corpus-designed-deferred). Highlights:
+Phase 2 extends the embeddings table to graph leaves — code symbols and design-doc sections, with ADRs joining once a fresh ADR-vector indexing design exists. The phase-2 design is sketched in [2_design.md §9](./2_design.md#9-phase-2-graph-corpus-designed-deferred). Highlights:
 
 - **Corpus** is `LeafKind`-filtered leaves from the knowledge graph (allowlist: `Function`, `Method`, `Module`, `Struct`, `Enum`, `Trait`, `Section`). One indexer covers code and markdown uniformly because both already exist as `LeafKind` variants in [graph/nodes.rs](../../../crates/orbit-knowledge/src/graph/nodes.rs).
 - **Stable IDs** from `BaseNodeFields.identity_key`; **content hashing** reuses `LeafNode.source_hash`; **no schema migration** — the phase-1 `source_kind` discriminator carries the extension.
 - **Indexer** is `orbit-embed::graph_indexer`, consuming a diff stream from `orbit-knowledge::pipeline` after clean rebuilds. Async, mirrors the task indexer.
 - **Three freshness loops** handle stale-row removal: per-rebuild diff, mark-and-sweep anti-join, explicit `--kind=symbol` reindex. Dirty rebuilds are skipped.
-- **Sequencing**: gated on adr-artifact v2 so the doc-section indexer can cleanly exclude `4_decisions.md` and ADRs flow in as `source_kind = "adr"` through the same machinery.
+- **Sequencing**: gated on a separate ADR-vector indexing design so the doc-section indexer can cleanly exclude `4_decisions.md` and ADRs flow in as `source_kind = "adr"` through the same machinery.
 
 Open questions kept for the implementing phase:
 
@@ -148,7 +148,7 @@ The result shape exposes `bm25_rank` and `cosine_rank` separately on every resul
 ### 4.1 Orbit-internal
 
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) — folder layout, frontmatter, ADR template.
-- [docs/design/knowledge-graph/](../knowledge-graph/) — the corpus phase 2 will index. Phase-1 schema is designed to accommodate it.
+- [docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) — the corpus phase 2 will index. Phase-1 schema is designed to accommodate it.
 - [docs/design/task-sync/](../task-sync/) — relevant for whether embeddings should sync across machines (decision: no, embeddings are derivable from text and stay local).
 - [docs/POSITIONING.md](../../POSITIONING.md) — the self-hosted, no-cloud-dependency stance that rules out hosted embedding APIs.
 - [README.md](../../../README.md) — single-binary install posture.

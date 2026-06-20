@@ -14,16 +14,16 @@ tags: ["task-lineage"]
 
 ADR log for the task-lineage feature. Format follows [docs/design/CONVENTIONS.md §4](../CONVENTIONS.md): each entry is `Context · Decision · Consequences`, every entry names at least one Cost, numbers are append-only.
 
-ADR numbers are local to this folder. Cross-folder references (e.g., to `knowledge-graph/4_decisions.md`) use full paths. ADRs whose status is `Proposed` flip to `Accepted` when their implementing task lands; the implementing task's ID is appended to the Status line.
+ADR numbers are local to this folder. Cross-folder references (e.g., to `_archive/knowledge-graph/4_decisions.md`) use full paths. ADRs whose status is `Proposed` flip to `Accepted` when their implementing task lands; the implementing task's ID is appended to the Status line.
 
 ---
 
 ## ADR-001 — Restore code-graph task attribution as the lineage consumer
 
 **Status:** Proposed · 2026-05 · *implementing task TBD*
-**Supersedes:** [knowledge-graph/4_decisions.md ADR-029](../knowledge-graph/4_decisions.md) · [T20260506-11]
+**Supersedes:** [archived knowledge-graph ADR-029](../_archive/knowledge-graph/4_decisions.md) · [T20260506-11]
 
-**Context.** [Knowledge-graph ADR-029](../knowledge-graph/4_decisions.md) removed graph task attribution citing a 10-day audit with 961 `orbit.graph.*` calls and 0 reverse-lookup uses. The audit was correct in its window — there was no consumer of reverse lookup. Lineage is the consumer the audit didn't have: the symbol-grain `co-touches-symbol` edges, the `feature` closure ([2_design.md §5.1](./2_design.md)), and the symbol-biography renderer ([2_design.md §6](./2_design.md)) all require per-node `task_ids` attribution.
+**Context.** [Archived knowledge-graph ADR-029](../_archive/knowledge-graph/4_decisions.md) removed graph task attribution citing a 10-day audit with 961 `orbit.graph.*` calls and 0 reverse-lookup uses. The audit was correct in its window — there was no consumer of reverse lookup. Lineage is the consumer the audit didn't have: the symbol-grain `co-touches-symbol` edges, the `feature` closure ([2_design.md §5.1](./2_design.md)), and the symbol-biography renderer ([2_design.md §6](./2_design.md)) all require per-node `task_ids` attribution.
 
 **Decision.** Restore symbol-grain task attribution on knowledge-graph nodes, narrowed to what lineage's derivation pipeline consumes: `task_ids: Vec<String>` (set, not ordered) on each node, populated by a single pass over commits in the build window. Drop the historical hunk-mapping walker, the `structural_conflict` field, and the task-commits sidecar — those carried cost (per ADR-029, the dominant cost was hunk-coordinate remapping after rename hops) without serving lineage's consumers. Flip ADR-029 to `Superseded by [this ADR + implementing task]` when the implementation lands.
 
@@ -89,7 +89,7 @@ ADR numbers are local to this folder. Cross-folder references (e.g., to `knowled
 
 **Status:** Proposed (cross-machine render deferred from minimal Phase 1) · 2026-05 · *implementing task TBD*
 
-**Context.** Orbit task IDs are workspace-local per [task-sync 2_design.md](../task-sync/2_design.md) and per [knowledge-graph ADR-029](../knowledge-graph/4_decisions.md)'s framing. A "global" lineage graph that merges two engineers' machines requires distributed-consistency machinery far beyond lineage's scope. But cross-engineer presentation is a real need — PR descriptions, audit reports, and shared root-cause analyses want to surface lineage to readers on other machines.
+**Context.** Orbit task IDs are workspace-local per [task-sync 2_design.md](../task-sync/2_design.md) and per [archived knowledge-graph ADR-029](../_archive/knowledge-graph/4_decisions.md)'s framing. A "global" lineage graph that merges two engineers' machines requires distributed-consistency machinery far beyond lineage's scope. But cross-engineer presentation is a real need — PR descriptions, audit reports, and shared root-cause analyses want to surface lineage to readers on other machines.
 
 **Decision.** Lineage chains stay strictly local. The workspace-local commitment is load-bearing for the minimal Phase 1 (it is why the substrate avoids distributed-state machinery entirely). The render-time `external_refs` projection that surfaces cross-engineer output (PR descriptions, audit reports) is **deferred from the minimal first draft** — it is a presentation concern, not a substrate concern, and its specification waits until a consumer that emits cross-engineer output ships.
 
@@ -168,7 +168,7 @@ ADR numbers are local to this folder. Cross-folder references (e.g., to `knowled
 
 **Status:** Proposed · 2026-05 · *implementing task TBD*
 
-**Context.** The biography surface keys every story on a KG `stable_id`. If `stable_id` does not survive the structural changes lineage is meant to outlive (renames, file moves, refactors), biographies orphan and the surface degrades silently. Per [knowledge-graph ADR-010](../knowledge-graph/4_decisions.md), `stable_id` is intended to survive renames and file moves; per [2_design.md §7.2](./2_design.md), it is known *not* to survive extract-into-multiple, inline-into-caller, cross-language ports, and wholesale rewrites. Two responses were on the table. Response A: invest in KG identity-tracking heuristics (similarity matching, AST-shape stitching) to close the orphan cases before lineage ships. Response B: ship lineage on top of today's KG identity, name the orphan cases in the renderer's output, and treat orphan-rate reduction as a follow-up KG investment.
+**Context.** The biography surface keys every story on a KG `stable_id`. If `stable_id` does not survive the structural changes lineage is meant to outlive (renames, file moves, refactors), biographies orphan and the surface degrades silently. Per [archived knowledge-graph ADR-010](../_archive/knowledge-graph/4_decisions.md), `stable_id` is intended to survive renames and file moves; per [2_design.md §7.2](./2_design.md), it is known *not* to survive extract-into-multiple, inline-into-caller, cross-language ports, and wholesale rewrites. Two responses were on the table. Response A: invest in KG identity-tracking heuristics (similarity matching, AST-shape stitching) to close the orphan cases before lineage ships. Response B: ship lineage on top of today's KG identity, name the orphan cases in the renderer's output, and treat orphan-rate reduction as a follow-up KG investment.
 
 **Decision.** Response B. Lineage's biography surface ships on top of today's KG `stable_id` semantics. The renderer surfaces the orphan failure mode explicitly via a footnote when a symbol's biography is shorter than its containing-file biography ([2_design.md §7.4](./2_design.md), §6.2). Mitigations on the lineage side (cross-rename evidence accumulation, path-grain fallback, manual `same_as` stitch) cover the most common cases. Investment in KG identity heuristics is a follow-up gated on the measured orphan rate ([2_design.md §9.4](./2_design.md)).
 

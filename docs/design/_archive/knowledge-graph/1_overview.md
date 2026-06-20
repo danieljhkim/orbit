@@ -12,7 +12,7 @@ tags: ["knowledge-graph"]
 
 # Knowledge Graph — Overview
 
-> **Decommissioned (ORB-00391, 2026-06).** The `orbit-knowledge` (v1) crate this document describes was removed from the workspace; **orbit-graph (v2)** is now the sole graph surface. See [`docs/design/orbit-graph/`](../orbit-graph/1_overview.md) and ADR-0198 (which supersedes ADR-0192). This directory is retained as the historical design record of v1; the mechanisms below no longer ship.
+> **Decommissioned (ORB-00391, 2026-06).** The `orbit-knowledge` (v1) crate this document describes was removed from the workspace; **orbit-graph (v2)** is now the sole graph surface. See [`docs/design/orbit-graph/`](../../orbit-graph/1_overview.md) and ADR-0198 (which supersedes ADR-0192). This directory is retained as the historical design record of v1; the mechanisms below no longer ship.
 
 The knowledge graph is Orbit's durable, queryable codebase map: a content-addressed, branch-scoped tree of directories, files, and extracted symbols. It sits between raw files and the agent prompt so agents can ask *"where is `AgentRuntime` defined?"* without re-reading the repo from scratch. Task attribution was removed in [T20260506-11]; task IDs now remain local commit-search keys rather than graph fields. This compaction pass [T20260430-22] keeps the overview focused on entry-point concepts and leaves mechanism detail to [2_design.md](./2_design.md).
 

@@ -38,7 +38,7 @@ Orbit already stores every piece of evidence the missing context would draw on, 
 
 - **Task store** owns descriptions, plans, execution summaries, status history, and `context_files`.
 - **Git history** owns commit-level attribution via the `[T...]` convention enforced by [CLAUDE.md](../../../CLAUDE.md).
-- **Knowledge graph** owns symbol/file-level structure with stable IDs that survive renames, with a now-removed task attribution layer ([ADR-029](../knowledge-graph/4_decisions.md) / [T20260506-11]).
+- **Knowledge graph** owns symbol/file-level structure with stable IDs that survive renames, with a now-removed task attribution layer ([ADR-029](../_archive/knowledge-graph/4_decisions.md) / [T20260506-11]).
 - **ADR log** owns the supersession chain in `Status` lines ("Superseded by ADR-NNN / [T...]").
 - **Run store** owns activity/job parent-child runtime edges (e.g. `task_gate_pipeline` → `task_pr_pipeline`).
 - **Review threads** own reviewer cross-citations.
@@ -60,7 +60,7 @@ The metaphor is load-bearing in two ways:
 
 ### 1.4 Why ADR-029's removal needs reversing
 
-[ADR-029](../knowledge-graph/4_decisions.md) removed graph task attribution citing a 10-day audit with 0 reverse-lookup uses. That audit was correct *in its window* — there was no consumer of reverse lookup at the time. Lineage is the consumer the audit didn't have. Without per-node `task_ids`, there is no way to key a symbol's biography on the symbol itself; the entire vision collapses to "task-graph that happens to mention code." This design supersedes ADR-029 with the lineage feature as the consumer of record; see [4_decisions.md ADR-001](./4_decisions.md). The kill criterion in ADR-001 is the honesty mechanism: if the biography surface doesn't see real usage, attribution is removed again.
+[ADR-029](../_archive/knowledge-graph/4_decisions.md) removed graph task attribution citing a 10-day audit with 0 reverse-lookup uses. That audit was correct *in its window* — there was no consumer of reverse lookup at the time. Lineage is the consumer the audit didn't have. Without per-node `task_ids`, there is no way to key a symbol's biography on the symbol itself; the entire vision collapses to "task-graph that happens to mention code." This design supersedes ADR-029 with the lineage feature as the consumer of record; see [4_decisions.md ADR-001](./4_decisions.md). The kill criterion in ADR-001 is the honesty mechanism: if the biography surface doesn't see real usage, attribution is removed again.
 
 ### 1.5 Why pull-only inspection is not enough
 
@@ -180,7 +180,7 @@ Biographies survive structural change *only* if KG `stable_id` survives the stru
 | **Symbol-biography renderer (Phase 1 headline read surface)** | [2_design.md §6](./2_design.md), [4_decisions.md ADR-008, ADR-009](./4_decisions.md) | — |
 | **Symbol identity stability across refactors (load-bearing assumption)** | [2_design.md §7](./2_design.md), [4_decisions.md ADR-010](./4_decisions.md) | — |
 | **Open concerns to address one by one** | [2_design.md §9](./2_design.md) | — |
-| Restoration of code-graph task attribution | [4_decisions.md ADR-001](./4_decisions.md) supersedes [knowledge-graph ADR-029](../knowledge-graph/4_decisions.md) | [T20260506-11] |
+| Restoration of code-graph task attribution | [4_decisions.md ADR-001](./4_decisions.md) supersedes [archived knowledge-graph ADR-029](../_archive/knowledge-graph/4_decisions.md) | [T20260506-11] |
 | Deferred: authoring assist, stale-task detection, ADR auto-supersession, additional derivers/closures, cross-machine rendering | [3_vision.md](./3_vision.md) | — |
 | Open questions, prior art, ambitious projections | [3_vision.md](./3_vision.md) | — |
 | Glossary | [references/glossary.md](./references/glossary.md) | — |

@@ -260,7 +260,7 @@ The following are explicitly NOT synced by task sync, regardless of release:
 - **Audit DB (`~/.orbit/orbit.db`).** The audit store is `GlobalOnly` per the [scoping rules](../../../crates/orbit-store/src/scope.rs). Cross-machine aggregation of audit events is its own design problem and has different retention, query, and tamper-evidence requirements than task bundles.
 - **Scoreboards (`.orbit/state/scoreboard/*.json`).** Scoreboards use read-modify-write counter semantics that don't merge cleanly. Reconciliation requires either a coordinator or a fundamentally different model (event-sourced counters), neither of which fits inside task sync.
 - **Job runs (`.orbit/runs/`).** Job-run YAML bundles can be large, contain blob refs, and have their own lifecycle. They are workspace-local execution artifacts; making them team-shared is a separate design.
-- **Knowledge graph (`.orbit/knowledge/`).** The graph is content-addressed and branch-scoped; sharing it has its own design under [docs/design/knowledge-graph/](../knowledge-graph/).
+- **Knowledge graph (`.orbit/knowledge/`).** The graph is content-addressed and branch-scoped; sharing it has its own design under [docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/).
 
 ### 7.2 Online-only mutations
 
