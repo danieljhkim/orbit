@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use orbit_common::types::ReviewThreadStatus;
 use orbit_core::ActorIdentity;
 use orbit_core::OrbitRuntime;
 use orbit_core::TaskStatus;
@@ -12,6 +13,9 @@ use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use serde_json::Value;
 use tower::ServiceExt;
 
+use super::super::review_threads::{
+    AuthorKind, classify_author, parse_status_filter, preview_body,
+};
 use super::super::router;
 use super::test_support::body_json;
 
@@ -383,4 +387,46 @@ async fn list_review_threads_excludes_threads_on_closed_tasks() {
     let stats = &body["stats"];
     assert_eq!(stats["open"].as_u64(), Some(3));
     assert_eq!(stats["total"].as_u64(), Some(3));
+}
+
+#[test]
+fn classify_author_recognizes_known_families_and_models() {
+    assert!(matches!(
+        classify_author("claude"),
+        AuthorKind::Agent { .. }
+    ));
+    assert!(matches!(
+        classify_author("claude-opus-4-7"),
+        AuthorKind::Agent { .. }
+    ));
+    assert!(matches!(
+        classify_author("gpt-5.5"),
+        AuthorKind::Agent { .. }
+    ));
+    assert!(matches!(classify_author("daniel"), AuthorKind::Human));
+    assert!(matches!(classify_author(""), AuthorKind::Human));
+}
+
+#[test]
+fn parse_status_filter_accepts_open_resolved_all() {
+    assert!(matches!(
+        parse_status_filter(Some("open")),
+        Ok(Some(ReviewThreadStatus::Open))
+    ));
+    assert!(matches!(
+        parse_status_filter(Some("resolved")),
+        Ok(Some(ReviewThreadStatus::Resolved))
+    ));
+    assert!(matches!(parse_status_filter(Some("all")), Ok(None)));
+    assert!(matches!(parse_status_filter(None), Ok(None)));
+    assert!(parse_status_filter(Some("bogus")).is_err());
+}
+
+#[test]
+fn preview_body_collapses_and_truncates() {
+    assert_eq!(preview_body("hello\n\nworld"), "hello world");
+    let long: String = "a".repeat(500);
+    let preview = preview_body(&long);
+    assert!(preview.chars().count() <= 161);
+    assert!(preview.ends_with('\u{2026}'));
 }
