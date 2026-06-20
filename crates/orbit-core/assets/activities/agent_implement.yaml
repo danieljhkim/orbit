@@ -77,25 +77,44 @@ spec:
     9. Respect repository instructions for validation. If tests are forbidden,
        do not add or run them. Use the smallest allowed validation that gives
        real confidence.
-    10. Before handoff, run the learning checkpoint: if this task surfaced a
+    10. Do not report a `failed` outcome for environment or sandbox limitations
+        that are unrelated to the correctness of your change. The run's pass/fail
+        signal is taken from your reported outcome alone, so a hard failure here
+        strands an otherwise-clean implementation and skips the downstream
+        commit/push/PR steps. If a validation step cannot run because the
+        sandbox/runner denies an operation — e.g. a test that cannot execute
+        because process spawn, signalling, or `ps` is blocked with `operation not
+        permitted`/EPERM, or any similar permission/sandbox denial — finish the
+        implementation, record in the execution summary exactly which checks could
+        not run and why, and return a success outcome. The CI merge gate runs
+        these checks in an unrestricted environment and is the authoritative
+        arbiter of correctness; let it deal with them. Reserve a failing outcome
+        for cases where your change is genuinely incomplete or wrong.
+    11. If the task truly cannot proceed — a real blocker such as a missing
+        dependency, contradictory requirements, or an unresolvable conflict —
+        set the task status to `blocked` with `orbit.task.update` (including a
+        reason) rather than leaving it silently in `in-progress`. This is
+        distinct from item 10: a blocker means the work cannot be completed, not
+        merely that a check could not run in this environment.
+    12. Before handoff, run the learning checkpoint: if this task surfaced a
         contradicted assumption, recurring failure mode, non-obvious gotcha that
         took more than 10 minutes to debug, or incident-style root cause, follow
         the `orbit-learning` skill and call the `add` action on
         `orbit.learning` (or use that skill's update/supersede flow when it
         points to existing guidance).
         Skip if none apply.
-    11. The task is already in `in-progress` status when this activity fires
+    13. The task is already in `in-progress` status when this activity fires
         (the engine performed workflow admission via `admit_task_for_workflow`
         during worktree setup, before dispatching the implement step). Do **not**
         call `orbit.task.start` — this envelope rule overrides the direct-execution
         start step described in the `orbit-execute-task` skill's Step 3. Proceed
         directly to implementation.
-    12. Persist an execution summary when useful, but do not move the task to
+    14. Persist an execution summary when useful, but do not move the task to
         `review`; the pipeline does that only after commit/merge or PR steps
         succeed. This envelope rule overrides the direct-execution review
         transition described in the `orbit-execute-task` skill's Step 5 and Exit
         Criteria.
-    13. Return a short structured summary. Include a `diff` string only when you
+    15. Return a short structured summary. Include a `diff` string only when you
         can produce it cheaply and accurately.
   tools:
     - orbit.task.*
