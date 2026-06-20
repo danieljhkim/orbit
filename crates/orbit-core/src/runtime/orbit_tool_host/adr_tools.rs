@@ -1,7 +1,7 @@
 //! Host-side dispatch for the `orbit.adr.*` tool surface.
 //!
-//! See `docs/design/adr-artifact/2_design.md` §6 for the tool surface and §5
-//! for the lifecycle rules enforced here.
+//! See `docs/design/CONVENTIONS.md` §4 for the authoring rules and `.orbit/adrs/`
+//! for the persisted artifact store.
 
 use std::str::FromStr;
 

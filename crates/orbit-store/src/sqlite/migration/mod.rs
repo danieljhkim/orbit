@@ -112,8 +112,8 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
             -- Arrays (related_features, related_tasks, tags, paths, legacy_ids,
             -- supersedes, validation_warnings) are stored as JSON-encoded strings
             -- so filters can use `LIKE '%"<value>"%'` until the corpus warrants junction
-            -- tables. Per ADR-010 in docs/design/adr-artifact, FTS5 over body
-            -- content is owned by `orbit-search::vector`, not this schema.
+            -- tables. FTS5 over body content is owned by `orbit-search::vector`,
+            -- not this schema.
             CREATE TABLE IF NOT EXISTS adrs (
                 id TEXT PRIMARY KEY,
                 status TEXT NOT NULL,

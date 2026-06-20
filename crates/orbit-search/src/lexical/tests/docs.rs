@@ -152,7 +152,7 @@ fn score_adr_record_matches_tags() {
 fn adr_paths_containment_matches_positive_and_negative_cases() {
     let paths = vec![
         "crates/orbit-search/**".to_string(),
-        "docs/design/adr-artifact/**".to_string(),
+        "docs/design/orbit-search/**".to_string(),
     ];
 
     assert!(

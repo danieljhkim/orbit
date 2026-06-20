@@ -82,7 +82,7 @@ The existing `orbit-store::file::task_store` implementation is the baseline. It 
 
 ### 2.2 Orbit ADR artifacts
 
-[docs/design/adr-artifact/](../adr-artifact/) uses the same envelope-plus-Markdown pattern this design recommends. The ADR design also introduces globally unique monotonic IDs (`ADR-NNNN`). That is the closest internal precedent for `ORB-00000`, though task artifacts deliberately avoid old task ID aliases.
+The ADR artifact store under [.orbit/adrs/](../../../.orbit/adrs/) uses the same envelope-plus-Markdown pattern this design recommends. ADRs also use globally unique monotonic IDs (`ADR-NNNN`). That is the closest internal precedent for `ORB-00000`, though task artifacts deliberately avoid old task ID aliases.
 
 ### 2.3 Orbit task sync
 
@@ -132,7 +132,7 @@ Orbit tasks should feel local and inspectable without forcing every user into a 
 
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) - design folder layout and ADR rules.
 - [docs/design/task-sync/](../task-sync/) - current sync proposal over the existing task layout.
-- [docs/design/adr-artifact/](../adr-artifact/) - internal precedent for envelope plus Markdown body and monotonic artifact IDs.
+- [.orbit/adrs/](../../../.orbit/adrs/) - internal precedent for envelope plus Markdown body and monotonic artifact IDs.
 - [docs/design/task-lineage/](../task-lineage/) - typed task relationships and derivation questions.
 - [docs/design/orbit-search/](../orbit-search/) - per-field indexing of task text.
 - [docs/POSITIONING.md](../../POSITIONING.md) - product doctrine that currently treats task IDs as local search keys.

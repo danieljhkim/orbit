@@ -213,7 +213,7 @@ The lineage system is **not** a separate graph that happens to reference code-gr
 
 ### 4.1 Stable IDs across planes
 
-Code-graph nodes already carry `stable_id: node:<nanoid-21>` per [knowledge-graph ADR-010](../knowledge-graph/4_decisions.md). Task nodes use their existing `task_id`. The two ID namespaces don't overlap (different prefix, different shape), so a single `node_id` column with a kind discriminator works in any traversal query.
+Code-graph nodes already carry `stable_id: node:<nanoid-21>` per [archived knowledge-graph ADR-010](../_archive/knowledge-graph/4_decisions.md). Task nodes use their existing `task_id`. The two ID namespaces don't overlap (different prefix, different shape), so a single `node_id` column with a kind discriminator works in any traversal query.
 
 ### 4.2 Cross-plane closure queries
 
@@ -237,7 +237,7 @@ The "what code did this lineage touch?" query joins the result onto `task_code_e
 
 ### 4.3 KG attribution restoration
 
-Phase 1 requires reviving the symbol-grain `task_ids` attribution removed by [knowledge-graph ADR-029](../knowledge-graph/4_decisions.md). The new attribution is shaped narrowly for lineage's needs:
+Phase 1 requires reviving the symbol-grain `task_ids` attribution removed by [archived knowledge-graph ADR-029](../_archive/knowledge-graph/4_decisions.md). The new attribution is shaped narrowly for lineage's needs:
 
 - **What's persisted on graph nodes:** `task_ids: Vec<String>` (set, not ordered list); no per-hunk attribution; no historical task_ids beyond what current commits attribute.
 - **What's not persisted:** the old hunk-mapping walker, the `structural_conflict` field, the task-commits sidecar.
@@ -286,7 +286,7 @@ A graph dump is not oral history. An agent that loads a symbol's biography shoul
 >
 > **Removed in [T20260510-17]** — supersedes both prior tasks. The agent-facing skill instructions were dropped because lock arbitration moved into the runtime. Status: done. Note: this task's execution summary acknowledged that [README.md:27](../../../README.md) sales copy still describes the removed feature (still-live as of biography render).
 >
-> Cross-references: [knowledge-graph ADR-029](../knowledge-graph/4_decisions.md) governs this symbol's domain; superseded by lineage [4_decisions.md ADR-001](./4_decisions.md).
+> Cross-references: [archived knowledge-graph ADR-029](../_archive/knowledge-graph/4_decisions.md) governs this symbol's domain; superseded by lineage [4_decisions.md ADR-001](./4_decisions.md).
 
 That output is what an agent loading the symbol gets. Each line traces back to a specific edge in the substrate; the agent can audit every claim.
 
@@ -322,7 +322,7 @@ The biography surface (§6) keys every story on a KG `stable_id`. If `stable_id`
 
 ### 7.1 What KG stable_id guarantees today
 
-Per [knowledge-graph ADR-010](../knowledge-graph/4_decisions.md), `stable_id: node:<nanoid-21>` is allocated on a node's first appearance and intended to survive renames and file moves. Concretely:
+Per [archived knowledge-graph ADR-010](../_archive/knowledge-graph/4_decisions.md), `stable_id: node:<nanoid-21>` is allocated on a node's first appearance and intended to survive renames and file moves. Concretely:
 
 - **File rename** (`a.rs` → `b.rs`): file-node `stable_id` survives; child-symbol `stable_id`s survive.
 - **Symbol rename within file** (`fn foo` → `fn bar`): symbol `stable_id` survives.
@@ -355,11 +355,11 @@ The cases where stability *does* hold cover the dominant refactor patterns in lo
 
 1. **Confidence is heuristic.** The numbers in §2.3 are starting points. Real calibration requires a labeled dataset of edge correctness, which doesn't exist yet. Phase 1 ships with the heuristic numbers; calibration is a follow-up.
 
-2. **KG attribution restoration costs.** [Knowledge-graph ADR-029](../knowledge-graph/4_decisions.md) removed attribution citing zero reverse-lookup uses. We're restoring it for one consumer (the biography surface). If Phase 1's biography surface doesn't drive enough adoption to justify the cost, the right move is to roll back attribution again — not to invent more consumers to justify a sunk cost. [4_decisions.md ADR-001](./4_decisions.md) names the kill criterion.
+2. **KG attribution restoration costs.** [Archived knowledge-graph ADR-029](../_archive/knowledge-graph/4_decisions.md) removed attribution citing zero reverse-lookup uses. We're restoring it for one consumer (the biography surface). If Phase 1's biography surface doesn't drive enough adoption to justify the cost, the right move is to roll back attribution again — not to invent more consumers to justify a sunk cost. [4_decisions.md ADR-001](./4_decisions.md) names the kill criterion.
 
 3. **Edge-type taxonomy is intentionally narrow.** Phase 1 populates 7 task-task and 4 task-code edge types (§1.1). Adding more later is a schema-tolerant change (the column is free-form TEXT) but every consumer that ships against the smaller set will need to be updated when new types arrive. Cost: future consumers may need updates rather than naturally absorbing new types.
 
-4. **The bipartite bridge means lineage's correctness is partly the graph's correctness.** A KG attribution bug shows up as wrong lineage edges. This is acceptable because the graph is the authoritative substrate, but it does mean lineage inherits the graph's failure modes. ([Knowledge-graph 2_design.md](../knowledge-graph/2_design.md) covers those.)
+4. **The bipartite bridge means lineage's correctness is partly the graph's correctness.** A KG attribution bug shows up as wrong lineage edges. This is acceptable because the graph is the authoritative substrate, but it does mean lineage inherits the graph's failure modes. ([Knowledge-graph 2_design.md](../_archive/knowledge-graph/2_design.md) covers those.)
 
 5. **Lineage cannot resurrect lost rationale.** If a task's `description` and `execution_summary` were terse, the biography surfaces them but they don't say much. Lineage amplifies the existing record's value; it does not generate retrospective rationale where none was written. The cure is task-authoring quality, not lineage.
 

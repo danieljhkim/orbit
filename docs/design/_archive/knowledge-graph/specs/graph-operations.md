@@ -19,7 +19,7 @@ The taxonomy itself may still inform a future graph write tool. ADR-010 captures
 
 ## Historical Reference
 
-The full original spec is preserved in git history at commit [`aa0950a2`](aa0950a2)'s parent (the `[T20260426-0622]` predecessor commit) and earlier. Run `git log --follow -- docs/design/knowledge-graph/specs/graph-operations.md` to retrieve it.
+The full original spec is preserved in git history at commit [`aa0950a2`](aa0950a2)'s parent (the `[T20260426-0622]` predecessor commit) and earlier. Run `git log --follow -- docs/design/_archive/knowledge-graph/specs/graph-operations.md` to retrieve it.
 
 ## Task References
 

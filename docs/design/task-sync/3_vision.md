@@ -142,7 +142,7 @@ Task sync inherits the team's existing git auth posture. Whatever the team uses 
 - [docs/POSITIONING.md](../../POSITIONING.md) — the per-engineer-deployment doctrine that motivates this design.
 - [README.md](../../../README.md) — `Direction of travel` section names shared-host as the team-coordination direction; task sync slots underneath that as a git-native mechanism.
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) — folder layout, frontmatter, ADR template.
-- [docs/design/knowledge-graph/](../knowledge-graph/) — content-addressed branch-scoped storage; relevant precedent for "Orbit data lives in branch-aware structures."
+- [docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) — content-addressed branch-scoped storage; relevant precedent for "Orbit data lives in branch-aware structures."
 - [docs/design/auditability/](../auditability/) — relevant for understanding why audit DB is explicitly out-of-scope for task sync.
 
 ### 4.2 External

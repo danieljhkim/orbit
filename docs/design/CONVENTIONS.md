@@ -232,7 +232,7 @@ Until those exist: cross-review and author judgment are the quality mechanism. W
 | Activity / Job | [docs/design/activity-job/](./activity-job/) | codex |
 | Auditability | [docs/design/auditability/](./auditability/) | codex |
 | Groundhog | [docs/design/groundhog/](./groundhog/) | codex |
-| Knowledge graph | [docs/design/knowledge-graph/](./knowledge-graph/) | claude |
+| Knowledge graph | [docs/design/_archive/knowledge-graph/](./_archive/knowledge-graph/) | claude |
 | Policy & Sandboxing | [docs/design/policy-sandbox/](./policy-sandbox/) | claude |
 | Project Learnings | [docs/design/project-learnings/](./project-learnings/) | claude |
 | Task Artifacts | [docs/design/task-artifacts/](./task-artifacts/) | codex |

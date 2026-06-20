@@ -114,9 +114,8 @@ impl AdrStatus {
 
 /// Whether an ADR has been flagged with legacy-validation warnings.
 ///
-/// See ADR-011 of the adr-artifact design. `Warned` means
-/// [`Adr::validation_warnings`] is non-empty and the record was admitted
-/// despite failing one or more soft checks.
+/// `Warned` means [`Adr::validation_warnings`] is non-empty and the record was
+/// admitted despite failing one or more soft checks.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "snake_case")]
@@ -152,7 +151,7 @@ impl FromStr for LegacyValidation {
 
 /// Architecture Decision Record.
 ///
-/// See `docs/design/adr-artifact/2_design.md` §1 for the canonical schema.
+/// See the ADR artifact store under `.orbit/adrs/` for persisted envelopes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Adr {
     pub id: String,

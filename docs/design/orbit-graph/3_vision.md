@@ -97,7 +97,7 @@ V1 expects the MCP server to keep a `Graph` handle open across calls (5ms per-ca
 
 ### 2.1 Orbit-internal
 
-- **`orbit-knowledge`** is the immediate predecessor and the system being replaced. Its design is documented at [docs/design/knowledge-graph/](../knowledge-graph/). The V1 spec ([`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md)§1) enumerates the specific failures driving the rewrite.
+- **`orbit-knowledge`** is the immediate predecessor and the system being replaced. Its design is documented at [docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/). The V1 spec ([`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md)§1) enumerates the specific failures driving the rewrite.
 - **`orbit-search`** is the cross-cutting search surface that fronts task / doc / learning / ADR queries. `orbit graph search` should plug into the same retrieval shape so agents don't learn two query languages.
 
 ### 2.2 LSP-based code intelligence
@@ -131,7 +131,7 @@ The reframe in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §2 — "the graph is a 
 
 - [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) — the prescriptive V1 spec
 - [docs/design/orbit-graph/2_design.md](./2_design.md) — design overview
-- [docs/design/knowledge-graph/](../knowledge-graph/) — the predecessor (`orbit-knowledge`)
+- [docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) — the predecessor (`orbit-knowledge`)
 - [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) — workspace crate layering rules
 
 ### 4.2 External
