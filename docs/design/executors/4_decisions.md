@@ -1,7 +1,7 @@
 ---
 title: Executors — Decisions
 owner: claude
-last_updated: 2026-06-13
+last_updated: 2026-06-20
 status: Draft
 feature: executors
 doc_role: decisions
@@ -10,7 +10,7 @@ summary: ADR log for executor registration and the External Executor Protocol.
 tags: [executors]
 paths: ["crates/orbit-engine/src/executor/**", "crates/orbit-common/src/types/executor_def.rs"]
 related_features: [executors]
-related_artifacts: [ORB-00384, ADR-0196]
+related_artifacts: [ORB-00384, ORB-00400, ADR-0196]
 ---
 
 # Executors — Decisions
@@ -20,6 +20,14 @@ by ascending global ADR number. Each entry is the long-form narrative keyed on a
 global ID allocated through `orbit.adr.add`; the ADR store is the source of truth
 for status, owner, `related_features`, and `related_tasks`. Resolve any global ID
 with `orbit tool run orbit.adr.show --input '{"id":"ADR-0196"}'`.
+
+Layout note: as of [ORB-00400], this folder is intentionally decisions+specs-only.
+[ADR-0196] and [specs/external-executor-protocol.md](./specs/external-executor-protocol.md)
+are the load-bearing docs for the shipped External Executor Protocol; placeholder
+`1_overview.md`, `2_design.md`, and `3_vision.md` docs would imply a broader
+executor feature narrative that this work has not established. Add numbered docs
+only when a future executor-architecture task owns that narrative, and retire
+this exception in the same PR.
 
 ---
 
@@ -43,5 +51,6 @@ with `orbit tool run orbit.adr.show --input '{"id":"ADR-0196"}'`.
 ## Task References
 
 - **[ORB-00384]** — External Executor Protocol v1: define the contract, add `ExecutorType::External`, register a generic external-process executor, document the spec, ship a conformance test.
+- **[ORB-00400]** — recorded the `executors` folder as a decisions+specs-only layout exception while refreshing design-doc ownership conventions.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
