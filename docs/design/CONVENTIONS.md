@@ -1,7 +1,7 @@
 ---
 title: Design Doc Conventions
 owner: daniel
-last_updated: 2026-05-20
+last_updated: 2026-06-20
 status: Accepted
 ---
 
@@ -227,12 +227,22 @@ Until those exist: cross-review and author judgment are the quality mechanism. W
 
 ## 12. Ownership
 
+The `Lead` value mirrors each live feature folder's frontmatter `owner:` field
+and uses the canonical agent family (`codex`, `claude`, `gemini`, or `grok`).
+
 | Feature | Folder | Lead |
 |---------|--------|------|
 | Activity / Job | [docs/design/activity-job/](./activity-job/) | codex |
+| Agent Families | [docs/design/agent-families/](./agent-families/) | grok |
 | Auditability | [docs/design/auditability/](./auditability/) | codex |
+| Executors | [docs/design/executors/](./executors/) | claude |
+| Global Store Consolidation | [docs/design/global-store-consolidation/](./global-store-consolidation/) | codex |
 | Groundhog | [docs/design/groundhog/](./groundhog/) | codex |
 | Knowledge graph | [docs/design/_archive/knowledge-graph/](./_archive/knowledge-graph/) | claude |
+| MCP Session Context | [docs/design/mcp-session-context/](./mcp-session-context/) | codex |
+| Orbit Docs | [docs/design/orbit-docs/](./orbit-docs/) | claude |
+| Orbit Graph | [docs/design/orbit-graph/](./orbit-graph/) | claude |
+| Orbit Search | [docs/design/orbit-search/](./orbit-search/) | claude |
 | Policy & Sandboxing | [docs/design/policy-sandbox/](./policy-sandbox/) | claude |
 | Project Learnings | [docs/design/project-learnings/](./project-learnings/) | claude |
 | Task Artifacts | [docs/design/task-artifacts/](./task-artifacts/) | codex |
