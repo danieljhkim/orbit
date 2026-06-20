@@ -31,24 +31,20 @@ docs/design/<feature>/
 - No `README.md`, `roadmap.md`, `changelog.md`, `tutorial.md` at this level.
 - No top-level narrative files outside the numbered four (`1_`–`4_`). Existing folders may vary; new work should prefer the layout for coherence.
 
+**Starting a new feature?** Copy the ready-made scaffold, then fill the placeholders:
+
+```sh
+cp -r docs/design/_templates docs/design/<feature>
+mv docs/design/<feature>/specs/_mechanism.md docs/design/<feature>/specs/<mechanism>.md
+```
+
+The [`_templates/`](./_templates/) files carry the required frontmatter and section skeletons. They are the canonical copy source — the sections below describe only the *rules*, and point at the template they instantiate instead of repeating the boilerplate.
+
 ---
 
 ## 2. Required Frontmatter (all numbered docs)
 
-Every numbered design doc starts with YAML frontmatter:
-
-```yaml
----
-title: <Feature> — <Doc Role>
-owner: <agent family — codex, claude, grok, or gemini>
-last_updated: YYYY-MM-DD
-status: <Draft | Accepted>
-feature: <feature-slug — matches the folder name>
-doc_role: <overview | design | vision | decisions>
----
-
-# <Feature> — <Doc Role>
-```
+Every numbered design doc starts with the YAML frontmatter carried by the [`_templates/`](./_templates/) `N_*.md` files — copy it and fill the placeholders. The fields:
 
 - `title` mirrors the H1 verbatim.
 - `owner` is the accountable agent family, not a committer list or full model string.
@@ -57,20 +53,7 @@ doc_role: <overview | design | vision | decisions>
 - `feature` is the folder slug (e.g. `groundhog`, `knowledge-graph`). Lets tooling group docs by feature without parsing paths.
 - `doc_role` is one of `overview`, `design`, `vision`, `decisions` — corresponds 1:1 with the filename prefix `1_`/`2_`/`3_`/`4_`.
 
-Orbit-docs also indexes any configured Markdown doc with this retrieval frontmatter. For numbered design docs, keep the fields above and add at least `type` and `summary`:
-
-```yaml
----
-type: design | pattern | context | glossary | runbook
-summary: One-line hook for agent retrieval
-tags: [feature-slug]
-paths: ["crates/orbit-cli/**"]
-related_features: [feature-slug]
-related_artifacts: [ORB-00160, ADR-0168, L-0003]
----
-```
-
-`type` and `summary` are required by the strict parser. `summary` must be a non-empty single line. `related_artifacts` accepts `ORB-NNNNN`, `L-NNNN`, `FYYYY-MM-NNN`, and `ADR-NNNN` strings. The tolerant indexer infers these fields for legacy design docs and pattern docs, but new docs should write them explicitly. Orbit-docs does not index `.orbit/`; ADR bodies remain owned by `orbit-adr`.
+The template frontmatter also carries the orbit-docs retrieval fields (`type`, `summary`, `tags`, `paths`, `related_features`, `related_artifacts`) so the doc is indexable on day one. `type` and `summary` are required by the strict parser. `summary` must be a non-empty single line. `related_artifacts` accepts `ORB-NNNNN`, `L-NNNN`, `FYYYY-MM-NNN`, and `ADR-NNNN` strings. The tolerant indexer infers these fields for legacy design docs and pattern docs, but new docs should write them explicitly. Orbit-docs does not index `.orbit/`; ADR bodies remain owned by `orbit-adr`.
 
 ---
 
@@ -93,20 +76,7 @@ Every numbered doc ends with a **Task References** section listing only the task
 
 **Allocation order is non-negotiable.** Before writing the heading or body, allocate the global ID via `orbit.adr.add` (see the `orbit-adr` skill and [ADR-0153]). The local heading then uses the allocated global ID verbatim — never invent a four-digit number that "looks global." The store is the source of truth for ID, status, owner, `related_features`, and `related_tasks`; the local `4_decisions.md` entry is the long-form narrative log keyed on that same global ID.
 
-```
-## ADR-NNNN — <short title, noun phrase>
-
-**Status:** <Accepted | Proposed | Superseded by ADR-MMMM> · YYYY-MM · [T...]
-
-**Context.** <1–3 sentences. Why this forced a decision.>
-
-**Decision.** <1–3 sentences. What we chose.>
-
-**Consequences.**
-- <bullet>
-- <bullet>
-- Cost: <explicit tradeoff — every ADR must name at least one cost>
-```
+Copy the ADR block from [`_templates/4_decisions.md`](./_templates/4_decisions.md): a `## ADR-NNNN — <title>` heading, a `**Status:** <status> · YYYY-MM · [task]` line, then `Context` / `Decision` / `Consequences`, where the Consequences list ends with a `Cost:` bullet.
 
 Rules:
 
@@ -140,15 +110,7 @@ When a cluster of accepted ADRs all instantiate the same underlying decision (e.
 
 ## 5. Glossary Format
 
-```
-# Glossary: <Feature>
-
-<One paragraph: what's in scope, what's deliberately excluded (generic terms).>
-
-| Term | Meaning |
-|------|---------|
-| **Term** | Definition with cross-ref to [2_design.md §X]. |
-```
+Copy [`_templates/references/glossary.md`](./_templates/references/glossary.md): an intro paragraph (scope and deliberate exclusions) followed by an alphabetized `Term | Meaning` table.
 
 Rules:
 
@@ -160,15 +122,7 @@ Rules:
 
 ## 6. Spec Format (`specs/<mechanism>.md`)
 
-```
-# Spec: <Mechanism>
-
-<One-paragraph contract statement.>
-
-## Why This Exists
-## <Mechanism-specific sections>
-## Agent Signature (optional — who last revised)
-```
+Copy [`_templates/specs/_mechanism.md`](./_templates/specs/_mechanism.md): a one-paragraph contract statement, a **Why This Exists** section, mechanism-specific sections, and an optional **Agent Signature**.
 
 A spec is **prescriptive**. It names invariants ("writes do not fall back"), failure modes ("detached HEAD errors"), and migration paths. It is *not* a design-rationale doc — rationale lives in `4_decisions.md`.
 
@@ -227,8 +181,9 @@ Until those exist: cross-review and author judgment are the quality mechanism. W
 
 ## 12. Ownership
 
-The `Lead` value mirrors each live feature folder's frontmatter `owner:` field
-and uses the canonical agent family (`codex`, `claude`, `gemini`, or `grok`).
+The `Lead` value mirrors each feature folder's frontmatter `owner:` field and
+uses the canonical agent family (`codex`, `claude`, `gemini`, or `grok`).
+Retired features stay listed with their `_archive/` path as a historical record.
 
 | Feature | Folder | Lead |
 |---------|--------|------|
@@ -236,7 +191,7 @@ and uses the canonical agent family (`codex`, `claude`, `gemini`, or `grok`).
 | Agent Families | [docs/design/agent-families/](./agent-families/) | grok |
 | Auditability | [docs/design/auditability/](./auditability/) | codex |
 | Executors | [docs/design/executors/](./executors/) | claude |
-| Global Store Consolidation | [docs/design/global-store-consolidation/](./global-store-consolidation/) | codex |
+| Global Store Consolidation | [docs/design/_archive/global-store-consolidation/](./_archive/global-store-consolidation/) | codex |
 | Groundhog | [docs/design/groundhog/](./groundhog/) | codex |
 | Knowledge graph | [docs/design/_archive/knowledge-graph/](./_archive/knowledge-graph/) | claude |
 | MCP Session Context | [docs/design/mcp-session-context/](./mcp-session-context/) | codex |
@@ -246,7 +201,6 @@ and uses the canonical agent family (`codex`, `claude`, `gemini`, or `grok`).
 | Policy & Sandboxing | [docs/design/policy-sandbox/](./policy-sandbox/) | claude |
 | Project Learnings | [docs/design/project-learnings/](./project-learnings/) | claude |
 | Task Artifacts | [docs/design/task-artifacts/](./task-artifacts/) | codex |
-| Task Lineage | [docs/design/task-lineage/](./task-lineage/) | claude |
 | Task Sync | [docs/design/task-sync/](./task-sync/) | claude |
 | User Interface | [docs/design/user-interface/](./user-interface/) | gemini |
 | Worktree Artifacts | [docs/design/worktree-artifacts/](./worktree-artifacts/) | codex |

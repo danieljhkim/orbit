@@ -133,7 +133,6 @@ Orbit tasks should feel local and inspectable without forcing every user into a 
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) - design folder layout and ADR rules.
 - [docs/design/task-sync/](../task-sync/) - current sync proposal over the existing task layout.
 - [.orbit/adrs/](../../../.orbit/adrs/) - internal precedent for envelope plus Markdown body and monotonic artifact IDs.
-- [docs/design/task-lineage/](../task-lineage/) - typed task relationships and derivation questions.
 - [docs/design/orbit-search/](../orbit-search/) - per-field indexing of task text.
 - [docs/POSITIONING.md](../../POSITIONING.md) - product doctrine that currently treats task IDs as local search keys.
 

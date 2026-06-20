@@ -1,8 +1,8 @@
 ---
 title: Global Store Consolidation — Overview
 owner: codex
-last_updated: 2026-05-23
-status: Draft
+last_updated: 2026-06-20
+status: Accepted
 feature: global-store-consolidation
 doc_role: overview
 type: design
@@ -14,6 +14,8 @@ related_artifacts: [ORB-00276, ADR-0183]
 ---
 
 # Global Store Consolidation — Overview
+
+> **Archived (2026-06) — completed feature, historical record.** The consolidation described here shipped under [ORB-00276]: v2 audit, job-run, and session-learning state now live in the global SQLite store (`crates/orbit-store/src/sqlite/`). This folder was moved out of the active design set during a docs-cleanup pass; it is retained as the design record behind **ADR-0183** (still allocated in the store). No further design work is tracked here.
 
 High-cardinality, machine-only runtime stores now use the existing global SQLite database instead of JSON-per-record workspace files.
 
@@ -37,7 +39,7 @@ The v2 audit envelope, job-run lifecycle, and session-learning stores grow quick
 | SQLite schema | `crates/orbit-store/src/sqlite/migration/mod.rs` | ORB-00276 |
 | Store APIs | `crates/orbit-store/src/sqlite/*_store/mod.rs` | ORB-00276 |
 | Runtime bootstrap import | `crates/orbit-core/src/runtime/builder.rs` | ORB-00276 |
-| Decision | `docs/design/global-store-consolidation/4_decisions.md` | ORB-00276 |
+| Decision | `docs/design/_archive/global-store-consolidation/4_decisions.md` | ORB-00276 |
 
 ## Task References
 

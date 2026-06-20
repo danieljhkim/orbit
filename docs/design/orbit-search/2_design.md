@@ -408,7 +408,7 @@ Three loops at increasing scope:
 
 This section deliberately does not commit to:
 
-- **Symbol → ADR back-link as a precomputed edge.** Falls out of a future vector-ranked ADR search path once ADRs are vector-indexed. Precomputing top-k matches per symbol is a phase-3 optimization tied to the task-lineage feature, not a v1 requirement.
+- **Symbol → ADR back-link as a precomputed edge.** Falls out of a future vector-ranked ADR search path once ADRs are vector-indexed. Precomputing top-k matches per symbol is a phase-3 optimization, not a v1 requirement.
 - **Code-aware embedding model.** CodeBERT, voyage-code, and similar outperform general-text models on code retrieval but are larger and weaker on English. v1 ships with the BGE-small default ([ADR-001](./4_decisions.md#adr-001--fastembed-rs-onnx-backend-over-candle-llamacpp-or-external-ollama)) and revisits if recall on code queries underperforms.
 - **HNSW upgrade.** The graph corpus may cross the brute-force ceiling. Schema is already forward-compatible with `sqlite-vec` per [ADR-002](./4_decisions.md#adr-002--brute-force-cosine-over-sqlite-blobs-sqlite-vec-reserved-as-phase-2-upgrade); the decision to switch is a separate ADR at the point of operational evidence — see [3_vision.md §1.3](./3_vision.md).
 - **Free-floating file-scope comments.** Comments not attached to any leaf's source span (e.g. section dividers between two `fn`s) are not embedded. The project convention is "default to no comments" so this gap is small and low-signal.
