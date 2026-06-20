@@ -201,7 +201,10 @@ enum AuthorKindFilter {
     Agent,
 }
 
-fn parse_status_filter(raw: Option<&str>) -> Result<Option<ReviewThreadStatus>, String> {
+// `pub(super)` widened so the sibling test module
+// (`src/api/tests/review_threads.rs`) can exercise the helper. Used only
+// by handlers in this file plus tests.
+pub(super) fn parse_status_filter(raw: Option<&str>) -> Result<Option<ReviewThreadStatus>, String> {
     let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(None);
     };
@@ -322,7 +325,8 @@ fn project_thread(
     }
 }
 
-fn preview_body(body: &str) -> String {
+// `pub(super)` widened for sibling test access.
+pub(super) fn preview_body(body: &str) -> String {
     const PREVIEW_LIMIT: usize = 160;
     let collapsed: String = body
         .lines()
@@ -338,8 +342,9 @@ fn preview_body(body: &str) -> String {
     }
 }
 
+// `pub(super)` widened for sibling test access.
 #[derive(Debug, Clone)]
-enum AuthorKind {
+pub(super) enum AuthorKind {
     Human,
     Agent { family: Option<String> },
 }
@@ -360,7 +365,8 @@ impl AuthorKind {
     }
 }
 
-fn classify_author(label: &str) -> AuthorKind {
+// `pub(super)` widened for sibling test access.
+pub(super) fn classify_author(label: &str) -> AuthorKind {
     let trimmed = label.trim();
     if trimmed.is_empty() {
         return AuthorKind::Human;
@@ -379,51 +385,4 @@ fn classify_author(label: &str) -> AuthorKind {
         };
     }
     AuthorKind::Human
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn classify_author_recognizes_known_families_and_models() {
-        assert!(matches!(
-            classify_author("claude"),
-            AuthorKind::Agent { .. }
-        ));
-        assert!(matches!(
-            classify_author("claude-opus-4-7"),
-            AuthorKind::Agent { .. }
-        ));
-        assert!(matches!(
-            classify_author("gpt-5.5"),
-            AuthorKind::Agent { .. }
-        ));
-        assert!(matches!(classify_author("daniel"), AuthorKind::Human));
-        assert!(matches!(classify_author(""), AuthorKind::Human));
-    }
-
-    #[test]
-    fn parse_status_filter_accepts_open_resolved_all() {
-        assert!(matches!(
-            parse_status_filter(Some("open")),
-            Ok(Some(ReviewThreadStatus::Open))
-        ));
-        assert!(matches!(
-            parse_status_filter(Some("resolved")),
-            Ok(Some(ReviewThreadStatus::Resolved))
-        ));
-        assert!(matches!(parse_status_filter(Some("all")), Ok(None)));
-        assert!(matches!(parse_status_filter(None), Ok(None)));
-        assert!(parse_status_filter(Some("bogus")).is_err());
-    }
-
-    #[test]
-    fn preview_body_collapses_and_truncates() {
-        assert_eq!(preview_body("hello\n\nworld"), "hello world");
-        let long: String = "a".repeat(500);
-        let preview = preview_body(&long);
-        assert!(preview.chars().count() <= 161);
-        assert!(preview.ends_with('\u{2026}'));
-    }
 }
