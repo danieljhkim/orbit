@@ -5,8 +5,8 @@ use std::thread;
 
 use chrono::Utc;
 use orbit_common::types::{
-    Cost, ImplementerStats, Outcome, ReviewerStats, RoleAssignment, Roles, Scores, TaskClass,
-    ValidIssuesBySeverity,
+    Cost, Decision, ImplementerStats, Outcome, ReviewerStats, RoleAssignment, Roles, Scores,
+    TaskClass, ValidIssuesBySeverity,
 };
 
 use super::super::*;

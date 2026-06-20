@@ -798,13 +798,6 @@ impl AdrRecords<'_> {
         self.store.update_adr_document(id, fields)
     }
 
-    /// Removes an ADR from disk and index. Reserved for the future
-    /// migration / cleanup CLI; not exposed via the tool surface.
-    #[allow(dead_code)]
-    pub(crate) fn delete(&self, id: &str) -> Result<bool, OrbitError> {
-        self.store.delete_adr(id)
-    }
-
     pub(crate) fn supersede(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
         self.store.supersede_adr(old_id, new_id)
     }
@@ -901,14 +894,6 @@ impl LearningRecords<'_> {
 
     pub(crate) fn archive(&self, id: &str) -> Result<bool, OrbitError> {
         self.store.archive_learning(id)
-    }
-
-    /// Hard-deletes a learning's YAML file and index row. Reserved for
-    /// maintenance / migration tooling; the tool surface uses `archive`
-    /// for stale-record cleanup per §7.3.
-    #[allow(dead_code)]
-    pub(crate) fn delete(&self, id: &str) -> Result<bool, OrbitError> {
-        self.store.delete_learning(id)
     }
 
     pub(crate) fn sync(&self) -> Result<(), OrbitError> {

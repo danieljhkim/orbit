@@ -36,21 +36,15 @@ fn only_orbit_common_is_an_internal_dependency() {
 }
 
 #[test]
-fn git2_transport_is_feature_gated() {
+fn manifest_does_not_expose_dead_git2_transport() {
     let manifest = parse_manifest();
     let dependencies = manifest
         .get("dependencies")
         .and_then(Value::as_table)
         .expect("dependencies table");
-    let git2_dependency = dependencies
-        .get("git2")
-        .and_then(Value::as_table)
-        .expect("git2 dependency table");
-
-    assert_eq!(
-        git2_dependency.get("optional").and_then(Value::as_bool),
-        Some(true),
-        "git2 must stay optional"
+    assert!(
+        !dependencies.contains_key("git2"),
+        "dead git2 transport dependency must stay removed"
     );
 
     let features = manifest
@@ -65,13 +59,8 @@ fn git2_transport_is_feature_gated() {
         "default features must not enable git2"
     );
     assert!(
-        features
-            .get("transport-git2")
-            .and_then(Value::as_array)
-            .is_some_and(|values| values
-                .iter()
-                .any(|value| value.as_str() == Some("dep:git2"))),
-        "transport-git2 must gate the optional git2 dependency"
+        !features.contains_key("transport-git2"),
+        "dead transport-git2 feature must stay removed"
     );
 }
 

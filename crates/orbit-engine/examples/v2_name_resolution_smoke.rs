@@ -31,9 +31,9 @@ use std::sync::Arc;
 
 use orbit_common::types::JobScheduleState;
 use orbit_common::types::activity_job::{
-    ActivityV2, ActivityV2Spec, AgentLoopSpec, Backend, JobKind, JobV2, JobV2Step, JobV2StepBody,
-    LoopBlock, OnDenial, Provider, ResolveError, TargetRef, V2ActivityCatalog, load_job_asset,
-    resolve_job_backends, resolve_job_target_refs, validate_job_loop_session_backends,
+    ActivityV2, ActivityV2Spec, Backend, JobKind, JobV2, JobV2Step, JobV2StepBody, LoopBlock,
+    Provider, ResolveError, TargetRef, V2ActivityCatalog, load_job_asset, resolve_job_backends,
+    resolve_job_target_refs, validate_job_loop_session_backends,
 };
 use orbit_engine::{
     DispatchError, ResolvedCliExecutor, V2AuditWriter, V2DispatchInput, V2RuntimeHost,
@@ -491,23 +491,4 @@ fn count_target_refs(job: &JobV2) -> usize {
         }
     }
     job.steps.iter().map(count_step).sum()
-}
-
-// Silence the AgentLoopSpec unused-import warning when this example builds in
-// isolation — we need the type re-exported to construct stubs if we ever flip
-// the stub helper above to agent_loop.
-#[allow(dead_code)]
-fn _type_gate() {
-    let _ = AgentLoopSpec {
-        instruction: String::new(),
-        tools: vec![],
-        on_denial: OnDenial::Terminate,
-        model: None,
-        max_iterations: 1,
-        backend: Backend::Http,
-        provider: Provider::Claude,
-        wall_clock_timeout_seconds: 60,
-        role: None,
-        proc_allowed_programs: None,
-    };
 }

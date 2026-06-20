@@ -1,8 +1,5 @@
 use crate::{MergeClass, RegistryResult};
 
-#[cfg(feature = "transport-git2")]
-pub mod git2;
-
 /// Opaque publication unit passed to registry transports.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TransportEnvelope<'a> {
