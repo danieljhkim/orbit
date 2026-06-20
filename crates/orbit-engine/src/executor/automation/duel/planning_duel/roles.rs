@@ -302,33 +302,6 @@ pub(super) fn parse_planning_duel_roles(input: &Value) -> Result<PlanningRoles, 
     .map_err(|err| OrbitError::InvalidInput(format!("invalid planning_duel_roles payload: {err}")))
 }
 
-#[allow(dead_code)]
-pub(super) fn role_activity_id(input: &Value, role: &str) -> Result<String, OrbitError> {
-    let flat_key = format!("{role}_activity_id");
-    if let Some(value) = input_string_field(input, &flat_key) {
-        return Ok(value);
-    }
-    if matches!(role, "planner_a" | "planner_b")
-        && let Some(value) = input_string_field(input, "planner_activity_id")
-    {
-        return Ok(value);
-    }
-
-    input
-        .get("roles")
-        .and_then(|roles| roles.get(role))
-        .and_then(|entry| {
-            entry
-                .get("activity_id")
-                .and_then(Value::as_str)
-                .or_else(|| entry.get("activityId").and_then(Value::as_str))
-        })
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| OrbitError::InvalidInput(format!("missing required input.{flat_key}")))
-}
-
 pub(super) fn select_planning_duel_roles<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,

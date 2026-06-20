@@ -30,9 +30,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use orbit_common::types::{
-    Ambiguity, Decision, DuelRun, OrbitError, TaskScope, Verdict, all_agent_families,
-};
+use orbit_common::types::{Ambiguity, DuelRun, OrbitError, TaskScope, Verdict, all_agent_families};
 use serde::{Deserialize, Serialize};
 
 use orbit_common::utility::fs::{
@@ -472,11 +470,6 @@ pub struct ReviewerTally {
 // is still the source of truth.
 // ============================================================================
 pub use orbit_common::types::all_agent_families as known_agent_families;
-
-// Silence an unused-import lint when the module is consumed by callers that
-// do not need the Decision re-export directly.
-#[allow(dead_code)]
-fn _ensure_decision_in_scope(_: Decision) {}
 
 // ============================================================================
 // Tests

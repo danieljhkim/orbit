@@ -20,33 +20,9 @@ pub const AGENT_PROTOCOL_VIOLATION: &str = "AGENT_PROTOCOL_VIOLATION";
 pub const AGENT_INVOCATION_FAILED: &str = "AGENT_INVOCATION_FAILED";
 pub const AGENT_COMMIT_FAILED: &str = "AGENT_COMMIT_FAILED";
 pub const AGENT_TIMEOUT: &str = "AGENT_TIMEOUT";
-/// WebSocket/HTTPS connection failure — safe to retry.
-#[allow(dead_code)]
-pub const AGENT_TRANSPORT_FAILURE: &str = "AGENT_TRANSPORT_FAILURE";
-/// HTTP 5xx from provider (overloaded/unavailable) — safe to retry.
-#[allow(dead_code)]
-pub const AGENT_PROVIDER_OVERLOAD: &str = "AGENT_PROVIDER_OVERLOAD";
-/// HTTP 429 rate-limit from provider — safe to retry with backoff.
-#[allow(dead_code)]
-pub const AGENT_RATE_LIMIT: &str = "AGENT_RATE_LIMIT";
 pub const ACTIVITY_EXECUTION_FAILED: &str = "ACTIVITY_EXECUTION_FAILED";
-#[allow(dead_code)]
-pub const INPUT_VALIDATION_FAILED: &str = "INPUT_VALIDATION_FAILED";
-#[allow(dead_code)]
-pub const RUN_ABANDONED: &str = "RUN_ABANDONED";
 pub const WORKFLOW_RUN_FAILED_EVENT: &str = "workflow_run_failed";
 pub const STALE_RUN_GRACE_SECONDS: u64 = 30;
-
-/// Returns `true` for error codes that indicate a transient infrastructure failure
-/// where an automatic retry is safe. Returns `false` for deterministic failures
-/// such as protocol violations or unclassified invocation errors.
-#[allow(dead_code)]
-pub fn is_transient_error(code: &str) -> bool {
-    matches!(
-        code,
-        AGENT_TRANSPORT_FAILURE | AGENT_PROVIDER_OVERLOAD | AGENT_RATE_LIMIT | AGENT_TIMEOUT
-    )
-}
 
 pub fn workflow_failure_note(
     job_id: &str,

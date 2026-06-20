@@ -12,10 +12,8 @@ workspace = true
 
 [features]
 default = []
-transport-git2 = ["dep:git2"]
 
 [dependencies]
-git2 = { workspace = true, optional = true }
 orbit-common = { path = "../orbit-common" }
 
 [dev-dependencies]

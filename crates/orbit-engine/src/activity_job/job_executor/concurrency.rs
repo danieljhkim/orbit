@@ -43,7 +43,3 @@ impl Drop for Permit {
         self.sem.release();
     }
 }
-
-// Silence unused-import warnings when compiling without the loop sample.
-#[allow(dead_code)]
-pub(super) fn _unused_timing(_: Instant) {}
