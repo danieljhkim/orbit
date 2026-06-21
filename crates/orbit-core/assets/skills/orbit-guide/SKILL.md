@@ -75,6 +75,12 @@ Two handoff branches, depending on user intent:
 
 After hand-off, this skill's job is done. Subsequent Orbit work routes through the `orbit` skill and its lifecycle siblings.
 
+## Cowork configuration
+
+If the user runs the plugin inside **Cowork** (the Claude desktop app) and only the `orbit_graph_*` tools appear — no `orbit_task_add` / ADR / learning tools — it's the known workspace-discovery gap: Cowork launches the plugin's MCP server with cwd and `CLAUDE_PROJECT_DIR` set to an internal scratchpad, not the selected repo, so `serve` finds no `.orbit/` and falls back to the graph-only surface.
+
+Fix: pass the repo explicitly via the global `--root` flag in the orbit MCP launch. The durable place is user config (`~/.claude/settings.json`), since the cached plugin copy is overwritten on reinstall. See the README "Cowork users" note for the exact `mcpServers` block — re-read it at invocation time rather than restating the args here. This is `--root` only; there is no env/cwd source for the repo path in Cowork today (see learning L-0065).
+
 ## Anti-patterns (DO NOT)
 
 - Don't inline install commands, prereq versions, or destructive-action rules in this file. They rot independently from the README.

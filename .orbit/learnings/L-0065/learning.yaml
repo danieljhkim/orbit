@@ -1,0 +1,37 @@
+schema_version: 1
+id: L-0065
+status: active
+scope:
+  paths:
+  - plugin/.mcp.json
+  - crates/orbit-cli/src/command/mcp/**
+  tags:
+  - cowork
+  - mcp
+  - plugin
+  - tooling
+summary: In Cowork, the plugin MCP server launches with cwd/CLAUDE_PROJECT_DIR = internal scratchpad, not the selected repo, so `orbit mcp serve` finds no workspace and exposes graph-only tools; pass `--root <repo>` to load the task/adr/learning surface.
+body: |-
+  ## Symptom
+  Running the Orbit plugin inside Cowork (the Claude desktop app), the MCP surface shows only `orbit_graph_*` tools. `orbit_task_add` and the rest of the task/ADR/learning/friction surface are missing.
+
+  ## Root cause
+  `orbit mcp serve` builds its host tool registry from workspace discovery at launch (`OrbitRuntime::try_initialize_existing`, cwd-based). When no initialized `.orbit/` workspace is discovered it installs `EmptyMcpHost` (`crates/orbit-cli/src/command/mcp/host.rs`), which returns an empty `tools/list`; only the workspace-agnostic graph adapter (which takes an explicit `workspace_path` per call) remains.
+
+  Cowork launches the plugin's MCP server with **cwd and `CLAUDE_PROJECT_DIR` both set to its internal scratchpad** (`.../local_.../outputs`), not the user's selected repo. Verified by instrumenting the launch and dumping `env`: `CWD` and `CLAUDE_PROJECT_DIR` are the scratchpad, and no env var references the selected folder. So serve never finds `.orbit/` → `EmptyMcpHost` → graph-only. The graph adapter's announced workspace (`_meta.orbit.workspace`) is the scratchpad too, so no launch channel exposes the repo.
+
+  ## Workaround
+  The global `--root` flag (`crates/orbit-cli/src/command/mod.rs`, highest precedence) is already threaded into serve. Pass the repo explicitly:
+  `npx -y @orbit-tools/cli@latest --root /abs/path/to/repo mcp serve`
+
+  Durable placement: the shipped `plugin/.mcp.json` should use `--root ${CLAUDE_PROJECT_DIR}` (correct for the Claude Code CLI; a harmless no-op in Cowork where it resolves to the scratchpad). Cowork users need an explicit `--root <repo>` override in user-scope `~/.claude/settings.json` — the cached `rpm/plugin_<id>/.mcp.json` copy also works but is wiped on plugin reinstall/update.
+
+  ## Real fix (out of scope for this repo)
+  Cowork should expose the selected workspace folder to plugin MCP launches (set `CLAUDE_PROJECT_DIR` to it, a dedicated env var, or advertise it via MCP `roots`). Until then there is no auto-dynamic root resolution on the plugin side.
+evidence:
+- kind: task
+  reference: ORB-00405
+created_at: 2026-06-21T18:27:26.130936Z
+updated_at: 2026-06-21T18:27:26.130936Z
+created_by: claude
+priority: 120

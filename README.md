@@ -183,6 +183,13 @@ Two install surfaces. The CLI gives you the full power of Orbit. Choose the plug
 
 </details>
 
+> **Cowork users:** Cowork launches the plugin's MCP server with its working directory and `CLAUDE_PROJECT_DIR` pointed at an internal scratchpad rather than your selected repo, so `orbit mcp serve` finds no workspace and exposes only the graph tools — `orbit_task_add` and the rest of the task/ADR/learning surface stay hidden. Workaround: point the server at your repo explicitly with the global `--root` flag in your user config (`~/.claude/settings.json`):
+>
+> ```json
+> { "mcpServers": { "orbit": { "command": "npx",
+>   "args": ["-y", "@orbit-tools/cli@latest", "--root", "/abs/path/to/repo", "mcp", "serve"] } } }
+> ```
+
 ---
 
 ## Agent Skills
