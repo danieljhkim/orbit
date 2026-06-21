@@ -29,6 +29,11 @@ tracing-subscriber.workspace = true
 unicode-normalization.workspace = true
 url.workspace = true
 
+# Unix-only: resolve the OS login name (getpwuid_r) to backfill USER/LOGNAME
+# in provider subprocess environments. See `redaction::backfill_login_identity`.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 proptest.workspace = true
 tempfile = "3"

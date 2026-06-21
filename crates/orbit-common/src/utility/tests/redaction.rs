@@ -1,4 +1,16 @@
-use super::super::redaction::{is_high_confidence_single_token_credential, redact_all};
+use std::ffi::{OsStr, OsString};
+
+use super::super::redaction::{
+    backfill_login_identity, is_high_confidence_single_token_credential, is_sensitive_env_name,
+    os_login_name, redact_all,
+};
+
+fn values_for(vars: &[(OsString, OsString)], key: &str) -> Vec<OsString> {
+    vars.iter()
+        .filter(|(name, _)| name == OsStr::new(key))
+        .map(|(_, value)| value.clone())
+        .collect()
+}
 
 #[test]
 fn redact_all_scrubs_key_query_params_case_insensitively() {
@@ -89,6 +101,83 @@ fn high_confidence_single_token_detection_covers_provider_scm_cloud_families() {
         assert!(
             is_high_confidence_single_token_credential(&credential),
             "{credential} was not classified as a high-confidence credential"
+        );
+    }
+}
+
+#[test]
+fn backfill_login_identity_fills_missing_user_and_logname() {
+    let Some(expected) = os_login_name() else {
+        // No resolvable login on this host; backfill is a no-op by design.
+        return;
+    };
+    let mut vars = vec![(OsString::from("PATH"), OsString::from("/usr/bin"))];
+
+    backfill_login_identity(&mut vars);
+
+    assert_eq!(values_for(&vars, "USER"), vec![OsString::from(&expected)]);
+    assert_eq!(
+        values_for(&vars, "LOGNAME"),
+        vec![OsString::from(&expected)]
+    );
+}
+
+#[test]
+fn backfill_login_identity_preserves_existing_nonempty_user() {
+    let mut vars = vec![
+        (OsString::from("USER"), OsString::from("explicit-user")),
+        (OsString::from("LOGNAME"), OsString::from("explicit-user")),
+    ];
+
+    backfill_login_identity(&mut vars);
+
+    assert_eq!(
+        values_for(&vars, "USER"),
+        vec![OsString::from("explicit-user")]
+    );
+    assert_eq!(
+        values_for(&vars, "LOGNAME"),
+        vec![OsString::from("explicit-user")]
+    );
+}
+
+#[test]
+fn backfill_login_identity_replaces_empty_user_without_duplicating() {
+    let Some(expected) = os_login_name() else {
+        return;
+    };
+    let mut vars = vec![(OsString::from("USER"), OsString::new())];
+
+    backfill_login_identity(&mut vars);
+
+    // Exactly one USER entry, carrying the resolved login (no empty leftover).
+    assert_eq!(values_for(&vars, "USER"), vec![OsString::from(&expected)]);
+}
+
+#[test]
+fn identity_backfill_does_not_weaken_credential_scrubbing() {
+    // ORB-00409 AC#4: known credential-shaped names stay classified sensitive,
+    // so they remain excluded from `non_sensitive_env_vars()` output.
+    for name in [
+        "ANTHROPIC_API_KEY",
+        "GH_TOKEN",
+        "MY_SECRET",
+        "DB_PASSWORD",
+        "AWS_SECRET_ACCESS_KEY",
+        "SOME_PRIVATE_KEY",
+        "AUTH_BEARER",
+    ] {
+        assert!(
+            is_sensitive_env_name(name),
+            "{name} must be classified sensitive (excluded from the forwarded env)"
+        );
+    }
+    // Identity / runtime-context vars are NOT sensitive — they pass through and
+    // are the ones the backfill guarantees.
+    for name in ["USER", "LOGNAME", "HOME", "PATH"] {
+        assert!(
+            !is_sensitive_env_name(name),
+            "{name} must not be classified sensitive"
         );
     }
 }
