@@ -86,3 +86,4 @@ build/
 .vscode
 .grok
 .gemini
+.cowork-launch-env.txt
