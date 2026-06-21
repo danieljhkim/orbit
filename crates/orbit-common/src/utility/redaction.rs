@@ -22,7 +22,11 @@
 // ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
-use std::{borrow::Cow, ffi::OsString, sync::OnceLock};
+use std::{
+    borrow::Cow,
+    ffi::{OsStr, OsString},
+    sync::OnceLock,
+};
 
 use regex::Regex;
 use serde_json::Value;
@@ -156,14 +160,108 @@ fn sensitive_env_values() -> Vec<String> {
 /// Return the current process environment with sensitive variable names
 /// removed. Provider subprocesses use this when they need normal runtime
 /// context such as `PATH`/`HOME` without inheriting ambient credentials.
+///
+/// The login identity (`USER` / `LOGNAME`) is backfilled from the OS when it
+/// is absent from the current process — see [`backfill_login_identity`].
 pub fn non_sensitive_env_vars() -> Vec<(OsString, OsString)> {
-    std::env::vars_os()
+    let mut vars: Vec<(OsString, OsString)> = std::env::vars_os()
         .filter(|(name, _)| {
             name.to_str()
                 .map(|name| !is_sensitive_env_name(name))
                 .unwrap_or(true)
         })
-        .collect()
+        .collect();
+    backfill_login_identity(&mut vars);
+    vars
+}
+
+/// Ensure a forwarded environment carries a login identity (`USER` /
+/// `LOGNAME`).
+///
+/// A provider CLI such as `claude` reads `USER` to locate its per-user
+/// credential store (macOS Keychain account). When orbit's executor is started
+/// without a login environment — e.g. a detached pipeline worker that did not
+/// inherit a login shell's variables — `USER`/`LOGNAME` are absent and the
+/// spawned provider fails to authenticate (HTTP 401) even though valid
+/// credentials exist. We backfill the real OS login name resolved from the
+/// current uid so the child always has a correct identity. An already-present,
+/// non-empty value is never overwritten. [ORB-00409]
+// pub(crate) for sibling-layout tests in utility/tests/redaction.rs.
+pub(crate) fn backfill_login_identity(vars: &mut Vec<(OsString, OsString)>) {
+    let present = |key: &str| {
+        vars.iter()
+            .any(|(name, value)| name == OsStr::new(key) && !value.is_empty())
+    };
+    let need_user = !present("USER");
+    let need_logname = !present("LOGNAME");
+    if !need_user && !need_logname {
+        return;
+    }
+    let Some(login) = os_login_name() else {
+        // Cannot resolve a login name; leave the environment untouched rather
+        // than inject a placeholder that would itself fail credential lookup.
+        return;
+    };
+    let mut set = |key: &str| {
+        // Drop any empty placeholder first so the resolved value is the only
+        // entry for `key` (Command::envs would otherwise keep both).
+        vars.retain(|(name, _)| name != OsStr::new(key));
+        vars.push((OsString::from(key), OsString::from(&login)));
+    };
+    if need_user {
+        set("USER");
+    }
+    if need_logname {
+        set("LOGNAME");
+    }
+}
+
+/// Resolve the current process's OS login name.
+///
+/// On Unix this is the `pw_name` for the real uid via the reentrant
+/// `getpwuid_r`, which (unlike `$USER`) does not depend on the ambient
+/// environment. Returns `None` when no passwd entry exists or the lookup
+/// fails.
+// pub(crate) for sibling-layout tests in utility/tests/redaction.rs.
+#[cfg(unix)]
+pub(crate) fn os_login_name() -> Option<String> {
+    use std::ffi::CStr;
+
+    // SAFETY: getuid cannot fail. getpwuid_r writes into caller-owned buffers
+    // (`pwd` and `buf`); we only read `pw_name` after a success (rc == 0) with a
+    // non-null `result`, and copy it out before either buffer is dropped.
+    let uid = unsafe { libc::getuid() };
+    let mut buf = vec![0 as libc::c_char; 1024];
+    loop {
+        let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+        let mut result: *mut libc::passwd = std::ptr::null_mut();
+        let rc =
+            unsafe { libc::getpwuid_r(uid, &mut pwd, buf.as_mut_ptr(), buf.len(), &mut result) };
+        if rc == 0 {
+            if result.is_null() || pwd.pw_name.is_null() {
+                return None;
+            }
+            let name = unsafe { CStr::from_ptr(pwd.pw_name) };
+            return name
+                .to_str()
+                .ok()
+                .map(str::to_owned)
+                .filter(|s| !s.is_empty());
+        }
+        // ERANGE: buffer too small. Grow and retry up to a sane ceiling.
+        if rc == libc::ERANGE && buf.len() < (1 << 20) {
+            buf.resize(buf.len() * 2, 0);
+            continue;
+        }
+        return None;
+    }
+}
+
+/// Non-Unix fallback: derive the login name from `USERNAME` if present.
+// pub(crate) for sibling-layout tests in utility/tests/redaction.rs.
+#[cfg(not(unix))]
+pub(crate) fn os_login_name() -> Option<String> {
+    std::env::var("USERNAME").ok().filter(|s| !s.is_empty())
 }
 
 fn is_redactable_value(value: &str) -> bool {
