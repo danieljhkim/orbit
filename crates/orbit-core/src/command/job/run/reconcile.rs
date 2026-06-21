@@ -69,6 +69,7 @@ impl OrbitRuntime {
             run,
             step_started_at,
             finished_at,
+            None,
             &stale_job_run_message(run, stale_reason),
         );
         self.record_event(OrbitEvent::JobRunCompleted {

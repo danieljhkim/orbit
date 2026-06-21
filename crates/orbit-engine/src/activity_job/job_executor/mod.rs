@@ -82,6 +82,7 @@ pub use self::validate::validate_job;
 pub struct JobOutcome {
     pub success: bool,
     pub pipeline: Value,
+    pub error_code: Option<String>,
     pub message: Option<String>,
 }
 
@@ -133,11 +134,13 @@ pub fn execute_job(
     };
 
     let mut overall_ok = true;
+    let mut overall_error_code = None;
     let mut overall_message = None;
     for step in &job.steps {
         let outcome = run_step(step, &ctx)?;
         if !outcome.success {
             overall_ok = false;
+            overall_error_code = outcome.error_code;
             overall_message = Some(
                 outcome
                     .message
@@ -159,6 +162,7 @@ pub fn execute_job(
     Ok(JobOutcome {
         success: overall_ok,
         pipeline,
+        error_code: (!overall_ok).then_some(overall_error_code).flatten(),
         message: (!overall_ok).then_some(overall_message).flatten(),
     })
 }

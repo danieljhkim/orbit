@@ -35,6 +35,7 @@ pub(super) fn run_fan_out(
         return Ok(StepOutcome {
             success: true,
             output: Value::Array(Vec::new()),
+            error_code: None,
             message: None,
             skipped: false,
         });
@@ -181,6 +182,7 @@ pub(super) fn run_fan_out(
     Ok(StepOutcome {
         success: block_ok,
         output: collected_value,
+        error_code: None,
         message: None,
         skipped: false,
     })

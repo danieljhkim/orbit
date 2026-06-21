@@ -128,6 +128,36 @@ mod parse {
     }
 
     #[test]
+    fn peek_provider_auth_failure_classifies_claude_auth_stdout() {
+        let stdout = r#"{"type":"result","subtype":"error","is_error":true,"api_error_status":401,"result":"Failed to authenticate. API Error: 401 Invalid authentication credentials","usage":{"input_tokens":0,"output_tokens":0}}"#;
+
+        let classification =
+            peek_provider_auth_failure(stdout).expect("provider auth classification");
+
+        assert_eq!(classification.error_code(), "provider_auth");
+        assert_eq!(classification.status, Some(401));
+        assert!(
+            classification.message.contains("authentication"),
+            "{:?}",
+            classification
+        );
+        assert!(
+            classification.message.contains("credentials"),
+            "{:?}",
+            classification
+        );
+    }
+
+    #[test]
+    fn peek_provider_auth_failure_ignores_normal_envelopes() {
+        let success = r#"{"schemaVersion":1,"status":"success","result":{}}"#;
+        let failed = r#"{"schemaVersion":1,"status":"failed","error":{"code":"agent_failed","message":"ordinary failure","details":null}}"#;
+
+        assert_eq!(peek_provider_auth_failure(success), None);
+        assert_eq!(peek_provider_auth_failure(failed), None);
+    }
+
+    #[test]
     fn synthesize_response_failed_path_carries_usage() {
         // Empty stdout + non-zero exit triggers the synthesize "failed" path.
         // The trace returned alongside the synthesized envelope must preserve

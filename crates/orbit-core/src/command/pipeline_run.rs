@@ -8,6 +8,7 @@ use orbit_common::types::{
     AuditEventStatus, JobRun, JobRunState, JobScheduleState, JobTargetType, NotFoundKind,
     OrbitError, OrbitEvent, PipelineState, audit_execution_id,
 };
+use orbit_common::utility::git::run_git;
 use orbit_store::{AuditEventInsertParams, JobRunStepParams, TaskReservationReleaseReason};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -255,7 +256,7 @@ impl OrbitRuntime {
         match outcome {
             Ok(result) => {
                 let mut state = self.read_run_state(&run.run_id)?.unwrap_or_else(|| {
-                    PipelineState::new(run.run_id.clone(), run.job_id.clone(), input)
+                    PipelineState::new(run.run_id.clone(), run.job_id.clone(), input.clone())
                 });
                 state.sync_pipeline(result.pipeline.clone());
                 self.stores().jobs().write_run_state(&run.run_id, &state)?;
@@ -265,8 +266,13 @@ impl OrbitRuntime {
                 } else {
                     let fallback = "job completed with success=false but emitted no failure detail";
                     let message = result.message.as_deref().unwrap_or(fallback);
-                    let _ =
-                        self.record_pipeline_failure_step(run, started_at, finished_at, message);
+                    let _ = self.record_pipeline_failure_step(
+                        run,
+                        started_at,
+                        finished_at,
+                        result.error_code.as_deref(),
+                        message,
+                    );
                     JobRunState::Failed
                 };
                 self.finalize_job_run_with_reservation_cleanup(
@@ -276,6 +282,16 @@ impl OrbitRuntime {
                     duration_ms,
                     TaskReservationReleaseReason::RunTerminal,
                 )?;
+                if final_state == JobRunState::Failed {
+                    let fallback = "job completed with success=false but emitted no failure detail";
+                    self.rollback_workflow_admissions_after_failed_run(
+                        &run.run_id,
+                        &run.job_id,
+                        &input,
+                        Some(&result.pipeline),
+                        Some(result.message.as_deref().unwrap_or(fallback)),
+                    );
+                }
                 self.record_event(OrbitEvent::JobRunCompleted {
                     job_id: run.job_id.clone(),
                     run_id: run.run_id.clone(),
@@ -288,6 +304,7 @@ impl OrbitRuntime {
                     run,
                     started_at,
                     finished_at,
+                    None,
                     &error.to_string(),
                 );
                 self.finalize_job_run_with_reservation_cleanup(
@@ -297,6 +314,13 @@ impl OrbitRuntime {
                     duration_ms,
                     TaskReservationReleaseReason::RunTerminal,
                 )?;
+                self.rollback_workflow_admissions_after_failed_run(
+                    &run.run_id,
+                    &run.job_id,
+                    &input,
+                    None,
+                    Some(&error.to_string()),
+                );
                 self.record_event(OrbitEvent::JobRunCompleted {
                     job_id: run.job_id.clone(),
                     run_id: run.run_id.clone(),
@@ -312,6 +336,7 @@ impl OrbitRuntime {
         run: &JobRun,
         started_at: chrono::DateTime<Utc>,
         finished_at: chrono::DateTime<Utc>,
+        error_code: Option<&str>,
         message: &str,
     ) -> Result<(), OrbitError> {
         let current = self.show_job_run(&run.run_id)?;
@@ -346,7 +371,7 @@ impl OrbitRuntime {
             exit_code: None,
             agent_response_json: None,
             state: JobRunState::Failed,
-            error_code: None,
+            error_code: error_code.map(str::to_string),
             error_message: Some(message.to_string()),
         };
         let _ = self
@@ -354,6 +379,36 @@ impl OrbitRuntime {
             .jobs()
             .complete_run_step(&run.run_id, &params)?;
         Ok(())
+    }
+
+    pub(crate) fn rollback_workflow_admissions_after_failed_run(
+        &self,
+        run_id: &str,
+        job_id: &str,
+        input: &Value,
+        pipeline: Option<&Value>,
+        error_message: Option<&str>,
+    ) {
+        let has_material_work = pipeline
+            .map(workflow_pipeline_has_material_work)
+            .unwrap_or(true);
+        for task_id in task_ids_from_pipeline_input(input) {
+            if let Err(error) = self.rollback_workflow_admission_after_pre_work_failure_as_system(
+                &task_id,
+                run_id,
+                "worktree_setup",
+                job_id,
+                error_message,
+                has_material_work,
+            ) {
+                tracing::warn!(
+                    task_id = task_id.as_str(),
+                    run_id,
+                    error = %error,
+                    "failed to roll back workflow admission after failed run",
+                );
+            }
+        }
     }
 
     fn collect_pipeline_wait_entries(
@@ -517,6 +572,74 @@ impl OrbitRuntime {
             step_index: None,
         })
     }
+}
+
+fn task_ids_from_pipeline_input(input: &Value) -> Vec<String> {
+    let mut ids = Vec::new();
+    if let Some(task_id) = input
+        .get("task_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        ids.push(task_id.to_string());
+    }
+    if let Some(task_ids) = input.get("task_ids").and_then(Value::as_array) {
+        for task_id in task_ids
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if !ids.iter().any(|existing| existing == task_id) {
+                ids.push(task_id.to_string());
+            }
+        }
+    }
+    ids
+}
+
+fn workflow_pipeline_has_material_work(pipeline: &Value) -> bool {
+    let Some(worktree) = pipeline.get("worktree") else {
+        return true;
+    };
+    let Some(workspace_path) = worktree.get("workspace_path").and_then(Value::as_str) else {
+        return true;
+    };
+    let Some(base_ref) = worktree.get("base_ref").and_then(Value::as_str) else {
+        return true;
+    };
+    worktree_has_commits_since_base(Path::new(workspace_path), base_ref)
+        || worktree_has_dirty_changes(Path::new(workspace_path))
+}
+
+fn worktree_has_commits_since_base(workspace_path: &Path, base_ref: &str) -> bool {
+    let range = format!("{base_ref}..HEAD");
+    let Ok(output) = run_git(workspace_path, &["rev-list", "--count", &range]) else {
+        return true;
+    };
+    if !output.success {
+        return true;
+    }
+    output
+        .stdout
+        .trim()
+        .parse::<u64>()
+        .map(|count| count > 0)
+        .unwrap_or(true)
+}
+
+fn worktree_has_dirty_changes(workspace_path: &Path) -> bool {
+    let Ok(output) = run_git(
+        workspace_path,
+        &["status", "--porcelain", "--untracked-files=all"],
+    ) else {
+        return true;
+    };
+    if !output.success {
+        return true;
+    }
+    !output.stdout.trim().is_empty()
 }
 
 fn pipeline_run_is_runnable(runs: &[JobRun], run_id: &str, max_active_runs: u32) -> bool {

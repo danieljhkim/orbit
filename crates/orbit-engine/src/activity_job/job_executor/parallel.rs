@@ -13,6 +13,7 @@ pub(super) fn run_parallel(
         return Ok(StepOutcome {
             success: true,
             output: Value::Array(Vec::new()),
+            error_code: None,
             message: None,
             skipped: false,
         });
@@ -113,6 +114,7 @@ pub(super) fn run_parallel(
     Ok(StepOutcome {
         success: block_ok,
         output: out,
+        error_code: None,
         message: None,
         skipped: false,
     })

@@ -84,6 +84,7 @@ pub(super) fn run_target(
             Ok(StepOutcome {
                 success: dispatch.success,
                 output: out,
+                error_code: dispatch.error_code,
                 message: dispatch.message,
                 skipped: false,
             })
@@ -105,6 +106,7 @@ pub(super) fn run_target(
             Ok(StepOutcome {
                 success: dispatch.success,
                 output: out,
+                error_code: dispatch.error_code,
                 message: dispatch.message,
                 skipped: false,
             })
@@ -181,6 +183,7 @@ pub(super) fn run_agent_loop_outcome(
     Ok(StepOutcome {
         success: true,
         output: out_json,
+        error_code: None,
         message: None,
         skipped: false,
     })

@@ -449,6 +449,52 @@ impl OrbitRuntime {
         Ok(updated)
     }
 
+    pub(crate) fn rollback_workflow_admission_after_pre_work_failure_as_system(
+        &self,
+        id: &str,
+        run_id: &str,
+        workflow: &str,
+        job_id: &str,
+        error_message: Option<&str>,
+        has_material_work: bool,
+    ) -> Result<bool, OrbitError> {
+        if has_material_work {
+            return Ok(false);
+        }
+
+        let task = self.get_task(id)?;
+        if task.status != TaskStatus::InProgress
+            || task.job_run_id.as_deref() != Some(run_id)
+            || !latest_history_is_workflow_admission_from_backlog(
+                &self.get_task_history(id)?,
+                workflow,
+            )
+        {
+            return Ok(false);
+        }
+
+        let note = workflow_admission_rollback_note(job_id, run_id, error_message);
+        self.with_mutation(|| {
+            let task = self.stores().tasks().update(
+                id,
+                StoreTaskUpdateParams {
+                    actor: SYSTEM_ACTOR_LABEL.to_string(),
+                    status: Some(TaskStatus::Backlog),
+                    status_event: Some("workflow_admission_rolled_back".to_string()),
+                    status_note: Some(note),
+                    job_run_id: Some(None),
+                    ..Default::default()
+                },
+            )?;
+            Ok((
+                true,
+                OrbitEvent::TaskUpdated {
+                    id: task.id.clone(),
+                },
+            ))
+        })
+    }
+
     pub fn reject_task(
         &self,
         id: &str,
@@ -669,4 +715,36 @@ pub(crate) fn ensure_task_has_execution_plan(id: &str, plan: &str) -> Result<(),
 
 pub(crate) fn in_progress_transition_requires_plan(from_status: TaskStatus) -> bool {
     !matches!(from_status, TaskStatus::Backlog | TaskStatus::InProgress)
+}
+
+fn latest_history_is_workflow_admission_from_backlog(
+    history: &[TaskHistoryEntry],
+    workflow: &str,
+) -> bool {
+    let expected_note = format!("workflow admission: {workflow}");
+    history
+        .iter()
+        .rev()
+        .find(|entry| entry.from_status.is_some() || entry.to_status.is_some())
+        .is_some_and(|entry| {
+            entry.event == "started"
+                && entry.by == SYSTEM_ACTOR_LABEL
+                && entry.note.as_deref() == Some(expected_note.as_str())
+                && entry.from_status == Some(TaskStatus::Backlog)
+                && entry.to_status == Some(TaskStatus::InProgress)
+        })
+}
+
+fn workflow_admission_rollback_note(
+    job_id: &str,
+    run_id: &str,
+    error_message: Option<&str>,
+) -> String {
+    let message = error_message
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("run failed before implementation work was committed");
+    format!(
+        "rolled back workflow admission after pre-work failure: job={job_id}, run_id={run_id}, error={message}"
+    )
 }

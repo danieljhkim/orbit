@@ -66,6 +66,7 @@ pub fn run_groundhog_activity(
                     "completed_checkpoints": chronicle.days.len(),
                     "chronicle_days": chronicle.days.len(),
                 }),
+                error_code: None,
                 message: Some("groundhog run completed all checkpoints".to_string()),
                 invocation: None,
             });
@@ -166,6 +167,7 @@ pub fn run_groundhog_activity(
                                 "checkpoint_id": checkpoint.id,
                                 "reason": "attempt budget exhausted",
                             }),
+                            error_code: None,
                             message: Some(format!(
                                 "checkpoint `{}` exhausted its attempt budget",
                                 checkpoint.id
@@ -247,6 +249,7 @@ pub fn run_groundhog_activity(
                             "checkpoint_id": checkpoint.id,
                             "reason": "attempt budget exhausted",
                         }),
+                        error_code: None,
                         message: Some(format!(
                             "checkpoint `{}` exhausted its attempt budget",
                             checkpoint.id

@@ -68,6 +68,7 @@ pub(super) fn wrap_step_output(raw: &Value) -> Value {
 pub(super) struct StepOutcome {
     pub(super) success: bool,
     pub(super) output: Value,
+    pub(super) error_code: Option<String>,
     pub(super) message: Option<String>,
     /// `true` when `when:` returned false and the step did not run. Kept for
     /// future callers that need to distinguish a skipped-but-successful step

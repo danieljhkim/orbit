@@ -4,7 +4,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use orbit_agent::{Agent, AgentConfig, AgentOperation, AgentRequest, peek_response_status};
+use orbit_agent::{
+    Agent, AgentConfig, AgentOperation, AgentRequest, peek_provider_auth_failure,
+    peek_response_status,
+};
 use orbit_common::types::activity_job::{AgentLoopSpec, V2AuditEventKind};
 use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, prepend_reminder_block};
 use orbit_common::utility::redaction::{PatternRedactor, redact_sensitive_env_text};
@@ -209,10 +212,11 @@ pub fn run_cli_backend(
     let exit_success = !timed_out && matches!(exit_code, Some(0));
     let stdout_text = String::from_utf8_lossy(&stdout);
     let envelope_status = peek_response_status(stdout_text.as_ref());
+    let provider_auth_failure = peek_provider_auth_failure(stdout_text.as_ref());
     let stdout_preview = stdout_text_preview(stdout_text.as_ref(), &redaction);
     let envelope_indicates_failure =
         matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"));
-    let success = exit_success && !envelope_indicates_failure;
+    let success = exit_success && !envelope_indicates_failure && provider_auth_failure.is_none();
     let trace = parse_cli_invocation_trace(
         &stdout,
         &stderr,
@@ -220,11 +224,16 @@ pub fn run_cli_backend(
         duration.as_millis() as u64,
         success,
     );
+    let error_code = provider_auth_failure
+        .as_ref()
+        .map(|failure| failure.error_code().to_string());
     let message = if timed_out {
         Some(format!(
             "cli subprocess exceeded {}s wall-clock timeout",
             timeout_seconds
         ))
+    } else if let Some(failure) = provider_auth_failure {
+        Some(failure.message)
     } else if exit_success && envelope_indicates_failure {
         Some(format!(
             "cli subprocess reported envelope status={:?} despite exit 0",
@@ -253,6 +262,7 @@ pub fn run_cli_backend(
             "stdout_text_preview_bytes": stdout_preview.preview_bytes,
             "stdout_text_preview_limit_bytes": STDOUT_TEXT_PREVIEW_LIMIT_BYTES,
         }),
+        error_code,
         message,
         invocation: trace.map(|trace| DispatchInvocationTrace {
             provider,

@@ -29,6 +29,7 @@ pub struct V2JobRunResult {
     pub job_name: String,
     pub success: bool,
     pub pipeline: Value,
+    pub error_code: Option<String>,
     pub message: Option<String>,
     pub events_emitted: usize,
     /// Resolved backend applied at load time to every `agent_loop` step in
@@ -128,8 +129,13 @@ impl OrbitRuntime {
                 } else {
                     let fallback = "job completed with success=false but emitted no failure detail";
                     let message = result.message.as_deref().unwrap_or(fallback);
-                    let _ =
-                        self.record_pipeline_failure_step(&run, started_at, finished_at, message);
+                    let _ = self.record_pipeline_failure_step(
+                        &run,
+                        started_at,
+                        finished_at,
+                        result.error_code.as_deref(),
+                        message,
+                    );
                 }
                 self.finalize_job_run_with_reservation_cleanup(
                     &run.run_id,
@@ -138,6 +144,16 @@ impl OrbitRuntime {
                     duration_ms,
                     TaskReservationReleaseReason::RunTerminal,
                 )?;
+                if final_state == JobRunState::Failed {
+                    let fallback = "job completed with success=false but emitted no failure detail";
+                    self.rollback_workflow_admissions_after_failed_run(
+                        &run.run_id,
+                        &run.job_id,
+                        &input,
+                        Some(&result.pipeline),
+                        Some(result.message.as_deref().unwrap_or(fallback)),
+                    );
+                }
                 self.record_event(OrbitEvent::JobRunCompleted {
                     job_id: run.job_id.clone(),
                     run_id: run.run_id.clone(),
@@ -150,6 +166,7 @@ impl OrbitRuntime {
                     &run,
                     started_at,
                     finished_at,
+                    None,
                     &error.to_string(),
                 );
                 self.finalize_job_run_with_reservation_cleanup(
@@ -159,6 +176,13 @@ impl OrbitRuntime {
                     duration_ms,
                     TaskReservationReleaseReason::RunTerminal,
                 )?;
+                self.rollback_workflow_admissions_after_failed_run(
+                    &run.run_id,
+                    &run.job_id,
+                    &input,
+                    None,
+                    Some(&error.to_string()),
+                );
                 self.record_event(OrbitEvent::JobRunCompleted {
                     job_id: run.job_id.clone(),
                     run_id: run.run_id.clone(),
@@ -277,6 +301,7 @@ impl OrbitRuntime {
                 job_name: asset.name,
                 success: o.success,
                 pipeline: o.pipeline,
+                error_code: o.error_code,
                 message: o.message,
                 events_emitted: events_count,
                 resolved_backend: resolution.backend,

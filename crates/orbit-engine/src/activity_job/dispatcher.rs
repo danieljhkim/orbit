@@ -197,6 +197,7 @@ pub struct V2DispatchInput<'a> {
 pub struct DispatchOutcome {
     pub success: bool,
     pub output: Value,
+    pub error_code: Option<String>,
     pub message: Option<String>,
     pub invocation: Option<DispatchInvocationTrace>,
 }
@@ -411,6 +412,7 @@ fn run_deterministic(
     Ok(DispatchOutcome {
         success: true,
         output,
+        error_code: None,
         message: None,
         invocation: None,
     })
@@ -486,6 +488,7 @@ fn run_agent_loop_via_driver(
     Ok(DispatchOutcome {
         success: true,
         output: agent_loop_output_from_final_message(&outcome.final_message, metadata),
+        error_code: None,
         message: None,
         invocation: Some(DispatchInvocationTrace {
             provider: spec.provider.as_str().to_string(),

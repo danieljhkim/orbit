@@ -60,6 +60,7 @@ pub(super) fn run_loop(
                 return Ok(StepOutcome {
                     success: false,
                     output: outcome.output,
+                    error_code: outcome.error_code,
                     message: outcome.message,
                     skipped: false,
                 });
@@ -112,6 +113,7 @@ pub(super) fn run_loop(
     Ok(StepOutcome {
         success: true,
         output: out,
+        error_code: None,
         message: None,
         skipped: false,
     })

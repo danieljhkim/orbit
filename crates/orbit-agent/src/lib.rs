@@ -58,4 +58,7 @@ pub use agent::{Agent, AgentConfig, ProviderOptions};
 pub use orbit_common::types::{InvocationTrace, TokenUsage, ToolCallTrace};
 pub use runtime::AgentRuntime;
 pub use types::{AgentInvocationSpec, AgentOperation, AgentRequest, AgentResponseStatus};
-pub use types::{is_timeout, parse_and_validate_response, peek_response_status};
+pub use types::{
+    ProviderAuthFailure, is_timeout, parse_and_validate_response, peek_provider_auth_failure,
+    peek_response_status,
+};

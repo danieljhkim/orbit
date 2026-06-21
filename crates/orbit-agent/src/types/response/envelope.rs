@@ -2,7 +2,7 @@ use orbit_common::types::{
     AgentResponseEnvelope, AgentRunError, ExecutionResult, InvocationTrace, OrbitError,
 };
 use serde::Deserialize;
-use serde_json::{Deserializer, Value};
+use serde_json::{Deserializer, Map, Value};
 
 use super::{AgentResponseStatus, ResponseParseResult, trace::extract_invocation_trace};
 
@@ -36,6 +36,30 @@ pub fn peek_response_status(stdout: &str) -> Option<String> {
         .rev()
         .find_map(find_agent_response_envelope)?;
     Some(envelope.status)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderAuthFailure {
+    pub status: Option<u16>,
+    pub message: String,
+}
+
+impl ProviderAuthFailure {
+    pub fn error_code(&self) -> &'static str {
+        "provider_auth"
+    }
+}
+
+/// Best-effort lookup of provider authentication failures in raw CLI stdout.
+///
+/// Claude's CLI can return a wrapper such as `{ "is_error": true,
+/// "api_error_status": 401, "result": "Failed to authenticate..." }` without
+/// an Orbit response envelope. This helper recognizes that provider-shaped
+/// failure without treating ordinary Orbit success/failed envelopes as auth
+/// failures.
+pub fn peek_provider_auth_failure(stdout: &str) -> Option<ProviderAuthFailure> {
+    let documents = parse_json_documents(stdout).ok()?;
+    documents.iter().rev().find_map(find_provider_auth_failure)
 }
 
 fn parse_json_documents(stdout: &str) -> Result<Vec<Value>, OrbitError> {
@@ -255,4 +279,66 @@ fn deserialize_envelope(value: &Value) -> Option<AgentResponseEnvelope> {
         return None;
     }
     serde_json::from_value(value.clone()).ok()
+}
+
+fn find_provider_auth_failure(value: &Value) -> Option<ProviderAuthFailure> {
+    match value {
+        Value::String(raw) => find_provider_auth_failure_in_string(raw),
+        Value::Array(items) => items.iter().rev().find_map(find_provider_auth_failure),
+        Value::Object(map) => provider_auth_failure_from_object(map)
+            .or_else(|| map.values().find_map(find_provider_auth_failure)),
+        _ => None,
+    }
+}
+
+fn find_provider_auth_failure_in_string(raw: &str) -> Option<ProviderAuthFailure> {
+    if let Ok(nested) = serde_json::from_str::<Value>(raw) {
+        return find_provider_auth_failure(&nested);
+    }
+    None
+}
+
+fn provider_auth_failure_from_object(map: &Map<String, Value>) -> Option<ProviderAuthFailure> {
+    if map.get("is_error").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+
+    let status = map
+        .get("api_error_status")
+        .and_then(Value::as_u64)
+        .and_then(|status| u16::try_from(status).ok());
+    let result_text = ["result", "message", "error"]
+        .iter()
+        .find_map(|key| map.get(*key).and_then(Value::as_str));
+    let auth_status = matches!(status, Some(401 | 403));
+    let auth_text = result_text.is_some_and(text_indicates_provider_auth_failure);
+    if !auth_status && !auth_text {
+        return None;
+    }
+
+    Some(ProviderAuthFailure {
+        status,
+        message: provider_auth_failure_message(status, result_text),
+    })
+}
+
+fn text_indicates_provider_auth_failure(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("authenticat") || lower.contains("credential")
+}
+
+fn provider_auth_failure_message(status: Option<u16>, result_text: Option<&str>) -> String {
+    let detail = result_text.map(str::trim).filter(|value| !value.is_empty());
+    match (status, detail) {
+        (Some(status), Some(detail)) => {
+            format!("provider authentication failed with API status {status}: {detail}")
+        }
+        (Some(status), None) => {
+            format!("provider authentication failed with API status {status}")
+        }
+        (None, Some(detail)) => {
+            format!("provider authentication failed: {detail}")
+        }
+        (None, None) => "provider authentication failed".to_string(),
+    }
 }

@@ -653,6 +653,47 @@ fn run_cli_backend_demotes_success_when_envelope_reports_failed_despite_exit_zer
     );
 }
 
+#[test]
+fn run_cli_backend_classifies_provider_auth_failure() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    let stdout = r#"{"type":"result","subtype":"error","is_error":true,"api_error_status":401,"result":"Failed to authenticate. API Error: 401 Invalid authentication credentials","usage":{"input_tokens":0,"output_tokens":0}}"#;
+    write_executable(
+        &script,
+        &format!("#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{stdout}'\nexit 1\n"),
+    );
+
+    let sink_for_writer: Arc<dyn AuditSink> = Arc::new(RecordingSink::default());
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-provider-auth",
+        "claude:claude-opus-4-7",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let mut spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+    spec.model = Some("claude-opus-4-7".to_string());
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-provider-auth",
+        audit,
+        &serde_json::json!({"prompt": "hi", "task_id": "TAUTH"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(!outcome.success);
+    assert_eq!(outcome.error_code.as_deref(), Some("provider_auth"));
+    let message = outcome.message.expect("classified message");
+    assert!(message.contains("authentication"), "{message}");
+    assert!(message.contains("credentials"), "{message}");
+    assert!(
+        !message.contains("cli subprocess exited with code"),
+        "{message}"
+    );
+}
+
 /// Sanity check that the demotion does not regress the happy path: an exit-0
 /// run with a `status: "success"` envelope must still be classified as
 /// success. Without this, the demotion logic could silently flip every

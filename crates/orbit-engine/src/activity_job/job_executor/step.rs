@@ -18,6 +18,7 @@ pub(super) fn run_step(step: &JobV2Step, ctx: &ExecCtx<'_>) -> Result<StepOutcom
             return Ok(StepOutcome {
                 success: true,
                 output: Value::Null,
+                error_code: None,
                 message: None,
                 skipped: true,
             });
@@ -114,6 +115,7 @@ pub(super) fn run_step_with_retry(
         None => Ok(StepOutcome {
             success: false,
             output: Value::Null,
+            error_code: None,
             message: None,
             skipped: false,
         }),
