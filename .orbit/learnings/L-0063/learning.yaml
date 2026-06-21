@@ -1,6 +1,6 @@
 schema_version: 1
 id: L-0063
-status: active
+status: superseded
 scope:
   paths:
   - crates/orbit-cli/src/tests/audit_middleware.rs
@@ -13,7 +13,8 @@ body: When running `make ci` from inside an Orbit managed agent run, inherited v
 evidence:
 - kind: task
   reference: ORB-00377
+superseded_by: L-0068
 created_at: 2026-06-13T18:31:06.019297Z
-updated_at: 2026-06-13T18:31:06.019297Z
+updated_at: 2026-06-21T20:08:57.989675Z
 created_by: codex
 priority: 80

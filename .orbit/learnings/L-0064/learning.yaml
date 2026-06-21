@@ -1,6 +1,6 @@
 schema_version: 1
 id: L-0064
-status: active
+status: superseded
 scope:
   paths:
   - crates/orbit-knowledge/src/graph/sqlite_index/writer.rs
@@ -10,11 +10,9 @@ scope:
   - sqlite-index
   - performance
 summary: Avoid target-term cross products when populating graph source mention indexes
-body: 'While implementing ORB-00380, a first pass built `source_mention` by checking every non-identifier target symbol against every leaf/file source. The unit suite exposed the problem through `pack_regression_selector_opens_from_branch_ref_layout`: large fixture graph persistence stalled because the work was O(source nodes × target symbols). Populate source indexes by extracting terms from each source once, then query those terms, so build cost scales with source size rather than definition count times source size.'
-evidence:
-- kind: task
-  reference: ORB-00380
+body: 'RETIRED — orbit-knowledge was decommissioned in ORB-00391; the sqlite_index writer this learning covered no longer exists (orig evidence: ORB-00380). Evidence cleared so `orbit learning prune` can archive it.'
+evidence: []
 created_at: 2026-06-13T19:41:25.713873Z
-updated_at: 2026-06-13T19:41:25.713873Z
+updated_at: 2026-06-21T21:52:56.150471Z
 created_by: codex
 priority: 180

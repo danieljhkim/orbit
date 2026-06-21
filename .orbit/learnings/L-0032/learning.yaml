@@ -1,6 +1,6 @@
 schema_version: 1
 id: L-0032
-status: active
+status: superseded
 scope:
   paths:
   - crates/orbit-knowledge/src/pipeline/build.rs
@@ -13,5 +13,6 @@ body: 'The workspace .gitignore has a broad build/ rule, so a path such as crate
 evidence:
 - kind: task
   reference: ORB-00215
+superseded_by: L-0067
 created_at: 2026-05-21T04:31:40.909739Z
-updated_at: 2026-05-21T04:31:40.909739Z
+updated_at: 2026-06-21T20:08:58.752636Z

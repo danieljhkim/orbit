@@ -1,6 +1,6 @@
 schema_version: 1
 id: L-0054
-status: active
+status: superseded
 scope:
   paths:
   - tools/graph-equiv/**
@@ -8,11 +8,9 @@ scope:
   - graph-equiv
   - ci
 summary: Keep graph-equiv v1 checks fixture-scoped; full orbit-knowledge refresh is too slow for the CI gate
-body: While wiring ORB-00320, running the equivalence harness through the persisted orbit-knowledge command graph caused the process to spend over a minute in v1 refresh/query work before any useful diff report. The CI gate needs a small, deterministic corpus, so v1-side checks in `tools/graph-equiv` should stay fixture-scoped and use the orbit-knowledge extraction compatibility layer unless a later task deliberately budgets and optimizes full-workspace v1 graph refresh. v2 should still be exercised through `orbit-graph-cli`, because that is the user-facing surface under test.
-evidence:
-- kind: task
-  reference: ORB-00320
+body: 'RETIRED — the tools/graph-equiv equivalence harness was removed after the orbit-graph cutover (orig evidence: ORB-00320). Scope is dead; evidence cleared so `orbit learning prune` can archive it.'
+evidence: []
 created_at: 2026-05-25T06:09:14.226657Z
-updated_at: 2026-05-25T06:09:14.226657Z
+updated_at: 2026-06-21T21:52:56.150728Z
 created_by: codex
 priority: 120

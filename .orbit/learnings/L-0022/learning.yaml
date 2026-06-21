@@ -1,8 +1,6 @@
 schema_version: 1
 id: L-0022
-legacy_ids:
-- L20260519-6
-status: active
+status: superseded
 scope:
   paths:
   - crates/orbit-core/src/command/design.rs
@@ -10,11 +8,11 @@ scope:
   - ci
   - clippy
 summary: Treat orbit-design deprecation clippy failures as unrelated CI blockers unless the task owns design.rs
-body: On ORB-00179, `make ci` failed before task-specific checks because `crates/orbit-core/src/command/design.rs` uses deprecated items with `since = "2026-05"`, which current clippy rejects under `-D warnings` (`clippy::deprecated_semver` plus `deprecated`). When a task does not own the retired orbit-design surface, do not patch `design.rs` just to make the unrelated gate green; record the evidence on the task and run targeted validation for the touched code.
-evidence:
-- kind: task
-  reference: ORB-00179
+body: 'RETIRED — the orbit-design surface was removed; `crates/orbit-core/src/command/design.rs` no longer exists (orig evidence: ORB-00179). Evidence cleared so `orbit learning prune` can archive it.'
+evidence: []
+legacy_ids:
+- L20260519-6
 created_at: 2026-05-19T08:05:09.034578Z
-updated_at: 2026-05-19T08:05:09.034578Z
+updated_at: 2026-06-21T21:52:56.151287Z
 created_by: codex
 priority: 100

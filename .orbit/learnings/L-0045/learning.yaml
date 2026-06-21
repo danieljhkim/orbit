@@ -4,8 +4,7 @@ status: active
 scope:
   paths:
   - crates/orbit-graph-extract/src/languages/config.rs
-  - '**/*extract*.rs'
-  - '**/*detect*ext*.rs'
+  - crates/orbit-graph-extract/src/languages/**/*.rs
   tags:
   - rust-std
   - path-extension
@@ -18,6 +17,6 @@ body: |-
   Recurring gotcha for any extension-based file classifier (loaders, syntax highlighters, graph extractors). Evidence: task ORB-00305, L-0015 (worktree root notes).
 evidence: []
 created_at: 2026-05-24T22:20:25.052607Z
-updated_at: 2026-05-24T22:20:25.052607Z
+updated_at: 2026-06-21T20:07:09.425779Z
 created_by: grok
 priority: 80

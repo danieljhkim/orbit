@@ -1,29 +1,16 @@
 schema_version: 1
 id: L-0028
-status: active
+status: superseded
 scope:
   paths:
-  - crates/orbit-dashboard/src/
-  - docs/design-patterns/test_layout.md
+  - crates/orbit-dashboard/src/api/log_tests.rs
   tags:
   - test-layout
   - migration
-  - visibility
-  - gotcha
+  - retired
 summary: Collapsing *_tests.rs into parent/tests/ during layout migration requires pub(super) widenings on private test helpers (no longer child modules); always use `cargo check --tests` + fmt before ci-fast.
-body: |-
-  During ORB-00224 (orbit-dashboard):
-  - api/ siblings moved to api/tests/ (not per-adrs/tests/ etc) to match job_executor precedent and avoid 7 tiny dirs.
-  - Result: had to widen 9 fns + fields (log.rs:4, diagnostics.rs:4+struct, denials.rs:1) with comments.
-  - Pitfalls hit: cargo check != test build; LogFilters alias required crate::log_format import; fmt/guardrail import order diffs after edits.
-  - Fix pattern: widen deliberately + comment; run full `cargo test -p X && make ci-fast`.
-
-  Relevant to all 13 crates in ORB-00219 sweep and future test-layout work.
-evidence:
-- kind: task
-  reference: ORB-00224
-- kind: task
-  reference: ORB-00219
+body: RETIRED — one-off note from the completed test-layout migration sweep (ORB-00224 / ORB-00219); the durable rule lives in L-0033. Scope re-pointed to the dead pre-collapse `*_tests.rs` path and evidence cleared so `orbit learning prune` can archive it.
+evidence: []
 created_at: 2026-05-21T04:03:34.738826Z
-updated_at: 2026-05-21T04:03:34.738826Z
+updated_at: 2026-06-21T21:52:56.149751Z
 created_by: grok

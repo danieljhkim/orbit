@@ -1,11 +1,9 @@
 schema_version: 1
 id: L-0024
-legacy_ids:
-- L20260520-1
 status: active
 scope:
   paths:
-  - crates/orbit-store/src/sqlite/invocation_store/records.rs
+  - crates/orbit-store/src/sqlite/invocation_store/records/**/*.rs
   tags:
   - metrics
   - sqlite
@@ -14,5 +12,7 @@ body: InvocationListQuery::push_filter used to append the bind index to the end 
 evidence:
 - kind: task
   reference: ORB-00191
+legacy_ids:
+- L20260520-1
 created_at: 2026-05-20T04:20:22.046840Z
-updated_at: 2026-05-20T04:20:22.046840Z
+updated_at: 2026-06-21T20:07:03.298302Z

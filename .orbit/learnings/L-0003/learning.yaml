@@ -1,8 +1,6 @@
 schema_version: 1
 id: L-0003
-legacy_ids:
-- L20260517-3
-status: active
+status: superseded
 scope:
   paths:
   - crates/orbit-core/src/runtime/engine/**/*.rs
@@ -16,7 +14,10 @@ body: Some Orbit runtime tests intentionally assert the default actor path (`hum
 evidence:
 - kind: task
   reference: ORB-00091
+superseded_by: L-0068
+legacy_ids:
+- L20260517-3
 created_at: 2026-05-17T03:30:27.207734Z
-updated_at: 2026-05-17T03:30:27.207734Z
+updated_at: 2026-06-21T20:08:57.052410Z
 created_by: codex
 priority: 80

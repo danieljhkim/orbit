@@ -1,8 +1,6 @@
 schema_version: 1
 id: L-0004
-legacy_ids:
-- L20260517-4
-status: active
+status: superseded
 scope:
   paths:
   - crates/orbit-common/src/utility/process_identity.rs
@@ -14,5 +12,8 @@ body: The Codex exec environment can deny `ps` execution (`operation not permitt
 evidence:
 - kind: task
   reference: ORB-00093
+superseded_by: L-0066
+legacy_ids:
+- L20260517-4
 created_at: 2026-05-17T04:20:14.720654Z
-updated_at: 2026-05-17T04:20:14.720654Z
+updated_at: 2026-06-21T20:08:55.641574Z
