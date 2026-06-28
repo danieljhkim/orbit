@@ -1,6 +1,6 @@
-# CLAUDE.md
+# Orbit — agent guide
 
-Project instructions for agents working on Orbit.
+Project instructions for agents working on Orbit (loaded as both `AGENTS.md` and `CLAUDE.md`).
 
 ## Rules
 
@@ -70,4 +70,4 @@ Conventions (not lint-enforced):
 
 For any Orbit lifecycle work (creating tasks, executing, reviewing, raising PRs), invoke the relevant `orbit-*` skill. The `orbit` skill is the entry point and router. Task authoring quality standards live in `orbit-create-task`.
 
-Scoreboards live at `.orbit/state/scoreboard/` (e.g. `duel_plan.json` — planning-duel run results).
+Planning-duel scoreboards, when a duel has run, appear under `.orbit/state/scoreboard/` (e.g. `duel_plan.json`) — workspace-local runtime state, gitignored, so the path won't exist until then.
