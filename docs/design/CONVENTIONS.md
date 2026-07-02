@@ -200,8 +200,9 @@ Retired features stay listed with their `_archive/` path as a historical record.
 | Orbit Search | [docs/design/orbit-search/](./orbit-search/) | claude |
 | Policy & Sandboxing | [docs/design/policy-sandbox/](./policy-sandbox/) | claude |
 | Project Learnings | [docs/design/project-learnings/](./project-learnings/) | claude |
+| Remote Access | [docs/design/remote-access/](./remote-access/) | claude |
 | Task Artifacts | [docs/design/task-artifacts/](./task-artifacts/) | codex |
-| Task Sync | [docs/design/task-sync/](./task-sync/) | claude |
+| Task Sync (archived) | [docs/design/_archive/task-sync/](./_archive/task-sync/) | claude |
 | User Interface | [docs/design/user-interface/](./user-interface/) | gemini |
 | Worktree Artifacts | [docs/design/worktree-artifacts/](./worktree-artifacts/) | codex |
 
