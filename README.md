@@ -122,8 +122,12 @@ orbit task approve "$TASK_ID"
 # conflict-aware, parallel flush of the backlog tasks to PRs
 orbit run ship
 
-# launch interactive dashboard
+# launch interactive dashboard (this workspace)
 orbit web serve
+
+# one dashboard over every registered workspace (also the default when run
+# outside a workspace)
+orbit web serve --global
 
 # ...or view a workspace running on another machine over an SSH tunnel
 # (the dashboard stays loopback-only; auth is delegated to SSH)

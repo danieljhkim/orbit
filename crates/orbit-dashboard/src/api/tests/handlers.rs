@@ -18,7 +18,7 @@ async fn request_cancel(runtime: OrbitRuntime, run_id: &str, origin: Option<&str
         builder = builder.header(header::ORIGIN, origin);
     }
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(builder.body(Body::empty()).expect("request"))
         .await
         .expect("response")
@@ -26,7 +26,7 @@ async fn request_cancel(runtime: OrbitRuntime, run_id: &str, origin: Option<&str
 
 async fn request_tasks(runtime: OrbitRuntime) -> Response {
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .method(Method::GET)
@@ -44,7 +44,7 @@ async fn patch_task_crew(runtime: OrbitRuntime, task_id: &str, crew: &str) -> Re
 
 async fn patch_task_body(runtime: OrbitRuntime, task_id: &str, body: String) -> Response {
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .method(Method::PATCH)
@@ -60,7 +60,7 @@ async fn patch_task_body(runtime: OrbitRuntime, task_id: &str, body: String) -> 
 
 async fn request_crews(runtime: OrbitRuntime) -> Response {
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .method(Method::GET)
@@ -380,7 +380,7 @@ async fn require_localhost_origin_blocks_cross_origin_get_with_attacker_origin()
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
 
     let response = router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .method(Method::GET)

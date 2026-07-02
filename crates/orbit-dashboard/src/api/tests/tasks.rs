@@ -105,7 +105,7 @@ fn seed_lock_task(
 
 async fn request(runtime: OrbitRuntime, uri: &str) -> axum::response::Response {
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .method(Method::GET)
@@ -441,7 +441,7 @@ async fn patch_api_accepts_in_progress_hyphen_from_dashboard_and_returns_in_prog
     // Wrap to exercise the literal /api/tasks path per acceptance criteria
     let app = Router::new()
         .nest("/api", router())
-        .with_state(Arc::new(runtime));
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)));
 
     let response = app
         .oneshot(

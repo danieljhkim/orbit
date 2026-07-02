@@ -1,10 +1,8 @@
 //! Job catalog and job-run listing handlers.
 
-use std::sync::Arc;
-
-use axum::extract::{Query, State};
+use crate::state::Ws;
+use axum::extract::Query;
 use axum::response::{IntoResponse, Json, Response};
-use orbit_core::OrbitRuntime;
 use orbit_core::command::job::JobRunListParams;
 use serde_json::Value;
 
@@ -13,7 +11,7 @@ use crate::projections::{job_catalog_to_json_with_last_run, job_run_to_json};
 
 const JOB_RUN_DEFAULT_LIMIT: usize = 25;
 
-pub(super) async fn list_jobs(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
+pub(super) async fn list_jobs(Ws(runtime): Ws) -> Response {
     use orbit_core::command::job::JobCatalogFilter;
     match runtime.list_job_catalog_with_last_run(true, JobCatalogFilter::All) {
         Ok(rows) => {
@@ -29,10 +27,7 @@ pub(super) async fn list_jobs(State(runtime): State<Arc<OrbitRuntime>>) -> Respo
     }
 }
 
-pub(super) async fn list_job_runs(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Query(q): Query<LimitQuery>,
-) -> Response {
+pub(super) async fn list_job_runs(Ws(runtime): Ws, Query(q): Query<LimitQuery>) -> Response {
     let limit = bounded_limit(q.limit, JOB_RUN_DEFAULT_LIMIT);
     let params = JobRunListParams {
         job_id: None,

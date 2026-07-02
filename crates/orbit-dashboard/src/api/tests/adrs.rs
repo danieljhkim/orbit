@@ -62,7 +62,7 @@ async fn request_accept(
     }
 
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(builder.body(Body::empty()).expect("request"))
         .await
         .expect("response")
@@ -90,7 +90,7 @@ async fn request_supersede(
     };
 
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(request)
         .await
         .expect("response")

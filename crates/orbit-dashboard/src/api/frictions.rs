@@ -1,8 +1,7 @@
 //! Friction artifact scan and triage handlers.
 
-use std::sync::Arc;
-
-use axum::extract::{Path, Query, State};
+use crate::state::Ws;
+use axum::extract::{Path, Query};
 use axum::response::{IntoResponse, Json, Response};
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde::Deserialize;
@@ -38,7 +37,7 @@ pub(super) struct FrictionPatchBody {
 }
 
 pub(super) async fn list_frictions(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Query(query): Query<FrictionsQuery>,
 ) -> Response {
     let mut input = Map::new();
@@ -78,10 +77,7 @@ pub(super) async fn list_frictions(
     .into_response()
 }
 
-pub(super) async fn get_friction(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn get_friction(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let mut friction = match run_friction_tool(
         &runtime,
         "orbit.friction.show",
@@ -102,7 +98,7 @@ pub(super) async fn get_friction(
     Json(friction).into_response()
 }
 
-pub(super) async fn friction_stats(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
+pub(super) async fn friction_stats(Ws(runtime): Ws) -> Response {
     match run_friction_tool(&runtime, "orbit.friction.stats", json!({})) {
         Ok(stats) => Json(stats).into_response(),
         Err(e) => map_runtime_error(e),
@@ -110,7 +106,7 @@ pub(super) async fn friction_stats(State(runtime): State<Arc<OrbitRuntime>>) -> 
 }
 
 pub(super) async fn update_friction_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path(id): Path<String>,
     body: Option<Json<FrictionPatchBody>>,
 ) -> Response {
@@ -136,10 +132,7 @@ pub(super) async fn update_friction_action(
     }
 }
 
-pub(super) async fn resolve_friction_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn resolve_friction_action(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     match run_friction_tool(
         &runtime,
         "orbit.friction.resolve",

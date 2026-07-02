@@ -1,5 +1,27 @@
 const params = new URLSearchParams(window.location.search);
 
+// ORB-00030: the dashboard can serve multiple workspaces. `currentWorkspace`
+// (a workspace id, or null for the aggregate "all" view) is transparently
+// appended as `?workspace=<id>` to every API request below, so individual view
+// modules stay workspace-agnostic. Initialized from the URL for shareable links.
+let currentWorkspace = params.get("workspace") || null;
+
+export function getWorkspace() {
+  return currentWorkspace;
+}
+
+export function setWorkspace(id) {
+  currentWorkspace = id || null;
+}
+
+// Append the selected workspace to an API path, unless one is already present
+// (aggregate endpoints like /api/tasks/all are called with no workspace set).
+function withWorkspace(path) {
+  if (!currentWorkspace || /[?&]workspace=/.test(path)) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}workspace=${encodeURIComponent(currentWorkspace)}`;
+}
+
 export function positiveIntParam(name, fallback) {
   const parsed = parseInt(params.get(name) || String(fallback), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -39,7 +61,7 @@ export function stateCell(state) {
 }
 
 export function fetchJson(path) {
-  return fetch(path, { headers: { accept: "application/json" } })
+  return fetch(withWorkspace(path), { headers: { accept: "application/json" } })
     .then(res => {
       if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
       return res.json();
@@ -56,7 +78,7 @@ export function requestJson(path, method, body) {
     headers["content-type"] = "application/json";
     opts.body = JSON.stringify(body);
   }
-  return fetch(path, opts).then(async (res) => {
+  return fetch(withWorkspace(path), opts).then(async (res) => {
     const text = await res.text();
     const body = text ? JSON.parse(text) : {};
     if (!res.ok) {

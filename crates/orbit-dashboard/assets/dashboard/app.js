@@ -1,7 +1,7 @@
 // Orbit dashboard — terminal-dark, manually refreshed SPA.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, statusPill, stateCell, fetchJson, requestJson, postJson, patchJson, syncNodes, positiveIntParam } from './common.js';
+import { el, statusPill, stateCell, fetchJson, requestJson, postJson, patchJson, syncNodes, positiveIntParam, getWorkspace, setWorkspace } from './common.js';
 import { buildChips, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, setPinnedExternalTask, wireSearch } from './tasks.js';
 import { applyAuditHashQuery, buildAuditChips, buildAuditHash, fetchAndRenderAudit, fetchAndRenderPolicy, getActiveAuditSubtab, navigateToAuditExecution, renderAuditSummary, setActiveAuditSubtabFromButton, setAuditSubtab, syncAuditControls, wireAuditSearch, } from './audit.js';
 import { renderScoreboard } from './scoreboard.js';
@@ -83,6 +83,10 @@ let frictionSearchQuery = "";
 
 // Health strip state
 let lastSummary = null;
+
+// ORB-00030: workspaces the dashboard is serving. Empty/one entry => single
+// mode (no selector). More than one => global mode (selector shown).
+let dashboardWorkspaces = [];
 
 function taskContext() {
   return {
@@ -1158,13 +1162,73 @@ function fetchAndCacheCrews() {
 }
 
 function fetchAndRenderTasks() {
+  // In global mode with the aggregate ("All workspaces") view selected, pull
+  // every workspace's tasks; otherwise the single/selected workspace's tasks
+  // (the workspace query param is applied by fetchJson).
+  const aggregate = dashboardWorkspaces.length > 1 && !getWorkspace();
+  const path = aggregate ? "/api/tasks/all" : "/api/tasks";
   return Promise.all([
-    fetchJson("/api/tasks"),
+    fetchJson(path),
     fetchAndCacheCrews(),
   ]).then(([tasks]) => {
     lastTasks = tasks;
     renderTasks(tasks, taskContext());
   });
+}
+
+// ORB-00030: discover servable workspaces and, in global mode, install a
+// header selector. Runs before the first refresh so the initial fetches target
+// the right workspace. Failures are non-fatal (single-workspace fallback).
+async function initWorkspaceSelector() {
+  let entries;
+  try {
+    entries = await fetchJson("/api/workspaces");
+  } catch (e) {
+    console.error(e);
+    return;
+  }
+  dashboardWorkspaces = Array.isArray(entries) ? entries : [];
+  if (dashboardWorkspaces.length <= 1) return; // single mode: no selector
+
+  // Default to the workspace flagged by the server (the cwd workspace, if the
+  // server was launched inside one) so every tab works out of the box; else the
+  // first active workspace. "All workspaces" (aggregate) is an explicit choice.
+  if (!getWorkspace()) {
+    const def = dashboardWorkspaces.find((w) => w.is_default);
+    const firstActive = dashboardWorkspaces.find((w) => w.status === "active");
+    const initial = (def || firstActive || dashboardWorkspaces[0]).id;
+    setWorkspace(initial);
+  }
+  buildWorkspaceSelector();
+}
+
+function buildWorkspaceSelector() {
+  const select = el("select", { class: "workspace-select", title: "Workspace" });
+  select.id = "workspace-select";
+
+  const allOption = el("option", { text: "All workspaces" });
+  allOption.value = "";
+  select.appendChild(allOption);
+
+  const current = getWorkspace() || "";
+  for (const ws of dashboardWorkspaces) {
+    const active = ws.status === "active";
+    const label = active ? ws.name : `${ws.name} (unavailable)`;
+    const option = el("option", { text: label });
+    option.value = ws.id;
+    option.disabled = !active;
+    if (ws.id === current) option.selected = true;
+    select.appendChild(option);
+  }
+  if (!current) allOption.selected = true;
+
+  select.addEventListener("change", () => {
+    setWorkspace(select.value);
+    refreshDashboard();
+  });
+
+  const meta = $("meta");
+  meta.insertBefore(select, $("refresh-btn"));
 }
 
 function activeRefreshJobs() {
@@ -1465,6 +1529,9 @@ initRunDetail(runDetailContext());
 initReviewThreads();
 const rctx = routerContext();
 initRouter(rctx);
+// Resolve workspaces before the router fires its first refresh so the initial
+// fetches carry the right workspace (top-level await; app.js is an ES module).
+await initWorkspaceSelector();
 iT();
 
 initLogTail();

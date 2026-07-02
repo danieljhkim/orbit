@@ -1,10 +1,9 @@
 //! Learning scan and curation handlers.
 
-use std::sync::Arc;
-
-use axum::extract::{Path, Query, State};
+use crate::state::Ws;
+use axum::extract::{Path, Query};
 use axum::response::{IntoResponse, Json, Response};
-use orbit_core::{Learning, LearningSearchParams, OrbitRuntime};
+use orbit_core::{Learning, LearningSearchParams};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -36,7 +35,7 @@ pub(super) struct SupersedeLearningBody {
 }
 
 pub(super) async fn list_learnings(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Query(query): Query<LearningsQuery>,
 ) -> Response {
     let all = match runtime.list_learnings(None) {
@@ -88,10 +87,7 @@ pub(super) async fn list_learnings(
     .into_response()
 }
 
-pub(super) async fn get_learning(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn get_learning(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     match runtime.get_learning(&id) {
         Ok(learning) => Json(learning_to_json(&learning)).into_response(),
         Err(e) => map_runtime_error(e),
@@ -99,7 +95,7 @@ pub(super) async fn get_learning(
 }
 
 pub(super) async fn supersede_learning_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path(id): Path<String>,
     body: Option<Json<SupersedeLearningBody>>,
 ) -> Response {

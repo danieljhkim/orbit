@@ -25,7 +25,7 @@ async fn request_cancel(runtime: OrbitRuntime, run_id: &str, origin: Option<&str
         builder = builder.header(header::ORIGIN, origin);
     }
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(builder.body(Body::empty()).expect("request"))
         .await
         .expect("response")
@@ -39,7 +39,7 @@ async fn request_replay(runtime: OrbitRuntime, run_id: &str, origin: Option<&str
         builder = builder.header(header::ORIGIN, origin);
     }
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(builder.body(Body::empty()).expect("request"))
         .await
         .expect("response")
@@ -56,7 +56,7 @@ async fn request_dashboard_run_events_query(
 ) -> Response {
     Router::new()
         .nest("/api", router())
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .uri(format!("/api/runs/{encoded_run_id}/events{query}"))
@@ -70,7 +70,7 @@ async fn request_dashboard_run_events_query(
 async fn request_dashboard_run_logs(runtime: OrbitRuntime, encoded_run_id: &str) -> Response {
     Router::new()
         .nest("/api", router())
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .uri(format!("/api/runs/{encoded_run_id}/logs"))
@@ -477,7 +477,9 @@ async fn replay_run_endpoint_returns_new_run_id_and_lineage() {
         Some(source.run_id.as_str())
     );
     let list_response = router()
-        .with_state(Arc::new(runtime.clone()))
+        .with_state(crate::state::DashboardState::single(Arc::new(
+            runtime.clone(),
+        )))
         .oneshot(
             Request::builder()
                 .uri("/job-runs?limit=10")

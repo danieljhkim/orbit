@@ -57,7 +57,7 @@ async fn request_supersede(
     };
 
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(request)
         .await
         .expect("response")
@@ -161,7 +161,7 @@ async fn list_learnings_returns_stats_and_rows() {
         .expect("supersede fixture");
 
     let response = router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .method(Method::GET)

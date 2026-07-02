@@ -1,8 +1,7 @@
 //! Run lifecycle: detail, cancel, replay, events, logs.
 
-use std::sync::Arc;
-
-use axum::extract::{Path, Query, State};
+use crate::state::Ws;
+use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use orbit_common::utility::redaction::redact_all;
@@ -24,10 +23,7 @@ const RUN_LOG_PREVIEW_MAX_BYTES: usize = 8192;
 /// Maximum lines included in stdout/stderr previews returned by run-log APIs.
 const RUN_LOG_PREVIEW_MAX_LINES: usize = 120;
 
-pub(super) async fn get_run(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn get_run(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let id = match validate_id(&id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
@@ -38,10 +34,7 @@ pub(super) async fn get_run(
     }
 }
 
-pub(super) async fn cancel_run_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn cancel_run_action(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let id = match validate_id(&id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
@@ -65,10 +58,7 @@ pub(super) async fn cancel_run_action(
     }
 }
 
-pub(super) async fn replay_run_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn replay_run_action(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let id = match validate_id(&id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
@@ -128,7 +118,7 @@ fn audit_step_to_json(step: &RunAuditStep) -> Value {
 }
 
 pub(super) async fn list_run_events(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path(id): Path<String>,
     Query(q): Query<RunEventsQuery>,
 ) -> Response {
@@ -201,7 +191,7 @@ pub(super) async fn list_run_events(
 }
 
 pub(super) async fn list_run_logs(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path(id): Path<String>,
     Query(q): Query<LimitQuery>,
 ) -> Response {

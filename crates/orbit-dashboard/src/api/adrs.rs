@@ -2,9 +2,9 @@
 
 use std::fs;
 use std::io::ErrorKind;
-use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
+use crate::state::Ws;
+use axum::extract::{Path, Query};
 use axum::response::{IntoResponse, Json, Response};
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde::Deserialize;
@@ -37,10 +37,7 @@ pub(super) struct SupersedeAdrBody {
     reason: Option<String>,
 }
 
-pub(super) async fn list_adrs(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Query(query): Query<AdrsQuery>,
-) -> Response {
+pub(super) async fn list_adrs(Ws(runtime): Ws, Query(query): Query<AdrsQuery>) -> Response {
     let all = match adr_list(&runtime, Map::new()) {
         Ok(adrs) => adrs,
         Err(e) => return map_runtime_error(e),
@@ -88,20 +85,14 @@ pub(super) async fn list_adrs(
     .into_response()
 }
 
-pub(super) async fn get_adr(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn get_adr(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     match adr_show(&runtime, &id) {
         Ok(adr) => Json(adr).into_response(),
         Err(e) => map_runtime_error(e),
     }
 }
 
-pub(super) async fn accept_adr_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn accept_adr_action(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let result = run_adr_tool(
         &runtime,
         "orbit.adr.update",
@@ -120,7 +111,7 @@ pub(super) async fn accept_adr_action(
 }
 
 pub(super) async fn supersede_adr_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path(id): Path<String>,
     body: Option<Json<SupersedeAdrBody>>,
 ) -> Response {

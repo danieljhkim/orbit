@@ -5,15 +5,18 @@
 //! large dependency subtree (axum, etc). Behavior is identical to the prior
 //! in-tree implementation.
 //!
-//! Public surface is deliberately tiny: `ServeArgs` (clap) + `serve()` entry
-//! point. All routes, content types, defaults, and graceful shutdown are
-//! preserved.
+//! Public surface is deliberately tiny: `ServeArgs` (clap) plus two entry
+//! points — `serve()` for a caller-supplied runtime and `serve_from_env()`,
+//! which resolves the workspace(s) to serve from the environment (single
+//! workspace, or every registered workspace in global mode). All routes,
+//! content types, defaults, and graceful shutdown are preserved.
 
 mod api;
 mod connect;
 mod log_format;
 mod parse;
 mod projections;
+mod state;
 
 #[cfg(test)]
 mod tests;
@@ -21,6 +24,7 @@ mod tests;
 pub use connect::{ConnectArgs, connect};
 
 use std::net::{IpAddr, SocketAddr};
+use std::path::Path;
 use std::sync::Arc;
 
 use axum::Router;
@@ -28,7 +32,8 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_common::types::{WorkspaceRegistry, WorkspaceStatus};
+use orbit_core::{ActorIdentity, OrbitError, OrbitRuntime, workspace_registry};
 
 const INDEX_HTML: &str = include_str!("../assets/dashboard/index.html");
 const DASHBOARD_CSS: &str = include_str!("../assets/dashboard/dashboard.css");
@@ -79,20 +84,99 @@ pub struct ServeArgs {
     /// Do not attempt to open the dashboard URL in a browser on startup.
     #[arg(long)]
     pub no_open: bool,
+
+    /// Serve every registered workspace (machine-wide view) instead of only
+    /// the current one. Implied automatically when run outside any workspace.
+    #[arg(long)]
+    pub global: bool,
 }
 
-/// Boot the dashboard server and block until shutdown (ctrl-c or SIGTERM).
-///
-/// This is the single public entry point. The caller (typically orbit-cli's
-/// thin `web` subcommand) supplies the shared `OrbitRuntime` and the clap
-/// args. All routes, response shapes, and side-effects (browser open, banner)
-/// are unchanged from the prior CLI-embedded version.
+/// Boot the dashboard for a single, already-built runtime and block until
+/// shutdown (ctrl-c or SIGTERM). Retained for callers that already hold an
+/// `OrbitRuntime`; `orbit web serve` uses [`serve_from_env`] instead.
 pub fn serve(runtime: &OrbitRuntime, args: ServeArgs) -> Result<(), OrbitError> {
+    let state = state::DashboardState::single(Arc::new(runtime.clone()));
+    run_server(&args, state)
+}
+
+/// Boot the dashboard, resolving which workspace(s) to serve from the current
+/// environment, and block until shutdown.
+///
+/// Unlike [`serve`], this needs no pre-built runtime, so it works from any
+/// directory — the entry point for `orbit web serve` (dispatched before the
+/// CLI's eager workspace initialization, which would otherwise fail outside a
+/// workspace). Inside a workspace without `--global` it preserves the original
+/// single-workspace behavior; otherwise it serves every registered workspace.
+pub fn serve_from_env(args: ServeArgs, root_override: Option<&Path>) -> Result<(), OrbitError> {
+    let state = build_state(&args, root_override)?;
+    run_server(&args, state)
+}
+
+/// Resolve dashboard state from the environment.
+///
+/// - Inside a workspace, no `--global`: single mode over that workspace.
+/// - `--global`, or outside any workspace: global mode over every registered
+///   workspace (stale-path entries are listed but marked inactive and never
+///   built).
+fn build_state(
+    args: &ServeArgs,
+    root_override: Option<&Path>,
+) -> Result<state::DashboardState, OrbitError> {
+    let cwd_runtime = OrbitRuntime::try_initialize_existing(root_override)?;
+
+    if !args.global
+        && let Some(runtime) = cwd_runtime
+    {
+        let runtime = runtime.with_actor(ActorIdentity::human("human"));
+        return Ok(state::DashboardState::single(Arc::new(runtime)));
+    }
+
+    let global_root = workspace_registry::global_orbit_dir()?;
+    let mut registry = workspace_registry::load_registry()?;
+    workspace_registry::validate_workspaces(&mut registry);
+
+    let default_workspace = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| default_workspace_for_cwd(&registry, &cwd));
+
+    let entries = registry
+        .workspaces
+        .iter()
+        .map(|ws| state::WsEntry {
+            id: ws.id.clone(),
+            name: ws.name.clone(),
+            repo_root: ws.root.clone(),
+            orbit_dir: ws.orbit_dir.clone(),
+            active: ws.status == WorkspaceStatus::Active,
+        })
+        .collect();
+
+    Ok(state::DashboardState::global(
+        global_root,
+        entries,
+        default_workspace,
+    ))
+}
+
+/// Best-effort default when serving globally: the registered workspace whose
+/// repo root is the longest prefix of `cwd`, if the server was launched inside
+/// one. `None` means the frontend opens on the aggregate "all workspaces" view.
+fn default_workspace_for_cwd(registry: &WorkspaceRegistry, cwd: &Path) -> Option<String> {
+    registry
+        .workspaces
+        .iter()
+        .filter(|ws| ws.status == WorkspaceStatus::Active && cwd.starts_with(&ws.root))
+        .max_by_key(|ws| ws.root.as_os_str().len())
+        .map(|ws| ws.id.clone())
+}
+
+/// Build the axum app and block on the tokio runtime until graceful shutdown.
+fn run_server(args: &ServeArgs, state: state::DashboardState) -> Result<(), OrbitError> {
     check_bindable_host(args.host, args.port)?;
 
     let addr = SocketAddr::new(args.host, args.port);
     let url = format!("http://{addr}");
-    let runtime = Arc::new(runtime.clone());
+    let no_open = args.no_open;
 
     let app = Router::new()
         .route("/", get(serve_index))
@@ -113,7 +197,7 @@ pub fn serve(runtime: &OrbitRuntime, args: ServeArgs) -> Result<(), OrbitError> 
         .route("/static/review-threads.js", get(serve_review_threads_js))
         .route("/healthz", get(healthz))
         .nest("/api", api::router())
-        .with_state(runtime);
+        .with_state(state);
 
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -130,7 +214,7 @@ pub fn serve(runtime: &OrbitRuntime, args: ServeArgs) -> Result<(), OrbitError> 
             println!("Dashboard listening on {url}");
         }
 
-        if !args.no_open {
+        if !no_open {
             open_browser(&url);
         }
 

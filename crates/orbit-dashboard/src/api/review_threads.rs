@@ -5,13 +5,12 @@
 //! does not have to fan out across the per-task endpoints. Write paths
 //! delegate to the same `OrbitRuntime` methods the MCP tools use.
 
-use std::sync::Arc;
-
-use axum::extract::{Path, Query, State};
+use crate::state::Ws;
+use axum::extract::{Path, Query};
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
 use orbit_common::types::{ReviewMessage, ReviewThread, ReviewThreadStatus, all_agent_families};
-use orbit_core::{OrbitRuntime, TaskStatus};
+use orbit_core::TaskStatus;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -33,10 +32,7 @@ pub(super) struct ReplyBody {
     pub(super) body: String,
 }
 
-pub(super) async fn list_review_threads(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Query(q): Query<ListQuery>,
-) -> Response {
+pub(super) async fn list_review_threads(Ws(runtime): Ws, Query(q): Query<ListQuery>) -> Response {
     let status_filter = match parse_status_filter(q.status.as_deref()) {
         Ok(value) => value,
         Err(message) => return bad_request(message),
@@ -121,7 +117,7 @@ pub(super) async fn list_review_threads(
 }
 
 pub(super) async fn reply_review_thread_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path((task_id, thread_id)): Path<(String, String)>,
     Json(body): Json<ReplyBody>,
 ) -> Response {
@@ -149,7 +145,7 @@ pub(super) async fn reply_review_thread_action(
 }
 
 pub(super) async fn resolve_review_thread_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path((task_id, thread_id)): Path<(String, String)>,
 ) -> Response {
     let validated_id = match validate_id(&task_id) {
@@ -172,7 +168,7 @@ pub(super) async fn resolve_review_thread_action(
 }
 
 pub(super) async fn reopen_review_thread_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path((task_id, thread_id)): Path<(String, String)>,
 ) -> Response {
     let validated_id = match validate_id(&task_id) {
