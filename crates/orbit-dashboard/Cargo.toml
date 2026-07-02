@@ -15,6 +15,7 @@ axum.workspace = true
 chrono.workspace = true
 clap.workspace = true
 futures-core.workspace = true
+libc.workspace = true
 orbit-common = { path = "../orbit-common" }
 orbit-core = { path = "../orbit-core" }
 serde.workspace = true

@@ -10,12 +10,15 @@
 //! preserved.
 
 mod api;
+mod connect;
 mod log_format;
 mod parse;
 mod projections;
 
 #[cfg(test)]
 mod tests;
+
+pub use connect::{ConnectArgs, connect};
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -56,6 +59,11 @@ const DASHBOARD_CSP: &str = concat!(
     "frame-ancestors 'none'"
 );
 
+/// Conventional loopback port for the dashboard. Shared by `web serve`'s
+/// `--port` default and `web connect`'s local/remote port preference so the
+/// two surfaces agree on one number.
+pub(crate) const DEFAULT_DASHBOARD_PORT: u16 = 7878;
+
 /// Arguments for `orbit web serve` (and the library entry point).
 #[derive(Args, Clone)]
 #[command(about = "Run the Orbit dashboard")]
@@ -65,7 +73,7 @@ pub struct ServeArgs {
     pub host: IpAddr,
 
     /// Port to bind to.
-    #[arg(long, default_value_t = 7878)]
+    #[arg(long, default_value_t = DEFAULT_DASHBOARD_PORT)]
     pub port: u16,
 
     /// Do not attempt to open the dashboard URL in a browser on startup.
@@ -269,7 +277,7 @@ async fn shutdown_signal() {
     }
 }
 
-fn open_browser(url: &str) {
+pub(crate) fn open_browser(url: &str) {
     #[cfg(target_os = "macos")]
     let cmd = "open";
     #[cfg(all(unix, not(target_os = "macos")))]
