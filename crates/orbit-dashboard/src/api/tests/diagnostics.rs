@@ -25,7 +25,7 @@ use orbit_common::utility::blob_store::BlobStore;
 async fn request_dashboard_errors(runtime: OrbitRuntime) -> Response {
     Router::new()
         .nest("/api", router())
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .uri("/api/diagnostics/errors?limit=10")

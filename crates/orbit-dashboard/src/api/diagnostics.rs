@@ -1,9 +1,9 @@
 //! `/diagnostics/{metrics,errors,friction}` aggregation endpoints.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use crate::state::Ws;
+use axum::extract::Query;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::DateTime;
 use orbit_common::utility::blob_store::BlobStore;
@@ -18,7 +18,7 @@ use super::{
 use crate::log_format::{Filters as LogFilters, read_recent_rendered_events, resolve_log_path};
 
 pub(super) async fn list_diagnostics_metrics(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Query(q): Query<DiagnosticsQuery>,
 ) -> Response {
     let month = q.month.unwrap_or_else(current_year_month_utc);
@@ -298,7 +298,7 @@ fn read_blob_text_best_effort(blob_store: &BlobStore, blob_ref: &str) -> String 
 }
 
 pub(super) async fn list_diagnostics_errors(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Query(q): Query<DiagnosticsQuery>,
 ) -> Response {
     let limit = bounded_limit(q.limit, HISTORY_DEFAULT_LIMIT);
@@ -483,7 +483,7 @@ fn strip_htmlish(raw: &str) -> String {
 }
 
 pub(super) async fn list_diagnostics_friction(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Query(q): Query<DiagnosticsQuery>,
 ) -> Response {
     let month = q.month.unwrap_or_else(current_year_month_utc);
@@ -512,9 +512,7 @@ pub(super) async fn list_diagnostics_friction(
     }
 }
 
-pub(super) async fn diagnostics_implement_one(
-    State(runtime): State<Arc<OrbitRuntime>>,
-) -> Response {
+pub(super) async fn diagnostics_implement_one(Ws(runtime): Ws) -> Response {
     let runtime_clone = runtime.clone();
     let actor_vec =
         match tokio::task::spawn_blocking(move || compute_implement_one_by_actor(&runtime_clone))

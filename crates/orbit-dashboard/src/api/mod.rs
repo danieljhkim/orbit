@@ -8,8 +8,6 @@
 // `*_tests` modules are the documented exception for test harness code.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
-use std::sync::Arc;
-
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
@@ -17,7 +15,6 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
-use orbit_core::OrbitRuntime;
 use serde::Deserialize;
 use serde_json::json;
 use url::Url;
@@ -36,6 +33,7 @@ mod review_threads;
 mod runs;
 mod scoreboard;
 mod tasks;
+mod workspaces;
 
 pub(super) const HISTORY_DEFAULT_LIMIT: usize = 50;
 pub(super) const HISTORY_MAX_LIMIT: usize = 200;
@@ -293,13 +291,15 @@ async fn require_localhost_origin(request: Request<Body>, next: Next) -> Respons
     next.run(request).await
 }
 
-pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
+pub(super) fn router() -> Router<crate::state::DashboardState> {
     Router::new()
         .route(
             "/tasks",
             get(tasks::list_tasks).post(tasks::create_task_action),
         )
         .route("/tasks/locks", get(tasks::list_task_locks))
+        .route("/tasks/all", get(workspaces::list_all_tasks))
+        .route("/workspaces", get(workspaces::list_workspaces))
         .route(
             "/tasks/:id",
             get(tasks::get_task).patch(tasks::update_task_action),

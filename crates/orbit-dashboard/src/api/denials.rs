@@ -2,9 +2,9 @@
 //! SQLite audit-events table.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use crate::state::Ws;
+use axum::extract::Query;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
 use orbit_common::types::activity_job::{
@@ -496,10 +496,7 @@ pub(super) fn denials_by_reason_summary(rows: &[DenialRow], limit: usize) -> Val
     )
 }
 
-pub(super) async fn list_denials(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Query(q): Query<DenialsQuery>,
-) -> Response {
+pub(super) async fn list_denials(Ws(runtime): Ws, Query(q): Query<DenialsQuery>) -> Response {
     let raw_since = q.since.as_deref().unwrap_or(DEFAULT_SUMMARY_WINDOW);
     let since = match parse_since(raw_since) {
         Ok(ts) => Some(ts),

@@ -43,7 +43,7 @@ fn seed_task(runtime: &OrbitRuntime) -> String {
 
 async fn get(runtime: Arc<OrbitRuntime>, uri: &str) -> axum::response::Response {
     router()
-        .with_state(runtime)
+        .with_state(crate::state::DashboardState::single(runtime))
         .oneshot(
             Request::builder()
                 .method(Method::GET)
@@ -71,7 +71,7 @@ async fn post(
         Body::empty()
     };
     router()
-        .with_state(runtime)
+        .with_state(crate::state::DashboardState::single(runtime))
         .oneshot(builder.body(body).expect("request"))
         .await
         .expect("response")
@@ -250,7 +250,7 @@ async fn cross_origin_post_is_forbidden() {
     let runtime = Arc::new(runtime);
 
     let response = router()
-        .with_state(runtime)
+        .with_state(crate::state::DashboardState::single(runtime))
         .oneshot(
             Request::builder()
                 .method(Method::POST)

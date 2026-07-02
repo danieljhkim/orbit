@@ -28,7 +28,7 @@ const TASK_ID: &str = "ORB-METRICS-1";
 async fn request_metrics(runtime: OrbitRuntime, uri: &str) -> Response {
     Router::new()
         .nest("/api", router())
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .uri(format!("/api{uri}"))

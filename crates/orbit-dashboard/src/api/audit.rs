@@ -2,9 +2,9 @@
 
 use std::collections::BTreeMap;
 use std::str::FromStr;
-use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use crate::state::Ws;
+use axum::extract::Query;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Duration, Utc};
 use orbit_core::command::job::JobRunListParams;
@@ -27,10 +27,7 @@ use crate::projections::audit_event_to_json;
 /// switch the tile to alert state without a second round-trip.
 const DEFAULT_DENIAL_THRESHOLD: i64 = 10;
 
-pub(super) async fn list_audit(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Query(q): Query<AuditQuery>,
-) -> Response {
+pub(super) async fn list_audit(Ws(runtime): Ws, Query(q): Query<AuditQuery>) -> Response {
     let since = match q.since.as_deref() {
         Some(raw) => match parse_since(raw) {
             Ok(ts) => Some(ts),
@@ -146,10 +143,7 @@ fn arguments_json_matches_profile(raw: Option<&str>, expected: &str) -> bool {
     false
 }
 
-pub(super) async fn audit_summary(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Query(q): Query<AuditSummaryQuery>,
-) -> Response {
+pub(super) async fn audit_summary(Ws(runtime): Ws, Query(q): Query<AuditSummaryQuery>) -> Response {
     let raw_since = q.since.as_deref().unwrap_or(DEFAULT_SUMMARY_WINDOW);
     let since = match parse_since(raw_since) {
         Ok(ts) => ts,

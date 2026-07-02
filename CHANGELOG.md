@@ -5,6 +5,7 @@
 ### Highlights
 
 - **`orbit web connect <ssh-host>`**: a client-side convenience command that views a workspace's dashboard running on another machine over an SSH tunnel — automating the manual `ssh -L 7878:localhost:7878 <host> "orbit web serve --no-open"` dance. It picks a free local port (preferring 7878, else ephemeral), starts `orbit web serve --no-open` on the remote, forwards the port, waits for `/healthz`, opens the browser, and tears the tunnel (and remote serve process) down cleanly on Ctrl-C. The loopback-only bind guard (ORB-00360) is untouched and auth is delegated entirely to SSH — no new network attack surface. Flags: `--port`, `--remote-port`, `--root`, `--no-open`. ([ORB-00029])
+- **Global, multi-workspace dashboard**: `orbit web serve` is no longer confined to a single workspace. Run it outside any workspace — or pass the new `--global` flag from inside one — and the dashboard serves every workspace registered in `~/.orbit/workspaces.json`, lazily building a runtime per workspace and skipping stale-path entries rather than failing to start. A header workspace selector plus an aggregate "All workspaces" task view (`GET /api/workspaces`, `GET /api/tasks/all`) let one loopback server cover the whole machine; inside a workspace without `--global`, behavior is unchanged. The dashboard's axum state moves from a single `Arc<OrbitRuntime>` to a workspace-keyed runtime map behind a `Ws` extractor, and the loopback-only bind guard (ORB-00360) is untouched. ([ORB-00030])
 
 ## 0.9.2
 

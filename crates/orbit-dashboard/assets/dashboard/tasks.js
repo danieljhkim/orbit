@@ -869,6 +869,11 @@ export function renderTasks(tasks, context) {
   const body = $("tasks-body");
   if (!body) return;
 
+  // ORB-00030: in the aggregate ("All workspaces") view each task carries its
+  // owning workspace; show it as a badge in the Title cell. Detected from the
+  // data so no extra plumbing is needed (single-workspace lists lack the field).
+  const aggregate = Array.isArray(tasks) && tasks.some((t) => t && t.workspace_name);
+
   // Auto-clear pinned external (global resolver) if its status+search now makes it
   // visible in the normal filtered list (user enabled the chip or cleared search).
   if (pinnedExternalTask && pinnedExternalTask.task) {
@@ -980,15 +985,21 @@ export function renderTasks(tasks, context) {
           idSpan.style.color = "";
         }, 1000);
       });
+      const titleCell = aggregate && t.workspace_name
+        ? el("span", { class: "title" }, [
+            el("span", { class: "ws-badge mono", text: t.workspace_name, title: `Workspace: ${t.workspace_name}` }),
+            t.title,
+          ])
+        : el("span", { class: "title", text: t.title });
       const row = el("div", { class: "row", title: t.title }, [
         idSpan,
-        el("span", { class: "title", text: t.title }),
+        titleCell,
         buildStatusUpdateControl(t, context),
         buildCrewUpdateControl(t, context),
       ]);
       row.dataset.key = `task-${t.id}`;
       // Basic hash based on row presentation parameters + expanded state
-      row.dataset.hash = `${t.id}-${t.title}-${t.status}-${t.crew || ""}-${t.resolved_crew || ""}-${crewOptionsSignature()}-${crewUpdateErrors.get(t.id) || ""}-${expandedTaskIds.has(t.id)}`;
+      row.dataset.hash = `${t.id}-${t.title}-${t.status}-${t.crew || ""}-${t.resolved_crew || ""}-${t.workspace_id || ""}-${crewOptionsSignature()}-${crewUpdateErrors.get(t.id) || ""}-${expandedTaskIds.has(t.id)}`;
       row.addEventListener("click", () => {
         const toggle = () => {
           if (expandedTaskIds.has(t.id)) expandedTaskIds.delete(t.id);

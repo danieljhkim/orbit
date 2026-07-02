@@ -16,3 +16,4 @@ mod review_threads;
 mod runs;
 mod scoreboard;
 mod tasks;
+mod workspaces;

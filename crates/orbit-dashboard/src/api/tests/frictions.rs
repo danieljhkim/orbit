@@ -46,7 +46,7 @@ async fn request(
     };
 
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(request)
         .await
         .expect("response")

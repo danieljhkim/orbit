@@ -46,6 +46,7 @@ use crate::command::learning::{LearningCommand, LearningSubcommand};
 use crate::command::mcp::{McpCommand, McpSubcommand};
 use crate::command::search::SearchCommand;
 use crate::command::tool::{OutputFormat, ToolSubcommand};
+use crate::command::web::{WebCommand, WebSubcommand};
 use crate::command::workspace::{WorkspaceCommand, WorkspaceSubcommand};
 use crate::command::{Commands, Execute, init::InitCommand};
 
@@ -106,6 +107,18 @@ fn main() {
             command: LearningSubcommand::MigrateLayout(args),
         }) => {
             if let Err(err) = args.execute_without_runtime(root_override.as_deref()) {
+                print_error(&err, tool_run_json_output);
+                std::process::exit(1);
+            }
+            return;
+        }
+        // The dashboard resolves its own workspace(s) and can serve globally
+        // from any directory, so it must dispatch before the eager workspace
+        // initialization below (which fails outside a workspace).
+        Commands::Web(WebCommand {
+            command: WebSubcommand::Serve(args),
+        }) => {
+            if let Err(err) = orbit_dashboard::serve_from_env(args, root_override.as_deref()) {
                 print_error(&err, tool_run_json_output);
                 std::process::exit(1);
             }

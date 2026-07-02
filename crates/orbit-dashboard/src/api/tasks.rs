@@ -1,9 +1,8 @@
 //! Task CRUD and lifecycle handlers.
 
-use std::sync::Arc;
-
+use crate::state::Ws;
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::Path;
 use axum::http::{HeaderName, HeaderValue, header};
 use axum::response::{IntoResponse, Json, Response};
 use orbit_common::types::validate_relative_artifact_path;
@@ -132,27 +131,27 @@ where
     Option::<String>::deserialize(deserializer).map(Some)
 }
 
-pub(super) async fn list_tasks(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
-    match list_dashboard_tasks(&runtime) {
-        Ok(tasks) => match dashboard_status_index(&runtime) {
-            Ok(status_by_id) => {
-                let values = match tasks
-                    .iter()
-                    .map(|task| task_to_json_with_sidecars(&runtime, task, &status_by_id))
-                    .collect::<Result<Vec<_>, _>>()
-                {
-                    Ok(values) => values,
-                    Err(error) => return server_error(error),
-                };
-                Json(Value::Array(values)).into_response()
-            }
-            Err(e) => server_error(e),
-        },
+pub(super) async fn list_tasks(Ws(runtime): Ws) -> Response {
+    match list_tasks_json(&runtime) {
+        Ok(values) => Json(Value::Array(values)).into_response(),
         Err(e) => server_error(e),
     }
 }
 
-pub(super) async fn list_task_locks(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
+/// Build the dashboard task list as JSON values (shared by `list_tasks` and the
+/// cross-workspace `/api/tasks/all` aggregate).
+pub(super) fn list_tasks_json(
+    runtime: &OrbitRuntime,
+) -> Result<Vec<Value>, orbit_core::OrbitError> {
+    let tasks = list_dashboard_tasks(runtime)?;
+    let status_by_id = dashboard_status_index(runtime)?;
+    tasks
+        .iter()
+        .map(|task| task_to_json_with_sidecars(runtime, task, &status_by_id))
+        .collect()
+}
+
+pub(super) async fn list_task_locks(Ws(runtime): Ws) -> Response {
     match task_locks_json(&runtime) {
         Ok(value) => Json(value).into_response(),
         Err(e) => server_error(e),
@@ -173,10 +172,7 @@ fn dashboard_status_index(
     Ok(orbit_core::build_task_status_index(&runtime.list_tasks()?))
 }
 
-pub(super) async fn get_task(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn get_task(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let id = match validate_id(&id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
@@ -194,7 +190,7 @@ pub(super) async fn get_task(
 }
 
 pub(super) async fn get_task_artifact(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path((id, path)): Path<(String, String)>,
 ) -> Response {
     let id = match validate_id(&id) {
@@ -270,7 +266,7 @@ fn validate_artifact_request_path(path: &str) -> Result<String, String> {
 }
 
 pub(super) async fn create_task_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Json(body): Json<CreateTaskBody>,
 ) -> Response {
     let params = TaskAddParams {
@@ -307,7 +303,7 @@ pub(super) async fn create_task_action(
 }
 
 pub(super) async fn update_task_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path(id): Path<String>,
     Json(body): Json<UpdateTaskBody>,
 ) -> Response {
@@ -350,7 +346,7 @@ pub(super) async fn update_task_action(
 }
 
 pub(super) async fn approve_task_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path(id): Path<String>,
     body: Option<Json<ApproveBody>>,
 ) -> Response {
@@ -372,7 +368,7 @@ pub(super) async fn approve_task_action(
 }
 
 pub(super) async fn reject_task_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path(id): Path<String>,
     Json(body): Json<RejectBody>,
 ) -> Response {
@@ -392,10 +388,7 @@ pub(super) async fn reject_task_action(
     }
 }
 
-pub(super) async fn archive_task_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn archive_task_action(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let id = match validate_id(&id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
