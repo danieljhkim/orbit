@@ -565,6 +565,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             use crate::command::web::WebSubcommand;
             let sub = match &cmd.command {
                 WebSubcommand::Serve(_) => "serve",
+                WebSubcommand::Connect(_) => "connect",
             };
             CommandMeta {
                 command: "web".to_string(),

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Highlights
+
+- **`orbit web connect <ssh-host>`**: a client-side convenience command that views a workspace's dashboard running on another machine over an SSH tunnel — automating the manual `ssh -L 7878:localhost:7878 <host> "orbit web serve --no-open"` dance. It picks a free local port (preferring 7878, else ephemeral), starts `orbit web serve --no-open` on the remote, forwards the port, waits for `/healthz`, opens the browser, and tears the tunnel (and remote serve process) down cleanly on Ctrl-C. The loopback-only bind guard (ORB-00360) is untouched and auth is delegated entirely to SSH — no new network attack surface. Flags: `--port`, `--remote-port`, `--root`, `--no-open`. ([ORB-00029])
+
 ## 0.9.2
 
 ### Highlights

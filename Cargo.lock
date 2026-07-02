@@ -2242,6 +2242,7 @@ dependencies = [
  "chrono",
  "clap",
  "futures-core",
+ "libc",
  "orbit-common",
  "orbit-core",
  "rusqlite",

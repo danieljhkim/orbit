@@ -124,6 +124,10 @@ orbit run ship
 
 # launch interactive dashboard
 orbit web serve
+
+# ...or view a workspace running on another machine over an SSH tunnel
+# (the dashboard stays loopback-only; auth is delegated to SSH)
+orbit web connect my-server
 ```
 
 </details>
