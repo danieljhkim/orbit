@@ -19,6 +19,7 @@ fn args(host: &str, remote_port: u16, root: Option<&str>) -> ConnectArgs {
         port: None,
         remote_port,
         root: root.map(str::to_string),
+        global: false,
         no_open: false,
     }
 }
@@ -118,6 +119,27 @@ fn remote_command_shell_quotes_root() {
 fn remote_command_without_root_has_no_root_flag() {
     let cmd = remote_serve_command(&args("box", 7878, None));
     assert!(!cmd.contains("--root"));
+}
+
+#[test]
+fn remote_command_passes_global_when_set() {
+    let mut cfg = args("box", 7878, None);
+    assert!(!remote_serve_command(&cfg).contains("--global"));
+    cfg.global = true;
+    let cmd = remote_serve_command(&cfg);
+    assert!(
+        cmd.contains("--global"),
+        "remote serve must receive --global: {cmd}"
+    );
+}
+
+#[test]
+fn remote_command_combines_global_and_root() {
+    let mut cfg = args("box", 7878, Some("/srv/ws"));
+    cfg.global = true;
+    let cmd = remote_serve_command(&cfg);
+    assert!(cmd.contains("--global"), "{cmd}");
+    assert!(cmd.contains("--root '/srv/ws'"), "{cmd}");
 }
 
 #[test]

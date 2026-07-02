@@ -62,6 +62,11 @@ pub struct ConnectArgs {
     #[arg(long)]
     pub root: Option<String>,
 
+    /// Serve every workspace registered on the remote host, not just its
+    /// default one — passes `--global` through to the remote `orbit web serve`.
+    #[arg(long)]
+    pub global: bool,
+
     /// Do not open the dashboard URL in a browser once the tunnel is ready.
     #[arg(long)]
     pub no_open: bool,
@@ -170,13 +175,17 @@ pub(crate) fn build_ssh_args(cfg: &ConnectArgs, local_port: u16) -> Vec<String> 
     ]
 }
 
-/// The remote shell command line: `orbit web serve --no-open --port N [--root P]`.
+/// The remote shell command line:
+/// `orbit web serve --no-open --port N [--global] [--root P]`.
 ///
 /// `ssh` concatenates trailing args with spaces and re-parses them via the
 /// remote shell, so any value that could contain spaces (`--root`) is
 /// shell-quoted.
 pub(crate) fn remote_serve_command(cfg: &ConnectArgs) -> String {
     let mut cmd = format!("orbit web serve --no-open --port {}", cfg.remote_port);
+    if cfg.global {
+        cmd.push_str(" --global");
+    }
     if let Some(root) = &cfg.root {
         cmd.push_str(" --root ");
         cmd.push_str(&shell_quote(root));

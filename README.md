@@ -132,6 +132,10 @@ orbit web serve --global
 # ...or view a workspace running on another machine over an SSH tunnel
 # (the dashboard stays loopback-only; auth is delegated to SSH)
 orbit web connect my-server
+
+# ...or every workspace on that remote machine at once (--global is forwarded
+# to the remote `orbit web serve`)
+orbit web connect my-server --global
 ```
 
 </details>
