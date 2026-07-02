@@ -309,7 +309,7 @@ The score breakdown is deliberately exposed: agents can use it to decide whether
 
 ### 7.3 Deletion
 
-`task.delete` cascades to `DELETE FROM embeddings WHERE source_kind = 'task' AND source_id = ?`. Tombstoned tasks (in the v2 task-sync sense, see [docs/design/task-sync/](../task-sync/)) are not embedded.
+`task.delete` cascades to `DELETE FROM embeddings WHERE source_kind = 'task' AND source_id = ?`. Tombstoned tasks (in the v2 task-sync sense, see [docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md)) are not embedded.
 
 ---
 

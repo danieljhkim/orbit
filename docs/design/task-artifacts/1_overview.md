@@ -114,7 +114,7 @@ The canonical bundle lives in the local task store under `~/.orbit/tasks/workspa
 | Home registry: allocator, workspace bindings, generated indexes | [crates/orbit-store/src/sqlite/task_registry.rs](../../../crates/orbit-store/src/sqlite/task_registry.rs) | — |
 | V2 runtime wiring (`build_v2_task_backends`) | [crates/orbit-core/src/runtime/builder.rs](../../../crates/orbit-core/src/runtime/builder.rs) | — |
 | Local task store and symlink projection | [2_design.md §6](./2_design.md#6-local-task-store-and-symlink-projection) | — |
-| Task sync design over `ORB-*` IDs | [docs/design/task-sync/2_design.md](../task-sync/2_design.md) | [T20260505-12] |
+| Task sync design over `ORB-*` IDs (archived) | [docs/design/_archive/task-sync/2_design.md](../_archive/task-sync/2_design.md) | [T20260505-12] |
 | Task ID local-only doctrine after graph attribution removal | [docs/POSITIONING.md](../../POSITIONING.md), [_archive/knowledge-graph/4_decisions.md](../_archive/knowledge-graph/4_decisions.md) | [T20260506-11] |
 | V2 task bundle contract | [specs/task-bundle-v2.md](./specs/task-bundle-v2.md) | — |
 | Glossary | [references/glossary.md](./references/glossary.md) | — |

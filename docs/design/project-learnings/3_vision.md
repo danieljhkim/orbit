@@ -170,7 +170,7 @@ A learning that references a function the graph no longer recognizes is flagged 
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) — folder layout, frontmatter, ADR template.
 - [docs/design/orbit-search/](../orbit-search/) — phase 2 dependency for semantic-similarity ranking.
 - [docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) — phase 2 dependency for symbol-aware scope and staleness detection.
-- [docs/design/task-sync/](../task-sync/) — relevant for whether learnings should sync across machines (decision: yes, via the same checked-in path tasks use).
+- [docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md) — relevant for whether learnings should sync across machines (decision: yes, via the same checked-in path tasks use). Archived; superseded by [remote-access](../remote-access/1_overview.md).
 - [CLAUDE.md](../../../CLAUDE.md) — friction-reports section is the closest existing precedent for agent-authored project artifacts.
 - `orbit-create-task` skill (`~/.claude/skills/orbit-create-task/`) — the authoring shape `orbit-learnings` will mirror.
 

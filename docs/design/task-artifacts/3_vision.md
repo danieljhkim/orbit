@@ -86,7 +86,7 @@ The ADR artifact store under [.orbit/adrs/](../../../.orbit/adrs/) uses the same
 
 ### 2.3 Orbit task sync
 
-[docs/design/task-sync/](../task-sync/) documents a git-orphan-branch registry around the current task layout. It preserves `T<YYYYMMDD>-<N>` and status directories because it was designed as an incremental sync layer. The task-artifacts reset intentionally reopens those decisions.
+[docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md) documents a git-orphan-branch registry around the current task layout. It preserves `T<YYYYMMDD>-<N>` and status directories because it was designed as an incremental sync layer. The task-artifacts reset intentionally reopens those decisions. (Task sync is now archived — superseded by [remote-access](../remote-access/1_overview.md).)
 
 ### 2.4 Issue trackers
 
@@ -131,7 +131,7 @@ Orbit tasks should feel local and inspectable without forcing every user into a 
 ### 4.1 Orbit-internal
 
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) - design folder layout and ADR rules.
-- [docs/design/task-sync/](../task-sync/) - current sync proposal over the existing task layout.
+- [docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md) - archived (superseded) git-sync proposal over the existing task layout; see [remote-access](../remote-access/1_overview.md).
 - [.orbit/adrs/](../../../.orbit/adrs/) - internal precedent for envelope plus Markdown body and monotonic artifact IDs.
 - [docs/design/orbit-search/](../orbit-search/) - per-field indexing of task text.
 - [docs/POSITIONING.md](../../POSITIONING.md) - product doctrine that currently treats task IDs as local search keys.

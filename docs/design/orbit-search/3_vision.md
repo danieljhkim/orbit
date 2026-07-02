@@ -149,7 +149,7 @@ The result shape exposes `bm25_rank` and `cosine_rank` separately on every resul
 
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) — folder layout, frontmatter, ADR template.
 - [docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) — the corpus phase 2 will index. Phase-1 schema is designed to accommodate it.
-- [docs/design/task-sync/](../task-sync/) — relevant for whether embeddings should sync across machines (decision: no, embeddings are derivable from text and stay local).
+- [docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md) — relevant for whether embeddings should sync across machines (decision: no, embeddings are derivable from text and stay local). Archived; superseded by [remote-access](../remote-access/1_overview.md).
 - [docs/POSITIONING.md](../../POSITIONING.md) — the self-hosted, no-cloud-dependency stance that rules out hosted embedding APIs.
 - [README.md](../../../README.md) — single-binary install posture.
 
