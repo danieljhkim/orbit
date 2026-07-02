@@ -112,13 +112,18 @@ fn main() {
             }
             return;
         }
-        // The dashboard resolves its own workspace(s) and can serve globally
-        // from any directory, so it must dispatch before the eager workspace
-        // initialization below (which fails outside a workspace).
-        Commands::Web(WebCommand {
-            command: WebSubcommand::Serve(args),
-        }) => {
-            if let Err(err) = orbit_dashboard::serve_from_env(args, root_override.as_deref()) {
+        // `orbit web` resolves its own workspace(s): `serve` can serve globally
+        // from any directory, and `connect` is a client-side SSH tunnel whose
+        // workspace lives on the remote. Both must dispatch before the eager
+        // workspace initialization below (which fails outside a workspace).
+        Commands::Web(WebCommand { command }) => {
+            let result = match command {
+                WebSubcommand::Serve(args) => {
+                    orbit_dashboard::serve_from_env(args, root_override.as_deref())
+                }
+                WebSubcommand::Connect(args) => orbit_dashboard::connect(args),
+            };
+            if let Err(err) = result {
                 print_error(&err, tool_run_json_output);
                 std::process::exit(1);
             }
