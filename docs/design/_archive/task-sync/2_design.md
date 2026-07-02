@@ -4,13 +4,15 @@ type: design
 title: "Task Sync — Design"
 owner: claude
 last_updated: 2026-07-02
-status: Draft
+status: Superseded
 feature: task-sync
 doc_role: design
 tags: ["task-sync"]
 ---
 
 # Task Sync — Design
+
+> **Superseded (ORB-00029, ORB-00030, 2026-07).** Historical record of an unbuilt design. See [1_overview.md](./1_overview.md) for the supersession note and [`docs/design/remote-access/`](../../remote-access/1_overview.md) for the shipped replacement.
 
 This document specifies the task-sync design on top of the current v2 task-artifact store: the registry mechanism, the conflict-resolution model and why it's the central design question, the call sites that need to become sync-aware, the CLI surface, the config schema, and the migration paths. Orbit currently ships with sync disabled and the code path absent. The architectural boundary is explicit: the task store ([v2_bundle.rs](../../../crates/orbit-store/src/file/task_store/v2_bundle.rs), [v2_store.rs](../../../crates/orbit-store/src/file/task_store/v2_store.rs), and [task_registry.rs](../../../crates/orbit-store/src/sqlite/task_registry.rs)) keeps owning bundle layout, validation, allocation, and workspace binding; a future task-sync coordinator above the store owns git transport.
 
@@ -286,10 +288,6 @@ The orphan branch convention assumes the team's git host supports branch protect
 
 Task sync inherits whatever auth posture the team uses for `git push`. If a team uses SSO-wrapped tokens that expire mid-day, `task add` will fail mid-flow at refresh time. Orbit does not handle this: the user gets the same error they would get from `git push`, which is appropriate for a tool that's supposed to be a thin layer over git.
 
-### 7.8 Live remote viewing is a separate, shipped path
-
-`orbit web connect <ssh-host>` and the global multi-workspace dashboard (`orbit web serve --global`) — [ORB-00029], [ORB-00030] — let an operator open a live dashboard over a remote machine's workspaces (SSH tunnel) or over every workspace on the local machine at once. They are *not* task sync: they require the target machine to be online and SSH-reachable, show one machine's state at a time, and neither fetch, merge, nor allocate anything across machines. They close the *viewing* half of the coordination gap; task sync remains the durable, offline, writable half. The loopback-only bind guard (ORB-00360) is untouched by either, so viewing adds no network surface. See [4_decisions.md ADR-009](./4_decisions.md).
-
 ---
 
 ## Task References
@@ -298,7 +296,5 @@ Task sync inherits whatever auth posture the team uses for `git push`. If a team
 - [T20260421-0528] — Historical knowledge-graph task attribution. Superseded as a canonical load-bearing ID example by [T20260506-11].
 - [T20260506-9] — Adds first-class task `external_refs` metadata and documents the task-sync merge rule.
 - [T20260506-13] — Rejected follow-up; no standalone task-sync replay implementation is currently required for `external_refs`.
-- [ORB-00029] — `orbit web connect <ssh-host>`: SSH-tunnel viewing of a remote machine's dashboard (§7.8).
-- [ORB-00030] — Global, multi-workspace dashboard `orbit web serve --global` (§7.8).
 
 Resolve archival task references with `git log --grep=<ID>`; new Orbit tasks use `ORB-*` IDs.

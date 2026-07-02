@@ -4,13 +4,15 @@ type: design
 title: "Task Sync — Overview"
 owner: claude
 last_updated: 2026-07-02
-status: Draft
+status: Superseded
 feature: task-sync
 doc_role: overview
 tags: ["task-sync"]
 ---
 
 # Task Sync — Overview
+
+> **Superseded (ORB-00029, ORB-00030, 2026-07).** This git-orphan-branch *task-sync* design is retired and was never built. The cross-machine task-visibility gap it targeted is now addressed by live remote/multi-workspace dashboard viewing — `orbit web serve --global` and `orbit web connect <ssh-host> [--global]` — documented under [`docs/design/remote-access/`](../../remote-access/1_overview.md). See ADR-0200 (why viewing supersedes a git-sync registry) and ADR-0201 (SSH-tunnel-over-loopback transport). This folder is retained only as the historical record of the rejected git-sync mechanism; nothing here ships. Note the tradeoff ADR-0200 names: viewing is *not* sync — it has no offline, writable, or cross-machine-merge story, so a team that genuinely needs a shared writable registry would have to revisit this design.
 
 Task sync is an opt-in, git-orphan-branch task registry that lets engineers on the same team see each other's tasks without running a shared Orbit instance. **Sync is a future feature.** Orbit still ships per-engineer per the [README](../../../README.md) and [POSITIONING](../../POSITIONING.md) doctrines — each operator runs Orbit on their own machine, with locks and audit DB local to that machine. This document captures the sync design on top of the current v2 task-artifact store: canonical task bundles live under `~/.orbit/tasks/workspaces/<workspace-id>/<task-id>/`, workspace checkouts expose `.orbit/tasks/<task-id>` projections, and task IDs use `ORB-00000`. Historical `T...` task references in this folder are archival references, not current sync-design inputs.
 
@@ -29,8 +31,6 @@ Three obvious options for closing the gap:
 3. **Use git itself as the coordination primitive.** The team already has a shared git remote. Auth, ACL, and transport are already solved by whatever git host the team uses.
 
 Option 3 is what task sync proposes. A single orphan branch (proposed: `orbit/tasks`, ref `refs/heads/orbit/tasks`) holds the canonical task registry. `orbit task add` and mutating `orbit task update` paths fetch this ref before mutating, write locally, commit on the orphan branch, and push. Atomic git ref update is the coordinator. No new server, no new auth surface, no break to the per-engineer deployment doctrine.
-
-A fourth capability now *ships*, but it answers a different slice of the gap. `orbit web serve --global` ([ORB-00030]) opens one loopback dashboard over every workspace registered on a machine, and `orbit web connect <ssh-host>` ([ORB-00029]) tunnels that loopback dashboard from a *remote* machine over SSH. Together they close the **visibility** half of the gap for a single machine at a time — you can watch a colleague's tasks live if their machine is up and SSH-reachable — but they are a *viewer*, not a shared store: nothing is fetched, merged, or allocated across machines, there is no offline path, and the remote must be online. Task sync remains the durable, offline-capable, writable side of the same problem; the two are complementary, not substitutes. See [4_decisions.md ADR-009](./4_decisions.md).
 
 The name "task sync" is deliberately narrow. It means task YAML bundles plus their companion files (`description.md`, `acceptance.md`, `plan.md`, `execution-summary.md`, `events.jsonl`, `comments.jsonl`, `review-threads/**`, and `artifacts/**`). It does *not* mean syncing locks, the audit DB, scoreboards, or job runs. Those have different consistency needs and are out of scope at any version — see [2_design.md §7](./2_design.md).
 
@@ -87,7 +87,5 @@ This design is still docs-only. Orbit ships with local v2 task artifacts but no 
 
 - [T20260505-12] — Original git-orphan-branch task sync proposal. Historical reference; the design now targets the `ORB-*` task-artifact shape.
 - [T20260421-0528] — Historical knowledge-graph task attribution work. Superseded as evidence that old task IDs must be load-bearing across machines by [T20260506-11].
-- [ORB-00029] — `orbit web connect <ssh-host>`: view a workspace's dashboard on another machine over an SSH tunnel. The shipped read-only viewing path this doc now positions against sync.
-- [ORB-00030] — Global, multi-workspace dashboard (`orbit web serve --global`): one loopback dashboard over every registered workspace on a machine.
 
 Resolve archival task references with `git log --grep=<ID>`; new Orbit tasks use `ORB-*` IDs.
