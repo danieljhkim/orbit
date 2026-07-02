@@ -3,14 +3,16 @@ summary: "Task Sync — Decisions"
 type: design
 title: "Task Sync — Decisions"
 owner: claude
-last_updated: 2026-05-12
-status: Draft
+last_updated: 2026-07-02
+status: Superseded
 feature: task-sync
 doc_role: decisions
 tags: ["task-sync"]
 ---
 
 # Task Sync — Decisions
+
+> **Superseded (ORB-00029, ORB-00030, 2026-07).** These ADRs were local-only (never allocated in the global ADR store) and describe an unbuilt design. The superseding decisions live in the global store as ADR-0200 (viewing supersedes a git-sync registry) and ADR-0201 (SSH-tunnel transport), mirrored in [`docs/design/remote-access/4_decisions.md`](../../remote-access/4_decisions.md).
 
 ADR-style log of non-obvious task-sync decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
