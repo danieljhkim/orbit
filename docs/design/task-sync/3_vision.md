@@ -3,7 +3,7 @@ summary: "Task Sync — Vision"
 type: design
 title: "Task Sync — Vision"
 owner: claude
-last_updated: 2026-05-12
+last_updated: 2026-07-02
 status: Draft
 feature: task-sync
 doc_role: vision
@@ -38,6 +38,8 @@ Task sync is opt-in and orthogonal to the shared-host coordinator. If shared-hos
 - **Sync is deprecated.** Shared-host becomes the team-coordination story; orphan-branch sync is removed because it duplicates functionality with worse properties.
 
 The honest answer depends on demand. Some teams won't run a shared service. Some teams will. The design does not pre-commit; it builds task sync as a standalone feature that can survive or be retired without restructuring the rest of Orbit.
+
+A third, lighter point in this space now ships and narrows the question. `orbit web connect` plus the global multi-workspace dashboard ([ORB-00029], [ORB-00030]) give live, browser-based visibility into a machine's workspaces — a peer's over an SSH tunnel, or all of your own at once — with no server, no sync branch, and no shared store. It does not fold sync into shared-host so much as carve the gap in two: the pure *viewing* half of "see the team's tasks" is answerable today with an SSH tunnel, leaving durable, offline-capable, writable shared state as the part only task sync (or a shared host) provides. Watching how much of the perceived need `web connect` absorbs is itself a useful demand signal before committing to build sync. See [4_decisions.md ADR-009](./4_decisions.md).
 
 ### 1.3 Soft-claim semantics
 
@@ -144,6 +146,7 @@ Task sync inherits the team's existing git auth posture. Whatever the team uses 
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) — folder layout, frontmatter, ADR template.
 - [docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) — content-addressed branch-scoped storage; relevant precedent for "Orbit data lives in branch-aware structures."
 - [docs/design/auditability/](../auditability/) — relevant for understanding why audit DB is explicitly out-of-scope for task sync.
+- [docs/design/user-interface/4_decisions.md](../user-interface/4_decisions.md) — ADR-00030 (global multi-workspace dashboard); the shipped live-viewing path §1.2 positions against sync.
 
 ### 4.2 External
 
@@ -158,5 +161,7 @@ Task sync inherits the team's existing git auth posture. Whatever the team uses 
 ## Task References
 
 - [T20260505-12] — Original git-orphan-branch task sync proposal. Historical reference; the design now targets the `ORB-*` task-artifact shape.
+- [ORB-00029] — `orbit web connect <ssh-host>`: SSH-tunnel dashboard viewing; the shipped viewing path §1.2 weighs against sync.
+- [ORB-00030] — Global, multi-workspace dashboard (`orbit web serve --global`).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

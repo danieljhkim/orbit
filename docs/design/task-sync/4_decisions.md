@@ -3,7 +3,7 @@ summary: "Task Sync — Decisions"
 type: design
 title: "Task Sync — Decisions"
 owner: claude
-last_updated: 2026-05-12
+last_updated: 2026-07-02
 status: Draft
 feature: task-sync
 doc_role: decisions
@@ -145,8 +145,25 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
+## ADR-009 — Live remote viewing complements task sync; it is not a substitute
+
+**Status:** Accepted · 2026-07 · [ORB-00029], [ORB-00030]
+
+**Context.** The coordination gap in [1_overview.md §1](./1_overview.md) has two halves: *viewing* ("let me see the team's tasks") and *shared state* ("let the team hold one writable, durable task registry"). After this design was written, two features shipped that address the viewing half with none of task sync's machinery: `orbit web serve --global` ([ORB-00030]) serves one loopback dashboard over every workspace in `~/.orbit/workspaces.json`, and `orbit web connect <ssh-host>` ([ORB-00029]) tunnels that loopback dashboard from a remote machine over SSH. A reasonable reader could conclude these obviate task sync.
+
+**Decision.** Treat live remote viewing as complementary to task sync, not a replacement, and keep this design as-is. `connect`/global-dashboard answer "let me see the tasks on a machine right now"; task sync answers "let the team share a durable, offline-capable, writable task registry." They differ on every axis that matters: `connect` requires the target machine to be online and SSH-reachable and shows exactly one machine's state at a time, with no fetch, merge, allocation, or offline path; task sync is a persistent git-orphan-branch registry with `ORB-00000` allocation (ADR-004) and operation-aware conflict resolution (ADR-002) that works while peers are offline. Neither touches the loopback-only bind guard (ORB-00360), so viewing adds no network surface and no new auth.
+
+**Consequences.**
+- The overview motivation and the fold-into-shared-host question ([3_vision.md §1.2](./3_vision.md)) now name `connect` explicitly as the shipped viewing path, so readers do not mistake it for sync.
+- Teams that only need to glance at a colleague's live board can do so today over SSH — a signal to watch for how much real demand for full sync remains before building it (relevant to ADR-007's deferral).
+- Cost: two capabilities that *sound* overlapping ("connect to see tasks" vs. "sync to share tasks") now coexist; the docs must keep the boundary sharp, or users will expect `connect` to persist or merge state, which it does not.
+
+---
+
 ## Task References
 
 - [T20260505-12] — Original git-orphan-branch task sync proposal. Historical reference; the design now targets the `ORB-*` task-artifact shape.
+- [ORB-00029] — `orbit web connect <ssh-host>`: SSH-tunnel dashboard viewing (ADR-009).
+- [ORB-00030] — Global, multi-workspace dashboard `orbit web serve --global` (ADR-009).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
