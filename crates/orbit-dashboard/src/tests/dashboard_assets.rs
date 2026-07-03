@@ -63,6 +63,26 @@ fn dashboard_markdown_call_sites_use_sanitizing_wrapper() {
     assert!(tasks.contains("renderMarkdownInline("));
 }
 
+#[test]
+fn dashboard_surfaces_workspace_location() {
+    // ORB-00037: the selector renders the selected workspace's path as a
+    // secondary line, and each aggregate task shows its workspace location in
+    // the Details box. Asserted against the embedded asset sources since the
+    // dashboard has no JS test runner (see dashboard_markdown_call_sites above).
+    let app = include_str!("../../assets/dashboard/app.js");
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+
+    // Selector secondary line: a dedicated element updated from the entry `root`.
+    assert!(app.contains("workspace-path"));
+    assert!(app.contains("updateWorkspacePath"));
+    assert!(app.contains("ws.root"));
+
+    // Task Details box: a "location" field driven by the tagged workspace_root.
+    assert!(tasks.contains("workspace_root"));
+    assert!(tasks.contains(r#"addField(rightCol, "location""#));
+    assert!(tasks.contains("ws-location"));
+}
+
 async fn response_body(response: Response) -> String {
     let bytes = match to_bytes(response.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,

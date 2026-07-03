@@ -140,6 +140,12 @@ async fn tasks_all_aggregates_active_workspaces_and_skips_inactive() {
         .collect();
     assert_eq!(ws_ids, HashSet::from(["alpha", "beta"]));
     assert!(tasks.iter().all(|t| t["workspace_name"].is_string()));
+    // ORB-00037: every aggregate task carries its workspace's filesystem path.
+    assert!(tasks.iter().all(|t| {
+        t["workspace_root"]
+            .as_str()
+            .is_some_and(|root| root.ends_with(t["workspace_name"].as_str().expect("name")))
+    }));
 
     // Workspace listing: all three, with status + default flag.
     let response = router()
@@ -161,4 +167,45 @@ async fn tasks_all_aggregates_active_workspaces_and_skips_inactive() {
         .expect("alpha entry");
     assert_eq!(alpha["is_default"], json!(true));
     assert_eq!(alpha["status"], json!("active"));
+    // ORB-00037: entries expose the filesystem path (repo root + orbit_dir).
+    assert!(
+        alpha["root"]
+            .as_str()
+            .is_some_and(|root| root.ends_with("alpha"))
+    );
+    assert!(
+        alpha["orbit_dir"]
+            .as_str()
+            .is_some_and(|dir| dir.ends_with(".orbit"))
+    );
+}
+
+/// ORB-00037: the pure display helper collapses `$HOME` to `~` and otherwise
+/// renders paths verbatim.
+#[test]
+fn abbreviate_home_collapses_home_prefix() {
+    use super::super::workspaces::abbreviate_home;
+
+    let home = PathBuf::from("/home/dan");
+    assert_eq!(
+        abbreviate_home(&PathBuf::from("/home/dan/ws/orbit"), Some(&home)),
+        "~/ws/orbit"
+    );
+    // The home directory itself collapses to a bare `~`.
+    assert_eq!(abbreviate_home(&home, Some(&home)), "~");
+    // Paths outside home are untouched.
+    assert_eq!(
+        abbreviate_home(&PathBuf::from("/srv/data"), Some(&home)),
+        "/srv/data"
+    );
+    // A sibling that merely shares a name prefix is not under home.
+    assert_eq!(
+        abbreviate_home(&PathBuf::from("/home/danish/x"), Some(&home)),
+        "/home/danish/x"
+    );
+    // No home configured => render verbatim.
+    assert_eq!(
+        abbreviate_home(&PathBuf::from("/home/dan/ws"), None),
+        "/home/dan/ws"
+    );
 }
