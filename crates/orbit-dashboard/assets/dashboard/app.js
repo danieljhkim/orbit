@@ -1155,6 +1155,62 @@ function truncate(text, max) {
   return text.slice(0, max) + "\u2026";
 }
 
+// ORB-00039: the aggregate ("All workspaces") view has no concrete workspace to
+// scope per-workspace endpoints to — the backend `Ws` extractor finds no default
+// and returns 400. This single predicate gates every per-workspace fetch so the
+// aggregate view shows only the cross-workspace task list; picking a concrete
+// workspace flips it false and restores every panel. Reused by fetchAndRenderTasks
+// and activeRefreshJobs rather than duplicated inline.
+function isAggregateView() {
+  return dashboardWorkspaces.length > 1 && !getWorkspace();
+}
+
+// Panels whose data is per-workspace render this in place of their body while
+// the aggregate view is active, instead of erroring or holding stale content.
+const AGGREGATE_PANEL_PLACEHOLDER = "Select a workspace to view this panel";
+
+function renderPanelPlaceholder(bodyId) {
+  const body = $(bodyId);
+  if (!body) return;
+  const note = el("div", { class: "panel-placeholder", text: AGGREGATE_PANEL_PLACEHOLDER });
+  note.dataset.key = "aggregate-placeholder";
+  note.dataset.hash = "aggregate-placeholder";
+  syncNodes(body, [note]);
+}
+
+// ORB-00039: in aggregate mode the per-workspace fetches are skipped, so the
+// panels they feed (audit summary, cross-task review threads, locked files) show
+// an inline placeholder and the health strip is neutralized rather than left
+// displaying one workspace's stale counts.
+function renderAggregatePlaceholders() {
+  renderPanelPlaceholder("audit-summary-body");
+  renderPanelPlaceholder("threads-body");
+  renderPanelPlaceholder("locks-body");
+  const locksCount = $("locks-count");
+  if (locksCount) locksCount.textContent = "—";
+  const threadsCount = $("threads-count");
+  if (threadsCount) threadsCount.textContent = "—";
+  resetHealthStrip();
+}
+
+// The health strip is fed by the same per-workspace /api/audit/summary endpoint,
+// so in aggregate mode reset its tiles to a neutral dash rather than showing the
+// last-selected workspace's numbers as if they were machine-wide.
+function resetHealthStrip() {
+  for (const id of [
+    "tile-events-value",
+    "tile-denials-value",
+    "tile-failed-value",
+    "tile-active-value",
+  ]) {
+    const node = $(id);
+    if (node) node.textContent = "—";
+  }
+  const denials = $("tile-denials");
+  if (denials) denials.classList.remove("tile-alert");
+  renderSparkline([]);
+}
+
 function fetchAndCacheCrews() {
   return fetchJson("/api/crews").then((payload) => {
     return cacheCrewPayload(payload);
@@ -1165,11 +1221,19 @@ function fetchAndRenderTasks() {
   // In global mode with the aggregate ("All workspaces") view selected, pull
   // every workspace's tasks; otherwise the single/selected workspace's tasks
   // (the workspace query param is applied by fetchJson).
-  const aggregate = dashboardWorkspaces.length > 1 && !getWorkspace();
+  const aggregate = isAggregateView();
   const path = aggregate ? "/api/tasks/all" : "/api/tasks";
+  // /api/crews is per-workspace and 400s without a concrete workspace, so in
+  // aggregate mode skip the crew fetch and let the crew controls degrade to a
+  // disabled "crew unavailable" fallback rather than rejecting the Promise.all
+  // and blocking the whole task list. Clear any crew cache left over from a
+  // previously-selected concrete workspace so the fallback is consistent (a
+  // stale, still-enabled crew <select> would PATCH with no workspace).
+  if (aggregate) cacheCrewPayload({ crews: [] });
+  const crews = aggregate ? Promise.resolve() : fetchAndCacheCrews();
   return Promise.all([
     fetchJson(path),
-    fetchAndCacheCrews(),
+    crews,
   ]).then(([tasks]) => {
     lastTasks = tasks;
     renderTasks(tasks, taskContext());
@@ -1255,27 +1319,45 @@ function updateWorkspacePath() {
 }
 
 function activeRefreshJobs() {
+  // ORB-00039: in the aggregate "All workspaces" view there is no concrete
+  // workspace to scope per-workspace endpoints to, so skip every per-workspace
+  // fetch (they'd 400) and render placeholders for the panels they feed. Only
+  // the cross-workspace aggregate task list (/api/tasks/all) is fetched.
+  const aggregate = isAggregateView();
+
   // The health strip is global; refresh on every tick alongside the active tab.
   // Threads also refresh globally so the unread badge updates without visiting
-  // the Threads tab; mark-seen only fires while that tab is active (below).
-  const jobs = [
-    fetchAndRenderSummary(),
-    fetchAndRenderReviewThreads().then(() => {
-      if (activeTab === "threads") markCurrentAgentThreadsSeen();
-    }),
-  ];
+  // the Threads tab; mark-seen only fires while that tab is active (below). Both
+  // are per-workspace (/api/audit/summary, /api/review-threads), so in aggregate
+  // mode they're replaced by placeholders instead of fetched.
+  const jobs = [];
+  if (aggregate) {
+    renderAggregatePlaceholders();
+  } else {
+    jobs.push(fetchAndRenderSummary());
+    jobs.push(
+      fetchAndRenderReviewThreads().then(() => {
+        if (activeTab === "threads") markCurrentAgentThreadsSeen();
+      }),
+    );
+  }
 
   if (activeTab === "tasks") {
     jobs.push(fetchAndRenderTasks());
-    if (!document.hidden) jobs.push(fetchAndRenderTaskLocks());
+    // /api/tasks/locks is per-workspace; skip it in aggregate mode (the locks
+    // panel shows the placeholder rendered above).
+    if (!aggregate && !document.hidden) jobs.push(fetchAndRenderTaskLocks());
     return jobs;
   }
 
   if (activeTab === "scoreboard") {
     // ORB-00337: boot fetch matches the visually-highlighted segment
     // (`24h`); the user can pick a different window from the selector,
-    // which calls /api/scoreboard?window=... directly.
-    jobs.push(fetchJson("/api/scoreboard?window=24h").then(renderScoreboard));
+    // which calls /api/scoreboard?window=... directly. /api/scoreboard is
+    // per-workspace, so it's skipped in aggregate mode.
+    if (!aggregate) {
+      jobs.push(fetchJson("/api/scoreboard?window=24h").then(renderScoreboard));
+    }
     return jobs;
   }
 

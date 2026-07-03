@@ -83,6 +83,81 @@ fn dashboard_surfaces_workspace_location() {
     assert!(tasks.contains("ws-location"));
 }
 
+#[test]
+fn dashboard_guards_per_workspace_panels_in_aggregate_view() {
+    // ORB-00039: in the aggregate "All workspaces" view there is no concrete
+    // workspace, so the per-workspace endpoints (/api/crews, /api/tasks/locks,
+    // /api/audit/summary, /api/review-threads, /api/scoreboard) must not be
+    // fetched — they'd 400 — and their panels show a placeholder instead.
+    // Asserted against the embedded asset sources since the dashboard has no JS
+    // test runner (see dashboard_markdown_call_sites above).
+    let app = include_str!("../../assets/dashboard/app.js");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    // A single aggregate-mode predicate, defined once and reused — the raw
+    // `dashboardWorkspaces.length > 1 && !getWorkspace()` check lives only inside
+    // the helper, not duplicated inline at each call site.
+    assert!(
+        app.contains("function isAggregateView()"),
+        "aggregate-mode check must be factored into isAggregateView()"
+    );
+    assert_eq!(
+        app.matches("dashboardWorkspaces.length > 1 && !getWorkspace()")
+            .count(),
+        1,
+        "the aggregate predicate must be defined once, not duplicated inline"
+    );
+    assert_eq!(
+        app.matches("const aggregate = isAggregateView();").count(),
+        2,
+        "isAggregateView() must gate both fetchAndRenderTasks and activeRefreshJobs"
+    );
+
+    // Aggregate mode renders placeholders instead of fetching the per-workspace
+    // summary / review-threads panels.
+    assert!(
+        app.contains("renderAggregatePlaceholders()"),
+        "aggregate mode must render panel placeholders"
+    );
+    assert!(
+        app.contains("Select a workspace to view this panel"),
+        "skipped panels must show an inline placeholder prompt"
+    );
+    assert!(
+        css.contains(".panel-placeholder"),
+        "the aggregate placeholder must be styled"
+    );
+
+    // The per-workspace summary + review-thread jobs are pushed only in the
+    // non-aggregate branch (previously unconditional array literals with a
+    // trailing comma) — the old unconditional form must be gone.
+    assert!(
+        app.contains("jobs.push(fetchAndRenderSummary());"),
+        "fetchAndRenderSummary must be pushed conditionally, not unconditionally"
+    );
+    assert!(
+        !app.contains("fetchAndRenderSummary(),"),
+        "fetchAndRenderSummary must no longer be an unconditional job"
+    );
+    // The review-thread panel (per-workspace) is likewise pushed only in the
+    // non-aggregate branch, wrapped in the same conditional jobs.push.
+    assert!(
+        app.contains("fetchAndRenderReviewThreads().then(() => {"),
+        "review-threads job must still exist for the concrete-workspace path"
+    );
+
+    // Task locks and crews are skipped in aggregate mode; the aggregate task list
+    // (/api/tasks/all) still renders with a crew fallback rather than blocking.
+    assert!(
+        app.contains("if (!aggregate && !document.hidden) jobs.push(fetchAndRenderTaskLocks());"),
+        "task locks fetch must be skipped in aggregate mode"
+    );
+    assert!(
+        app.contains("const crews = aggregate ? Promise.resolve() : fetchAndCacheCrews();"),
+        "crews fetch must be skipped in aggregate mode so the task list still renders"
+    );
+}
+
 async fn response_body(response: Response) -> String {
     let bytes = match to_bytes(response.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
