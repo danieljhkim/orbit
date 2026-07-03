@@ -126,7 +126,10 @@ orbit run ship
 orbit web serve
 
 # one dashboard over every registered workspace (also the default when run
-# outside a workspace)
+# outside a workspace). The header selector shows the selected workspace's
+# filesystem path (home-abbreviated to ~) beneath the dropdown, and the
+# aggregate task view lists each task's workspace location in its Details box —
+# so same-named workspaces are easy to tell apart.
 orbit web serve --global
 
 # ...or view a workspace running on another machine over an SSH tunnel

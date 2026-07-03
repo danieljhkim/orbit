@@ -559,6 +559,14 @@ function buildTaskDetail(task, context) {
   }
   if (metaCount > 0) addField(rightCol, "details", meta);
 
+  // ORB-00037: in the aggregate ("All workspaces") view each task carries its
+  // owning workspace's filesystem location (home-abbreviated to ~ server-side);
+  // show it in full here since the row only has room for the short name badge.
+  if (task.workspace_root) {
+    const loc = el("span", { class: "ws-location mono", text: task.workspace_root, title: task.workspace_root });
+    addField(rightCol, "location", loc);
+  }
+
   if (Array.isArray(task.external_refs) && task.external_refs.length > 0) {
     addField(rightCol, "external refs", buildExternalRefs(task.external_refs));
   }

@@ -156,6 +156,31 @@
         vertical-align: middle;
       }
 
+      /* ORB-00037: selected-workspace filesystem path beneath the selector,
+         plus the full location in a task's Details box. */
+      .workspace-select-wrap {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1px;
+        margin: 0 2px;
+      }
+      .workspace-select-wrap .workspace-select { margin: 0; }
+      .workspace-path {
+        max-width: 190px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        color: var(--fg-dim);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .detail-side .ws-location {
+        font-size: 11px;
+        color: var(--fg-dim);
+        word-break: break-all;
+      }
+
       /* ORB-00211 global resolver (added after task comment; minimal to make input usable in header + error visible + pinned distinguishable) */
       header .global-id-wrap { position: relative; display: inline-block; margin: 0 2px; }
       #global-task-id { width: 142px; height: 26px; font: 12px/1.2 var(--font-mono); background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 2px; padding: 3px 6px; vertical-align: middle; }
