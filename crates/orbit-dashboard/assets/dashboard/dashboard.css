@@ -3060,6 +3060,15 @@
         font-size: 12px;
         font-style: italic;
       }
+      /* ORB-00039: placeholder shown in per-workspace panels while the aggregate
+         "All workspaces" view is active (audit summary, review threads, locks). */
+      .panel-placeholder {
+        padding: 10px 16px;
+        color: var(--fg-dim);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        font-style: italic;
+      }
       .lock-task-group {
         padding: 8px 12px 9px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.04);
