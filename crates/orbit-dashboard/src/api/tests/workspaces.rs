@@ -180,6 +180,85 @@ async fn tasks_all_aggregates_active_workspaces_and_skips_inactive() {
     );
 }
 
+/// ORB-10008: workspace selection failures surface over HTTP as clean 4xx
+/// JSON bodies (unknown -> 404, inactive -> 400, no default -> 400), never a
+/// 500 or a panic.
+#[tokio::test]
+async fn workspace_selection_errors_are_clean_4xx_json() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (orbit_dir, repo_root) = seed_workspace(&global_root, tmp.path(), "alpha");
+    let entries = vec![
+        WsEntry {
+            id: "alpha".to_string(),
+            name: "alpha".to_string(),
+            repo_root,
+            orbit_dir,
+            active: true,
+        },
+        WsEntry {
+            id: "stale".to_string(),
+            name: "stale".to_string(),
+            repo_root: tmp.path().join("missing"),
+            orbit_dir: tmp.path().join("missing/.orbit"),
+            active: false,
+        },
+    ];
+    // No default workspace configured: requests must select one explicitly.
+    let state = DashboardState::global(global_root, entries, None);
+
+    // Unknown workspace id -> 404 with a JSON error body.
+    let response = router()
+        .with_state(state.clone())
+        .oneshot(get("/tasks?workspace=ghost"))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    let body = body_json(response).await;
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|m| m.contains("unknown workspace: ghost"))
+    );
+
+    // Inactive (stale-path) workspace -> 400, never built.
+    let response = router()
+        .with_state(state.clone())
+        .oneshot(get("/tasks?workspace=stale"))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    let body = body_json(response).await;
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|m| m.contains("inactive"))
+    );
+
+    // No selection and no default -> 400 telling the caller what to pass.
+    let response = router()
+        .with_state(state.clone())
+        .oneshot(get("/tasks"))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    let body = body_json(response).await;
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|m| m.contains("workspace"))
+    );
+
+    // A valid selection on the same state still works.
+    let response = router()
+        .with_state(state)
+        .oneshot(get("/tasks?workspace=alpha"))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+}
+
 /// ORB-00037: the pure display helper collapses `$HOME` to `~` and otherwise
 /// renders paths verbatim.
 #[test]

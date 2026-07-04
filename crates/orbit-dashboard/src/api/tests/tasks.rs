@@ -418,6 +418,207 @@ fn get_task_artifact_rejects_traversal_path() {
         });
 }
 
+const SECRET_CONTENT: &str = "TOP-SECRET-OUTSIDE-ARTIFACT-ROOT";
+
+/// Plants a secret file *outside* the artifact root (next to the runtime's
+/// data root) and returns its absolute path, so adversarial requests have a
+/// concrete escape target whose bytes must never appear in a response.
+fn plant_secret_outside_artifact_root(runtime: &OrbitRuntime) -> std::path::PathBuf {
+    let secret_path = runtime.data_root().join("secret-fixture.txt");
+    std::fs::write(&secret_path, SECRET_CONTENT).expect("write secret fixture");
+    secret_path
+}
+
+async fn assert_artifact_request_denied(response: axum::response::Response, label: &str) {
+    let status = response.status();
+    assert!(
+        status.is_client_error(),
+        "{label}: expected 4xx, got {status}"
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    let body = String::from_utf8_lossy(&bytes);
+    assert!(
+        !body.contains(SECRET_CONTENT),
+        "{label}: response leaked out-of-root file content"
+    );
+}
+
+/// ORB-10008: adversarial path shapes against the artifact validator. Every
+/// case must be a clean 4xx and must never serve bytes from outside the task's
+/// artifact root.
+#[tokio::test]
+async fn get_task_artifact_rejects_adversarial_paths() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let task = seed_task_with_artifact(&runtime);
+    plant_secret_outside_artifact_root(&runtime);
+
+    let cases: &[(&str, String)] = &[
+        (
+            "raw dot-dot traversal",
+            format!(
+                "/tasks/{}/artifacts/../../../../secret-fixture.txt",
+                task.id
+            ),
+        ),
+        (
+            "encoded dot-dot traversal",
+            format!(
+                "/tasks/{}/artifacts/subdir/%2e%2e%2f%2e%2e%2fsecret-fixture.txt",
+                task.id
+            ),
+        ),
+        (
+            "encoded absolute path",
+            format!("/tasks/{}/artifacts/%2Fetc%2Fpasswd", task.id),
+        ),
+        (
+            "backslash separators",
+            format!(
+                "/tasks/{}/artifacts/subdir%5C..%5C..%5Csecret-fixture.txt",
+                task.id
+            ),
+        ),
+        (
+            "leading current-dir component",
+            format!("/tasks/{}/artifacts/.%2Fsubdir%2Ffile.json", task.id),
+        ),
+    ];
+    for (label, uri) in cases {
+        let response = request(runtime.clone(), uri).await;
+        assert_artifact_request_denied(response, label).await;
+    }
+
+    // A double-slash absolute spelling may 400 (validator) or 404 (router);
+    // either way it must not leak file contents.
+    let response = request(
+        runtime.clone(),
+        &format!("/tasks/{}/artifacts//etc/passwd", task.id),
+    )
+    .await;
+    let status = response.status();
+    assert!(
+        status.is_client_error(),
+        "double-slash absolute: expected 4xx, got {status}"
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    assert!(!String::from_utf8_lossy(&bytes).contains("root:"));
+}
+
+/// Replace the on-disk blob backing `subdir/file.json` with a symlink to
+/// `target`, returning the blob path that was swapped.
+#[cfg(unix)]
+fn swap_artifact_blob_for_symlink(
+    runtime: &OrbitRuntime,
+    target: &std::path::Path,
+) -> std::path::PathBuf {
+    let blob_path = find_artifact_blob(&runtime.data_root(), "file.json")
+        .expect("artifact blob exists on disk");
+    assert!(
+        blob_path.components().any(|c| c.as_os_str() == "artifacts"),
+        "blob must live under the artifact directory: {}",
+        blob_path.display()
+    );
+    std::fs::remove_file(&blob_path).expect("remove artifact blob");
+    std::os::unix::fs::symlink(target, &blob_path).expect("plant escaping symlink");
+    blob_path
+}
+
+/// ORB-10008: a manifest-listed blob replaced on disk by a symlink pointing
+/// outside the artifact root must be refused, not followed.
+///
+/// The v2 bundle read sha256/size-verifies every manifest entry before any
+/// artifact is served, so the path-containment check (canonicalize +
+/// `starts_with`) is only reachable when the escape target is byte-identical
+/// to the recorded artifact. This test plants exactly that worst case and
+/// asserts the containment validator still rejects the escaping link.
+#[cfg(unix)]
+#[tokio::test]
+async fn get_task_artifact_refuses_symlink_escaping_artifact_root() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let task = seed_task_with_artifact(&runtime);
+    // Byte-identical to the seeded artifact so integrity checks pass and the
+    // containment check itself is exercised.
+    let outside_twin = runtime.data_root().join("outside-twin.json");
+    std::fs::write(&outside_twin, br#"{"ok":true}"#).expect("write outside twin");
+    swap_artifact_blob_for_symlink(&runtime, &outside_twin);
+
+    let response = request(
+        runtime,
+        &format!("/tasks/{}/artifacts/subdir/file.json", task.id),
+    )
+    .await;
+
+    let status = response.status();
+    let body = body_json(response).await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "unexpected response: {body}"
+    );
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|m| m.contains("outside the task artifact directory")),
+        "unexpected error body: {body}"
+    );
+}
+
+/// ORB-10008: when the escaping symlink points at *different* content, the
+/// bundle-read integrity verification (sha256/size against the manifest)
+/// fails closed before the containment check is reached. The response is an
+/// error either way and must never carry the out-of-root bytes.
+#[cfg(unix)]
+#[tokio::test]
+async fn get_task_artifact_fails_closed_on_symlink_with_foreign_content() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let task = seed_task_with_artifact(&runtime);
+    let secret_path = plant_secret_outside_artifact_root(&runtime);
+    swap_artifact_blob_for_symlink(&runtime, &secret_path);
+
+    let response = request(
+        runtime,
+        &format!("/tasks/{}/artifacts/subdir/file.json", task.id),
+    )
+    .await;
+
+    let status = response.status();
+    assert!(
+        !status.is_success(),
+        "tampered artifact must not be served: got {status}"
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    assert!(
+        !String::from_utf8_lossy(&bytes).contains(SECRET_CONTENT),
+        "response leaked out-of-root file content"
+    );
+}
+
+/// Depth-first search for a file named `name` under `root`, skipping nothing.
+/// Test-only helper: the artifact bundle layout is an implementation detail of
+/// orbit-store, so the test discovers the blob instead of hardcoding the path.
+fn find_artifact_blob(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    let entries = std::fs::read_dir(root).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_artifact_blob(&path, name) {
+                return Some(found);
+            }
+        } else if path.file_name().is_some_and(|f| f == name)
+            && path.components().any(|c| c.as_os_str() == "artifacts")
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
 /// Exercises PATCH /api/tasks/:id with the dashboard's emitted spelling {"status":"in-progress"}
 /// against a backlog task. Before the serde alias fix this produced 422 on JSON extraction;
 /// now it succeeds and the response continues to surface status as the display form "in-progress".

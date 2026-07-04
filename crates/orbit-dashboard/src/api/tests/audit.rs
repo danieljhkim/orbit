@@ -1,0 +1,277 @@
+//! Endpoint tests for `GET /audit` (listing, paging, filters, error paths).
+//!
+//! ORB-10008: the audit surface previously had no handler-level coverage; these
+//! tests drive the real router with seeded SQLite audit events.
+
+use std::sync::Arc;
+
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode};
+use orbit_core::{
+    AuditEventInsertParams, AuditEventStatus, LearningCreateParams, LearningScope, OrbitRuntime,
+};
+use serde_json::Value;
+use tower::ServiceExt;
+
+use super::super::router;
+use super::test_support::body_json;
+
+fn seed_audit_event(
+    runtime: &OrbitRuntime,
+    execution_id: &str,
+    tool_name: &str,
+    status: AuditEventStatus,
+    role: &str,
+    error_message: Option<&str>,
+) {
+    runtime
+        .record_audit_event(&AuditEventInsertParams {
+            execution_id: execution_id.to_string(),
+            command: "task".to_string(),
+            subcommand: Some("update".to_string()),
+            tool_name: Some(tool_name.to_string()),
+            target_type: Some("task".to_string()),
+            target_id: Some("T00000000-000000".to_string()),
+            role: role.to_string(),
+            status,
+            exit_code: match status {
+                AuditEventStatus::Success => 0,
+                _ => 1,
+            },
+            duration_ms: 5,
+            working_directory: "/tmp/fixture".to_string(),
+            arguments_json: None,
+            stdout_truncated: None,
+            stderr_truncated: None,
+            error_message: error_message.map(str::to_string),
+            host: None,
+            pid: std::process::id(),
+            session_id: None,
+            task_id: None,
+            job_run_id: None,
+            activity_id: None,
+            step_index: None,
+        })
+        .expect("seed audit event");
+}
+
+async fn request_audit(runtime: OrbitRuntime, uri: &str) -> axum::response::Response {
+    router()
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(uri)
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response")
+}
+
+fn execution_ids(rows: &[Value]) -> Vec<&str> {
+    rows.iter()
+        .map(|row| row["execution_id"].as_str().expect("execution_id"))
+        .collect()
+}
+
+#[tokio::test]
+async fn audit_lists_seeded_events_newest_first_with_projected_fields() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    seed_audit_event(
+        &runtime,
+        "exec-1",
+        "orbit.task.update",
+        AuditEventStatus::Success,
+        "editor",
+        None,
+    );
+    seed_audit_event(
+        &runtime,
+        "exec-2",
+        "orbit.learning.add",
+        AuditEventStatus::Failure,
+        "editor",
+        Some("boom"),
+    );
+
+    let response = request_audit(runtime, "/audit").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("audit array");
+    assert_eq!(rows.len(), 2);
+    // SQLite lists `ORDER BY id DESC`: the most recently inserted event first.
+    assert_eq!(execution_ids(rows), vec!["exec-2", "exec-1"]);
+    let newest = &rows[0];
+    assert_eq!(newest["tool_name"], "orbit.learning.add");
+    assert_eq!(newest["status"], "failure");
+    assert_eq!(newest["role"], "editor");
+    assert_eq!(newest["error_message"], "boom");
+    assert!(
+        newest["timestamp"]
+            .as_str()
+            .is_some_and(|ts| { chrono::DateTime::parse_from_rfc3339(ts).is_ok() })
+    );
+}
+
+/// Runtime writes are audited end-to-end: creating a learning through the
+/// runtime surfaces its id-allocation event on `/audit` without any direct
+/// event seeding. (Task-add does not emit an audit event; learning/ADR
+/// creation does, via `record_id_allocation_audit`.)
+#[tokio::test]
+async fn audit_captures_learning_create_through_the_runtime() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let learning = runtime
+        .create_learning(LearningCreateParams {
+            summary: "Audited learning".to_string(),
+            scope: LearningScope::default(),
+            body: "Learning whose creation must appear in the audit log.".to_string(),
+            evidence: Vec::new(),
+            created_by: Some("claude".to_string()),
+            priority: None,
+        })
+        .expect("create learning");
+
+    let response = request_audit(runtime, "/audit").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("audit array");
+    let allocation = rows
+        .iter()
+        .find(|row| row["target_type"] == "id_allocation")
+        .expect("id allocation audit event");
+    assert_eq!(allocation["tool_name"], "orbit.learning.add");
+    assert_eq!(allocation["target_id"], Value::String(learning.id));
+    assert_eq!(allocation["status"], "success");
+}
+
+#[tokio::test]
+async fn audit_limit_and_offset_page_through_results_without_overlap() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    for index in 0..5 {
+        seed_audit_event(
+            &runtime,
+            &format!("exec-{index}"),
+            "orbit.task.update",
+            AuditEventStatus::Success,
+            "editor",
+            None,
+        );
+    }
+
+    let response = request_audit(runtime.clone(), "/audit?limit=3").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let first = body_json(response).await;
+    let first_rows = first.as_array().expect("first page");
+    assert_eq!(first_rows.len(), 3);
+
+    let response = request_audit(runtime.clone(), "/audit?limit=3&offset=3").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let second = body_json(response).await;
+    let second_rows = second.as_array().expect("second page");
+    assert_eq!(second_rows.len(), 2);
+
+    let mut all: Vec<String> = execution_ids(first_rows)
+        .into_iter()
+        .chain(execution_ids(second_rows))
+        .map(str::to_string)
+        .collect();
+    all.sort();
+    all.dedup();
+    assert_eq!(all.len(), 5, "pages must be disjoint and cover every event");
+
+    // Offset past the end degrades to an empty page, not an error.
+    let response = request_audit(runtime, "/audit?offset=50").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body, Value::Array(Vec::new()));
+}
+
+#[tokio::test]
+async fn audit_filters_by_tool_status_run_id_alias_and_text_query() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    seed_audit_event(
+        &runtime,
+        "exec-ok",
+        "orbit.task.update",
+        AuditEventStatus::Success,
+        "editor",
+        None,
+    );
+    seed_audit_event(
+        &runtime,
+        "exec-denied",
+        "orbit.policy.check",
+        AuditEventStatus::Denied,
+        "admin",
+        Some("blocked by policy needle"),
+    );
+
+    let response = request_audit(runtime.clone(), "/audit?tool=orbit.policy.check").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("tool-filtered array");
+    assert_eq!(execution_ids(rows), vec!["exec-denied"]);
+
+    let response = request_audit(runtime.clone(), "/audit?status=denied").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("status-filtered array");
+    assert_eq!(execution_ids(rows), vec!["exec-denied"]);
+
+    // `run_id` is the backward-compat alias of `execution_id` (T20260427-26).
+    let response = request_audit(runtime.clone(), "/audit?run_id=exec-ok").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("run_id-filtered array");
+    assert_eq!(execution_ids(rows), vec!["exec-ok"]);
+
+    // When both are supplied, `execution_id` wins.
+    let response = request_audit(
+        runtime.clone(),
+        "/audit?execution_id=exec-denied&run_id=exec-ok",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("execution_id-precedence array");
+    assert_eq!(execution_ids(rows), vec!["exec-denied"]);
+
+    let response = request_audit(runtime, "/audit?q=needle").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("text-filtered array");
+    assert_eq!(execution_ids(rows), vec!["exec-denied"]);
+}
+
+#[tokio::test]
+async fn audit_rejects_malformed_since_and_status_with_json_400() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request_audit(runtime.clone(), "/audit?since=not-a-time").await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(response).await;
+    assert!(body["error"].as_str().is_some_and(|m| !m.is_empty()));
+
+    let response = request_audit(runtime, "/audit?status=bogus").await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(response).await;
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|m| m.contains("unknown audit event status"))
+    );
+}
+
+#[tokio::test]
+async fn audit_rejects_non_numeric_limit_without_500() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request_audit(runtime, "/audit?limit=lots").await;
+
+    // Axum's Query extractor rejects before the handler runs: a clean client
+    // error, never a 500/panic.
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}

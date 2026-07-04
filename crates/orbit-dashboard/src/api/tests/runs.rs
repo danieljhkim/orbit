@@ -15,7 +15,7 @@ use tower::ServiceExt;
 
 use super::super::router;
 use super::super::runs::*;
-use super::test_support::{body_json, seed_run, write_replay_job};
+use super::test_support::{body_json, seed_run, write_replay_job, write_replay_job_under};
 
 async fn request_cancel(runtime: OrbitRuntime, run_id: &str, origin: Option<&str>) -> Response {
     let mut builder = Request::builder()
@@ -648,6 +648,130 @@ async fn ship_endpoint_rejects_unknown_mode() {
         payload["error"]
             .as_str()
             .is_some_and(|message| message.contains("unknown ship mode"))
+    );
+}
+
+/// Create an on-disk workspace under `base/<name>`, so global mode can build
+/// its runtime lazily via `from_roots`. Returns `(orbit_dir, repo_root)`. The
+/// `task_auto_pipeline` job asset itself is a *default* job resolved from the
+/// global orbit root — seed it there once via `write_replay_job_under`.
+fn seed_ship_workspace(
+    base: &std::path::Path,
+    name: &str,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let repo_root = base.join(name);
+    let orbit_dir = repo_root.join(".orbit");
+    std::fs::create_dir_all(&orbit_dir).expect("create .orbit");
+    std::fs::write(orbit_dir.join("config.toml"), "").expect("write config");
+    (orbit_dir, repo_root)
+}
+
+async fn request_ship_global(
+    state: crate::state::DashboardState,
+    uri: &str,
+    body: Value,
+) -> Response {
+    router()
+        .with_state(state)
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(uri)
+                .header(header::ORIGIN, "http://localhost:7878")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response")
+}
+
+/// ORB-10008: `POST /workflows/ship?workspace=<id>` in aggregate (global)
+/// mode submits the run into the selected workspace only. Drives the real
+/// submission path (job asset load, run insert, worker spawn) over on-disk
+/// temp workspaces; the job asset is the stub sleep workflow, so no git or
+/// agent machinery runs.
+#[tokio::test]
+async fn ship_endpoint_in_global_mode_targets_selected_workspace() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    write_replay_job_under(&global_root, "task_auto_pipeline");
+    let (alpha_orbit, alpha_repo) = seed_ship_workspace(tmp.path(), "alpha");
+    let (beta_orbit, beta_repo) = seed_ship_workspace(tmp.path(), "beta");
+    let entries = vec![
+        crate::state::WsEntry {
+            id: "alpha".to_string(),
+            name: "alpha".to_string(),
+            repo_root: alpha_repo,
+            orbit_dir: alpha_orbit.clone(),
+            active: true,
+        },
+        crate::state::WsEntry {
+            id: "beta".to_string(),
+            name: "beta".to_string(),
+            repo_root: beta_repo,
+            orbit_dir: beta_orbit.clone(),
+            active: true,
+        },
+    ];
+    let state = crate::state::DashboardState::global(
+        global_root.clone(),
+        entries,
+        Some("alpha".to_string()),
+    );
+
+    // Exercise the non-default `local` ship mode against the non-default
+    // workspace so both selection and mode parsing are load-bearing.
+    let response = request_ship_global(
+        state,
+        "/workflows/ship?workspace=beta",
+        json!({ "mode": "local" }),
+    )
+    .await;
+
+    let status = response.status();
+    let payload = body_json(response).await;
+    assert_eq!(status, StatusCode::OK, "unexpected response: {payload}");
+    assert_eq!(payload["workflow"].as_str(), Some("ship"));
+    assert_eq!(payload["job_id"].as_str(), Some("task_auto_pipeline"));
+    assert!(matches!(
+        payload["state"].as_str(),
+        Some("queued" | "submitted")
+    ));
+    let run_id = payload["run_id"].as_str().expect("run id");
+
+    // The run is persisted in beta...
+    let beta_runtime =
+        OrbitRuntime::from_roots(&global_root, &beta_orbit).expect("reopen beta workspace");
+    let stored = beta_runtime.show_job_run(run_id).expect("stored ship run");
+    assert_eq!(stored.job_id, "task_auto_pipeline");
+    // ...and nowhere else.
+    let alpha_runtime =
+        OrbitRuntime::from_roots(&global_root, &alpha_orbit).expect("reopen alpha workspace");
+    assert!(alpha_runtime.show_job_run(run_id).is_err());
+}
+
+/// ORB-10008: an unknown `?workspace=` on the ship endpoint is a clean 404
+/// JSON rejection from the workspace extractor, not a 500.
+#[tokio::test]
+async fn ship_endpoint_rejects_unknown_workspace_with_404_json() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let state = crate::state::DashboardState::single(Arc::new(runtime));
+
+    let response = request_ship_global(
+        state,
+        "/workflows/ship?workspace=ghost",
+        json!({ "mode": "pr" }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let payload = body_json(response).await;
+    assert!(
+        payload["error"]
+            .as_str()
+            .is_some_and(|m| m.contains("unknown workspace: ghost"))
     );
 }
 
