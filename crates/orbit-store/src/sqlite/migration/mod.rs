@@ -1,7 +1,24 @@
 use orbit_common::types::OrbitError;
 use rusqlite::Connection;
 
+mod ledger;
+
+pub use ledger::{AppliedMigration, SUPPORTED_SCHEMA_VERSION};
+pub(crate) use ledger::{applied_migrations, current_schema_version};
+
+/// Bring the store database up to the newest supported schema version,
+/// applying any pending versioned migrations (each transactional and
+/// recorded in the `schema_meta` ledger). Refuses to open a database whose
+/// recorded schema version is newer than this binary supports.
 pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
+    ledger::run_migrations(conn, ledger::MIGRATIONS)
+}
+
+/// v1 `baseline` migration: the full pre-ledger idempotent schema. Safe to
+/// run on both a fresh database and any legacy database created by the
+/// pre-versioning migration code, which is how existing databases adopt
+/// the versioned ledger.
+fn apply_baseline_schema(conn: &Connection) -> Result<(), OrbitError> {
     conn.execute_batch(
         r#"
             CREATE TABLE IF NOT EXISTS tools (

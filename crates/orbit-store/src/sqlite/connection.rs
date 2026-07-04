@@ -81,6 +81,26 @@ impl Store {
     pub fn connection(&self) -> Arc<Mutex<Connection>> {
         self.conn.clone()
     }
+
+    /// Current schema version recorded in the migration ledger (0 when no
+    /// versioned migration has run). Foundation for `orbit migrate` (P3.4).
+    pub fn schema_version(&self) -> Result<u32, OrbitError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        migration::current_schema_version(&conn)
+    }
+
+    /// All migrations recorded as applied in the `schema_meta` ledger,
+    /// ordered by version ascending.
+    pub fn applied_migrations(&self) -> Result<Vec<migration::AppliedMigration>, OrbitError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        migration::applied_migrations(&conn)
+    }
 }
 
 fn enable_best_effort_wal_mode(conn: &Connection) {
