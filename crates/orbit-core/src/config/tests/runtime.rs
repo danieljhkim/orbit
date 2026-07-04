@@ -407,3 +407,42 @@ auto_ship = true
         RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
     assert!(config.workflow_auto_ship());
 }
+
+#[test]
+fn runtime_log_rotation_rejects_invalid_values() {
+    // [ORB-00415] Malformed rotation knobs must fail at config load with a
+    // clear, key-naming error.
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+
+    write_config(workspace.path(), "[runtime]\nlog_retention_days = 0\n");
+    let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect_err("zero retention must fail config load");
+    assert!(
+        error.to_string().contains("log_retention_days"),
+        "message: {error}"
+    );
+
+    write_config(
+        workspace.path(),
+        "[runtime]\nlog_max_total_mb = 10\nlog_max_file_mb = 50\n",
+    );
+    let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect_err("per-file budget above total must fail config load");
+    assert!(
+        error.to_string().contains("log_max_file_mb"),
+        "message: {error}"
+    );
+}
+
+#[test]
+fn runtime_log_rotation_accepts_valid_values() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        workspace.path(),
+        "[runtime]\nlog_retention_days = 14\nlog_max_total_mb = 200\nlog_max_file_mb = 20\n",
+    );
+    RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("valid log rotation config should load");
+}

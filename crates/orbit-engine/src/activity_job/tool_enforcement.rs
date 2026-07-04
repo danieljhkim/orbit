@@ -73,7 +73,7 @@ impl AuditSink for EnforcedAuditSink {
             LoopAuditEvent::PolicyDenial {
                 tool_name, reason, ..
             } => {
-                let _ = self.writer.emit(V2AuditEventKind::ToolDenied {
+                self.writer.emit_lossy(V2AuditEventKind::ToolDenied {
                     tool_name: tool_name.clone(),
                     reason: reason.clone(),
                 });
@@ -87,7 +87,7 @@ impl AuditSink for EnforcedAuditSink {
                 if !tool_allowed(tool_name, &self.allowlist) =>
             {
                 let reason = format!("tool `{tool_name}` not in allowlist");
-                let _ = self.writer.emit(V2AuditEventKind::ToolDenied {
+                self.writer.emit_lossy(V2AuditEventKind::ToolDenied {
                     tool_name: tool_name.clone(),
                     reason: reason.clone(),
                 });

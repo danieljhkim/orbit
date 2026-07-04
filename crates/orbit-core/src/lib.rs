@@ -77,8 +77,8 @@ pub use orbit_common::types::{
 };
 pub use orbit_common::types::{LearningComment, NotFoundKind, OrbitError};
 pub use orbit_common::utility::redaction::{
-    redact_sensitive_env_error, redact_sensitive_env_json, redact_sensitive_env_option,
-    redact_sensitive_env_text,
+    redact_all_error, redact_sensitive_env_error, redact_sensitive_env_json,
+    redact_sensitive_env_option, redact_sensitive_env_text,
 };
 pub use orbit_store::learning_layout::LearningLayoutMigrationReport;
 pub use orbit_store::{

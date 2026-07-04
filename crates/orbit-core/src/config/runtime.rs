@@ -5,6 +5,7 @@ use std::path::Path;
 use orbit_common::types::{
     Crew, CrewRoleAssignment, OrbitError, activity_job::Backend, all_agent_families, resolve_crew,
 };
+use orbit_common::utility::log_rotation::LogRotationConfig;
 use orbit_common::utility::redaction::redact_home_dir;
 use orbit_engine::PrConfig;
 
@@ -168,6 +169,11 @@ impl RuntimeConfig {
 
         validate_task_artifact_store_from_raw(parsed.task.as_ref())?;
         let v2_backend = runtime_backend_from_raw(parsed.runtime.as_ref())?;
+        // [ORB-00415] Strict gate for the JSONL log rotation/retention knobs so
+        // a malformed `[runtime]` value fails `orbit` startup with a clear
+        // error. The subscriber itself reads these keys leniently at init
+        // (before config load); this validates the same values.
+        validate_log_rotation_from_raw(parsed.runtime.as_ref())?;
 
         reject_stale_agent_role_tables(parsed.agent.as_ref())?;
 
@@ -515,6 +521,19 @@ fn runtime_backend_from_raw(raw: Option<&RawRuntimeSection>) -> Result<Option<St
         )));
     };
     Ok(Some(backend.as_str().to_string()))
+}
+
+fn validate_log_rotation_from_raw(raw: Option<&RawRuntimeSection>) -> Result<(), OrbitError> {
+    let (retention_days, max_total_mb, max_file_mb) = match raw {
+        Some(section) => (
+            section.log_retention_days,
+            section.log_max_total_mb,
+            section.log_max_file_mb,
+        ),
+        None => (None, None, None),
+    };
+    LogRotationConfig::from_parts(retention_days, max_total_mb, max_file_mb)?;
+    Ok(())
 }
 
 fn validate_task_artifact_store_from_raw(raw: Option<&RawTaskSection>) -> Result<(), OrbitError> {

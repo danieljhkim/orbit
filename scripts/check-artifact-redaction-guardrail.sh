@@ -15,6 +15,14 @@ targets=(
   "crates/orbit-tools/src/builtin/orbit/task"
   "crates/orbit-tools/src/builtin/orbit/review_thread"
   "crates/orbit-tools/src/builtin/orbit/friction"
+  # [ORB-00417] Write-time redaction paths: task creation (dashboard + core
+  # choke point) and provider CLI argv. Redaction must flow through
+  # orbit_common::utility::redaction (redact_all / with_argv_secrets), never a
+  # surface-local helper here.
+  "crates/orbit-core/src/command/task/add.rs"
+  "crates/orbit-dashboard/src/api/tasks.rs"
+  "crates/orbit-engine/src/activity_job/cli_runner/orchestrator.rs"
+  "crates/orbit-engine/src/activity_job/cli_runner/argv.rs"
 )
 
 if rg -n 'fn\s+redact_' "${targets[@]}"; then

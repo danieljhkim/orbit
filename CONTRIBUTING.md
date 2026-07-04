@@ -33,6 +33,41 @@ Rust workspace crates live under `crates/` (for example `crates/orbit-cli`).
 - Prefer removing legacy paths over carrying compatibility code when the product is still pre-adoption.
 - If you discover friction or recurring issues, fix them in scope or create a concrete follow-up task.
 
+## Supply-chain (cargo-deny)
+
+Dependencies are gated by [`cargo-deny`](https://embarkstudios.github.io/cargo-deny/)
+on every PR (via `scripts/ci-guardrails.sh`) and locally with `make audit`. The
+policy lives in [`deny.toml`](deny.toml): it denies crates with an open RUSTSEC
+advisory or a yanked version, and restricts licenses to a reviewed allow-list.
+
+Run it before landing a dependency change:
+
+```bash
+cargo install cargo-deny --locked   # one-time
+make audit                          # == cargo deny check
+```
+
+**Adding a license.** If a new dependency introduces a license not in the
+`[licenses].allow` list, `cargo deny check` fails. Add the SPDX identifier to
+the list in `deny.toml` **only** if it is a permissive/public-domain-equivalent
+license, with a one-line comment naming the crate(s) and (for weak-copyleft
+licenses such as MPL-2.0) a short justification. Copyleft licenses that would
+impose obligations on Orbit's own sources must not be added — replace the
+dependency instead.
+
+**Advisory exceptions.** Only when there is no safe upgrade available may an
+advisory be time-boxed in `[advisories].ignore`. Each entry must be an object
+carrying:
+
+- `id` — the `RUSTSEC-YYYY-NNNN` identifier, and
+- `reason` — why it is safe in Orbit's usage (why the vulnerable path is
+  unreachable or the impact is bounded) **and** a `Re-review YYYY-MM-DD` date
+  (default: ~6 months out).
+
+Re-review ignored advisories on or before their date and drop the entry once an
+upstream fix lands. Never ignore an advisory that has an available patched
+release — bump the dependency instead.
+
 ## Orbit State
 
 Orbit keeps operational state under `.orbit/`. Review those changes carefully before committing.

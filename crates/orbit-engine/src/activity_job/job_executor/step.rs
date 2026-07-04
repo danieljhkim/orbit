@@ -7,7 +7,7 @@ pub(super) fn run_step(step: &JobV2Step, ctx: &ExecCtx<'_>) -> Result<StepOutcom
         let matched = evaluate_bool_expr(expr, &tctx)
             .map_err(|err| DispatchError::JobExecution(format!("when expr: {err}")))?;
         if !matched {
-            let _ = emit_job_event(
+            emit_job_event_lossy(
                 &ctx.audit,
                 ctx.task_id(),
                 V2AuditEventKind::StepSkipped {
@@ -32,17 +32,17 @@ pub(super) fn run_step(step: &JobV2Step, ctx: &ExecCtx<'_>) -> Result<StepOutcom
         },
     )
     .map_err(|e| DispatchError::AuditFailed(format!("{e:?}")))?;
-    let _ = ctx.audit.push_parent(step_event_id);
+    ctx.audit.push_parent_lossy(step_event_id);
 
     let result = run_step_with_retry(step, ctx);
 
-    let _ = ctx.audit.pop_parent();
+    ctx.audit.pop_parent_lossy();
     let (outcome_str, error_message) = match &result {
         Ok(StepOutcome { success: true, .. }) => ("success", None),
         Ok(StepOutcome { message, .. }) => ("failed", message.clone()),
         Err(err) => ("error", Some(err.to_string())),
     };
-    let _ = emit_job_event(
+    emit_job_event_lossy(
         &ctx.audit,
         ctx.task_id(),
         V2AuditEventKind::StepFinished {
@@ -97,7 +97,7 @@ pub(super) fn run_step_with_retry(
             break;
         }
         let backoff_ms = compute_backoff_ms(retry, attempt);
-        let _ = emit_job_event(
+        emit_job_event_lossy(
             &ctx.audit,
             ctx.task_id(),
             V2AuditEventKind::StepRetry {
@@ -170,7 +170,7 @@ pub(super) fn emit_denied_if_applicable(
     task_id: Option<&str>,
 ) {
     if matches!(err, DispatchError::ToolDenied { .. }) {
-        let _ = emit_job_event(
+        emit_job_event_lossy(
             audit,
             task_id,
             V2AuditEventKind::StepDenied {

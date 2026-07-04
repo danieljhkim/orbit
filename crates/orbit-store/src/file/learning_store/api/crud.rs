@@ -67,18 +67,82 @@ impl LearningFileStore {
             };
 
             let path = learning_doc_path(&self.root, &id);
-            if !create_learning_file_exclusive(&path, &learning, LearningStatus::Active)? {
-                self.adopt_or_reject_existing_learning_path(&id, &path)?;
-                continue;
-            }
 
-            ensure_empty_sidecar(&votes_jsonl_path(&self.root, &id))?;
-            ensure_empty_sidecar(&comments_jsonl_path(&self.root, &id))?;
-            self.id_allocator.record_learning_body_path(&id, &path)?;
-            self.upsert_index_row(&learning);
-            self.invalidate_envelope_cache();
-            return Ok(learning);
+            // [ORB-00413] The SQLite reservation from `allocate_learning` is the
+            // source of truth for the ID; guard the body/sidecar/record steps so
+            // a partial create rolls the reservation back rather than leaving a
+            // half-visible ID (reserved-without-body) or an orphaned body file.
+            // A learning after this point either fully exists (allocated + body
+            // present + indexed) or not at all.
+            match create_learning_file_exclusive(&path, &learning, LearningStatus::Active) {
+                Ok(true) => match self.finalize_created_learning(&id, &path, &learning) {
+                    Ok(()) => return Ok(learning),
+                    Err(error) => {
+                        self.rollback_partial_learning(&id, &path);
+                        return Err(error);
+                    }
+                },
+                Ok(false) => {
+                    // The allocated id's path already exists: adopt it (same id)
+                    // or reject (different id). `adopt_or_reject_existing_learning_path`
+                    // owns cleanup of the reservation in the reject case, so no
+                    // body of ours is left behind.
+                    self.adopt_or_reject_existing_learning_path(&id, &path)?;
+                    continue;
+                }
+                Err(error) => {
+                    // The exclusive create failed with an IO error — a
+                    // pre-existing file surfaces as `Ok(false)`, not `Err`, so
+                    // any partial file here is ours to clean up.
+                    self.rollback_partial_learning(&id, &path);
+                    return Err(error);
+                }
+            }
         }
+    }
+
+    /// Finalize a freshly-created learning body: write its empty sidecars,
+    /// record the allocation's body path, and refresh the index. The last
+    /// fallible step is `record_learning_body_path`; everything after it is
+    /// infallible, so a returned `Err` always leaves the reservation's
+    /// `body_path` unset and thus abandonable by [`Self::rollback_partial_learning`].
+    fn finalize_created_learning(
+        &self,
+        id: &str,
+        path: &std::path::Path,
+        learning: &Learning,
+    ) -> Result<(), OrbitError> {
+        ensure_empty_sidecar(&votes_jsonl_path(&self.root, id))?;
+        ensure_empty_sidecar(&comments_jsonl_path(&self.root, id))?;
+        self.id_allocator.record_learning_body_path(id, path)?;
+        self.upsert_index_row(learning);
+        self.invalidate_envelope_cache();
+        Ok(())
+    }
+
+    /// [ORB-00413] Best-effort rollback of a partially-created learning: remove
+    /// the staged body + sidecars we wrote, drop the now-empty id directory, and
+    /// abandon the reservation so the ID is never left half-visible. Never fails
+    /// the caller — the original error is what propagates — and only logs if the
+    /// abandon itself fails.
+    fn rollback_partial_learning(&self, id: &str, path: &std::path::Path) {
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(votes_jsonl_path(&self.root, id));
+        let _ = std::fs::remove_file(comments_jsonl_path(&self.root, id));
+        if let Some(dir) = path.parent() {
+            // Only succeeds if the directory is now empty — leaves any
+            // pre-existing/foreign content in place.
+            let _ = std::fs::remove_dir(dir);
+        }
+        if let Err(error) = self.id_allocator.abandon_learning(id) {
+            orbit_common::tracing::warn!(
+                target: "orbit.store.learning",
+                id,
+                error = %error,
+                "rollback: failed to abandon reserved learning after a partial create",
+            );
+        }
+        self.invalidate_envelope_cache();
     }
 
     pub(crate) fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError> {

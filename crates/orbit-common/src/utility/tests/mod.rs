@@ -1,5 +1,6 @@
 mod blob_store;
 mod glob;
+mod log_rotation;
 mod logging;
 #[cfg(unix)]
 mod process_identity;

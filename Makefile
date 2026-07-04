@@ -46,7 +46,7 @@ help:
 	@echo "  make fmt-check    Check formatting"
 	@echo "  make clippy       Lint with clippy (deny warnings)"
 	@echo "  make bench        Run graph build benchmark (ARGS=... optional)"
-	@echo "  make audit        Cargo audit (security)"
+	@echo "  make audit        Supply-chain audit (cargo-deny: advisories + licenses)"
 	@echo "  make tree         Print dependency tree"
 	@echo "  make ci           Full CI pass (clippy + tests + doc + guardrails; also runs on PRs)"
 	@echo "  make ci-fast      Pre-handoff gate for agents (fmt-check + guardrail scripts; no compile)"
@@ -98,9 +98,11 @@ clippy:
 bench:
 	$(CARGO) run -p orbit-knowledge --example graph_build --release -- $(ARGS)
 
-# Security audit (requires cargo-audit)
+# Supply-chain audit: advisories + license allow-list via cargo-deny (deny.toml).
+# Canonical command; CI runs the same check via scripts/ci-guardrails.sh.
 audit:
-	$(CARGO) audit || echo "Install cargo-audit via: cargo install cargo-audit"
+	@command -v cargo-deny >/dev/null 2>&1 || { echo "Install cargo-deny via: cargo install cargo-deny --locked"; exit 1; }
+	$(CARGO) deny check
 
 # Dependency tree inspection
 tree:

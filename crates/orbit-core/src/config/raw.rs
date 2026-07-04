@@ -94,6 +94,15 @@ pub(super) struct RawRuntimeSection {
     /// backend (§3.1). One of `http`, `cli`, `auto`; validated by
     /// `RuntimeConfig::load_layered`.
     pub(super) backend: Option<String>,
+    /// `runtime.log_retention_days` — delete JSONL log archives older than this
+    /// many days. [ORB-00415] Validated by `RuntimeConfig::load_layered`.
+    pub(super) log_retention_days: Option<u64>,
+    /// `runtime.log_max_total_mb` — total size budget (MiB) across JSONL log
+    /// archives; oldest are pruned first when exceeded.
+    pub(super) log_max_total_mb: Option<u64>,
+    /// `runtime.log_max_file_mb` — roll the active JSONL log once it grows past
+    /// this many MiB.
+    pub(super) log_max_file_mb: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

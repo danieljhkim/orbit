@@ -3,6 +3,7 @@ pub mod fs;
 pub mod git;
 pub mod glob;
 pub mod learning_session;
+pub mod log_rotation;
 pub mod logging;
 pub mod output_capture;
 pub mod path;

@@ -17,6 +17,8 @@
 //! # Key exports
 //! - [`PolicyEngine`] — wraps a validated [`orbit_common::types::PolicyDef`]
 //! - [`FsPolicyEvaluation`] — structured allow/deny outcome with matched rule
+//! - [`resolve_symlinks`] — symlink-safe path resolution (dangling links
+//!   included) shared by policy evaluation and the tools-layer boundary check
 //!
 //! # Dependency direction
 //! `orbit-types` → `orbit-policy` → orbit-core
@@ -29,4 +31,4 @@ mod evaluator;
 mod tests;
 
 pub use decision::PolicyDecision;
-pub use engine::{FsPolicyEvaluation, PolicyEngine};
+pub use engine::{FsPolicyEvaluation, PolicyEngine, resolve_symlinks};

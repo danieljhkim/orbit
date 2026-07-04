@@ -823,3 +823,59 @@ fn mixed_crew_drives_exact_models_to_planner_and_implementer() {
         "implementer --model must be exact gpt-5.5, not family"
     );
 }
+
+#[test]
+fn run_cli_backend_redacts_token_shaped_argv_in_audit() {
+    // [ORB-00417] A token-shaped provider-CLI flag value must be redacted in
+    // the persisted run record / audit event, not recorded verbatim.
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("codex");
+    write_executable(&script, "#!/bin/sh\ncat > /dev/null\nprintf 'ok\\n'\n");
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-argv-redaction",
+        "codex:gpt-5.5",
+        sink_for_writer,
+    ));
+    let audit_for_assert = Arc::clone(&audit);
+
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.executor_args = vec![
+        "--api-key".to_string(),
+        "sk-secretargvtoken1234567890abcdef".to_string(),
+    ];
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-argv-redaction",
+        audit,
+        &serde_json::json!({"prompt": "hi"}),
+        None,
+    )
+    .expect("run succeeds");
+    assert!(outcome.success);
+
+    let events = audit_for_assert.events_snapshot().expect("audit snapshot");
+    let argv = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            V2AuditEventKind::CliInvocationStarted { argv_redacted, .. } => {
+                Some(argv_redacted.clone())
+            }
+            _ => None,
+        })
+        .expect("a CliInvocationStarted audit event should be present");
+    let joined = argv.join(" ");
+    assert!(
+        !joined.contains("sk-secretargvtoken1234567890abcdef"),
+        "argv leaked the token: {joined}"
+    );
+    assert!(
+        joined.contains("[REDACTED"),
+        "argv should carry a redaction placeholder: {joined}"
+    );
+}
