@@ -151,6 +151,10 @@ pub use sqlite::invocation_store::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,
     InvocationRecord, InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
 };
+pub use sqlite::routine_store::{
+    RoutineCursor, RoutineFireIntentParams, RoutineFireRecord, RoutineFireState,
+    RoutinePauseRecord, RoutineSweepLock, try_acquire_routine_sweep_lock,
+};
 pub use sqlite::task_registry::workspace_id_for_orbit_dir;
 pub use sqlite::v2_audit_store::{V2AuditEventFilter, V2AuditEventInsertParams, V2AuditEventRow};
 

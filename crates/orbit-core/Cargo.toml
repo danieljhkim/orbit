@@ -16,6 +16,8 @@ clap = ["orbit-common/clap"]
 
 [dependencies]
 chrono.workspace = true
+croner.workspace = true
+hostname.workspace = true
 fs2.workspace = true
 orbit-common = { path = "../orbit-common" }
 orbit-search = { path = "../orbit-search" }

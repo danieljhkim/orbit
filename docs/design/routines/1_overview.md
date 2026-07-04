@@ -1,8 +1,8 @@
 ---
 title: Routines — Overview
 owner: claude
-last_updated: 2026-07-03
-status: Draft
+last_updated: 2026-07-04
+status: Accepted
 feature: routines
 doc_role: overview
 type: design
@@ -10,7 +10,7 @@ summary: Durable, git-versioned scheduler primitive that fires catalog jobs/acti
 tags: [routines, scheduler]
 paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**"]
 related_features: [routines, activity-job]
-related_artifacts: [ORB-10001]
+related_artifacts: [ORB-10001, ORB-10021]
 ---
 
 # Routines — Overview
@@ -21,11 +21,12 @@ activity/job catalog, host pinning, and a retry/overlap policy. A stateless **`o
 pass, invoked every minute by the OS scheduler (launchd on macOS, a systemd timer on Linux),
 fires whatever is due on the current host through the existing v2 run machinery. Definitions
 are shared across hosts via git; all scheduler state (last fires, pauses, locks, run history)
-is host-local and never synced. [2_design.md](./2_design.md) is the proposed contract;
+is host-local and never synced. [2_design.md](./2_design.md) is the v1 contract;
 [3_vision.md](./3_vision.md) holds what is deliberately out of scope for v1.
 
-> **Status.** This feature is a design proposal. Nothing described here is implemented yet;
-> the At a Glance table lists *proposed* homes for each concern.
+> **Status.** v1 shipped in [ORB-10021]; the At a Glance table lists the actual home of
+> each concern. Targets are `job:<name>` in v1 — see [ADR-0206] for why `activity:` is
+> reserved.
 
 ---
 
@@ -58,8 +59,9 @@ fragmentation this feature exists to end.
 
 - **Routine** — a versioned YAML definition in a routine-source workspace: name, trigger,
   target, `hosts`, `enabled`, and policy. The durable unit of scheduling.
-- **Target** — what fires: a reference into the existing catalog (`job:<name>` or
-  `activity:<name>`). Routines carry no inline commands; the `shell` activity variant was
+- **Target** — what fires: a reference into the existing catalog. v1 dispatches
+  `job:<name>`; `activity:<name>` is reserved (wrap the activity in a one-step job — see
+  [ADR-0206]). Routines carry no inline commands; the `shell` activity variant was
   removed fail-closed in [ORB-00374] (see [ADR-0194]), and routines inherit that posture.
 - **Sweep** — `orbit sweep`, the stateless due-check pass the OS clock invokes every minute.
   Loads definitions, filters for this host, fires due routines, records state, exits.
@@ -77,22 +79,23 @@ fragmentation this feature exists to end.
 
 ## 3. At a Glance
 
-All rows are proposed, not shipped; the task column fills in as work is created.
-
-| Concern | File (proposed) | Task |
-|---------|-----------------|------|
-| Routine definition type + YAML loader | `crates/orbit-common/src/types/routine.rs` | — |
-| Due computation, host filter, dispatch | `crates/orbit-core/src/routines/` | — |
-| Host-local scheduler state (fires, pauses, locks) | `crates/orbit-store/src/sqlite/routine_store/` | — |
-| `orbit sweep` CLI entrypoint | `crates/orbit-cli/src/command/sweep.rs` | — |
-| `orbit routine` CLI (`list/show/pause/resume/init`) | `crates/orbit-cli/src/command/routine/` | — |
-| launchd/systemd unit templates + installer | `crates/orbit-core/assets/clock/` | — |
+| Concern | File | Task |
+|---------|------|------|
+| Routine definition type + fail-closed YAML parse | `crates/orbit-common/src/types/routine.rs` | [ORB-10021] |
+| Discovery, due computation, dispatch, status | `crates/orbit-core/src/routines/` | [ORB-10021] |
+| Host-local scheduler state (fires, pauses) | `crates/orbit-store/src/sqlite/routine_store/` | [ORB-10021] |
+| Sweep advisory lock (flock, host-global) | `crates/orbit-store/src/sqlite/routine_store/mod.rs` | [ORB-10021] |
+| `orbit sweep` CLI entrypoint | `crates/orbit-cli/src/command/sweep.rs` | [ORB-10021] |
+| `orbit routine` CLI (`list/show/pause/resume/init`) | `crates/orbit-cli/src/command/routine/` | [ORB-10021] |
+| launchd/systemd unit templates + installer | `crates/orbit-core/assets/clock/` + `src/routines/clock.rs` | [ORB-10021] |
+| `[routines] role = "source"` config key | `crates/orbit-core/src/config/{raw,runtime}.rs` | [ORB-10021] |
 
 ---
 
 ## Task References
 
 - [ORB-10001] — authored this design-doc folder (proposal; no implementation).
+- [ORB-10021] — implemented routines v1 (types, store, sweep, CLI, clock units).
 - [ORB-00374] — removed the `shell` activity variant and `run_shell` dispatch (fail-closed);
   routines inherit this constraint.
 

@@ -230,8 +230,61 @@ fn apply_baseline_schema(conn: &Connection) -> Result<(), OrbitError> {
     ensure_learning_index_schema(conn)?;
     ensure_invocation_schema(conn)?;
     ensure_v2_state_consolidation_schema(conn)?;
+    ensure_routine_schema(conn)?;
 
     Ok(())
+}
+
+fn ensure_routine_schema(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            -- Host-local routine scheduler state [ORB-10021]. Lives only in
+            -- the host-global store database and is never synced between
+            -- hosts (ADR-0208); routine *definitions* are git-versioned YAML
+            -- in routine-source workspaces.
+
+            -- Per-routine cursor: first observation baseline + last slot
+            -- consumed. A routine never fires for slots before its baseline.
+            CREATE TABLE IF NOT EXISTS routine_cursors (
+                routine_name TEXT PRIMARY KEY,
+                baseline_at TEXT NOT NULL,
+                last_slot TEXT,
+                updated_at TEXT NOT NULL
+            );
+
+            -- One row per fire attempt. The (name, slot, attempt) uniqueness
+            -- is the idempotency key that prevents double fires for the same
+            -- scheduled slot across overlapping or crashed sweeps.
+            CREATE TABLE IF NOT EXISTS routine_fires (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                routine_name TEXT NOT NULL,
+                slot TEXT NOT NULL,
+                attempt INTEGER NOT NULL DEFAULT 1,
+                state TEXT NOT NULL,
+                run_id TEXT,
+                source_workspace TEXT NOT NULL,
+                detail TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(routine_name, slot, attempt)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_routine_fires_name_slot
+            ON routine_fires(routine_name, slot DESC, attempt DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_routine_fires_state
+            ON routine_fires(state);
+
+            -- Host-local suppressions written by `orbit routine pause`;
+            -- durable across reboots, invisible to git.
+            CREATE TABLE IF NOT EXISTS routine_pauses (
+                routine_name TEXT PRIMARY KEY,
+                paused_at TEXT NOT NULL,
+                actor TEXT
+            );
+        "#,
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))
 }
 
 fn ensure_adr_index_schema(conn: &Connection) -> Result<(), OrbitError> {

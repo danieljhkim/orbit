@@ -1,8 +1,8 @@
 ---
 title: Routines — Design
 owner: claude
-last_updated: 2026-07-03
-status: Draft
+last_updated: 2026-07-04
+status: Accepted
 feature: routines
 doc_role: design
 type: design
@@ -10,14 +10,14 @@ summary: Proposed contract for routine definitions, sweep dispatch, host-local s
 tags: [routines, scheduler]
 paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**"]
 related_features: [routines, activity-job]
-related_artifacts: [ORB-10001]
+related_artifacts: [ORB-10001, ORB-10021]
 ---
 
 # Routines — Design
 
-This doc is the proposed v1 contract: the routine definition schema, how definitions are
-discovered, what `orbit sweep` does on each invocation, where state lives, and how the OS
-clock drives it. Cross-host coordination, event triggers, and everything else deferred is
+This doc is the v1 contract as shipped in [ORB-10021]: the routine definition schema,
+how definitions are discovered, what `orbit sweep` does on each invocation, where state
+lives, and how the OS clock drives it. Cross-host coordination, event triggers, and everything else deferred is
 in [3_vision.md](./3_vision.md). Decision rationale lives in [4_decisions.md](./4_decisions.md).
 
 ---
@@ -36,8 +36,8 @@ enabled: true                  # global kill-switch, versioned
 hosts: [dk-mac]                # explicit host pinning; no "any host" in v1
 trigger:
   cron: "0 22 * * *"           # standard 5-field cron, evaluated in host-local time
-  missed_run: catch_up_once    # catch_up_once | skip
-target: job:almanac_commit_pipeline   # job:<name> | activity:<name>, resolved via the catalog
+  missed_run: catch_up_once    # catch_up_once | skip (default: skip)
+target: job:almanac_commit_pipeline   # job:<name>, resolved via the catalog
 policy:
   timeout_minutes: 10
   retries: { max: 2, backoff_minutes: 2 }
@@ -53,13 +53,19 @@ Field semantics:
 - **`trigger.cron`** — when the routine is due. `missed_run` governs fires that fall in a
   window when the host was asleep or powered off: `catch_up_once` fires a single make-up run
   on the next sweep (never one per missed slot); `skip` waits for the next natural slot.
-- **`target`** — a `job:` or `activity:` reference resolved through the existing catalog at
-  load time, exactly like `target:` steps in `JobV2`. Unresolvable targets are load-time
-  errors. There is deliberately no inline command form: the `shell` activity variant was
-  removed fail-closed in [ORB-00374] / [ADR-0194], and reintroducing arbitrary-command
+- **`target`** — a `job:<name>` reference resolved through the source workspace's job
+  catalog at load time. Unresolvable targets are load-time errors. `activity:<name>` is
+  reserved and rejected at parse time with wrapping guidance: run dispatch is job-shaped
+  (`submit_pipeline_run` resolves jobs by name; nothing dispatches a bare activity), and a
+  one-step wrapper job in the same source workspace is the existing composition grammar
+  ([ADR-0206]). There is deliberately no inline command form: the `shell` activity variant
+  was removed fail-closed in [ORB-00374] / [ADR-0194], and reintroducing arbitrary-command
   payloads through the scheduler would reopen that surface on a timer.
 - **`policy`** — applied by the dispatcher around the run: timeout, bounded retries with
-  fixed backoff, and overlap handling. `overlap: forbid` is the default.
+  fixed backoff, and overlap handling. `overlap: forbid` is the default; `timeout_minutes`
+  defaults to 60 and doubles as the staleness horizon (§4), `retries` defaults to
+  `{max: 0, backoff_minutes: 2}`. Retries re-dispatch a *failed* fire under the same slot
+  (attempt 2..max+1) once the backoff has elapsed, evaluated on later sweep passes.
 
 Parsing is fail-closed: an invalid routine file is reported and *that routine* is treated
 as absent; it never degrades into "fire with defaults".
@@ -93,7 +99,9 @@ properties fall out:
 
 Host identity is the one genuinely host-local datum: `~/.orbit/host.toml` carries
 `host_id = "dk-mac"`, defaulting to the machine hostname when absent. `orbit routine init`
-writes it and (with `--install-clock`) installs the OS clock unit (§5).
+writes it and (with `--install-clock`) installs the OS clock unit (§5). A malformed
+`host.toml` is an error, not a fallback; a `[routines] role` value other than `"source"`
+is a config error (fail-closed on both).
 
 ---
 
@@ -111,13 +119,20 @@ Per pass:
    exit immediately — overlapping invocations from a slow prior pass must not double-fire.
 2. Load the registry; collect routines from all source workspaces (fail-closed per file).
 3. Filter to routines where `enabled`, `hosts` contains this `host_id`, and no local pause.
-4. For each, compute due-ness from the cron expression and the persisted last-fire
-   timestamp; apply `missed_run` policy for gaps.
-5. For each due routine: check `overlap` against in-flight fires, record the fire intent
-   (idempotency key: routine name + scheduled slot), then dispatch the target through the
-   existing v2 run entrypoints in the routine's source workspace, tagging provenance
-   `origin: routine/<name>` in the audit envelope.
-6. Record outcomes and exit.
+4. Sync unresolved fires against actual run state, reclaiming entries older than the
+   routine's `timeout_minutes` (the staleness horizon — a sweep that crashed between
+   intent and dispatch must not block `overlap: forbid` forever).
+5. For each, compute due-ness from the cron expression and the persisted cursor
+   (last slot, else the first-observation baseline — a routine never fires for slots that
+   predate its registration on this host; the first sweep records the baseline and fires
+   nothing). Due-ness is O(1) via previous-occurrence lookup, never a walk over every
+   missed slot; `missed_run` policy decides gaps. A slot is "natural" within a 120s grace
+   of its scheduled time.
+6. For each due routine: check `overlap` against in-flight fires, record the fire intent
+   (idempotency key: routine name + scheduled slot + attempt, transactionally with the
+   cursor advance), then dispatch the target via `submit_pipeline_run` in the routine's
+   source workspace with actor `routine/<name>` as run provenance.
+7. Record outcomes and exit.
 
 Fires are normal runs: they appear in run history, carry v2 audit envelopes, and are
 debuggable with the existing run tooling — there is no separate "scheduled run" ledger.
@@ -130,14 +145,18 @@ vision item ([3_vision.md](./3_vision.md) §1), not a v1 goal.
 
 ## 4. Host-Local State and Toggles
 
-All scheduler state lives in a host-local SQLite store (`routine_store`, following the
-existing store patterns), gitignored and never synced:
+All scheduler state lives host-locally (the `routine_*` tables in the host-global store
+database `~/.orbit/orbit.db`, module `orbit-store/src/sqlite/routine_store/`), gitignored
+and never synced:
 
-- **fires** — per routine: last scheduled slot fired, fire intents (idempotency keys),
-  outcome, dispatched run id.
-- **pauses** — host-local suppressions written by `orbit routine pause <name>` / cleared by
-  `resume`. Durable across reboots; invisible to git.
-- **sweep lock** — the advisory lock from §3.
+- **routine_cursors** — per routine: first-observation baseline + last slot consumed.
+- **routine_fires** — one row per fire attempt: `(name, slot, attempt)` idempotency key,
+  state (`intent → dispatched → succeeded/failed/timed_out/error`), dispatched run id.
+- **routine_pauses** — host-local suppressions written by `orbit routine pause <name>` /
+  cleared by `resume`. Durable across reboots; invisible to git.
+- **sweep lock** — a `flock(2)` file lock (`~/.orbit/state/routine-sweep.lock`) rather
+  than a table: the OS releases it on process death, so a crashed sweep never wedges the
+  next pass and no lock-staleness logic is needed.
 
 Toggle resolution, in order: `enabled: false` (versioned, everywhere) → not in `hosts`
 (versioned, per host) → local pause (unversioned, this host only). `orbit routine list`
@@ -184,14 +203,19 @@ out of v1 scope for this reason.
   be a new `missed_run` variant.
 - **First minute of overlap risk is on the dispatcher.** `overlap: forbid` depends on
   accurate in-flight bookkeeping; a crashed sweep that recorded a fire intent but died
-  before dispatch leaves a stale in-flight entry. The store needs a staleness horizon
-  (intent older than policy timeout → reclaimable) — easy to get subtly wrong; needs tests.
+  before dispatch leaves a stale in-flight entry. The outcome-sync step reclaims intents
+  and dispatches older than `policy.timeout_minutes` (marking them `error` / `timed_out`);
+  the consumed slot is not re-fired — the idempotency key holds.
+- **Routines carry no input payload.** v1 dispatches every target with an empty input
+  object; jobs meant for routines must run with defaults. Parameterized fires would be a
+  schema addition.
 
 ---
 
 ## Task References
 
 - [ORB-10001] — authored this design-doc folder (proposal; no implementation).
+- [ORB-10021] — implemented routines v1 (types, store, sweep, CLI, clock units).
 - [ORB-00374] — removed the `shell` activity variant and `run_shell` dispatch (fail-closed);
   routines inherit this constraint.
 

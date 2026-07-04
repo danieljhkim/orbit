@@ -1,0 +1,426 @@
+//! The stateless sweep pass [ORB-10021]: what runs when the OS clock invokes
+//! `orbit sweep` (ADR-0204). Modeled on `orbit run ship-sweep`: never
+//! bootstraps a workspace from the caller's cwd, isolates per-routine
+//! failures into report rows, and returns `Err` only for infrastructure
+//! failures (registry unreadable, store unopenable) — an unconfigured host
+//! is a clean no-op, because launchd/systemd will invoke this forever.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use chrono::{DateTime, Duration, Local, Utc};
+use orbit_common::types::{JobRunState, OrbitError, OverlapPolicy};
+use orbit_store::{RoutineFireIntentParams, RoutineFireRecord, RoutineFireState, Store};
+use serde_json::json;
+
+use crate::OrbitRuntime;
+use crate::workspace_registry;
+
+use super::due::{DueDecision, due_decision, parse_cron};
+use super::host::resolve_host_id;
+use super::loader::{LoadedRoutine, RoutineLoadError, collect_routines, discover_workspaces};
+
+/// Options for one sweep pass.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SweepOptions {
+    /// Report what would fire without recording or dispatching anything.
+    pub dry_run: bool,
+}
+
+/// Per-routine outcome of one sweep pass.
+#[derive(Debug, Clone)]
+pub struct RoutineSweepReport {
+    /// Routine name.
+    pub routine: String,
+    /// Source workspace name.
+    pub source: String,
+    /// One of: `fired`, `retry_fired`, `would_fire`, `baselined`,
+    /// `would_baseline`, `skipped`, `error`.
+    pub action: &'static str,
+    /// Why, for `skipped`/`error` rows.
+    pub reason: Option<String>,
+    /// Scheduled slot consumed (RFC 3339, UTC), when a fire was involved.
+    pub slot: Option<String>,
+    /// Run id returned by dispatch, when one was submitted.
+    pub run_id: Option<String>,
+}
+
+/// Result of one sweep pass.
+#[derive(Debug, Default)]
+pub struct SweepOutcome {
+    /// Host identity the pass filtered against.
+    pub host_id: String,
+    /// True when another sweep held the lock and this pass exited early.
+    pub lock_busy: bool,
+    /// Per-routine outcomes.
+    pub reports: Vec<RoutineSweepReport>,
+    /// Fail-closed definition/load failures (those routines were absent).
+    pub load_errors: Vec<RoutineLoadError>,
+}
+
+/// Run one sweep pass against the default global root (`~/.orbit`).
+pub fn run_sweep(options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
+    let global_root = workspace_registry::global_orbit_dir()?;
+    run_sweep_at(&global_root, options)
+}
+
+/// Run one sweep pass against an explicit global root (test seam).
+pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
+    let host_id = resolve_host_id(global_root)?;
+
+    // One pass per host at a time: overlapping invocations from a slow prior
+    // pass must not double-fire. flock releases on process death, so a
+    // crashed sweep never wedges the next one.
+    let lock = orbit_store::try_acquire_routine_sweep_lock(&global_root.join("state"))?;
+    let Some(_lock) = lock else {
+        return Ok(SweepOutcome {
+            host_id,
+            lock_busy: true,
+            ..SweepOutcome::default()
+        });
+    };
+
+    let store = Store::open(&global_root.join("orbit.db"))?;
+
+    // One runtime per active workspace; discovery and dispatch share them.
+    let discovered = discover_workspaces(global_root)?;
+    let mut load_errors: Vec<RoutineLoadError> = discovered.errors.clone();
+
+    let mut collection = collect_routines(&discovered.entries);
+    load_errors.append(&mut collection.errors);
+
+    let routines_by_name: BTreeMap<String, &LoadedRoutine> = collection
+        .routines
+        .iter()
+        .map(|routine| (routine.definition.name.clone(), routine))
+        .collect();
+    let runtime_by_orbit_dir: BTreeMap<PathBuf, &OrbitRuntime> = discovered
+        .entries
+        .iter()
+        .map(|(workspace, runtime)| (workspace.orbit_dir.clone(), runtime))
+        .collect();
+
+    let now_utc = Utc::now();
+    if !options.dry_run {
+        sync_unresolved_fires(&store, &routines_by_name, &runtime_by_orbit_dir, now_utc)?;
+    }
+
+    let pauses = store.routine_pauses()?;
+
+    let mut reports = Vec::new();
+    for routine in &collection.routines {
+        let report = sweep_routine(
+            &store,
+            routine,
+            &runtime_by_orbit_dir,
+            &host_id,
+            &pauses,
+            options,
+        )
+        .unwrap_or_else(|error| RoutineSweepReport {
+            routine: routine.definition.name.clone(),
+            source: routine.source_workspace.clone(),
+            action: "error",
+            reason: Some(error.to_string()),
+            slot: None,
+            run_id: None,
+        });
+        reports.push(report);
+    }
+
+    Ok(SweepOutcome {
+        host_id,
+        lock_busy: false,
+        reports,
+        load_errors,
+    })
+}
+
+fn sweep_routine(
+    store: &Store,
+    routine: &LoadedRoutine,
+    runtimes: &BTreeMap<PathBuf, &OrbitRuntime>,
+    host_id: &str,
+    pauses: &BTreeMap<String, orbit_store::RoutinePauseRecord>,
+    options: SweepOptions,
+) -> Result<RoutineSweepReport, OrbitError> {
+    let definition = &routine.definition;
+    let name = &definition.name;
+
+    // Toggle resolution order (2_design.md §4): versioned kill-switch →
+    // versioned host pinning → host-local pause.
+    if !definition.enabled {
+        return Ok(skipped(routine, "disabled_in_definition"));
+    }
+    if !definition.hosts.iter().any(|host| host == host_id) {
+        return Ok(skipped(routine, "host_not_pinned"));
+    }
+    if pauses.contains_key(name) {
+        return Ok(skipped(routine, "paused_locally"));
+    }
+
+    let cron = parse_cron(&definition.trigger.cron)?;
+    let now_local = Local::now();
+
+    let Some(cursor) = store.routine_cursor(name)? else {
+        // First observation on this host: record the baseline and fire
+        // nothing — a routine never fires for slots that predate its
+        // registration here.
+        if options.dry_run {
+            return Ok(action(routine, "would_baseline"));
+        }
+        store.routine_record_baseline(name, &Utc::now().to_rfc3339())?;
+        return Ok(action(routine, "baselined"));
+    };
+
+    let lower_bound_raw = cursor.last_slot.as_deref().unwrap_or(&cursor.baseline_at);
+    let lower_bound = parse_rfc3339(lower_bound_raw)?.with_timezone(&Local);
+
+    match due_decision(
+        &cron,
+        definition.trigger.missed_run,
+        &lower_bound,
+        &now_local,
+    )? {
+        DueDecision::Fire { slot, .. } => {
+            let slot_utc = slot.with_timezone(&Utc).to_rfc3339();
+            fire(store, routine, runtimes, &slot_utc, 1, "fired", options)
+        }
+        DueDecision::NotDue => {
+            // No new slot: a failed most-recent fire may still have retry
+            // budget under the same slot.
+            if let Some(retry) = retry_candidate(store, routine, Utc::now())? {
+                return fire(
+                    store,
+                    routine,
+                    runtimes,
+                    &retry.slot,
+                    retry.attempt + 1,
+                    "retry_fired",
+                    options,
+                );
+            }
+            Ok(skipped(routine, "not_due"))
+        }
+    }
+}
+
+/// The most recent fire, when it failed with retry budget left and the
+/// fixed backoff has elapsed.
+fn retry_candidate(
+    store: &Store,
+    routine: &LoadedRoutine,
+    now_utc: DateTime<Utc>,
+) -> Result<Option<RoutineFireRecord>, OrbitError> {
+    let retries = routine.definition.policy.retries;
+    if retries.max == 0 {
+        return Ok(None);
+    }
+    let Some(latest) = store.routine_latest_fire(&routine.definition.name)? else {
+        return Ok(None);
+    };
+    if latest.state != RoutineFireState::Failed {
+        return Ok(None);
+    }
+    // attempt is 1-based: max=2 allows attempts 2 and 3.
+    if latest.attempt > retries.max {
+        return Ok(None);
+    }
+    let failed_at = parse_rfc3339(&latest.updated_at)?;
+    if now_utc.signed_duration_since(failed_at) < Duration::minutes(retries.backoff_minutes as i64)
+    {
+        return Ok(None);
+    }
+    Ok(Some(latest))
+}
+
+fn fire(
+    store: &Store,
+    routine: &LoadedRoutine,
+    runtimes: &BTreeMap<PathBuf, &OrbitRuntime>,
+    slot: &str,
+    attempt: u32,
+    fired_action: &'static str,
+    options: SweepOptions,
+) -> Result<RoutineSweepReport, OrbitError> {
+    let definition = &routine.definition;
+    let name = &definition.name;
+
+    if definition.policy.overlap == OverlapPolicy::Forbid
+        && let Some(latest) = store.routine_latest_fire(name)?
+        && !latest.state.is_terminal()
+    {
+        // Stale in-flight entries past the policy timeout were already
+        // reclaimed by the outcome sync at the top of the pass, so anything
+        // still non-terminal here is genuinely (believed) in flight.
+        return Ok(RoutineSweepReport {
+            slot: Some(slot.to_string()),
+            ..skipped(routine, "overlap_in_flight")
+        });
+    }
+
+    if options.dry_run {
+        return Ok(RoutineSweepReport {
+            slot: Some(slot.to_string()),
+            ..action(routine, "would_fire")
+        });
+    }
+
+    let claimed = store.routine_record_fire_intent(&RoutineFireIntentParams {
+        routine_name: name.clone(),
+        slot: slot.to_string(),
+        attempt,
+        source_workspace: routine.source_workspace.clone(),
+    })?;
+    if !claimed {
+        return Ok(RoutineSweepReport {
+            slot: Some(slot.to_string()),
+            ..skipped(routine, "slot_already_claimed")
+        });
+    }
+
+    let runtime = runtimes.get(&routine.source_orbit_dir).ok_or_else(|| {
+        OrbitError::WorkspaceError(format!(
+            "no runtime for source workspace '{}'",
+            routine.source_workspace
+        ))
+    })?;
+
+    let actor = format!("routine/{name}");
+    match runtime.submit_pipeline_run(definition.target.job_name(), json!({}), None, Some(&actor)) {
+        Ok(invoke) => {
+            store.routine_mark_fire_dispatched(name, slot, attempt, &invoke.run_id)?;
+            Ok(RoutineSweepReport {
+                routine: name.clone(),
+                source: routine.source_workspace.clone(),
+                action: fired_action,
+                reason: None,
+                slot: Some(slot.to_string()),
+                run_id: Some(invoke.run_id),
+            })
+        }
+        Err(error) => {
+            store.routine_mark_fire_outcome(
+                name,
+                slot,
+                attempt,
+                RoutineFireState::Error,
+                Some(&error.to_string()),
+            )?;
+            Ok(RoutineSweepReport {
+                routine: name.clone(),
+                source: routine.source_workspace.clone(),
+                action: "error",
+                reason: Some(format!("dispatch failed: {error}")),
+                slot: Some(slot.to_string()),
+                run_id: None,
+            })
+        }
+    }
+}
+
+/// Bring unresolved fires up to date against actual run state, and reclaim
+/// entries older than the routine's policy timeout (the staleness horizon —
+/// without it, a sweep that crashed between intent and dispatch would block
+/// `overlap: forbid` forever).
+fn sync_unresolved_fires(
+    store: &Store,
+    routines_by_name: &BTreeMap<String, &LoadedRoutine>,
+    runtimes: &BTreeMap<PathBuf, &OrbitRuntime>,
+    now_utc: DateTime<Utc>,
+) -> Result<(), OrbitError> {
+    for fire in store.routine_unresolved_fires()? {
+        let timeout_minutes = routines_by_name
+            .get(&fire.routine_name)
+            .map(|routine| routine.definition.policy.timeout_minutes)
+            .unwrap_or(60);
+        let created_at = match parse_rfc3339(&fire.created_at) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let expired =
+            now_utc.signed_duration_since(created_at) > Duration::minutes(timeout_minutes as i64);
+
+        match fire.state {
+            RoutineFireState::Intent => {
+                if expired {
+                    store.routine_mark_fire_outcome(
+                        &fire.routine_name,
+                        &fire.slot,
+                        fire.attempt,
+                        RoutineFireState::Error,
+                        Some("stale fire intent reclaimed (sweep died before dispatch)"),
+                    )?;
+                }
+            }
+            RoutineFireState::Dispatched => {
+                let run_state = fire
+                    .run_id
+                    .as_deref()
+                    .and_then(|run_id| {
+                        routines_by_name
+                            .get(&fire.routine_name)
+                            .and_then(|routine| runtimes.get(&routine.source_orbit_dir))
+                            .and_then(|runtime| runtime.show_job_run(run_id).ok())
+                    })
+                    .map(|run| run.state);
+                let outcome = match run_state {
+                    Some(JobRunState::Success) => Some((RoutineFireState::Succeeded, None)),
+                    Some(JobRunState::Failed) => Some((RoutineFireState::Failed, None)),
+                    Some(JobRunState::Timeout) => Some((RoutineFireState::TimedOut, None)),
+                    Some(JobRunState::Cancelled) => {
+                        Some((RoutineFireState::Failed, Some("run cancelled")))
+                    }
+                    Some(JobRunState::Interrupted) => {
+                        Some((RoutineFireState::Failed, Some("run interrupted")))
+                    }
+                    // Still in flight (or unqueryable): reclaim once past the
+                    // policy timeout, otherwise leave for a later pass.
+                    _ => expired.then_some((
+                        RoutineFireState::TimedOut,
+                        Some("exceeded policy timeout without a terminal run state"),
+                    )),
+                };
+                if let Some((state, detail)) = outcome {
+                    store.routine_mark_fire_outcome(
+                        &fire.routine_name,
+                        &fire.slot,
+                        fire.attempt,
+                        state,
+                        detail,
+                    )?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn skipped(routine: &LoadedRoutine, reason: &str) -> RoutineSweepReport {
+    RoutineSweepReport {
+        routine: routine.definition.name.clone(),
+        source: routine.source_workspace.clone(),
+        action: "skipped",
+        reason: Some(reason.to_string()),
+        slot: None,
+        run_id: None,
+    }
+}
+
+fn action(routine: &LoadedRoutine, action: &'static str) -> RoutineSweepReport {
+    RoutineSweepReport {
+        routine: routine.definition.name.clone(),
+        source: routine.source_workspace.clone(),
+        action,
+        reason: None,
+        slot: None,
+        run_id: None,
+    }
+}
+
+fn parse_rfc3339(raw: &str) -> Result<DateTime<Utc>, OrbitError> {
+    DateTime::parse_from_rfc3339(raw)
+        .map(|value| value.with_timezone(&Utc))
+        .map_err(|error| OrbitError::Store(format!("invalid stored timestamp '{raw}': {error}")))
+}

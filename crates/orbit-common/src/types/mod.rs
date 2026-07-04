@@ -43,6 +43,7 @@ pub mod policy_decision;
 pub mod policy_def;
 pub mod resource;
 pub mod role;
+pub mod routine;
 pub mod run_state;
 pub mod skill;
 pub mod task;
@@ -118,6 +119,10 @@ pub use resource::{
     ResourceHeader, ResourceKind, ResourceMetadata, parse_policy_resource, validate_resource_name,
 };
 pub use role::Role;
+pub use routine::{
+    MissedRunPolicy, OverlapPolicy, ROUTINE_SCHEMA_VERSION, RoutineDefinition, RoutinePolicy,
+    RoutineRetries, RoutineTarget, RoutineTrigger, parse_routine_yaml,
+};
 pub use run_state::PipelineState;
 pub use skill::Skill;
 pub use task::{

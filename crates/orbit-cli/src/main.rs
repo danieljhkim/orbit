@@ -135,6 +135,23 @@ fn main() {
             }
             return;
         }
+        // `orbit sweep` and `orbit routine` resolve everything from the
+        // global registry and host-local scheduler state; like ship-sweep
+        // they must never bootstrap a `.orbit/` in the scheduler's cwd.
+        Commands::Sweep(cmd) => {
+            if let Err(err) = cmd.execute_without_runtime() {
+                print_error(&err, tool_run_json_output);
+                std::process::exit(1);
+            }
+            return;
+        }
+        Commands::Routine(cmd) => {
+            if let Err(err) = cmd.execute_without_runtime() {
+                print_error(&err, tool_run_json_output);
+                std::process::exit(1);
+            }
+            return;
+        }
         // `orbit web` resolves its own workspace(s): `serve` can serve globally
         // from any directory, and `connect` is a client-side SSH tunnel whose
         // workspace lives on the remote. Both must dispatch before the eager

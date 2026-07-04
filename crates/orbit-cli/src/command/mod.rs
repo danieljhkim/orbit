@@ -15,10 +15,12 @@ pub mod log;
 pub mod mcp;
 pub mod migrate;
 pub mod policy;
+pub mod routine;
 pub mod run;
 pub mod search;
 pub mod semantic;
 pub mod skill;
+pub mod sweep;
 pub mod task;
 pub mod tool;
 pub mod web;
@@ -58,6 +60,8 @@ Environment:
 
 Operate:
   run         Run a workflow (ship, duel-plan, job)
+  sweep       Fire due routines on this host (the scheduler pass)
+  routine     Inspect and control scheduled routines on this host
   task        Create, update, and manage tasks
   docs        Search and manage the indexed docs corpus
   adr         List and inspect Architecture Decision Records
@@ -106,6 +110,8 @@ pub enum Commands {
 
     // ── Operate ──
     Run(run::RunCommand),
+    Sweep(sweep::SweepCommand),
+    Routine(routine::RoutineCommand),
     Task(Box<task::TaskCommand>),
     Search(search::SearchCommand),
     Docs(docs::DocsCommand),
@@ -149,6 +155,11 @@ impl Execute for Commands {
             Commands::Semantic(cmd) => cmd.execute(runtime),
             Commands::Migrate(cmd) => cmd.execute(runtime),
             Commands::Run(cmd) => cmd.execute(runtime),
+            // Sweep and routine resolve everything from the global registry;
+            // they normally dispatch before runtime init (see main.rs) and
+            // never use the runtime even when reached through this path.
+            Commands::Sweep(cmd) => cmd.execute_without_runtime(),
+            Commands::Routine(cmd) => cmd.execute_without_runtime(),
             Commands::Task(cmd) => (*cmd).execute(runtime),
             Commands::Search(cmd) => cmd.execute(runtime),
             Commands::Docs(cmd) => cmd.execute(runtime),

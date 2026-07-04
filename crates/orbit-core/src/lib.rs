@@ -49,6 +49,7 @@ pub mod config;
 pub mod context;
 pub mod metrics;
 mod paths;
+pub mod routines;
 pub mod runtime;
 pub mod workspace_registry;
 
@@ -77,7 +78,9 @@ pub use orbit_common::types::{
     TaskStatus, TaskType, build_task_status_index, resolve_task_dependencies,
     task_dependencies_ready,
 };
-pub use orbit_common::types::{LearningComment, NotFoundKind, OrbitError};
+pub use orbit_common::types::{
+    LearningComment, MissedRunPolicy, NotFoundKind, OrbitError, OverlapPolicy,
+};
 pub use orbit_common::utility::redaction::redact_sensitive_env_text;
 pub use orbit_store::learning_layout::LearningLayoutMigrationReport;
 pub use orbit_store::{
