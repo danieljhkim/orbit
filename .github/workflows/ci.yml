@@ -12,6 +12,7 @@ env:
   CARGO_TERM_COLOR: always
   NEXTEST_VERSION: 0.9.136
   NEXTEST_LINUX_SHA256: a098eed56f2dd88c7fdca1e554a6b99fa1ffbd2a7a1c41b865700112981f6f52
+  CARGO_DENY_VERSION: 0.19.9
 
 jobs:
   ci:
@@ -48,6 +49,14 @@ jobs:
           tar zxf "$archive" -C "$cargo_bin"
           rm -f "$archive"
           cargo nextest --version
+
+      - name: Install cargo-deny
+        run: |
+          set -euo pipefail
+          if ! cargo deny --version 2>/dev/null | grep -q "${CARGO_DENY_VERSION}"; then
+            cargo install cargo-deny --locked --version "${CARGO_DENY_VERSION}"
+          fi
+          cargo deny --version
 
       - name: Run CI guardrails
         run: ./scripts/ci-guardrails.sh

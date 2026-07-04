@@ -16,6 +16,14 @@ else
 fi
 cargo test --workspace --doc
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
+# Supply-chain gate: dependency advisories + license allow-list (deny.toml).
+# [ORB-00416] Soft-presence like nextest above — CI installs a pinned version;
+# local runs without the tool warn instead of hard-failing.
+if command -v cargo-deny >/dev/null 2>&1; then
+  cargo deny check
+else
+  echo "cargo-deny not found; skipping supply-chain gate (install: cargo install cargo-deny --locked)" >&2
+fi
 "$repo_root/scripts/check-installer-pubkey.sh"
 "$repo_root/scripts/test-installer-security.sh"
 "$repo_root/scripts/check-dependency-direction.sh"
