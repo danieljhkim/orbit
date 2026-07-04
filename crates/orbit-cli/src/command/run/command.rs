@@ -10,11 +10,13 @@ use super::job::JobRunArgs;
 use super::logs::RunLogsArgs;
 use super::ship;
 use super::show::RunShowArgs;
+use super::sweep;
 use super::trace::RunTraceArgs;
 
 const RUN_AFTER_HELP: &str = "\
 Workflow entrypoints:
   orbit run ship [task_id ...]
+  orbit run ship-sweep [--dry-run] [--json]
   orbit run duel-plan <task_id>
   orbit run job <job_id> [--input key=value] [--json] [--debug]
 
@@ -40,9 +42,10 @@ Run history:
 {usage-heading} {usage}
 
 Workflows:
-  ship       Ship backlog or explicitly selected tasks through the gated task pipeline
-  duel-plan  Run a planning duel for one task
-  job        Run an arbitrary job by ID
+  ship        Ship backlog or explicitly selected tasks through the gated task pipeline
+  ship-sweep  Dispatch ship runs in every registered workspace with ready backlog tasks
+  duel-plan   Run a planning duel for one task
+  job         Run an arbitrary job by ID
 
 Audits:
   history    Show recent job runs, optionally filtered to one job
@@ -73,6 +76,9 @@ pub enum RunSubcommand {
     /// Deprecated alias for `orbit run ship --mode local`
     #[command(name = "ship-local", hide = true)]
     ShipLocal(ship::LegacyShipLocalCommand),
+    /// Dispatch ship runs in every registered workspace with ready backlog tasks
+    #[command(name = "ship-sweep")]
+    ShipSweep(sweep::ShipSweepCommand),
     /// Run a planning duel for one task
     #[command(name = "duel-plan")]
     DuelPlan(duel::DuelPlanCommand),
@@ -95,6 +101,9 @@ impl Execute for RunSubcommand {
         match self {
             RunSubcommand::Ship(command) => command.execute(runtime),
             RunSubcommand::ShipLocal(command) => command.execute(runtime),
+            // Normally dispatched before runtime init (see main.rs); the
+            // registry-driven sweep never uses the cwd-derived runtime.
+            RunSubcommand::ShipSweep(command) => command.execute_without_runtime(),
             RunSubcommand::DuelPlan(command) => command.execute(runtime),
             RunSubcommand::History(command) => command.execute(runtime),
             RunSubcommand::Show(command) => command.execute(runtime),

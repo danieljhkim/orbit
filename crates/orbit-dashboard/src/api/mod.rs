@@ -331,6 +331,7 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
         )
         .route("/jobs", get(jobs::list_jobs))
         .route("/job-runs", get(jobs::list_job_runs))
+        .route("/workflows/ship", post(runs::ship_workflow_action))
         .route("/runs/:id", get(runs::get_run))
         .route("/runs/:id/cancel", post(runs::cancel_run_action))
         .route("/runs/:id/replay", post(runs::replay_run_action))

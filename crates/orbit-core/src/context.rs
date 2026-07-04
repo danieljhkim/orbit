@@ -180,6 +180,9 @@ pub(crate) struct OrbitRuntimeSettings {
     /// Default base branch for ship/duel-plan workflows
     /// (`[workflow] base_branch` in `config.toml`, default `"main"`).
     workflow_base_branch: String,
+    /// Opt-in for unattended ship dispatch
+    /// (`[workflow] auto_ship` in `config.toml`, default `false`).
+    workflow_auto_ship: bool,
     crews: std::collections::BTreeMap<String, Crew>,
     default_crew: Option<String>,
     duel: DuelConfig,
@@ -197,6 +200,7 @@ impl OrbitRuntimeSettings {
         pr_config: PrConfig,
         v2_backend: Option<String>,
         workflow_base_branch: String,
+        workflow_auto_ship: bool,
         crews: std::collections::BTreeMap<String, Crew>,
         default_crew: Option<String>,
         duel: DuelConfig,
@@ -211,6 +215,7 @@ impl OrbitRuntimeSettings {
             pr_config,
             v2_backend,
             workflow_base_branch,
+            workflow_auto_ship,
             crews,
             default_crew,
             duel,
@@ -227,6 +232,10 @@ impl OrbitRuntimeSettings {
 
     pub(crate) fn workflow_base_branch(&self) -> &str {
         &self.workflow_base_branch
+    }
+
+    pub(crate) fn workflow_auto_ship(&self) -> bool {
+        self.workflow_auto_ship
     }
 
     pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {
@@ -353,6 +362,12 @@ impl OrbitContext {
     /// `"main"` when the key is absent.
     pub(crate) fn workflow_base_branch(&self) -> &str {
         self.runtime.workflow_base_branch()
+    }
+
+    /// Whether this workspace opted into unattended ship dispatch
+    /// (`[workflow] auto_ship` in `config.toml`, default `false`).
+    pub(crate) fn workflow_auto_ship(&self) -> bool {
+        self.runtime.workflow_auto_ship()
     }
 
     pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {

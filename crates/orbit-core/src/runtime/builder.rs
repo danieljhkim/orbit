@@ -129,6 +129,7 @@ pub(crate) fn build_context_from_roots(
     let pr_config = runtime_config.pr_config().clone();
     let v2_backend = runtime_config.v2_backend().map(ToString::to_string);
     let workflow_base_branch = runtime_config.workflow_base_branch().to_string();
+    let workflow_auto_ship = runtime_config.workflow_auto_ship();
     let crews = runtime_config.crews.clone();
     let default_crew = runtime_config.default_crew.clone();
     let duel = runtime_config.duel_config().clone();
@@ -168,6 +169,7 @@ pub(crate) fn build_context_from_roots(
             pr_config,
             v2_backend,
             workflow_base_branch,
+            workflow_auto_ship,
             crews,
             default_crew,
             duel,

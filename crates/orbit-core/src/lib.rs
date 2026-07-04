@@ -61,8 +61,8 @@ pub use command::search::{
 };
 pub use command::task_template::TaskTemplate;
 pub use command::workflow::{
-    WORKFLOWS, Workflow, WorkflowInput, build_workflow_input, build_workflow_input_for,
-    find_workflow, validate_workflow_flags,
+    SHIP_WORKFLOW_ALIAS, ShipMode, WORKFLOWS, Workflow, WorkflowInput, build_ship_input,
+    build_workflow_input, build_workflow_input_for, find_workflow, validate_workflow_flags,
 };
 pub use context::{ActorIdentity, ActorKind, OrbitContext};
 pub use orbit_common::types::{

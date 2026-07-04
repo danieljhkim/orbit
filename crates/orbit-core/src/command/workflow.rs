@@ -58,6 +58,84 @@ pub fn find_workflow(name: &str) -> Option<&'static Workflow> {
     WORKFLOWS.iter().find(|w| w.alias == name)
 }
 
+/// Canonical alias of the gated ship workflow (`task_auto_pipeline`).
+pub const SHIP_WORKFLOW_ALIAS: &str = "ship";
+
+/// Pipeline mode for the `ship` workflow: open a PR or apply locally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShipMode {
+    Pr,
+    Local,
+}
+
+impl ShipMode {
+    /// The value the `task_auto_pipeline` job expects in its `mode` input.
+    pub fn as_input_value(self) -> &'static str {
+        match self {
+            ShipMode::Pr => "pr",
+            ShipMode::Local => "local",
+        }
+    }
+
+    /// Parse an external (CLI/HTTP) mode string.
+    pub fn parse(value: &str) -> Result<Self, OrbitError> {
+        match value {
+            "pr" => Ok(ShipMode::Pr),
+            "local" => Ok(ShipMode::Local),
+            other => Err(OrbitError::InvalidInput(format!(
+                "unknown ship mode '{other}' (expected 'pr' or 'local')"
+            ))),
+        }
+    }
+}
+
+/// Build the `task_auto_pipeline` input document for a ship run.
+///
+/// An empty `task_ids` slice selects auto mode (the pipeline discovers
+/// backlog tasks itself). Explicit ids are validated for duplicates and
+/// emptiness so every submission surface rejects the same malformed input.
+pub fn build_ship_input(
+    mode: ShipMode,
+    base_branch: &str,
+    task_ids: &[String],
+) -> Result<Value, OrbitError> {
+    if base_branch.trim().is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "ship base branch must not be empty".to_string(),
+        ));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for task_id in task_ids {
+        if task_id.trim().is_empty() {
+            return Err(OrbitError::InvalidInput(
+                "task id in explicit task selection must not be empty".to_string(),
+            ));
+        }
+        if !seen.insert(task_id.as_str()) {
+            return Err(OrbitError::InvalidInput(format!(
+                "duplicate task id '{task_id}' in explicit task selection"
+            )));
+        }
+    }
+
+    let mut map = serde_json::Map::new();
+    map.insert(
+        "mode".to_string(),
+        Value::String(mode.as_input_value().to_string()),
+    );
+    map.insert(
+        "base_branch".to_string(),
+        Value::String(base_branch.to_string()),
+    );
+    if !task_ids.is_empty() {
+        map.insert(
+            "task_ids".to_string(),
+            Value::Array(task_ids.iter().cloned().map(Value::String).collect()),
+        );
+    }
+    Ok(Value::Object(map))
+}
+
 pub struct WorkflowInput {
     pub tasks: Option<String>,
     pub parallelism: Option<u32>,
@@ -199,5 +277,45 @@ mod tests {
         assert!(!workflow.supports_parallelism);
         assert!(find_workflow("ship-auto").is_none());
         assert!(find_workflow("ship-local").is_none());
+    }
+}
+
+#[cfg(test)]
+mod ship_input_tests {
+    use super::*;
+
+    #[test]
+    fn build_ship_input_auto_mode_omits_task_ids() {
+        let input = build_ship_input(ShipMode::Pr, "main", &[]).expect("input builds");
+        assert_eq!(input["mode"], "pr");
+        assert_eq!(input["base_branch"], "main");
+        assert!(input.get("task_ids").is_none());
+    }
+
+    #[test]
+    fn build_ship_input_explicit_tasks_and_local_mode() {
+        let task_ids = vec!["T1".to_string(), "T2".to_string()];
+        let input = build_ship_input(ShipMode::Local, "agent-main", &task_ids).expect("builds");
+        assert_eq!(input["mode"], "local");
+        assert_eq!(input["base_branch"], "agent-main");
+        assert_eq!(input["task_ids"], serde_json::json!(["T1", "T2"]));
+    }
+
+    #[test]
+    fn build_ship_input_rejects_duplicates_blank_ids_and_empty_base() {
+        let dup = vec!["T1".to_string(), "T1".to_string()];
+        assert!(build_ship_input(ShipMode::Pr, "main", &dup).is_err());
+
+        let blank = vec!["  ".to_string()];
+        assert!(build_ship_input(ShipMode::Pr, "main", &blank).is_err());
+
+        assert!(build_ship_input(ShipMode::Pr, "  ", &[]).is_err());
+    }
+
+    #[test]
+    fn ship_mode_parses_external_strings() {
+        assert_eq!(ShipMode::parse("pr").expect("pr"), ShipMode::Pr);
+        assert_eq!(ShipMode::parse("local").expect("local"), ShipMode::Local);
+        assert!(ShipMode::parse("yolo").is_err());
     }
 }

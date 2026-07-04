@@ -10,6 +10,7 @@ pub mod ship;
 mod show;
 mod steps;
 pub(crate) mod support;
+pub mod sweep;
 mod trace;
 
 pub use command::{RunCommand, RunSubcommand};

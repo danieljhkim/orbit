@@ -1,0 +1,13 @@
+[Unit]
+Description=orbit ship-sweep (dispatch ship runs in opted-in workspaces with ready backlog)
+
+[Service]
+Type=oneshot
+# The sweep is cwd-independent (it resolves workspaces from ~/.orbit/workspaces.json
+# and never bootstraps a .orbit/ where it runs), but pin a stable directory anyway.
+WorkingDirectory=%h
+# systemd user units get a minimal PATH that omits ~/.orbit/bin (orbit) and the
+# tools the dispatched pipelines shell out to (git, gh, claude).
+Environment=PATH=%h/.local/bin:%h/.orbit/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.orbit/bin/orbit run ship-sweep --json
+SyslogIdentifier=orbit-ship-sweep

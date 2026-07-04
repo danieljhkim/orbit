@@ -385,3 +385,25 @@ fn task_artifact_store_rejects_removed_key() {
     assert!(message.contains("no longer supported"));
     assert!(message.contains("v2"));
 }
+
+#[test]
+fn workflow_auto_ship_defaults_false_and_loads_when_set() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+
+    write_config(workspace.path(), "");
+    let config =
+        RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
+    assert!(!config.workflow_auto_ship());
+
+    write_config(
+        workspace.path(),
+        r#"
+[workflow]
+auto_ship = true
+"#,
+    );
+    let config =
+        RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
+    assert!(config.workflow_auto_ship());
+}
