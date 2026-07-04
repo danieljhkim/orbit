@@ -62,7 +62,7 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 > Follow these steps carefully:
 >
 > 1. Ask me where I want to clone the Orbit repository (suggest something like `~/code/orbit` or `~/dev/orbit`).
-> 2. Verify the Rust toolchain. Run `cargo --version` and `rustc --version`. Orbit uses edition 2024, so I need Rust **1.85 or newer**. If cargo is missing, or rustc is older than 1.85, **stop and ask me before installing anything** — the canonical path is `rustup` (`curl https://sh.rustup.rs | sh`), but that modifies shell profile, so I want to confirm first. If rustup is already installed but the toolchain is old, suggest `rustup update stable` and confirm before running.
+> 2. Verify the Rust toolchain. Run `cargo --version` and `rustc --version`. Orbit declares `rust-version = "1.89"` (MSRV), so I need Rust **1.89 or newer**. If cargo is missing, or rustc is older than 1.89, **stop and ask me before installing anything** — the canonical path is `rustup` (`curl https://sh.rustup.rs | sh`), but that modifies shell profile, so I want to confirm first. If rustup is already installed but the toolchain is old, suggest `rustup update stable` and confirm before running.
 > 3. Clone `https://github.com/danieljhkim/orbit` into the location from step 1, then run `make install`. This builds with cargo and copies the `orbit` binary to `$INSTALL_BIN_DIR` (default: `~/.cargo/bin`). Confirm the install path with me before running. Verify with `orbit --version`.
 > 4. Run `orbit init` to initialize global state at `~/.orbit`.
 > 5. From *this* repository (not the Orbit clone), run `orbit workspace init --mcp`. This creates `.orbit/` here and auto-registers Orbit's MCP server with installed agent CLIs (Claude Code, Codex, Gemini).
