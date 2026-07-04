@@ -124,6 +124,7 @@ Use `[duel]` to constrain which CLIs Orbit will spawn — e.g. drop `grok` from 
 | `[execution.env]` | Env vars passed to agent subprocesses. `inherit = false` (default) means only the explicit `pass` list crosses the boundary; useful for keeping secrets out of agent CLIs. |
 | `[execution.codex]` | Codex CLI sandbox mode. Valid: `read-only`, `workspace-write` (default), `danger-full-access`. Optional `approval_policy = "on-request"` enables escalation prompts. |
 | `[task.approval]` | Whether agent-initiated tasks require human approval before execution (`required_for_agent`), and whether delegated subagent runs inherit that requirement (`delegate_approval`). |
+| `[tasks]` | `id_start = N` sets a floor for the local task-id allocator: on runtime build the counter is raised to at least `N` (never lowered), so machines can hold disjoint id ranges (e.g. one `0–9999`, another `10000+`) and avoid cross-machine collisions. Capped by `ORB_TASK_ID_MAX` (99999) — setting it near the ceiling shrinks the usable range. Prefer the one-shot `orbit workspace init --task-id-start N` for the initial seed; the config key keeps the floor sticky across machines that share a config. See [task-migration overview](design/task-migration/1_overview.md). |
 | `[scoring]` | `enabled = true` records per-agent scoreboard counters under `.orbit/state/scoreboard/`. |
 | `[graph]` | `editing = false` (default) makes the knowledge graph read-only from agent tools; flip to `true` to allow `orbit.graph.*` mutations. |
 | `[pr]` | PR creation defaults (template, labels, draft mode) for `orbit run ship --mode pr`. |
@@ -140,5 +141,7 @@ Config is parsed at startup; invalid entries fail loud rather than silently fall
 - `[workflow].default_crew = '<x>' is not defined under [crews]` — name a crew that exists.
 - `config schema changed in ORB-00058; remove [agent.<role>] tables` — migrate to crews.
 - `execution.codex.sandbox has invalid value` — must be `read-only`, `workspace-write`, or `danger-full-access`.
+- `tasks.id_start N exceeds maximum task id 99999` — the allocator start must fit the `ORB-00000` id space.
+- `tasks.id_start N would lower the allocator below its current position M` — the counter only moves forward (raised only via `orbit workspace init --task-id-start`; the config key is a silent forward-only floor).
 
 When in doubt, copy the default ([`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml)) into `.orbit/config.toml` and edit from there.
