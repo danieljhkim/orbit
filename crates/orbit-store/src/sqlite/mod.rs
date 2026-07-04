@@ -5,6 +5,7 @@ pub(crate) mod invocation_store;
 pub mod job_run_store;
 pub mod learning_index;
 pub mod migration;
+pub(crate) mod read_pool;
 pub mod session_learning_state_store;
 pub mod task_registry;
 pub mod task_reservation_store;

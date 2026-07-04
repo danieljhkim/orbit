@@ -33,10 +33,7 @@ impl Store {
         workspace_id: &str,
         session_id: &str,
     ) -> Result<Option<LearningInjectionState>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         let mut stmt = conn
             .prepare(
                 "SELECT learning_injection_state_json FROM session_learning_state \

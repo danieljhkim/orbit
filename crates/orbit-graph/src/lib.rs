@@ -247,6 +247,8 @@ fn sync_window_elapsed(last_incremental_at: i64, window: Duration) -> Result<boo
 
 fn open_read_connection(db_path: &Path, operation: &'static str) -> Result<Connection, GraphError> {
     let conn = Connection::open(db_path).map_err(|source| GraphError::sqlite(operation, source))?;
+    conn.pragma_update(None, "busy_timeout", 5_000)
+        .map_err(|source| GraphError::sqlite("set busy_timeout for graph read", source))?;
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(|source| GraphError::sqlite("enable foreign keys for graph read", source))?;
     Ok(conn)

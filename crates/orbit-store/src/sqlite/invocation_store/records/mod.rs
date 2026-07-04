@@ -59,10 +59,7 @@ impl Store {
         &self,
         filter: &InvocationQuery,
     ) -> Result<Vec<InvocationRecord>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         let (sql, params) = build_invocation_list_query(filter);
         let param_refs: Vec<&dyn ToSql> = params.iter().map(|value| value.as_ref()).collect();
 
@@ -383,11 +380,7 @@ impl InvocationListQuery {
 }
 
 impl Store {
-    fn connection_handle(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, rusqlite::Connection>, OrbitError> {
-        self.conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))
+    fn connection_handle(&self) -> Result<crate::sqlite::read_pool::ReadGuard<'_>, OrbitError> {
+        self.read()
     }
 }

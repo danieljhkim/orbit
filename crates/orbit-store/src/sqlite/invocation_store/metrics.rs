@@ -163,10 +163,7 @@ impl Store {
     }
 
     pub fn list_tool_invocation_metrics(&self) -> Result<Vec<ToolInvocationMetrics>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         let mut stmt = conn
             .prepare(
                 r#"
@@ -197,10 +194,7 @@ impl Store {
     }
 
     fn load_invocation_samples(&self) -> Result<Vec<InvocationSample>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         let mut stmt = conn
             .prepare(
                 r#"
@@ -268,10 +262,7 @@ impl Store {
         &self,
         task_id: Option<&str>,
     ) -> Result<Vec<TaskInvocationMetrics>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let sql = if task_id.is_some() {
             r#"

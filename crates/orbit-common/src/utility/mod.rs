@@ -10,6 +10,8 @@ pub mod path;
 pub mod process_identity;
 pub mod redaction;
 pub mod selector;
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
 
 #[cfg(test)]
 mod tests;

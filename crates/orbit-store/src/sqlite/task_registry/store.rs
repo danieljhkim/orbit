@@ -21,9 +21,7 @@ use super::types::{
     AllocatorSeedOutcome, BindWorkspaceParams, ProjectionRebuildResult, TaskBundleBinding,
     TaskIndexFilter, WorkspaceBinding,
 };
-use super::util::{
-    enable_best_effort_wal_mode, normalize_path, now_string, path_to_string, relation_type_name,
-};
+use super::util::{normalize_path, now_string, path_to_string, relation_type_name};
 use super::workspace_id::{next_workspace_id_candidate, sanitize_slug, validate_workspace_id};
 
 #[derive(Clone)]
@@ -43,10 +41,10 @@ impl TaskRegistryStore {
         fs::create_dir_all(&workspaces_dir).map_err(|e| OrbitError::Store(e.to_string()))?;
 
         let conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
-        enable_best_effort_wal_mode(&conn);
+        orbit_common::utility::sqlite::apply_default_pragmas(&conn)?;
         // The registry is the commit point that makes a created task official, so
         // its writes must be durable against power loss the moment they ack. WAL's
-        // default synchronous=NORMAL only fsyncs the WAL at checkpoint, leaving an
+        // synchronous=NORMAL default only fsyncs the WAL at checkpoint, leaving an
         // acked register_task_bundle exposed to rollback on a hard reset. FULL
         // fsyncs the WAL on every commit, closing that window. The registry is
         // low-write (≈one commit per task create/bind/unregister), so the extra
@@ -54,10 +52,6 @@ impl TaskRegistryStore {
         // Store::open stays at NORMAL for higher-write stores.
         conn.pragma_update(None, "synchronous", "FULL")
             .map_err(|e| OrbitError::Store(format!("failed to set synchronous=FULL: {e}")))?;
-        conn.pragma_update(None, "busy_timeout", "5000")
-            .map_err(|e| OrbitError::Store(format!("failed to set busy_timeout: {e}")))?;
-        conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|e| OrbitError::Store(format!("failed to enable foreign keys: {e}")))?;
         reject_unsupported_registry_schema(&conn)?;
         apply_schema(&conn)?;
         assert_registry_user_version(&conn)?;

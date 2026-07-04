@@ -138,9 +138,7 @@ impl IdAllocator {
         }
         let conn = Connection::open(&config.semantic_db_path)
             .map_err(|e| OrbitError::Store(e.to_string()))?;
-        enable_best_effort_wal_mode(&conn);
-        conn.pragma_update(None, "busy_timeout", "5000")
-            .map_err(|e| OrbitError::Store(format!("failed to set busy_timeout: {e}")))?;
+        orbit_common::utility::sqlite::apply_default_pragmas(&conn)?;
         ensure_id_allocation_schema(&conn)?;
 
         let allocator = Self {
@@ -911,26 +909,6 @@ fn relative_to(path: &Path, root: &Path) -> PathBuf {
     path.strip_prefix(&root)
         .map(Path::to_path_buf)
         .unwrap_or(path)
-}
-
-fn enable_best_effort_wal_mode(conn: &Connection) {
-    match conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0)) {
-        Ok(mode) if mode.eq_ignore_ascii_case("wal") => {}
-        Ok(mode) => {
-            orbit_common::tracing::warn!(
-                target: "orbit.store.id_allocator",
-                journal_mode = mode.as_str(),
-                "requested WAL mode on semantic database, but SQLite kept the active journal mode",
-            );
-        }
-        Err(error) => {
-            orbit_common::tracing::warn!(
-                target: "orbit.store.id_allocator",
-                error = %error,
-                "could not set WAL mode on semantic database; continuing with default journal mode",
-            );
-        }
-    }
 }
 
 #[cfg(test)]

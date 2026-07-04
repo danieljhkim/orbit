@@ -6,3 +6,5 @@ mod logging;
 mod process_identity;
 mod redaction;
 mod selector;
+#[cfg(feature = "sqlite")]
+mod sqlite;

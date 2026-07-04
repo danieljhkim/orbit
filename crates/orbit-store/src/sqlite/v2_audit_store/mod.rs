@@ -99,10 +99,7 @@ impl Store {
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|b| b.as_ref()).collect();
 
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         let mut stmt = conn
             .prepare(&sql)
             .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -117,10 +114,7 @@ impl Store {
         let sql = format!("SELECT COUNT(*) FROM v2_audit_events {where_clause}");
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|b| b.as_ref()).collect();
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         conn.query_row(&sql, param_refs.as_slice(), |row| row.get(0))
             .map_err(|e| OrbitError::Store(e.to_string()))
     }

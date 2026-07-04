@@ -417,10 +417,7 @@ impl Store {
         workspace_id: &str,
         run_id: &str,
     ) -> Result<Option<JobRun>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         get_job_run_for_workspace_conn(&conn, workspace_id, run_id)
     }
 
@@ -457,10 +454,7 @@ impl Store {
         }
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|b| b.as_ref()).collect();
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         let mut stmt = conn
             .prepare(&sql)
             .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -481,10 +475,7 @@ impl Store {
         workspace_id: &str,
         run_id: &str,
     ) -> Result<Option<PipelineState>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         let raw = match conn.query_row(
             "SELECT pipeline_state_json FROM job_runs WHERE workspace_id = ?1 AND run_id = ?2",
             rusqlite::params![workspace_id, run_id],

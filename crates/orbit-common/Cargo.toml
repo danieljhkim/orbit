@@ -12,10 +12,14 @@ workspace = true
 
 [features]
 clap = ["dep:clap"]
+# Shared SQLite connection defaults (utility::sqlite). Optional so that
+# non-SQLite consumers (orbit-policy, orbit-exec, ...) do not pull rusqlite.
+sqlite = ["dep:rusqlite"]
 
 [dependencies]
 chrono.workspace = true
 clap = { workspace = true, optional = true }
+rusqlite = { workspace = true, optional = true }
 fs2.workspace = true
 regex.workspace = true
 serde.workspace = true

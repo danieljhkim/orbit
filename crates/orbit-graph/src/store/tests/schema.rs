@@ -122,6 +122,30 @@ fn graph_open_creates_documented_schema_and_initial_meta() {
     );
 }
 
+/// [ORB-10004] configure_connection must stay in lockstep with
+/// `orbit_common::utility::sqlite::apply_default_pragmas` (no crate edge to
+/// share code, so the values are pinned here against drift).
+#[test]
+fn configure_connection_applies_shared_pragma_defaults() {
+    let worktree = TestWorktree::new("pragma-defaults", "feat/pragma-defaults");
+    let conn = Connection::open(worktree.path().join("pragmas.db")).expect("open connection");
+
+    super::super::configure_connection(&conn).expect("configure connection");
+
+    let journal_mode = conn
+        .pragma_query_value(None, "journal_mode", |row| row.get::<_, String>(0))
+        .expect("journal_mode");
+    assert_eq!(journal_mode.to_lowercase(), "wal");
+    let pragma_i64 = |name: &str| -> i64 {
+        conn.pragma_query_value(None, name, |row| row.get::<_, i64>(0))
+            .expect("query pragma")
+    };
+    assert_eq!(pragma_i64("busy_timeout"), 5_000);
+    assert_eq!(pragma_i64("foreign_keys"), 1);
+    // synchronous=NORMAL reports as 1.
+    assert_eq!(pragma_i64("synchronous"), 1);
+}
+
 #[test]
 fn graph_open_cleans_stale_version_databases_without_deleting_active_db() {
     let worktree = TestWorktree::new("cleans-stale-dbs", "main");

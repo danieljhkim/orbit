@@ -597,10 +597,7 @@ impl AdrFileStore {
         }
         sql.push_str(" ORDER BY id DESC");
 
-        let conn_arc = index.connection();
-        let conn = conn_arc
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = index.read()?;
         let mut stmt = conn
             .prepare(&sql)
             .map_err(|e| OrbitError::Store(e.to_string()))?;

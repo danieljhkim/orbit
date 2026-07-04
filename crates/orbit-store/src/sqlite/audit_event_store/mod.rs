@@ -156,10 +156,7 @@ impl Store {
         &self,
         filter: &AuditEventFilter,
     ) -> Result<Vec<AuditEvent>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let mut conditions = Vec::new();
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -264,10 +261,7 @@ impl Store {
     }
 
     pub fn get_audit_event(&self, id: i64) -> Result<Option<AuditEvent>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let mut stmt = conn
             .prepare(
@@ -332,10 +326,7 @@ impl Store {
         since: Option<&DateTime<Utc>>,
         tool: Option<&str>,
     ) -> Result<(i64, i64, i64, i64, f64, i64), OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let mut conditions = Vec::new();
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -387,10 +378,7 @@ impl Store {
         since: Option<&DateTime<Utc>>,
         tool: Option<&str>,
     ) -> Result<Vec<i64>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let mut conditions = Vec::new();
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -436,10 +424,7 @@ impl Store {
         &self,
         since: &DateTime<Utc>,
     ) -> Result<Vec<(String, i64)>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let sql = "SELECT strftime('%Y-%m-%dT%H:00:00Z', timestamp) AS bucket, COUNT(*) \
                    FROM audit_events WHERE timestamp >= ?1 \
@@ -466,10 +451,7 @@ impl Store {
         &self,
         since: Option<&DateTime<Utc>>,
     ) -> Result<Vec<(String, i64)>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let sql = if since.is_some() {
             "SELECT role, COUNT(*) FROM audit_events \
@@ -506,10 +488,7 @@ impl Store {
         &self,
         since: Option<&DateTime<Utc>>,
     ) -> Result<Vec<AuditToolCallCountsByRole>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let sql = if since.is_some() {
             "SELECT role, COUNT(*), \
@@ -568,10 +547,7 @@ impl Store {
         &self,
         since: Option<&DateTime<Utc>>,
     ) -> Result<Vec<AuditToolCallCountsBySurfaceAndRole>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         // SUBSTR(tool_name, 7) strips the literal "orbit." prefix; the
         // appended "." in the inner SUBSTR ensures INSTR finds a delimiter
@@ -647,10 +623,7 @@ impl Store {
         since: Option<&DateTime<Utc>>,
         limit: usize,
     ) -> Result<Vec<AuditTopToolCall>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let base = "SELECT tool_name, role, COUNT(*) \
                     FROM audit_events \
@@ -710,10 +683,7 @@ impl Store {
         &self,
         since: &DateTime<Utc>,
     ) -> Result<Vec<i64>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let sql = "SELECT duration_ms FROM audit_events \
                    WHERE tool_name IS NULL AND timestamp >= ?1 \
@@ -741,10 +711,7 @@ impl Store {
         &self,
         since: &DateTime<Utc>,
     ) -> Result<Vec<AuditToolAggregate>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let sql = "SELECT COALESCE(tool_name, 'unknown') AS tool, \
                    COUNT(*), \
@@ -786,10 +753,7 @@ impl Store {
         &self,
         since: &DateTime<Utc>,
     ) -> Result<Vec<AuditRoleAggregate>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let sql = "SELECT role, \
                    COUNT(*), \

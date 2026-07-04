@@ -83,10 +83,7 @@ impl Store {
     }
 
     pub(crate) fn list_active_learning_rows(&self) -> Result<Vec<LearningIndexRow>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         let mut stmt = conn
             .prepare(
                 "SELECT id, status, paths, tags, summary, updated_at, priority
@@ -111,10 +108,7 @@ impl Store {
         &self,
         id: &str,
     ) -> Result<Option<LearningIndexRow>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         let mut stmt = conn
             .prepare(
                 "SELECT id, status, paths, tags, summary, updated_at, priority

@@ -15,7 +15,7 @@ blake3.workspace = true
 chrono.workspace = true
 fs2.workspace = true
 jsonschema.workspace = true
-orbit-common = { path = "../orbit-common" }
+orbit-common = { path = "../orbit-common", features = ["sqlite"] }
 regex.workspace = true
 rusqlite.workspace = true
 serde.workspace = true

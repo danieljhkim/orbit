@@ -89,10 +89,7 @@ impl Store {
     }
 
     pub fn schema_meta_value(&self, key: &str) -> Result<Option<String>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         match conn.query_row(
             "SELECT value FROM schema_meta WHERE key = ?1",
             [key],

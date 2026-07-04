@@ -13,8 +13,9 @@
 //! - [`queries`] — `delete_source` and `stats` read/cascade operations.
 //!
 //! This file owns the `VectorStore` struct itself plus the connection-handle
-//! plumbing (`open`, `open_in_memory`, `connection`, the WAL pragma helper)
-//! and the small `pub(super)` constants shared across the submodules above.
+//! plumbing (`open`, `open_in_memory`, `connection` — pragma defaults come
+//! from `orbit_common::utility::sqlite`) and the small `pub(super)`
+//! constants shared across the submodules above.
 
 mod adrs;
 mod docs;
@@ -42,16 +43,16 @@ pub struct VectorStore {
 }
 
 impl VectorStore {
-    /// Open the workspace-local orbit-search SQLite at `path`, applying WAL
-    /// + busy_timeout pragmas and creating the embeddings/corpus_fts schema if missing.
+    /// Open the workspace-local orbit-search SQLite at `path`, applying the
+    /// shared Orbit connection defaults (WAL best-effort, busy_timeout,
+    /// foreign_keys, synchronous=NORMAL) and creating the
+    /// embeddings/corpus_fts schema if missing.
     pub fn open(path: &Path) -> Result<Self, OrbitError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| OrbitError::Store(e.to_string()))?;
         }
         let conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
-        enable_best_effort_wal_mode(&conn);
-        conn.pragma_update(None, "busy_timeout", "5000")
-            .map_err(|e| OrbitError::Store(format!("failed to set busy_timeout: {e}")))?;
+        orbit_common::utility::sqlite::apply_default_pragmas(&conn)?;
         schema::ensure_vector_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -61,6 +62,7 @@ impl VectorStore {
     /// Open an in-memory orbit-search database. Used by tests.
     pub fn open_in_memory() -> Result<Self, OrbitError> {
         let conn = Connection::open_in_memory().map_err(|e| OrbitError::Store(e.to_string()))?;
+        orbit_common::utility::sqlite::apply_default_pragmas(&conn)?;
         schema::ensure_vector_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -69,29 +71,6 @@ impl VectorStore {
 
     pub(super) fn connection(&self) -> Arc<Mutex<Connection>> {
         self.conn.clone()
-    }
-}
-
-fn enable_best_effort_wal_mode(conn: &Connection) {
-    // WAL mode is best-effort: when the database file is read-only or the
-    // filesystem refuses WAL sidecar writes, fall back to the default journal
-    // mode so that read operations can still succeed.
-    match conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0)) {
-        Ok(mode) if mode.eq_ignore_ascii_case("wal") => {}
-        Ok(mode) => {
-            orbit_common::tracing::warn!(
-                target: "orbit.search.sqlite",
-                journal_mode = mode.as_str(),
-                "requested WAL mode on the semantic database, but SQLite kept the active journal mode",
-            );
-        }
-        Err(err) => {
-            orbit_common::tracing::warn!(
-                target: "orbit.search.sqlite",
-                error = %err,
-                "could not set WAL mode on the semantic database; continuing with the default journal mode",
-            );
-        }
     }
 }
 

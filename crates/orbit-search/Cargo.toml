@@ -14,7 +14,7 @@ workspace = true
 blake3.workspace = true
 chrono.workspace = true
 libc.workspace = true
-orbit-common = { path = "../orbit-common" }
+orbit-common = { path = "../orbit-common", features = ["sqlite"] }
 reqwest.workspace = true
 rsa.workspace = true
 rusqlite.workspace = true

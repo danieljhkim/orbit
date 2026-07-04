@@ -46,6 +46,12 @@ pub(crate) fn open(worktree_root: &Path, _policy: SyncPolicy) -> Result<OpenedGr
     Ok(OpenedGraph { db_path })
 }
 
+// Mirrors `orbit_common::utility::sqlite::apply_default_pragmas` (WAL,
+// busy_timeout=5000, foreign_keys=ON, synchronous=NORMAL). orbit-graph has
+// no orbit-common dependency edge (adding one needs an ADR per
+// ARCHITECTURE.md), so keep these values in sync manually. Divergence kept
+// on purpose: WAL is a hard requirement here, not best-effort — the graph
+// store is always workspace-local scratch state on a writable filesystem.
 fn configure_connection(conn: &Connection) -> Result<(), GraphError> {
     let journal_mode = conn
         .pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))
@@ -57,6 +63,8 @@ fn configure_connection(conn: &Connection) -> Result<(), GraphError> {
         ));
     }
 
+    conn.pragma_update(None, "busy_timeout", 5_000)
+        .map_err(|source| GraphError::sqlite("set busy_timeout", source))?;
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(|source| GraphError::sqlite("set foreign_keys=ON", source))?;
     conn.pragma_update(None, "synchronous", "NORMAL")
