@@ -26,6 +26,10 @@ pub(super) fn validate_step(step: &JobV2Step) -> Result<(), DispatchError> {
         )));
     }
 
+    if let Some(retry) = &step.retry {
+        validate_retry_spec(&step.id, retry)?;
+    }
+
     match &step.body {
         JobV2StepBody::Parallel { parallel } => {
             let mut seen: HashMap<&str, &str> = HashMap::new();
@@ -57,6 +61,45 @@ pub(super) fn validate_step(step: &JobV2Step) -> Result<(), DispatchError> {
             // Surfaces as a structural error in `run_step_body`; no session
             // binding to validate here.
         }
+    }
+    Ok(())
+}
+
+/// Enforce `retry:` block invariants before any step executes (ORB-10006).
+///
+/// - `max_attempts >= 1` — zero attempts is a contradiction (the executor
+///   would silently clamp it to one, hiding the config error).
+/// - `initial_backoff_ms >= 1` — a zero base stays zero under exponential
+///   growth, degenerating into a hot retry loop.
+/// - `backoff_cap_ms >= initial_backoff_ms` — an inverted cap silently
+///   truncates every sleep to the cap.
+pub(super) fn validate_retry_spec(step_id: &str, retry: &RetrySpec) -> Result<(), DispatchError> {
+    if retry.max_attempts == 0 {
+        return Err(DispatchError::RetryConfigInvalid {
+            step_id: step_id.to_string(),
+            field: "max_attempts",
+            value: u64::from(retry.max_attempts),
+            invariant: "max_attempts >= 1".to_string(),
+        });
+    }
+    if retry.initial_backoff_ms == 0 {
+        return Err(DispatchError::RetryConfigInvalid {
+            step_id: step_id.to_string(),
+            field: "initial_backoff_ms",
+            value: retry.initial_backoff_ms,
+            invariant: "initial_backoff_ms >= 1".to_string(),
+        });
+    }
+    if retry.backoff_cap_ms < retry.initial_backoff_ms {
+        return Err(DispatchError::RetryConfigInvalid {
+            step_id: step_id.to_string(),
+            field: "backoff_cap_ms",
+            value: retry.backoff_cap_ms,
+            invariant: format!(
+                "backoff_cap_ms >= initial_backoff_ms ({})",
+                retry.initial_backoff_ms
+            ),
+        });
     }
     Ok(())
 }

@@ -225,3 +225,49 @@ fn compute_backoff_ms_respects_initial_max_and_zero_attempt_boundary() {
     assert_eq!(compute_backoff_ms(&exp, 4), 800); // 50 << 4
     assert_eq!(compute_backoff_ms(&exp, 10), 1000); // capped
 }
+
+#[test]
+fn jittered_backoff_stays_within_deterministic_bound() {
+    // ORB-10006: the actual sleep is a full-jitter draw over the
+    // deterministic cap-growth bound — always within [0, bound].
+    let retry = RetrySpec {
+        max_attempts: 5,
+        initial_backoff_ms: 100,
+        backoff_cap_ms: 1_000,
+        backoff_strategy: BackoffStrategy::Exponential,
+    };
+    let mut rng = orbit_common::utility::jitter::JitterRng::from_seed(0xdead_beef);
+    for attempt in 0..8u32 {
+        let bound = compute_backoff_ms(&retry, attempt);
+        for _ in 0..128 {
+            let sleep = rng.full_jitter(bound);
+            assert!(
+                sleep <= bound,
+                "attempt {attempt}: jittered sleep {sleep} exceeded bound {bound}"
+            );
+        }
+    }
+}
+
+#[test]
+fn backoff_bound_grows_monotonically_to_cap_under_exponential() {
+    // ORB-10006: jitter randomizes the sleep but the *bound* still grows
+    // monotonically with attempt index and saturates at the cap.
+    let retry = RetrySpec {
+        max_attempts: 10,
+        initial_backoff_ms: 50,
+        backoff_cap_ms: 750,
+        backoff_strategy: BackoffStrategy::Exponential,
+    };
+    let mut previous = 0u64;
+    for attempt in 0..12u32 {
+        let bound = compute_backoff_ms(&retry, attempt);
+        assert!(
+            bound >= previous,
+            "bound shrank at attempt {attempt}: {previous} -> {bound}"
+        );
+        assert!(bound <= retry.backoff_cap_ms, "bound exceeded cap");
+        previous = bound;
+    }
+    assert_eq!(previous, retry.backoff_cap_ms, "bound must saturate at cap");
+}

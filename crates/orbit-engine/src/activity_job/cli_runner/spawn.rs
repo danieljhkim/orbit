@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
-use orbit_common::types::{ExecutorSandboxKind, OrbitError};
+use orbit_common::types::ExecutorSandboxKind;
 use orbit_common::utility::redaction::non_sensitive_env_vars;
 use orbit_exec::{
     MacosSandboxSpawnRequest, compile_macos_sandbox_profile, sandbox_exec_available,
@@ -10,6 +10,51 @@ use orbit_exec::{
 use tempfile::NamedTempFile;
 
 use super::super::dispatcher::ResolvedSandbox;
+
+/// Typed spawn failure with a retryability classification (ORB-10006).
+///
+/// `permanent: true` marks failures that retrying cannot fix — the step
+/// retry wrapper fails fast on them instead of burning attempts. Only
+/// clearly-deterministic failures are classified permanent (executable
+/// missing, permission denied, sandbox profile rejected); everything else
+/// stays transient so the step-level retry keeps its pre-ORB-10006 reach.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+pub(crate) struct SpawnError {
+    pub(crate) permanent: bool,
+    pub(crate) message: String,
+}
+
+impl SpawnError {
+    pub(crate) fn transient(message: String) -> Self {
+        Self {
+            permanent: false,
+            message,
+        }
+    }
+
+    pub(crate) fn permanent(message: String) -> Self {
+        Self {
+            permanent: true,
+            message,
+        }
+    }
+
+    /// Classify an OS spawn error. `NotFound` (ENOENT) and
+    /// `PermissionDenied` (EACCES) are deterministic; resource-exhaustion
+    /// signals (EAGAIN, ENOMEM, EMFILE, ENFILE, ...) and anything
+    /// unrecognized stay transient — conservative in the direction of
+    /// preserving retries.
+    pub(crate) fn from_spawn_io(program: &str, err: &std::io::Error) -> Self {
+        let message = format!("failed to spawn `{program}`: {err}");
+        match err.kind() {
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied => {
+                Self::permanent(message)
+            }
+            _ => Self::transient(message),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(super) struct SpawnedChild {
@@ -25,7 +70,7 @@ pub(super) fn spawn_child_with_optional_sandbox(
     env: &[(String, String)],
     cwd: Option<&Path>,
     sandbox: Option<&ResolvedSandbox>,
-) -> Result<SpawnedChild, OrbitError> {
+) -> Result<SpawnedChild, SpawnError> {
     match sandbox {
         Some(sb) if sb.kind == ExecutorSandboxKind::MacosSandboxExec => {
             spawn_macos_sandboxed(program, args, env, cwd, sb)
@@ -40,7 +85,7 @@ pub(crate) fn spawn_bare(
     args: &[String],
     env: &[(String, String)],
     cwd: Option<&Path>,
-) -> Result<SpawnedChild, OrbitError> {
+) -> Result<SpawnedChild, SpawnError> {
     let mut command = Command::new(program);
     command
         .args(args)
@@ -60,7 +105,7 @@ pub(crate) fn spawn_bare(
     }
     let child = command
         .spawn()
-        .map_err(|err| OrbitError::Execution(format!("failed to spawn `{program}`: {err}")))?;
+        .map_err(|err| SpawnError::from_spawn_io(program, &err))?;
     Ok(SpawnedChild {
         child,
         _profile_temp: None,
@@ -73,7 +118,7 @@ fn spawn_macos_sandboxed(
     env: &[(String, String)],
     cwd: Option<&Path>,
     sandbox: &ResolvedSandbox,
-) -> Result<SpawnedChild, OrbitError> {
+) -> Result<SpawnedChild, SpawnError> {
     spawn_macos_sandboxed_with(program, args, env, cwd, sandbox, sandbox_exec_available())
 }
 
@@ -90,7 +135,7 @@ pub(crate) fn spawn_macos_sandboxed_with(
     cwd: Option<&Path>,
     sandbox: &ResolvedSandbox,
     sandbox_exec_present: bool,
-) -> Result<SpawnedChild, OrbitError> {
+) -> Result<SpawnedChild, SpawnError> {
     if !sandbox_exec_present {
         let unavailable = sandbox_exec_unavailable_message();
         if sandbox.allow_fallback {
@@ -101,7 +146,9 @@ pub(crate) fn spawn_macos_sandboxed_with(
             );
             return spawn_bare(program, args, env, cwd);
         }
-        return Err(OrbitError::Execution(format!(
+        // A missing trusted sandbox-exec binary won't appear between retry
+        // attempts — deterministic environment failure.
+        return Err(SpawnError::permanent(format!(
             "{unavailable}; declare allow_fallback: true to permit bare exec"
         )));
     }
@@ -110,7 +157,12 @@ pub(crate) fn spawn_macos_sandboxed_with(
     // stays scoped to this crate. The host returns only a descriptor
     // (`fs_profile` + `kind` + `allow_fallback`) so orbit-core has no
     // direct edge to orbit-exec.
-    let profile_text = compile_macos_sandbox_profile(&sandbox.fs_profile)?;
+    //
+    // A profile that fails to compile is deterministic config — permanent.
+    // The sandboxed spawn itself goes through orbit-exec, which erases the
+    // io::ErrorKind; classify it transient so retries are preserved.
+    let profile_text = compile_macos_sandbox_profile(&sandbox.fs_profile)
+        .map_err(|err| SpawnError::permanent(err.to_string()))?;
     let (child, profile_temp) = spawn_under_macos_sandbox(MacosSandboxSpawnRequest {
         profile_text: &profile_text,
         program,
@@ -120,7 +172,8 @@ pub(crate) fn spawn_macos_sandboxed_with(
         stdin: Stdio::piped(),
         stdout: Stdio::piped(),
         stderr: Stdio::piped(),
-    })?;
+    })
+    .map_err(|err| SpawnError::transient(err.to_string()))?;
     Ok(SpawnedChild {
         child,
         _profile_temp: Some(profile_temp),

@@ -29,6 +29,7 @@ mod resume;
 mod step;
 mod target;
 mod templating;
+mod validate;
 
 fn test_writer(run_id: &str) -> V2AuditWriter {
     let inner: std::sync::Arc<dyn AuditSink> = std::sync::Arc::new(NullSink);
@@ -337,8 +338,8 @@ pub(super) fn target_step_with_retry(id: &str, action: &str, max_attempts: u32) 
         when: None,
         retry: Some(RetrySpec {
             max_attempts,
-            initial_backoff_ms: 0,
-            backoff_cap_ms: 0,
+            initial_backoff_ms: 1,
+            backoff_cap_ms: 1,
             backoff_strategy: BackoffStrategy::Linear,
         }),
         recovery_activity: None,

@@ -2,11 +2,10 @@
 
 use std::ffi::OsString;
 
-use orbit_common::types::OrbitError;
 use tempfile::tempdir;
 
 use super::super::super::dispatcher::ResolvedSandbox;
-use super::super::spawn::{SpawnedChild, spawn_bare, spawn_macos_sandboxed_with};
+use super::super::spawn::{SpawnError, SpawnedChild, spawn_bare, spawn_macos_sandboxed_with};
 use super::test_support::{sandbox_for_test, sh_args};
 
 #[test]
@@ -55,18 +54,59 @@ fn spawn_macos_sandboxed_returns_error_when_sandbox_exec_missing_and_fallback_di
     let sandbox = sandbox_for_test();
     let err = spawn_macos_sandboxed_with("/bin/sh", &[], &[], None, &sandbox, false)
         .expect_err("expected fallback-disabled error");
-    match err {
-        OrbitError::Execution(msg) => {
-            assert!(
-                msg.contains("trusted sandbox-exec not available at /usr/bin/sandbox-exec"),
-                "unexpected error message: {msg}"
-            );
-            assert!(
-                msg.contains("allow_fallback: true"),
-                "error should describe fallback opt-in: {msg}"
-            );
-        }
-        other => panic!("expected Execution error, got {other:?}"),
+    assert!(
+        err.permanent,
+        "missing sandbox-exec is deterministic and must classify permanent"
+    );
+    assert!(
+        err.message
+            .contains("trusted sandbox-exec not available at /usr/bin/sandbox-exec"),
+        "unexpected error message: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains("allow_fallback: true"),
+        "error should describe fallback opt-in: {}",
+        err.message
+    );
+}
+
+#[test]
+fn spawn_bare_missing_executable_classifies_permanent() {
+    let err = spawn_bare("/nonexistent/orbit-test-program", &[], &[], None)
+        .expect_err("missing executable must fail");
+    assert!(
+        err.permanent,
+        "ENOENT is deterministic and must classify permanent: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains("/nonexistent/orbit-test-program"),
+        "error should name the program: {}",
+        err.message
+    );
+}
+
+#[test]
+fn spawn_io_error_classification_table() {
+    use std::io::{Error, ErrorKind};
+    // (kind, expected permanent) — clearly-deterministic failures fail fast;
+    // resource exhaustion and everything unrecognized stays retryable.
+    let table = [
+        (ErrorKind::NotFound, true),
+        (ErrorKind::PermissionDenied, true),
+        (ErrorKind::WouldBlock, false),  // EAGAIN
+        (ErrorKind::OutOfMemory, false), // ENOMEM
+        (ErrorKind::Interrupted, false), // EINTR
+        (ErrorKind::Other, false),       // unknown → conservative: retryable
+    ];
+    for (kind, expect_permanent) in table {
+        let classified = SpawnError::from_spawn_io("prog", &Error::new(kind, "boom"));
+        assert_eq!(
+            classified.permanent, expect_permanent,
+            "kind {kind:?} misclassified (permanent={})",
+            classified.permanent
+        );
     }
 }
 

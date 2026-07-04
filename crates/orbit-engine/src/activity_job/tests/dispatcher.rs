@@ -32,3 +32,52 @@ fn agent_loop_output_unwraps_response_envelope_result() {
     assert_eq!(output["dispatched_run_ids"], json!([]));
     assert!(output.get("schemaVersion").is_none());
 }
+
+#[test]
+fn dispatch_error_retryability_classification_table() {
+    // ORB-10006: retryable-vs-permanent classification consumed by the step
+    // retry wrapper. Permanent (non-retryable) errors fail fast; transient
+    // ones burn retry attempts.
+    use super::super::dispatcher::DispatchError;
+
+    let permanent: Vec<DispatchError> = vec![
+        DispatchError::ToolDenied {
+            tool_name: "fs.write".into(),
+            iteration: 1,
+        },
+        DispatchError::DeterministicActionNotRegistered("nope".into()),
+        DispatchError::JobValidation("bad".into()),
+        DispatchError::RetryConfigInvalid {
+            step_id: "s".into(),
+            field: "max_attempts",
+            value: 0,
+            invariant: "max_attempts >= 1".into(),
+        },
+        DispatchError::HostRequired("host"),
+        DispatchError::UnwiredHttpTransport {
+            provider: "claude".into(),
+        },
+        DispatchError::UnresolvedAutoBackend {
+            step_id: "s".into(),
+        },
+        DispatchError::CliInvocationPermanent("agent config: bad model".into()),
+    ];
+    for err in &permanent {
+        assert!(err.is_non_retryable(), "expected non-retryable: {err:?}");
+    }
+
+    let transient: Vec<DispatchError> = vec![
+        DispatchError::CliInvocationFailed("spawn claude: EAGAIN".into()),
+        DispatchError::AgentLoopFailed("overloaded".into()),
+        DispatchError::GroundhogFailed("boom".into()),
+        DispatchError::DeterministicActionFailed {
+            action: "a".into(),
+            message: "flaky".into(),
+        },
+        DispatchError::JobExecution("executor hiccup".into()),
+        DispatchError::AuditFailed("sink".into()),
+    ];
+    for err in &transient {
+        assert!(!err.is_non_retryable(), "expected retryable: {err:?}");
+    }
+}

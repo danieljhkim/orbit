@@ -38,6 +38,7 @@ use orbit_common::types::activity_job::{
     V2ActivityCatalog, V2AuditEventKind, resolve_job_target_refs,
 };
 use orbit_common::types::{JobRunState, PipelineState};
+use orbit_common::utility::jitter::JitterRng;
 use serde_json::Value;
 
 use crate::job_runner::evaluate_bool_expr;

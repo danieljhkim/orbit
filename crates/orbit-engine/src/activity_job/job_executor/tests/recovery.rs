@@ -404,8 +404,8 @@ fn recovery_job(
             when: None,
             retry: Some(RetrySpec {
                 max_attempts,
-                initial_backoff_ms: 0,
-                backoff_cap_ms: 0,
+                initial_backoff_ms: 1,
+                backoff_cap_ms: 1,
                 backoff_strategy: BackoffStrategy::Linear,
             }),
             recovery_activity: None,

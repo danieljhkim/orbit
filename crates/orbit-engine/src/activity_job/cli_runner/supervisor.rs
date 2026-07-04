@@ -9,7 +9,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::super::dispatcher::ResolvedSandbox;
-use super::spawn::{SpawnedChild, spawn_child_with_optional_sandbox};
+use super::spawn::{SpawnError, SpawnedChild, spawn_child_with_optional_sandbox};
 use orbit_common::utility::output_capture::{BoundedOutputCapture, capture_limit_from_env};
 
 /// Default wall-clock timeout when `AgentLoopSpec::wall_clock_timeout_seconds`
@@ -63,7 +63,7 @@ struct OutputReaderHandle {
 
 pub(super) fn spawn_with_timeout(
     request: SpawnWithTimeoutRequest<'_>,
-) -> Result<SpawnOutput, String> {
+) -> Result<SpawnOutput, SpawnError> {
     let SpawnWithTimeoutRequest {
         program,
         args,
@@ -82,8 +82,12 @@ pub(super) fn spawn_with_timeout(
         mut child,
         // The temp profile must outlive the child — drop it after wait.
         _profile_temp,
-    } = spawn_child_with_optional_sandbox(program, args, env, cwd, sandbox)
-        .map_err(|err| format!("spawn {program}: {err}"))?;
+    } = spawn_child_with_optional_sandbox(program, args, env, cwd, sandbox).map_err(|err| {
+        SpawnError {
+            permanent: err.permanent,
+            message: format!("spawn {program}: {}", err.message),
+        }
+    })?;
 
     if let Some(mut stdin) = child.stdin.take() {
         let bytes = stdin_bytes.to_vec();
@@ -157,7 +161,11 @@ pub(super) fn spawn_with_timeout(
                 }
                 thread::sleep(Duration::from_millis(25));
             }
-            Err(err) => return Err(format!("wait {program}: {err}")),
+            Err(err) => {
+                // `wait` failures are host-side and not clearly deterministic
+                // — leave them retryable.
+                return Err(SpawnError::transient(format!("wait {program}: {err}")));
+            }
         }
     }
 

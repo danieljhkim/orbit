@@ -27,6 +27,7 @@ use tracing_subscriber::{Registry, fmt as tracing_fmt, fmt::MakeWriter, layer::S
 use super::super::super::dispatcher::{
     DispatchError, ResolvedCliExecutor, ResolvedSandbox, V2RuntimeHost,
 };
+use super::super::spawn::SpawnError;
 use super::super::supervisor::SpawnOutput;
 
 pub(in crate::activity_job::cli_runner) fn sandbox_for_test() -> ResolvedSandbox {
@@ -47,9 +48,9 @@ pub(in crate::activity_job::cli_runner) fn sh_args(script: &str) -> Vec<String> 
 
 pub(in crate::activity_job::cli_runner) fn capture_events<F>(
     f: F,
-) -> (Result<SpawnOutput, String>, Vec<CapturedEvent>)
+) -> (Result<SpawnOutput, SpawnError>, Vec<CapturedEvent>)
 where
-    F: FnOnce() -> Result<SpawnOutput, String>,
+    F: FnOnce() -> Result<SpawnOutput, SpawnError>,
 {
     let events = Arc::new(Mutex::new(Vec::new()));
     let subscriber = CaptureSubscriber {
@@ -64,9 +65,9 @@ where
 
 pub(in crate::activity_job::cli_runner) fn capture_redacted_tracing_output<F>(
     f: F,
-) -> (Result<SpawnOutput, String>, String)
+) -> (Result<SpawnOutput, SpawnError>, String)
 where
-    F: FnOnce() -> Result<SpawnOutput, String>,
+    F: FnOnce() -> Result<SpawnOutput, SpawnError>,
 {
     let writer = BufferMakeWriter::default();
     let buffer = writer.buffer();

@@ -262,8 +262,16 @@ pub enum DispatchError {
 
     /// CLI subprocess invocation failed at the host layer (e.g. failed to
     /// spawn, or provider key unknown). Wraps the host's error text verbatim.
+    /// Treated as transient: the step retry wrapper may re-attempt it.
     #[error("cli invocation failed: {0}")]
     CliInvocationFailed(String),
+
+    /// CLI subprocess invocation failed in a way retrying cannot fix —
+    /// agent config rejected, executable missing, or permission denied
+    /// (ORB-10006). Non-retryable: the step retry wrapper fails fast
+    /// instead of burning attempts on a deterministic failure.
+    #[error("cli invocation failed (permanent): {0}")]
+    CliInvocationPermanent(String),
 
     /// Tool-allowlist denial (§6). Non-retryable — the retry wrapper must not
     /// re-attempt a denied call. Phase 2 formerly translated this to
@@ -276,6 +284,17 @@ pub enum DispatchError {
     #[error("job validation failed: {0}")]
     JobValidation(String),
 
+    /// A step's `retry:` block violates a config invariant (ORB-10006).
+    /// Caught by `validate_job` before any step executes; the message names
+    /// the offending values.
+    #[error("step `{step_id}`: invalid retry config: {field} = {value} violates `{invariant}`")]
+    RetryConfigInvalid {
+        step_id: String,
+        field: &'static str,
+        value: u64,
+        invariant: String,
+    },
+
     /// Generic job-executor error — distinct from per-activity failures.
     #[error("job executor: {0}")]
     JobExecution(String),
@@ -286,18 +305,20 @@ pub enum DispatchError {
 
 impl DispatchError {
     /// Whether this error should bypass the retry wrapper. Tool denials,
-    /// unknown deterministic actions, and validation errors are non-retryable
-    /// (§4.3: "Non-retryable errors — schema violations, allowlist denials,
-    /// cancellation — skip retry").
+    /// unknown deterministic actions, validation errors, and permanent CLI
+    /// invocation failures are non-retryable (§4.3: "Non-retryable errors —
+    /// schema violations, allowlist denials, cancellation — skip retry").
     pub fn is_non_retryable(&self) -> bool {
         matches!(
             self,
             DispatchError::ToolDenied { .. }
                 | DispatchError::DeterministicActionNotRegistered(_)
                 | DispatchError::JobValidation(_)
+                | DispatchError::RetryConfigInvalid { .. }
                 | DispatchError::HostRequired(_)
                 | DispatchError::UnwiredHttpTransport { .. }
                 | DispatchError::UnresolvedAutoBackend { .. }
+                | DispatchError::CliInvocationPermanent(_)
         )
     }
 }

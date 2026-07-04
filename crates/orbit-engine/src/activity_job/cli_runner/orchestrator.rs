@@ -101,14 +101,17 @@ pub fn run_cli_backend(
         neutralize_inner_sandbox(&provider, &mut provider_config, &mut cli_executor.args);
     }
 
+    // Config parse / agent construction failures are deterministic — the
+    // same spec fails identically on every attempt, so they are classified
+    // permanent and skip the step retry wrapper (ORB-10006).
     let config = AgentConfig::from_cli_config(
         cli_executor.command.clone(),
         spec.model.as_deref(),
         &provider_config,
     )
-    .map_err(|err| DispatchError::CliInvocationFailed(format!("agent config: {err}")))?;
+    .map_err(|err| DispatchError::CliInvocationPermanent(format!("agent config: {err}")))?;
     let agent = Agent::new(&config)
-        .map_err(|err| DispatchError::CliInvocationFailed(format!("agent build: {err}")))?;
+        .map_err(|err| DispatchError::CliInvocationPermanent(format!("agent build: {err}")))?;
 
     let agent_req = AgentRequest {
         operation: AgentOperation::Activity {
@@ -118,9 +121,11 @@ pub fn run_cli_backend(
         verbose: false,
     };
 
+    // `invoke` only renders the argv/stdin for the subprocess (nothing has
+    // executed yet) — failures here are deterministic request-shaping errors.
     let (invocation, _trace) = agent
         .invoke(agent_req)
-        .map_err(|err| DispatchError::CliInvocationFailed(format!("agent invoke: {err}")))?;
+        .map_err(|err| DispatchError::CliInvocationPermanent(format!("agent invoke: {err}")))?;
     let model = agent.model_name().map(str::to_string);
 
     let mut subprocess_args = Vec::with_capacity(cli_executor.args.len() + invocation.args.len());
@@ -185,7 +190,17 @@ pub fn run_cli_backend(
             #[cfg(test)]
             output_capture_limit: None,
         })
-        .map_err(|err| DispatchError::CliInvocationFailed(err.to_string()))?;
+        .map_err(|err| {
+            // Spawn-layer classification (ORB-10006): executable missing /
+            // permission denied fail fast; resource exhaustion (EAGAIN,
+            // ENOMEM, ...) and other transient host failures stay retryable
+            // at the step layer.
+            if err.permanent {
+                DispatchError::CliInvocationPermanent(err.message)
+            } else {
+                DispatchError::CliInvocationFailed(err.message)
+            }
+        })?;
 
     let stdout_blob_ref = audit.write_blob(&stdout);
     let stderr_blob_ref = audit.write_blob(&stderr);

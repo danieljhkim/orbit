@@ -1,5 +1,6 @@
 mod blob_store;
 mod glob;
+mod jitter;
 mod log_rotation;
 mod logging;
 #[cfg(unix)]
