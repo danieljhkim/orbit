@@ -92,20 +92,26 @@ fn dashboard_guards_per_workspace_panels_in_aggregate_view() {
     // Asserted against the embedded asset sources since the dashboard has no JS
     // test runner (see dashboard_markdown_call_sites above).
     let app = include_str!("../../assets/dashboard/app.js");
+    let common = include_str!("../../assets/dashboard/common.js");
     let css = include_str!("../../assets/dashboard/dashboard.css");
 
-    // A single aggregate-mode predicate, defined once and reused — the raw
-    // `dashboardWorkspaces.length > 1 && !getWorkspace()` check lives only inside
-    // the helper, not duplicated inline at each call site.
+    // A single aggregate-mode predicate, defined once and reused. ORB-00040 moved
+    // it into the shared leaf module (common.js) so audit.js and scoreboard.js can
+    // guard on the same live predicate; the raw check lives only inside the helper.
     assert!(
-        app.contains("function isAggregateView()"),
-        "aggregate-mode check must be factored into isAggregateView()"
+        common.contains("function isAggregateView()"),
+        "aggregate-mode check must be factored into isAggregateView() in common.js"
     );
     assert_eq!(
-        app.matches("dashboardWorkspaces.length > 1 && !getWorkspace()")
+        common
+            .matches("multiWorkspace && !currentWorkspace")
             .count(),
         1,
         "the aggregate predicate must be defined once, not duplicated inline"
+    );
+    assert!(
+        !app.contains("function isAggregateView()"),
+        "isAggregateView() must be single-sourced in common.js, not redefined in app.js"
     );
     assert_eq!(
         app.matches("const aggregate = isAggregateView();").count(),
@@ -120,7 +126,7 @@ fn dashboard_guards_per_workspace_panels_in_aggregate_view() {
         "aggregate mode must render panel placeholders"
     );
     assert!(
-        app.contains("Select a workspace to view this panel"),
+        common.contains("Select a workspace to view this panel"),
         "skipped panels must show an inline placeholder prompt"
     );
     assert!(
@@ -155,6 +161,87 @@ fn dashboard_guards_per_workspace_panels_in_aggregate_view() {
     assert!(
         app.contains("const crews = aggregate ? Promise.resolve() : fetchAndCacheCrews();"),
         "crews fetch must be skipped in aggregate mode so the task list still renders"
+    );
+}
+
+#[test]
+fn dashboard_guards_remaining_panels_in_aggregate_view() {
+    // ORB-00040: follow-up to ORB-00039. In the aggregate "All workspaces" view
+    // the Audit tab (/api/audit, /api/diagnostics/denials), the Knowledge tab
+    // (/api/learnings, /api/adrs, /api/frictions) and the scoreboard window
+    // selector (/api/scoreboard?window=...) still fired per-workspace endpoints
+    // that 400 and flipped conn-status to red. The isAggregateView() guard is
+    // extended to all of them, sharing one predicate from common.js. Asserted
+    // against the embedded asset sources (the dashboard has no JS test runner).
+    let app = include_str!("../../assets/dashboard/app.js");
+    let audit = include_str!("../../assets/dashboard/audit.js");
+    let scoreboard = include_str!("../../assets/dashboard/scoreboard.js");
+    let common = include_str!("../../assets/dashboard/common.js");
+
+    // The predicate + placeholder helper are shared from the leaf module so all
+    // three view modules guard on the same live state without a circular import.
+    assert!(
+        common.contains("export function isAggregateView()"),
+        "isAggregateView() must be exported from common.js for cross-module reuse"
+    );
+    assert!(
+        common.contains("export function setMultiWorkspace("),
+        "the multi-workspace flag setter must be exported from common.js"
+    );
+    assert!(
+        common.contains("export function renderPanelPlaceholder("),
+        "the shared placeholder renderer must be exported from common.js"
+    );
+    // Multi-workspace mode is fed once, from the workspace-discovery path.
+    assert!(
+        app.contains("setMultiWorkspace(dashboardWorkspaces.length > 1)"),
+        "aggregate mode must be driven by the discovered workspace count"
+    );
+
+    // Audit tab: both subtabs skip their per-workspace fetch and show a
+    // placeholder in aggregate mode (events -> /api/audit, policy -> denials).
+    assert!(
+        audit.contains("isAggregateView") && audit.contains("renderPanelPlaceholder"),
+        "audit.js must import the shared aggregate guard"
+    );
+    assert!(
+        audit.contains(r#"renderPanelPlaceholder("audit-body")"#),
+        "audit events subtab must show a placeholder in aggregate mode"
+    );
+    assert!(
+        audit.contains(r#"renderPanelPlaceholder("audit-policy-body")"#),
+        "audit policy subtab must show a placeholder in aggregate mode"
+    );
+
+    // Knowledge tab: each subtab's fetch is guarded at the chokepoint, so the
+    // auto-refresh, tab-activation and search-box entry points are all covered.
+    for body in ["learnings-body", "adrs-body", "frictions-body"] {
+        assert!(
+            app.contains(&format!(r#"renderPanelPlaceholder("{body}")"#)),
+            "knowledge {body} must show a placeholder in aggregate mode"
+        );
+    }
+
+    // Scoreboard: the tab body shows a placeholder, and the user-initiated window
+    // re-fetch is a no-op in aggregate mode (not just the auto-refresh boot fetch).
+    assert!(
+        app.contains(r#"renderPanelPlaceholder("scoreboard-body")"#),
+        "scoreboard panel must show a placeholder in aggregate mode"
+    );
+    assert!(
+        scoreboard.contains("if (isAggregateView()) return;"),
+        "the scoreboard window selector must skip its re-fetch in aggregate mode"
+    );
+
+    // The guards read the live predicate before fetching (not a stale captured
+    // flag), so switching to "All workspaces" after a concrete selection is safe.
+    assert!(
+        app.matches("if (isAggregateView())").count() >= 3,
+        "each knowledge fetch must guard on the live aggregate predicate"
+    );
+    assert!(
+        audit.matches("if (isAggregateView())").count() >= 2,
+        "both audit fetches must guard on the live aggregate predicate"
     );
 }
 

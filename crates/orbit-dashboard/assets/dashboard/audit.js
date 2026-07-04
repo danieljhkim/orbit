@@ -1,7 +1,7 @@
 // Orbit dashboard audit-domain rendering and actions.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, fetchJson, syncNodes, positiveIntParam } from './common.js';
+import { el, fetchJson, syncNodes, positiveIntParam, isAggregateView, renderPanelPlaceholder } from './common.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -209,6 +209,13 @@ function setActiveAuditSubtabFromButton(name) {
 }
 
 function fetchAndRenderAudit(ctx) {
+  // ORB-00040: /api/audit is per-workspace and 400s without a concrete
+  // workspace. In the aggregate ("All workspaces") view render the placeholder
+  // and skip the fetch — covers both the auto-refresh and audit-search paths.
+  if (isAggregateView()) {
+    renderPanelPlaceholder("audit-body");
+    return Promise.resolve();
+  }
   const sp = new URLSearchParams();
   sp.set("limit", String(AUDIT_LIMIT));
   if (auditFilter.since) sp.set("since", auditFilter.since);
@@ -398,6 +405,13 @@ function renderAuditSummary(data, ctx) {
 }
 
 function fetchAndRenderPolicy(ctx) {
+  // ORB-00040: the audit Policy subtab reads /api/diagnostics/denials, which is
+  // also per-workspace (the `Ws` extractor 400s without a concrete workspace),
+  // so guard it the same way as the events subtab.
+  if (isAggregateView()) {
+    renderPanelPlaceholder("audit-policy-body");
+    return Promise.resolve();
+  }
   const sp = new URLSearchParams();
   sp.set("since", "24h");
   if (auditFilter.policyKind) sp.set("kind", auditFilter.policyKind);

@@ -1,7 +1,7 @@
 // Orbit dashboard scoreboard-domain rendering.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, syncNodes, fetchJson } from './common.js';
+import { el, syncNodes, fetchJson, isAggregateView } from './common.js';
 import { navigateToRole } from './audit.js';
 
 // ORB-00337: canonical scoreboard windows (mirror of
@@ -20,6 +20,12 @@ function wireScoreboardWindowSelector() {
     const next = seg.dataset.window;
     if (!SCOREBOARD_WINDOWS.includes(next)) return;
     if (seg.classList.contains("on")) return; // no-op refetch
+    // ORB-00040: /api/scoreboard is per-workspace and 400s without a concrete
+    // workspace. The auto-refresh boot fetch is already guarded in app.js; this
+    // guards the user-initiated window re-fetch too, so selecting a window in the
+    // aggregate ("All workspaces") view is a no-op (the panel shows the
+    // placeholder) rather than flipping conn-status to red.
+    if (isAggregateView()) return;
     for (const peer of selector.querySelectorAll(".scoreboard-window-seg")) {
       peer.classList.remove("on");
     }

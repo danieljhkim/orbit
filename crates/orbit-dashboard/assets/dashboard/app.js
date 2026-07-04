@@ -1,7 +1,7 @@
 // Orbit dashboard — terminal-dark, manually refreshed SPA.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, statusPill, stateCell, fetchJson, requestJson, postJson, patchJson, syncNodes, positiveIntParam, getWorkspace, setWorkspace } from './common.js';
+import { el, statusPill, stateCell, fetchJson, requestJson, postJson, patchJson, syncNodes, positiveIntParam, getWorkspace, setWorkspace, setMultiWorkspace, isAggregateView, renderPanelPlaceholder } from './common.js';
 import { buildChips, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, setPinnedExternalTask, wireSearch } from './tasks.js';
 import { applyAuditHashQuery, buildAuditChips, buildAuditHash, fetchAndRenderAudit, fetchAndRenderPolicy, getActiveAuditSubtab, navigateToAuditExecution, renderAuditSummary, setActiveAuditSubtabFromButton, setAuditSubtab, syncAuditControls, wireAuditSearch, } from './audit.js';
 import { renderScoreboard } from './scoreboard.js';
@@ -1155,28 +1155,13 @@ function truncate(text, max) {
   return text.slice(0, max) + "\u2026";
 }
 
-// ORB-00039: the aggregate ("All workspaces") view has no concrete workspace to
-// scope per-workspace endpoints to — the backend `Ws` extractor finds no default
-// and returns 400. This single predicate gates every per-workspace fetch so the
-// aggregate view shows only the cross-workspace task list; picking a concrete
-// workspace flips it false and restores every panel. Reused by fetchAndRenderTasks
-// and activeRefreshJobs rather than duplicated inline.
-function isAggregateView() {
-  return dashboardWorkspaces.length > 1 && !getWorkspace();
-}
-
-// Panels whose data is per-workspace render this in place of their body while
-// the aggregate view is active, instead of erroring or holding stale content.
-const AGGREGATE_PANEL_PLACEHOLDER = "Select a workspace to view this panel";
-
-function renderPanelPlaceholder(bodyId) {
-  const body = $(bodyId);
-  if (!body) return;
-  const note = el("div", { class: "panel-placeholder", text: AGGREGATE_PANEL_PLACEHOLDER });
-  note.dataset.key = "aggregate-placeholder";
-  note.dataset.hash = "aggregate-placeholder";
-  syncNodes(body, [note]);
-}
+// ORB-00039/00040: the aggregate ("All workspaces") view has no concrete
+// workspace to scope per-workspace endpoints to — the backend `Ws` extractor
+// finds no default and returns 400. The single `isAggregateView()` predicate
+// (shared from common.js, backed by the multi-workspace flag set in
+// initWorkspaceSelector) gates every per-workspace fetch across app.js,
+// audit.js and scoreboard.js; picking a concrete workspace flips it false and
+// restores every panel.
 
 // ORB-00039: in aggregate mode the per-workspace fetches are skipped, so the
 // panels they feed (audit summary, cross-task review threads, locked files) show
@@ -1252,6 +1237,9 @@ async function initWorkspaceSelector() {
     return;
   }
   dashboardWorkspaces = Array.isArray(entries) ? entries : [];
+  // Feed the shared aggregate-view predicate (common.js): multi-workspace mode
+  // is what makes the "All workspaces" (no concrete workspace) view possible.
+  setMultiWorkspace(dashboardWorkspaces.length > 1);
   if (dashboardWorkspaces.length <= 1) return; // single mode: no selector
 
   // Default to the workspace flagged by the server (the cwd workspace, if the
@@ -1354,8 +1342,12 @@ function activeRefreshJobs() {
     // ORB-00337: boot fetch matches the visually-highlighted segment
     // (`24h`); the user can pick a different window from the selector,
     // which calls /api/scoreboard?window=... directly. /api/scoreboard is
-    // per-workspace, so it's skipped in aggregate mode.
-    if (!aggregate) {
+    // per-workspace, so it's skipped in aggregate mode (ORB-00040: the manual
+    // window-selector re-fetch is guarded in scoreboard.js) and the body shows
+    // the placeholder instead of stale or empty content.
+    if (aggregate) {
+      renderPanelPlaceholder("scoreboard-body");
+    } else {
       jobs.push(fetchJson("/api/scoreboard?window=24h").then(renderScoreboard));
     }
     return jobs;
@@ -1495,6 +1487,13 @@ function fetchAndRenderSummary() {
 }
 
 function fetchAndRenderLearnings() {
+  // ORB-00040: /api/learnings is per-workspace and 400s without a concrete
+  // workspace. Guard at the fetch chokepoint so every entry point (auto-refresh,
+  // tab activation, and the search box) shows the placeholder instead of firing.
+  if (isAggregateView()) {
+    renderPanelPlaceholder("learnings-body");
+    return Promise.resolve();
+  }
   const sp = new URLSearchParams();
   sp.set("limit", String(LEARNING_LIMIT));
   if (learningSearchQuery) sp.set("q", learningSearchQuery);
@@ -1505,6 +1504,11 @@ function fetchAndRenderLearnings() {
 }
 
 function fetchAndRenderAdrs() {
+  // ORB-00040: /api/adrs is per-workspace; skip it in aggregate mode.
+  if (isAggregateView()) {
+    renderPanelPlaceholder("adrs-body");
+    return Promise.resolve();
+  }
   const sp = new URLSearchParams();
   sp.set("limit", String(ADR_LIMIT));
   if (adrSearchQuery) sp.set("q", adrSearchQuery);
@@ -1515,6 +1519,12 @@ function fetchAndRenderAdrs() {
 }
 
 function fetchAndRenderFrictions() {
+  // ORB-00040: /api/frictions and /api/frictions/stats are per-workspace; skip
+  // both in aggregate mode.
+  if (isAggregateView()) {
+    renderPanelPlaceholder("frictions-body");
+    return Promise.resolve();
+  }
   const sp = new URLSearchParams();
   sp.set("limit", String(FRICTION_LIMIT));
   if (frictionSearchQuery) sp.set("q", frictionSearchQuery);
