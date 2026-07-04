@@ -36,7 +36,7 @@ orbit task lint "$TASK_ID"
 If the task entered a proposal state, approve it before execution:
 
 ```bash
-orbit task approve "$TASK_ID"
+orbit task update "$TASK_ID" --status backlog
 ```
 
 ## Ship It

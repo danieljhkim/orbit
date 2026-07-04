@@ -7,17 +7,12 @@ use super::add::TaskAddArgs;
 use super::artifact::TaskArtifactCommand;
 use super::export::TaskExportArgs;
 use super::import::TaskImportArgs;
-use super::lifecycle::{
-    TaskApproveArgs, TaskArchiveArgs, TaskDeleteArgs, TaskRejectArgs, TaskStartArgs,
-    TaskUnarchiveArgs,
-};
+use super::lifecycle::{TaskArchiveArgs, TaskStartArgs};
 use super::lint::TaskLintArgs;
-use super::list::{TaskListArgs, TaskLocksArgs};
-use super::prune::TaskPruneContextArgs;
+use super::list::TaskListArgs;
 use super::reindex::TaskReindexArgs;
 use super::review::ReviewThreadCommand;
 use super::show::TaskShowArgs;
-use super::templates::TaskTemplatesCommand;
 use super::update::TaskUpdateArgs;
 
 #[derive(Args)]
@@ -39,37 +34,22 @@ pub enum TaskSubcommand {
     Add(TaskAddArgs),
     /// Manage task artifact files
     Artifact(TaskArtifactCommand),
-    /// List tasks with optional filters
+    /// List tasks with optional filters (`--locked` shows the file-lock projection)
     List(TaskListArgs),
-    /// Show files locked by active tasks
-    Locks(TaskLocksArgs),
     /// Show detailed information about a task
     Show(TaskShowArgs),
-    /// Lint a task for stale paths and vague acceptance criteria
+    /// Lint tasks for stale paths and vague acceptance criteria; `--fix` prunes stale context files
     Lint(TaskLintArgs),
-    /// Update task fields
+    /// Update task fields and perform guarded status transitions
+    /// (approve: proposed -> backlog, review -> done; reject: -> rejected; unarchive: archived -> backlog)
     Update(TaskUpdateArgs),
     /// Start work on a task, approving proposed work when needed
     Start(TaskStartArgs),
-    /// Approve a task (proposed → backlog, or review → done)
-    Approve(TaskApproveArgs),
-    /// Reject a task (proposed/friction/review/backlog/in-progress -> rejected)
-    Reject(TaskRejectArgs),
     /// Archive a task
     Archive(TaskArchiveArgs),
-    /// Unarchive a task (archived → backlog)
-    Unarchive(TaskUnarchiveArgs),
-    /// Delete a task permanently
-    Delete(TaskDeleteArgs),
-    /// Manage task templates
-    Templates(TaskTemplatesCommand),
     /// Manage review threads on a task
     #[command(name = "review-thread")]
     ReviewThread(ReviewThreadCommand),
-    /// Backfill: drop non-existent `context_files` entries from active tasks.
-    /// Defaults to a dry-run report; pass `--write` to apply.
-    #[command(name = "prune-context")]
-    PruneContext(TaskPruneContextArgs),
     /// Export task bundles to a portable tar.zst archive
     Export(TaskExportArgs),
     /// Import task bundles from a tar.zst archive
@@ -84,19 +64,12 @@ impl Execute for TaskSubcommand {
             TaskSubcommand::Add(args) => args.execute(runtime),
             TaskSubcommand::Artifact(cmd) => cmd.execute(runtime),
             TaskSubcommand::List(args) => args.execute(runtime),
-            TaskSubcommand::Locks(args) => args.execute(runtime),
             TaskSubcommand::Show(args) => args.execute(runtime),
             TaskSubcommand::Lint(args) => args.execute(runtime),
             TaskSubcommand::Update(args) => args.execute(runtime),
             TaskSubcommand::Start(args) => args.execute(runtime),
-            TaskSubcommand::Approve(args) => args.execute(runtime),
-            TaskSubcommand::Reject(args) => args.execute(runtime),
             TaskSubcommand::Archive(args) => args.execute(runtime),
-            TaskSubcommand::Unarchive(args) => args.execute(runtime),
-            TaskSubcommand::Delete(args) => args.execute(runtime),
-            TaskSubcommand::Templates(cmd) => cmd.execute(runtime),
             TaskSubcommand::ReviewThread(cmd) => cmd.execute(runtime),
-            TaskSubcommand::PruneContext(args) => args.execute(runtime),
             TaskSubcommand::Export(args) => args.execute(runtime),
             TaskSubcommand::Import(args) => args.execute(runtime),
             TaskSubcommand::Reindex(args) => args.execute(runtime),

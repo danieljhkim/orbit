@@ -117,7 +117,7 @@ TASK_ID=$(orbit task add \
 # or simply ask an agent to create a task:
 # "Claude can you create an orbit task to refactor the authentication logic in ..."
 
-orbit task approve "$TASK_ID"
+orbit task update "$TASK_ID" --status backlog   # approve into the backlog
 
 # conflict-aware, parallel flush of the backlog tasks to PRs
 orbit run ship
@@ -235,7 +235,7 @@ Not every tool is intended for agent calls. Lifecycle/admin operations (`docs.in
 <summary><strong>Full tool reference</strong> — task, review, graph, search, semantic, adr, docs, learning, friction (click to expand)
 </summary>
 
-Agents discover project docs through `orbit.search`; docs, lock, semantic setup/index/status, graph history, learning sync/list/comment.list/upvote, and friction stats operations are CLI-only admin/setup workflows. Six further admin/destructive tools — `orbit.task.delete`, `orbit.task.lint`, `orbit.semantic.uninstall`, `orbit.adr.list` (use `orbit search --kind adr` from agents), `orbit.learning.prune`, `orbit.learning.comment.delete` — remain registered for CLI use (`orbit task delete`, `orbit adr list`, etc.) but are hidden from the agent MCP surface (ORB-00289).
+Agents discover project docs through `orbit.search`; docs, lock, semantic setup/index/status, graph history, learning sync/list/comment.list/upvote, and friction stats operations are CLI-only admin/setup workflows. Six further admin/destructive tools — `orbit.task.delete`, `orbit.task.lint`, `orbit.semantic.uninstall`, `orbit.adr.list` (use `orbit search --kind adr` from agents), `orbit.learning.prune`, `orbit.learning.comment.delete` — remain registered for admin use via `orbit tool run` and the `orbit adr list` / `orbit task lint` CLI surfaces, but are hidden from the agent MCP surface (ORB-00289).
 
 | Namespace | Tool | Purpose |
 |---|---|---|

@@ -185,8 +185,14 @@ impl TaskTemplateCommands for OrbitRuntime {
             }
         }
 
+        let available = self
+            .list_task_templates()?
+            .into_iter()
+            .map(|template| template.name)
+            .collect::<Vec<_>>()
+            .join(", ");
         Err(OrbitError::InvalidInput(format!(
-            "task template '{name}' not found; run `orbit task templates list` to see available templates"
+            "task template '{name}' not found; available templates: {available}"
         )))
     }
 }

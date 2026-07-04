@@ -78,6 +78,28 @@ impl OrbitRuntime {
         dropped
     }
 
+    /// Drops `context_files` entries whose anchors no longer exist in the
+    /// workspace (the `orbit task lint --fix` path, formerly the standalone
+    /// `prune-context` backfill). Returns the updated task and the dropped
+    /// entries; no write happens when nothing is stale.
+    pub fn prune_task_context_files(&self, id: &str) -> Result<(Task, Vec<String>), OrbitError> {
+        let task = self.get_task(id)?;
+        let prune_root = context_workspace_root(&self.paths().repo_root, None);
+        let canonicalized = canonicalize_context_files_for_read(&task.context_files, &prune_root);
+        let (kept, dropped) = prune_missing_context_files(&prune_root, canonicalized);
+        if dropped.is_empty() {
+            return Ok((task, dropped));
+        }
+        let updated = self.update_task(
+            id,
+            super::TaskUpdateParams {
+                context_files: Some(kept),
+                ..Default::default()
+            },
+        )?;
+        Ok((updated, dropped))
+    }
+
     pub fn list_tasks_filtered(
         &self,
         status: Option<orbit_common::types::TaskStatus>,

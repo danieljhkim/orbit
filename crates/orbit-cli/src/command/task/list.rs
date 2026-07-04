@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use clap::{ArgAction, Args, Subcommand};
+use clap::{ArgAction, Args};
 use orbit_core::{
     ExternalRef, OrbitError, OrbitRuntime, TaskPriority, TaskStatus, TaskType,
     build_task_status_index, task_dependencies_ready, task_selectors_contain_path,
@@ -15,7 +15,7 @@ use super::output::{
 
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit task list\n  orbit task list --all\n  orbit task list --status backlog\n  orbit task list --status friction\n  orbit task list --status in-progress,review\n  orbit task list --type feature\n  orbit task list --priority high\n  orbit task list --parent T12345678-123456\n  orbit task list --ref jira:ENG-1234\n  orbit task list --has-ref jira\n  orbit task list --tag perf --tag bench\n  orbit task list --path src/auth/login.rs\n  orbit task list --json"
+    after_help = "Examples:\n  orbit task list\n  orbit task list --all\n  orbit task list --status backlog\n  orbit task list --status friction\n  orbit task list --status in-progress,review\n  orbit task list --type feature\n  orbit task list --priority high\n  orbit task list --parent T12345678-123456\n  orbit task list --ref jira:ENG-1234\n  orbit task list --has-ref jira\n  orbit task list --tag perf --tag bench\n  orbit task list --path src/auth/login.rs\n  orbit task list --locked\n  orbit task list --json"
 )]
 pub struct TaskListArgs {
     /// Filter by one or more statuses (comma-separated). Defaults to backlog,in-progress.
@@ -54,6 +54,10 @@ pub struct TaskListArgs {
     /// selector under it.
     #[arg(long)]
     pub path: Option<String>,
+    /// Show files locked by active (in-progress/review) tasks instead of the
+    /// task table (formerly `orbit task locks`)
+    #[arg(long, conflicts_with_all = ["status", "all", "ops", "full"])]
+    pub locked: bool,
     /// Output full task objects as JSON
     #[arg(long)]
     pub json: bool,
@@ -89,8 +93,12 @@ impl Execute for TaskListArgs {
         let tasks_matching_tags = runtime.list_tasks_by_tags(&tags)?;
         let status_by_id = build_task_status_index(&runtime.list_tasks()?);
         let active_statuses = [TaskStatus::Backlog, TaskStatus::InProgress];
-        let status_filter =
-            default_task_list_status_filter(all, &status, job_run_id.as_deref(), &active_statuses);
+        let locked_statuses = [TaskStatus::InProgress, TaskStatus::Review];
+        let status_filter = if self.locked {
+            &locked_statuses[..]
+        } else {
+            default_task_list_status_filter(all, &status, job_run_id.as_deref(), &active_statuses)
+        };
 
         let tasks: Vec<_> = tasks_matching_tags
             .into_iter()
@@ -127,6 +135,10 @@ impl Execute for TaskListArgs {
                     .is_none_or(|p| task_selectors_contain_path(&t.context_files, p))
             })
             .collect();
+
+        if self.locked {
+            return print_locked_projection(tasks, self.json);
+        }
 
         if self.ops {
             let json_tasks: Vec<Value> = tasks.iter().map(task_to_signal_json).collect();
@@ -165,96 +177,9 @@ fn default_task_list_status_filter<'a>(
     }
 }
 
-#[derive(Args)]
-pub struct TaskLocksArgs {
-    #[command(subcommand)]
-    pub command: Option<TaskLocksSubcommand>,
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Subcommand)]
-pub enum TaskLocksSubcommand {
-    /// Release an active reservation by id
-    Release(TaskLocksReleaseArgs),
-}
-
-#[derive(Args)]
-pub struct TaskLocksReleaseArgs {
-    /// Reservation id to release
-    pub reservation_id: String,
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-}
-
-impl Execute for TaskLocksArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        if let Some(command) = self.command {
-            return command.execute(runtime);
-        }
-        if self.json {
-            crate::output::json::print_pretty(&task_locks_json(runtime)?)
-        } else {
-            let (tasks, locked_files) = task_locks(runtime)?;
-            print_task_locks(&tasks, &locked_files);
-            Ok(())
-        }
-    }
-}
-
-impl Execute for TaskLocksSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        match self {
-            Self::Release(args) => args.execute(runtime),
-        }
-    }
-}
-
-impl Execute for TaskLocksReleaseArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let value = runtime.run_tool(
-            "orbit.task.locks.release",
-            json!({ "reservation_id": self.reservation_id }),
-        )?;
-        if self.json {
-            crate::output::json::print_pretty(&value)
-        } else {
-            let released = value
-                .get("released")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            if released {
-                println!("Released reservation {}", self.reservation_id);
-            } else {
-                println!("No active reservation found for {}", self.reservation_id);
-            }
-            Ok(())
-        }
-    }
-}
-
-pub(crate) fn task_locks_json(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
-    let (tasks, locked_files) = task_locks(runtime)?;
-    let json_by_task: Vec<Value> = tasks.iter().map(task_lock_to_json).collect();
-    Ok(json!({
-        "locked_files": locked_files.iter().cloned().collect::<Vec<_>>(),
-        "by_task": json_by_task,
-        "total_locked": locked_files.len(),
-        "total_tasks": tasks.len(),
-    }))
-}
-
-fn task_locks(
-    runtime: &OrbitRuntime,
-) -> Result<(Vec<orbit_core::Task>, BTreeSet<String>), OrbitError> {
-    let mut tasks: Vec<_> = runtime
-        .list_tasks()?
-        .into_iter()
-        .filter(|task| matches!(task.status, TaskStatus::InProgress | TaskStatus::Review))
-        .collect();
-
+/// Renders the file-lock projection (formerly `orbit task locks`) over the
+/// already-filtered in-progress/review task set.
+fn print_locked_projection(mut tasks: Vec<orbit_core::Task>, json: bool) -> Result<(), OrbitError> {
     tasks.sort_by_key(|task| {
         (
             task_lock_status_rank(task.status),
@@ -268,7 +193,18 @@ fn task_locks(
         .flat_map(|task| task.context_files.iter().cloned())
         .collect();
 
-    Ok((tasks, locked_files))
+    if json {
+        let json_by_task: Vec<Value> = tasks.iter().map(task_lock_to_json).collect();
+        crate::output::json::print_pretty(&json!({
+            "locked_files": locked_files.iter().cloned().collect::<Vec<_>>(),
+            "by_task": json_by_task,
+            "total_locked": locked_files.len(),
+            "total_tasks": tasks.len(),
+        }))
+    } else {
+        print_task_locks(&tasks, &locked_files);
+        Ok(())
+    }
 }
 
 fn task_lock_status_rank(status: TaskStatus) -> u8 {

@@ -104,15 +104,20 @@ impl OrbitRuntime {
         if let Some(crew) = &params.crew {
             self.validate_crew_name(crew.as_deref())?;
         }
-        if params.has_any_mutation() && task.status == TaskStatus::Archived {
+        // Archived tasks accept exactly one mutation: the guarded restore to
+        // backlog (formerly `orbit task unarchive`). Everything else requires
+        // restoring the task first.
+        let unarchiving =
+            task.status == TaskStatus::Archived && params.status == Some(TaskStatus::Backlog);
+        if params.has_any_mutation() && task.status == TaskStatus::Archived && !unarchiving {
             return Err(OrbitError::InvalidInput(format!(
-                "task {id} is {} and cannot be modified; unarchive or reopen it first",
+                "task {id} is {} and cannot be modified; restore it with `orbit task update {id} --status backlog` first",
                 task.status
             )));
         }
         if params.has_non_comment_mutation() && task.status == TaskStatus::Done {
             return Err(OrbitError::InvalidInput(format!(
-                "task {id} is {} and cannot be modified; unarchive or reopen it first",
+                "task {id} is {} and cannot be modified; done is terminal",
                 task.status
             )));
         }
@@ -221,7 +226,12 @@ impl OrbitRuntime {
                     ..TaskRecordUpdateParams::from(params)
                 },
             )?;
-            Ok((task.clone(), OrbitEvent::TaskUpdated { id: id.to_string() }))
+            let event = if unarchiving {
+                OrbitEvent::TaskUnarchived { id: id.to_string() }
+            } else {
+                OrbitEvent::TaskUpdated { id: id.to_string() }
+            };
+            Ok((task.clone(), event))
         })?;
         if updated.status == TaskStatus::Done {
             self.record_resolves_side_effects(&updated)?;

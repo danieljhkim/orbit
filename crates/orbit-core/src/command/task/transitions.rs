@@ -602,29 +602,6 @@ impl OrbitRuntime {
         Ok(())
     }
 
-    pub fn unarchive_task(&self, id: &str) -> Result<(), OrbitError> {
-        let task = self.get_task(id)?;
-
-        if task.status != TaskStatus::Archived {
-            return Err(OrbitError::InvalidInput(format!(
-                "task '{id}' is not archived (status: {})",
-                task.status
-            )));
-        }
-
-        self.with_mutation(|| {
-            let _ = self.stores().tasks().update(
-                id,
-                StoreTaskUpdateParams {
-                    actor: self.actor_label().to_string(),
-                    status: Some(TaskStatus::Backlog),
-                    ..Default::default()
-                },
-            )?;
-            Ok(((), OrbitEvent::TaskUnarchived { id: id.to_string() }))
-        })
-    }
-
     pub fn delete_task(&self, id: &str) -> Result<(), OrbitError> {
         self.with_mutation(|| {
             let deleted = self.stores().tasks().delete(id)?;

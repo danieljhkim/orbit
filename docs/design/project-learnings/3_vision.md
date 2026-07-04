@@ -58,7 +58,7 @@ The whole system depends on someone writing the learnings. Phase 1 ships:
 
 None of these guarantee learnings get authored. Three candidate accelerators, all out of scope phase 1:
 
-- **Auto-suggestion at task close.** When `orbit task approve` runs, surface "did the agent learn anything from this task that should become a learning?" Adds friction; may help.
+- **Auto-suggestion at task close.** When a task is approved (`orbit.task.approve`, or `orbit task update --status done` out of review), surface "did the agent learn anything from this task that should become a learning?" Adds friction; may help.
 - **Mining from review threads.** Crawl resolved review threads for sentences matching patterns like "remember to" / "always" / "don't" / "we got burned" and suggest them as draft learnings. Cheap to implement, high-noise without a relevance filter.
 - **Mining from MEMORY.md.** Agent-private memory often contains lessons that should be project-wide. A migration tool ("promote this MEMORY.md entry to a project learning") would convert quietly-accumulating private knowledge into shared artifact.
 

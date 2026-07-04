@@ -287,27 +287,12 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                     }
                 },
                 TaskSubcommand::List(_) => ("list", None, None),
-                TaskSubcommand::Locks(_) => ("locks", None, None),
                 TaskSubcommand::Show(args) => ("show", Some("task"), Some(args.id.as_str())),
-                TaskSubcommand::Lint(args) => ("lint", Some("task"), Some(args.id.as_str())),
+                TaskSubcommand::Lint(args) => ("lint", Some("task"), args.id.as_deref()),
                 TaskSubcommand::Update(args) => ("update", Some("task"), Some(args.id.as_str())),
                 TaskSubcommand::Start(args) => ("start", Some("task"), Some(args.id.as_str())),
-                TaskSubcommand::Approve(args) => (
-                    "approve",
-                    Some("task"),
-                    args.ids.first().map(|s| s.as_str()),
-                ),
-                TaskSubcommand::Reject(args) => {
-                    ("reject", Some("task"), args.ids.first().map(|s| s.as_str()))
-                }
                 TaskSubcommand::Archive(args) => ("archive", Some("task"), Some(args.id.as_str())),
-                TaskSubcommand::Unarchive(args) => {
-                    ("unarchive", Some("task"), Some(args.id.as_str()))
-                }
-                TaskSubcommand::Delete(args) => ("delete", Some("task"), Some(args.id.as_str())),
-                TaskSubcommand::Templates(_) => ("templates", None, None),
                 TaskSubcommand::ReviewThread(_) => ("review-thread", Some("task"), None),
-                TaskSubcommand::PruneContext(_) => ("prune-context", None, None),
                 TaskSubcommand::Export(_) => ("export", None, None),
                 TaskSubcommand::Import(args) => (
                     "import",

@@ -1,19 +1,7 @@
-use crate::OrbitRuntime;
 use crate::command::task::{TaskAddParams, compute_task_add_warnings};
 use orbit_common::types::{TaskStatus, TaskType};
-use tempfile::tempdir;
 
-fn test_runtime() -> (tempfile::TempDir, OrbitRuntime) {
-    let root = tempdir().expect("create tempdir");
-    let global_root = root.path().join("global");
-    let repo_root = root.path().join("repo");
-    let workspace_root = repo_root.join(".orbit");
-    std::fs::create_dir_all(&global_root).expect("create global root");
-    std::fs::create_dir_all(&workspace_root).expect("create workspace root");
-    let runtime =
-        OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
-    (root, runtime)
-}
+use super::test_runtime;
 
 #[test]
 fn task_add_enters_proposed_and_requires_approval_before_backlog() {

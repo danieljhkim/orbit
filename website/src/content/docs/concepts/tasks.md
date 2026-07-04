@@ -33,7 +33,7 @@ Human-created direct tasks may enter the backlog immediately. Proposed tasks mus
 | `review`      | Implementation complete; awaiting review/merge. Requires an `execution_summary`. |
 | `done`        | Accepted and closed. **Terminal** — no further transitions. |
 | `blocked`     | Temporarily paused (waiting on a dependency or decision). |
-| `archived`    | Soft-deleted. Restorable to `backlog` via the dedicated `orbit task archive` command. |
+| `archived`    | Soft-deleted via the dedicated `orbit task archive` command. Restorable to `backlog` with `orbit task update <id> --status backlog`. |
 | `rejected`    | Declined. Can be re-opened to `backlog` or `in-progress`. |
 
 ### Transition rules
