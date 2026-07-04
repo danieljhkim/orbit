@@ -33,10 +33,13 @@ mod tests;
 
 /// Checks that `path` resolves inside the context workspace root.
 ///
-/// Symlink escapes are blocked because the path is canonicalized before the check.
-/// For paths that do not yet exist (e.g. `fs.write` creating a new file), the
-/// nearest existing ancestor is canonicalized and the remaining components are
-/// appended before the check.
+/// Symlink escapes are blocked because the path is resolved via
+/// [`orbit_policy::resolve_symlinks`] before the check — the same resolver the
+/// policy engine uses ([ORB-00418]), so the two layers cannot drift. It follows
+/// dangling links (an `O_CREAT` open through one creates the link's *target*)
+/// and, for paths that do not yet exist (e.g. `fs.write` creating a new file),
+/// canonicalizes the nearest existing ancestor and appends the remaining
+/// components before the check.
 ///
 /// Returns `Err(PolicyDenied)` when no workspace root is set (fail-closed) or
 /// when the canonical path is outside the root. Returns `Ok` only when the
@@ -54,7 +57,7 @@ pub(crate) fn check_workspace_boundary(
         }
     };
 
-    let canonical = canonicalize_with_missing_tail(path)?;
+    let canonical = orbit_policy::resolve_symlinks(path)?;
 
     // Canonicalize the workspace root so symlinks (e.g. /var -> /private/var on
     // macOS) don't cause false negatives when comparing against the canonical path.
@@ -69,34 +72,6 @@ pub(crate) fn check_workspace_boundary(
         )));
     }
 
-    Ok(canonical)
-}
-
-fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, OrbitError> {
-    if path.exists() {
-        return path
-            .canonicalize()
-            .map_err(|e| OrbitError::Io(format!("failed to canonicalize path: {e}")));
-    }
-
-    let mut missing_components = Vec::new();
-    let mut existing_ancestor = path;
-    while !existing_ancestor.exists() {
-        let name = existing_ancestor
-            .file_name()
-            .ok_or_else(|| OrbitError::InvalidInput("path has no file name".to_string()))?;
-        missing_components.push(name.to_os_string());
-        existing_ancestor = existing_ancestor.parent().ok_or_else(|| {
-            OrbitError::InvalidInput("path has no existing parent directory".to_string())
-        })?;
-    }
-
-    let mut canonical = existing_ancestor
-        .canonicalize()
-        .map_err(|e| OrbitError::Io(format!("failed to canonicalize parent directory: {e}")))?;
-    for component in missing_components.iter().rev() {
-        canonical.push(component);
-    }
     Ok(canonical)
 }
 

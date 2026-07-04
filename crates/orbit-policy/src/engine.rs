@@ -105,10 +105,35 @@ impl PolicyEngine {
     }
 }
 
+/// Cap on symlink traversals while resolving a not-yet-existing tail. Mirrors
+/// the kernel's `ELOOP` limit; a cycle of dangling links fails closed here
+/// instead of looping.
+const MAX_SYMLINK_FOLLOWS: usize = 40;
+
 /// Resolve symlinks in `path`, tolerating a not-yet-existing tail (writes /
 /// creates): canonicalize the nearest existing ancestor and rejoin the missing
 /// components. [ORB-00418]
-fn resolve_symlinks(path: &Path) -> Result<PathBuf, OrbitError> {
+///
+/// A *dangling* symlink reports `exists() == false` (`exists()` follows the
+/// link), but an `O_CREAT` open through it creates the link's **target** — so a
+/// dangling component is resolved via `read_link` rather than treated as a
+/// missing tail. Without this, a dangling link inside an allowed subtree
+/// pointing into a denied subtree would pass rule matching while the actual
+/// write landed at the denied target.
+///
+/// Shared with `orbit-tools`' workspace-boundary check so the two enforcement
+/// layers cannot drift.
+pub fn resolve_symlinks(path: &Path) -> Result<PathBuf, OrbitError> {
+    resolve_symlinks_bounded(path.to_path_buf(), 0)
+}
+
+fn resolve_symlinks_bounded(path: PathBuf, follows: usize) -> Result<PathBuf, OrbitError> {
+    if follows > MAX_SYMLINK_FOLLOWS {
+        return Err(OrbitError::InvalidInput(format!(
+            "too many levels of symbolic links resolving {}",
+            path.display()
+        )));
+    }
     if path.exists() {
         return path
             .canonicalize()
@@ -116,8 +141,33 @@ fn resolve_symlinks(path: &Path) -> Result<PathBuf, OrbitError> {
     }
 
     let mut missing = Vec::new();
-    let mut ancestor = path;
+    let mut ancestor = path.as_path();
     while !ancestor.exists() {
+        // Dangling symlink: follow it (fail closed if the link is unreadable)
+        // and restart resolution at the rejoined target.
+        let is_symlink = ancestor
+            .symlink_metadata()
+            .map(|meta| meta.file_type().is_symlink())
+            .unwrap_or(false);
+        if is_symlink {
+            let target = ancestor.read_link().map_err(|error| {
+                OrbitError::Io(format!("read_link {}: {error}", ancestor.display()))
+            })?;
+            let mut rejoined = if target.is_absolute() {
+                target
+            } else {
+                ancestor
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_default()
+                    .join(target)
+            };
+            for name in missing.iter().rev() {
+                rejoined.push(name);
+            }
+            return resolve_symlinks_bounded(rejoined, follows + 1);
+        }
+
         let name = ancestor.file_name().ok_or_else(|| {
             OrbitError::InvalidInput(format!("path has no file name: {}", path.display()))
         })?;

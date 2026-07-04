@@ -62,11 +62,15 @@ plus global `denyRead` / `denyModify` rules, evaluated by `orbit-policy`.
 filesystem location, not the requested path. Before matching, the requested
 path is resolved with `Path::canonicalize` (following symlinks); for a
 not-yet-existing target (a write/create) the nearest existing ancestor is
-canonicalized and the remaining components are rejoined. A symlink inside an
-allowed subtree that points into a denied subtree is therefore **denied**, and
-a resolved path that escapes the workspace root is denied outright. This
-resolution lives in `orbit-policy` (`PolicyEngine::check_resolved`) so the
-guarantee holds regardless of the caller.
+canonicalized and the remaining components are rejoined. **Dangling** symlinks
+are followed too (with an `ELOOP`-style traversal cap): an `O_CREAT` open
+through a dangling link creates the link's *target*, so evaluation happens at
+that target, not at the link path. A symlink inside an allowed subtree that
+points into a denied subtree is therefore **denied**, and a resolved path that
+escapes the workspace root is denied outright. This resolution lives in
+`orbit-policy` (`PolicyEngine::check_resolved` / `resolve_symlinks`) and is
+shared by the tools-layer workspace-boundary check, so the guarantee holds
+regardless of the caller.
 
 **Known limitation (TOCTOU).** There is an inherent time-of-check to
 time-of-use gap between the policy decision and the actual filesystem
