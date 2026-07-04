@@ -245,6 +245,113 @@ fn dashboard_guards_remaining_panels_in_aggregate_view() {
     );
 }
 
+#[test]
+fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
+    // ORB-00044: follow-up to ORB-00039/00040 closing the two remaining
+    // aggregate-mode gaps. (1) The Diagnostics tab is fed exclusively by
+    // per-workspace endpoints (/api/job-runs plus /api/diagnostics/metrics,
+    // /errors, /friction and /implement_one all take the `Ws` extractor and 400
+    // without a concrete workspace), so in aggregate mode the whole tab branch
+    // of activeRefreshJobs is skipped and placeholders render instead. (2) The
+    // knowledge detail panels (learning-detail / adr-detail / friction-detail)
+    // previously kept stale content with live supersede/accept/resolve/patch
+    // buttons after switching to "All workspaces"; they now show the shared
+    // placeholder too. Asserted against the embedded asset sources (the
+    // dashboard has no JS test runner).
+    let app = include_str!("../../assets/dashboard/app.js");
+    let router = include_str!("../../assets/dashboard/router.js");
+
+    fn index_of(source: &str, name: &str, needle: &str) -> usize {
+        match source.find(needle) {
+            Some(index) => index,
+            None => panic!("{name} must contain `{needle}`"),
+        }
+    }
+
+    // Diagnostics: the aggregate guard sits at the top of the diagnostics
+    // branch, before any of the per-workspace fetch sites — every diagnostics
+    // fetch in activeRefreshJobs is unreachable in aggregate mode.
+    let branch = index_of(app, "app.js", r#"if (activeTab === "diagnostics") {"#);
+    let guard = index_of(
+        app,
+        "app.js",
+        "renderDiagnosticsPlaceholders();\n      return jobs;",
+    );
+    assert!(
+        branch < guard,
+        "the aggregate guard must live inside the diagnostics branch"
+    );
+    for fetch in [
+        "/api/diagnostics/metrics",
+        "/api/diagnostics/errors",
+        "/api/diagnostics/implement_one",
+        "fetchAndRenderRuns()",
+    ] {
+        let fetch_at = index_of(app, "app.js", fetch);
+        assert!(
+            guard < fetch_at,
+            "diagnostics fetch `{fetch}` must come after the aggregate early-return"
+        );
+    }
+    // fetchAndRenderRuns (the "runs" subtab job, /api/job-runs +
+    // /api/diagnostics/friction) is only invoked from the guarded branch: one
+    // guarded call site plus the function definition itself.
+    assert_eq!(
+        app.matches("fetchAndRenderRuns()").count(),
+        2,
+        "fetchAndRenderRuns must have no unguarded call site"
+    );
+
+    // The placeholder helper covers both subtab bodies and the side card, and
+    // neutralizes the count.
+    assert!(
+        app.contains("function renderDiagnosticsPlaceholders()"),
+        "aggregate mode must render diagnostics placeholders"
+    );
+    for body in ["diag-body", "runs-body", "diag-implement-one-body"] {
+        assert!(
+            app.contains(&format!(r#"renderPanelPlaceholder("{body}")"#)),
+            "diagnostics {body} must show a placeholder in aggregate mode"
+        );
+    }
+
+    // A diagnostics subtab switch re-renders from the stale last* caches in
+    // router.js, so it guards on the same live predicate instead of repainting
+    // the previous workspace's rows over the placeholder.
+    assert!(
+        router.contains("isAggregateView"),
+        "router.js must import the shared aggregate guard"
+    );
+    for body in ["diag-body", "runs-body"] {
+        assert!(
+            router.contains(&format!(r#"renderPanelPlaceholder("{body}")"#)),
+            "router subtab switch must render the {body} placeholder in aggregate mode"
+        );
+    }
+    assert_eq!(
+        router.matches("if (isAggregateView())").count(),
+        2,
+        "both subtab re-render sites in router.js must be guarded"
+    );
+
+    // Knowledge detail panels: each list guard also replaces its detail panel
+    // (which carries the per-workspace action buttons) with the placeholder.
+    assert!(
+        app.contains("function renderKnowledgeDetailPlaceholder(prefix)"),
+        "the detail-panel placeholder helper must exist"
+    );
+    assert!(
+        app.contains("renderPanelPlaceholder(`${prefix}-detail`)"),
+        "the helper must target the <prefix>-detail panels"
+    );
+    for prefix in ["learning", "adr", "friction"] {
+        assert!(
+            app.contains(&format!(r#"renderKnowledgeDetailPlaceholder("{prefix}")"#)),
+            "the {prefix} list guard must also clear the stale {prefix}-detail panel"
+        );
+    }
+}
+
 async fn response_body(response: Response) -> String {
     let bytes = match to_bytes(response.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,

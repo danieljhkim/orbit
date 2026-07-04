@@ -1178,6 +1178,31 @@ function renderAggregatePlaceholders() {
   resetHealthStrip();
 }
 
+// ORB-00044: the Diagnostics tab is fed exclusively by per-workspace endpoints
+// (/api/job-runs and /api/diagnostics/{metrics,errors,friction,implement_one}),
+// so in aggregate mode every diagnostics panel — both subtab bodies and the
+// implement_one side card — shows the placeholder and the count is neutralized.
+function renderDiagnosticsPlaceholders() {
+  renderPanelPlaceholder("diag-body");
+  renderPanelPlaceholder("runs-body");
+  renderPanelPlaceholder("diag-implement-one-body");
+  const diagCount = $("diag-count");
+  if (diagCount) diagCount.textContent = "—";
+}
+
+// ORB-00044: the knowledge detail panels (learning-detail / adr-detail /
+// friction-detail) hold live action buttons (supersede, accept, resolve, and
+// the friction status/tag controls) that POST/PATCH per-workspace endpoints.
+// Left stale in aggregate mode, a click would fire without ?workspace= — 400 in
+// pure-global mode, or a silent write to the default workspace inside a
+// --global workspace — so the stale detail is replaced by the same placeholder
+// as its list panel. Selecting a concrete workspace re-fetches and re-renders.
+function renderKnowledgeDetailPlaceholder(prefix) {
+  renderPanelPlaceholder(`${prefix}-detail`);
+  const count = $(`${prefix}-detail-count`);
+  if (count) count.textContent = "—";
+}
+
 // The health strip is fed by the same per-workspace /api/audit/summary endpoint,
 // so in aggregate mode reset its tiles to a neutral dash rather than showing the
 // last-selected workspace's numbers as if they were machine-wide.
@@ -1393,6 +1418,15 @@ function activeRefreshJobs() {
   }
 
   if (activeTab === "diagnostics") {
+    // ORB-00044: every diagnostics fetch is per-workspace — /api/job-runs and
+    // all four /api/diagnostics/* endpoints (metrics, errors, friction,
+    // implement_one) take the backend `Ws` extractor and 400 without a concrete
+    // workspace — so in aggregate mode skip the whole tab and show placeholders
+    // (subtab switches are likewise guarded in router.js setDiagSubtabImpl).
+    if (aggregate) {
+      renderDiagnosticsPlaceholders();
+      return jobs;
+    }
     if (activeDiagSubtab === "runs") {
       jobs.push(fetchAndRenderRuns());
     } else if (activeDiagSubtab === "metrics") {
@@ -1490,8 +1524,10 @@ function fetchAndRenderLearnings() {
   // ORB-00040: /api/learnings is per-workspace and 400s without a concrete
   // workspace. Guard at the fetch chokepoint so every entry point (auto-refresh,
   // tab activation, and the search box) shows the placeholder instead of firing.
+  // ORB-00044: also replace the stale detail panel (live supersede button).
   if (isAggregateView()) {
     renderPanelPlaceholder("learnings-body");
+    renderKnowledgeDetailPlaceholder("learning");
     return Promise.resolve();
   }
   const sp = new URLSearchParams();
@@ -1505,8 +1541,10 @@ function fetchAndRenderLearnings() {
 
 function fetchAndRenderAdrs() {
   // ORB-00040: /api/adrs is per-workspace; skip it in aggregate mode.
+  // ORB-00044: also replace the stale detail panel (live accept/supersede).
   if (isAggregateView()) {
     renderPanelPlaceholder("adrs-body");
+    renderKnowledgeDetailPlaceholder("adr");
     return Promise.resolve();
   }
   const sp = new URLSearchParams();
@@ -1521,8 +1559,10 @@ function fetchAndRenderAdrs() {
 function fetchAndRenderFrictions() {
   // ORB-00040: /api/frictions and /api/frictions/stats are per-workspace; skip
   // both in aggregate mode.
+  // ORB-00044: also replace the stale detail panel (live resolve/status/tags).
   if (isAggregateView()) {
     renderPanelPlaceholder("frictions-body");
+    renderKnowledgeDetailPlaceholder("friction");
     return Promise.resolve();
   }
   const sp = new URLSearchParams();

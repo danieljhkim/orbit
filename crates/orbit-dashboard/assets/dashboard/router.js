@@ -17,7 +17,7 @@
 //
 // Also exports parseHashRoute for symmetry (used only internally today).
 
-import { el } from './common.js';
+import { el, isAggregateView, renderPanelPlaceholder } from './common.js';
 import { renderRuns } from './runs.js';
 
 const $ = (id) => document.getElementById(id);
@@ -71,14 +71,26 @@ function setDiagSubtabImpl(ctx, name) {
     subIndicator.style.left = `${activeBtn.offsetLeft}px`;
   }
 
+  // ORB-00044: in the aggregate "All workspaces" view the diagnostics fetches
+  // are skipped (activeRefreshJobs), so a subtab switch must not repaint the
+  // previous workspace's stale rows over the placeholder — render the
+  // placeholder for the now-visible body instead.
   if (name === "runs") {
     $("diag-body").style.display = "none";
     $("runs-body").style.display = "block";
-    renderRuns(ctx.getLastRuns ? ctx.getLastRuns() : []);
+    if (isAggregateView()) {
+      renderPanelPlaceholder("runs-body");
+    } else {
+      renderRuns(ctx.getLastRuns ? ctx.getLastRuns() : []);
+    }
   } else {
     $("diag-body").style.display = "block";
     $("runs-body").style.display = "none";
-    ctx.renderDiagnostics();
+    if (isAggregateView()) {
+      renderPanelPlaceholder("diag-body");
+    } else {
+      ctx.renderDiagnostics();
+    }
   }
 }
 
