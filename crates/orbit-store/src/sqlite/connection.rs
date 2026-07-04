@@ -130,4 +130,39 @@ impl Store {
         let conn = self.read()?;
         migration::applied_migrations(&conn)
     }
+
+    /// Run `PRAGMA quick_check` (the fast subset of `integrity_check`).
+    /// Returns `Ok(())` when SQLite reports `ok`; otherwise an
+    /// [`OrbitError::Store`] listing the reported problems.
+    pub fn quick_check(&self) -> Result<(), OrbitError> {
+        let conn = self.read()?;
+        let mut stmt = conn
+            .prepare("PRAGMA quick_check")
+            .map_err(|e| OrbitError::Store(format!("quick_check: {e}")))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| OrbitError::Store(format!("quick_check: {e}")))?
+            .collect::<Result<Vec<String>, _>>()
+            .map_err(|e| OrbitError::Store(format!("quick_check: {e}")))?;
+        if rows.len() == 1 && rows[0] == "ok" {
+            return Ok(());
+        }
+        Err(OrbitError::Store(format!(
+            "quick_check reported problems: {}",
+            rows.join("; ")
+        )))
+    }
+
+    /// Prove the database accepts writes without mutating it: acquire the
+    /// write lock via `BEGIN IMMEDIATE`, then roll back. Fails when the
+    /// database file (or its WAL sidecars) is not writable, or when the
+    /// write lock cannot be obtained within the busy timeout.
+    pub fn check_writable(&self) -> Result<(), OrbitError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        conn.execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
+            .map_err(|e| OrbitError::Store(format!("write probe failed: {e}")))
+    }
 }

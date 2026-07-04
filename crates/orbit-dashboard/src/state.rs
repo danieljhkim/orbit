@@ -139,6 +139,24 @@ impl DashboardState {
         Ok(cached.clone())
     }
 
+    /// Snapshot of the runtimes this server currently has open (built and
+    /// cached), in registry order. In single mode this is the one pre-built
+    /// runtime; in global mode only workspaces that have actually been
+    /// served appear — health checks probe what the process holds open
+    /// rather than force-building every registered workspace.
+    pub(crate) fn open_runtimes(&self) -> Vec<(String, Arc<OrbitRuntime>)> {
+        let cache = self.lock_runtimes();
+        self.inner
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                cache
+                    .get(&entry.id)
+                    .map(|runtime| (entry.id.clone(), runtime.clone()))
+            })
+            .collect()
+    }
+
     fn lock_runtimes(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<OrbitRuntime>>> {
         // Recover from poisoning: the cache is an idempotent build cache, so a
         // panic in another thread cannot leave it logically inconsistent.

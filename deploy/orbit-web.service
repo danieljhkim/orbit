@@ -1,0 +1,23 @@
+[Unit]
+Description=orbit dashboard (loopback web UI, JSON API, /healthz)
+# Circuit-breaker for the Restart= retries below: at most 5 starts in 200s,
+# then give up until `systemctl --user reset-failed orbit-web`.
+StartLimitIntervalSec=200
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# `--global` serves every workspace in ~/.orbit/workspaces.json, so the unit
+# is cwd-independent; pin a stable directory anyway.
+WorkingDirectory=%h
+# systemd user units get a minimal PATH that omits ~/.orbit/bin (orbit).
+Environment=PATH=%h/.local/bin:%h/.orbit/bin:/usr/local/bin:/usr/bin:/bin
+# Loopback-only by design: the dashboard is unauthenticated. Reach it remotely
+# via `orbit web connect` / an SSH tunnel, never by widening --host.
+ExecStart=%h/.orbit/bin/orbit web serve --global --no-open
+Restart=on-failure
+RestartSec=5
+SyslogIdentifier=orbit-web
+
+[Install]
+WantedBy=default.target

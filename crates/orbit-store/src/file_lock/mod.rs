@@ -84,6 +84,31 @@ struct LockHolder {
     label: String,
 }
 
+/// Public, read-only view of the holder metadata recorded in a lock file.
+/// Advisory and diagnostic only (the OS `flock` is the source of truth, and
+/// the OS releases advisory locks on process death) — consumers such as
+/// `orbit doctor` use it to spot leftover metadata from crashed holders.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockHolderInfo {
+    /// PID recorded by the holder at acquisition time.
+    pub pid: u32,
+    /// RFC 3339 acquisition timestamp.
+    pub acquired_at: String,
+    /// Human label of the operation that acquired the lock.
+    pub label: String,
+}
+
+/// Read the holder metadata recorded in a lock file, if any. Lenient like
+/// [`read_holder`]: missing file, torn write, or legacy empty lock files
+/// yield `None` rather than an error.
+pub fn read_lock_holder(path: &Path) -> Option<LockHolderInfo> {
+    read_holder(path).map(|holder| LockHolderInfo {
+        pid: holder.pid,
+        acquired_at: holder.acquired_at,
+        label: holder.label,
+    })
+}
+
 /// Acquire an exclusive advisory lock on `path` using production defaults,
 /// creating the file (and parent directories) if needed. `label` names the
 /// operation for diagnostics (e.g. `"id allocation"`).

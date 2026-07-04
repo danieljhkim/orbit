@@ -1,5 +1,9 @@
 [Unit]
 Description=orbit ship-sweep (dispatch ship runs in opted-in workspaces with ready backlog)
+# Circuit-breaker for the Restart= retries below: at most 5 starts in 200s,
+# then stay failed until the next timer tick (or `systemctl --user reset-failed`).
+StartLimitIntervalSec=200
+StartLimitBurst=5
 
 [Service]
 Type=oneshot
@@ -10,4 +14,10 @@ WorkingDirectory=%h
 # tools the dispatched pipelines shell out to (git, gh, claude).
 Environment=PATH=%h/.local/bin:%h/.orbit/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/.orbit/bin/orbit run ship-sweep --json
+# Retry a failed sweep after a short pause instead of waiting a full timer
+# interval. Restart= on a Type=oneshot unit requires systemd >= 254; on older
+# systemd drop these two lines (the timer's OnUnitActiveSec still retries
+# every 20 minutes).
+Restart=on-failure
+RestartSec=5
 SyslogIdentifier=orbit-ship-sweep

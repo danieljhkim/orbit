@@ -135,6 +135,7 @@ pub use backend::{
     workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
     workspace_policy_def_store, workspace_task_backends,
 };
+pub use file_lock::{LockHolderInfo, read_lock_holder};
 pub use json_schema::{validate_instance_against_schema, validate_schema_document};
 pub use sqlite::audit_event_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,

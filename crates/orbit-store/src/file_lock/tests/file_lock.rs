@@ -7,7 +7,9 @@ use tracing::field::{Field, Visit};
 use tracing::span;
 use tracing::{Event, Metadata, Subscriber};
 
-use super::super::{FileLockGuard, LockOptions, acquire_exclusive, acquire_exclusive_with};
+use super::super::{
+    FileLockGuard, LockOptions, acquire_exclusive, acquire_exclusive_with, read_lock_holder,
+};
 
 /// Exact libtest name of the ignored helper below, re-exec'd as a child process
 /// by [`sigkilled_holder_releases_lock`]. Keep in sync with the module path.
@@ -96,6 +98,35 @@ fn blocked_waiter_emits_warning_with_holder_metadata() {
         warned,
         "expected a warn event naming the waiter and holder metadata; captured={events:?}"
     );
+}
+
+#[test]
+fn read_lock_holder_reports_current_holder() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("h.lock");
+
+    let _held = acquire_exclusive(&path, "doctor scan").expect("hold lock");
+
+    let holder = read_lock_holder(&path).expect("holder metadata present while held");
+    assert_eq!(holder.pid, std::process::id());
+    assert_eq!(holder.label, "doctor scan");
+    assert!(
+        !holder.acquired_at.is_empty(),
+        "acquired_at should carry the RFC 3339 acquisition timestamp"
+    );
+}
+
+#[test]
+fn read_lock_holder_is_lenient_on_missing_or_garbage_files() {
+    let dir = TempDir::new().expect("tempdir");
+
+    // Missing file → None, not an error.
+    assert!(read_lock_holder(&dir.path().join("absent.lock")).is_none());
+
+    // Torn/legacy content → None, not an error.
+    let garbage = dir.path().join("garbage.lock");
+    std::fs::write(&garbage, b"not json").expect("write garbage");
+    assert!(read_lock_holder(&garbage).is_none());
 }
 
 /// Crash semantics: the OS releases advisory (`flock`) locks when a holder

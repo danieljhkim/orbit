@@ -593,6 +593,16 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             }
         }
         Commands::Audit(_) => unreachable!("audit commands should not be audited"),
+        Commands::Doctor(_) => CommandMeta {
+            command: "doctor".to_string(),
+            subcommand: None,
+            tool_name: None,
+            target_type: Some("workspace".to_string()),
+            target_id: None,
+            role: "admin".to_string(),
+            arguments_json: None,
+            job_run_id: None,
+        },
         Commands::Log(_) => CommandMeta {
             command: "log".to_string(),
             subcommand: Some("tail".to_string()),

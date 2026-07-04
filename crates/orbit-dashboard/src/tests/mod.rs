@@ -2,6 +2,7 @@
 
 mod connect;
 mod dashboard_assets;
+mod health;
 mod log_format;
 mod parse;
 mod serve;

@@ -3,6 +3,7 @@ pub mod adr;
 pub mod audit;
 pub mod config;
 pub mod docs;
+pub mod doctor;
 pub mod executor;
 pub mod friction;
 pub mod graph;
@@ -66,6 +67,7 @@ Observe:
   graph       Query and sync the code graph (symbols, refs, impact)
   audit       Query the audit event log
   log         Tail the unified Orbit log feed
+  doctor      Diagnose workspace health (config, database, disk, indexes)
 
 Definitions:
   activity    View activity definitions
@@ -112,6 +114,7 @@ pub enum Commands {
     Graph(graph::GraphCommand),
     Audit(audit::AuditCommand),
     Log(log::LogCommand),
+    Doctor(doctor::DoctorCommand),
 
     // ── Definitions ──
     Activity(activity::ActivityCommand),
@@ -151,6 +154,7 @@ impl Execute for Commands {
             Commands::Graph(cmd) => cmd.execute(runtime),
             Commands::Audit(cmd) => cmd.execute(runtime),
             Commands::Log(cmd) => cmd.execute(runtime),
+            Commands::Doctor(cmd) => cmd.execute(runtime),
             Commands::Activity(cmd) => cmd.execute(runtime),
             Commands::Job(cmd) => cmd.execute(runtime),
             Commands::Tool(cmd) => cmd.execute(runtime),

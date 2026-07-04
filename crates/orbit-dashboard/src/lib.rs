@@ -13,6 +13,7 @@
 
 mod api;
 mod connect;
+mod health;
 mod log_format;
 mod parse;
 mod projections;
@@ -28,7 +29,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use clap::Args;
@@ -195,7 +196,7 @@ fn run_server(args: &ServeArgs, state: state::DashboardState) -> Result<(), Orbi
         .route("/static/runs.js", get(serve_runs_js))
         .route("/static/run-detail.js", get(serve_run_detail_js))
         .route("/static/review-threads.js", get(serve_review_threads_js))
-        .route("/healthz", get(healthz))
+        .route("/healthz", get(health::healthz))
         .nest("/api", api::router())
         .with_state(state);
 
@@ -332,10 +333,6 @@ fn dashboard_response(content_type: &'static str, body: &'static str) -> Respons
         HeaderValue::from_static(DASHBOARD_CSP),
     );
     response
-}
-
-async fn healthz() -> (StatusCode, &'static str) {
-    (StatusCode::OK, "ok")
 }
 
 async fn shutdown_signal() {
