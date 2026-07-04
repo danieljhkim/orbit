@@ -359,7 +359,18 @@ pub fn init_default_subscriber(default_filter: &str) {
         .fmt_fields(RedactingFields::default());
     let log_layer = global_jsonl_log_path()
         .map_err(|err| err.to_string())
-        .and_then(|path| jsonl_layer_at_path(&path).map_err(|err| err.to_string()));
+        .and_then(|path| {
+            // [ORB-00415] Opportunistically roll the active feed if it has grown
+            // past the per-file budget and prune old archives, before reopening
+            // the (fixed-path) active file for appending. Config is read
+            // leniently from the global config here; orbit-core validates the
+            // same keys strictly at config load.
+            super::log_rotation::rotate_and_prune(
+                &path,
+                &super::log_rotation::LogRotationConfig::load_global_best_effort(),
+            );
+            jsonl_layer_at_path(&path).map_err(|err| err.to_string())
+        });
 
     match log_layer {
         Ok((file_layer, guard)) => {

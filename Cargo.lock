@@ -2212,6 +2212,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+ "toml",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

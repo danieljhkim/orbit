@@ -128,7 +128,7 @@ Use `[duel]` to constrain which CLIs Orbit will spawn — e.g. drop `grok` from 
 | `[scoring]` | `enabled = true` records per-agent scoreboard counters under `.orbit/state/scoreboard/`. |
 | `[graph]` | `editing = false` (default) makes the knowledge graph read-only from agent tools; flip to `true` to allow `orbit.graph.*` mutations. |
 | `[pr]` | PR creation defaults (template, labels, draft mode) for `orbit run ship --mode pr`. |
-| `[runtime]` | `backend = "cli" \| "http" \| "auto"` selects the activity-job dispatcher backend for v2 `agent_loop` activities. |
+| `[runtime]` | `backend = "cli" \| "http" \| "auto"` selects the activity-job dispatcher backend for v2 `agent_loop` activities. **JSONL log rotation/retention** (`~/.orbit/state/logs/orbit.jsonl`): `log_retention_days` (default `7`) deletes archives older than N days; `log_max_total_mb` (default `500`) caps total archive size, pruning oldest first; `log_max_file_mb` (default `100`) rolls the active file to a dated archive once it exceeds N MiB. Rotation runs opportunistically at process start. Invalid values (`0`, or `log_max_file_mb > log_max_total_mb`) are rejected at config load. |
 
 ---
 
