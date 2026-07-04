@@ -10,8 +10,8 @@
 //! workspace-local because logging starts before CLI argument parsing and
 //! runtime root resolution.
 //!
-//! JSONL retention is intentionally simple in v1: the file is append-only and
-//! has no rotation. Multiple Orbit processes may append to the same file at
+//! The JSONL file is size-rotated and pruned on startup (see `log_rotation`;
+//! ORB-00415). Multiple Orbit processes may append to the same file at
 //! the same time; readers should tolerate malformed lines because writes
 //! larger than `PIPE_BUF` can interleave across processes. JSONL timestamps are
 //! assigned when the formatter writes the event, which may lag event emission

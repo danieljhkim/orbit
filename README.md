@@ -304,8 +304,8 @@ Agents discover project docs through `orbit.search`; docs, lock, semantic setup/
 ├── graph/                       # parsed code-graph index (.db, per worktree)
 ├── resources/                   # activities, jobs, executors, policies (customizable)
 └── state/
-    ├── audit/                   # append-only JSONL events
-    ├── job-runs/                # per-run metadata + step traces
+    ├── audit/                   # reserved; audit events live in ~/.orbit/orbit.db
+    ├── job-runs/                # reserved; v2 run state lives in ~/.orbit/orbit.db
     ├── worktrees/               # live git worktrees for agent runs
     ├── logs/                    # captured agent stdout/stderr
     └── scoreboard/              # rolling counters (PRs, reviews, etc.)
