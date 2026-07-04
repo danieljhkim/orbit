@@ -14,8 +14,8 @@ use crate::paths;
 use super::persistence::PersistenceConfig;
 use super::raw::{
     RawAgentRoleConfig, RawCodexExecutionConfig, RawCrewEntry, RawDuelSection,
-    RawExecutionEnvConfig, RawPrSection, RawRuntimeConfig, RawRuntimeSection, RawTaskSection,
-    RawWorkflowConfig,
+    RawExecutionEnvConfig, RawPrSection, RawRoutinesConfig, RawRuntimeConfig, RawRuntimeSection,
+    RawTaskSection, RawWorkflowConfig,
 };
 
 const DEFAULT_ENV_INHERIT: bool = false;
@@ -48,6 +48,10 @@ pub(crate) struct RuntimeConfig {
     /// Opt-in for unattended ship dispatch (`[workflow] auto_ship` in
     /// `config.toml`; defaults to `false`).
     pub(crate) workflow_auto_ship: bool,
+    /// Whether this workspace is a routine source (`[routines] role =
+    /// "source"` in `config.toml`; defaults to `false`). Consulted by
+    /// `orbit sweep` before loading `.orbit/routines/*.yaml`.
+    pub(crate) routines_source: bool,
     /// Named planner/implementer/reviewer lineups from `[crews.<name>]`.
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
@@ -95,6 +99,7 @@ impl RuntimeConfig {
             v2_backend: None,
             workflow_base_branch: DEFAULT_WORKFLOW_BASE_BRANCH.to_string(),
             workflow_auto_ship: false,
+            routines_source: false,
             crews: default_crews(),
             default_crew: Some(DEFAULT_WORKFLOW_CREW.to_string()),
             duel: DuelConfig::default(),
@@ -183,6 +188,7 @@ impl RuntimeConfig {
             .as_ref()
             .and_then(|workflow| workflow.auto_ship)
             .unwrap_or(false);
+        let routines_source = routines_source_from_raw(parsed.routines.as_ref())?;
         let crews = crews_from_raw(parsed.crews.as_ref())?;
         let default_crew = workflow_default_crew_from_raw(parsed.workflow.as_ref(), &crews)?;
         let duel = duel_from_raw(parsed.duel.as_ref())?;
@@ -213,6 +219,7 @@ impl RuntimeConfig {
             v2_backend,
             workflow_base_branch,
             workflow_auto_ship,
+            routines_source,
             crews,
             default_crew,
             duel,
@@ -236,6 +243,10 @@ impl RuntimeConfig {
 
     pub(crate) fn workflow_auto_ship(&self) -> bool {
         self.workflow_auto_ship
+    }
+
+    pub(crate) fn routines_source(&self) -> bool {
+        self.routines_source
     }
 
     pub(crate) fn pr_config(&self) -> &PrConfig {
@@ -544,6 +555,18 @@ fn validate_task_artifact_store_from_raw(raw: Option<&RawTaskSection>) -> Result
     Err(OrbitError::InvalidInput(format!(
         "[task] artifact_store is no longer supported; remove the key because v2 task artifacts are always enabled (found '{trimmed}')"
     )))
+}
+
+fn routines_source_from_raw(raw: Option<&RawRoutinesConfig>) -> Result<bool, OrbitError> {
+    let Some(value) = raw.and_then(|section| section.role.as_deref()) else {
+        return Ok(false);
+    };
+    match value.trim() {
+        "source" => Ok(true),
+        other => Err(OrbitError::InvalidInput(format!(
+            "[routines] role has invalid value '{other}'; the only supported value is 'source'"
+        ))),
+    }
 }
 
 fn workflow_base_branch_from_raw(raw: Option<&RawWorkflowConfig>) -> Result<String, OrbitError> {

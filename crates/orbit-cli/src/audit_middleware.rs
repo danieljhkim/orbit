@@ -638,6 +638,38 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 job_run_id: None,
             }
         }
+        // Normally dispatched before runtime init (see main.rs); metadata
+        // kept for completeness should they ever reach the audited path.
+        Commands::Sweep(_) => CommandMeta {
+            command: "sweep".to_string(),
+            subcommand: None,
+            tool_name: None,
+            target_type: Some("workflow".to_string()),
+            target_id: Some("sweep".to_string()),
+            role: "admin".to_string(),
+            arguments_json: None,
+            job_run_id: None,
+        },
+        Commands::Routine(cmd) => {
+            use crate::command::routine::RoutineSubcommand;
+            let sub = match &cmd.command {
+                RoutineSubcommand::List(_) => "list",
+                RoutineSubcommand::Show(_) => "show",
+                RoutineSubcommand::Pause(_) => "pause",
+                RoutineSubcommand::Resume(_) => "resume",
+                RoutineSubcommand::Init(_) => "init",
+            };
+            CommandMeta {
+                command: "routine".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("routine".to_string()),
+                target_id: None,
+                role: "admin".to_string(),
+                arguments_json: None,
+                job_run_id: None,
+            }
+        }
         Commands::Workspace(cmd) => {
             use crate::command::workspace::WorkspaceSubcommand;
             let sub = match &cmd.command {

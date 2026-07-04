@@ -363,6 +363,14 @@ impl OrbitRuntime {
         self.context.workflow_auto_ship()
     }
 
+    /// Whether this workspace declared itself a routine source
+    /// (`[routines] role = "source"` in the active `config.toml`; defaults
+    /// to `false`). Consulted by `orbit sweep` before loading routine
+    /// definitions nobody registered explicitly.
+    pub fn routines_source(&self) -> bool {
+        self.context.routines_source()
+    }
+
     /// Returns the configured `[duel] candidates` list (e.g. ["codex", "claude", "gemini", "grok"]).
     /// Used by `orbit run duel-plan --planner-a ...` overrides to validate explicit families.
     pub fn duel_candidate_families(&self) -> Vec<String> {

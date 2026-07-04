@@ -1,7 +1,7 @@
 ---
 title: Routines — Vision
 owner: claude
-last_updated: 2026-07-03
+last_updated: 2026-07-04
 status: Draft
 feature: routines
 doc_role: vision
@@ -10,7 +10,7 @@ summary: Open questions and prior art for the routines scheduler — leases, eve
 tags: [routines, scheduler]
 paths: ["crates/orbit-core/src/routines/**"]
 related_features: [routines, activity-job]
-related_artifacts: [ORB-10001]
+related_artifacts: [ORB-10001, ORB-10021]
 ---
 
 # Routines — Vision
@@ -23,6 +23,10 @@ and an ADR, not by drifting in.
 
 ## 1. Open Questions
 
+0. **First-class `activity:` targets.** v1 rejects `activity:<name>` at parse time because
+   run dispatch is job-shaped ([ADR-0206]); the wrapper-job idiom covers current needs. A
+   standalone activity run entrypoint (or auto-wrapping) would let routines fire
+   activities directly — worth doing only if the wrapper friction proves real.
 1. **Single-fire across hosts.** v1 pins routines to explicit hosts. A "exactly one of N"
    mode needs a lease: the natural v2 shape is a lease table in one designated host's store,
    reached over SSH (port 22 is the only always-open channel between the current hosts).
@@ -110,5 +114,6 @@ External:
 ## Task References
 
 - [ORB-10001] — authored this design-doc folder (proposal; no implementation).
+- [ORB-10021] — implemented routines v1.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

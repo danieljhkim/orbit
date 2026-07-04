@@ -116,6 +116,45 @@ pub(crate) fn acquire_exclusive(path: &Path, label: &str) -> Result<FileLockGuar
     acquire_exclusive_with(path, label, LockOptions::default())
 }
 
+/// Single-shot exclusive acquisition: returns `Ok(None)` immediately when
+/// another process holds the lock instead of waiting. For callers whose
+/// correct response to contention is "someone else is already doing this
+/// pass, exit" (e.g. the routine sweep) rather than queueing behind the
+/// holder. The OS releases the lock on process death, so a crashed holder
+/// never wedges future acquisitions.
+pub(crate) fn try_acquire_exclusive(
+    path: &Path,
+    label: &str,
+) -> Result<Option<FileLockGuard>, OrbitError> {
+    let parent = path.parent().ok_or_else(|| {
+        OrbitError::Store(format!(
+            "cannot determine lock parent for '{}'",
+            path.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(|error| OrbitError::Io(error.to_string()))?;
+
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|error| OrbitError::Io(error.to_string()))?;
+
+    match file.try_lock_exclusive() {
+        Ok(()) => {
+            write_holder(&file, label);
+            Ok(Some(FileLockGuard { _file: file }))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+        Err(error) => Err(OrbitError::Store(format!(
+            "failed to acquire {label} lock '{}': {error}",
+            path.display()
+        ))),
+    }
+}
+
 /// Acquire an exclusive advisory lock with explicit [`LockOptions`]. On timeout
 /// returns [`OrbitError::Store`] whose message names the lock path and any
 /// holder metadata, so a stalled waiter is observable rather than silent.

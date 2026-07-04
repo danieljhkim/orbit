@@ -1,0 +1,8 @@
+# Oneshot service driving `orbit sweep` [ORB-10021] / ADR-0204.
+# Installed as a systemd *user* unit by `orbit routine init --install-clock`.
+[Unit]
+Description=Orbit routine sweep (fires due routines on this host)
+
+[Service]
+Type=oneshot
+ExecStart={{ORBIT_BIN}} sweep

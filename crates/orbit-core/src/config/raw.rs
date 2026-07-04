@@ -15,6 +15,7 @@ pub(super) struct RawRuntimeConfig {
     pub(super) watch: Option<toml::Value>,
     pub(super) runtime: Option<RawRuntimeSection>,
     pub(super) workflow: Option<RawWorkflowConfig>,
+    pub(super) routines: Option<RawRoutinesConfig>,
     pub(super) duel: Option<RawDuelSection>,
     /// Removed in ORB-00058. Kept only so config loading can reject stale
     /// `[agent.<role>]` tables with an explicit migration error.
@@ -38,6 +39,16 @@ pub(super) struct RawWorkflowConfig {
     /// Named crew used when a task does not declare `crew` and no CLI
     /// override is provided.
     pub(super) default_crew: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct RawRoutinesConfig {
+    /// `routines.role` — opt-in for the routine scheduler. `"source"` marks
+    /// this workspace as a routine source: `orbit sweep` loads
+    /// `.orbit/routines/*.yaml` from it. Any other value is a config error
+    /// (fail-closed; scheduled execution must never be enabled by a typo'd
+    /// key that silently parses).
+    pub(super) role: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

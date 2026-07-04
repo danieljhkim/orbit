@@ -9,6 +9,7 @@ mod friction;
 mod job;
 mod learning;
 mod resource;
+mod routine;
 mod task;
 mod task_artifacts;
 mod tool_input;

@@ -1,16 +1,16 @@
 ---
 title: Routines — Decisions
 owner: claude
-last_updated: 2026-07-03
-status: Draft
+last_updated: 2026-07-04
+status: Accepted
 feature: routines
 doc_role: decisions
 type: design
-summary: ADR log for the routines scheduler; candidate decisions pending global ID allocation.
+summary: ADR log for the routines scheduler — five decisions allocated and accepted with the v1 implementation.
 tags: [routines, scheduler]
 paths: ["crates/orbit-core/src/routines/**"]
 related_features: [routines, activity-job]
-related_artifacts: [ORB-10001]
+related_artifacts: [ORB-10001, ORB-10021]
 ---
 
 # Routines — Decisions
@@ -19,71 +19,170 @@ This is the append-only ADR log for the `routines` feature. Entries are ordered 
 ascending global ADR number, each keyed on an ID allocated through `orbit.adr.add`; the
 ADR store is the source of truth for status, owner, `related_features`, and `related_tasks`.
 
-> **No ADRs allocated yet.** The feature is a proposal; per convention, global IDs are
-> allocated via `orbit.adr.add` before any `## ADR-` heading is written, so this log starts
-> with the candidate decisions below. Each candidate meets the three-part ADR bar (real
-> alternative, forward constraint, non-trivial cost) and should be allocated as `Proposed`
-> when the feature's first task is cut, then written up here under its allocated heading.
+The five candidate decisions recorded by [ORB-10001] were allocated as ADR-0204..ADR-0208
+when the v1 implementation task ([ORB-10021]) was cut, and accepted when it shipped.
 
 ---
 
-## Candidate decisions (pending allocation)
+## ADR-0204 — The OS owns the clock: stateless `orbit sweep` under launchd/systemd, no resident daemon
 
-### Candidate: definitions are git-shared; scheduler state is host-local and never synced
+**Status:** Accepted · 2026-07 · [ORB-10021]
 
-- **Alternative considered:** syncing scheduler state (last fires, pauses) between hosts so
-  either machine can answer for both.
-- **Decision sketch:** routine YAML is versioned and converges via git; fires, pauses, and
-  locks live in a host-local SQLite `routine_store`. No scheduler network protocol exists.
-- **Cost:** cross-host observability requires asking each host (no single pane of glass),
-  and a definition edit is only as fresh on the other host as its last `git pull`.
+### Context
 
-### Candidate: discovery via the workspace registry + `[routines] role = "source"`, not a host-level pointer file
+Something must wake the scheduler. The alternatives were a resident `orbit schedulerd`
+owning timers in-process (sub-minute precision, event triggers, but a daemon to supervise
+on two platforms), or delegating wake-ups to the OS schedulers that already exist —
+launchd on macOS, systemd timers on Linux — invoking a stateless pass every minute.
 
-- **Alternative considered:** a `~/.orbit/host.toml` entry pointing at one designated
-  control-workspace path per host (explicit two-way handshake).
-- **Decision sketch:** sweep enumerates `~/.orbit/workspaces.json` and collects routines
-  from registered workspaces whose versioned config opts in — the `ship-sweep` /
-  `auto_ship` precedent. Centralizing all routines in polaris is constellation convention,
-  not Orbit mechanism. `host.toml` survives only to carry `host_id`.
-- **Cost:** any registered workspace's config can make it a routine source — the review
-  boundary widens from one blessed repo to every registered workspace's `config.toml`, and
-  sweep behavior now depends on registry hygiene (stale registered paths must be skipped
-  loudly, not silently).
+### Decision
 
-### Candidate: hosts are pinned explicitly; no cross-host coordination in v1
+launchd (`StartInterval` 60s) and a systemd user timer (`OnCalendar=*:*:00`,
+`Persistent=true`) invoke `orbit sweep` every minute; sweep is stateless-in, durable-out.
+Missed-fire semantics split between the OS layer (wake/persistence behavior) and
+per-routine `missed_run` policy. There is no resident Orbit daemon. Unit templates live
+in `crates/orbit-core/assets/clock/` and are installed by
+`orbit routine init --install-clock`.
 
-- **Alternative considered:** a "run on exactly one host" mode backed by leases.
-- **Decision sketch:** `hosts:` lists every host a routine fires on; listing two hosts
-  means two independent fires. Failover is out of scope until a real routine needs it.
-- **Cost:** no routine survives its pinned host being down; adding leases later introduces
-  a second, coordinated mode whose semantics diverge from everything shipped in v1.
+### Consequences
 
-### Candidate: targets are catalog references only — no inline command payloads
+- No process supervision, crash recovery, or memory-leak surface; a wedged pass affects
+  one minute, not the scheduler.
+- launchd wake behavior and `Persistent=true` pair with `missed_run: catch_up_once` to
+  cover laptop sleep and host downtime.
+- Cost: minute granularity is a hard floor and event triggers are structurally impossible
+  in v1; correct behavior depends on two platform-specific unit files that must be kept in
+  parity and tested on both platforms.
 
-- **Alternative considered:** a `run: {type: shell, command: ...}` payload for small
-  chores, which was the original design sketch before [ADR-0194] surfaced.
-- **Decision sketch:** `target:` accepts `job:<name>` / `activity:<name>` resolved through
-  the existing catalog, load-time-validated, executing under existing activity/job policy.
-  Shell-like chores become `deterministic` activities or jobs in the source workspace.
-- **Cost:** every new chore requires authoring a catalog asset (higher friction than a
-  one-line command), and scheduler capability is permanently coupled to catalog capability.
+---
 
-### Candidate: the OS owns the clock — stateless `orbit sweep` under launchd/systemd, no daemon
+## ADR-0205 — Routine discovery via the workspace registry and a versioned `[routines] role = "source"` config key
 
-- **Alternative considered:** a resident `orbit schedulerd` owning timers in-process.
-- **Decision sketch:** launchd (`StartInterval`) and a systemd timer (`Persistent=true`)
-  invoke `orbit sweep` every minute; sweep is stateless-in, durable-out. Missed-fire
-  semantics are split between the OS layer (wake/persistence) and per-routine
-  `missed_run` policy.
-- **Cost:** minute granularity is a hard floor, event triggers are structurally impossible
-  in v1, and correct behavior depends on two platform-specific unit files that must be
-  kept in parity and tested on both platforms.
+**Status:** Accepted · 2026-07 · [ORB-10021]
+
+### Context
+
+Sweep must find routine definitions without a resident daemon and without bootstrapping
+from the caller's cwd. The alternative was a host-level pointer file in `~/.orbit/host.toml`
+naming one designated control workspace per host (an explicit two-way handshake), versus
+reusing the global workspace registry the way `orbit run ship-sweep` / `auto_ship` already
+does for unattended cross-workspace dispatch.
+
+### Decision
+
+Sweep enumerates `~/.orbit/workspaces.json` and collects `.orbit/routines/*.yaml` from
+every registered, active workspace whose versioned `.orbit/config.toml` declares
+`[routines] role = "source"`. Centralizing all routines in polaris is constellation
+convention, not Orbit mechanism. `~/.orbit/host.toml` survives only to carry `host_id`.
+
+### Consequences
+
+- Setup is what already exists: register the workspace plus one versioned config key;
+  both hosts converge through git with no per-host pointer files.
+- `orbit routine list` names each routine's source workspace, so provenance stays
+  unambiguous with multiple sources.
+- Cost: any registered workspace's config can make it a routine source — the review
+  boundary widens from one blessed repo to every registered workspace's `config.toml`,
+  and sweep correctness now depends on registry hygiene (stale registered paths must be
+  skipped loudly, not silently).
+
+---
+
+## ADR-0206 — Routine targets are catalog references only — no inline command payloads
+
+**Status:** Accepted · 2026-07 · [ORB-10021]
+
+### Context
+
+The original sketch allowed a `run: {type: shell, command: ...}` payload for small
+chores. [ADR-0194] removed the `shell` activity variant and `run_shell` dispatch
+fail-closed; reintroducing arbitrary-command payloads through the scheduler would reopen
+that surface on a timer, unattended.
+
+### Decision
+
+`target:` accepts only catalog references resolved at load time; unresolvable targets are
+load-time errors. v1 dispatches `job:<name>` — run dispatch is job-shaped
+(`submit_pipeline_run` resolves jobs by name; there is no standalone activity run
+entrypoint), so `activity:<name>` is reserved and rejected at parse time with guidance to
+wrap the activity in a one-step job in the same source workspace. Shell-like chores become
+`deterministic` activities or jobs in the source workspace.
+
+### Consequences
+
+- Scheduled execution inherits existing activity/job policy, audit envelopes, and the
+  fail-closed posture of [ADR-0194]; the scheduler adds a trigger source, not a new
+  execution surface.
+- Load-time validation makes a broken reference visible on the next sweep instead of at
+  fire time.
+- Cost: every new chore requires authoring a catalog asset (higher friction than a
+  one-line command), and scheduler capability is permanently coupled to catalog
+  capability — including the job-shaped dispatch constraint that keeps `activity:`
+  targets out of v1.
+
+---
+
+## ADR-0207 — Routines pin hosts explicitly; no cross-host coordination in v1
+
+**Status:** Accepted · 2026-07 · [ORB-10021]
+
+### Context
+
+Some recurring work should run on exactly one machine. A "run on exactly one of N hosts"
+mode needs a lease protocol between hosts that only expose SSH to each other; the
+alternative is explicit pinning, where the definition names every host it fires on.
+
+### Decision
+
+Each routine carries a `hosts:` list matched against the host-local `host_id`; there is
+no "any host" value in v1. Listing two hosts means two independent fires. Failover stays
+out of scope until a real routine needs it.
+
+### Consequences
+
+- Due computation stays purely host-local: no lease table, no network dependency, no
+  split-brain modes to test.
+- The semantics are trivially predictable from the YAML alone.
+- Cost: no routine survives its pinned host being down, and adding leases later
+  introduces a second, coordinated mode whose semantics diverge from everything shipped
+  in v1.
+
+---
+
+## ADR-0208 — Routine definitions are git-shared; scheduler state is host-local and never synced
+
+**Status:** Accepted · 2026-07 · [ORB-10021]
+
+### Context
+
+Routines run on two hosts (dk-mac, dk-server-1) with different availability profiles.
+Definitions must converge across hosts; scheduler runtime state (last fires, pauses,
+locks) could either be synced between hosts or kept local. Syncing state would let either
+machine answer "did the nightly fire on the other box?" but requires a scheduler network
+protocol between hosts that only expose 22/443 to each other.
+
+### Decision
+
+Routine YAML definitions live in routine-source workspaces and converge via git like any
+other versioned definition. All scheduler state — fires (with `name + slot + attempt`
+idempotency keys), host-local pauses, and the sweep lock — lives in host-local storage
+(the `routine_*` tables in `~/.orbit/orbit.db`, plus a `flock(2)` sweep lock that the OS
+releases on process death), gitignored and never synced. No scheduler network protocol
+exists in v1.
+
+### Consequences
+
+- Two hosts converge on definitions through a normal `git pull`; no new sync mechanism to
+  build, secure, or debug.
+- State stays consistent with the run history it references, which is also host-local.
+- Cost: cross-host observability requires asking each host — there is no single pane of
+  glass, and a definition edit is only as fresh on the other host as its last `git pull`.
 
 ---
 
 ## Task References
 
-- [ORB-10001] — authored this design-doc folder (proposal; no implementation).
+- [ORB-10001] — authored this design-doc folder (proposal).
+- [ORB-10021] — implemented routines v1; allocated and accepted ADR-0204..ADR-0208.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
