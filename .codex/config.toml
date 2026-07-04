@@ -13,30 +13,10 @@ matcher = '^(Edit|Write|apply_patch)$'
 command = '"$(git rev-parse --show-toplevel)/scripts/orbit-file-lock"'
 type = "command"
 
-[[hooks.PostToolUse]]
-matcher = '^(Edit|Write)$'
-
-[[hooks.PostToolUse.hooks]]
-command = '"$(git rev-parse --show-toplevel)/scripts/codegraph-if-main" mark-dirty'
-type = "command"
-async = true
-
-[[hooks.Stop]]
-matcher = '.*'
-
-[[hooks.Stop.hooks]]
-command = '"$(git rev-parse --show-toplevel)/scripts/codegraph-if-main" sync-if-dirty'
-type = "command"
-
 [mcp_servers.orbit]
 args = [
     "mcp",
     "serve",
 ]
 command = "orbit"
-enabled = true
-
-[mcp_servers.codegraph]
-args = ["serve", "--mcp"]
-command = "codegraph"
 enabled = true

@@ -21,7 +21,7 @@ Project instructions for agents working on Orbit (loaded as both `AGENTS.md` and
 
 ## Agent Read Exclusions
 
-Team-wide `Read()` exclusions (build artifacts, generated graph data, runtime state) live in [`.claude/settings.json`](.claude/settings.json) under `permissions.deny`. If you work on the excluded code itself (e.g. the graph builder under `.codegraph/`, or benchmark harness output), override locally in `.claude/settings.local.json` with a matching `allow` rule — don't relax the committed list.
+Team-wide `Read()` exclusions (build artifacts, runtime state) live in [`.claude/settings.json`](.claude/settings.json) under `permissions.deny`. If you work on the excluded content itself (e.g. benchmark harness output), override locally in `.claude/settings.local.json` with a matching `allow` rule — don't relax the committed list.
 
 ## Architecture
 
@@ -31,14 +31,12 @@ Reusable codebase-specific patterns (Command, RAII guard, newtype, crate-boundar
 
 ## Code Navigation
 
-This repo has two semantic graphs available (no live LSP). Use them in this order:
+This repo has a semantic graph available via the `orbit` MCP server (no live LSP):
 
-- **Definition / signature lookup** → `codegraph_search` then `codegraph_node`. Returns file:line, signature, and leading doc comment without a `Read`. **Avoid `orbit_graph_search` for plain symbol lookups** — slow on large repos, and you can build orbit-graph selectors by template from the codegraph result: `symbol:<file>#<name>:<kind>`. Reach for `orbit_graph_search` only when you need a method-on-impl selector, a `source_regex` search, or `include_non_code` doc/config matches.
-- **Outbound calls (what does X call?)** → `codegraph_callees`. Expect duplicate edges per call site — dedupe mentally.
-- **Find references / callers (who uses X?)** → **`orbit_graph_refs`** with `include: "all"`, *not* `*_callers`. Both graphs' `callers` indexes miss cross-crate calls that go through `pub use` re-exports (e.g. a symbol defined in `orbit-common`, re-exported from `orbit-core`, called in another crate), so they routinely return empty for real public functions. `orbit_graph_refs` surfaces the actual call sites plus re-export points.
-- **Blast radius before edits** → `codegraph_impact`.
+- **Definition / signature lookup** → `orbit_graph_search`, then `orbit_graph_show` for file:line, signature, and doc comment without a `Read`. Selectors take the form `symbol:<file>#<name>:<kind>`; use a method-on-impl selector or `source_regex` when a plain name is ambiguous, and `include_non_code` for doc/config matches.
+- **Find references / callers (who uses X?)** → **`orbit_graph_refs`** with `include: "all"`, *not* `orbit_graph_callers`. The `callers` index misses cross-crate calls that go through `pub use` re-exports (e.g. a symbol defined in `orbit-common`, re-exported from `orbit-core`, called in another crate), so it routinely returns empty for real public functions. `orbit_graph_refs` surfaces the actual call sites plus re-export points.
 - **Ground-truth fallback** → `rg --type rust 'symbol_name'`. Use when `refs` looks incomplete or you need to see exact textual context (macro call sites, doc references, etc.).
-- **From a plain shell (no MCP/codegraph)** → the same orbit-graph queries are bundled in the main `orbit` binary as `orbit graph <sub>` (`search`/`show`/`refs`/`callees`/`impact`/`deps`/`trace`/`overview`/`implementors`, plus `sync`). In-process the tools above are faster — reach for the CLI only when the graph tools aren't available.
+- **From a plain shell (no MCP)** → the same queries are bundled in the main `orbit` binary as `orbit graph <sub>` (`search`/`show`/`refs`/`callees`/`impact`/`deps`/`trace`/`overview`/`implementors`, plus `sync`). In-process the MCP tools are faster — reach for the CLI only when the graph tools aren't available.
 
 ## Design Docs
 
