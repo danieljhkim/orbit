@@ -160,11 +160,16 @@ fn concurrent_writers_do_not_corrupt_jsonl_lines() {
                     // Re-open per line (O_APPEND) to mirror separate processes
                     // appending concurrently; short lines stay under PIPE_BUF.
                     let mut file = append_private_file(&path).expect("append open");
-                    let line = serde_json::to_string(
+                    let mut line = serde_json::to_string(
                         &serde_json::json!({"writer": writer_id, "seq": seq}),
                     )
                     .expect("serialize");
-                    writeln!(file, "{line}").expect("write line");
+                    // One write() per line, newline included — mirrors the fmt
+                    // layer, which write_all()s the whole formatted event.
+                    // (`writeln!` issues a second syscall for the `\n`, which
+                    // can interleave between concurrent appenders.)
+                    line.push('\n');
+                    file.write_all(line.as_bytes()).expect("write line");
                 }
             })
         })

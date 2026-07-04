@@ -211,10 +211,11 @@ pub(crate) fn prune_archives(
         archives.push((entry.path(), mtime, meta.len()));
     }
 
-    // Age-based pruning.
-    if let Some(cutoff) =
-        SystemTime::now().checked_sub(Duration::from_secs(config.retention_days * SECONDS_PER_DAY))
-    {
+    // Age-based pruning. Saturate the multiply so an absurd (but validated
+    // nonzero) retention_days cannot overflow into a tiny cutoff.
+    if let Some(cutoff) = SystemTime::now().checked_sub(Duration::from_secs(
+        config.retention_days.saturating_mul(SECONDS_PER_DAY),
+    )) {
         archives.retain(|(path, mtime, _size)| {
             if *mtime < cutoff {
                 let _ = std::fs::remove_file(path);
