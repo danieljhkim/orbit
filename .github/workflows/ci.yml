@@ -193,6 +193,16 @@ jobs:
           fi
           cargo deny --version
 
+      # The guardrail scripts shell out to ripgrep; the ubuntu-latest runner
+      # image no longer ships it, and a missing `rg` makes
+      # check-error-translation.sh read empty search results as "translator
+      # missing" (false failures on every crate). [ORB-10021]
+      - name: Install ripgrep
+        run: |
+          set -euo pipefail
+          command -v rg >/dev/null 2>&1 || sudo apt-get install -y --no-install-recommends ripgrep
+          rg --version | head -1
+
       - name: Run CI guardrails
         run: ./scripts/ci-guardrails.sh
 

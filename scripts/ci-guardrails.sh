@@ -4,6 +4,14 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
+# Several guardrail scripts shell out to ripgrep; a missing `rg` degrades
+# them silently (empty search results read as "clean" or, worse, as false
+# violations). Fail fast instead. [ORB-10021]
+if ! command -v rg >/dev/null 2>&1; then
+  echo "ci-guardrails: ripgrep (rg) is required; install it before running" >&2
+  exit 1
+fi
+
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 # Keep examples covered by clippy's all-targets pass, but avoid re-running
