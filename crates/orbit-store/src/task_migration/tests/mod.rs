@@ -524,3 +524,50 @@ fn renumber_writes_id_map_file() {
     let map = read_id_map(&map_path);
     assert_eq!(map.get("ORB-00000"), outcome.id_remap.get("ORB-00000"));
 }
+
+#[test]
+fn renumber_reimport_is_not_idempotent() {
+    // Documented boundary: idempotency is scoped to kept (free) ids. A collision
+    // under --on-conflict=renumber means "these are new local tasks", so each
+    // re-run mints fresh ids rather than de-duplicating. This test pins that.
+    let src = TempDir::new().unwrap();
+    let dst = TempDir::new().unwrap();
+    let archive = src.path().join("tasks.tar.zst");
+    build_source_archive(src.path(), "orbit-src-aaaaaa", &archive);
+
+    let registry = open_registry(dst.path());
+    let target_ws = "orbit-dst-bbbbbb";
+    let binding = bind(&registry, dst.path(), target_ws);
+    let store = bundle_store(&registry, &binding);
+    seed(
+        &store,
+        &registry,
+        target_ws,
+        &make_bundle("ORB-00000", "local keep", Vec::new()),
+    );
+
+    let first = import_tasks(
+        &registry,
+        &archive,
+        Some(target_ws),
+        ImportConflictPolicy::Renumber,
+    )
+    .unwrap();
+    assert!(!first.id_remap.is_empty());
+    let after_first = registry.tasks_for_workspace(target_ws).unwrap().len();
+
+    let second = import_tasks(
+        &registry,
+        &archive,
+        Some(target_ws),
+        ImportConflictPolicy::Renumber,
+    )
+    .unwrap();
+    // Re-run renumbers again rather than skipping — task count strictly grows.
+    assert!(!second.id_remap.is_empty());
+    let after_second = registry.tasks_for_workspace(target_ws).unwrap().len();
+    assert!(
+        after_second > after_first,
+        "renumber re-import mints fresh copies (not idempotent): {after_first} -> {after_second}"
+    );
+}

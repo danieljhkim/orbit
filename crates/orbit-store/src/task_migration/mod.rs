@@ -15,8 +15,12 @@
 //! - Import validates everything *before* mutating state, then keeps free ids,
 //!   renumbers collisions (rewriting relation targets within the imported set),
 //!   rebuilds index rows from bundle YAML, bumps the allocator past the max
-//!   landed id, recreates the `.orbit/tasks/` symlink projection, and is
-//!   idempotent on re-run.
+//!   landed id, and recreates the `.orbit/tasks/` symlink projection.
+//! - Idempotency is scoped to *kept* ids: re-importing an archive whose ids are
+//!   free (or already landed unchanged) is a no-op. A `--on-conflict=renumber`
+//!   run is **not** idempotent — a collision means "these are new local tasks,"
+//!   so each run mints fresh ids. Import once; the printed `.idmap.json` records
+//!   what landed.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -284,6 +288,9 @@ pub fn import_tasks(
                             final_id: staged.source_id,
                             action: ImportAction::SkippedConflict,
                         }),
+                        // Note: renumber is not idempotent across re-runs — the
+                        // source id still collides with the original local task
+                        // (unchanged), so a second run mints another fresh id.
                         ImportConflictPolicy::Renumber => to_renumber.push(staged),
                     }
                 }
@@ -291,7 +298,7 @@ pub fn import_tasks(
         }
     }
 
-    // Nothing new to write (fully idempotent re-run, or everything skipped).
+    // Nothing new to write (all ids were free-and-identical, or all skipped).
     if kept.is_empty() && to_renumber.is_empty() {
         let projection = rebuild_projection_best_effort(registry, &target);
         return Ok(ImportOutcome {
@@ -305,9 +312,16 @@ pub fn import_tasks(
     }
 
     // ---- Phase 2: mutate. Track writes for best-effort rollback. ----
+    // Note: the monotonic allocator bumps below are intentionally never rolled
+    // back — the counter only moves forward and holes are expected. A newly
+    // created workspace *binding* is likewise left in place on rollback (an
+    // empty binding is benign and idempotent to re-create); only the synthetic
+    // directory we created for it is cleaned up.
     let mut guard = WriteGuard::new(registry);
 
     let registered_workspace = if let Some(params) = &target.register {
+        std::fs::create_dir_all(&target.orbit_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+        guard.created_workspace_dir = Some(target.orbit_dir.clone());
         registry.bind_workspace(params.clone())?;
         true
     } else {
@@ -503,14 +517,14 @@ fn resolve_target(
     // Source workspace is unknown locally and no target was named: register a
     // detached binding pinned to the source id. Its synthetic orbit_dir lives
     // beside the workspaces tree so the projection has somewhere to land until
-    // the real repo is initialized with this workspace id.
+    // the real repo is initialized with this workspace id. The directory is
+    // created in Phase 2 (not here) so a classification failure leaves no leak.
     let detached_root = registry
         .workspaces_dir()
         .parent()
         .map(|parent| parent.join("detached"))
         .unwrap_or_else(|| registry.workspaces_dir().join("detached"));
     let orbit_dir = detached_root.join(&manifest.source_workspace_id);
-    std::fs::create_dir_all(&orbit_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
     let params = BindWorkspaceParams {
         workspace_id: Some(manifest.source_workspace_id.clone()),
         slug: manifest.source_workspace_slug.clone(),
@@ -592,6 +606,8 @@ struct WriteGuard<'a> {
     registry: &'a TaskRegistryStore,
     written_dirs: Vec<PathBuf>,
     registered_ids: Vec<String>,
+    /// Synthetic orbit dir created for a freshly registered detached workspace.
+    created_workspace_dir: Option<PathBuf>,
     armed: bool,
 }
 
@@ -601,6 +617,7 @@ impl<'a> WriteGuard<'a> {
             registry,
             written_dirs: Vec::new(),
             registered_ids: Vec::new(),
+            created_workspace_dir: None,
             armed: true,
         }
     }
@@ -624,6 +641,13 @@ impl<'a> WriteGuard<'a> {
             }
         }
         for dir in self.written_dirs.drain(..) {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        // The empty detached workspace dir we created (bundle dirs live under a
+        // separate `workspaces/` tree, so this only holds a not-yet-built
+        // projection). The workspace binding row is left in place — an empty
+        // binding is benign and idempotent to re-create on retry.
+        if let Some(dir) = self.created_workspace_dir.take() {
             let _ = std::fs::remove_dir_all(&dir);
         }
         self.armed = false;

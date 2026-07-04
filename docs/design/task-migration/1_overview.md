@@ -86,9 +86,14 @@ fails with no partial writes. It resolves the target workspace (the archive's
 source workspace if registered locally, else `--workspace <id>`, else it
 registers the source workspace id), keeps ids that are free, renumbers the rest,
 rebuilds the index rows from bundle YAML, bumps the allocator past the highest
-landed id, recreates the `.orbit/tasks/` symlink projection, and is idempotent —
-re-running skips already-imported identical bundles. When anything is
+landed id, and recreates the `.orbit/tasks/` symlink projection. When anything is
 renumbered, an `<archive>.idmap.json` old→new map is written and printed.
+
+Idempotency is scoped to *kept* ids: re-importing an archive whose ids are free
+(or already landed unchanged) is a no-op. A `--on-conflict=renumber` run is not
+idempotent — a collision means "these are new local tasks," so each re-run mints
+fresh ids. Import a renumber archive once; the printed `.idmap.json` is the
+record of what landed.
 
 `--on-conflict=skip` imports the non-colliding tasks and drops the rest;
 `--on-conflict=fail` aborts the whole import on the first collision.
