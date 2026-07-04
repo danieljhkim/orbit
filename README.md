@@ -324,6 +324,8 @@ Couple things to note:
 
 - Global state — credentials, the canonical task store, and cross-workspace config — lives under `~/.orbit/`, created by `orbit init`. The recommended `.gitignore` pattern is `.orbit/*` with `!.orbit/adrs/` and `!.orbit/learnings/` un-ignored, so local runtime state stays out of the repo while project memory stays in.
 
+- Operating this state day-2 — backup/restore, stuck-job debugging, corrupted-DB recovery, log rotation, health checks (`orbit doctor`, `/healthz`), and upgrades (`orbit migrate`) — is covered in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+
 ---
 
 ## Current Status
