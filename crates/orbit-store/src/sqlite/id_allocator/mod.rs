@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
-use fs2::FileExt;
 use orbit_common::types::OrbitError;
 use orbit_common::utility::fs::atomic_write_text;
 use orbit_common::utility::git::{CurrentBranchStatus, current_branch};
@@ -551,28 +550,11 @@ impl IdAllocator {
         Ok(records)
     }
 
-    fn acquire_lock(&self) -> Result<File, OrbitError> {
-        let parent = self.inner.lock_path.parent().ok_or_else(|| {
-            OrbitError::Store(format!(
-                "cannot determine id allocation lock parent for '{}'",
-                self.inner.lock_path.display()
-            ))
-        })?;
-        fs::create_dir_all(parent).map_err(|error| OrbitError::Io(error.to_string()))?;
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&self.inner.lock_path)
-            .map_err(|error| OrbitError::Io(error.to_string()))?;
-        file.lock_exclusive().map_err(|error| {
-            OrbitError::Store(format!(
-                "failed to acquire id allocation lock '{}': {error}",
-                self.inner.lock_path.display()
-            ))
-        })?;
-        Ok(file)
+    /// Acquire the process-wide ID-allocation lock. [ORB-00412] Bounded by a
+    /// deadline with holder diagnostics via [`crate::file_lock`] — a hung
+    /// holder no longer stalls every other allocator forever.
+    fn acquire_lock(&self) -> Result<crate::file_lock::FileLockGuard, OrbitError> {
+        crate::file_lock::acquire_exclusive(&self.inner.lock_path, "id allocation")
     }
 
     fn lock_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>, OrbitError> {
