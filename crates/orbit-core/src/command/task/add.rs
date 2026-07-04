@@ -37,6 +37,7 @@ impl OrbitRuntime {
         for criterion in params.acceptance_criteria.iter_mut() {
             *criterion = redact_all(criterion);
         }
+        params.comment = params.comment.map(|comment| redact_all(&comment));
 
         let (canonical_agent, canonical_model) =
             self.try_canonical_agent_model_identity(agent.as_deref(), model.as_deref())?;
