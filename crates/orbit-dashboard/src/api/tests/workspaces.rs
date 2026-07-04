@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::http::{Method, Request};
+use axum::http::{Method, Request, StatusCode, header};
 use orbit_core::command::task::TaskAddParams;
 use orbit_core::{ActorIdentity, OrbitRuntime, TaskStatus};
 use serde_json::json;
@@ -286,5 +286,140 @@ fn abbreviate_home_collapses_home_prefix() {
     assert_eq!(
         abbreviate_home(&PathBuf::from("/home/dan/ws"), None),
         "/home/dan/ws"
+    );
+}
+
+fn post_json(uri: &str, body: serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(header::ORIGIN, "http://localhost:7878")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("request")
+}
+
+/// Titles of the dashboard task list for one workspace, via the HTTP surface.
+async fn task_titles(state: &DashboardState, workspace: &str) -> Vec<String> {
+    let response = router()
+        .with_state(state.clone())
+        .oneshot(get(&format!("/tasks?workspace={workspace}")))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    body_json(response)
+        .await
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|t| t["title"].as_str().expect("title").to_string())
+        .collect()
+}
+
+/// ORB-00042: `POST /tasks?workspace=<id>` creates the task in *that*
+/// workspace, not the server's default.
+#[tokio::test]
+async fn create_task_with_workspace_param_binds_to_that_workspace() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    let (beta_orbit, beta_repo) = seed_workspace(&global_root, tmp.path(), "beta");
+    let entries = vec![
+        WsEntry {
+            id: "alpha".to_string(),
+            name: "alpha".to_string(),
+            repo_root: alpha_repo,
+            orbit_dir: alpha_orbit,
+            active: true,
+        },
+        WsEntry {
+            id: "beta".to_string(),
+            name: "beta".to_string(),
+            repo_root: beta_repo,
+            orbit_dir: beta_orbit,
+            active: true,
+        },
+    ];
+    // alpha is the default: an unrouted create would land there.
+    let state = DashboardState::global(global_root, entries, Some("alpha".to_string()));
+
+    let response = router()
+        .with_state(state.clone())
+        .oneshot(post_json(
+            "/tasks?workspace=beta",
+            json!({ "title": "routed to beta", "description": "ORB-00042" }),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let created = body_json(response).await;
+    assert!(created["id"].is_string(), "create returns the task");
+
+    let beta_titles = task_titles(&state, "beta").await;
+    assert!(
+        beta_titles.iter().any(|t| t == "routed to beta"),
+        "task must live in the selected workspace, got {beta_titles:?}"
+    );
+    let alpha_titles = task_titles(&state, "alpha").await;
+    assert!(
+        !alpha_titles.iter().any(|t| t == "routed to beta"),
+        "task must not leak into the default workspace, got {alpha_titles:?}"
+    );
+
+    // Omitting `?workspace=` falls back to the configured default (alpha).
+    let response = router()
+        .with_state(state.clone())
+        .oneshot(post_json(
+            "/tasks",
+            json!({ "title": "defaulted to alpha", "description": "ORB-00042" }),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let alpha_titles = task_titles(&state, "alpha").await;
+    assert!(
+        alpha_titles.iter().any(|t| t == "defaulted to alpha"),
+        "omitted selector must use the default workspace, got {alpha_titles:?}"
+    );
+}
+
+/// ORB-00042: creating against an unknown workspace is a clean 404 and no
+/// task is created anywhere — never a silent fallback to the default.
+#[tokio::test]
+async fn create_task_with_unknown_workspace_is_404_and_creates_nothing() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    let entries = vec![WsEntry {
+        id: "alpha".to_string(),
+        name: "alpha".to_string(),
+        repo_root: alpha_repo,
+        orbit_dir: alpha_orbit,
+        active: true,
+    }];
+    let state = DashboardState::global(global_root, entries, Some("alpha".to_string()));
+
+    let response = router()
+        .with_state(state.clone())
+        .oneshot(post_json(
+            "/tasks?workspace=ghost",
+            json!({ "title": "lost", "description": "should not exist" }),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = body_json(response).await;
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|m| m.contains("unknown workspace: ghost"))
+    );
+
+    let alpha_titles = task_titles(&state, "alpha").await;
+    assert!(
+        !alpha_titles.iter().any(|t| t == "lost"),
+        "nothing may be created in the default workspace, got {alpha_titles:?}"
     );
 }

@@ -713,3 +713,36 @@ async fn list_tasks_includes_complexity_when_set() {
         "complexity must be projected as string for dashboard"
     );
 }
+
+/// ORB-00042: `workspace` is a selector and lives in the query string, never
+/// the body. A stray `workspace` body key (the historical bridge mis-key) must
+/// be a loud 400 pointing at `?workspace=`, not silently dropped.
+#[tokio::test]
+async fn create_task_rejects_stray_workspace_body_key() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let response = router()
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/tasks")
+                .header(header::ORIGIN, "http://localhost:7878")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "title": "mis-keyed",
+                        "description": "workspace does not belong in the body",
+                        "workspace": "ws_polaris",
+                    })
+                    .to_string(),
+                ))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(response).await;
+    let message = body["error"].as_str().expect("error message");
+    assert!(message.contains("workspace"), "names the offending key");
+    assert!(message.contains("?workspace="), "points at the query param");
+}
