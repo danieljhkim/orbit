@@ -159,7 +159,7 @@ impl ServerHandler for OrbitToolServer {
         request: InitializeRequestParams,
         context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<InitializeResult, McpError>> + Send + '_ {
-        self.replace_session_context(session_context_from_initialize(&request));
+        self.replace_session_context(session_context_from_initialize(&request, &context.meta));
         if context.peer.peer_info().is_none() {
             context.peer.set_peer_info(request);
         }
@@ -202,21 +202,31 @@ impl ServerHandler for OrbitToolServer {
 
 pub(super) fn session_context_from_initialize(
     request: &InitializeRequestParams,
+    transport_meta: &rmcp::model::Meta,
 ) -> ToolSessionContext {
     // ADR-0181: clients deliberately announce workspace through initialize `_meta`.
-    let workspace = request
-        .meta
-        .as_ref()
-        .and_then(|meta| {
-            meta.0
-                .get("orbit")
-                .and_then(|orbit| orbit.get("workspace"))
-                .or_else(|| meta.0.get("orbit.workspace"))
-                .and_then(Value::as_str)
-        })
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned);
+    //
+    // rmcp's wire deserializer strips `_meta` out of the request params and
+    // parks it on the request extensions (surfaced here as the request
+    // context's `meta`), so `request.meta` is always `None` for requests that
+    // crossed a real transport. Check the params-level field first for
+    // callers that construct `InitializeRequestParams` in-process, then fall
+    // back to the transport-level meta. Covered by the crate integration
+    // test `initialize_meta_workspace_reaches_host_session_context`.
+    let workspace = workspace_from_meta(request.meta.as_ref().map(|meta| &meta.0))
+        .or_else(|| workspace_from_meta(Some(&transport_meta.0)));
 
     ToolSessionContext { workspace }
+}
+
+fn workspace_from_meta(meta: Option<&rmcp::model::JsonObject>) -> Option<String> {
+    meta.and_then(|meta| {
+        meta.get("orbit")
+            .and_then(|orbit| orbit.get("workspace"))
+            .or_else(|| meta.get("orbit.workspace"))
+            .and_then(Value::as_str)
+    })
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .map(ToOwned::to_owned)
 }

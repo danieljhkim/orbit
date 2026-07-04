@@ -22,4 +22,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# `io-util` supplies the in-memory duplex transport and `time` the request
+# timeouts used by the crate-root wire integration tests.
+tokio = { workspace = true, features = ["io-util", "time"] }
 tracing-subscriber.workspace = true

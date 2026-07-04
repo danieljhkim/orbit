@@ -1,0 +1,1653 @@
+[
+  {
+    "description": "Create a Proposed Architecture Decision Record. Returns the assigned global ID and the full record JSON.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "body": {
+          "description": "ADR body as markdown. Must include Context / Decision / Consequences sections per the ADR template; at least one consequences bullet must be a labeled `Cost:` line.",
+          "type": "string"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "owner": {
+          "description": "Agent identity that owns the ADR (e.g. `claude`, `codex`). Defaults to the calling actor.",
+          "type": "string"
+        },
+        "paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Repo-relative glob patterns for code or docs areas constrained by this ADR. Defaults to an empty list when omitted."
+        },
+        "related_features": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Feature folder names this decision touches. Accepts a string or array of strings."
+        },
+        "related_tasks": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Orbit task IDs that proposed or shipped the decision. May be empty at creation per ADR-008. Accepts a string or array of strings."
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Free-form ADR labels. Defaults to an empty list when omitted."
+        },
+        "title": {
+          "description": "ADR title (short noun phrase).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "body"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_adr_add"
+  },
+  {
+    "description": "Fetch a single ADR by global ID or legacy ID alias. Returns the full record JSON including envelope fields and body.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "description": "Canonical ADR ID (e.g. `ADR-0042`).",
+          "type": "string"
+        },
+        "legacy_id": {
+          "description": "Legacy ID alias (e.g. `activity-job/ADR-039`). Either `id` or `legacy_id` must be provided; specifying both is an error.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "orbit_adr_show"
+  },
+  {
+    "description": "Write the bidirectional supersession edge: `old.status = superseded`, `old.superseded_by = new`, and `new.supersedes` gains `old`.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "new_id": {
+          "description": "Replacement ADR. Must already be in the `accepted` state, or the call returns an invalid_transition error and writes nothing.",
+          "type": "string"
+        },
+        "old_id": {
+          "description": "ADR being superseded.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "old_id",
+        "new_id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_adr_supersede"
+  },
+  {
+    "description": "Partial update of an ADR's mutable fields and/or status. Status transitions follow the ADR lifecycle rules.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "body": {
+          "description": "Replacement body markdown.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Canonical ADR ID to update.",
+          "type": "string"
+        },
+        "legacy_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Replacement legacy_ids list (supports rollup aliasing)."
+        },
+        "legacy_validation": {
+          "description": "Set legacy_validation to `none` or `warned`.",
+          "type": "string"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "owner": {
+          "description": "New owner.",
+          "type": "string"
+        },
+        "paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Replacement repo-relative applicability globs. Empty list clears existing paths; absence leaves them unchanged."
+        },
+        "related_features": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Replacement related_features list."
+        },
+        "related_tasks": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Replacement related_tasks list. Required (non-empty) when transitioning proposed -> accepted unless the existing record already has tasks."
+        },
+        "status": {
+          "description": "New status. `proposed -> accepted` requires non-empty `related_tasks` on the resulting record. `accepted -> proposed` is rejected. Direct writes to `superseded` are rejected — use orbit.adr.supersede.",
+          "type": "string"
+        },
+        "supersedes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Replacement supersedes list."
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Replacement free-form ADR labels. Empty list clears existing tags; absence leaves them unchanged."
+        },
+        "title": {
+          "description": "New title.",
+          "type": "string"
+        },
+        "validation_warnings": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Replacement validation_warnings list."
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_adr_update"
+  },
+  {
+    "description": "Append an Orbit friction report under .orbit/frictions/",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "body": {
+          "description": "Markdown body describing what happened and why it caused friction",
+          "type": "string"
+        },
+        "during_task": {
+          "description": "Optional task ID being worked on when friction occurred",
+          "type": "string"
+        },
+        "model": {
+          "description": "Required agent family for attribution (`codex`, `claude`, `gemini`, or `grok`)",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Friction taxonomy tags as a string or array; valid tags: build | docs | lifecycle | naming | other | policy | skill-guidance | tooling; defaults to other"
+        }
+      },
+      "required": [
+        "body",
+        "model"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_friction_add"
+  },
+  {
+    "description": "List configured friction taxonomy tags",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "orbit_friction_tags"
+  },
+  {
+    "description": "Update triage metadata for an Orbit friction record",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "body": {
+          "description": "Optional replacement markdown body",
+          "type": "string"
+        },
+        "id": {
+          "description": "Friction record id, e.g. F2026-05-001",
+          "type": "string"
+        },
+        "status": {
+          "description": "Optional status: open, triaged, or resolved",
+          "type": "string"
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Optional replacement taxonomy tags as a string or array; valid tags: build | docs | lifecycle | naming | other | policy | skill-guidance | tooling"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_friction_update"
+  },
+  {
+    "description": "Find outbound calls from an orbit-graph symbol selector.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "symbol": {
+          "description": "Symbol selector to query.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Optional worktree path alias for this graph request.",
+          "type": "string"
+        },
+        "workspace_path": {
+          "description": "Optional worktree path for this graph request.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_graph_callees"
+  },
+  {
+    "description": "List outbound module/import edges for a file: or dir: selector.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "selector": {
+          "description": "File or directory selector whose outbound imports to list.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Optional worktree path alias for this graph request.",
+          "type": "string"
+        },
+        "workspace_path": {
+          "description": "Optional worktree path for this graph request.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "selector"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_graph_deps"
+  },
+  {
+    "description": "Return a bounded orbit-graph blast-radius traversal.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "confidence": {
+          "description": "Minimum confidence floor. Defaults to same_module.",
+          "type": "string"
+        },
+        "depth": {
+          "description": "Maximum traversal depth.",
+          "type": "number"
+        },
+        "selector": {
+          "description": "Origin selector.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Optional worktree path alias for this graph request.",
+          "type": "string"
+        },
+        "workspace_path": {
+          "description": "Optional worktree path for this graph request.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "selector"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_graph_impact"
+  },
+  {
+    "description": "List the concrete types implementing the trait addressed by a selector.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "selector": {
+          "description": "Trait selector to resolve implementors for.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Optional worktree path alias for this graph request.",
+          "type": "string"
+        },
+        "workspace_path": {
+          "description": "Optional worktree path for this graph request.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "selector"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_graph_implementors"
+  },
+  {
+    "description": "Summarize indexed files and symbols, optionally scoped to a dir: or file: selector.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "format": {
+          "description": "Output detail: summary (default) or full.",
+          "type": "string"
+        },
+        "scope": {
+          "description": "Optional dir: or file: selector to scope the summary. Defaults to the whole worktree.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Optional worktree path alias for this graph request.",
+          "type": "string"
+        },
+        "workspace_path": {
+          "description": "Optional worktree path for this graph request.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "orbit_graph_overview"
+  },
+  {
+    "description": "Find inbound references and relations for an orbit-graph symbol selector.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "confidence": {
+          "description": "Minimum confidence floor.",
+          "enum": [
+            "exact",
+            "import",
+            "same_module",
+            "fuzzy"
+          ],
+          "type": "string"
+        },
+        "kind": {
+          "description": "Optional reference or relation kind filter.",
+          "enum": [
+            "call",
+            "type",
+            "use",
+            "trait_bound",
+            "impl",
+            "extends",
+            "implements"
+          ],
+          "type": "string"
+        },
+        "symbol": {
+          "description": "Symbol selector to query.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Optional worktree path alias for this graph request.",
+          "type": "string"
+        },
+        "workspace_path": {
+          "description": "Optional worktree path for this graph request.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_graph_refs"
+  },
+  {
+    "description": "Search orbit-graph symbols, notable strings, and config keys.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "kind": {
+          "description": "Optional result kind: symbol, string, or config.",
+          "enum": [
+            "symbol",
+            "string",
+            "config"
+          ],
+          "type": "string"
+        },
+        "lang": {
+          "description": "Optional language filter.",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Maximum number of matches.",
+          "type": "number"
+        },
+        "query": {
+          "description": "Search query text.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Optional worktree path alias for this graph request.",
+          "type": "string"
+        },
+        "workspace_path": {
+          "description": "Optional worktree path for this graph request.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_graph_search"
+  },
+  {
+    "description": "Show source and metadata for an orbit-graph selector.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "max_bytes": {
+          "description": "Maximum source bytes returned.",
+          "type": "number"
+        },
+        "selector": {
+          "description": "Selector to show.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Optional worktree path alias for this graph request.",
+          "type": "string"
+        },
+        "workspace_path": {
+          "description": "Optional worktree path for this graph request.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "selector"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_graph_show"
+  },
+  {
+    "description": "Synchronize the orbit-graph index for the current worktree.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "full": {
+          "description": "Run a full sync instead of an incremental auto sync.",
+          "type": "boolean"
+        },
+        "workspace": {
+          "description": "Optional worktree path alias for this graph request.",
+          "type": "string"
+        },
+        "workspace_path": {
+          "description": "Optional worktree path for this graph request.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "orbit_graph_sync"
+  },
+  {
+    "description": "Trace a command handler call tree from orbit-graph command metadata.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "command_name": {
+          "description": "Command name to trace.",
+          "type": "string"
+        },
+        "confidence": {
+          "description": "Minimum confidence floor. Defaults to same_module.",
+          "type": "string"
+        },
+        "depth": {
+          "description": "Maximum call-tree depth.",
+          "type": "number"
+        },
+        "workspace": {
+          "description": "Optional worktree path alias for this graph request.",
+          "type": "string"
+        },
+        "workspace_path": {
+          "description": "Optional worktree path for this graph request.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_name"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_graph_trace"
+  },
+  {
+    "description": "Create an active project learning. Returns `{ id, created_at }` plus the full record.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "body": {
+          "description": "Long-form prose (markdown).",
+          "type": "string"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Array of `{ kind: \"task\"|\"commit\"|\"external\", ref: string }` entries. Optional."
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "priority": {
+          "description": "Optional priority (0–255). Used as the secondary ranking key in `search`; higher wins.",
+          "type": "integer"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Scope object: `{ paths?: string[], tags?: string[] }`. Matches are evaluated as `paths OR tags` per §3.3."
+        },
+        "summary": {
+          "description": "One-line headline (≤ 280 chars). Required.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "summary",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_learning_add"
+  },
+  {
+    "description": "Append a footnote-style comment to an active learning. Returns `{ id, learning_id, created_at }`.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "body": {
+          "description": "Comment body (trimmed, non-empty, ≤ 500 chars).",
+          "type": "string"
+        },
+        "learning_id": {
+          "description": "ID of the parent learning.",
+          "type": "string"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "learning_id",
+        "body"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_learning_comment_add"
+  },
+  {
+    "description": "Fetch a single learning by ID as JSON. Returns the full record including body and evidence.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "description": "learning ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_learning_show"
+  },
+  {
+    "description": "Mark `id` as superseded by `with`. Writes both pointers atomically and excludes the old record from default search.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "description": "ID of the learning being superseded.",
+          "type": "string"
+        },
+        "with": {
+          "description": "ID of the replacement learning. Must differ from `id`. Both records must exist.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "with"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_learning_supersede"
+  },
+  {
+    "description": "Partial update of a learning. Rejects updates on superseded records (use `orbit.learning.supersede` instead).",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "body": {
+          "description": "Replace `body`.",
+          "type": "string"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Replace `evidence` array."
+        },
+        "id": {
+          "description": "Learning ID to update.",
+          "type": "string"
+        },
+        "priority": {
+          "description": "Replace `priority`. Pass an integer to set, `null` to clear, or omit to leave unchanged.",
+          "type": "integer"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Replace `scope` entirely: `{ paths?: string[], tags?: string[] }`."
+        },
+        "summary": {
+          "description": "Replace `summary` (≤ 280 chars).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_learning_update"
+  },
+  {
+    "description": "Search tasks, docs, learnings, and ADRs. Hybrid vector ranking applies to indexed tasks, docs, and learnings.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "all": {
+          "description": "Include normally-hidden statuses for the queried kind. Task adds done/rejected/archived; ADR adds superseded; learning adds superseded; doc is a no-op.",
+          "type": "boolean"
+        },
+        "hybrid": {
+          "description": "Opt into hybrid lexical + cosine ranking for indexed task, doc, and learning vectors; ADRs remain lexical.",
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "Corpus kind: task, doc, learning, adr, or all. Default: all.",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Maximum number of results. Default: 10.",
+          "type": "integer"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "path": {
+          "description": "Filter to artifacts applicable to this filesystem path. Task: selector containment. Learning and ADR: glob-containment over applicability globs. Doc out of scope (returns empty).",
+          "type": "string"
+        },
+        "query": {
+          "description": "Free-text query. Defaults to lexical matching unless hybrid is true.",
+          "type": "string"
+        },
+        "semantic": {
+          "description": "Task ID for cosine-neighbor lookup. Mutually exclusive with query.",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Explicit per-kind status override using kind:value tokens, such as task:open,doc:active,adr:proposed. Overrides `all` for the named kind."
+        },
+        "tag": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "AND-filter by tag. Repeat or pass an array. Applies to task, doc, learning, and ADR."
+        }
+      },
+      "type": "object"
+    },
+    "name": "orbit_search"
+  },
+  {
+    "description": "Create an Orbit task and return the created task JSON",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "acceptance_criteria": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Optional acceptance criteria as a string or array of strings"
+        },
+        "complexity": {
+          "description": "Optional task complexity level (low, medium, or hard)",
+          "enum": [
+            "low",
+            "medium",
+            "hard"
+          ],
+          "type": "string"
+        },
+        "context_files": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Optional task context selectors as a comma-separated string or array of strings. Add entries ONLY for existing files, directories, or symbols expected to be modified or deleted by the task. Do not add background-reading entries or files referenced only for context. Prefer canonical selectors: `file:`, `dir:`, or `symbol:path#name:kind`. Legacy raw paths are accepted and upgraded automatically."
+        },
+        "description": {
+          "description": "Task description markdown",
+          "type": "string"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "priority": {
+          "description": "Optional priority level",
+          "type": "string"
+        },
+        "relations": {
+          "description": "Optional typed task relations as an array of {type, target} objects",
+          "type": "array"
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Optional tags as a string or array of strings"
+        },
+        "title": {
+          "description": "Task title",
+          "type": "string"
+        },
+        "type": {
+          "description": "Optional task type",
+          "enum": [
+            "feature",
+            "bug",
+            "refactor",
+            "chore"
+          ],
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace path for the task",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "description"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_task_add"
+  },
+  {
+    "description": "Approve an Orbit task and return the updated task JSON",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "agent": {
+          "description": "Deprecated compatibility field. Prefer `model` with the agent family (`codex`, `claude`, `gemini`, or `grok`).",
+          "type": "string"
+        },
+        "comment": {
+          "description": "Optional task comment to append",
+          "type": "string"
+        },
+        "id": {
+          "description": "task ID",
+          "type": "string"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "note": {
+          "description": "Optional approval note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_task_approve"
+  },
+  {
+    "description": "Store a source file under a task's artifacts directory",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "agent": {
+          "description": "Deprecated compatibility field. Prefer `model` with the agent family (`codex`, `claude`, `gemini`, or `grok`).",
+          "type": "string"
+        },
+        "id": {
+          "description": "task ID",
+          "type": "string"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "path": {
+          "description": "Artifact path relative to the task artifacts directory. Defaults to the source file name.",
+          "type": "string"
+        },
+        "source_path": {
+          "description": "Source file to store as a task artifact.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_path"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_task_artifact_put"
+  },
+  {
+    "description": "List Orbit tasks, optionally filtered by status, parent, type, or dependency readiness",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "agent": {
+          "description": "Deprecated compatibility field. Prefer `model` with the agent family (`codex`, `claude`, `gemini`, or `grok`).",
+          "type": "string"
+        },
+        "job_run_id": {
+          "description": "Filter by job run ID",
+          "type": "string"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "parent_id": {
+          "description": "Optional parent task ID to list subtasks for",
+          "type": "string"
+        },
+        "path": {
+          "description": "Filter to tasks whose `context_files` selectors apply to this path. Supports file:, dir:, symbol:, and bare path selectors; bidirectional containment.",
+          "type": "string"
+        },
+        "ready": {
+          "description": "When true, keep only tasks whose dependencies are satisfied",
+          "type": "boolean"
+        },
+        "status": {
+          "description": "Optional task status filter",
+          "type": "string"
+        },
+        "tag": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Filter by tag. Repeat or pass an array for AND semantics."
+        },
+        "type": {
+          "description": "Optional task type filter",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "orbit_task_list"
+  },
+  {
+    "description": "Create a new review thread on an Orbit task",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "agent": {
+          "description": "Deprecated compatibility field. Prefer `model` with the agent family (`codex`, `claude`, `gemini`, or `grok`).",
+          "type": "string"
+        },
+        "body": {
+          "description": "Review comment body",
+          "type": "string"
+        },
+        "id": {
+          "description": "task ID",
+          "type": "string"
+        },
+        "line": {
+          "description": "Line number for inline review comment",
+          "type": "string"
+        },
+        "model": {
+          "description": "Required provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`), or `human` for human-authored review feedback to opt out of scoreboard scoring. Full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "path": {
+          "description": "File path for inline review comment",
+          "type": "string"
+        },
+        "task_id": {
+          "description": "Task ID alias for id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "body",
+        "model"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_task_review_thread_add"
+  },
+  {
+    "description": "List review threads on an Orbit task",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "agent": {
+          "description": "Deprecated compatibility field. Prefer `model` with the agent family (`codex`, `claude`, `gemini`, or `grok`).",
+          "type": "string"
+        },
+        "id": {
+          "description": "task ID",
+          "type": "string"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "status": {
+          "description": "Filter by thread status: open or resolved",
+          "type": "string"
+        },
+        "task_id": {
+          "description": "Task ID alias for id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_task_review_thread_list"
+  },
+  {
+    "description": "Reply to an existing review thread on an Orbit task",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "agent": {
+          "description": "Deprecated compatibility field. Prefer `model` with the agent family (`codex`, `claude`, `gemini`, or `grok`).",
+          "type": "string"
+        },
+        "body": {
+          "description": "Reply body",
+          "type": "string"
+        },
+        "id": {
+          "description": "task ID",
+          "type": "string"
+        },
+        "model": {
+          "description": "Required provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`), or `human` for human-authored review feedback to opt out of scoreboard scoring. Full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "task_id": {
+          "description": "Task ID alias for id",
+          "type": "string"
+        },
+        "thread_id": {
+          "description": "Review thread ID to reply to",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "thread_id",
+        "body",
+        "model"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_task_review_thread_reply"
+  },
+  {
+    "description": "Resolve a review thread on an Orbit task",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "agent": {
+          "description": "Deprecated compatibility field. Prefer `model` with the agent family (`codex`, `claude`, `gemini`, or `grok`).",
+          "type": "string"
+        },
+        "id": {
+          "description": "task ID",
+          "type": "string"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "task_id": {
+          "description": "Task ID alias for id",
+          "type": "string"
+        },
+        "thread_id": {
+          "description": "Review thread ID to resolve",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "thread_id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_task_review_thread_resolve"
+  },
+  {
+    "description": "Fetch a single Orbit task as JSON. Use the optional `fields` projection (or single-field alias `field`) to retrieve only specific task fields, such as `field: \"artifacts\"`.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "agent": {
+          "description": "Deprecated compatibility field. Prefer `model` with the agent family (`codex`, `claude`, `gemini`, or `grok`).",
+          "type": "string"
+        },
+        "field": {
+          "description": "Compatibility alias for a single field projection. Example: `field: \"artifacts\"`.",
+          "type": "string"
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Optional field projection as a string or array of strings. When set, returns only the requested field(s) as JSON. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, history, context_files, artifacts."
+        },
+        "id": {
+          "description": "task ID",
+          "type": "string"
+        },
+        "max_docs": {
+          "description": "Optional cap for `related_docs` when `with_context` is true. Defaults to 5.",
+          "type": "integer"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "with_context": {
+          "description": "Optional boolean. When true, include a `related_docs` array matched from task context selectors and feature tags.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_task_show"
+  },
+  {
+    "description": "Start work on an Orbit task and return the updated task JSON",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "agent": {
+          "description": "Deprecated compatibility field. Prefer `model` with the agent family (`codex`, `claude`, `gemini`, or `grok`).",
+          "type": "string"
+        },
+        "comment": {
+          "description": "Optional task comment to append",
+          "type": "string"
+        },
+        "crew": {
+          "description": "Optional crew override for this start",
+          "type": "string"
+        },
+        "id": {
+          "description": "task ID",
+          "type": "string"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "note": {
+          "description": "Optional lifecycle note for the start transition",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_task_start"
+  },
+  {
+    "description": "Update an Orbit task and return the fresh task JSON",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "acceptance_criteria": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "New acceptance criteria as an array of strings or a single string"
+        },
+        "artifacts": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Task artifacts to write under `artifacts/`. Accepts either an object map of `path -> content` or an array of `{ path, content }` objects."
+        },
+        "comment": {
+          "description": "Task comment to append",
+          "type": "string"
+        },
+        "context": {
+          "description": "Legacy alias for `context_files`. Add entries ONLY for existing files, directories, or symbols expected to be modified or deleted by the task. Do not add background-reading entries or files that are only relevant background context. Prefer canonical selectors: `file:path`, `dir:path`, or `symbol:path#name:kind`.",
+          "type": "string"
+        },
+        "context_files": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Task context selectors as a comma-separated string or array of strings. Add entries ONLY for existing files, directories, or symbols expected to be modified or deleted by the task. Do not add background-reading entries or files referenced only for context. Prefer canonical selectors: `file:path`, `dir:path`, or `symbol:path#name:kind`. Legacy raw paths are accepted and upgraded automatically."
+        },
+        "crew": {
+          "description": "Named crew to use when running this task (empty string clears)",
+          "type": "string"
+        },
+        "dependencies": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Replacement dependency task IDs as a string or array of strings"
+        },
+        "description": {
+          "description": "New task description (empty string clears)",
+          "type": "string"
+        },
+        "execution_summary": {
+          "description": "Replacement execution summary text",
+          "type": "string"
+        },
+        "id": {
+          "description": "task ID",
+          "type": "string"
+        },
+        "implemented_by": {
+          "description": "Explicit implementation attribution label (empty string clears)",
+          "type": "string"
+        },
+        "job_run_id": {
+          "description": "Job run ID to associate with the task (empty string clears)",
+          "type": "string"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "plan": {
+          "description": "Replacement task plan text (empty string clears)",
+          "type": "string"
+        },
+        "planned_by": {
+          "description": "Explicit planning attribution label (empty string clears)",
+          "type": "string"
+        },
+        "pr_status": {
+          "description": "PR review status (e.g. approve, request-changes)",
+          "type": "string"
+        },
+        "relations": {
+          "description": "Replacement typed task relations as an array of {type, target} objects",
+          "type": "array"
+        },
+        "source_task_id": {
+          "description": "For bug tasks: originating task ID that introduced the defect (empty string clears)",
+          "type": "string"
+        },
+        "status": {
+          "description": "New task status",
+          "enum": [
+            "proposed",
+            "friction",
+            "backlog",
+            "someday",
+            "in-progress",
+            "review",
+            "done",
+            "blocked",
+            "rejected"
+          ],
+          "type": "string"
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Replacement task tags as a string or array of strings"
+        },
+        "title": {
+          "description": "New task title",
+          "type": "string"
+        },
+        "type": {
+          "description": "New task type",
+          "enum": [
+            "feature",
+            "bug",
+            "refactor",
+            "chore"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_task_update"
+  }
+]

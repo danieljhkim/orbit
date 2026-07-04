@@ -158,9 +158,47 @@ fn initialize_meta_extracts_orbit_workspace_session_context() {
         }
     }));
 
-    let session_context = session_context_from_initialize(&params);
+    let session_context = session_context_from_initialize(&params, &Meta::new());
 
     assert_eq!(session_context.workspace.as_deref(), Some("/repo/main"));
+}
+
+#[test]
+fn initialize_transport_meta_extracts_orbit_workspace_session_context() {
+    // Over a real transport rmcp strips `_meta` from the params and delivers
+    // it through the request context instead; the params-level field stays
+    // `None`. The announced session workspace must still be honored.
+    let params = InitializeRequestParams::new(
+        ClientCapabilities::default(),
+        Implementation::new("orbit-test-client", "0"),
+    );
+    let Value::Object(meta_object) = json!({
+        "orbit": {
+            "workspace": " /repo/main "
+        }
+    }) else {
+        panic!("test meta must be an object");
+    };
+
+    let session_context = session_context_from_initialize(&params, &Meta(meta_object));
+
+    assert_eq!(session_context.workspace.as_deref(), Some("/repo/main"));
+}
+
+#[test]
+fn initialize_params_meta_wins_over_transport_meta() {
+    let params = initialize_params_with_meta(json!({
+        "orbit": { "workspace": "/repo/params" }
+    }));
+    let Value::Object(meta_object) = json!({
+        "orbit": { "workspace": "/repo/transport" }
+    }) else {
+        panic!("test meta must be an object");
+    };
+
+    let session_context = session_context_from_initialize(&params, &Meta(meta_object));
+
+    assert_eq!(session_context.workspace.as_deref(), Some("/repo/params"));
 }
 
 #[tokio::test]
