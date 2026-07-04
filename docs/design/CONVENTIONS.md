@@ -201,6 +201,7 @@ Retired features stay listed with their `_archive/` path as a historical record.
 | Policy & Sandboxing | [docs/design/policy-sandbox/](./policy-sandbox/) | claude |
 | Project Learnings | [docs/design/project-learnings/](./project-learnings/) | claude |
 | Remote Access | [docs/design/remote-access/](./remote-access/) | claude |
+| Routines | [docs/design/routines/](./routines/) | claude |
 | Task Artifacts | [docs/design/task-artifacts/](./task-artifacts/) | codex |
 | Task Sync (archived) | [docs/design/_archive/task-sync/](./_archive/task-sync/) | claude |
 | User Interface | [docs/design/user-interface/](./user-interface/) | gemini |
