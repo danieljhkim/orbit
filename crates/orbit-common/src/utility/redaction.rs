@@ -140,6 +140,54 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
     }
 }
 
+/// Scrub an [`OrbitError`]'s string payloads with the full [`redact_all`]
+/// pipeline (live env values **plus** the HTTP header / bearer / provider-key
+/// patterns), not just env values like [`redact_sensitive_env_error`].
+/// [ORB-00417] Apply at the error persistence/log boundary so an error message
+/// embedding a `Bearer <token>` or `sk-*` key in a URL is never written out
+/// un-redacted. Idempotent: `redact_all` placeholders never re-match the secret
+/// patterns.
+pub fn redact_all_error(error: OrbitError) -> OrbitError {
+    match error {
+        OrbitError::PolicyDenied(m) => OrbitError::PolicyDenied(redact_all(&m)),
+        OrbitError::NotFound { kind, id } => OrbitError::NotFound {
+            kind,
+            id: redact_all(&id),
+        },
+        OrbitError::TaskApprovalRequired(m) => OrbitError::TaskApprovalRequired(redact_all(&m)),
+        OrbitError::AdrInvalidTransition(m) => OrbitError::AdrInvalidTransition(redact_all(&m)),
+        OrbitError::CompanionNotInstalled(m) => OrbitError::CompanionNotInstalled(redact_all(&m)),
+        OrbitError::InvalidInput(m) => OrbitError::InvalidInput(redact_all(&m)),
+        OrbitError::SensitiveInput { field, reason } => OrbitError::SensitiveInput {
+            field: redact_all(&field),
+            reason: redact_all(&reason),
+        },
+        OrbitError::InvalidInputDiagnostic {
+            message,
+            did_you_mean,
+        } => OrbitError::InvalidInputDiagnostic {
+            message: redact_all(&message),
+            did_you_mean: did_you_mean
+                .into_iter()
+                .map(|suggestion| redact_all(&suggestion))
+                .collect(),
+        },
+        OrbitError::SkillValidation(m) => OrbitError::SkillValidation(redact_all(&m)),
+        OrbitError::JobValidation(m) => OrbitError::JobValidation(redact_all(&m)),
+        OrbitError::AgentProtocolViolation(m) => OrbitError::AgentProtocolViolation(redact_all(&m)),
+        OrbitError::UnsupportedAgentProvider(m) => {
+            OrbitError::UnsupportedAgentProvider(redact_all(&m))
+        }
+        OrbitError::Execution(m) => OrbitError::Execution(redact_all(&m)),
+        OrbitError::Store(m) => OrbitError::Store(redact_all(&m)),
+        OrbitError::TaskStatusTransition(m) => OrbitError::TaskStatusTransition(redact_all(&m)),
+        OrbitError::JobRunStateTransition(m) => OrbitError::JobRunStateTransition(redact_all(&m)),
+        OrbitError::Io(m) => OrbitError::Io(redact_all(&m)),
+        OrbitError::WorkspaceError(m) => OrbitError::WorkspaceError(redact_all(&m)),
+        OrbitError::Migration(m) => OrbitError::Migration(redact_all(&m)),
+    }
+}
+
 fn home_dir_string() -> Option<String> {
     std::env::var("HOME")
         .ok()

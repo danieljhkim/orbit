@@ -3,7 +3,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use orbit_common::types::{OrbitEvent, Role, activity_job::tool_allowed};
-use orbit_common::utility::redaction::{redact_sensitive_env_error, redact_sensitive_env_json};
+use orbit_common::utility::redaction::{redact_all_error, redact_sensitive_env_json};
 use orbit_tools::ToolContext;
 use serde_json::Value;
 
@@ -85,7 +85,7 @@ impl OrbitRuntime {
         let output = match self
             .tool_registry()
             .execute(name, &tool_context, input)
-            .map_err(redact_sensitive_env_error)
+            .map_err(redact_all_error)
         {
             Ok(output) => output,
             Err(OrbitError::PolicyDenied(reason)) => {

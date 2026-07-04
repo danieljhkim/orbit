@@ -181,3 +181,51 @@ fn identity_backfill_does_not_weaken_credential_scrubbing() {
         );
     }
 }
+
+// [ORB-00417] redact_all_error: pattern + env redaction over OrbitError payloads.
+
+#[test]
+fn redact_all_error_scrubs_bearer_token_in_message() {
+    use super::super::redaction::redact_all_error;
+    use crate::types::OrbitError;
+
+    let raw = OrbitError::Execution(
+        "request to https://api.example.test failed \
+         (Authorization: Bearer abc123def456ghi789SECRETTOKEN)"
+            .to_string(),
+    );
+    let redacted = redact_all_error(raw);
+    let message = redacted.to_string();
+
+    assert!(
+        !message.contains("abc123def456ghi789SECRETTOKEN"),
+        "bearer token must be redacted from the error message: {message}"
+    );
+    assert!(
+        message.contains("[REDACTED_AUTH]"),
+        "a redaction placeholder should replace the token: {message}"
+    );
+    assert!(
+        matches!(redacted, OrbitError::Execution(_)),
+        "the error variant must be preserved"
+    );
+}
+
+#[test]
+fn redact_all_error_is_idempotent() {
+    use super::super::redaction::redact_all_error;
+    use crate::types::OrbitError;
+
+    let OrbitError::Store(once) = redact_all_error(OrbitError::Store(
+        "token=Bearer abc123def456ghi789SECRETTOKEN".to_string(),
+    )) else {
+        panic!("variant must be preserved");
+    };
+    let OrbitError::Store(twice) = redact_all_error(OrbitError::Store(once.clone())) else {
+        panic!("variant must be preserved");
+    };
+    assert_eq!(
+        once, twice,
+        "redaction must be idempotent so read-time re-application is safe"
+    );
+}

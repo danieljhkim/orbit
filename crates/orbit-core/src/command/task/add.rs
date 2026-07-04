@@ -2,6 +2,7 @@ use orbit_common::types::{
     OrbitError, OrbitEvent, Task, TaskStatus, TaskType, normalize_task_dependencies,
     normalize_task_tags, prune_missing_context_files, validate_task_dependencies,
 };
+use orbit_common::utility::redaction::redact_all;
 use orbit_store::TaskCreateParams as StoreTaskCreateParams;
 
 use crate::OrbitRuntime;
@@ -22,10 +23,21 @@ impl OrbitRuntime {
 
     pub fn add_task_with_identity(
         &self,
-        params: TaskAddParams,
+        mut params: TaskAddParams,
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
+        // [ORB-00417] Redact secrets at the single task-creation choke point
+        // (shared by the dashboard POST, CLI `task add`, and the MCP task tool)
+        // so a pasted key never lands in the task registry or the audit trail.
+        // `redact_all` is idempotent, so read-time redaction still composes.
+        params.title = redact_all(&params.title);
+        params.description = redact_all(&params.description);
+        params.plan = redact_all(&params.plan);
+        for criterion in params.acceptance_criteria.iter_mut() {
+            *criterion = redact_all(criterion);
+        }
+
         let (canonical_agent, canonical_model) =
             self.try_canonical_agent_model_identity(agent.as_deref(), model.as_deref())?;
         let actor = self.actor().clone();
