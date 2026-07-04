@@ -7,6 +7,7 @@ pub(super) struct RawRuntimeConfig {
     #[allow(dead_code)]
     pub(super) identity: Option<toml::Value>,
     pub(super) task: Option<RawTaskSection>,
+    pub(super) tasks: Option<RawTasksConfig>,
     pub(super) pr: Option<RawPrSection>,
     pub(super) scoring: Option<RawScoringConfig>,
     pub(super) graph: Option<RawGraphConfig>,
@@ -37,6 +38,16 @@ pub(super) struct RawWorkflowConfig {
     /// Named crew used when a task does not declare `crew` and no CLI
     /// override is provided.
     pub(super) default_crew: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct RawTasksConfig {
+    /// `tasks.id_start` — floor for the local task-id allocator on this machine.
+    /// On runtime build the allocator is raised to at least this value (never
+    /// lowered), so machines can be handed disjoint id ranges (e.g. one 0–9999,
+    /// another 10000+) to avoid cross-machine collisions. Capped by
+    /// `ORB_TASK_ID_MAX`; setting it near the ceiling shrinks the usable range.
+    pub(super) id_start: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

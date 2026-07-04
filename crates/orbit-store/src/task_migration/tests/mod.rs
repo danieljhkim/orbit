@@ -94,12 +94,7 @@ fn child_of(target: &str) -> TaskRelation {
 
 /// Write a bundle to disk and register+index it (no allocator advance — ids are
 /// chosen explicitly by the test).
-fn seed(
-    store: &TaskBundleStoreV2,
-    registry: &TaskRegistryStore,
-    ws: &str,
-    bundle: &TaskBundleV2,
-) {
+fn seed(store: &TaskBundleStoreV2, registry: &TaskRegistryStore, ws: &str, bundle: &TaskBundleV2) {
     store.create_bundle(bundle).expect("create bundle");
     registry
         .replace_task_index(ws, &bundle.envelope)
@@ -151,8 +146,8 @@ fn round_trip_keeps_ids_and_content() {
     let registry = open_registry(dst.path());
     let binding = bind(&registry, dst.path(), ws);
 
-    let outcome = import_tasks(&registry, &archive, None, ImportConflictPolicy::Renumber)
-        .expect("import");
+    let outcome =
+        import_tasks(&registry, &archive, None, ImportConflictPolicy::Renumber).expect("import");
     assert_eq!(outcome.workspace_id, ws);
     assert!(!outcome.registered_workspace);
     assert!(outcome.id_remap.is_empty());
@@ -298,14 +293,7 @@ fn allocator_bumped_past_max_imported_id() {
         ws,
         &make_bundle("ORB-00042", "high id", Vec::new()),
     );
-    export_tasks(
-        &registry,
-        ws,
-        ExportSelection::All,
-        &archive,
-        exported_at(),
-    )
-    .unwrap();
+    export_tasks(&registry, ws, ExportSelection::All, &archive, exported_at()).unwrap();
 
     let target = open_registry(dst.path());
     import_tasks(&target, &archive, None, ImportConflictPolicy::Fail).unwrap();
@@ -452,8 +440,7 @@ fn corrupt_archive_fails_before_mutation() {
     let bogus = dst.path().join("bogus.tar.zst");
     fs::write(&bogus, b"not a real zstd archive").unwrap();
     let registry = open_registry(dst.path());
-    let err =
-        import_tasks(&registry, &bogus, None, ImportConflictPolicy::Renumber).unwrap_err();
+    let err = import_tasks(&registry, &bogus, None, ImportConflictPolicy::Renumber).unwrap_err();
     assert!(format!("{err}").contains("zstd") || format!("{err}").contains("archive"));
 }
 
@@ -464,13 +451,25 @@ fn reindex_reregisters_disk_bundles_and_drops_stale() {
     let registry = open_registry(temp.path());
     let binding = bind(&registry, temp.path(), ws);
     let store = bundle_store(&registry, &binding);
-    seed(&store, &registry, ws, &make_bundle("ORB-00000", "a", Vec::new()));
-    seed(&store, &registry, ws, &make_bundle("ORB-00003", "b", Vec::new()));
+    seed(
+        &store,
+        &registry,
+        ws,
+        &make_bundle("ORB-00000", "a", Vec::new()),
+    );
+    seed(
+        &store,
+        &registry,
+        ws,
+        &make_bundle("ORB-00003", "b", Vec::new()),
+    );
 
     // Simulate drift: drop ORB-00003's index+binding (dir still on disk) and add
     // a stale binding for ORB-00009 whose dir does not exist.
     registry.unregister_task_bundle("ORB-00003", ws).unwrap();
-    let stale_dir = registry.canonical_task_bundle_path(ws, "ORB-00009").unwrap();
+    let stale_dir = registry
+        .canonical_task_bundle_path(ws, "ORB-00009")
+        .unwrap();
     fs::create_dir_all(&stale_dir).unwrap();
     registry
         .register_task_bundle("ORB-00009", ws, &stale_dir)

@@ -31,9 +31,13 @@ pub fn reindex_workspace(
     registry: &TaskRegistryStore,
     workspace_id: &str,
 ) -> Result<ReindexOutcome, OrbitError> {
-    let binding = registry.find_workspace_binding(workspace_id)?.ok_or_else(|| {
-        OrbitError::InvalidInput(format!("workspace '{workspace_id}' is not registered locally"))
-    })?;
+    let binding = registry
+        .find_workspace_binding(workspace_id)?
+        .ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "workspace '{workspace_id}' is not registered locally"
+            ))
+        })?;
     let workspace_id = binding.workspace_id.clone();
 
     // Enumerate the bundles physically present on disk.

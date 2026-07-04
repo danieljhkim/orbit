@@ -308,6 +308,13 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 TaskSubcommand::Templates(_) => ("templates", None, None),
                 TaskSubcommand::ReviewThread(_) => ("review-thread", Some("task"), None),
                 TaskSubcommand::PruneContext(_) => ("prune-context", None, None),
+                TaskSubcommand::Export(_) => ("export", None, None),
+                TaskSubcommand::Import(args) => (
+                    "import",
+                    None,
+                    Some(args.archive.to_str().unwrap_or_default()),
+                ),
+                TaskSubcommand::Reindex(_) => ("reindex", None, None),
             };
             CommandMeta {
                 command: "task".to_string(),

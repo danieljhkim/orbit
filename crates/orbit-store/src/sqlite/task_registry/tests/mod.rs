@@ -732,7 +732,9 @@ fn seed_allocator_start_refuses_to_lower() {
     let temp = TempDir::new().expect("tempdir");
     let store = store(&temp);
     store.seed_allocator_start(5_000).expect("seed");
-    let err = store.seed_allocator_start(4_999).expect_err("must refuse lowering");
+    let err = store
+        .seed_allocator_start(4_999)
+        .expect_err("must refuse lowering");
     assert!(matches!(err, OrbitError::InvalidInput(_)));
     assert_eq!(store.allocator_next_number().expect("read"), 5_000);
 }
