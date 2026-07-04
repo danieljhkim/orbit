@@ -40,6 +40,11 @@ pub(crate) fn build_context_from_roots(
     local_root: &Path,
 ) -> Result<OrbitContext, OrbitError> {
     let runtime_config = RuntimeConfig::load_layered(global_root, workspace_root)?;
+    // Apply a configured `[tasks] id_start` floor before any task ids are
+    // allocated. Forward-only, so it is a no-op once the counter has advanced.
+    if let Some(start) = runtime_config.tasks_id_start() {
+        crate::command::task_migration::apply_configured_id_start(global_root, start)?;
+    }
     let persistence = &runtime_config.persistence;
 
     let store = Store::open(&persistence.audit_db)?;

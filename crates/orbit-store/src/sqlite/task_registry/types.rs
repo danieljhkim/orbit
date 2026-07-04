@@ -54,3 +54,15 @@ pub struct ProjectionRebuildResult {
     pub repaired: usize,
     pub degraded_reason: Option<String>,
 }
+
+/// Outcome of seeding the task-id allocator via
+/// [`TaskRegistryStore::seed_allocator_start`](crate::sqlite::task_registry::TaskRegistryStore::seed_allocator_start).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AllocatorSeedOutcome {
+    /// Counter value before the seed.
+    pub previous: u32,
+    /// Counter value after the seed (the id the next allocation will hand out).
+    pub next: u32,
+    /// Whether the seed changed the counter (`false` when it already matched).
+    pub changed: bool,
+}

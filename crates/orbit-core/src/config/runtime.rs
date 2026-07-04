@@ -51,6 +51,10 @@ pub(crate) struct RuntimeConfig {
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
     pub(crate) duel: DuelConfig,
+    /// Optional floor for the local task-id allocator (`[tasks] id_start`).
+    /// Applied forward-only on runtime build so machines can hold disjoint id
+    /// ranges. `None` leaves the allocator untouched.
+    pub(crate) tasks_id_start: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +97,7 @@ impl RuntimeConfig {
             crews: default_crews(),
             default_crew: Some(DEFAULT_WORKFLOW_CREW.to_string()),
             duel: DuelConfig::default(),
+            tasks_id_start: None,
         }
     }
 
@@ -175,6 +180,7 @@ impl RuntimeConfig {
         let crews = crews_from_raw(parsed.crews.as_ref())?;
         let default_crew = workflow_default_crew_from_raw(parsed.workflow.as_ref(), &crews)?;
         let duel = duel_from_raw(parsed.duel.as_ref())?;
+        let tasks_id_start = tasks_id_start_from_raw(parsed.tasks.as_ref())?;
         let pr = pr_config_from_raw(parsed.pr.as_ref());
 
         if parsed
@@ -204,7 +210,13 @@ impl RuntimeConfig {
             crews,
             default_crew,
             duel,
+            tasks_id_start,
         })
+    }
+
+    /// Configured `[tasks] id_start` floor, if any.
+    pub(crate) fn tasks_id_start(&self) -> Option<u32> {
+        self.tasks_id_start
     }
 
     /// Configured default backend for v2 `agent_loop` activities (§3.1 step 3).
@@ -282,6 +294,21 @@ fn pr_config_from_raw(raw: Option<&RawPrSection>) -> PrConfig {
     PrConfig {
         task_url_template: raw.and_then(|section| section.task_url_template.clone()),
     }
+}
+
+fn tasks_id_start_from_raw(
+    raw: Option<&super::raw::RawTasksConfig>,
+) -> Result<Option<u32>, OrbitError> {
+    let Some(start) = raw.and_then(|section| section.id_start) else {
+        return Ok(None);
+    };
+    if start > orbit_common::types::ORB_TASK_ID_MAX {
+        return Err(OrbitError::InvalidInput(format!(
+            "tasks.id_start {start} exceeds maximum task id {}",
+            orbit_common::types::ORB_TASK_ID_MAX
+        )));
+    }
+    Ok(Some(start))
 }
 
 fn duel_from_raw(raw: Option<&RawDuelSection>) -> Result<DuelConfig, OrbitError> {

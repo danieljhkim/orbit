@@ -7,7 +7,7 @@ use orbit_common::types::{
     NotFoundKind, ORB_TASK_ID_MAX, OrbitError, TaskEnvelopeV2, TaskRelationType,
     format_orb_task_id, normalize_task_tags, validate_orb_task_id,
 };
-use rusqlite::{Connection, TransactionBehavior, params, params_from_iter};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params, params_from_iter};
 
 use super::projection::create_projection_symlink;
 use super::queries::{
@@ -18,8 +18,8 @@ use super::schema::{
     apply_schema, assert_registry_user_version, reject_unsupported_registry_schema,
 };
 use super::types::{
-    BindWorkspaceParams, ProjectionRebuildResult, TaskBundleBinding, TaskIndexFilter,
-    WorkspaceBinding,
+    AllocatorSeedOutcome, BindWorkspaceParams, ProjectionRebuildResult, TaskBundleBinding,
+    TaskIndexFilter, WorkspaceBinding,
 };
 use super::util::{
     enable_best_effort_wal_mode, normalize_path, now_string, path_to_string, relation_type_name,
@@ -656,4 +656,155 @@ impl TaskRegistryStore {
 
         Ok(result)
     }
+
+    /// Root directory that holds per-workspace canonical bundle trees
+    /// (`<global>/tasks/workspaces`). Used by task-migration tooling to locate
+    /// and enumerate on-disk bundles for a workspace.
+    pub(crate) fn workspaces_dir(&self) -> &Path {
+        &self.workspaces_dir
+    }
+
+    /// Look up a workspace binding by id. Public wrapper over the internal query
+    /// so migration tooling can resolve a target workspace without opening the
+    /// SQLite connection directly.
+    pub fn find_workspace_binding(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<WorkspaceBinding>, OrbitError> {
+        let workspace_id = validate_workspace_id(workspace_id)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        workspace_by_id(&conn, &workspace_id)
+    }
+
+    /// Look up a task-bundle binding by task id. Task ids are a global primary
+    /// key in the registry, so this reports collisions across every workspace —
+    /// exactly what import conflict resolution needs.
+    pub fn find_task_binding(
+        &self,
+        task_id: &str,
+    ) -> Result<Option<TaskBundleBinding>, OrbitError> {
+        validate_orb_task_id(task_id)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        task_bundle_by_id(&conn, task_id)
+    }
+
+    /// Current value of the local allocator counter (`next_number`) — the id the
+    /// next [`allocate_task_id`](Self::allocate_task_id) call would hand out.
+    pub fn allocator_next_number(&self) -> Result<u32, OrbitError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        read_allocator_next_number(&conn)
+    }
+
+    /// Highest numeric task id registered in the whole registry, if any.
+    pub fn max_registered_task_number(&self) -> Result<Option<u32>, OrbitError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT task_id FROM task_bundle_bindings
+                 ORDER BY task_id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        Ok(raw.as_deref().and_then(parse_orb_task_number))
+    }
+
+    /// Seed the allocator so the next allocated id is `start`.
+    ///
+    /// Only ever moves the counter *forward*: if `start` is below the current
+    /// `next_number` the call is refused, so two machines can be handed disjoint
+    /// id ranges without risk of silently rewinding a live counter. `start` must
+    /// not exceed [`ORB_TASK_ID_MAX`].
+    pub fn seed_allocator_start(&self, start: u32) -> Result<AllocatorSeedOutcome, OrbitError> {
+        if start > ORB_TASK_ID_MAX {
+            return Err(OrbitError::InvalidInput(format!(
+                "tasks.id_start {start} exceeds maximum task id {ORB_TASK_ID_MAX}"
+            )));
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let previous = read_allocator_next_number(&tx)?;
+        if start < previous {
+            return Err(OrbitError::InvalidInput(format!(
+                "tasks.id_start {start} would lower the allocator below its current position {previous}; the counter only moves forward"
+            )));
+        }
+        let changed = start != previous;
+        if changed {
+            set_allocator_next_number(&tx, start)?;
+        }
+        tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
+        Ok(AllocatorSeedOutcome {
+            previous,
+            next: start,
+            changed,
+        })
+    }
+
+    /// Ensure the allocator will not hand out any id `< min_next`. Never lowers
+    /// the counter. Values above the exhausted ceiling saturate at
+    /// `ORB_TASK_ID_MAX + 1`. Used after import/reindex to move `next_number`
+    /// past the highest landed id.
+    pub fn bump_allocator_to_at_least(&self, min_next: u32) -> Result<(), OrbitError> {
+        let ceiling = ORB_TASK_ID_MAX + 1;
+        let target = min_next.min(ceiling);
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let previous = read_allocator_next_number(&tx)?;
+        if target > previous {
+            set_allocator_next_number(&tx, target)?;
+        }
+        tx.commit().map_err(|e| OrbitError::Store(e.to_string()))
+    }
+}
+
+fn read_allocator_next_number(conn: &Connection) -> Result<u32, OrbitError> {
+    let next: i64 = conn
+        .query_row(
+            "SELECT next_number FROM allocator_state WHERE authority = 'local'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    u32::try_from(next).map_err(|e| OrbitError::Store(e.to_string()))
+}
+
+fn set_allocator_next_number(conn: &Connection, value: u32) -> Result<(), OrbitError> {
+    conn.execute(
+        "UPDATE allocator_state SET next_number = ?1, updated_at = ?2 WHERE authority = 'local'",
+        params![i64::from(value), now_string()],
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))?;
+    Ok(())
+}
+
+/// Parse the numeric suffix of a canonical `ORB-00000` task id.
+pub(crate) fn parse_orb_task_number(task_id: &str) -> Option<u32> {
+    task_id
+        .strip_prefix("ORB-")
+        .filter(|suffix| suffix.len() == 5 && suffix.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|suffix| suffix.parse::<u32>().ok())
 }

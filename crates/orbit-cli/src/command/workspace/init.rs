@@ -18,6 +18,11 @@ pub struct WorkspaceInitArgs {
     /// Base branch for this workspace (default: main)
     #[arg(long, default_value = "main")]
     pub base_branch: String,
+    /// Seed the local task-id allocator so the next task id is N (e.g. hand this
+    /// machine a disjoint id range like 10000+). The counter only moves forward;
+    /// a value below the current position is refused.
+    #[arg(long, value_name = "N")]
+    pub task_id_start: Option<u32>,
     /// Set up MCP client integrations for auto-detected providers.
     #[arg(long)]
     pub mcp: bool,
@@ -42,12 +47,26 @@ impl WorkspaceInitArgs {
         let mcp = self.mcp;
         let hooks = self.hooks;
         let inject_rules = self.inject_agent_rules;
+        let task_id_start = self.task_id_start;
         let init_result = self.execute_at_path(&cwd, &orbit_dir, &global_root, &registry_path)?;
 
         println!("workspace '{}' initialized", init_result.name);
         println!("  id:        {}", init_result.id);
         println!("  root:      {}", init_result.root.display());
         println!("  orbit_dir: {}", init_result.orbit_dir.display());
+
+        if let Some(start) = task_id_start {
+            let outcome =
+                orbit_core::command::task_migration::seed_task_id_start(&global_root, start)?;
+            if outcome.changed {
+                println!("  id_start:  allocator seeded to ORB-{:05}", outcome.next);
+            } else {
+                println!(
+                    "  id_start:  allocator already at ORB-{:05} (unchanged)",
+                    outcome.next
+                );
+            }
+        }
 
         if mcp {
             let providers = crate::command::mcp::init_auto_for_workspace(

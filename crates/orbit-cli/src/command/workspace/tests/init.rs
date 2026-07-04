@@ -35,6 +35,7 @@ fn workspace_init_seeds_auto_detected_mcp_configs() {
     let result = WorkspaceInitArgs {
         name: None,
         base_branch: "main".to_string(),
+        task_id_start: None,
         mcp: true,
         hooks: false,
         inject_agent_rules: false,
@@ -98,6 +99,7 @@ fn workspace_init_skips_mcp_by_default() {
     let result = WorkspaceInitArgs {
         name: None,
         base_branch: "main".to_string(),
+        task_id_start: None,
         mcp: false,
         hooks: false,
         inject_agent_rules: false,
@@ -153,6 +155,7 @@ fn workspace_init_under_home_with_global_orbit_creates_repo_orbit() {
     let result = WorkspaceInitArgs {
         name: None,
         base_branch: "main".to_string(),
+        task_id_start: None,
         mcp: false,
         hooks: false,
         inject_agent_rules: false,
@@ -201,6 +204,7 @@ fn workspace_init_appends_orbit_to_existing_gitignore() {
     let result = WorkspaceInitArgs {
         name: None,
         base_branch: "main".to_string(),
+        task_id_start: None,
         mcp: false,
         hooks: false,
         inject_agent_rules: false,
@@ -245,6 +249,7 @@ fn workspace_init_does_not_duplicate_existing_orbit_gitignore_entry() {
     let result = WorkspaceInitArgs {
         name: None,
         base_branch: "main".to_string(),
+        task_id_start: None,
         mcp: false,
         hooks: false,
         inject_agent_rules: false,
@@ -289,6 +294,7 @@ fn workspace_init_from_git_subdir_gitignores_repo_orbit_dir() {
     let result = WorkspaceInitArgs {
         name: None,
         base_branch: "main".to_string(),
+        task_id_start: None,
         mcp: false,
         hooks: false,
         inject_agent_rules: false,
@@ -333,6 +339,7 @@ fn workspace_init_with_root_override_uses_custom_registry() {
     let result = WorkspaceInitArgs {
         name: Some("custom-root".to_string()),
         base_branch: "main".to_string(),
+        task_id_start: None,
         mcp: false,
         hooks: false,
         inject_agent_rules: false,
@@ -399,6 +406,7 @@ fn workspace_init_seeds_default_orbitignore_when_missing() {
     let result = WorkspaceInitArgs {
         name: None,
         base_branch: "main".to_string(),
+        task_id_start: None,
         mcp: false,
         hooks: false,
         inject_agent_rules: false,
@@ -445,6 +453,7 @@ fn workspace_init_preserves_existing_orbitignore() {
     let result = WorkspaceInitArgs {
         name: None,
         base_branch: "main".to_string(),
+        task_id_start: None,
         mcp: false,
         hooks: false,
         inject_agent_rules: false,
@@ -492,6 +501,7 @@ fn workspace_init_with_root_override_does_not_modify_repo_gitignore() {
     let result = WorkspaceInitArgs {
         name: Some("custom-root-git".to_string()),
         base_branch: "main".to_string(),
+        task_id_start: None,
         mcp: false,
         hooks: false,
         inject_agent_rules: false,
