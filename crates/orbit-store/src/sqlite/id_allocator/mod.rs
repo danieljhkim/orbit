@@ -198,6 +198,12 @@ impl IdAllocator {
         self.abandon(IdAllocationKind::Learning, id)
     }
 
+    /// [ORB-00413] Abandon a reserved-but-unfinalized ADR allocation so a
+    /// partial ADR create does not leak a half-visible ID.
+    pub fn abandon_adr(&self, id: &str) -> Result<(), OrbitError> {
+        self.abandon(IdAllocationKind::Adr, id)
+    }
+
     pub fn adr_allocation(&self, id: &str) -> Result<Option<IdAllocationRecord>, OrbitError> {
         self.allocation(IdAllocationKind::Adr, id)
     }

@@ -13,6 +13,18 @@ use super::super::votes::{deduped_vote_times, read_vote_rows};
 use super::store::LearningFileStore;
 use crate::backend::{LearningSearchParams, LearningSearchResult};
 
+/// [ORB-00413] An on-disk learning body whose ID the allocator has no active
+/// record of — the fingerprint of a legacy partial create (body written, the
+/// allocation never recorded). Returned by
+/// [`LearningFileStore::reconcile_learning_orphans`] and surfaced as warnings by
+/// [`LearningFileStore::sync_learnings`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LearningOrphan {
+    pub(crate) id: String,
+    pub(crate) body_path: std::path::PathBuf,
+    pub(crate) remedy: String,
+}
+
 pub(crate) struct EnvelopeSnapshot {
     pub(super) id: String,
     pub(super) paths: Vec<String>,
@@ -34,6 +46,27 @@ impl LearningFileStore {
     pub(crate) fn sync_learnings(&self) -> Result<(), OrbitError> {
         validate_vote_files(&self.root)?;
         super::validation::validate_comment_files(&self.root)?;
+        // [ORB-00413] Surface orphaned body files (the fingerprint of a legacy
+        // partial create: body on disk, allocation never recorded) so the
+        // resync command reports them with a remedy. Non-fatal to the sync.
+        match self.reconcile_learning_orphans() {
+            Ok(orphans) => {
+                for orphan in &orphans {
+                    orbit_common::tracing::warn!(
+                        target: "orbit.store.learning",
+                        id = %orphan.id,
+                        body_path = %orphan.body_path.display(),
+                        "orphaned learning body detected: {}",
+                        orphan.remedy,
+                    );
+                }
+            }
+            Err(error) => orbit_common::tracing::warn!(
+                target: "orbit.store.learning",
+                error = %error,
+                "learning orphan reconcile failed during sync",
+            ),
+        }
         let Some(index) = &self.index else {
             self.invalidate_envelope_cache();
             return Ok(());
@@ -45,6 +78,49 @@ impl LearningFileStore {
         }
         self.invalidate_envelope_cache();
         Ok(())
+    }
+
+    /// [ORB-00413] Detect learning body files on disk whose ID the allocator has
+    /// no active record of. Such an orphan is the residue of a legacy partial
+    /// create (body written before the allocation was recorded) that predates
+    /// the write-time rollback in `crud`. Read-only: reports, never mutates.
+    pub(crate) fn reconcile_learning_orphans(&self) -> Result<Vec<LearningOrphan>, OrbitError> {
+        let mut orphans = Vec::new();
+        if !self.root.exists() {
+            return Ok(orphans);
+        }
+        for entry in std::fs::read_dir(&self.root).map_err(|e| OrbitError::Io(e.to_string()))? {
+            let entry = entry.map_err(|e| OrbitError::Io(e.to_string()))?;
+            if !entry
+                .file_type()
+                .map_err(|e| OrbitError::Io(e.to_string()))?
+                .is_dir()
+            {
+                continue;
+            }
+            let Some(id) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if super::super::layout::validate_learning_id(&id).is_err() {
+                continue;
+            }
+            let body_path = super::super::layout::learning_doc_path(&self.root, &id);
+            if !body_path.is_file() {
+                continue;
+            }
+            if self.id_allocator.learning_allocation(&id)?.is_none() {
+                orphans.push(LearningOrphan {
+                    id: id.clone(),
+                    body_path,
+                    remedy: format!(
+                        "learning body exists on disk but the allocator has no record of '{id}'; \
+                         reopen the workspace to backfill the allocation, or remove the orphaned body"
+                    ),
+                });
+            }
+        }
+        orphans.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(orphans)
     }
 
     /// Run the phase-1 scope-OR search.

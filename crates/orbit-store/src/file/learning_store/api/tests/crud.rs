@@ -640,3 +640,131 @@ fn layout_places_files_at_expected_paths_and_gitignore_is_respected() {
         ".gitignore must ignore .orbit/state/ (or the wider .orbit/) so the rebuildable index is not checked in",
     );
 }
+
+// [ORB-00413] Atomic learning creation: rollback on partial write + reconcile.
+
+#[test]
+fn partial_create_rolls_back_reservation_and_body() {
+    let (dir, store) = store_with_index();
+    let root = dir.path().to_path_buf();
+
+    // Inject a failure *between* the YAML body write and the allocation
+    // recording: pre-create the votes sidecar path (for the id the fresh
+    // allocator will hand out first) as a *directory*, so `ensure_empty_sidecar`
+    // fails when it opens it as a file. The first id in a fresh store is L-0001.
+    let expected_id = "L-0001";
+    std::fs::create_dir_all(root.join(expected_id).join("votes.jsonl"))
+        .expect("seed sidecar collision");
+
+    let result = store.create_learning(create_params("rolled back", vec!["a/**"], vec!["t"]));
+    assert!(
+        result.is_err(),
+        "create must fail on the seeded sidecar collision"
+    );
+
+    // No orphaned state: not indexed, body removed, reservation abandoned —
+    // the learning either fully exists or not at all.
+    assert!(
+        store.get_learning(expected_id).expect("get").is_none(),
+        "no learning should be visible after rollback"
+    );
+    assert!(
+        store
+            .id_allocator
+            .learning_allocation(expected_id)
+            .expect("alloc lookup")
+            .is_none(),
+        "reserved id must be abandoned (not left half-visible) after rollback"
+    );
+    assert!(
+        !root.join(expected_id).join("learning.yaml").exists(),
+        "staged body file must be removed on rollback"
+    );
+
+    // The workspace is still usable: a subsequent create succeeds (the burned
+    // id is not reissued, per abandon semantics).
+    let next = store
+        .create_learning(create_params("after rollback", vec!["a/**"], vec!["t"]))
+        .expect("create after rollback succeeds");
+    assert_ne!(next.id, expected_id);
+}
+
+#[test]
+fn reconcile_detects_body_with_no_allocator_row() {
+    let (dir, store) = store_with_index();
+    let root = dir.path().to_path_buf();
+
+    let learning = store
+        .create_learning(create_params("keep", vec!["a/**"], vec!["t"]))
+        .expect("create");
+    assert_eq!(learning.id, "L-0001");
+
+    // Simulate the legacy partial-create residue: a body dir the allocator has
+    // no record of. Renaming to a fresh id the allocator never allocated yields
+    // exactly that shape (body present on disk, allocation absent).
+    let orphan_id = "L-0009";
+    std::fs::rename(root.join("L-0001"), root.join(orphan_id)).expect("rename to orphan id");
+
+    let orphans = store.reconcile_learning_orphans().expect("reconcile");
+    assert_eq!(
+        orphans.len(),
+        1,
+        "expected exactly one orphan; got {orphans:?}"
+    );
+    let orphan = &orphans[0];
+    assert_eq!(orphan.id, orphan_id);
+    assert_eq!(orphan.body_path, root.join(orphan_id).join("learning.yaml"));
+    assert!(
+        orphan.body_path.is_file(),
+        "orphan body path should point at the real file"
+    );
+    assert!(
+        orphan.remedy.contains("allocator"),
+        "remedy should name the allocator and a fix: {}",
+        orphan.remedy
+    );
+}
+
+#[test]
+fn concurrent_creation_yields_two_distinct_records() {
+    let dir = tempdir().expect("tempdir");
+    let root = dir.path().to_path_buf();
+
+    // Two stores over the same workspace (shared allocator db + lock file),
+    // mirroring concurrent multi-process creation. The file lock + Immediate
+    // transaction serialize id allocation.
+    let store_a = LearningFileStore::new(root.clone());
+    let store_b = LearningFileStore::new(root.clone());
+    let barrier = Arc::new(Barrier::new(2));
+
+    let barrier_a = Arc::clone(&barrier);
+    let handle_a = std::thread::spawn(move || {
+        barrier_a.wait();
+        store_a
+            .create_learning(create_params("thread a", vec!["a/**"], vec!["t"]))
+            .expect("thread a create")
+            .id
+    });
+    let barrier_b = barrier;
+    let handle_b = std::thread::spawn(move || {
+        barrier_b.wait();
+        store_b
+            .create_learning(create_params("thread b", vec!["b/**"], vec!["t"]))
+            .expect("thread b create")
+            .id
+    });
+
+    let id_a = handle_a.join().expect("join a");
+    let id_b = handle_b.join().expect("join b");
+    assert_ne!(id_a, id_b, "concurrent creates must yield distinct ids");
+
+    // Both records are well-formed and readable from a fresh store.
+    let reader = LearningFileStore::new(root.clone());
+    for id in [&id_a, &id_b] {
+        let learning = reader.get_learning(id).expect("get").expect("present");
+        assert_eq!(&learning.id, id);
+        assert!(root.join(id).join("learning.yaml").is_file());
+    }
+    let ids: BTreeSet<String> = [id_a, id_b].into_iter().collect();
+    assert_eq!(ids.len(), 2);
+}

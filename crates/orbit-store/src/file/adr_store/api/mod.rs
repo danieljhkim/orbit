@@ -58,12 +58,14 @@ impl AdrFileStore {
 
     /// Creates a new ADR.
     ///
-    /// Filesystem write happens first (atomic via `write_bundle_at`); if it
-    /// succeeds and an index is attached, the envelope is upserted. A failed
-    /// index write is logged but does **not** roll back the filesystem: the
-    /// filesystem is the source of truth and `rebuild_index` can recover.
-    /// The inverse direction (FS failure → index rollback) is implicit since
-    /// the index INSERT is gated on FS success.
+    /// The SQLite ID reservation from `allocate_adr` is the source of truth for
+    /// the ID; the bundle is then written to disk and the body path recorded.
+    /// [ORB-00413] If the bundle write or the body-path record fails, the
+    /// reservation is rolled back (bundle removed + allocation abandoned) so a
+    /// partial create leaves either a complete ADR or nothing — never a
+    /// half-visible ID. A failed index upsert is logged but does **not** roll
+    /// back the filesystem: the filesystem is the source of truth and the index
+    /// can be rebuilt from it.
     pub(crate) fn add_adr(&self, params: AdrCreateParams) -> Result<Adr, OrbitError> {
         if params.title.trim().is_empty() {
             return Err(OrbitError::InvalidInput(
@@ -106,13 +108,39 @@ impl AdrFileStore {
         validate_bundle(&bundle)?;
 
         let target_dir = adr_dir(&self.root, AdrStateDir::Proposed, &id);
-        write_bundle_at(&target_dir, &bundle)?;
-        self.id_allocator
-            .record_adr_body_path(&id, &super::layout::body_path(&target_dir))?;
+        if let Err(error) = write_bundle_at(&target_dir, &bundle) {
+            self.rollback_partial_adr(&id, &target_dir);
+            return Err(error);
+        }
+        if let Err(error) = self
+            .id_allocator
+            .record_adr_body_path(&id, &super::layout::body_path(&target_dir))
+        {
+            self.rollback_partial_adr(&id, &target_dir);
+            return Err(error);
+        }
 
         let adr = bundle_to_adr(bundle);
         self.upsert_index_row(&adr);
         Ok(adr)
+    }
+
+    /// [ORB-00413] Best-effort rollback of a partially-created ADR: remove the
+    /// staged bundle directory and abandon the reservation so the ID is never
+    /// left half-visible. Never fails the caller; logs only if the abandon
+    /// itself fails. Safe because the last fallible step before finalization is
+    /// `record_adr_body_path`, so the reservation's `body_path` is still unset
+    /// (and thus abandonable) whenever this runs.
+    fn rollback_partial_adr(&self, id: &str, target_dir: &std::path::Path) {
+        let _ = std::fs::remove_dir_all(target_dir);
+        if let Err(error) = self.id_allocator.abandon_adr(id) {
+            orbit_common::tracing::warn!(
+                target: "orbit.store.adr",
+                id,
+                error = %error,
+                "rollback: failed to abandon reserved ADR after a partial create",
+            );
+        }
     }
 
     pub(crate) fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
