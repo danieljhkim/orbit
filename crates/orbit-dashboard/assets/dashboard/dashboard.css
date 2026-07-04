@@ -40,6 +40,7 @@
         --state-failed: #ef4444;
         --state-error: #ef4444;
         --state-cancelled: #f87171;
+        --state-interrupted: #f97316; /* orange-500 — orphaned run, resumable */
         --state-disabled: #52525b;
 
         /* Per-agent identity colors (matches raw/scoreboard-league.html mock). */

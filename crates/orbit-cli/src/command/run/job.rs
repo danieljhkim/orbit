@@ -163,6 +163,55 @@ impl Execute for JobReplayArgs {
     }
 }
 
+#[derive(Args)]
+#[command(
+    after_help = "Examples:\n  orbit job resume jrun-20260704-0710\n\nResumes an interrupted (or failed / timed-out) run as a new linked run,\nskipping top-level steps whose checkpoints already recorded success."
+)]
+pub struct JobResumeArgs {
+    /// Source job run ID to resume from its persisted step checkpoints.
+    pub run_id: String,
+    /// Output resume result as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+impl Execute for JobResumeArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let source_run_id = self.run_id;
+        let result = runtime.resume_job_run(&source_run_id)?;
+        let backend_str = result.resolved_backend.as_str();
+        if self.json {
+            return crate::output::json::print_pretty(&json!({
+                "run_id": result.run_id,
+                "resumed_from": source_run_id,
+                "job_name": result.job_name,
+                "resolved_backend": backend_str,
+                "success": result.success,
+                "message": result.message,
+                "pipeline": result.pipeline,
+                "events_emitted": result.events_emitted,
+            }));
+        }
+        println!(
+            "run_id={};resumed_from={};job={};backend={};success={};events={}",
+            result.run_id,
+            source_run_id,
+            result.job_name,
+            backend_str,
+            result.success,
+            result.events_emitted,
+        );
+        if let Some(msg) = &result.message {
+            println!("message: {msg}");
+        }
+        println!(
+            "pipeline: {}",
+            serde_json::to_string_pretty(&result.pipeline).unwrap_or_default()
+        );
+        Ok(())
+    }
+}
+
 // Retained after ORB-00146 (dashboard callers moved to orbit-dashboard); the thin
 // wrapper is kept for any external re-exports or future CLI json paths.
 #[allow(dead_code)]

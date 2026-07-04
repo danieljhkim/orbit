@@ -204,6 +204,7 @@ impl JobFileStore {
             JobRunState::Failed => orbit_common::types::RunEvent::Fail,
             JobRunState::Timeout => orbit_common::types::RunEvent::Timeout,
             JobRunState::Cancelled => orbit_common::types::RunEvent::Cancel,
+            JobRunState::Interrupted => orbit_common::types::RunEvent::Interrupt,
             other => {
                 return Err(OrbitError::JobRunStateTransition(format!(
                     "cannot finalize to non-terminal state: {}",

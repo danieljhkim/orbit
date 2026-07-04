@@ -151,12 +151,18 @@ impl OrbitRuntime {
         local_root: &Path,
     ) -> Result<Self, OrbitError> {
         let context = builder::build_context_from_roots(global_root, shared_root, local_root)?;
-        Ok(Self {
+        let runtime = Self {
             activity_executors: build_activity_executor_registry(&context)?,
             context,
             event_log: event_bus::EventLog::default(),
             _temp_dir: None,
-        })
+        };
+        // [ORB-10002] Workspace-open orphan scan: job runs stuck in `running`
+        // whose recorded owner process is conclusively gone flip to
+        // `interrupted` so dashboards and `orbit job resume` see them.
+        // Best-effort — a scan failure must never block opening the runtime.
+        runtime.reconcile_stale_job_runs_on_open();
+        Ok(runtime)
     }
 
     pub fn in_memory() -> Result<Self, OrbitError> {

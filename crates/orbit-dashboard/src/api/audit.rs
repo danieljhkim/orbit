@@ -385,7 +385,11 @@ fn count_failed_runs(
     since: DateTime<Utc>,
 ) -> Result<i64, orbit_core::OrbitError> {
     let mut total: i64 = 0;
-    for state in [JobRunState::Failed, JobRunState::Timeout] {
+    for state in [
+        JobRunState::Failed,
+        JobRunState::Timeout,
+        JobRunState::Interrupted,
+    ] {
         let runs = runtime.list_job_runs(JobRunListParams {
             job_id: None,
             state: Some(state),
@@ -412,6 +416,7 @@ fn count_active_long_runs(
         JobRunState::Failed,
         JobRunState::Timeout,
         JobRunState::Cancelled,
+        JobRunState::Interrupted,
     ] {
         let runs = runtime.list_job_runs(JobRunListParams {
             job_id: None,

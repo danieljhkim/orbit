@@ -165,10 +165,12 @@ impl OrbitRuntime {
 
         loop {
             let snapshot = self.collect_pipeline_wait_entries(run_ids, false)?;
-            if snapshot
-                .iter()
-                .all(|entry| matches!(entry.status.as_str(), "succeeded" | "failed" | "cancelled"))
-            {
+            if snapshot.iter().all(|entry| {
+                matches!(
+                    entry.status.as_str(),
+                    "succeeded" | "failed" | "cancelled" | "interrupted"
+                )
+            }) {
                 let result = PipelineWaitResult { results: snapshot };
                 self.record_pipeline_wait_finished(actor, &result)?;
                 return Ok(result);
@@ -195,7 +197,8 @@ impl OrbitRuntime {
                 | JobRunState::Success
                 | JobRunState::Failed
                 | JobRunState::Timeout
-                | JobRunState::Cancelled => return Ok(()),
+                | JobRunState::Cancelled
+                | JobRunState::Interrupted => return Ok(()),
                 other => {
                     return Err(OrbitError::Execution(format!(
                         "pipeline worker cannot execute run '{}' from state '{}'",
@@ -336,6 +339,25 @@ impl OrbitRuntime {
         finished_at: chrono::DateTime<Utc>,
         message: &str,
     ) -> Result<(), OrbitError> {
+        self.record_pipeline_diagnostic_step(
+            run,
+            started_at,
+            finished_at,
+            message,
+            JobRunState::Failed,
+        )
+    }
+
+    /// [ORB-10002] Record a terminal diagnostic step with an explicit state
+    /// (`failed` for job errors, `interrupted` for orphan reconciliation).
+    pub(crate) fn record_pipeline_diagnostic_step(
+        &self,
+        run: &JobRun,
+        started_at: chrono::DateTime<Utc>,
+        finished_at: chrono::DateTime<Utc>,
+        message: &str,
+        state: JobRunState,
+    ) -> Result<(), OrbitError> {
         let current = self.show_job_run(&run.run_id)?;
         let already_has_error = current
             .steps
@@ -367,7 +389,7 @@ impl OrbitRuntime {
             duration_ms,
             exit_code: None,
             agent_response_json: None,
-            state: JobRunState::Failed,
+            state,
             error_code: None,
             error_message: Some(message.to_string()),
         };
@@ -407,6 +429,7 @@ impl OrbitRuntime {
                     JobRunState::Success => Some("succeeded"),
                     JobRunState::Failed => Some("failed"),
                     JobRunState::Cancelled => Some("cancelled"),
+                    JobRunState::Interrupted => Some("interrupted"),
                     _ => None,
                 };
                 let status = match (terminal, timeout_incomplete) {

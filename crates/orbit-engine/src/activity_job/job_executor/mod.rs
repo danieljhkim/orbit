@@ -37,6 +37,7 @@ use orbit_common::types::activity_job::{
     JobV2Step, JobV2StepBody, JoinMode, LoopBlock, ParallelBlock, RetrySpec, TargetStep,
     V2ActivityCatalog, V2AuditEventKind, resolve_job_target_refs,
 };
+use orbit_common::types::{JobRunState, PipelineState};
 use serde_json::Value;
 
 use crate::job_runner::evaluate_bool_expr;
@@ -115,6 +116,28 @@ pub fn execute_job(
     audit: Arc<V2AuditWriter>,
     host: &dyn V2RuntimeHost,
 ) -> Result<JobOutcome, DispatchError> {
+    execute_job_with_resume(job, input, run_id, audit, host, None)
+}
+
+/// [ORB-10002] Execute a v2 Job, optionally resuming from a persisted
+/// checkpoint state.
+///
+/// When `resume` is `Some`, top-level steps whose global index is recorded
+/// as `success` in `resume.step_states` are skipped (a `step.skipped` audit
+/// event is emitted) and their recorded outputs are pre-seeded into the
+/// pipeline map so later steps see them through `{{ steps.<id>.output.* }}`
+/// templates. Checkpoint granularity is the top-level step: `parallel:` /
+/// `fan_out:` / `loop:` blocks re-run as a whole if they did not complete.
+/// In-memory agent sessions are not restorable across processes, so resumed
+/// steps that share a session start it fresh.
+pub fn execute_job_with_resume(
+    job: &JobV2,
+    input: Value,
+    run_id: &str,
+    audit: Arc<V2AuditWriter>,
+    host: &dyn V2RuntimeHost,
+    resume: Option<&PipelineState>,
+) -> Result<JobOutcome, DispatchError> {
     validate_job(job)?;
 
     let base_input = merge_job_input(job.default_input.as_ref(), &input);
@@ -131,7 +154,7 @@ pub fn execute_job(
         audit: audit.clone(),
         host,
         input: base_input.clone(),
-        pipeline: Arc::new(Mutex::new(HashMap::new())),
+        pipeline: Arc::new(Mutex::new(seed_pipeline_from_resume(resume))),
         sessions: Arc::new(Mutex::new(HashMap::new())),
         recovery_activity,
         item: None,
@@ -140,7 +163,21 @@ pub fn execute_job(
 
     let mut overall_ok = true;
     let mut overall_message = None;
-    for step in &job.steps {
+    for (index, step) in job.steps.iter().enumerate() {
+        let step_index = index as u32;
+        if step_completed_in_resume(resume, step_index) {
+            emit_job_event_lossy(
+                &ctx.audit,
+                ctx.task_id(),
+                V2AuditEventKind::StepSkipped {
+                    step_id: step.id.clone(),
+                    reason: format!(
+                        "resume: step already completed in checkpointed run (index {step_index})"
+                    ),
+                },
+            );
+            continue;
+        }
         let outcome = run_step(step, &ctx)?;
         if !outcome.success {
             overall_ok = false;
@@ -151,6 +188,7 @@ pub fn execute_job(
             );
             break;
         }
+        checkpoint_completed_step(&ctx, step_index, &step.id, &outcome.output);
     }
 
     let pipeline = Value::Object(
@@ -169,4 +207,50 @@ pub fn execute_job(
         audit_failures: audit.audit_failure_count(),
         degraded_audit: audit.degraded_audit(),
     })
+}
+
+/// [ORB-10002] Seed the executor pipeline map from a resume snapshot so
+/// skipped steps' outputs stay visible to later steps.
+fn seed_pipeline_from_resume(resume: Option<&PipelineState>) -> HashMap<String, Value> {
+    resume
+        .and_then(|state| state.pipeline.as_object())
+        .map(|map| {
+            map.iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// [ORB-10002] True when the resume snapshot records this top-level step as
+/// completed successfully; such steps are skipped instead of re-executed.
+fn step_completed_in_resume(resume: Option<&PipelineState>, step_index: u32) -> bool {
+    resume.is_some_and(|state| state.step_states.get(&step_index) == Some(&JobRunState::Success))
+}
+
+/// [ORB-10002] Persist a checkpoint for a completed top-level step through
+/// the host. Non-fatal: a checkpoint write failure degrades resumability but
+/// must never fail an otherwise-successful run.
+fn checkpoint_completed_step(ctx: &ExecCtx<'_>, step_index: u32, step_id: &str, output: &Value) {
+    let snapshot = Value::Object(
+        ctx.pipeline
+            .lock()
+            .expect("pipeline poisoned")
+            .clone()
+            .into_iter()
+            .collect(),
+    );
+    if let Err(error) =
+        ctx.host
+            .checkpoint_step(&ctx.run_id, step_index, step_id, output, &snapshot)
+    {
+        tracing::warn!(
+            target: "orbit.engine.job_executor",
+            run_id = %ctx.run_id,
+            step_id,
+            step_index,
+            error = %error,
+            "step checkpoint persistence failed; run continues without a durable checkpoint",
+        );
+    }
 }

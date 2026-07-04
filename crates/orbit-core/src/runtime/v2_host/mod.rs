@@ -107,6 +107,42 @@ impl V2RuntimeHost for OrbitRuntime {
             })
     }
 
+    /// [ORB-10002] Persist a per-step checkpoint into the run's
+    /// `PipelineState` so an interrupted run can be resumed without
+    /// re-executing completed steps. A missing run row (direct `execute_job`
+    /// callers that never persisted a run) is a silent no-op — there is
+    /// nothing durable to checkpoint into.
+    fn checkpoint_step(
+        &self,
+        run_id: &str,
+        step_index: u32,
+        step_id: &str,
+        output: &Value,
+        pipeline_snapshot: &Value,
+    ) -> Result<(), DispatchError> {
+        let Some(mut state) = self.read_run_state(run_id).map_err(|error| {
+            DispatchError::JobExecution(format!("read run state for checkpoint: {error}"))
+        })?
+        else {
+            return Ok(());
+        };
+        state.record_step(
+            step_index,
+            orbit_common::types::JobRunState::Success,
+            Some(output.clone()),
+            None,
+        );
+        state.sync_pipeline(pipeline_snapshot.clone());
+        self.stores()
+            .jobs()
+            .write_run_state(run_id, &state)
+            .map_err(|error| {
+                DispatchError::JobExecution(format!(
+                    "persist step checkpoint (run {run_id}, step {step_index} `{step_id}`): {error}"
+                ))
+            })
+    }
+
     fn tool_context_for_activity(
         &self,
         run_id: Option<&str>,

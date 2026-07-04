@@ -31,7 +31,8 @@ pub use dispatcher::{
     V2RuntimeHost, dispatch_v2_activity,
 };
 pub use job_executor::{
-    JobOutcome, execute_job, resolve_job_catalog_refs_for_execution, validate_job,
+    JobOutcome, execute_job, execute_job_with_resume, resolve_job_catalog_refs_for_execution,
+    validate_job,
 };
 pub use orbit_tool_executor::OrbitToolCallExecutor;
 pub use sqlite_sink::V2SqliteSink;

@@ -25,6 +25,7 @@ mod r#loop;
 mod parallel;
 mod pipeline_durability;
 mod recovery;
+mod resume;
 mod step;
 mod target;
 mod templating;

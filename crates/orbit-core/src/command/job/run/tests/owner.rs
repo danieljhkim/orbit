@@ -386,12 +386,12 @@ fn show_job_run_reconciles_dead_pid_with_probe_outcome_in_message() {
         .expect("mark running with impossible pid");
 
     let shown = runtime.show_job_run(&run.run_id).expect("show run");
-    assert_eq!(shown.state, JobRunState::Failed);
+    assert_eq!(shown.state, JobRunState::Interrupted);
     let failure_step = shown
         .steps
         .iter()
-        .find(|step| step.state == JobRunState::Failed)
-        .expect("stale failure step");
+        .find(|step| step.state == JobRunState::Interrupted)
+        .expect("stale interrupted step");
     let message = failure_step
         .error_message
         .as_deref()

@@ -471,6 +471,11 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                     Some(args.run_id.as_str()),
                     Some(args.run_id.as_str()),
                 ),
+                JobSubcommand::Resume(args) => (
+                    "resume",
+                    Some(args.run_id.as_str()),
+                    Some(args.run_id.as_str()),
+                ),
                 JobSubcommand::RunPipelineWorker(args) => (
                     "run-pipeline-worker",
                     Some(args.run_id.as_str()),
@@ -481,11 +486,13 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 command: "job".to_string(),
                 subcommand: Some(sub.to_string()),
                 tool_name: None,
-                target_type: Some(if matches!(sub, "replay" | "run-pipeline-worker") {
-                    "job_run".to_string()
-                } else {
-                    "job".to_string()
-                }),
+                target_type: Some(
+                    if matches!(sub, "replay" | "resume" | "run-pipeline-worker") {
+                        "job_run".to_string()
+                    } else {
+                        "job".to_string()
+                    },
+                ),
                 target_id: target_id.map(String::from),
                 role: "admin".to_string(),
                 arguments_json: None,

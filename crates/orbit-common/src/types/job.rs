@@ -95,6 +95,11 @@ pub enum JobRunState {
     Retrying,
     /// Run was explicitly cancelled by the user before it completed.
     Cancelled,
+    /// Run was orphaned: its owner process died (crash, SIGKILL, host reboot)
+    /// without finalizing the run. Terminal for finalization purposes, but the
+    /// run's persisted step checkpoints can seed a resumed follow-up run
+    /// (ORB-10002).
+    Interrupted,
 }
 
 /// Events that drive job run state transitions.
@@ -106,6 +111,8 @@ pub enum RunEvent {
     Timeout,
     Cancel,
     Abandon,
+    /// Owner process died without finalizing the run (orphan reconciliation).
+    Interrupt,
 }
 
 impl Display for RunEvent {
@@ -117,6 +124,7 @@ impl Display for RunEvent {
             RunEvent::Timeout => write!(f, "timeout"),
             RunEvent::Cancel => write!(f, "cancel"),
             RunEvent::Abandon => write!(f, "abandon"),
+            RunEvent::Interrupt => write!(f, "interrupt"),
         }
     }
 }
@@ -126,7 +134,7 @@ impl JobRunState {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::Success | Self::Failed | Self::Timeout | Self::Cancelled
+            Self::Success | Self::Failed | Self::Timeout | Self::Cancelled | Self::Interrupted
         )
     }
 
@@ -148,6 +156,7 @@ impl JobRunState {
             (Self::Running, RunEvent::Timeout) => Ok(Self::Timeout),
             (Self::Running, RunEvent::Cancel) => Ok(Self::Cancelled),
             (Self::Running, RunEvent::Abandon) => Ok(Self::Failed),
+            (Self::Running, RunEvent::Interrupt) => Ok(Self::Interrupted),
             _ => Err(format!(
                 "invalid job run state transition: {} + {:?}",
                 self, event
@@ -158,11 +167,14 @@ impl JobRunState {
     /// Validates that a step result state is one of the allowed write-once values.
     pub fn validate_step_state(self) -> Result<(), String> {
         match self {
-            Self::Success | Self::Failed | Self::Timeout | Self::Skipped | Self::Cancelled => {
-                Ok(())
-            }
+            Self::Success
+            | Self::Failed
+            | Self::Timeout
+            | Self::Skipped
+            | Self::Cancelled
+            | Self::Interrupted => Ok(()),
             other => Err(format!(
-                "invalid step result state: {} (must be success, failed, timeout, skipped, or cancelled)",
+                "invalid step result state: {} (must be success, failed, timeout, skipped, cancelled, or interrupted)",
                 other
             )),
         }
@@ -180,6 +192,7 @@ impl Display for JobRunState {
             JobRunState::Skipped => write!(f, "skipped"),
             JobRunState::Retrying => write!(f, "retrying"),
             JobRunState::Cancelled => write!(f, "cancelled"),
+            JobRunState::Interrupted => write!(f, "interrupted"),
         }
     }
 }
@@ -197,6 +210,7 @@ impl FromStr for JobRunState {
             "skipped" => Ok(JobRunState::Skipped),
             "retrying" => Ok(JobRunState::Retrying),
             "cancelled" => Ok(JobRunState::Cancelled),
+            "interrupted" => Ok(JobRunState::Interrupted),
             other => Err(format!("unknown job run state: {other}")),
         }
     }

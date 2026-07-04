@@ -15,7 +15,8 @@ use orbit_common::types::{
     JobRun, JobRunState, JobTargetType, NotFoundKind, OrbitError, OrbitEvent, PipelineState,
 };
 use orbit_engine::{
-    DispatchError, JobOutcome, V2AuditWriter, execute_job, resolve_job_catalog_refs_for_execution,
+    DispatchError, JobOutcome, V2AuditWriter, execute_job_with_resume,
+    resolve_job_catalog_refs_for_execution,
 };
 use orbit_store::{JobRunStepParams, TaskReservationReleaseReason};
 use serde_json::{Value, json};
@@ -46,7 +47,7 @@ impl OrbitRuntime {
         input: Value,
         backend_flag: Option<Backend>,
     ) -> Result<V2JobRunResult, OrbitError> {
-        self.run_job_v2_from_yaml_with_retry_source(yaml_path, input, backend_flag, None)
+        self.run_job_v2_from_yaml_with_retry_source(yaml_path, input, backend_flag, None, 1, None)
     }
 
     /// Re-run a completed or historical job run from step 0 using the current
@@ -60,6 +61,48 @@ impl OrbitRuntime {
             input,
             None,
             Some(source.run_id.clone()),
+            1,
+            None,
+        )
+    }
+
+    /// [ORB-10002] Resume an interrupted (or failed / timed-out) job run from
+    /// its persisted step checkpoints.
+    ///
+    /// Creates a new run linked via `retry_source_run_id`, seeds its
+    /// `PipelineState` from the source run's checkpoints, and executes the
+    /// job skipping every top-level step already recorded as `success` —
+    /// their outputs are fed back into the pipeline so later steps see them.
+    /// If the source run has no successful checkpoints this degrades to a
+    /// full replay.
+    pub fn resume_job_run(&self, source_run_id: &str) -> Result<V2JobRunResult, OrbitError> {
+        // `show_job_run` reconciles a stale Running owner first, so a run
+        // orphaned by SIGKILL flips to Interrupted before the state guard.
+        let source = self.show_job_run(source_run_id)?;
+        if !matches!(
+            source.state,
+            JobRunState::Interrupted | JobRunState::Failed | JobRunState::Timeout
+        ) {
+            return Err(OrbitError::JobValidation(format!(
+                "job run '{}' is {} — resume requires an interrupted, failed, or timed-out run",
+                source_run_id, source.state
+            )));
+        }
+        let input = source.input.clone().unwrap_or_else(|| json!({}));
+        let resume_state = self.read_run_state(source_run_id)?.filter(|state| {
+            state
+                .step_states
+                .values()
+                .any(|step_state| *step_state == JobRunState::Success)
+        });
+        let (job_path, _) = self.load_v2_job_asset_by_name(&source.job_id)?;
+        self.run_job_v2_from_yaml_with_retry_source(
+            &job_path,
+            input,
+            None,
+            Some(source.run_id.clone()),
+            source.attempt.saturating_add(1),
+            resume_state,
         )
     }
 
@@ -69,18 +112,30 @@ impl OrbitRuntime {
         input: Value,
         backend_flag: Option<Backend>,
         retry_source_run_id: Option<String>,
+        attempt: u32,
+        resume: Option<PipelineState>,
     ) -> Result<V2JobRunResult, OrbitError> {
         let job_name = load_job_name(yaml_path)?;
         let scheduled_at = chrono::Utc::now();
         let run = self.stores().jobs().insert_run(
             &job_name,
-            1,
+            attempt,
             scheduled_at,
             Some(input.clone()),
             retry_source_run_id.clone(),
         )?;
-        let initial_state =
-            PipelineState::new(run.run_id.clone(), run.job_id.clone(), input.clone());
+        // [ORB-10002] A resumed run starts from the source run's checkpoint
+        // state (re-keyed to the new run) instead of a blank pipeline.
+        let initial_state = match &resume {
+            Some(source_state) => {
+                let mut seeded = source_state.clone();
+                seeded.run_id = run.run_id.clone();
+                seeded.job_id = run.job_id.clone();
+                seeded.updated_at = chrono::Utc::now();
+                seeded
+            }
+            None => PipelineState::new(run.run_id.clone(), run.job_id.clone(), input.clone()),
+        };
         self.stores()
             .jobs()
             .write_run_state(&run.run_id, &initial_state)?;
@@ -106,6 +161,7 @@ impl OrbitRuntime {
             backend_flag,
             Some(run.run_id.clone()),
             retry_source_run_id,
+            resume.as_ref(),
         );
         let finished_at = chrono::Utc::now();
         let duration_ms = Some(
@@ -182,6 +238,7 @@ impl OrbitRuntime {
             backend_flag,
             run_id_override,
             None,
+            None,
         )
     }
 
@@ -192,6 +249,7 @@ impl OrbitRuntime {
         backend_flag: Option<Backend>,
         run_id_override: Option<String>,
         retry_source_run_id: Option<String>,
+        resume: Option<&PipelineState>,
     ) -> Result<V2JobRunResult, OrbitError> {
         let yaml = std::fs::read_to_string(yaml_path).map_err(|err| {
             OrbitError::InvalidInput(format!("read {}: {err}", yaml_path.display()))
@@ -249,7 +307,7 @@ impl OrbitRuntime {
         });
 
         let outcome_res: Result<JobOutcome, OrbitError> =
-            execute_job(&asset.spec, input, &run_id, writer.clone(), self)
+            execute_job_with_resume(&asset.spec, input, &run_id, writer.clone(), self, resume)
                 .map_err(|err| OrbitError::Execution(format!("v2 job dispatch: {err}")));
 
         let (outcome_str, error_message) = match &outcome_res {
@@ -296,7 +354,13 @@ impl OrbitRuntime {
             PipelineState::new(run.run_id.clone(), run.job_id.clone(), input.clone())
         });
         state.sync_pipeline(result.pipeline.clone());
-        state.record_step(0, final_state, Some(result.pipeline.clone()), None);
+        // [ORB-10002] Per-step checkpoints already maintain step records for
+        // this run; only fall back to the legacy single-summary step record
+        // when no checkpoint was ever written, so a later `resume` never sees
+        // a whole-run summary clobbering step 0's real checkpoint.
+        if state.step_states.is_empty() {
+            state.record_step(0, final_state, Some(result.pipeline.clone()), None);
+        }
         self.stores().jobs().write_run_state(&run.run_id, &state)
     }
 
@@ -450,7 +514,7 @@ mod tests {
             Some(repo_root),
         )
         .expect("audit writer");
-        execute_job(&job, input, run_id, writer, host)
+        execute_job_with_resume(&job, input, run_id, writer, host, None)
     }
 
     struct ReserveThenStatusHost<'a> {
@@ -1064,6 +1128,254 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
                 && row.tool_name == "command_execution"
                 && row.call_count == 1
         }));
+    }
+
+    fn write_three_step_job(path: &Path, name: &str) {
+        let yaml = format!(
+            r#"schemaVersion: 2
+kind: Job
+metadata:
+  name: {name}
+spec:
+  state: enabled
+  kind: workflow
+  steps:
+    - id: nap0
+      spec:
+        type: deterministic
+        action: sleep
+        config: {{}}
+    - id: nap1
+      spec:
+        type: deterministic
+        action: sleep
+        config: {{}}
+    - id: nap2
+      spec:
+        type: deterministic
+        action: sleep
+        config: {{}}
+"#
+        );
+        std::fs::write(path, yaml).expect("write three-step job yaml");
+    }
+
+    /// [ORB-10002] Host checkpoint persistence: `checkpoint_step` records the
+    /// step into the run's `PipelineState` (state, output, snapshot, cursor).
+    #[test]
+    fn checkpoint_step_records_into_run_state() {
+        let (_root, runtime, _repo_root, _global_root) = test_runtime();
+        let run = runtime
+            .stores()
+            .jobs()
+            .insert_run("qa_ckpt", 1, Utc::now(), Some(json!({"seconds": 0})), None)
+            .expect("insert run");
+        let initial = orbit_common::types::PipelineState::new(
+            run.run_id.clone(),
+            run.job_id.clone(),
+            json!({"seconds": 0}),
+        );
+        runtime
+            .stores()
+            .jobs()
+            .write_run_state(&run.run_id, &initial)
+            .expect("write initial state");
+
+        <OrbitRuntime as V2RuntimeHost>::checkpoint_step(
+            &runtime,
+            &run.run_id,
+            0,
+            "nap0",
+            &json!({"ok": 0}),
+            &json!({"nap0": {"ok": 0}}),
+        )
+        .expect("checkpoint step 0");
+        <OrbitRuntime as V2RuntimeHost>::checkpoint_step(
+            &runtime,
+            &run.run_id,
+            1,
+            "nap1",
+            &json!({"ok": 1}),
+            &json!({"nap0": {"ok": 0}, "nap1": {"ok": 1}}),
+        )
+        .expect("checkpoint step 1");
+
+        let state = runtime
+            .read_run_state(&run.run_id)
+            .expect("read state")
+            .expect("state exists");
+        assert_eq!(
+            state.step_states.get(&0),
+            Some(&orbit_common::types::JobRunState::Success)
+        );
+        assert_eq!(
+            state.step_states.get(&1),
+            Some(&orbit_common::types::JobRunState::Success)
+        );
+        assert_eq!(state.step_outputs.get(&0), Some(&json!({"ok": 0})));
+        assert_eq!(state.next_step_index, 2);
+        assert_eq!(
+            state.pipeline,
+            json!({"nap0": {"ok": 0}, "nap1": {"ok": 1}})
+        );
+    }
+
+    /// [ORB-10002] A checkpoint against a run that was never persisted is a
+    /// silent no-op (direct `execute_job` callers without a run row).
+    #[test]
+    fn checkpoint_step_without_run_row_is_noop() {
+        let (_root, runtime, _repo_root, _global_root) = test_runtime();
+        <OrbitRuntime as V2RuntimeHost>::checkpoint_step(
+            &runtime,
+            "jrun-never-persisted",
+            0,
+            "nap0",
+            &json!({}),
+            &json!({}),
+        )
+        .expect("no-op checkpoint");
+    }
+
+    /// [ORB-10002] Acceptance-shaped test: a run is "SIGKILLed" between steps
+    /// (a real child worker process is killed, the run row stays `running`,
+    /// step 0's checkpoint is already persisted), then a fresh scan marks it
+    /// `interrupted` and `resume_job_run` completes only the remaining steps.
+    ///
+    /// The interruption itself is state-simulated (checkpoint written through
+    /// the real host path, run left running against a real dead pid) rather
+    /// than SIGKILLing a live orbit process mid-run; the orphan-liveness and
+    /// resume paths exercised are the production ones.
+    #[cfg(unix)]
+    #[test]
+    fn interrupted_run_resumes_skipping_checkpointed_steps() {
+        let (_root, runtime, _repo_root, global_root) = test_runtime();
+        let jobs_dir = global_root.join("resources/jobs");
+        std::fs::create_dir_all(&jobs_dir).expect("create jobs dir");
+        write_three_step_job(&jobs_dir.join("qa_resume_ckpt.yaml"), "qa_resume_ckpt");
+
+        // Simulate the interrupted first attempt: a real worker process owns
+        // the run, step 0's checkpoint lands, then the worker dies hard.
+        let input = json!({"seconds": 0});
+        let run = runtime
+            .stores()
+            .jobs()
+            .insert_run("qa_resume_ckpt", 1, Utc::now(), Some(input.clone()), None)
+            .expect("insert run");
+        let initial = orbit_common::types::PipelineState::new(
+            run.run_id.clone(),
+            run.job_id.clone(),
+            input.clone(),
+        );
+        runtime
+            .stores()
+            .jobs()
+            .write_run_state(&run.run_id, &initial)
+            .expect("write initial state");
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn fake worker");
+        runtime
+            .stores()
+            .jobs()
+            .mark_run_running(&run.run_id, Utc::now(), child.id())
+            .expect("mark running under fake worker pid");
+        <OrbitRuntime as V2RuntimeHost>::checkpoint_step(
+            &runtime,
+            &run.run_id,
+            0,
+            "nap0",
+            &json!({"checkpointed": true}),
+            &json!({"nap0": {"checkpointed": true}}),
+        )
+        .expect("persist step 0 checkpoint");
+        child.kill().expect("SIGKILL fake worker");
+        child.wait().expect("reap fake worker");
+
+        // Orphan scan (also runs at workspace open / every run query): the
+        // dead owner flips the stuck `running` run to `interrupted`.
+        let shown = runtime.show_job_run(&run.run_id).expect("show run");
+        assert_eq!(shown.state, JobRunState::Interrupted);
+        assert!(shown.steps.iter().any(|step| {
+            step.state == JobRunState::Interrupted
+                && step.error_message.as_deref().is_some_and(|message| {
+                    message.contains("recorded worker process is no longer alive")
+                })
+        }));
+
+        // Resume: a new linked run completes only the remaining steps.
+        let result = runtime
+            .resume_job_run(&run.run_id)
+            .expect("resume interrupted run");
+        assert!(result.success);
+        assert_ne!(result.run_id, run.run_id);
+        assert_eq!(
+            result.pipeline.get("nap0"),
+            Some(&json!({"checkpointed": true})),
+            "checkpointed step 0 output must be fed into the resumed pipeline"
+        );
+        assert!(result.pipeline.get("nap1").is_some());
+        assert!(result.pipeline.get("nap2").is_some());
+
+        let resumed = runtime.show_job_run(&result.run_id).expect("show resumed");
+        assert_eq!(resumed.state, JobRunState::Success);
+        assert_eq!(resumed.attempt, 2);
+        assert_eq!(
+            resumed.retry_source_run_id.as_deref(),
+            Some(run.run_id.as_str())
+        );
+
+        // Step 0 was NOT re-executed: it is audited as skipped-for-resume and
+        // never started; steps 1 and 2 started for real.
+        let skipped = v2_events(&runtime, &result.run_id, "step.skipped");
+        assert!(skipped.iter().any(|row| {
+            let payload: serde_json::Value =
+                serde_json::from_str(&row.payload_json).expect("payload");
+            payload["step_id"] == json!("nap0")
+                && payload["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("resume"))
+        }));
+        let started_ids: Vec<String> = v2_events(&runtime, &result.run_id, "step.started")
+            .iter()
+            .map(|row| {
+                let payload: serde_json::Value =
+                    serde_json::from_str(&row.payload_json).expect("payload");
+                payload["step_id"].as_str().unwrap_or_default().to_string()
+            })
+            .collect();
+        assert!(!started_ids.contains(&"nap0".to_string()));
+        assert!(started_ids.contains(&"nap1".to_string()));
+        assert!(started_ids.contains(&"nap2".to_string()));
+
+        // Source run stays interrupted; resume never mutates its history.
+        let source_after = runtime.show_job_run(&run.run_id).expect("show source");
+        assert_eq!(source_after.state, JobRunState::Interrupted);
+    }
+
+    /// [ORB-10002] Resume refuses runs that are not interrupted / failed /
+    /// timed-out.
+    #[test]
+    fn resume_rejects_successful_runs() {
+        let (_root, runtime, repo_root, _global_root) = test_runtime();
+        let yaml_path = repo_root.join("qa_resume_guard.yaml");
+        write_job(&yaml_path, "qa_resume_guard", "sleep");
+        let result = runtime
+            .run_job_v2_from_yaml(&yaml_path, json!({"seconds": 0}), None)
+            .expect("run succeeds");
+
+        let error = runtime
+            .resume_job_run(&result.run_id)
+            .expect_err("resume of a successful run must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("resume requires an interrupted, failed, or timed-out run"),
+            "{error}"
+        );
     }
 
     #[test]

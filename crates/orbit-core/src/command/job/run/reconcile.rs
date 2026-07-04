@@ -11,6 +11,31 @@ use super::owner::{
 };
 
 impl OrbitRuntime {
+    /// [ORB-10002] Best-effort orphan scan at workspace open. Marks stuck
+    /// `running` runs with a conclusively-dead owner as `interrupted`; when
+    /// owner liveness cannot be determined confidently the run is left alone
+    /// (see `owner::classify_run_owner`). Never fails runtime construction.
+    pub(crate) fn reconcile_stale_job_runs_on_open(&self) {
+        match self.reconcile_stale_job_runs(None) {
+            Ok(0) => {}
+            Ok(reconciled) => {
+                tracing::info!(
+                    target: "orbit.core.job_run",
+                    reconciled,
+                    "orphan scan at workspace open reconciled interrupted job runs",
+                );
+            }
+            Err(error) => {
+                tracing::warn!(
+                    target: "orbit.core.job_run",
+                    error = %error,
+                    "orphan scan at workspace open failed; stale runs will be \
+                     reconciled lazily by job run queries",
+                );
+            }
+        }
+    }
+
     pub(crate) fn reconcile_stale_job_runs(
         &self,
         job_id: Option<&str>,
@@ -45,9 +70,13 @@ impl OrbitRuntime {
                 .num_milliseconds()
                 .max(0) as u64
         });
+        // [ORB-10002] Orphaned runs (owner process conclusively gone) become
+        // `interrupted`, not `failed`: the job did not fail, its worker died.
+        // Interrupted runs are resumable from their step checkpoints via
+        // `orbit job resume <run_id>`.
         let changed = self.finalize_job_run_with_reservation_cleanup(
             &run.run_id,
-            JobRunState::Failed,
+            JobRunState::Interrupted,
             finished_at,
             duration_ms,
             TaskReservationReleaseReason::StaleRunReconciled,
@@ -59,22 +88,23 @@ impl OrbitRuntime {
         let Some(current) = self.get_job_run_backend(&run.run_id)? else {
             return Ok(false);
         };
-        if current.state != JobRunState::Failed || current.finished_at.is_none() {
+        if current.state != JobRunState::Interrupted || current.finished_at.is_none() {
             return Ok(false);
         }
 
         let step_started_at = run.started_at.unwrap_or(run.scheduled_at);
         let stale_reason = running_run_owner_stale_reason(run);
-        let _ = self.record_pipeline_failure_step(
+        let _ = self.record_pipeline_diagnostic_step(
             run,
             step_started_at,
             finished_at,
             &stale_job_run_message(run, stale_reason),
+            JobRunState::Interrupted,
         );
         self.record_event(OrbitEvent::JobRunCompleted {
             job_id: run.job_id.clone(),
             run_id: run.run_id.clone(),
-            state: JobRunState::Failed.to_string(),
+            state: JobRunState::Interrupted.to_string(),
         })?;
         Ok(true)
     }

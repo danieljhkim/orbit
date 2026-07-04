@@ -14,7 +14,7 @@ pub mod sweep;
 mod trace;
 
 pub use command::{RunCommand, RunSubcommand};
-pub use job::{JobReplayArgs, JobRunArgs, JobRunPipelineWorkerArgs};
+pub use job::{JobReplayArgs, JobResumeArgs, JobRunArgs, JobRunPipelineWorkerArgs};
 pub(crate) use show::{print_legacy_logs_summary, print_run_show};
 
 #[cfg(test)]

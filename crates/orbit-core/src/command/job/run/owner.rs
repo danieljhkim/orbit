@@ -318,7 +318,7 @@ pub(super) fn stale_job_run_message(run: &JobRun, reason: Option<OwnerIdentity>)
         None => "unknown",
     };
     format!(
-        "job run marked failed because recorded worker process is no longer alive (reason={}, pid={}, pid_start_time={})",
+        "job run marked interrupted because recorded worker process is no longer alive (reason={}, pid={}, pid_start_time={})",
         reason_str,
         run.pid
             .map(|pid| pid.to_string())
@@ -330,7 +330,7 @@ pub(super) fn stale_job_run_message(run: &JobRun, reason: Option<OwnerIdentity>)
 #[cfg(not(unix))]
 pub(super) fn stale_job_run_message(run: &JobRun, _reason: Option<()>) -> String {
     format!(
-        "job run marked failed because recorded worker process is no longer alive (reason=unknown, pid={}, pid_start_time={})",
+        "job run marked interrupted because recorded worker process is no longer alive (reason=unknown, pid={}, pid_start_time={})",
         run.pid
             .map(|pid| pid.to_string())
             .unwrap_or_else(|| "-".to_string()),

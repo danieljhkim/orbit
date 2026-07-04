@@ -19,11 +19,11 @@ fn show_job_run_reconciles_stale_running_owner() {
 
     let shown = runtime.show_job_run(&run.run_id).expect("show run");
 
-    assert_eq!(shown.state, JobRunState::Failed);
+    assert_eq!(shown.state, JobRunState::Interrupted);
     assert!(shown.finished_at.is_some());
     assert!(shown.duration_ms.is_some_and(|value| value > 0));
     assert!(shown.steps.iter().any(|step| {
-        step.state == JobRunState::Failed
+        step.state == JobRunState::Interrupted
             && step.error_message.as_deref().is_some_and(|message| {
                 message.contains("recorded worker process is no longer alive")
             })
@@ -110,12 +110,12 @@ fn list_job_runs_reconciles_before_state_filtering() {
             ..JobRunListParams::default()
         })
         .expect("list running");
-    let failed = runtime
+    let interrupted = runtime
         .list_job_runs(JobRunListParams {
-            state: Some(JobRunState::Failed),
+            state: Some(JobRunState::Interrupted),
             ..JobRunListParams::default()
         })
-        .expect("list failed");
+        .expect("list interrupted");
 
     assert!(
         !running
@@ -123,7 +123,7 @@ fn list_job_runs_reconciles_before_state_filtering() {
             .any(|candidate| candidate.run_id == run.run_id)
     );
     assert!(
-        failed
+        interrupted
             .iter()
             .any(|candidate| candidate.run_id == run.run_id)
     );
