@@ -144,13 +144,20 @@ fn enforce_fs_policy(
     let Some(policy_engine) = ctx.policy_engine.as_ref() else {
         return Ok(None);
     };
+    let workspace_root = ctx.workspace_root.as_ref().ok_or_else(|| {
+        OrbitError::PolicyDenied("workspace_root is not set; filesystem access denied".to_string())
+    })?;
 
-    let path = workspace_relative_path(ctx, canonical_path)?;
-    let evaluation = policy_engine.check(profile.to_string(), op, path.clone())?;
+    // [ORB-00418] Route through the policy engine's symlink-safe evaluation so
+    // resolution is enforced by the security-critical layer itself, not just by
+    // this caller's earlier canonicalization. `canonical_path` is already
+    // resolved, so re-resolution here is idempotent.
+    let evaluation =
+        policy_engine.check_resolved(workspace_root, profile.to_string(), op, canonical_path)?;
     let allowance = FsPolicyAllowance {
         profile: evaluation.profile,
         op: evaluation.operation,
-        path,
+        path: evaluation.path,
         matched_rule: evaluation.matched_rule,
     };
 
@@ -195,26 +202,4 @@ fn emit_fs_event(
         allowed,
         matched_rule: allowance.matched_rule.clone(),
     })
-}
-
-fn workspace_relative_path(ctx: &ToolContext, canonical_path: &Path) -> Result<String, OrbitError> {
-    let workspace_root = ctx.workspace_root.as_ref().ok_or_else(|| {
-        OrbitError::PolicyDenied("workspace_root is not set; filesystem access denied".to_string())
-    })?;
-    let canonical_root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.clone());
-    let relative = canonical_path.strip_prefix(&canonical_root).map_err(|_| {
-        OrbitError::PolicyDenied(format!(
-            "path is outside workspace: {}",
-            canonical_path.display()
-        ))
-    })?;
-
-    let rendered = relative.to_string_lossy().replace('\\', "/");
-    if rendered.is_empty() {
-        Ok(".".to_string())
-    } else {
-        Ok(format!("./{rendered}"))
-    }
 }

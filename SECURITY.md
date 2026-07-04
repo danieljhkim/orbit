@@ -45,3 +45,32 @@ Out of scope:
 - Issues that require an attacker who already has local code execution as the user running Orbit, or write access to the workspace, unless they cross a documented trust boundary.
 - Social-engineering or phishing of project maintainers.
 - Findings against forks or third-party redistributions of Orbit.
+
+## Filesystem Policy Enforcement
+
+Agent filesystem access is scoped by an `fsProfile` (`read` / `modify` globs)
+plus global `denyRead` / `denyModify` rules, evaluated by `orbit-policy`.
+
+**Enforcement layers differ by platform:**
+
+| Platform | Layers |
+| --- | --- |
+| **macOS** | Policy evaluation **and** the `orbit-exec` seatbelt (`sandbox-exec`) profile — two independent layers. |
+| **Linux** | Policy evaluation **only** — there is no OS-level sandbox. The policy check is the sole line of defense, so it must be correct on its own. |
+
+**Symlink resolution.** Policy rules are matched against the *real*
+filesystem location, not the requested path. Before matching, the requested
+path is resolved with `Path::canonicalize` (following symlinks); for a
+not-yet-existing target (a write/create) the nearest existing ancestor is
+canonicalized and the remaining components are rejoined. A symlink inside an
+allowed subtree that points into a denied subtree is therefore **denied**, and
+a resolved path that escapes the workspace root is denied outright. This
+resolution lives in `orbit-policy` (`PolicyEngine::check_resolved`) so the
+guarantee holds regardless of the caller.
+
+**Known limitation (TOCTOU).** There is an inherent time-of-check to
+time-of-use gap between the policy decision and the actual filesystem
+operation: an attacker who can race the filesystem (swap a resolved path for a
+symlink between check and use) is an OS-level concern outside what the policy
+layer can close. On macOS the seatbelt provides a second enforcement point; on
+Linux, treat a workspace an attacker can concurrently mutate as untrusted.
