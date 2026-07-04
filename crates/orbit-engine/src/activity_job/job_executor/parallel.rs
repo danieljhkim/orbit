@@ -81,7 +81,7 @@ pub(super) fn run_parallel(
         JoinMode::Any => "any",
         JoinMode::Quorum { .. } => "quorum",
     };
-    let _ = emit_job_event(
+    emit_job_event_lossy(
         &ctx.audit,
         ctx.task_id(),
         V2AuditEventKind::StepJoin {

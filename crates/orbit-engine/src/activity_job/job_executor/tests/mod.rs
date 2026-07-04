@@ -34,6 +34,24 @@ fn test_writer(run_id: &str) -> V2AuditWriter {
     V2AuditWriter::new(run_id, "test-agent", inner)
 }
 
+/// [ORB-00414] Envelope sink that always fails, used to exercise the non-fatal
+/// audit-failure recording path (counter + tracing error + degraded flag).
+struct FailingEnvelopeSink;
+
+impl crate::activity_job::audit_writer::EnvelopeSink for FailingEnvelopeSink {
+    fn write_envelope(&self, _event: &V2AuditEvent) -> Result<(), orbit_common::types::OrbitError> {
+        Err(orbit_common::types::OrbitError::Store(
+            "injected audit sink failure".to_string(),
+        ))
+    }
+}
+
+fn failing_sink_writer(run_id: &str) -> V2AuditWriter {
+    let inner: std::sync::Arc<dyn AuditSink> = std::sync::Arc::new(NullSink);
+    V2AuditWriter::new(run_id, "test-agent", inner)
+        .with_envelope_sink(std::sync::Arc::new(FailingEnvelopeSink))
+}
+
 fn capture<F>(f: F) -> CapturedTrace
 where
     F: FnOnce(),

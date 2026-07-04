@@ -32,7 +32,7 @@ pub(super) fn run_loop(
     for iter in 1..=planned_iterations {
         let iteration_index = iter - 1;
         last_iter = iter;
-        let _ = emit_job_event(
+        emit_job_event_lossy(
             &ctx.audit,
             ctx.task_id(),
             V2AuditEventKind::LoopIterationStart {
@@ -76,7 +76,7 @@ pub(super) fn run_loop(
             false
         };
 
-        let _ = emit_job_event(
+        emit_job_event_lossy(
             &ctx.audit,
             ctx.task_id(),
             V2AuditEventKind::LoopIterationEnd {
@@ -93,7 +93,7 @@ pub(super) fn run_loop(
     }
 
     if !broke && block.break_when.is_some() {
-        let _ = emit_job_event(
+        emit_job_event_lossy(
             &ctx.audit,
             ctx.task_id(),
             V2AuditEventKind::LoopDidNotConverge {

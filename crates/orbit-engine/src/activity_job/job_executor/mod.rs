@@ -83,6 +83,12 @@ pub struct JobOutcome {
     pub success: bool,
     pub pipeline: Value,
     pub message: Option<String>,
+    /// [ORB-00414] Number of audit-write failures observed during the run.
+    /// Non-zero means the audit trail is incomplete (see `degraded_audit`).
+    pub audit_failures: u64,
+    /// [ORB-00414] True when any audit write failed — retry/recovery/debugging
+    /// consumers should treat the trail as incomplete.
+    pub degraded_audit: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -160,5 +166,7 @@ pub fn execute_job(
         success: overall_ok,
         pipeline,
         message: (!overall_ok).then_some(overall_message).flatten(),
+        audit_failures: audit.audit_failure_count(),
+        degraded_audit: audit.degraded_audit(),
     })
 }

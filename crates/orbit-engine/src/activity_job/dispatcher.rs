@@ -317,7 +317,7 @@ fn dispatch_v2_activity_inner(
             },
         )
         .map_err(|err| DispatchError::AuditFailed(format!("{err:?}")))?;
-    let _ = input.audit.push_parent(activity_event_id);
+    input.audit.push_parent_lossy(activity_event_id);
 
     let result = match input.spec {
         ActivityV2Spec::AgentLoop(spec) => match input.host {
@@ -364,13 +364,13 @@ fn dispatch_v2_activity_inner(
         },
     };
 
-    let _ = input.audit.pop_parent();
+    input.audit.pop_parent_lossy();
     let outcome_str = match &result {
         Ok(o) if o.success => "success",
         Ok(_) => "failed",
         Err(_) => "error",
     };
-    let _ = input.audit.emit(
+    input.audit.emit_lossy(
         orbit_common::types::activity_job::V2AuditEventKind::ActivityFinished {
             activity_name: input.activity_name.to_string(),
             outcome: outcome_str.to_string(),

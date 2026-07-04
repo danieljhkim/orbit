@@ -8,6 +8,39 @@ use crate::AgentRoleConfig;
 
 use super::role_overridden_recovery_spec;
 
+/// [ORB-00414] Audit-write failures on the recovery path are recorded (counter
+/// + degraded flag) but never fatal: recovery still runs and the job succeeds.
+#[test]
+fn recovery_path_audit_failures_are_recorded_not_fatal() {
+    let original_error = retryable_error("flaky", "dirty checkout");
+    let host = RecoveryHost::new([
+        (
+            "flaky",
+            vec![
+                Err(original_error.clone()),
+                Err(original_error.clone()),
+                Ok(json!({"fixed": true})),
+            ],
+        ),
+        ("recover", vec![Ok(json!({"recovered": true}))]),
+    ]);
+    let job = recovery_job(Some("recover"), Some("wide"), "flaky", Some("narrow"), 2);
+    let run_id = "run-recovery-degraded-audit";
+    let writer = std::sync::Arc::new(failing_sink_writer(run_id));
+
+    let outcome = execute_job(&job, Value::Null, run_id, writer.clone(), &host)
+        .expect("job should recover despite audit sink failures");
+
+    assert!(outcome.success, "recovery should still succeed");
+    assert_eq!(host.action_count("recover"), 1, "recovery must have run");
+    assert!(
+        outcome.degraded_audit,
+        "audit trail must be marked degraded after recovery-path sink failures"
+    );
+    assert!(outcome.audit_failures > 0);
+    assert!(writer.degraded_audit());
+}
+
 #[test]
 fn recovery_success_runs_one_post_recovery_attempt_with_exact_input_and_fs_profile() {
     let original_error = retryable_error("flaky", "dirty checkout");

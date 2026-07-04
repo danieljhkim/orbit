@@ -45,7 +45,7 @@ pub fn run_cli_backend(
 
     // §6 allowlist-advisory event — emitted once per invocation before the
     // subprocess starts so a reviewer can see the enforcement gap at a glance.
-    let _ = audit.emit(V2AuditEventKind::ToolAllowlistHarnessDelegated {
+    audit.emit_lossy(V2AuditEventKind::ToolAllowlistHarnessDelegated {
         provider: provider.clone(),
         tools: spec.tools.clone(),
     });
@@ -139,7 +139,7 @@ pub fn run_cli_backend(
     let stdin_blob_ref = audit.write_blob(&invocation.stdin);
 
     let model_redacted = agent.model_name().map(|m| redaction.apply_str(m));
-    let _ = audit.emit(V2AuditEventKind::CliInvocationStarted {
+    audit.emit_lossy(V2AuditEventKind::CliInvocationStarted {
         provider: provider.clone(),
         argv_redacted: argv_redacted.clone(),
         stdin_blob_ref: Some(stdin_blob_ref.clone()),
@@ -190,7 +190,7 @@ pub fn run_cli_backend(
     let stdout_blob_ref = audit.write_blob(&stdout);
     let stderr_blob_ref = audit.write_blob(&stderr);
 
-    let _ = audit.emit(V2AuditEventKind::CliInvocationFinished {
+    audit.emit_lossy(V2AuditEventKind::CliInvocationFinished {
         provider: provider.clone(),
         exit_code,
         duration_ms: duration.as_millis() as u64,

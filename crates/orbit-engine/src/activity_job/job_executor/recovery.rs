@@ -67,17 +67,22 @@ pub(super) fn attempt_recovery_activity(
 
     let recovery_succeeded = match dispatch {
         Ok(dispatch) if dispatch.success => {
+            // [ORB-00414] Best-effort dispatch-invocation persistence (a DB
+            // record, not an audit-envelope write); a failure here is
+            // intentionally non-fatal and does not affect recovery outcome. The
+            // audit trail of the recovery attempt is emitted separately below.
             let _ = persist_dispatch_invocation(ctx, &recovery.name, &input, &dispatch);
             true
         }
         Ok(dispatch) => {
+            // [ORB-00414] See above: non-audit DB persistence, non-fatal.
             let _ = persist_dispatch_invocation(ctx, &recovery.name, &input, &dispatch);
             false
         }
         Err(_) => false,
     };
 
-    let _ = emit_job_event(
+    emit_job_event_lossy(
         &ctx.audit,
         ctx.task_id(),
         V2AuditEventKind::StepRecoveryAttempted {
