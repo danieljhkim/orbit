@@ -49,6 +49,27 @@ mod matching {
             1
         );
     }
+
+    #[test]
+    fn anchorless_selectors_have_no_filesystem_anchor() {
+        assert!(anchor_path("module:orbit_core::scheduler").is_err());
+        assert!(anchor_path("command:task.update").is_err());
+
+        let temp = tempdir().unwrap();
+        assert!(!exists_in_workspace("module:orbit_core", temp.path()));
+        assert!(!exists_in_workspace("command:task.update", temp.path()));
+
+        assert_eq!(shared_anchor_prefix_depth("module:a::b", "file:a/b.rs"), 0);
+    }
+
+    #[test]
+    fn anchorless_selectors_overlap_only_on_textual_equality() {
+        assert!(overlaps("module:orbit_core", "module:orbit_core"));
+        assert!(overlaps("command:task.update", " command:task.update "));
+        assert!(!overlaps("module:orbit_core", "module:orbit_engine"));
+        assert!(!overlaps("module:orbit_core", "file:src/lib.rs"));
+        assert!(!overlaps("dir:src", "command:task.update"));
+    }
 }
 
 mod parse {
@@ -97,6 +118,18 @@ mod parse {
     fn symbol_selector() -> impl Strategy<Value = Selector> {
         (selector_path(), symbol_name(), kind_name())
             .prop_map(|(path, symbol, kind)| Selector::Symbol { path, symbol, kind })
+    }
+
+    fn module_selector() -> impl Strategy<Value = Selector> {
+        prop::collection::vec(identifier(), 1..4).prop_map(|segments| Selector::Module {
+            qualified: segments.join("::"),
+        })
+    }
+
+    fn command_selector() -> impl Strategy<Value = Selector> {
+        prop::collection::vec(identifier(), 1..4).prop_map(|segments| Selector::Command {
+            name: segments.join("."),
+        })
     }
 
     #[test]
@@ -179,5 +212,79 @@ mod parse {
         fn symbol_selector_display_parse_roundtrips(selector in symbol_selector()) {
             prop_assert_eq!(Selector::from_str(&selector.to_string()).unwrap(), selector);
         }
+
+        #[test]
+        fn module_selector_display_parse_roundtrips(selector in module_selector()) {
+            prop_assert_eq!(Selector::from_str(&selector.to_string()).unwrap(), selector);
+        }
+
+        #[test]
+        fn command_selector_display_parse_roundtrips(selector in command_selector()) {
+            prop_assert_eq!(Selector::from_str(&selector.to_string()).unwrap(), selector);
+        }
+    }
+
+    #[test]
+    fn every_selector_variant_roundtrips_through_display() {
+        let variants = [
+            "dir:src/command",
+            "file:src/lib.rs",
+            "symbol:src/lib.rs#hello:function",
+            "module:orbit_core::scheduler",
+            "command:task.update",
+        ];
+        for raw in variants {
+            let parsed: Selector = raw.parse().unwrap();
+            assert_eq!(parsed.to_string(), raw);
+            let reparsed: Selector = parsed.to_string().parse().unwrap();
+            assert_eq!(reparsed, parsed);
+        }
+    }
+
+    #[test]
+    fn module_and_command_selectors_parse_and_validate() {
+        assert_eq!(
+            "module:orbit_core::scheduler".parse::<Selector>().unwrap(),
+            Selector::Module {
+                qualified: "orbit_core::scheduler".to_string(),
+            }
+        );
+        assert_eq!(
+            " command: task.update ".parse::<Selector>().unwrap(),
+            Selector::Command {
+                name: "task.update".to_string(),
+            }
+        );
+        assert!("module:".parse::<Selector>().is_err());
+        assert!("command:  ".parse::<Selector>().is_err());
+    }
+
+    #[test]
+    fn canonical_selector_passes_anchorless_selectors_through() {
+        assert_eq!(
+            canonical_selector("module:orbit_core::scheduler").unwrap(),
+            "module:orbit_core::scheduler"
+        );
+        assert_eq!(
+            canonical_selector("command:task.update").unwrap(),
+            "command:task.update"
+        );
+
+        let temp = tempdir().unwrap();
+        assert_eq!(
+            canonical_selector_in_workspace("module:orbit_core::scheduler", temp.path()).unwrap(),
+            "module:orbit_core::scheduler"
+        );
+        assert_eq!(
+            canonical_selector_in_workspace("command:task.update", temp.path()).unwrap(),
+            "command:task.update"
+        );
+    }
+
+    #[test]
+    fn unknown_prefixes_reject_with_full_grammar_hint() {
+        let error = "package:orbit-core".parse::<Selector>().unwrap_err();
+        assert!(error.reason.contains("`module:`"));
+        assert!(error.reason.contains("`command:`"));
     }
 }

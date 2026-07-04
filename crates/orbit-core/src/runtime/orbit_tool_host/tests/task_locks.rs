@@ -64,7 +64,17 @@ fn parse_task_lock_reservation_scope_validates_file_selectors() {
     })));
     assert!(symbol.contains("`file:`"));
     assert!(symbol.contains("`dir:`"));
-    assert!(symbol.contains("`symbol:` selectors are not supported"));
+    assert!(symbol.contains("selectors are not supported for task locks"));
+
+    let module = invalid_input_message(parse_task_lock_reservation_scope(&json!({
+        "files": ["module:orbit_core::scheduler"],
+    })));
+    assert!(module.contains("selectors are not supported for task locks"));
+
+    let command = invalid_input_message(parse_task_lock_reservation_scope(&json!({
+        "files": ["command:task.update"],
+    })));
+    assert!(command.contains("selectors are not supported for task locks"));
 }
 
 #[test]
@@ -106,7 +116,7 @@ fn task_locks_reserve_adapter_surfaces_new_validation_errors() {
     ));
     assert!(symbol.contains("`file:`"));
     assert!(symbol.contains("`dir:`"));
-    assert!(symbol.contains("`symbol:` selectors are not supported"));
+    assert!(symbol.contains("selectors are not supported for task locks"));
 }
 
 #[test]

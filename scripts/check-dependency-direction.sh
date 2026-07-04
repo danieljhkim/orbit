@@ -20,7 +20,8 @@ allowed_internal_deps() {
       echo "orbit-common orbit-search"
       ;;
     orbit-graph-extract)
-      echo ""
+      # ORB-10011 / ADR-0202: canonical Selector parser lives in orbit-common.
+      echo "orbit-common"
       ;;
     orbit-graph)
       echo "orbit-graph-extract"

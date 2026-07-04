@@ -3,7 +3,7 @@ summary: "Orbit Graph — Decisions"
 type: design
 title: "Orbit Graph — Decisions"
 owner: claude
-last_updated: 2026-06-16
+last_updated: 2026-07-04
 status: Draft
 feature: orbit-graph
 doc_role: decisions
@@ -185,6 +185,21 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
+## ADR-0202 — Consolidate the `Selector` parser into orbit-common
+
+**Status:** Accepted · 2026-07-04 · [ORB-10011]
+
+**Context.** The stable selector grammar (`dir:` / `file:` / `symbol:` / `module:` / `command:`) had two near-identical implementations: `orbit_common::utility::selector` (consumed by task scopes, locks, batch dispatch, learning reminders) and `orbit_graph_extract::selector` (consumed by orbit-graph, orbit-graph-cli, orbit-mcp). The copies were ~95% duplicated line-for-line; the extract copy additionally carried the `Module` / `Command` variants and the Option-based anchor semantics they require. Duplicated parsing of a documented public grammar is a drift hazard — a fix landing in one copy silently diverges the other, and GRAPH_SPEC §14 declares the grammar a hard compatibility contract.
+
+**Decision.** `orbit_common::utility::selector` is the single canonical implementation, adopting the extract superset wholesale: the `Module` / `Command` variants, `Selector::anchor_path() -> Option<&str>`, anchor-less handling in `anchor_path` / `overlaps` / `canonical_selector_in_workspace`, and the full doc comments. `orbit-graph-extract`'s `selector` module becomes a pure re-export shim, so every existing graph import path (`orbit_graph_extract::Selector`, `orbit_graph_extract::selector::*`) keeps working and orbit-graph / orbit-graph-cli need no direct orbit-common edge. This adds the crate edge `orbit-graph-extract → orbit-common`, ending extract's "no internal deps" status; the edge points at the lowest leaf, adds no heavy dependencies (orbit-common is types + utilities), and preserves extract's purity guarantees (still no storage, async, or filesystem traversal). Unified grammar tests (including parse→display→parse round-trips for all five variants) live in orbit-common; extract keeps the frozen selector-corpus spec test plus a re-export round-trip guard.
+
+**Consequences.**
+- One parser to fix, one grammar to audit; the GRAPH_SPEC §14 canonical-reference pointer moves to `crates/orbit-common/src/utility/selector.rs`.
+- orbit-common's selector surface now recognizes `module:` / `command:` everywhere it previously treated them as legacy raw paths: `Selector::from_str` accepts them (task locks now reject them with an explicit "not supported" error instead of a parse error), `canonical_selector("module:x")` returns `module:x` (previously `file:module:x`), and `anchor_path` / `exists_in_workspace` report no filesystem anchor (previously a bogus `module:x` path). These all align the shared surface with the documented grammar; no known caller passed such inputs.
+- Cost: orbit-common (stability `stable`) now owns two graph-flavored variants that non-graph consumers must exhaustively match; a future grammar addition for the graph is an orbit-common change and ripples to every crate in the workspace.
+
+---
+
 ## Task References
 
 - [ORB-00294] allocated the six initial orbit-graph ADR IDs (ADR-0184 through ADR-0189).
@@ -194,5 +209,6 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - [ORB-00385] allocated ADR-0197 and removed the orbit-graph equivalence + benchmark harness, amending ADR-0192.
 - [ORB-00391] allocated ADR-0198, cut the agent graph surface over to orbit-graph (v2), and decommissioned `orbit-knowledge`.
 - [ORB-00396] allocated ADR-0199, lib-ified `orbit-graph-cli`, and reintroduced `orbit graph` as a thin CLI wrapper over it.
+- [ORB-10011] allocated ADR-0202 and consolidated the `Selector` parser into `orbit-common::utility::selector`.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

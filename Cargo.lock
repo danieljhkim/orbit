@@ -2340,6 +2340,7 @@ dependencies = [
 name = "orbit-graph-extract"
 version = "0.9.2"
 dependencies = [
+ "orbit-common",
  "serde",
  "serde_json",
  "serde_yaml",

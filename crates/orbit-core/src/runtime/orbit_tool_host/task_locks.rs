@@ -331,9 +331,9 @@ fn parse_file_lock_selectors(files: Vec<String>) -> Result<Vec<String>, OrbitErr
             Selector::Dir { .. } | Selector::File { .. } => {
                 deduped.insert(selector.to_string());
             }
-            Selector::Symbol { .. } => {
+            Selector::Symbol { .. } | Selector::Module { .. } | Selector::Command { .. } => {
                 return Err(OrbitError::InvalidInput(
-                    "`files` entries must be canonical file or directory selectors using `file:` or `dir:`; `symbol:` selectors are not supported for task locks".to_string(),
+                    "`files` entries must be canonical file or directory selectors using `file:` or `dir:`; `symbol:`, `module:`, and `command:` selectors are not supported for task locks".to_string(),
                 ));
             }
         }

@@ -1,7 +1,7 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
-**Last updated:** 2026-06-14 (ORB-00391 completed the v2 cutover and removed `orbit-knowledge`; orbit-graph is now the sole graph surface)
+**Last updated:** 2026-07-04 (ORB-10011 consolidated the `Selector` parser into `orbit-common::utility::selector`; previously ORB-00391 completed the v2 cutover and removed `orbit-knowledge`)
 **Relation to `orbit-knowledge`:** Decommissioned. `orbit-knowledge` (v1) was removed in ORB-00391; orbit-graph is the sole graph backend. The two no longer coexist. See §16 for the migration outcome.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../_archive/knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
@@ -606,7 +606,7 @@ No async on the public surface. SQLite + tree-sitter are both sync. If the MCP s
 ## 14. What we keep from the current crate
 
 - All tree-sitter extractors (`extract/*.rs`). Move them into `orbit-graph-extract`, adjust output to `ExtractedFile`.
-- `Selector` grammar and parser. Agents and skills know the syntax. **Every form currently used in `~/.claude/` skills and `.claude/skills/` must continue to parse identically** — this is a hard contract, not a best-effort. A pre-Step-1 audit captures the full grammar surface in `crates/orbit-graph-extract/src/selector.rs` as the canonical reference; any divergence is a release blocker for Step 3.
+- `Selector` grammar and parser. Agents and skills know the syntax. **Every form currently used in `~/.claude/` skills and `.claude/skills/` must continue to parse identically** — this is a hard contract, not a best-effort. A pre-Step-1 audit captured the full grammar surface in `crates/orbit-graph-extract/src/selector.rs` as the canonical reference; ORB-10011 (ADR-0202) consolidated that implementation into `crates/orbit-common/src/utility/selector.rs`, which is now the canonical parser (`orbit-graph-extract` re-exports it unchanged). Any divergence is a release blocker for Step 3.
 - The `graph_bench.rs` harness.
 - `.orbitignore` defaults from `lib.rs`.
 - Signature-matching approach for cross-file refs.
