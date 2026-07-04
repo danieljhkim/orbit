@@ -22,8 +22,10 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 sha2.workspace = true
+tar.workspace = true
+tempfile.workspace = true
+zstd.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
 tracing.workspace = true
 tracing-subscriber.workspace = true

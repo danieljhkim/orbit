@@ -39,6 +39,7 @@ pub(crate) mod json_schema;
 pub(crate) mod scope;
 pub mod sqlite;
 pub mod state_io;
+pub mod task_migration;
 
 pub mod skill_store {
     pub use crate::file::skill_store::*;

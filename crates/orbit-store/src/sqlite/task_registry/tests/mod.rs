@@ -709,3 +709,63 @@ fn projection_rebuild_errors_on_non_symlink_blocker() {
         Err(OrbitError::Store(_))
     ));
 }
+
+#[test]
+fn seed_allocator_start_moves_counter_forward() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    assert_eq!(store.allocator_next_number().expect("read"), 0);
+
+    let outcome = store.seed_allocator_start(10_000).expect("seed");
+    assert_eq!(outcome.previous, 0);
+    assert_eq!(outcome.next, 10_000);
+    assert!(outcome.changed);
+    assert_eq!(store.allocator_next_number().expect("read"), 10_000);
+
+    // Re-seeding to the same value is a no-op.
+    let again = store.seed_allocator_start(10_000).expect("seed again");
+    assert!(!again.changed);
+}
+
+#[test]
+fn seed_allocator_start_refuses_to_lower() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    store.seed_allocator_start(5_000).expect("seed");
+    let err = store.seed_allocator_start(4_999).expect_err("must refuse lowering");
+    assert!(matches!(err, OrbitError::InvalidInput(_)));
+    assert_eq!(store.allocator_next_number().expect("read"), 5_000);
+}
+
+#[test]
+fn seed_allocator_start_rejects_above_max() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    let err = store
+        .seed_allocator_start(ORB_TASK_ID_MAX + 1)
+        .expect_err("must reject above max");
+    assert!(matches!(err, OrbitError::InvalidInput(_)));
+}
+
+#[test]
+fn seeded_allocator_hands_out_seeded_id() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    let workspace = bind(&store, temp.path());
+    store.seed_allocator_start(10_000).expect("seed");
+    let id = store
+        .allocate_task_id(&workspace.workspace_id)
+        .expect("allocate");
+    assert_eq!(id, "ORB-10000");
+}
+
+#[test]
+fn bump_allocator_never_lowers() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    store.seed_allocator_start(500).expect("seed");
+    store.bump_allocator_to_at_least(100).expect("bump low");
+    assert_eq!(store.allocator_next_number().expect("read"), 500);
+    store.bump_allocator_to_at_least(900).expect("bump high");
+    assert_eq!(store.allocator_next_number().expect("read"), 900);
+}
