@@ -104,6 +104,16 @@ fn main() {
             }
             return;
         }
+        // `orbit migrate --dry-run` must not bootstrap a runtime: opening one
+        // auto-applies the very migrations the dry-run is listing. The apply
+        // form (no --dry-run) falls through to the normal audited path below.
+        Commands::Migrate(cmd) if cmd.dry_run => {
+            if let Err(err) = cmd.execute_without_runtime(root_override.as_deref()) {
+                print_error(&err, tool_run_json_output);
+                std::process::exit(1);
+            }
+            return;
+        }
         Commands::Learning(LearningCommand {
             command: LearningSubcommand::MigrateLayout(args),
         }) => {

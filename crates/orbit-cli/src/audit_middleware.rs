@@ -603,6 +603,18 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             arguments_json: None,
             job_run_id: None,
         },
+        // Only the apply form reaches the audited dispatch: `--dry-run` is
+        // read-only and runs before the runtime bootstrap in `main.rs`.
+        Commands::Migrate(_) => CommandMeta {
+            command: "migrate".to_string(),
+            subcommand: None,
+            tool_name: None,
+            target_type: Some("workspace".to_string()),
+            target_id: None,
+            role: "admin".to_string(),
+            arguments_json: None,
+            job_run_id: None,
+        },
         Commands::Log(_) => CommandMeta {
             command: "log".to_string(),
             subcommand: Some("tail".to_string()),

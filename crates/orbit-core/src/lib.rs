@@ -55,6 +55,7 @@ pub use command::docs::{
     SearchResult, TaskRelatedDoc,
 };
 pub use command::learning::migrate_learning_layout_at;
+pub use command::migrate::{MigrateStatus, migrate_dry_run};
 pub use command::search::{
     GlobalSearchHit, GlobalSearchKind, GlobalSearchMode, GlobalSearchParams, GlobalSearchResponse,
     task_selectors_contain_path,
@@ -80,7 +81,9 @@ pub use orbit_common::utility::redaction::{
     redact_all_error, redact_sensitive_env_error, redact_sensitive_env_json,
     redact_sensitive_env_option, redact_sensitive_env_text,
 };
+pub use orbit_store::layout::{LayoutMigrationInfo, LayoutUpgradeReport, SUPPORTED_LAYOUT_VERSION};
 pub use orbit_store::learning_layout::LearningLayoutMigrationReport;
+pub use orbit_store::sqlite::migration::{PendingSchemaMigration, SUPPORTED_SCHEMA_VERSION};
 pub use orbit_store::{
     AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate, V2AuditEventFilter,
     V2AuditEventInsertParams, V2AuditEventRow,

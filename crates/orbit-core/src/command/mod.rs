@@ -26,6 +26,7 @@ pub mod init;
 pub mod job;
 pub mod learning;
 pub mod learning_hook;
+pub mod migrate;
 pub mod pipeline_run;
 pub mod policy;
 pub mod review_thread_hook;

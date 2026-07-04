@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use orbit_common::types::OrbitError;
 use rusqlite::Connection;
 
@@ -12,6 +14,70 @@ pub(crate) use ledger::{applied_migrations, current_schema_version};
 /// recorded schema version is newer than this binary supports.
 pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
     ledger::run_migrations(conn, ledger::MIGRATIONS)
+}
+
+/// Registry metadata for one schema migration not yet recorded as applied,
+/// as surfaced by `orbit migrate --dry-run` (ORB-10012).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingSchemaMigration {
+    pub version: u32,
+    pub name: &'static str,
+}
+
+/// Read-only view of a store database's migration ledger: the recorded
+/// schema version plus the registry migrations still pending against it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaLedgerStatus {
+    /// Schema version recorded in the ledger (0 for a fresh/pre-ledger or
+    /// nonexistent database).
+    pub current_version: u32,
+    /// Registry migrations newer than `current_version`, in apply order.
+    /// Empty when the database is current or newer than this binary
+    /// (compare against [`SUPPORTED_SCHEMA_VERSION`] to distinguish).
+    pub pending: Vec<PendingSchemaMigration>,
+}
+
+/// Inspect the migration ledger of the store database at `db_path` without
+/// opening it for writing — and therefore without triggering the automatic
+/// migrations that [`crate::Store::open`] applies. A missing database reads
+/// as version 0 with every registry migration pending (opening it would
+/// create and migrate it). Powers `orbit migrate --dry-run`.
+pub fn read_schema_ledger_status(db_path: &Path) -> Result<SchemaLedgerStatus, OrbitError> {
+    let current_version = if db_path.exists() {
+        let conn = Connection::open_with_flags(
+            db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| {
+            OrbitError::Store(format!(
+                "cannot open store database '{}' read-only: {e}",
+                db_path.display()
+            ))
+        })?;
+        current_schema_version(&conn)?
+    } else {
+        0
+    };
+
+    Ok(SchemaLedgerStatus {
+        current_version,
+        pending: pending_schema_migrations_after(current_version),
+    })
+}
+
+/// Registry migrations newer than `current_version`, in apply order. Lets
+/// callers that already know the recorded version (e.g. via
+/// [`crate::Store::schema_version`]) list what is pending without another
+/// database open.
+pub fn pending_schema_migrations_after(current_version: u32) -> Vec<PendingSchemaMigration> {
+    ledger::MIGRATIONS
+        .iter()
+        .filter(|m| m.version > current_version)
+        .map(|m| PendingSchemaMigration {
+            version: m.version,
+            name: m.name,
+        })
+        .collect()
 }
 
 /// v1 `baseline` migration: the full pre-ledger idempotent schema. Safe to

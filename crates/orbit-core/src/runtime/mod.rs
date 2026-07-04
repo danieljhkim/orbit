@@ -55,6 +55,10 @@ pub struct OrbitRuntime {
     context: OrbitContext,
     activity_executors: Arc<ActivityExecutorRegistry>,
     pub event_log: event_bus::EventLog,
+    /// Outcome of the [ORB-10012] workspace-layout pre-flight that ran when
+    /// this runtime opened (empty `applied` when the layout was already
+    /// current). Surfaced by `orbit migrate`.
+    layout_report: Arc<orbit_store::layout::LayoutUpgradeReport>,
     _temp_dir: Option<Arc<builder::TempDir>>,
 }
 
@@ -150,11 +154,21 @@ impl OrbitRuntime {
         shared_root: &Path,
         local_root: &Path,
     ) -> Result<Self, OrbitError> {
+        // [ORB-10012] Workspace-layout pre-flight: compare the `.orbit/`
+        // layout marker against this binary before anything opens the store.
+        // Older layouts auto-migrate here (matching how the SQLite schema
+        // ledger auto-applies inside `Store::open` below); a layout newer
+        // than this binary refuses with a downgrade-guard error. Runs before
+        // `build_context_from_roots` because a layout migration may need to
+        // restructure state the stores are about to open. Up-to-date cost:
+        // one marker-file read.
+        let layout_report = orbit_store::layout::upgrade_workspace_layout(shared_root)?;
         let context = builder::build_context_from_roots(global_root, shared_root, local_root)?;
         let runtime = Self {
             activity_executors: build_activity_executor_registry(&context)?,
             context,
             event_log: event_bus::EventLog::default(),
+            layout_report: Arc::new(layout_report),
             _temp_dir: None,
         };
         // [ORB-10002] Workspace-open orphan scan: job runs stuck in `running`
@@ -171,8 +185,15 @@ impl OrbitRuntime {
             activity_executors: build_activity_executor_registry(&context)?,
             context,
             event_log: event_bus::EventLog::default(),
+            layout_report: Arc::new(orbit_store::layout::LayoutUpgradeReport::default()),
             _temp_dir: Some(Arc::new(temp_dir)),
         })
+    }
+
+    /// Outcome of the workspace-layout pre-flight that ran when this runtime
+    /// opened: which layout migrations (if any) were auto-applied.
+    pub fn layout_upgrade_report(&self) -> &orbit_store::layout::LayoutUpgradeReport {
+        &self.layout_report
     }
 
     pub fn with_policy(mut self, policy: orbit_policy::PolicyEngine) -> Self {

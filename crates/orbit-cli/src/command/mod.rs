@@ -13,6 +13,7 @@ pub mod job;
 pub mod learning;
 pub mod log;
 pub mod mcp;
+pub mod migrate;
 pub mod policy;
 pub mod run;
 pub mod search;
@@ -53,6 +54,7 @@ Environment:
   workspace   Manage workspaces
   config      Show or update Orbit configuration
   semantic    Manage local orbit-search indexing
+  migrate     Apply or inspect pending .orbit layout/schema migrations
 
 Operate:
   run         Run a workflow (ship, duel-plan, job)
@@ -100,6 +102,7 @@ pub enum Commands {
     Workspace(workspace::WorkspaceCommand),
     Config(config::ConfigCommand),
     Semantic(semantic::SemanticCommand),
+    Migrate(migrate::MigrateCommand),
 
     // ── Operate ──
     Run(run::RunCommand),
@@ -144,6 +147,7 @@ impl Execute for Commands {
             Commands::Workspace(cmd) => cmd.execute(runtime),
             Commands::Config(cmd) => cmd.execute(runtime),
             Commands::Semantic(cmd) => cmd.execute(runtime),
+            Commands::Migrate(cmd) => cmd.execute(runtime),
             Commands::Run(cmd) => cmd.execute(runtime),
             Commands::Task(cmd) => (*cmd).execute(runtime),
             Commands::Search(cmd) => cmd.execute(runtime),

@@ -37,6 +37,7 @@ pub(crate) mod backend;
 mod file;
 pub(crate) mod file_lock;
 pub(crate) mod json_schema;
+pub mod layout;
 pub(crate) mod scope;
 pub mod sqlite;
 pub mod state_io;
