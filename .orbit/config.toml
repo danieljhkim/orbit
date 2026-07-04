@@ -23,6 +23,7 @@ enabled = true
 editing = false
 
 [workflow]
+auto_ship = true
 base_branch = "agent-main"
 default_crew = "codex"
 
