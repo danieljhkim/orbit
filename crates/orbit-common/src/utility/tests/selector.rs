@@ -288,3 +288,21 @@ mod parse {
         assert!(error.reason.contains("`command:`"));
     }
 }
+
+mod translation {
+    use super::super::super::selector::{SelectorParseError, selector_error_to_orbit};
+    use crate::types::OrbitError;
+
+    #[test]
+    fn selector_error_to_orbit_maps_to_invalid_input() {
+        let error = SelectorParseError {
+            input: "bogus:thing".to_string(),
+            reason: "unknown selector kind".to_string(),
+        };
+        let rendered = error.to_string();
+        assert!(matches!(
+            selector_error_to_orbit(error),
+            OrbitError::InvalidInput(m) if m == format!("invalid selector: {rendered}")
+        ));
+    }
+}

@@ -81,3 +81,22 @@ fn dispatch_error_retryability_classification_table() {
         assert!(!err.is_non_retryable(), "expected retryable: {err:?}");
     }
 }
+
+#[test]
+fn dispatch_error_to_orbit_keeps_validation_variant_and_buckets_the_rest() {
+    use orbit_common::types::OrbitError;
+
+    use super::super::dispatcher::{DispatchError, dispatch_error_to_orbit};
+
+    assert!(matches!(
+        dispatch_error_to_orbit(DispatchError::JobValidation("bad spec".into())),
+        OrbitError::JobValidation(m) if m == "bad spec"
+    ));
+
+    let other = DispatchError::AgentLoopFailed("overloaded".into());
+    let expected = other.to_string();
+    assert!(matches!(
+        dispatch_error_to_orbit(other),
+        OrbitError::InvalidInput(m) if m == expected
+    ));
+}

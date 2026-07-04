@@ -24,7 +24,10 @@ allowed_internal_deps() {
       echo "orbit-common"
       ;;
     orbit-graph)
-      echo "orbit-graph-extract"
+      # ORB-10013: orbit-common needed for the GraphError -> OrbitError
+      # translator (graph_error_to_orbit), which lives next to the error per
+      # docs/design-patterns/error_translation.md.
+      echo "orbit-common orbit-graph-extract"
       ;;
     orbit-graph-cli)
       echo "orbit-graph orbit-graph-extract"

@@ -60,7 +60,7 @@ pub use lexical::docs::{
     adr_paths_contain_path, score_adr_record, score_doc_record, sort_search_results,
 };
 pub use noop::NoopEmbedder;
-pub use rpc::{RpcError, RpcRequest, RpcResponse, RpcResult};
+pub use rpc::{RpcError, RpcRequest, RpcResponse, RpcResult, rpc_error_to_orbit};
 pub use subprocess::SubprocessEmbedder;
 pub use vector::{
     AdrEmbeddingSource, DocEmbeddingSource, EmbedWorker, LearningEmbeddingSource, SOURCE_KIND_ADR,

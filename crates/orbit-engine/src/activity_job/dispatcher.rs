@@ -323,6 +323,21 @@ impl DispatchError {
     }
 }
 
+/// Translate a [`DispatchError`] into the workspace-public [`OrbitError`]
+/// surface at crate boundaries.
+///
+/// Validation failures keep their dedicated [`OrbitError::JobValidation`]
+/// variant; everything else collapses into [`OrbitError::InvalidInput`] with
+/// the dispatch error's rendered message. Callers translate with
+/// `.map_err(dispatch_error_to_orbit)?` per
+/// `docs/design-patterns/error_translation.md` [ORB-10013].
+pub fn dispatch_error_to_orbit(error: DispatchError) -> OrbitError {
+    match error {
+        DispatchError::JobValidation(message) => OrbitError::JobValidation(message),
+        other => OrbitError::InvalidInput(format!("{other}")),
+    }
+}
+
 /// Dispatch a v2 activity by type. Emits §7 activity.started/finished
 /// events around the per-type runner and nests the runner's events beneath.
 pub fn dispatch_v2_activity(input: V2DispatchInput<'_>) -> Result<DispatchOutcome, DispatchError> {

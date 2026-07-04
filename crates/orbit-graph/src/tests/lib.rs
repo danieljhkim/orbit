@@ -493,3 +493,44 @@ fn query_callees_non_symbol_selector_returns_empty_vec() {
     let edges2: Vec<CalleeEdge> = graph.callees(&dir_sel).expect("callees on dir sel");
     assert!(edges2.is_empty());
 }
+
+#[test]
+fn graph_error_to_orbit_maps_variants_to_orbit_surface() {
+    use orbit_common::types::OrbitError;
+
+    use crate::graph_error_to_orbit;
+
+    let io = GraphError::Io {
+        operation: "open graph db",
+        path: PathBuf::from("/tmp/graph.db"),
+        reason: "permission denied".to_string(),
+    };
+    let expected = io.to_string();
+    assert!(matches!(graph_error_to_orbit(io), OrbitError::Io(m) if m == expected));
+
+    let invalid = GraphError::InvalidData {
+        operation: "decode row",
+        reason: "bad span".to_string(),
+    };
+    let expected = invalid.to_string();
+    assert!(matches!(
+        graph_error_to_orbit(invalid),
+        OrbitError::InvalidInput(m) if m == expected
+    ));
+
+    let sqlite = GraphError::Sqlite {
+        operation: "query nodes",
+        reason: "locked".to_string(),
+    };
+    let expected = sqlite.to_string();
+    assert!(matches!(
+        graph_error_to_orbit(sqlite),
+        OrbitError::Execution(m) if m == expected
+    ));
+
+    let expected = GraphError::Unimplemented.to_string();
+    assert!(matches!(
+        graph_error_to_orbit(GraphError::Unimplemented),
+        OrbitError::Execution(m) if m == expected
+    ));
+}

@@ -15,7 +15,7 @@ use orbit_common::types::{
     JobRun, JobRunState, JobTargetType, NotFoundKind, OrbitError, OrbitEvent, PipelineState,
 };
 use orbit_engine::{
-    DispatchError, JobOutcome, V2AuditWriter, execute_job_with_resume,
+    JobOutcome, V2AuditWriter, dispatch_error_to_orbit, execute_job_with_resume,
     resolve_job_catalog_refs_for_execution,
 };
 use orbit_store::{JobRunStepParams, TaskReservationReleaseReason};
@@ -263,12 +263,8 @@ impl OrbitRuntime {
         let catalog = self
             .v2_activity_catalog()
             .map_err(|err| OrbitError::InvalidInput(format!("build activity catalog: {err}")))?;
-        resolve_job_catalog_refs_for_execution(&mut asset.spec, &catalog).map_err(
-            |err| match err {
-                DispatchError::JobValidation(message) => OrbitError::JobValidation(message),
-                other => OrbitError::InvalidInput(format!("{other}")),
-            },
-        )?;
+        resolve_job_catalog_refs_for_execution(&mut asset.spec, &catalog)
+            .map_err(dispatch_error_to_orbit)?;
 
         // §3.1 resolution: replace every `Auto` with a concrete backend.
         let resolution = self.resolve_v2_backend(backend_flag);
@@ -418,7 +414,7 @@ mod tests {
     use orbit_common::types::{
         AuditEventStatus, ExecutorDef, ExecutorType, TaskPriority, TaskStatus, TaskType,
     };
-    use orbit_engine::{ResolvedCliExecutor, V2RuntimeHost};
+    use orbit_engine::{DispatchError, ResolvedCliExecutor, V2RuntimeHost};
     use orbit_store::{InvocationQuery, V2AuditEventFilter};
     use orbit_tools::{FsAuditLogger, ToolContext};
     use serde_json::json;

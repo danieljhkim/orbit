@@ -2310,6 +2310,7 @@ dependencies = [
  "git2",
  "ignore",
  "notify",
+ "orbit-common",
  "orbit-graph-extract",
  "rayon",
  "rusqlite",

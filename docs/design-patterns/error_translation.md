@@ -37,50 +37,55 @@ The principle: internal code propagates the rich typed error so callers can matc
 - **You don't have a typed error yet.** A thin wrapper crate producing `OrbitError` directly is fine; introduce a typed error only when you have enough variants that matching on them adds value.
 - **The "translation" is `OrbitError::from(other_err.to_string())`.** Stringifying loses the kind. If that's all your translator does, you don't need one — write the one-line `.map_err` at the boundary.
 
-## Reference: `KnowledgeError` → `OrbitError`
+## Reference: `GraphError` → `OrbitError`
 
-A thiserror struct with a string `kind` field, and a translator that maps a known kind to a specific `OrbitError` variant and dumps the rest into the generic bucket. From `crates/orbit-knowledge/src/error.rs:6`:
+An enum error whose variants act as the discriminator, with `pub(crate)` constructors, and a translator that maps each variant family to a specific `OrbitError` variant. From `crates/orbit-graph/src/lib.rs` (ORB-10013):
 
 ```rust
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Error)]
-#[error("{kind}: {reason}")]
-pub struct KnowledgeError {
-    pub kind: String,
-    pub reason: String,
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GraphError {
+    Io { operation: &'static str, path: PathBuf, reason: String },
+    Sqlite { operation: &'static str, reason: String },
+    InvalidData { operation: &'static str, reason: String },
+    Unimplemented,
 }
 
-impl KnowledgeError {
-    pub(crate) fn knowledge_unavailable(reason: impl Into<String>) -> Self { /* ... */ }
-    pub(crate) fn invalid_data(reason: impl Into<String>) -> Self { /* ... */ }
-    pub(crate) fn io(reason: impl Into<String>) -> Self { /* ... */ }
+impl GraphError {
+    pub(crate) fn io(operation: &'static str, path: impl Into<PathBuf>, source: std::io::Error) -> Self { /* ... */ }
+    pub(crate) fn sqlite(operation: &'static str, source: rusqlite::Error) -> Self { /* ... */ }
+    pub(crate) fn invalid_data(operation: &'static str, reason: impl Into<String>) -> Self { /* ... */ }
 }
 ```
 
-The translator at `crates/orbit-knowledge/src/commands/mod.rs:108`, re-exported at the crate root (`crates/orbit-knowledge/src/lib.rs:49`):
+The translator lives next to the error in `crates/orbit-graph/src/lib.rs`, at the crate root so callers can `use orbit_graph::graph_error_to_orbit;`:
 
 ```rust
-pub fn knowledge_error_to_orbit(error: KnowledgeError) -> OrbitError {
-    if error.kind == "knowledge_invalid" {
-        OrbitError::InvalidInput(error.reason)
-    } else {
-        OrbitError::Execution(error.to_string())
+pub fn graph_error_to_orbit(error: GraphError) -> OrbitError {
+    match error {
+        GraphError::Io { .. } => OrbitError::Io(error.to_string()),
+        GraphError::InvalidData { .. } => OrbitError::InvalidInput(error.to_string()),
+        GraphError::Sqlite { .. } | GraphError::Unimplemented => {
+            OrbitError::Execution(error.to_string())
+        }
     }
 }
 ```
 
-Used at every cross-crate edge — e.g. `crates/orbit-tools/src/builtin/orbit/knowledge/show.rs:53`:
+Used at every cross-crate edge — e.g. `crates/orbit-mcp/src/adapter/graph.rs`:
 
 ```rust
-let pack = orbit_knowledge::commands::show::pack(...)
-    .map_err(super::knowledge_error_to_orbit)?;
+to_json(graph.search(&query).map_err(graph_error_to_orbit)?)
 ```
+
+Other live translators in the same shape: `selector_error_to_orbit` (`orbit-common::utility::selector`, re-exported through `orbit-graph-extract` for graph consumers), `rpc_error_to_orbit` (`orbit-search::rpc`), and `dispatch_error_to_orbit` (`orbit-engine`, dispatcher module).
 
 Patterns to copy:
 
 - **Translator lives in the source crate, next to the error.** Not in `orbit-common`, not in each caller. The crate that *defined* `FooError` owns the kind→variant mapping. Re-export at the crate root so callers can `use crate_foo::foo_error_to_orbit;`.
 - **Discriminator field drives the mapping.** A typed `kind: String` (or an enum, equivalently) lets the translator branch without exposing internal `thiserror` variants to consumers.
-- **Constructors are `pub(crate)`.** Outside callers receive `KnowledgeError` from existing APIs; they never construct one. This keeps the kind set narrow and meaningful.
-- **One named match per surfaced variant; everything else passes through.** "`knowledge_invalid` → `InvalidInput`, default → `Execution`" is the right granularity — name the kinds callers will actually branch on, dump the rest into the generic bucket.
+- **Constructors are `pub(crate)`.** Outside callers receive `GraphError` from existing APIs; they never construct one. This keeps the kind set narrow and meaningful.
+- **One named match per surfaced variant; everything else passes through.** "`InvalidData` → `InvalidInput`, `Io` → `Io`, default → `Execution`" is the right granularity — name the kinds callers will actually branch on, dump the rest into the generic bucket.
 - **`.map_err(translator)?`, not `.map_err(|e| translator(e))?`.** The translator's signature is `FnOnce(E) -> OrbitError`, so the bare path works as a closure. The shorter form reads better at boundary sites.
 
-Use this shape for every new crate in the workspace per the architecture diagram in `CLAUDE.md`. A new typed error should land in the same PR as its translator.
+Use this shape for every new crate in the workspace per the architecture diagram in `CLAUDE.md`. A new typed error should land in the same PR as its translator. `scripts/check-error-translation.sh` (ORB-10013, wired into `make ci-fast` and CI guardrails) enforces the mechanically checkable core: registered boundary errors must export their translator from the owning crate, translators may not live in caller crates, and no foreign error type may be mapped to `OrbitError` variants at a call site.

@@ -17,6 +17,7 @@ fs2.workspace = true
 git2.workspace = true
 ignore.workspace = true
 notify.workspace = true
+orbit-common = { path = "../orbit-common" }
 orbit-graph-extract = { path = "../orbit-graph-extract" }
 rayon.workspace = true
 rusqlite.workspace = true

@@ -7,5 +7,6 @@
 
 pub use orbit_common::utility::selector::{
     Selector, SelectorLookupKey, SelectorParseError, anchor_path, canonical_selector,
-    canonical_selector_in_workspace, exists_in_workspace, overlaps, shared_anchor_prefix_depth,
+    canonical_selector_in_workspace, exists_in_workspace, overlaps, selector_error_to_orbit,
+    shared_anchor_prefix_depth,
 };

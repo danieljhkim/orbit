@@ -15,6 +15,7 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use git2::Repository;
+use orbit_common::types::OrbitError;
 pub use orbit_graph_extract::Selector;
 use rusqlite::{Connection, OpenFlags, params};
 use serde::Serialize;
@@ -425,6 +426,22 @@ impl Display for GraphError {
 }
 
 impl std::error::Error for GraphError {}
+
+/// Translate a [`GraphError`] into the workspace-public [`OrbitError`]
+/// surface at crate boundaries.
+///
+/// Callers that return `OrbitError` translate with `.map_err(graph_error_to_orbit)?`
+/// instead of mapping variants ad hoc; the kind→variant mapping lives here, next
+/// to the error, per `docs/design-patterns/error_translation.md` [ORB-10013].
+pub fn graph_error_to_orbit(error: GraphError) -> OrbitError {
+    match error {
+        GraphError::Io { .. } => OrbitError::Io(error.to_string()),
+        GraphError::InvalidData { .. } => OrbitError::InvalidInput(error.to_string()),
+        GraphError::Sqlite { .. } | GraphError::Unimplemented => {
+            OrbitError::Execution(error.to_string())
+        }
+    }
+}
 
 /// Sync mode requested by the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

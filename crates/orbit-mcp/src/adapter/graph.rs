@@ -9,10 +9,11 @@ use orbit_common::types::{
     required_string,
 };
 use orbit_graph::{
-    DEFAULT_IMPACT_DEPTH, DEFAULT_SHOW_MAX_BYTES, DEFAULT_TRACE_DEPTH, Graph, GraphError,
-    OverviewFormat, RefConfidence, RefKind, RefOpts, SearchKind, SearchQuery, SyncMode, SyncPolicy,
+    DEFAULT_IMPACT_DEPTH, DEFAULT_SHOW_MAX_BYTES, DEFAULT_TRACE_DEPTH, Graph, OverviewFormat,
+    RefConfidence, RefKind, RefOpts, SearchKind, SearchQuery, SyncMode, SyncPolicy,
+    graph_error_to_orbit,
 };
-use orbit_graph_extract::{Selector, SelectorParseError};
+use orbit_graph_extract::{Selector, selector_error_to_orbit};
 use serde_json::{Value, json};
 
 const GRAPH_SYNC_TOOL: &str = "orbit.graph.sync";
@@ -523,19 +524,4 @@ fn canonicalize_dir(path: &Path, label: &str) -> Result<PathBuf, OrbitError> {
 fn to_json<T: serde::Serialize>(value: T) -> Result<Value, OrbitError> {
     serde_json::to_value(value)
         .map_err(|error| OrbitError::Execution(format!("serialize graph tool response: {error}")))
-}
-
-fn graph_error_to_orbit(error: GraphError) -> OrbitError {
-    match error {
-        GraphError::Io { .. } => OrbitError::Io(error.to_string()),
-        GraphError::InvalidData { .. } => OrbitError::InvalidInput(error.to_string()),
-        GraphError::Sqlite { .. } | GraphError::Unimplemented => {
-            OrbitError::Execution(error.to_string())
-        }
-        _ => OrbitError::Execution(error.to_string()),
-    }
-}
-
-fn selector_error_to_orbit(error: SelectorParseError) -> OrbitError {
-    OrbitError::InvalidInput(format!("invalid selector: {error}"))
 }

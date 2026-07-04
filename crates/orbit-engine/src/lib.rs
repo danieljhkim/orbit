@@ -43,10 +43,10 @@ pub use activity_job::{
     DispatchError, DispatchOutcome, EnforcedAuditSink, EnforcementDecision, JobOutcome,
     OrbitToolCallExecutor, ResolvedAgentSettings, ResolvedCliExecutor, ResolvedSandbox,
     V2AuditWriter, V2DispatchInput, V2RuntimeHost, V2SqliteSink, WriteError,
-    apply_resolved_settings, dispatch_v2_activity, drive_agent_loop, drive_agent_loop_with_session,
-    drive_agent_loop_with_tool_context, execute_job, execute_job_with_resume,
-    reset_replay_transport, resolve_agent_settings, resolve_job_catalog_refs_for_execution,
-    resolve_subprocess_cwd, run_cli_backend, validate_job,
+    apply_resolved_settings, dispatch_error_to_orbit, dispatch_v2_activity, drive_agent_loop,
+    drive_agent_loop_with_session, drive_agent_loop_with_tool_context, execute_job,
+    execute_job_with_resume, reset_replay_transport, resolve_agent_settings,
+    resolve_job_catalog_refs_for_execution, resolve_subprocess_cwd, run_cli_backend, validate_job,
 };
 pub use checkpoint_verifier::{
     Criterion, CriterionOutcome, CriterionRun, DEFAULT_OUTPUT_CAP_BYTES, VerifierConfig,

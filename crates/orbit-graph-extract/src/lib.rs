@@ -16,7 +16,7 @@ pub mod selector;
 pub use extracted::{
     ExtractedFile, RawCommand, RawConfig, RawImport, RawRef, RawRelation, RawString, RawSymbol,
 };
-pub use selector::{Selector, SelectorParseError};
+pub use selector::{Selector, SelectorParseError, selector_error_to_orbit};
 
 #[cfg(test)]
 mod tests;

@@ -23,7 +23,7 @@ use orbit_common::utility::jitter::JitterRng;
 
 use crate::companion::locate_companion;
 use crate::embedder::{DEFAULT_MODEL, Embedder};
-use crate::rpc::{RpcRequest, RpcResponse, RpcResult};
+use crate::rpc::{RpcRequest, RpcResponse, RpcResult, rpc_error_to_orbit};
 
 /// Total request attempts (first try + respawn retries).
 const RPC_MAX_ATTEMPTS: u32 = 3;
@@ -245,10 +245,7 @@ fn request_once(io: &mut ChildIo, line: &str, id: u64) -> Result<RpcResult, Requ
         RpcResponse::Error {
             id: response_id,
             error,
-        } if response_id == id => Err(RequestFailure::Permanent(OrbitError::Execution(format!(
-            "search companion {}: {}",
-            error.code, error.message
-        )))),
+        } if response_id == id => Err(RequestFailure::Permanent(rpc_error_to_orbit(error))),
         other => Err(RequestFailure::Permanent(
             OrbitError::AgentProtocolViolation(format!(
                 "companion response id mismatch for request {id}: {other:?}"

@@ -13,6 +13,8 @@ use std::str::FromStr;
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::types::OrbitError;
+
 /// Error returned when a selector or legacy path-like scope cannot be parsed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Error)]
 #[error("invalid selector `{input}`: {reason}")]
@@ -21,6 +23,17 @@ pub struct SelectorParseError {
     pub input: String,
     /// Human-readable parse failure reason.
     pub reason: String,
+}
+
+/// Translate a [`SelectorParseError`] into the workspace-public [`OrbitError`]
+/// surface at crate boundaries.
+///
+/// A parse failure is always caller input, so it maps to
+/// [`OrbitError::InvalidInput`]. Callers translate with
+/// `.map_err(selector_error_to_orbit)?` per
+/// `docs/design-patterns/error_translation.md` [ORB-10013].
+pub fn selector_error_to_orbit(error: SelectorParseError) -> OrbitError {
+    OrbitError::InvalidInput(format!("invalid selector: {error}"))
 }
 
 /// Canonical selector.
