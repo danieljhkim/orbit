@@ -17,6 +17,36 @@ cargo test --workspace
 
 Use targeted tests while iterating, then run the full workspace suite before landing a change.
 
+## Toolchain (MSRV)
+
+Orbit's minimum supported Rust version is declared as `rust-version` in the
+workspace `Cargo.toml` (`[workspace.package]`) and enforced by the `msrv` job
+in `.github/workflows/ci.yml` (`cargo check --workspace --locked` on the
+pinned toolchain). If a change genuinely needs a newer compiler or a
+dependency bump raises the floor, bump `rust-version` and the workflow's
+`MSRV` env var together in the same PR, and call it out in the CHANGELOG.
+
+## Testing & Coverage
+
+CI collects workspace test coverage with
+[`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) on every PR
+(the `Coverage (informational)` job in `.github/workflows/ci.yml`) and
+uploads an lcov report as the `coverage-lcov` workflow artifact. The job is
+**informational only — it never gates a merge**.
+
+Per-crate line-coverage **targets** — goals to steer test investment, not
+gates that fail CI:
+
+| Crate | Target | Why |
+|---|---|---|
+| `orbit-policy` | > 90% | Policy evaluation is the security decision surface; on Linux it is the only enforcement layer. |
+| `orbit-core` | > 80% | Composition root and command handling — regressions here surface everywhere. |
+| `orbit-exec` | > 70% | Process spawning/sandboxing is platform-conditional, so some paths are unreachable on any single CI runner. |
+
+When touching those crates, check the coverage summary in the CI job log (or
+run `cargo llvm-cov -p <crate> --summary-only` locally) and prefer adding
+tests that close the gap toward the target.
+
 ## Repository Shape
 
 Rust workspace crates live under `crates/` (for example `crates/orbit-cli`).

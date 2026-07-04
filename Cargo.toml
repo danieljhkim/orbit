@@ -24,6 +24,10 @@ resolver = "2"
 version = "0.9.2"
 edition = "2024"
 license = "MIT"
+# MSRV [ORB-10010]: edition 2024 requires >= 1.85; the highest `rust-version`
+# among locked dependencies is 1.88 (time, cookie_store, ort). Enforced by the
+# `msrv` job in .github/workflows/ci.yml (keep its MSRV env var in sync).
+rust-version = "1.88"
 
 # Workspace-wide lint config. Each crate opts in via `[lints] workspace = true`.
 # Keep this list short — only rules that are mechanically true everywhere.
