@@ -1,0 +1,23 @@
+## Context
+Orbit's four consumer surfaces — the CLI (`orbit-cli`), MCP (`orbit-mcp`), the web dashboard (`orbit-dashboard`), and the in-runtime agent tool hosts — are four hand-wired adapter layers over the same underlying operations, so every new operation is plumbed by hand up to four times. The same shape keeps constraining refactors: inherent `impl OrbitRuntime` methods plus the orphan rule forced the ORB-10016 / ADR-0203 orbit-cmd extraction to leave the runtime-entangled command groups behind in orbit-core as documented residuals, and the same wall shelved the docs+search pluginization (docs/design/orbit-docs-plugin/1_scope.md — pending commit). Repeated point refactors treat symptoms; the missing piece is a recorded long-term bearing that future refactors steer by. Real alternatives existed: keep the status quo and continue paying per-surface wiring, or mandate a big-bang plugin/microkernel rewrite.
+
+## Decision
+Record five bearings as orbit's north star. This is an **incremental bearing, not a rewrite mandate**: no code changes are required by this ADR, and existing code is not wrong for predating it.
+
+1. **Operations as data, not inherent methods.** Every orbit operation is eventually defined as a serializable request/response pair with a handler registered in an operation table. The four consumer surfaces become derived adapters over that registry instead of four hand-wired layers, and the recurring inherent-impl/orphan-rule constraint (ADR-0203 residuals; the shelved docs+search pluginization) dissolves because handlers are registry entries, not inherent methods on `OrbitRuntime`.
+2. **Knowledge/execution split.** Orbit is two products — a knowledge store (tasks, learnings, ADRs, docs) and an execution engine (activities, jobs, agent providers) — glued by one runtime. Bearing: two systems sharing only a kernel (IDs, errors, audit), mirroring the constellation split (polaris = knowledge, worker = execution).
+3. **Events over side-effects.** The task-mutation → semantic-index coupling becomes a transactional SQLite outbox consumed by the indexer, replacing the lossy in-process `EmbedWorker` enqueue (best-effort batches, drops on queue-full, debug-level failure logging).
+4. **One retrieval trait, two backends.** orbit-search (workspace-local) and sextant (constellation-wide) become deployment choices behind one retrieval interface, dissolving the two-stack question.
+5. **Crates follow build boundaries, not taxonomy.** Crate splits are justified by compile-graph and dependency-direction needs, not by conceptual category. Explicitly kept as-is under this bearing: the ADR-005 companion-subprocess packaging pattern (docs/design/orbit-search/4_decisions.md ADR-005, global ADR-0117), the YAML+SQLite layered store in orbit-store, and the stability-tier markers (ARCHITECTURE.md §Stability tiers).
+
+**Adoption model.** Incremental and opportunistic: when a new surface is added or an existing command group is touched for other reasons, move that slice to request/response + registry then. Future ADRs should cite this bearing when steering by it, or supersede it if the bearing itself changes.
+
+**Alternatives rejected.** (a) *Status quo as the implicit bearing*: keeps charging up to 4× adapter wiring per operation and guarantees the next boundary refactor hits the same inherent-impl/orphan-rule wall with no recorded direction — the cost that motivated this ADR. (b) *Big-bang registry rewrite*: months of churn across every surface with no incremental payoff and high regression risk in a codebase that ships continuously; rejected in favor of the touch-it-move-it model.
+
+## Consequences
+- Future architecture ADRs have a fixed point to cite or supersede; "which direction were we going?" is answerable from the store.
+- Slices touched after this ADR should trend toward request/response + registry; reviewers can ask "why not the registry shape?" when a new hand-wired adapter appears.
+- The knowledge/execution split (bearing 2) gives crate and module moves a destination: kernel-shared code is IDs/errors/audit only.
+- The transition is unbounded by design, so registry-shaped and inherent-method slices will coexist indefinitely; the registry idiom is the tie-breaker, not a deadline.
+- No single code anchor; convention enforced via review.
+- Cost: two coexisting idioms during the (unbounded) incremental transition — readers must recognize both the registry shape and the legacy inherent-method shape — and request/response indirection adds per-operation boilerplate (a request type, a response type, a registration) compared to calling an inherent method directly.
