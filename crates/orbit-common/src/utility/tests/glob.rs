@@ -20,6 +20,37 @@ mod matching {
         assert_eq!(path, "crates/orbit-engine/perf.rs");
     }
 
+    /// [ORB-10009] Deny-bypass regression: `secret/./key.txt`,
+    /// `secret//key.txt`, and `secret/key.txt/` all name the same file as
+    /// `secret/key.txt`; normalization must collapse them so an exact deny
+    /// rule cannot be dodged by respelling the path.
+    #[test]
+    fn normalize_collapses_dot_segments_duplicate_and_trailing_separators() {
+        for spelling in [
+            "secret/./key.txt",
+            "secret//key.txt",
+            "secret/key.txt/",
+            "././secret/key.txt",
+            "secret/.//./key.txt",
+        ] {
+            let normalized = normalize_glob_path(spelling).expect("normalize");
+            assert_eq!(
+                normalized, "secret/key.txt",
+                "`{spelling}` must normalize to the canonical spelling"
+            );
+            assert!(
+                match_glob("secret/key.txt", &normalized).expect("match"),
+                "exact rule must match respelled path `{spelling}`"
+            );
+        }
+    }
+
+    #[test]
+    fn normalize_returns_empty_string_for_workspace_root() {
+        assert_eq!(normalize_glob_path(".").expect("normalize"), "");
+        assert_eq!(normalize_glob_path("./").expect("normalize"), "");
+    }
+
     #[test]
     fn normalize_rejects_traversal() {
         assert!(matches!(

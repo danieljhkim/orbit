@@ -15,6 +15,41 @@ env:
   CARGO_DENY_VERSION: 0.19.9
 
 jobs:
+  # [ORB-10009] Linux counterpart of ci-macos.yml's enforcement leg. The main
+  # `ci` job already compiles and runs these crates inside the workspace-wide
+  # nextest pass, but this job makes the sandbox/policy enforcement suite an
+  # explicit, named gate on Linux: orbit-policy's evaluation matrix
+  # (incl. the ORB-00418 symlink-resolution tests), orbit-tools'
+  # runtime fs-enforcement integration tests (the only enforcement layer on
+  # Linux — there is no kernel sandbox), and orbit-exec's Linux fail-closed
+  # contract tests. Tests that need host capabilities self-skip at runtime
+  # (skip-with-message) rather than relying on compile-time cfg alone, so the
+  # suite stays honest on any ubuntu runner.
+  linux-sandbox:
+    name: Linux Sandbox & Policy Enforcement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable (2026-05-07)
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-linux-sandbox-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-linux-sandbox-
+            ${{ runner.os }}-cargo-
+
+      - name: Run Linux sandbox/policy enforcement tests
+        run: cargo test -p orbit-exec -p orbit-policy -p orbit-tools --locked
+
   ci:
     name: Check / Clippy / Test
     runs-on: ubuntu-latest

@@ -356,6 +356,15 @@ fn normalize_rule(rule: &str, label: &str) -> Result<String, OrbitError> {
         }
     }
 
+    // [ORB-10009] Rules share the path-side canonical spelling (no `.`
+    // segments, no duplicate/trailing separators) so a rule like `src/` or
+    // `src/./foo` matches the paths it visibly refers to instead of
+    // silently matching nothing.
+    let mut normalized = crate::utility::glob::join_normal_components(path);
+    if normalized.is_empty() {
+        normalized = ".".to_string();
+    }
+
     compile_glob_regex(&normalized).map_err(|error| {
         OrbitError::InvalidInput(format!(
             "{label} rule `{trimmed}` is not a valid filesystem glob: {error}"
