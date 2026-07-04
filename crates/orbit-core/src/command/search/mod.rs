@@ -7,7 +7,8 @@ use orbit_search::{
 };
 use orbit_store::LearningSearchParams;
 
-use crate::{OrbitRuntime, SearchResult};
+use crate::OrbitRuntime;
+use crate::command::docs::SearchResult;
 
 mod convert;
 mod filters;

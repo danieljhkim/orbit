@@ -7,8 +7,9 @@ use std::path::PathBuf;
 use orbit_store::layout::SUPPORTED_LAYOUT_VERSION;
 use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
 
-use crate::OrbitRuntime;
-use crate::command::migrate::migrate_dry_run_at;
+use orbit_core::OrbitRuntime;
+
+use crate::migrate::{MigrateCommands, migrate_dry_run_at};
 
 struct Roots {
     _temp: tempfile::TempDir,

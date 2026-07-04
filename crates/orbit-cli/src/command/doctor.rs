@@ -1,5 +1,5 @@
 use clap::Args;
-use orbit_core::command::doctor::{WorkspaceDoctorResult, WorkspaceDoctorStatus};
+use orbit_cmd::{DoctorCommands, WorkspaceDoctorResult, WorkspaceDoctorStatus};
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 

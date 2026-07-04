@@ -253,15 +253,15 @@ mod audited_mcp_call_tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::Instant;
 
+    use orbit_cmd::learning_hook::{
+        HookOutputFormat, ORBIT_LEARNING_PER_CALL_CAP_ENV, ORBIT_LEARNING_SESSION_CAP_ENV,
+        ORBIT_SESSION_ID_ENV, run_pretooluse_input,
+    };
     use orbit_common::types::{
         AuditEventStatus, LearningInjectionCaps, LearningInjectionState, LearningReminder,
         LearningScope,
     };
     use orbit_core::LearningEvidence;
-    use orbit_core::command::learning_hook::{
-        HookOutputFormat, ORBIT_LEARNING_PER_CALL_CAP_ENV, ORBIT_LEARNING_SESSION_CAP_ENV,
-        ORBIT_SESSION_ID_ENV, run_pretooluse_input,
-    };
     use orbit_core::{LearningCreateParams, OrbitError, OrbitRuntime};
     use orbit_mcp::McpHost;
     use serde_json::json;

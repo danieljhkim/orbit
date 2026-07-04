@@ -148,7 +148,8 @@ pub fn merge_state(
     (prior, admitted)
 }
 
-pub(crate) fn update_state_file(
+/// `pub` for the learning PreToolUse hook in `orbit-cmd` [ORB-10016].
+pub fn update_state_file(
     state_path: &Path,
     candidates: &[ReviewThreadReminder],
 ) -> Result<Vec<ReviewThreadReminder>, String> {
@@ -237,7 +238,8 @@ impl OrbitRuntime {
     }
 }
 
-pub(crate) fn emit_review_thread_surfaced_audit(
+/// `pub` for the learning PreToolUse hook in `orbit-cmd` [ORB-10016].
+pub fn emit_review_thread_surfaced_audit(
     runtime: &OrbitRuntime,
     tool_name: &str,
     target_path: &str,

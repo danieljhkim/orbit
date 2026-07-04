@@ -8,14 +8,17 @@ use crate::paths;
 use crate::workspace_registry;
 
 /// Returns the global orbit root at `~/.orbit/`.
-pub(crate) fn resolve_global_root() -> Result<PathBuf, OrbitError> {
+pub fn resolve_global_root() -> Result<PathBuf, OrbitError> {
     workspace_registry::global_orbit_dir()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ResolvedOrbitRoots {
-    pub(crate) shared_root: PathBuf,
-    pub(crate) local_root: PathBuf,
+pub struct ResolvedOrbitRoots {
+    /// Shared workspace `.orbit` directory (the main-worktree root).
+    pub shared_root: PathBuf,
+    /// Worktree-local `.orbit` directory (equals `shared_root` outside linked
+    /// worktrees).
+    pub local_root: PathBuf,
 }
 
 impl ResolvedOrbitRoots {
@@ -368,7 +371,7 @@ fn resolve_root_path_value(raw: &str, base_dir: &Path) -> Result<PathBuf, OrbitE
 /// Explicit roots (`--root`, `ORBIT_ROOT`) keep their `RequireInitialized`
 /// semantics: pointing at an uninitialized path is still a hard error, since
 /// the user explicitly asked for that root.
-pub(crate) fn try_resolve_initialized_roots(
+pub fn try_resolve_initialized_roots(
     cwd: &Path,
     root_override: Option<&Path>,
 ) -> Result<Option<ResolvedOrbitRoots>, OrbitError> {

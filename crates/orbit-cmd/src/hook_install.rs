@@ -5,8 +5,8 @@ use orbit_common::types::OrbitError;
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use toml::{Table as TomlTable, Value as TomlValue};
 
-use crate::OrbitRuntime;
-use crate::redact_sensitive_env_text;
+use orbit_core::OrbitRuntime;
+use orbit_core::redact_sensitive_env_text;
 
 const HOOK_FILE_NAME: &str = "orbit-learning-reminder";
 const SHIM_COMMENT: &str = "# Orbit project-learning PreToolUse hook.";

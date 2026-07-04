@@ -2177,6 +2177,7 @@ dependencies = [
  "comfy-table",
  "csv",
  "libc",
+ "orbit-cmd",
  "orbit-common",
  "orbit-core",
  "orbit-dashboard",
@@ -2194,6 +2195,26 @@ dependencies = [
  "tower",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "orbit-cmd"
+version = "0.9.2"
+dependencies = [
+ "chrono",
+ "fs2",
+ "libc",
+ "orbit-common",
+ "orbit-core",
+ "orbit-engine",
+ "orbit-store",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "toml",
+ "tracing",
 ]
 
 [[package]]
@@ -2227,7 +2248,6 @@ version = "0.9.2"
 dependencies = [
  "chrono",
  "fs2",
- "jsonschema",
  "libc",
  "orbit-common",
  "orbit-engine",
@@ -2255,6 +2275,7 @@ dependencies = [
  "clap",
  "futures-core",
  "libc",
+ "orbit-cmd",
  "orbit-common",
  "orbit-core",
  "rusqlite",

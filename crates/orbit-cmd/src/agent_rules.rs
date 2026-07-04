@@ -2,7 +2,7 @@
 //! (`CLAUDE.md`, `AGENTS.md`) at the workspace root.
 //!
 //! Triggered by `orbit workspace init --inject-agent-rules`. The rule content
-//! lives in `crates/orbit-core/assets/agent-rules.md` as a self-contained
+//! lives in `crates/orbit-cmd/assets/agent-rules.md` as a self-contained
 //! fenced block (with start/end markers literally inside the asset). Re-runs
 //! replace only the content between the markers; content outside is
 //! byte-preserved.
@@ -15,7 +15,7 @@ use orbit_common::utility::fs::atomic_write_text;
 /// Asset block embedded at compile time. The asset contains the marker pair
 /// literally so a read-render-write round-trip is byte-stable when the asset
 /// has not changed.
-pub const AGENT_RULES_TEMPLATE: &str = include_str!("../../assets/agent-rules.md");
+pub const AGENT_RULES_TEMPLATE: &str = include_str!("../assets/agent-rules.md");
 
 pub const START_MARKER: &str = "<!-- orbit-managed:start -->";
 pub const END_MARKER: &str = "<!-- orbit-managed:end -->";

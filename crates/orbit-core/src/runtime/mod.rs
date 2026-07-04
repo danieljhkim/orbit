@@ -37,17 +37,20 @@ use orbit_engine::ActivityExecutorRegistry;
 use orbit_store::{Store, V2AuditEventFilter, V2AuditEventRow, workspace_id_for_orbit_dir};
 use serde_json::Value;
 
-use crate::OrbitContext;
 use crate::command::activity::DEFAULT_ACTIVITY_FILES;
 use crate::command::init::ensure_orbit_root_initialized;
 use crate::context::ActorIdentity;
+use crate::context::OrbitContext;
 use crate::context::OrbitStores;
 
 pub(crate) use orbit_tool_host::build_orbit_tool_host;
-pub(crate) use resolve::{
-    ResolvedOrbitRoots, resolve_bootstrap_roots, resolve_global_root, resolve_initialize_roots,
-    try_resolve_initialized_roots,
-};
+pub(crate) use resolve::{resolve_bootstrap_roots, resolve_initialize_roots};
+// `pub` for the runtime-less `orbit migrate --dry-run` inspection that moved
+// to `orbit-cmd` [ORB-10016].
+pub use resolve::ResolvedOrbitRoots;
+// `pub` for the runtime-less `orbit migrate --dry-run` inspection that moved
+// to `orbit-cmd` [ORB-10016].
+pub use resolve::{resolve_global_root, try_resolve_initialized_roots};
 pub(crate) use store_delegates::TaskRecordUpdateParams;
 
 #[derive(Clone)]
@@ -445,7 +448,8 @@ impl OrbitRuntime {
     /// orbit-mcp graph adapter rather than registered as builtins, so they are
     /// absent from `tool_registry().schemas()` but are still legitimate targets
     /// under the `orbit.graph.` wildcard root.
-    pub(crate) fn allowlist_known_tool_names(&self) -> Vec<String> {
+    /// `pub` for the direct v2 activity runner in `orbit-cmd` [ORB-10016].
+    pub fn allowlist_known_tool_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self
             .tool_registry()
             .schemas()
@@ -517,7 +521,9 @@ impl OrbitRuntime {
         self.context.skill_catalog()
     }
 
-    pub(crate) fn paths(&self) -> &WorkspacePaths {
+    /// Resolved workspace paths. `pub` for the command surfaces extracted to
+    /// `orbit-cmd` [ORB-10016].
+    pub fn paths(&self) -> &WorkspacePaths {
         self.context.paths()
     }
 

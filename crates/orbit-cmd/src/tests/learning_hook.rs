@@ -8,13 +8,13 @@ use orbit_common::types::{
     LearningInjectionCaps, LearningReminder, ReviewMessage, ReviewThread, ReviewThreadStatus,
 };
 
-use super::super::learning_hook::{
+use crate::learning_hook::{
     CODEX_PRETOOLUSE_TOOLS, HookOutputFormat, ORBIT_LEARNING_PER_CALL_CAP_ENV,
     ORBIT_LEARNING_SESSION_CAP_ENV, SessionLearningState, caps_from_env, merge_state,
     parse_payload, parse_payload_with_tools, parse_state_json, render_codex, render_gemini,
     render_reminders, state_file_path, update_state_file,
 };
-use super::super::review_thread_hook::reminders_from_threads;
+use orbit_core::command::review_thread_hook::reminders_from_threads;
 
 #[test]
 fn parse_payload_accepts_tool_and_path_variants() {
@@ -296,7 +296,7 @@ fn render_hook_reminders_combines_learnings_and_review_threads() {
         }],
     );
 
-    let claude = super::super::learning_hook::render_hook_reminders(
+    let claude = crate::learning_hook::render_hook_reminders(
         HookOutputFormat::Claude,
         &learnings,
         &review_threads,
@@ -306,7 +306,7 @@ fn render_hook_reminders_combines_learnings_and_review_threads() {
     assert!(claude.contains("Review threads awaiting agent attention"));
     assert!(claude.contains("Please adjust course."));
 
-    let grok = super::super::learning_hook::render_hook_reminders(
+    let grok = crate::learning_hook::render_hook_reminders(
         HookOutputFormat::Grok,
         &learnings,
         &review_threads,
@@ -314,7 +314,7 @@ fn render_hook_reminders_combines_learnings_and_review_threads() {
     .expect("render grok");
     assert_eq!(grok, claude);
 
-    let codex = super::super::learning_hook::render_hook_reminders(
+    let codex = crate::learning_hook::render_hook_reminders(
         HookOutputFormat::Codex,
         &learnings,
         &review_threads,
@@ -327,7 +327,7 @@ fn render_hook_reminders_combines_learnings_and_review_threads() {
     assert!(additional_context.contains("Project learnings relevant to this task"));
     assert!(additional_context.contains("Review threads awaiting agent attention"));
 
-    let gemini = super::super::learning_hook::render_hook_reminders(
+    let gemini = crate::learning_hook::render_hook_reminders(
         HookOutputFormat::Gemini,
         &learnings,
         &review_threads,

@@ -3,7 +3,9 @@ use orbit_common::types::OrbitEvent;
 use crate::{OrbitError, OrbitRuntime};
 
 impl OrbitRuntime {
-    pub(crate) fn record_event(&self, event: OrbitEvent) -> Result<(), OrbitError> {
+    /// `pub` for the direct v2 activity runner in `orbit-cmd` [ORB-10016],
+    /// which records the standard activity-run lifecycle events.
+    pub fn record_event(&self, event: OrbitEvent) -> Result<(), OrbitError> {
         self.event_log.append(event);
         Ok(())
     }

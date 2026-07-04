@@ -2,7 +2,7 @@
 //!
 //! Both migration ledgers auto-apply when a workspace opens — the SQLite
 //! schema ledger inside `Store::open` (ORB-10003) and the workspace-layout
-//! registry in the [`crate::OrbitRuntime::from_resolved_roots`] pre-flight —
+//! registry in the [`OrbitRuntime::from_resolved_roots`] pre-flight —
 //! so `orbit migrate` is the *explicit* surface over the same machinery:
 //!
 //! - `orbit migrate` (apply): opens the runtime normally, which applies
@@ -22,8 +22,7 @@ use orbit_store::sqlite::migration::{
     read_schema_ledger_status,
 };
 
-use crate::OrbitRuntime;
-use crate::config::RuntimeConfig;
+use orbit_core::OrbitRuntime;
 
 /// Version alignment between a workspace's on-disk state and this binary:
 /// current vs supported versions for both ledgers, plus whatever is pending
@@ -71,14 +70,15 @@ impl MigrateStatus {
 /// `--root` / `ORBIT_ROOT` overrides) and refuses to bootstrap one.
 pub fn migrate_dry_run(root_override: Option<&Path>) -> Result<MigrateStatus, OrbitError> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let Some(resolved) = crate::runtime::try_resolve_initialized_roots(&cwd, root_override)? else {
+    let Some(resolved) = orbit_core::runtime::try_resolve_initialized_roots(&cwd, root_override)?
+    else {
         return Err(OrbitError::WorkspaceError(
             "no initialized orbit workspace found from the current directory; \
              run `orbit init` first"
                 .to_string(),
         ));
     };
-    let global_root = crate::runtime::resolve_global_root()?;
+    let global_root = orbit_core::runtime::resolve_global_root()?;
     migrate_dry_run_at(&global_root, &resolved.shared_root)
 }
 
@@ -88,8 +88,8 @@ pub(crate) fn migrate_dry_run_at(
     global_root: &Path,
     orbit_dir: &Path,
 ) -> Result<MigrateStatus, OrbitError> {
-    let runtime_config = RuntimeConfig::load_layered(global_root, orbit_dir)?;
-    let ledger = read_schema_ledger_status(&runtime_config.persistence.audit_db)?;
+    let audit_db = orbit_core::config::resolved_audit_db_path(global_root, orbit_dir)?;
+    let ledger = read_schema_ledger_status(&audit_db)?;
 
     Ok(MigrateStatus {
         orbit_dir: orbit_dir.to_path_buf(),
@@ -104,13 +104,19 @@ pub(crate) fn migrate_dry_run_at(
     })
 }
 
-impl OrbitRuntime {
+/// `orbit migrate` command surface for [`OrbitRuntime`] (extension trait —
+/// the implementation moved out of orbit-core in [ORB-10016]).
+pub trait MigrateCommands {
     /// Migration status of an open runtime (the `orbit migrate` apply path).
     /// Opening the runtime already applied everything pending — layout in
     /// the open pre-flight, schema inside `Store::open` — so this reports
     /// the resulting versions plus which layout migrations that open
     /// auto-applied (see [`OrbitRuntime::layout_upgrade_report`]).
-    pub fn migrate_status(&self) -> Result<MigrateStatus, OrbitError> {
+    fn migrate_status(&self) -> Result<MigrateStatus, OrbitError>;
+}
+
+impl MigrateCommands for OrbitRuntime {
+    fn migrate_status(&self) -> Result<MigrateStatus, OrbitError> {
         let orbit_dir = self.shared_root();
         let schema_version = self.sqlite_store()?.schema_version()?;
 

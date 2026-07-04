@@ -90,7 +90,7 @@ impl Execute for WorkspaceTeardownArgs {
         }
 
         // 3. Remove repo-local hook integrations while preserving user-authored hook entries
-        let hook_providers = orbit_core::command::hook_install::uninstall_for_workspace(repo_root)?;
+        let hook_providers = orbit_cmd::hook_install::uninstall_for_workspace(repo_root)?;
         if !hook_providers.is_empty() {
             removed.push(format!(
                 "removed hook integrations for {}",

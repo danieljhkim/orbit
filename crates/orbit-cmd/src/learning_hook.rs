@@ -11,8 +11,8 @@ use orbit_store::{AuditEventInsertParams, LearningSearchParams};
 use serde_json::Value;
 use serde_json::json;
 
-use crate::OrbitRuntime;
-use crate::redact_sensitive_env_text;
+use orbit_core::OrbitRuntime;
+use orbit_core::redact_sensitive_env_text;
 
 const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(5);
 const LOCK_RETRY_BUDGET: Duration = Duration::from_millis(50);
@@ -73,7 +73,7 @@ pub fn render_reminders(
 pub fn render_hook_reminders(
     format: HookOutputFormat,
     admitted: &[LearningReminder],
-    review_threads: &[crate::command::review_thread_hook::ReviewThreadReminder],
+    review_threads: &[orbit_core::command::review_thread_hook::ReviewThreadReminder],
 ) -> Result<String, OrbitError> {
     match format {
         HookOutputFormat::Claude | HookOutputFormat::Grok => {
@@ -98,14 +98,14 @@ pub fn render_gemini(admitted: &[LearningReminder]) -> Result<String, OrbitError
 
 pub fn render_codex_context(
     admitted: &[LearningReminder],
-    review_threads: &[crate::command::review_thread_hook::ReviewThreadReminder],
+    review_threads: &[orbit_core::command::review_thread_hook::ReviewThreadReminder],
 ) -> Result<String, OrbitError> {
     render_json_context("PreToolUse", admitted, review_threads)
 }
 
 pub fn render_gemini_context(
     admitted: &[LearningReminder],
-    review_threads: &[crate::command::review_thread_hook::ReviewThreadReminder],
+    review_threads: &[orbit_core::command::review_thread_hook::ReviewThreadReminder],
 ) -> Result<String, OrbitError> {
     // Gemini CLI names its documented pre-tool hook event `BeforeTool`; the
     // renderer stays separate so the wiring can change when Gemini's hook
@@ -284,23 +284,36 @@ fn update_session_learning_state(
     Ok(admitted)
 }
 
-impl OrbitRuntime {
-    pub fn learning_hook_target_is_searchable(
+/// Learning-hook helper surface for [`OrbitRuntime`] (extension trait — the
+/// implementation moved out of orbit-core in [ORB-10016]).
+pub trait LearningHookCommands {
+    /// Whether `target_path` falls inside the workspace scope that learning
+    /// search indexes (tilde-rooted paths never match).
+    fn learning_hook_target_is_searchable(&self, target_path: &str) -> Result<bool, OrbitError>;
+
+    /// Per-session hook state file path for reminder-dedup bookkeeping.
+    fn learning_hook_state_file_path(
         &self,
-        target_path: &str,
-    ) -> Result<bool, OrbitError> {
+        session_id: Option<&str>,
+        tmpdir: &Path,
+        ppid: u32,
+    ) -> PathBuf;
+}
+
+impl LearningHookCommands for OrbitRuntime {
+    fn learning_hook_target_is_searchable(&self, target_path: &str) -> Result<bool, OrbitError> {
         let normalized = target_path.trim().replace('\\', "/");
         if normalized == "~" || normalized.starts_with("~/") {
             return Ok(false);
         }
 
-        crate::command::learning::learning_search_path_matches_workspace(
+        orbit_core::command::learning::learning_search_path_matches_workspace(
             &self.paths().repo_root,
             target_path,
         )
     }
 
-    pub fn learning_hook_state_file_path(
+    fn learning_hook_state_file_path(
         &self,
         session_id: Option<&str>,
         tmpdir: &Path,
@@ -383,7 +396,7 @@ pub fn run_pretooluse_input(
         )?;
     }
     for reminder in &review_thread_admitted {
-        crate::command::review_thread_hook::emit_review_thread_surfaced_audit(
+        orbit_core::command::review_thread_hook::emit_review_thread_surfaced_audit(
             runtime,
             &payload.tool_name,
             &payload.target_path,
@@ -440,8 +453,8 @@ fn admitted_review_thread_reminders(
     session_id: Option<&str>,
     tmpdir: &Path,
     ppid: u32,
-) -> Result<Vec<crate::command::review_thread_hook::ReviewThreadReminder>, String> {
-    let Some(task_id) = crate::command::review_thread_hook::active_task_id_from_env() else {
+) -> Result<Vec<orbit_core::command::review_thread_hook::ReviewThreadReminder>, String> {
+    let Some(task_id) = orbit_core::command::review_thread_hook::active_task_id_from_env() else {
         return Ok(Vec::new());
     };
     let threads = runtime
@@ -451,9 +464,11 @@ fn admitted_review_thread_reminders(
         return Ok(Vec::new());
     }
 
-    let candidates = crate::command::review_thread_hook::reminders_from_threads(&task_id, threads);
+    let candidates =
+        orbit_core::command::review_thread_hook::reminders_from_threads(&task_id, threads);
     let state_path = runtime.review_thread_hook_state_file_path(session_id, tmpdir, ppid);
-    let admitted = crate::command::review_thread_hook::update_state_file(&state_path, &candidates)?;
+    let admitted =
+        orbit_core::command::review_thread_hook::update_state_file(&state_path, &candidates)?;
     tracing::debug!(
         tool_name = %payload.tool_name,
         target_path = %payload.target_path,
@@ -483,11 +498,11 @@ pub(crate) fn learning_hook_tmpdir() -> PathBuf {
 
 fn render_text_context(
     admitted: &[LearningReminder],
-    review_threads: &[crate::command::review_thread_hook::ReviewThreadReminder],
+    review_threads: &[orbit_core::command::review_thread_hook::ReviewThreadReminder],
 ) -> String {
     let learning_block = render_claude(admitted);
     let review_thread_block =
-        crate::command::review_thread_hook::render_review_thread_block(review_threads);
+        orbit_core::command::review_thread_hook::render_review_thread_block(review_threads);
     match (learning_block.is_empty(), review_thread_block.is_empty()) {
         (true, true) => String::new(),
         (false, true) => learning_block,
@@ -499,7 +514,7 @@ fn render_text_context(
 fn render_json_context(
     event_name: &str,
     admitted: &[LearningReminder],
-    review_threads: &[crate::command::review_thread_hook::ReviewThreadReminder],
+    review_threads: &[orbit_core::command::review_thread_hook::ReviewThreadReminder],
 ) -> Result<String, OrbitError> {
     let block = render_text_context(admitted, review_threads);
     serde_json::to_string(&json!({

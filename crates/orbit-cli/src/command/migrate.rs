@@ -1,5 +1,6 @@
 use clap::Args;
-use orbit_core::{MigrateStatus, OrbitError, OrbitRuntime, migrate_dry_run};
+use orbit_cmd::{MigrateCommands, MigrateStatus, migrate_dry_run};
+use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
 
 use crate::command::Execute;

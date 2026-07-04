@@ -21,10 +21,10 @@ use orbit_common::types::{
 use orbit_tools::ToolRegistry;
 use orbit_tools::external::ExternalTool;
 
-use crate::OrbitContext;
 use crate::command::init::global_skills_dir;
 use crate::command::policy::seed_default_policies;
 use crate::config::RuntimeConfig;
+use crate::context::OrbitContext;
 use crate::context::{
     ActorIdentity, OrbitExecutionAssets, OrbitPolicyContext, OrbitRuntimeSettings, OrbitStores,
 };

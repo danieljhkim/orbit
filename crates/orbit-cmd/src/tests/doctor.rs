@@ -6,10 +6,11 @@ use std::path::Path;
 use chrono::Utc;
 use orbit_common::types::{JobRun, JobRunState};
 
-use crate::OrbitRuntime;
-use crate::command::doctor::{
-    WorkspaceDoctorResult, WorkspaceDoctorStatus, collect_lock_files, disk_space_check,
-    process_is_alive,
+use orbit_core::OrbitRuntime;
+
+use crate::doctor::{
+    DoctorCommands, WorkspaceDoctorResult, WorkspaceDoctorStatus, collect_lock_files,
+    disk_space_check, process_is_alive,
 };
 
 fn status_of<'a>(results: &'a [WorkspaceDoctorResult], name: &str) -> &'a WorkspaceDoctorResult {

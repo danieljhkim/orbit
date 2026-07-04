@@ -8,7 +8,7 @@ pub struct HookInstallArgs;
 
 impl Execute for HookInstallArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let providers = orbit_core::command::hook_install::install_for_runtime(runtime)?;
+        let providers = orbit_cmd::hook_install::install_for_runtime(runtime)?;
         if providers.is_empty() {
             println!("no hook providers auto-detected");
         } else {
@@ -23,7 +23,7 @@ pub struct HookUninstallArgs;
 
 impl Execute for HookUninstallArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let providers = orbit_core::command::hook_install::uninstall_for_runtime(runtime)?;
+        let providers = orbit_cmd::hook_install::uninstall_for_runtime(runtime)?;
         if providers.is_empty() {
             println!("no hook integrations found");
         } else {

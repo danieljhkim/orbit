@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use clap::Args;
+use orbit_cmd::agent_rules::{InjectionAction, inject_agent_rules};
 use orbit_common::types::{Workspace, WorkspaceStatus};
-use orbit_core::command::agent_rules::{InjectionAction, inject_agent_rules};
 use orbit_core::command::init::{InitOptions, init_workspace_at_root, seed_default_orbitignore};
 use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -83,8 +83,7 @@ impl WorkspaceInitArgs {
         }
 
         if hooks {
-            let providers =
-                orbit_core::command::hook_install::install_for_workspace(&init_result.root)?;
+            let providers = orbit_cmd::hook_install::install_for_workspace(&init_result.root)?;
             if providers.is_empty() {
                 println!("  hooks:     no providers auto-detected");
             } else {

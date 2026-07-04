@@ -44,14 +44,19 @@ allowed_internal_deps() {
     orbit-core)
       echo "orbit-common orbit-search orbit-engine orbit-policy orbit-store orbit-tools"
       ;;
+    orbit-cmd)
+      # ORB-10016: CLI-facing command layer extracted from orbit-core.
+      # Depends on orbit-core (runtime/context) — never the other way around.
+      echo "orbit-common orbit-core orbit-engine orbit-store"
+      ;;
     orbit-mcp)
       echo "orbit-common orbit-graph orbit-graph-extract orbit-tools"
       ;;
     orbit-dashboard)
-      echo "orbit-common orbit-core"
+      echo "orbit-common orbit-cmd orbit-core"
       ;;
     orbit-cli)
-      echo "orbit-common orbit-core orbit-graph-cli orbit-mcp orbit-dashboard"
+      echo "orbit-common orbit-cmd orbit-core orbit-graph-cli orbit-mcp orbit-dashboard"
       ;;
     *)
       return 1

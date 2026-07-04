@@ -24,7 +24,9 @@ flowchart LR
   Store --> Engine
   Agent --> Engine
   Engine --> Core["orbit-core"]
+  Core --> Cmd["orbit-cmd"]
   Core --> CLI["orbit-cli"]
+  Cmd --> CLI
   MCP --> CLI
 ```
 
@@ -41,7 +43,8 @@ flowchart LR
 | `orbit-engine` | Activity/job execution, template rendering, retries, CLI subprocess runner. |
 | `orbit-tools` | Built-in tool registry and external tool integration. |
 | `orbit-mcp` | MCP adapter over the tool registry. |
-| `orbit-core` | Runtime bootstrap, config, command dispatch, default asset seeding. |
+| `orbit-core` | Runtime bootstrap, config, runtime-integrated commands, default asset seeding. |
+| `orbit-cmd` | CLI-facing command layer (doctor, migrate, diagnostics, templates, hooks) over `OrbitRuntime`. |
 | `orbit-cli` | Clap-based CLI entrypoint. |
 
 ## Feature Ownership

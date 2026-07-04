@@ -3,7 +3,7 @@
 //! Reads a YAML file from disk, parses it through the two-pass loader at
 //! `orbit_common::types::activity_job::load_activity_asset`, and invokes the dispatcher with
 //! `OrbitRuntime` as the `V2RuntimeHost` (impl lives in
-//! `crate::runtime::v2_host`).
+//! `orbit_core::runtime`'s v2 host).
 //!
 //! Loop + envelope audit sink construction is delegated to
 //! `V2AuditWriter::with_disk_sinks` — this file never names orbit-agent types.
@@ -18,8 +18,8 @@ use orbit_common::types::{OrbitError, OrbitEvent};
 use orbit_engine::{V2AuditWriter, V2DispatchInput, dispatch_v2_activity};
 use serde_json::Value;
 
-use crate::OrbitRuntime;
-use crate::command::SYSTEM_AUDIT_IDENTITY;
+use orbit_core::OrbitRuntime;
+use orbit_core::command::SYSTEM_AUDIT_IDENTITY;
 
 #[derive(Debug)]
 pub struct V2ActivityRunResult {
@@ -36,14 +36,25 @@ pub struct V2ActivityRunResult {
     pub resolved_backend: Option<Backend>,
 }
 
-impl OrbitRuntime {
+/// Direct v2 activity execution surface for [`OrbitRuntime`] (extension
+/// trait — the implementation moved out of orbit-core in [ORB-10016]).
+pub trait ActivityV2Commands {
     /// Execute a v2 activity from a YAML path. Returns a structural result.
     /// Audit events for the run are queryable via `list_v2_audit_events` using
     /// the `run_id`.
     ///
     /// `backend_flag` is the `--backend` invocation-level override; when
     /// `None`, the resolver falls through to env → config → default.
-    pub fn run_activity_v2_from_yaml(
+    fn run_activity_v2_from_yaml(
+        &self,
+        yaml_path: &Path,
+        input: Value,
+        backend_flag: Option<Backend>,
+    ) -> Result<V2ActivityRunResult, OrbitError>;
+}
+
+impl ActivityV2Commands for OrbitRuntime {
+    fn run_activity_v2_from_yaml(
         &self,
         yaml_path: &Path,
         input: Value,
@@ -163,7 +174,7 @@ mod tests {
 
     use std::path::PathBuf;
 
-    use crate::V2AuditEventFilter;
+    use orbit_store::V2AuditEventFilter;
     use serde_json::json;
     use tempfile::tempdir;
 

@@ -5,7 +5,8 @@ use orbit_search::{AdrSemanticHit, DocSemanticHit, LearningSemanticHit};
 use orbit_store::{AdrCreateParams, LearningCreateParams, TaskCreateParams};
 
 use super::*;
-use crate::{OrbitRuntime, SearchResult};
+use crate::OrbitRuntime;
+use crate::command::docs::SearchResult;
 
 mod global;
 mod hybrid;

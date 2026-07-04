@@ -352,7 +352,8 @@ fn normalize_learning_search_path(repo_root: &Path, path: &str) -> Result<String
     }
 }
 
-pub(crate) fn learning_search_path_matches_workspace(
+/// `pub` for the learning PreToolUse hook in `orbit-cmd` [ORB-10016].
+pub fn learning_search_path_matches_workspace(
     repo_root: &Path,
     path: &str,
 ) -> Result<bool, OrbitError> {

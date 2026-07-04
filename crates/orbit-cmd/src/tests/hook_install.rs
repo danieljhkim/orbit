@@ -3,7 +3,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use super::super::hook_install::{install_for_workspace, uninstall_for_workspace};
+use crate::hook_install::{install_for_workspace, uninstall_for_workspace};
 
 #[test]
 fn install_writes_expected_shims_and_config_entries() {

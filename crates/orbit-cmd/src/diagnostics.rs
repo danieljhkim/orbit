@@ -15,14 +15,35 @@ use std::path::{Path, PathBuf};
 use orbit_common::types::{FrictionEntry, MetricsEntry, OrbitError};
 use serde::de::DeserializeOwned;
 
-use crate::OrbitRuntime;
+use orbit_core::OrbitRuntime;
 
-impl OrbitRuntime {
-    pub fn read_metrics_entries(&self, year_month: &str) -> Result<Vec<MetricsEntry>, OrbitError> {
+/// Diagnostics-stream read surface for [`OrbitRuntime`] (extension trait —
+/// the implementation moved out of orbit-core in [ORB-10016]).
+pub trait DiagnosticsCommands {
+    /// All metrics entries recorded in `year_month` (`YYYY-MM`).
+    fn read_metrics_entries(&self, year_month: &str) -> Result<Vec<MetricsEntry>, OrbitError>;
+    /// Most recent `limit` metrics entries recorded in `year_month`.
+    fn read_metrics_entries_limited(
+        &self,
+        year_month: &str,
+        limit: usize,
+    ) -> Result<Vec<MetricsEntry>, OrbitError>;
+    /// All friction entries recorded in `year_month` (`YYYY-MM`).
+    fn read_friction_entries(&self, year_month: &str) -> Result<Vec<FrictionEntry>, OrbitError>;
+    /// Most recent `limit` friction entries recorded in `year_month`.
+    fn read_friction_entries_limited(
+        &self,
+        year_month: &str,
+        limit: usize,
+    ) -> Result<Vec<FrictionEntry>, OrbitError>;
+}
+
+impl DiagnosticsCommands for OrbitRuntime {
+    fn read_metrics_entries(&self, year_month: &str) -> Result<Vec<MetricsEntry>, OrbitError> {
         read_jsonl_month::<MetricsEntry>(&self.data_root(), "metrics", year_month)
     }
 
-    pub fn read_metrics_entries_limited(
+    fn read_metrics_entries_limited(
         &self,
         year_month: &str,
         limit: usize,
@@ -30,14 +51,11 @@ impl OrbitRuntime {
         read_jsonl_month_limited::<MetricsEntry>(&self.data_root(), "metrics", year_month, limit)
     }
 
-    pub fn read_friction_entries(
-        &self,
-        year_month: &str,
-    ) -> Result<Vec<FrictionEntry>, OrbitError> {
+    fn read_friction_entries(&self, year_month: &str) -> Result<Vec<FrictionEntry>, OrbitError> {
         read_jsonl_month::<FrictionEntry>(&self.data_root(), "friction", year_month)
     }
 
-    pub fn read_friction_entries_limited(
+    fn read_friction_entries_limited(
         &self,
         year_month: &str,
         limit: usize,

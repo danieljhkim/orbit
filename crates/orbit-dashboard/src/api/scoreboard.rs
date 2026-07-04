@@ -7,6 +7,7 @@ use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{Duration, Utc};
+use orbit_cmd::DiagnosticsCommands;
 use orbit_core::OrbitRuntime;
 use orbit_core::scoreboard_summary::ScoreboardWindow;
 use serde::Deserialize;

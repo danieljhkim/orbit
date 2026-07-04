@@ -8,7 +8,7 @@ pub enum HookOutputFormat {
     Grok,
 }
 
-impl From<HookOutputFormat> for orbit_core::command::learning_hook::HookOutputFormat {
+impl From<HookOutputFormat> for orbit_cmd::learning_hook::HookOutputFormat {
     fn from(format: HookOutputFormat) -> Self {
         match format {
             HookOutputFormat::Claude => Self::Claude,

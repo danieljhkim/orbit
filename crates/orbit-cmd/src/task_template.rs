@@ -1,7 +1,7 @@
 use orbit_common::types::{OrbitError, TaskPriority, TaskType};
 use serde::Deserialize;
 
-use crate::OrbitRuntime;
+use orbit_core::OrbitRuntime;
 
 // ---------------------------------------------------------------------------
 // Built-in templates (embedded at compile time)
@@ -10,20 +10,14 @@ use crate::OrbitRuntime;
 const BUILTIN_TEMPLATES: [(&str, &str); 4] = [
     (
         "bug-fix",
-        include_str!("../../assets/task_templates/bug-fix.yaml"),
+        include_str!("../assets/task_templates/bug-fix.yaml"),
     ),
-    (
-        "chore",
-        include_str!("../../assets/task_templates/chore.yaml"),
-    ),
+    ("chore", include_str!("../assets/task_templates/chore.yaml")),
     (
         "feature",
-        include_str!("../../assets/task_templates/feature.yaml"),
+        include_str!("../assets/task_templates/feature.yaml"),
     ),
-    (
-        "spike",
-        include_str!("../../assets/task_templates/spike.yaml"),
-    ),
+    ("spike", include_str!("../assets/task_templates/spike.yaml")),
 ];
 
 // ---------------------------------------------------------------------------
@@ -106,17 +100,28 @@ fn parse_template(yaml: &str, builtin: bool) -> Result<TaskTemplate, OrbitError>
 // OrbitRuntime methods
 // ---------------------------------------------------------------------------
 
-impl OrbitRuntime {
+/// Task-template command surface for [`OrbitRuntime`] (extension trait —
+/// the implementation moved out of orbit-core in [ORB-10016]).
+pub trait TaskTemplateCommands {
     /// Returns the path where user-defined templates are stored:
     /// `<data_root>/task_templates/`
-    pub fn task_templates_dir(&self) -> std::path::PathBuf {
-        self.data_root_path().join("task_templates")
-    }
+    fn task_templates_dir(&self) -> std::path::PathBuf;
 
     /// List all available templates: built-ins first, then user-defined ones.
     ///
     /// User-defined templates with the same name as a built-in override the built-in.
-    pub fn list_task_templates(&self) -> Result<Vec<TaskTemplate>, OrbitError> {
+    fn list_task_templates(&self) -> Result<Vec<TaskTemplate>, OrbitError>;
+
+    /// Look up a single template by name.
+    fn get_task_template(&self, name: &str) -> Result<TaskTemplate, OrbitError>;
+}
+
+impl TaskTemplateCommands for OrbitRuntime {
+    fn task_templates_dir(&self) -> std::path::PathBuf {
+        self.data_root().join("task_templates")
+    }
+
+    fn list_task_templates(&self) -> Result<Vec<TaskTemplate>, OrbitError> {
         let mut templates: Vec<TaskTemplate> = Vec::new();
 
         // Load built-ins first.
@@ -158,8 +163,7 @@ impl OrbitRuntime {
         Ok(templates)
     }
 
-    /// Look up a single template by name.
-    pub fn get_task_template(&self, name: &str) -> Result<TaskTemplate, OrbitError> {
+    fn get_task_template(&self, name: &str) -> Result<TaskTemplate, OrbitError> {
         // Check user-defined first (they take priority).
         let user_dir = self.task_templates_dir();
         if user_dir.is_dir() {

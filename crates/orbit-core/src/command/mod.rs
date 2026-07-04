@@ -10,23 +10,19 @@
 //! Default YAML assets (e.g., sample skills, config templates) are embedded
 //! at compile time via `include_str!` and seeded to disk on first `orbit init`.
 
-pub(crate) const SYSTEM_AUDIT_IDENTITY: &str = "system";
+/// Audit identity used for system-initiated (non-agent) mutations.
+/// `pub` because the direct v2 activity runner moved to `orbit-cmd`
+/// [ORB-10016] and stamps the same identity.
+pub const SYSTEM_AUDIT_IDENTITY: &str = "system";
 
 pub mod activity;
-pub mod activity_v2;
-pub mod agent_rules;
 pub mod audit_event;
 pub mod backend_resolver;
-pub mod diagnostics;
 pub mod docs;
-pub mod doctor;
 pub mod executor;
-pub mod hook_install;
 pub mod init;
 pub mod job;
 pub mod learning;
-pub mod learning_hook;
-pub mod migrate;
 pub mod pipeline_run;
 pub mod policy;
 pub mod review_thread_hook;
@@ -35,7 +31,6 @@ pub mod semantic;
 pub mod skill;
 pub mod task;
 pub mod task_migration;
-pub mod task_template;
 pub mod tool;
 pub mod workflow;
 

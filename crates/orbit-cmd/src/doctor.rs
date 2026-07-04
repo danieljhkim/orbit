@@ -10,17 +10,15 @@
 //! fresh workspace report [`WorkspaceDoctorStatus::Skipped`], and probe
 //! failures become `Warning`/`Error` rows instead of aborting the whole
 //! diagnosis. The cheap probes shared with the dashboard's
-//! `/healthz?detailed=true` ([`OrbitRuntime::health_check_store_writable`],
-//! [`OrbitRuntime::health_check_graph_index`]) also live here.
+//! `/healthz?detailed=true` ([`DoctorCommands::health_check_store_writable`],
+//! [`DoctorCommands::health_check_graph_index`]) also live here.
 
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::{OrbitError, WorkspacePaths};
+use orbit_core::OrbitRuntime;
 use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
 use serde::Serialize;
-
-use crate::OrbitRuntime;
-use crate::config::RuntimeConfig;
 
 /// Outcome of one workspace doctor check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -64,236 +62,248 @@ const DISK_WARN_PCT: f64 = 5.0;
 /// Fail when less than this percentage of the volume is free.
 const DISK_FAIL_PCT: f64 = 1.0;
 
-impl OrbitRuntime {
+/// Workspace doctor / health-probe command surface for [`OrbitRuntime`]
+/// (extension trait — the implementation moved out of orbit-core in
+/// [ORB-10016]).
+pub trait DoctorCommands {
     /// Run every workspace-level doctor check. Individual checks never abort
     /// the diagnosis: probe failures surface as `Warning`/`Error` rows and
     /// absent subsystems as `Skipped`.
-    pub fn doctor_workspace(&self) -> Result<Vec<WorkspaceDoctorResult>, OrbitError> {
-        Ok(vec![
-            self.doctor_check_config(),
-            self.doctor_check_database(),
-            self.doctor_check_disk_space(),
-            self.doctor_check_semantic_index(),
-            self.doctor_check_graph_index(),
-            self.doctor_check_stale_locks(),
-            self.doctor_check_job_runs(),
-        ])
-    }
+    fn doctor_workspace(&self) -> Result<Vec<WorkspaceDoctorResult>, OrbitError>;
 
     /// Cheap store write probe for health endpoints: open the store and
     /// acquire + roll back the write lock without mutating anything.
-    pub fn health_check_store_writable(&self) -> Result<String, OrbitError> {
-        let store = self.sqlite_store()?;
-        store.check_writable()?;
-        Ok("store database accepts writes".to_string())
-    }
+    fn health_check_store_writable(&self) -> Result<String, OrbitError>;
 
     /// Cheap read probe of the newest code-graph database, if one exists.
     /// Returns `None` when no graph index has been built (fresh workspace),
     /// so callers can skip rather than fail.
     ///
     /// Deliberately opens the SQLite file directly instead of adding an
-    /// orbit-core → orbit-graph dependency edge (see `ARCHITECTURE.md`).
-    pub fn health_check_graph_index(&self) -> Option<Result<String, OrbitError>> {
+    /// orbit-cmd → orbit-graph dependency edge (see `ARCHITECTURE.md`).
+    fn health_check_graph_index(&self) -> Option<Result<String, OrbitError>>;
+}
+
+impl DoctorCommands for OrbitRuntime {
+    fn doctor_workspace(&self) -> Result<Vec<WorkspaceDoctorResult>, OrbitError> {
+        Ok(vec![
+            doctor_check_config(self),
+            doctor_check_database(self),
+            doctor_check_disk_space(self),
+            doctor_check_semantic_index(self),
+            doctor_check_graph_index(self),
+            doctor_check_stale_locks(self),
+            doctor_check_job_runs(self),
+        ])
+    }
+
+    fn health_check_store_writable(&self) -> Result<String, OrbitError> {
+        let store = self.sqlite_store()?;
+        store.check_writable()?;
+        Ok("store database accepts writes".to_string())
+    }
+
+    fn health_check_graph_index(&self) -> Option<Result<String, OrbitError>> {
         let graph_dir = self.local_root().join("graph");
         let newest = newest_graph_db(&graph_dir)?;
         Some(read_graph_db(&newest))
     }
+}
 
-    /// Parse + validate the effective (workspace-over-global) `config.toml`.
-    fn doctor_check_config(&self) -> WorkspaceDoctorResult {
-        let path = self.config_path();
-        match RuntimeConfig::load_layered(&self.global_root(), &self.data_root()) {
-            Ok(_) => check(
-                "config",
-                WorkspaceDoctorStatus::Ok,
-                format!("valid ({})", path.display()),
-            ),
-            Err(error) => check(
-                "config",
-                WorkspaceDoctorStatus::Error,
-                format!("invalid ({}): {error}", path.display()),
-            ),
-        }
+/// Parse + validate the effective (workspace-over-global) `config.toml`.
+fn doctor_check_config(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
+    let path = runtime.config_path();
+    match orbit_core::config::validate_layered_config(&runtime.global_root(), &runtime.data_root())
+    {
+        Ok(_) => check(
+            "config",
+            WorkspaceDoctorStatus::Ok,
+            format!("valid ({})", path.display()),
+        ),
+        Err(error) => check(
+            "config",
+            WorkspaceDoctorStatus::Error,
+            format!("invalid ({}): {error}", path.display()),
+        ),
     }
+}
 
-    /// `PRAGMA quick_check` plus migration-ledger schema version vs binary.
-    fn doctor_check_database(&self) -> WorkspaceDoctorResult {
-        let store = match self.sqlite_store() {
-            Ok(store) => store,
-            Err(error) => {
-                return check(
-                    "database",
-                    WorkspaceDoctorStatus::Error,
-                    format!("cannot open store database: {error}"),
-                );
-            }
-        };
-        if let Err(error) = store.quick_check() {
+/// `PRAGMA quick_check` plus migration-ledger schema version vs binary.
+fn doctor_check_database(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
+    let store = match runtime.sqlite_store() {
+        Ok(store) => store,
+        Err(error) => {
             return check(
                 "database",
                 WorkspaceDoctorStatus::Error,
-                format!("integrity check failed: {error}"),
+                format!("cannot open store database: {error}"),
             );
         }
-        match store.schema_version() {
-            Ok(version) if version == SUPPORTED_SCHEMA_VERSION => check(
-                "database",
-                WorkspaceDoctorStatus::Ok,
-                format!("quick_check ok; schema version {version} matches this binary"),
-            ),
-            Ok(version) if version < SUPPORTED_SCHEMA_VERSION => check(
-                "database",
-                WorkspaceDoctorStatus::Warning,
-                format!(
-                    "quick_check ok; schema version {version} is behind this binary \
-                     ({SUPPORTED_SCHEMA_VERSION}) — migrations apply on next store open"
-                ),
-            ),
-            Ok(version) => check(
-                "database",
-                WorkspaceDoctorStatus::Error,
-                format!(
-                    "schema version {version} is newer than this binary supports \
-                     ({SUPPORTED_SCHEMA_VERSION}); upgrade orbit"
-                ),
-            ),
-            Err(error) => check(
-                "database",
-                WorkspaceDoctorStatus::Warning,
-                format!("quick_check ok; cannot read migration ledger: {error}"),
-            ),
-        }
+    };
+    if let Err(error) = store.quick_check() {
+        return check(
+            "database",
+            WorkspaceDoctorStatus::Error,
+            format!("integrity check failed: {error}"),
+        );
     }
-
-    /// Free space on the volume holding the workspace `.orbit` directory.
-    fn doctor_check_disk_space(&self) -> WorkspaceDoctorResult {
-        let root = self.local_root();
-        disk_space_check(&root)
+    match store.schema_version() {
+        Ok(version) if version == SUPPORTED_SCHEMA_VERSION => check(
+            "database",
+            WorkspaceDoctorStatus::Ok,
+            format!("quick_check ok; schema version {version} matches this binary"),
+        ),
+        Ok(version) if version < SUPPORTED_SCHEMA_VERSION => check(
+            "database",
+            WorkspaceDoctorStatus::Warning,
+            format!(
+                "quick_check ok; schema version {version} is behind this binary \
+                 ({SUPPORTED_SCHEMA_VERSION}) — migrations apply on next store open"
+            ),
+        ),
+        Ok(version) => check(
+            "database",
+            WorkspaceDoctorStatus::Error,
+            format!(
+                "schema version {version} is newer than this binary supports \
+                 ({SUPPORTED_SCHEMA_VERSION}); upgrade orbit"
+            ),
+        ),
+        Err(error) => check(
+            "database",
+            WorkspaceDoctorStatus::Warning,
+            format!("quick_check ok; cannot read migration ledger: {error}"),
+        ),
     }
+}
 
-    /// Semantic (docs/tasks/learnings) embedding index staleness, using the
-    /// stale-row signal the vector store already tracks.
-    fn doctor_check_semantic_index(&self) -> WorkspaceDoctorResult {
-        match self.semantic_stats() {
-            Err(error) => check(
-                "semantic-index",
-                WorkspaceDoctorStatus::Warning,
-                format!("cannot read semantic index: {error}"),
-            ),
-            Ok(stats) => {
-                let total: usize = stats.rows.counts.iter().map(|count| count.rows).sum();
-                if total == 0 {
-                    check(
-                        "semantic-index",
-                        WorkspaceDoctorStatus::Skipped,
-                        "no semantic embeddings indexed yet".to_string(),
-                    )
-                } else if stats.rows.stale_rows > 0 {
-                    check(
-                        "semantic-index",
-                        WorkspaceDoctorStatus::Warning,
-                        format!(
-                            "{} of {total} embedding rows are stale; re-run `orbit semantic index`",
-                            stats.rows.stale_rows
-                        ),
-                    )
-                } else {
-                    check(
-                        "semantic-index",
-                        WorkspaceDoctorStatus::Ok,
-                        format!("{total} embedding rows, none stale"),
-                    )
-                }
-            }
-        }
-    }
+/// Free space on the volume holding the workspace `.orbit` directory.
+fn doctor_check_disk_space(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
+    let root = runtime.local_root();
+    disk_space_check(&root)
+}
 
-    /// Code-graph index presence + readability (skip when never built).
-    fn doctor_check_graph_index(&self) -> WorkspaceDoctorResult {
-        match self.health_check_graph_index() {
-            None => check(
-                "graph-index",
-                WorkspaceDoctorStatus::Skipped,
-                "no graph index built (run `orbit graph sync` to create one)".to_string(),
-            ),
-            Some(Ok(detail)) => check("graph-index", WorkspaceDoctorStatus::Ok, detail),
-            Some(Err(error)) => check(
-                "graph-index",
-                WorkspaceDoctorStatus::Warning,
-                format!("graph index unreadable ({error}); rebuild with `orbit graph sync`"),
-            ),
-        }
-    }
-
-    /// Lock files whose recorded holder PID is dead. Advisory `flock`s are
-    /// released by the OS on process death, so these are leftover metadata
-    /// from crashed holders — a crash signal, not an availability problem.
-    fn doctor_check_stale_locks(&self) -> WorkspaceDoctorResult {
-        let lock_files = collect_lock_files(self.paths());
-        let mut stale = Vec::new();
-        for path in &lock_files {
-            let Some(holder) = orbit_store::read_lock_holder(path) else {
-                continue;
-            };
-            if !process_is_alive(holder.pid) {
-                stale.push(format!(
-                    "{} (dead pid {}, op: {}, since {})",
-                    path.display(),
-                    holder.pid,
-                    holder.label,
-                    holder.acquired_at
-                ));
-            }
-        }
-        if stale.is_empty() {
-            check(
-                "stale-locks",
-                WorkspaceDoctorStatus::Ok,
-                format!("{} lock file(s) scanned, none stale", lock_files.len()),
-            )
-        } else {
-            check(
-                "stale-locks",
-                WorkspaceDoctorStatus::Warning,
-                format!(
-                    "{} lock file(s) left by dead holders (the OS already released the \
-                     flock; safe to delete): {}",
-                    stale.len(),
-                    stale.join("; ")
-                ),
-            )
-        }
-    }
-
-    /// `running` job runs whose recorded owner process is conclusively gone
-    /// (read-only view of the reconcile signal; see `job/run/reconcile.rs`).
-    fn doctor_check_job_runs(&self) -> WorkspaceDoctorResult {
-        match self.list_orphaned_running_job_runs() {
-            Err(error) => check(
-                "job-runs",
-                WorkspaceDoctorStatus::Warning,
-                format!("cannot inspect job runs: {error}"),
-            ),
-            Ok(orphans) if orphans.is_empty() => check(
-                "job-runs",
-                WorkspaceDoctorStatus::Ok,
-                "no orphaned running job runs".to_string(),
-            ),
-            Ok(orphans) => {
-                let ids: Vec<&str> = orphans.iter().map(|run| run.run_id.as_str()).collect();
+/// Semantic (docs/tasks/learnings) embedding index staleness, using the
+/// stale-row signal the vector store already tracks.
+fn doctor_check_semantic_index(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
+    match runtime.semantic_stats() {
+        Err(error) => check(
+            "semantic-index",
+            WorkspaceDoctorStatus::Warning,
+            format!("cannot read semantic index: {error}"),
+        ),
+        Ok(stats) => {
+            let total: usize = stats.rows.counts.iter().map(|count| count.rows).sum();
+            if total == 0 {
                 check(
-                    "job-runs",
+                    "semantic-index",
+                    WorkspaceDoctorStatus::Skipped,
+                    "no semantic embeddings indexed yet".to_string(),
+                )
+            } else if stats.rows.stale_rows > 0 {
+                check(
+                    "semantic-index",
                     WorkspaceDoctorStatus::Warning,
                     format!(
-                        "{} running run(s) whose owner process is gone: {} — they \
-                         finalize as `interrupted` on reconcile; resume with \
-                         `orbit job resume <run_id>`",
-                        orphans.len(),
-                        ids.join(", ")
+                        "{} of {total} embedding rows are stale; re-run `orbit semantic index`",
+                        stats.rows.stale_rows
                     ),
                 )
+            } else {
+                check(
+                    "semantic-index",
+                    WorkspaceDoctorStatus::Ok,
+                    format!("{total} embedding rows, none stale"),
+                )
             }
+        }
+    }
+}
+
+/// Code-graph index presence + readability (skip when never built).
+fn doctor_check_graph_index(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
+    match runtime.health_check_graph_index() {
+        None => check(
+            "graph-index",
+            WorkspaceDoctorStatus::Skipped,
+            "no graph index built (run `orbit graph sync` to create one)".to_string(),
+        ),
+        Some(Ok(detail)) => check("graph-index", WorkspaceDoctorStatus::Ok, detail),
+        Some(Err(error)) => check(
+            "graph-index",
+            WorkspaceDoctorStatus::Warning,
+            format!("graph index unreadable ({error}); rebuild with `orbit graph sync`"),
+        ),
+    }
+}
+
+/// Lock files whose recorded holder PID is dead. Advisory `flock`s are
+/// released by the OS on process death, so these are leftover metadata
+/// from crashed holders — a crash signal, not an availability problem.
+fn doctor_check_stale_locks(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
+    let lock_files = collect_lock_files(runtime.paths());
+    let mut stale = Vec::new();
+    for path in &lock_files {
+        let Some(holder) = orbit_store::read_lock_holder(path) else {
+            continue;
+        };
+        if !process_is_alive(holder.pid) {
+            stale.push(format!(
+                "{} (dead pid {}, op: {}, since {})",
+                path.display(),
+                holder.pid,
+                holder.label,
+                holder.acquired_at
+            ));
+        }
+    }
+    if stale.is_empty() {
+        check(
+            "stale-locks",
+            WorkspaceDoctorStatus::Ok,
+            format!("{} lock file(s) scanned, none stale", lock_files.len()),
+        )
+    } else {
+        check(
+            "stale-locks",
+            WorkspaceDoctorStatus::Warning,
+            format!(
+                "{} lock file(s) left by dead holders (the OS already released the \
+                 flock; safe to delete): {}",
+                stale.len(),
+                stale.join("; ")
+            ),
+        )
+    }
+}
+
+/// `running` job runs whose recorded owner process is conclusively gone
+/// (read-only view of the reconcile signal; see `job/run/reconcile.rs`).
+fn doctor_check_job_runs(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
+    match runtime.list_orphaned_running_job_runs() {
+        Err(error) => check(
+            "job-runs",
+            WorkspaceDoctorStatus::Warning,
+            format!("cannot inspect job runs: {error}"),
+        ),
+        Ok(orphans) if orphans.is_empty() => check(
+            "job-runs",
+            WorkspaceDoctorStatus::Ok,
+            "no orphaned running job runs".to_string(),
+        ),
+        Ok(orphans) => {
+            let ids: Vec<&str> = orphans.iter().map(|run| run.run_id.as_str()).collect();
+            check(
+                "job-runs",
+                WorkspaceDoctorStatus::Warning,
+                format!(
+                    "{} running run(s) whose owner process is gone: {} — they \
+                     finalize as `interrupted` on reconcile; resume with \
+                     `orbit job resume <run_id>`",
+                    orphans.len(),
+                    ids.join(", ")
+                ),
+            )
         }
     }
 }

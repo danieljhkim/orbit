@@ -25,7 +25,10 @@ pub(super) fn learning_has_all_tags(
     })
 }
 
-pub(super) fn doc_has_all_tags(record: &crate::DocRecord, tag_filter: &[String]) -> bool {
+pub(super) fn doc_has_all_tags(
+    record: &crate::command::docs::DocRecord,
+    tag_filter: &[String],
+) -> bool {
     tag_filter.iter().all(|needle| {
         record
             .frontmatter

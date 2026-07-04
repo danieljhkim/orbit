@@ -2,6 +2,7 @@
 members = [
   "crates/orbit-agent",
   "crates/orbit-cli",
+  "crates/orbit-cmd",
   "crates/orbit-common",
   "crates/orbit-search",
   "crates/orbit-search-companion",

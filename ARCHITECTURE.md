@@ -5,8 +5,12 @@ Layered Rust crates. Lower layers do not depend on higher layers.
 ```mermaid
 flowchart LR
   CLI["orbit-cli"] --> Core["orbit-core"]
+  CLI --> Cmd["orbit-cmd"]
   CLI --> MCP["orbit-mcp"]
   CLI --> GraphCli["orbit-graph-cli"]
+  Cmd --> Core
+  Cmd --> Engine
+  Cmd --> Store
   Core --> Engine["orbit-engine"]
   Core --> Store["orbit-store"]
   Core --> Tools["orbit-tools"]
@@ -35,6 +39,8 @@ flowchart LR
   GraphCli --> GraphExtract
   MCP --> Common
   Dashboard["orbit-dashboard"] --> Core
+  Dashboard --> Cmd
+  Cmd --> Common
   Core --> Common
   Registry["orbit-registry"] --> Common
 ```
@@ -59,7 +65,8 @@ flowchart LR
 - **orbit-dashboard**: read-only web dashboard (axum server + embedded HTML/JS assets + JSON API handlers for tasks, runs, scoreboard, logs, etc.). Depends on `orbit-core` (for OrbitRuntime/OrbitError and the `metrics::aggregate` knowledge-stats summary) plus axum/clap/chrono/serde; consumed by `orbit-cli` via `web serve`. Extracted from orbit-cli in ORB-00146 to isolate compile graph and co-locate assets. The only public surface is `serve(runtime, ServeArgs)`.
 - **orbit-agent**: per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, openai_compat, anthropic, ollama, mock_agent). Implements `backend: cli`, hosts HTTP `LoopTransport` primitives, and routes loop tool calls through the shared `orbit-tools` registry. Depends on `orbit-common` and `orbit-tools`.
 - **orbit-engine**: activity/job execution, template rendering, retry logic, subprocess execution, and tool-aware automation. Owns the `backend: cli` subprocess runner (`activity_job::cli_runner`), which references `orbit-agent::{Agent, AgentConfig}` directly so orbit-core stays clean of orbit-agent types. Depends on `orbit-agent`, `orbit-common`, `orbit-exec`, `orbit-store`, and `orbit-tools`.
-- **orbit-core**: runtime bootstrap, config layering, command dispatch, default asset seeding, thin command facades for policy, tool, store, engine, and search features, and the `metrics` module (tool-invocation knowledge-stats computation migrated out of orbit-knowledge in ORB-00391). Surfaces the `OrbitRuntime` API used by `orbit-cli`; does NOT depend on `orbit-agent`.
+- **orbit-core**: runtime bootstrap, config layering, default asset seeding, the runtime-integrated command modules (those the tool hosts / engine hosts / bootstrap seeding invoke: task, learning, docs, search, semantic, job, tool, audit, pipeline, init, workflow, skill, activity, policy, executor, backend-resolver, task-migration, review-thread-hook), and the `metrics` module. Surfaces the `OrbitRuntime` API used by `orbit-cmd`, `orbit-cli`, and `orbit-dashboard`; does NOT depend on `orbit-agent` or `orbit-cmd`. Root re-exports are trimmed to the consumer-justified set (ORB-10016, ADR in [docs/design/orbit-core/4_decisions.md](docs/design/orbit-core/4_decisions.md)).
+- **orbit-cmd**: CLI-facing command layer extracted from orbit-core (ORB-10016): workspace doctor, migrate status/dry-run, diagnostics readers, task templates, agent-rules injection, hook install + learning/review-thread PreToolUse hook, and the direct v2 activity runner. Pure consumer of `OrbitRuntime`'s public API; runtime methods are exposed as per-module `*Commands` extension traits. Depends on `orbit-core`, `orbit-engine` (v2 dispatch), `orbit-store`, `orbit-common`; consumed by `orbit-cli` and `orbit-dashboard`. orbit-core must never depend on it.
 - **orbit-cli**: clap-based CLI entry point. Embeds the `orbit-graph-cli` library as the `orbit graph` subcommand (ADR-0199), dispatching its worktree-scoped JSON queries directly rather than through `OrbitRuntime`.
 
 ---
@@ -80,6 +87,7 @@ Each workspace crate declares a stability tier in its `Cargo.toml` under `[packa
 | orbit-registry        | experimental |
 | orbit-agent           | internal     |
 | orbit-cli             | internal     |
+| orbit-cmd             | internal     |
 | orbit-core            | internal     |
 | orbit-graph           | internal     |
 | orbit-graph-cli       | internal     |
