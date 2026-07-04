@@ -17,6 +17,7 @@ pub(crate) mod layout;
 pub(crate) mod learning_store;
 pub(crate) mod policy_def_store;
 pub(crate) mod scoreboard {
+    pub(crate) mod common;
     pub(crate) mod duel_scoreboard;
     pub(crate) mod planning_duel_scoreboard;
     pub(crate) mod pr_scoreboard;

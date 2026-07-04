@@ -6,35 +6,15 @@
 //! the report stays deterministic and schema-light.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::Path;
 
 use orbit_common::types::{OrbitError, PlannerSlot, PlanningDuelRun, all_agent_families};
 use serde::{Deserialize, Serialize};
 
-use orbit_common::utility::fs::{
-    atomic_write_text_volatile as write_atomic, with_exclusive_file_lock,
-};
+use super::common;
 
 const SCOREBOARD_FILENAME: &str = "duel_plan.json";
-const CURRENT_SCHEMA_VERSION: u32 = 1;
-
-/// On-disk envelope for the planning-duel scoreboard file.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-struct PlanningDuelScoreboardFile {
-    schema_version: u32,
-    #[serde(default)]
-    runs: Vec<PlanningDuelRun>,
-}
-
-impl Default for PlanningDuelScoreboardFile {
-    fn default() -> Self {
-        Self {
-            schema_version: CURRENT_SCHEMA_VERSION,
-            runs: Vec::new(),
-        }
-    }
-}
+const LOCK_LABEL: &str = "planning duel scoreboard";
 
 /// The three role axes that can be aggregated independently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,33 +90,12 @@ struct Bucket {
 
 /// Append a single [`PlanningDuelRun`] to `scoreboard_dir/duel_plan.json`.
 pub fn append_run(scoreboard_dir: &Path, run: &PlanningDuelRun) -> Result<(), OrbitError> {
-    let path = scoreboard_dir.join(SCOREBOARD_FILENAME);
-    with_exclusive_file_lock(&path, "planning duel scoreboard", || {
-        let mut file = load_scoreboard_file(&path)?;
-        file.runs.push(run.clone());
-
-        let json = serde_json::to_string_pretty(&file)
-            .map_err(|e| OrbitError::Io(format!("serialize duel_plan.json: {e}")))?;
-        write_atomic(&path, &format!("{json}\n")).map_err(Into::into)
-    })
+    common::append_run_entry(scoreboard_dir, SCOREBOARD_FILENAME, LOCK_LABEL, run)
 }
 
 /// Load every run entry from `scoreboard_dir/duel_plan.json`.
 pub fn load_runs(scoreboard_dir: &Path) -> Result<Vec<PlanningDuelRun>, OrbitError> {
-    let path = scoreboard_dir.join(SCOREBOARD_FILENAME);
-    Ok(load_scoreboard_file(&path)?.runs)
-}
-
-fn load_scoreboard_file(path: &Path) -> Result<PlanningDuelScoreboardFile, OrbitError> {
-    if !path.exists() {
-        return Ok(PlanningDuelScoreboardFile::default());
-    }
-    let content = fs::read_to_string(path)
-        .map_err(|e| OrbitError::Io(format!("read duel_plan.json: {e}")))?;
-    if content.trim().is_empty() {
-        return Ok(PlanningDuelScoreboardFile::default());
-    }
-    serde_json::from_str(&content).map_err(|e| OrbitError::Io(format!("parse duel_plan.json: {e}")))
+    common::load_run_entries(scoreboard_dir, SCOREBOARD_FILENAME)
 }
 
 // ============================================================================
@@ -356,6 +315,5 @@ fn record_head_to_head(
 // Tests
 // ============================================================================
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests;

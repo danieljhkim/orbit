@@ -11,6 +11,7 @@ use orbit_common::types::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::common::{LEGACY_TASK_REVIEW_MESSAGES_METRIC, TASK_REVIEW_THREADS_METRIC};
 use super::planning_duel_scoreboard;
 use crate::friction_store::StoredFrictionRecord;
 use crate::{AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall};
@@ -28,8 +29,6 @@ const SUMMARY_FILENAME: &str = "summary.json";
 // windows because we lack a timestamped snapshot log to filter against.
 // Older readers ignore unknown fields.
 const CURRENT_SCHEMA_VERSION: u32 = 6;
-const TASK_REVIEW_THREADS_METRIC: &str = "task-review-threads";
-const LEGACY_TASK_REVIEW_MESSAGES_METRIC: &str = "task-review-messages";
 const RECENT_WINDOW_DAYS: i64 = 7;
 
 type FamilyScoreboard = BTreeMap<String, BTreeMap<String, u64>>;
@@ -885,6 +884,5 @@ fn canonical_scoreboard_metric(metric: &str) -> &str {
     }
 }
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests;
