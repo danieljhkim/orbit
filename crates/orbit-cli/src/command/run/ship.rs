@@ -1,9 +1,7 @@
 //! `orbit run ship` CLI entrypoint.
 
-use std::collections::HashSet;
-
 use clap::{Args, ValueEnum};
-use orbit_core::{OrbitError, OrbitRuntime, find_workflow};
+use orbit_core::{OrbitError, OrbitRuntime, build_ship_input, find_workflow};
 use serde_json::Value;
 
 use crate::command::Execute;
@@ -19,10 +17,10 @@ pub enum ShipMode {
 }
 
 impl ShipMode {
-    fn as_input_value(self) -> &'static str {
+    pub(super) fn to_core(self) -> orbit_core::ShipMode {
         match self {
-            ShipMode::Pr => "pr",
-            ShipMode::Local => "local",
+            ShipMode::Pr => orbit_core::ShipMode::Pr,
+            ShipMode::Local => orbit_core::ShipMode::Local,
         }
     }
 }
@@ -100,40 +98,14 @@ pub(crate) fn build_ship_run_plan(
     let base = args.base.as_deref().unwrap_or(config_base_branch);
     Ok(WorkflowRunPlan {
         workflow_alias,
-        input: ship_input(args.mode, base, &args.task_ids),
+        input: build_ship_input(args.mode.to_core(), base, &args.task_ids)?,
     })
-}
-
-fn ship_input(mode: ShipMode, base: &str, task_ids: &[String]) -> Value {
-    let mut map = serde_json::Map::new();
-    map.insert(
-        "mode".to_string(),
-        Value::String(mode.as_input_value().to_string()),
-    );
-    map.insert("base_branch".to_string(), Value::String(base.to_string()));
-    if !task_ids.is_empty() {
-        map.insert(
-            "task_ids".to_string(),
-            Value::Array(task_ids.iter().cloned().map(Value::String).collect()),
-        );
-    }
-    Value::Object(map)
 }
 
 fn validate_task_selection(task_ids: &[String]) -> Result<(), OrbitError> {
     if let Some(legacy) = task_ids.first().and_then(|value| legacy_ship_form(value)) {
         return Err(OrbitError::InvalidInput(legacy.to_string()));
     }
-
-    let mut seen = HashSet::new();
-    for task_id in task_ids {
-        if !seen.insert(task_id.as_str()) {
-            return Err(OrbitError::InvalidInput(format!(
-                "duplicate task id '{task_id}' in explicit task selection"
-            )));
-        }
-    }
-
     Ok(())
 }
 

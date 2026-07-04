@@ -1,0 +1,11 @@
+[Unit]
+Description=Run orbit ship-sweep every 20 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=20min
+# Smear start times so the sweep never lines up exactly with other timers.
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

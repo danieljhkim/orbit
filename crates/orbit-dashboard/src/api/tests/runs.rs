@@ -596,3 +596,77 @@ fn run_detail_uses_v2_audit_steps_when_step_bundle_is_empty() {
     assert_eq!(steps[0]["state"], "success");
     assert_eq!(steps[0]["duration_ms"], 2_000);
 }
+
+async fn request_ship(runtime: OrbitRuntime, body: Option<Value>) -> Response {
+    let mut builder = Request::builder()
+        .method(Method::POST)
+        .uri("/workflows/ship")
+        .header(header::ORIGIN, "http://localhost:3000");
+    let body = match body {
+        Some(json) => {
+            builder = builder.header(header::CONTENT_TYPE, "application/json");
+            Body::from(json.to_string())
+        }
+        None => Body::empty(),
+    };
+    router()
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(builder.body(body).expect("request"))
+        .await
+        .expect("response")
+}
+
+#[tokio::test]
+async fn ship_endpoint_submits_task_auto_pipeline_run() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    write_replay_job(&runtime, "task_auto_pipeline");
+
+    let response = request_ship(runtime.clone(), Some(json!({ "mode": "pr" }))).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_json(response).await;
+    assert_eq!(payload["workflow"].as_str(), Some("ship"));
+    assert_eq!(payload["job_id"].as_str(), Some("task_auto_pipeline"));
+    assert!(matches!(
+        payload["state"].as_str(),
+        Some("queued" | "submitted")
+    ));
+    let run_id = payload["run_id"].as_str().expect("run id");
+    let stored = runtime.show_job_run(run_id).expect("stored ship run");
+    assert_eq!(stored.job_id, "task_auto_pipeline");
+}
+
+#[tokio::test]
+async fn ship_endpoint_rejects_unknown_mode() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request_ship(runtime, Some(json!({ "mode": "yolo" }))).await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = body_json(response).await;
+    assert!(
+        payload["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("unknown ship mode"))
+    );
+}
+
+#[tokio::test]
+async fn ship_endpoint_rejects_duplicate_task_ids() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    write_replay_job(&runtime, "task_auto_pipeline");
+
+    let response = request_ship(
+        runtime,
+        Some(json!({ "task_ids": ["T12345678-123456", "T12345678-123456"] })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = body_json(response).await;
+    assert!(
+        payload["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("duplicate task id"))
+    );
+}

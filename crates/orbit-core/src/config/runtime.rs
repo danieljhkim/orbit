@@ -44,6 +44,9 @@ pub(crate) struct RuntimeConfig {
     /// from `[workflow] base_branch` in `config.toml`; defaults to `"main"`
     /// when no key is set.
     pub(crate) workflow_base_branch: String,
+    /// Opt-in for unattended ship dispatch (`[workflow] auto_ship` in
+    /// `config.toml`; defaults to `false`).
+    pub(crate) workflow_auto_ship: bool,
     /// Named planner/implementer/reviewer lineups from `[crews.<name>]`.
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
@@ -86,6 +89,7 @@ impl RuntimeConfig {
             graph_editing: DEFAULT_GRAPH_EDITING,
             v2_backend: None,
             workflow_base_branch: DEFAULT_WORKFLOW_BASE_BRANCH.to_string(),
+            workflow_auto_ship: false,
             crews: default_crews(),
             default_crew: Some(DEFAULT_WORKFLOW_CREW.to_string()),
             duel: DuelConfig::default(),
@@ -163,6 +167,11 @@ impl RuntimeConfig {
         reject_stale_agent_role_tables(parsed.agent.as_ref())?;
 
         let workflow_base_branch = workflow_base_branch_from_raw(parsed.workflow.as_ref())?;
+        let workflow_auto_ship = parsed
+            .workflow
+            .as_ref()
+            .and_then(|workflow| workflow.auto_ship)
+            .unwrap_or(false);
         let crews = crews_from_raw(parsed.crews.as_ref())?;
         let default_crew = workflow_default_crew_from_raw(parsed.workflow.as_ref(), &crews)?;
         let duel = duel_from_raw(parsed.duel.as_ref())?;
@@ -191,6 +200,7 @@ impl RuntimeConfig {
             graph_editing,
             v2_backend,
             workflow_base_branch,
+            workflow_auto_ship,
             crews,
             default_crew,
             duel,
@@ -204,6 +214,10 @@ impl RuntimeConfig {
 
     pub(crate) fn workflow_base_branch(&self) -> &str {
         &self.workflow_base_branch
+    }
+
+    pub(crate) fn workflow_auto_ship(&self) -> bool {
+        self.workflow_auto_ship
     }
 
     pub(crate) fn pr_config(&self) -> &PrConfig {

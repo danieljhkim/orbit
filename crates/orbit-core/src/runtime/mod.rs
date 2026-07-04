@@ -325,6 +325,14 @@ impl OrbitRuntime {
         self.context.workflow_base_branch()
     }
 
+    /// Whether this workspace opted into unattended ship dispatch
+    /// (`[workflow] auto_ship` in the active `config.toml`; defaults to
+    /// `false`). Consulted by `orbit run ship-sweep` and other schedulers
+    /// before dispatching ship runs nobody explicitly asked for.
+    pub fn workflow_auto_ship(&self) -> bool {
+        self.context.workflow_auto_ship()
+    }
+
     /// Returns the configured `[duel] candidates` list (e.g. ["codex", "claude", "gemini", "grok"]).
     /// Used by `orbit run duel-plan --planner-a ...` overrides to validate explicit families.
     pub fn duel_candidate_families(&self) -> Vec<String> {

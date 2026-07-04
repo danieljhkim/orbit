@@ -30,6 +30,10 @@ pub(super) struct RawWorkflowConfig {
     /// Repos that keep an `agent-main` buffer branch set this to
     /// `"agent-main"`.
     pub(super) base_branch: Option<String>,
+    /// `workflow.auto_ship` — opt-in for unattended ship dispatch
+    /// (`orbit run ship-sweep` and other schedulers). When absent or
+    /// `false`, sweeps skip this workspace.
+    pub(super) auto_ship: Option<bool>,
     /// Named crew used when a task does not declare `crew` and no CLI
     /// override is provided.
     pub(super) default_crew: Option<String>,

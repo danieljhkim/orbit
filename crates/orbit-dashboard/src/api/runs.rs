@@ -23,6 +23,52 @@ const RUN_LOG_PREVIEW_MAX_BYTES: usize = 8192;
 /// Maximum lines included in stdout/stderr previews returned by run-log APIs.
 const RUN_LOG_PREVIEW_MAX_LINES: usize = 120;
 
+#[derive(serde::Deserialize, Default)]
+pub(super) struct ShipBody {
+    /// Explicit task selection; empty selects auto (backlog-discovery) mode.
+    #[serde(default)]
+    task_ids: Vec<String>,
+    /// `"pr"` (default) or `"local"`.
+    #[serde(default)]
+    mode: Option<String>,
+    /// Base branch override; defaults to the workspace's `[workflow] base_branch`.
+    #[serde(default)]
+    base: Option<String>,
+}
+
+/// Submit a `ship` workflow run (`POST /workflows/ship?workspace=<id>`).
+///
+/// One-shot: responds as soon as the run is persisted, with the same
+/// `queued`/`submitted` states the CLI reports. Callers poll
+/// `GET /runs/:id` for progress.
+pub(super) async fn ship_workflow_action(
+    Ws(runtime): Ws,
+    body: Option<Json<ShipBody>>,
+) -> Response {
+    let Json(body) = body.unwrap_or_default();
+    let mode = match orbit_core::ShipMode::parse(body.mode.as_deref().unwrap_or("pr")) {
+        Ok(mode) => mode,
+        Err(e) => return bad_request(e.to_string()),
+    };
+    match runtime.submit_ship_run(
+        mode,
+        body.base.as_deref(),
+        &body.task_ids,
+        Some("dashboard"),
+    ) {
+        Ok(invoke) => Json(json!({
+            "workflow": "ship",
+            "job_id": invoke.job_name,
+            "run_id": invoke.run_id,
+            "state": if invoke.queued { "queued" } else { "submitted" },
+            "submitted_at": invoke.submitted_at,
+        }))
+        .into_response(),
+        Err(orbit_core::OrbitError::InvalidInput(msg)) => bad_request(msg),
+        Err(e) => map_runtime_error(e),
+    }
+}
+
 pub(super) async fn get_run(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let id = match validate_id(&id) {
         Ok(id) => id,

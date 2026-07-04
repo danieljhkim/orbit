@@ -44,6 +44,7 @@ use crate::command::friction::{FrictionCommand, FrictionSubcommand};
 use crate::command::hook::{HookCommand, HookSubcommand};
 use crate::command::learning::{LearningCommand, LearningSubcommand};
 use crate::command::mcp::{McpCommand, McpSubcommand};
+use crate::command::run::{RunCommand, RunSubcommand};
 use crate::command::search::SearchCommand;
 use crate::command::tool::{OutputFormat, ToolSubcommand};
 use crate::command::web::{WebCommand, WebSubcommand};
@@ -107,6 +108,18 @@ fn main() {
             command: LearningSubcommand::MigrateLayout(args),
         }) => {
             if let Err(err) = args.execute_without_runtime(root_override.as_deref()) {
+                print_error(&err, tool_run_json_output);
+                std::process::exit(1);
+            }
+            return;
+        }
+        // `orbit run ship-sweep` iterates the global workspace registry and
+        // must never bootstrap a `.orbit/` in the scheduler's cwd, so it
+        // dispatches before the eager workspace initialization below.
+        Commands::Run(RunCommand {
+            command: RunSubcommand::ShipSweep(args),
+        }) => {
+            if let Err(err) = args.execute_without_runtime() {
                 print_error(&err, tool_run_json_output);
                 std::process::exit(1);
             }
