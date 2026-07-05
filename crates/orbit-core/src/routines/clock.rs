@@ -19,6 +19,15 @@ pub const LAUNCHD_LABEL: &str = "com.orbit.sweep";
 /// systemd unit base name (Linux).
 pub const SYSTEMD_UNIT: &str = "orbit-sweep";
 
+/// Path launchd redirects `orbit sweep` stdout/stderr to on macOS, and the
+/// file `run_sweep` rotates so it stays bounded on an always-on host
+/// ([ORB-00423]). Single source of truth shared by the installer and the sweep
+/// pass so the writer and the rotator never disagree. (Linux logs to the
+/// journal, which rotates on its own, so only macOS needs this file.)
+pub fn sweep_log_path(global_root: &Path) -> PathBuf {
+    global_root.join("logs").join("sweep.log")
+}
+
 /// What an installation attempt did: files written, plus either a successful
 /// activation or the commands the user must run themselves.
 #[derive(Debug)]
@@ -50,7 +59,7 @@ pub fn install_clock(global_root: &Path) -> Result<ClockInstallReport, OrbitErro
 
 fn install_launchd(global_root: &Path, orbit_bin: &str) -> Result<ClockInstallReport, OrbitError> {
     let home = home_dir()?;
-    let log_path = global_root.join("logs").join("sweep.log");
+    let log_path = sweep_log_path(global_root);
     if let Some(parent) = log_path.parent() {
         fs::create_dir_all(parent).map_err(|error| OrbitError::Io(error.to_string()))?;
     }
