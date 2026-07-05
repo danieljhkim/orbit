@@ -75,6 +75,48 @@ Two handoff branches, depending on user intent:
 
 After hand-off, this skill's job is done. Subsequent Orbit work routes through the `orbit` skill and its lifecycle siblings.
 
+## Routines & scheduling (`orbit sweep`)
+
+Routines make Orbit the host's scheduler: a git-versioned YAML definition (`.orbit/routines/*.yaml`) pairs a cron trigger with a catalog `job:<name>` target, host pinning, and a retry/overlap policy. A stateless `orbit sweep` pass — invoked every minute by the OS clock (launchd / systemd timer) — fires whatever is due on this host as a normal run. Definitions sync across hosts via git; **all scheduler state (last fires, pauses, locks) is host-local in `~/.orbit/orbit.db` and never synced.**
+
+**Canonical sources — read these at invocation time; don't answer routine field semantics from memory:**
+
+- Design contract (schema, discovery, sweep, host-local state, clock): `docs/design/routines/` — start at `2_design.md` (§1 is the field-by-field schema, the source of truth).
+- Command surface: `orbit routine --help` and `orbit sweep --help`.
+
+Setup sequence (the *skeleton* is stable; re-read the design doc for full field semantics before hand-authoring a routine):
+
+1. **Set this host's identity** — `orbit routine init --host-id <id>` writes `~/.orbit/host.toml`. The `<id>` is what a routine's `hosts:` list is matched against. Absent an explicit id it defaults to the machine hostname. Add `--install-clock` to also install and start the per-user OS clock unit that runs `orbit sweep` every minute (launchd agent on macOS, systemd user timer on Linux).
+2. **Make a workspace a routine source** — add `[routines]` / `role = "source"` to that workspace's `.orbit/config.toml` (versioned; both hosts converge via `git pull`). The workspace must already be registered with Orbit. Only `role = "source"` is valid — any other value is a fail-closed config error.
+3. **Add a routine** — drop a YAML file under `<source>/.orbit/routines/`. Minimal illustrative shape (see `2_design.md` §1 for every field and default):
+
+   ```yaml
+   schemaVersion: 1
+   name: almanac-auto-commit          # unique across all sources on a host
+   enabled: true                       # versioned kill-switch
+   hosts: [dk-mac]                      # explicit pinning; no "any host" in v1
+   trigger:
+     cron: "0 22 * * *"                # 5-field, host-local time
+     missed_run: skip                   # skip | catch_up_once (default: skip)
+   target: job:almanac_commit_pipeline  # job:<name> only; activity: is rejected — wrap it in a one-step job
+   policy:
+     timeout_minutes: 10
+     retries: { max: 2, backoff_minutes: 2 }
+     overlap: forbid                    # forbid | allow
+   ```
+
+   Parsing is fail-closed: an invalid file (bad schema version, unknown field, unresolvable target, unparsable cron) makes *that routine* absent and reports a load error — it never fires with defaults.
+
+4. **Verify without firing** — `orbit routine list` shows every routine with its toggle columns (enabled / pinned / paused) and computed next-due; `orbit sweep --dry-run` reports what *would* fire and records nothing. `orbit routine show <name>` adds recent fire history.
+
+Observe & control:
+
+- Fires are normal runs — they appear in `orbit run history` and carry the actor `routine/<name>`.
+- `orbit routine pause <name>` / `resume <name>` suppress a routine on *this host only* (host-local, unversioned, durable across reboots).
+- Toggle resolution order when a routine doesn't fire: `enabled: false` (versioned, everywhere) → host not in `hosts` (versioned, per host) → local pause (this host only). `orbit routine list` shows all three, so "why didn't this fire?" is one command.
+
+If setup or a sweep misbehaves, surface it and offer `orbit-track-issues` to capture the friction.
+
 ## Cowork configuration
 
 If the user runs the plugin inside **Cowork** (the Claude desktop app) and only the `orbit_graph_*` tools appear — no `orbit_task_add` / ADR / learning tools — it's the known workspace-discovery gap: Cowork launches the plugin's MCP server with cwd and `CLAUDE_PROJECT_DIR` set to an internal scratchpad, not the selected repo, so `serve` finds no `.orbit/` and falls back to the graph-only surface.
