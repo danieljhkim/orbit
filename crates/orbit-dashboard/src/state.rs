@@ -7,9 +7,12 @@
 //! the [`Ws`] extractor (which selects a workspace from the `?workspace=<id>`
 //! query parameter, falling back to the configured default).
 //!
-//! [`DashboardState::single`] preserves the original single-workspace behavior
-//! so `serve()` inside a workspace and every existing handler test keep working
-//! unchanged: one pre-built runtime, always selected, no lazy construction.
+//! [`DashboardState::single`] preserves the original single-workspace behavior:
+//! one pre-built runtime, always selected, no lazy construction. `orbit web
+//! serve` no longer reaches it (it always serves in global mode as of
+//! ORB-10029); it is retained for [`crate::serve`] (callers embedding an
+//! already-built `OrbitRuntime`) and for every existing handler test, which
+//! builds an in-memory runtime and wants a trivial single-workspace harness.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -58,8 +61,9 @@ pub(crate) struct DashboardState {
 
 impl DashboardState {
     /// Single-workspace mode: serve exactly one pre-built runtime, always
-    /// selected. Preserves the pre-ORB-00030 behavior and keeps every handler
-    /// test (which builds an in-memory runtime) working unchanged.
+    /// selected. No longer reachable from `orbit web serve` (ORB-10029);
+    /// used by [`crate::serve`] and by every handler test (which builds an
+    /// in-memory runtime and wants a trivial single-workspace harness).
     pub(crate) fn single(runtime: Arc<OrbitRuntime>) -> Self {
         let entry = WsEntry {
             id: SINGLE_WORKSPACE_ID.to_string(),

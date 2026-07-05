@@ -122,23 +122,18 @@ orbit task update "$TASK_ID" --status backlog   # approve into the backlog
 # conflict-aware, parallel flush of the backlog tasks to PRs
 orbit run ship
 
-# launch interactive dashboard (this workspace)
+# launch interactive dashboard — one view over every registered workspace,
+# from any directory. The header selector preselects the workspace for the
+# directory orbit was launched from (if it's registered) and otherwise opens
+# on "All workspaces"; it shows the selected workspace's filesystem path
+# (home-abbreviated to ~) beneath the dropdown, and the aggregate task view
+# lists each task's workspace location in its Details box — so same-named
+# workspaces are easy to tell apart.
 orbit web serve
-
-# one dashboard over every registered workspace (also the default when run
-# outside a workspace). The header selector shows the selected workspace's
-# filesystem path (home-abbreviated to ~) beneath the dropdown, and the
-# aggregate task view lists each task's workspace location in its Details box —
-# so same-named workspaces are easy to tell apart.
-orbit web serve --global
 
 # ...or view a workspace running on another machine over an SSH tunnel
 # (the dashboard stays loopback-only; auth is delegated to SSH)
 orbit web connect my-server
-
-# ...or every workspace on that remote machine at once (--global is forwarded
-# to the remote `orbit web serve`)
-orbit web connect my-server --global
 ```
 
 </details>
