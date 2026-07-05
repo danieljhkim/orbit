@@ -260,8 +260,9 @@ fn sweep_routine(
             fire(store, routine, dispatch, &slot_utc, 1, "fired", options)
         }
         DueDecision::NotDue => {
-            // No new slot: a failed most-recent fire may still have retry
-            // budget under the same slot.
+            // No new slot: a most-recent fire that failed (run-level) or
+            // errored at dispatch may still have retry budget under the same
+            // slot.
             if let Some(retry) = retry_candidate(store, routine, now_utc)? {
                 return fire(
                     store,
@@ -278,8 +279,16 @@ fn sweep_routine(
     }
 }
 
-/// The most recent fire, when it failed with retry budget left and the
-/// fixed backoff has elapsed.
+/// The most recent fire, when it failed with retry budget left and the fixed
+/// backoff has elapsed.
+///
+/// Retryable means `Failed` — a run-level failure *or* a synchronous dispatch
+/// failure ([ORB-00422]): `fire` records a `submit_pipeline_run` that returns
+/// `Err` as `Failed` (not `Error`) precisely because nothing dispatched, so it
+/// is unambiguously safe to re-dispatch under the same slot. `Error` is
+/// reserved for the *ambiguous* case — a crashed sweep's stale intent reclaimed
+/// by the outcome sync, where a worker may have partially started — and stays
+/// terminal so a make-up fire never races an orphaned run.
 fn retry_candidate(
     store: &Store,
     routine: &LoadedRoutine,
@@ -370,12 +379,16 @@ fn fire(
             })
         }
         Err(error) => {
+            // A synchronous dispatch failure means nothing was dispatched, so
+            // record it as `Failed` — retryable under the same slot within
+            // `policy.retries` ([ORB-00422]) — rather than the terminal `Error`
+            // the outcome sync reserves for an ambiguous crash-orphaned intent.
             store.routine_mark_fire_outcome(
                 name,
                 slot,
                 attempt,
-                RoutineFireState::Error,
-                Some(&error.to_string()),
+                RoutineFireState::Failed,
+                Some(&format!("dispatch failed: {error}")),
             )?;
             Ok(RoutineSweepReport {
                 routine: name.clone(),

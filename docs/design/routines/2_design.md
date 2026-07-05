@@ -1,7 +1,7 @@
 ---
 title: Routines — Design
 owner: claude
-last_updated: 2026-07-04
+last_updated: 2026-07-05
 status: Accepted
 feature: routines
 doc_role: design
@@ -65,7 +65,12 @@ Field semantics:
   fixed backoff, and overlap handling. `overlap: forbid` is the default; `timeout_minutes`
   defaults to 60 and doubles as the staleness horizon (§4), `retries` defaults to
   `{max: 0, backoff_minutes: 2}`. Retries re-dispatch a *failed* fire under the same slot
-  (attempt 2..max+1) once the backoff has elapsed, evaluated on later sweep passes.
+  (attempt 2..max+1) once the backoff has elapsed, evaluated on later sweep passes. A fire
+  that *errored at dispatch* (`submit_pipeline_run` failed synchronously — lock contention, a
+  momentary catalog/store hiccup) is retried under the same policy as a run-level failure
+  ([ORB-00422]): a transient dispatch failure is the class retries exist to absorb, so it must
+  not burn the slot when retry budget remains. With `max: 0` (the default) a dispatch error,
+  like any failure, consumes the slot and waits for the next natural one.
 
 Parsing is fail-closed: an invalid routine file is reported and *that routine* is treated
 as absent; it never degrades into "fire with defaults".
@@ -205,7 +210,13 @@ out of v1 scope for this reason.
   accurate in-flight bookkeeping; a crashed sweep that recorded a fire intent but died
   before dispatch leaves a stale in-flight entry. The outcome-sync step reclaims intents
   and dispatches older than `policy.timeout_minutes` (marking them `error` / `timed_out`);
-  the consumed slot is not re-fired — the idempotency key holds.
+  the consumed slot is not re-fired — the idempotency key holds. The two failure paths are
+  deliberately given different states so retry can tell them apart ([ORB-00422]): a
+  *synchronous* `submit_pipeline_run` error is unambiguous (nothing dispatched), so `fire`
+  records it as `failed` — retryable under `policy.retries` like a run-level failure; a crashed
+  sweep's reclaimed stale intent is *ambiguous* (a worker may have partially started), so the
+  outcome sync records it as `error` — terminal, never re-fired, so a make-up fire cannot race
+  an orphaned run.
 - **Routines carry no input payload.** v1 dispatches every target with an empty input
   object; jobs meant for routines must run with defaults. Parameterized fires would be a
   schema addition.

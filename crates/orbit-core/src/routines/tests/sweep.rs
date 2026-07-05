@@ -84,7 +84,7 @@ fn ts(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32) -> DateTime<Utc> {
 /// run ids, and answers `run_state` from a table the test primes.
 #[derive(Default)]
 struct FakeDispatch {
-    fail_submit: bool,
+    fail_submit: Cell<bool>,
     counter: Cell<u32>,
     submits: RefCell<Vec<(PathBuf, String)>>,
     states: RefCell<HashMap<String, JobRunState>>,
@@ -97,11 +97,15 @@ impl FakeDispatch {
     fn set_state(&self, run_id: &str, state: JobRunState) {
         self.states.borrow_mut().insert(run_id.to_string(), state);
     }
+    /// Make the next `submit` calls fail (dispatch-time error) until cleared.
+    fn set_fail(&self, fail: bool) {
+        self.fail_submit.set(fail);
+    }
 }
 
 impl RoutineDispatch for FakeDispatch {
     fn submit(&self, dir: &Path, job: &str, _actor: &str) -> Result<String, OrbitError> {
-        if self.fail_submit {
+        if self.fail_submit.get() {
             return Err(OrbitError::Execution("dispatch boom".to_string()));
         }
         let n = self.counter.get() + 1;
@@ -378,6 +382,65 @@ fn sync_reclaims_stale_intent_and_dispatched_past_timeout() {
         Some(&RoutineFireState::TimedOut),
         "stale dispatched reclaimed as timed_out"
     );
+}
+
+// ---- dispatch-error retry [ORB-00422] -------------------------------------
+
+#[test]
+fn dispatch_error_is_retry_eligible_under_the_same_slot() {
+    let store = store();
+    let dispatch = FakeDispatch::default();
+    // Daily catch-up routine so exactly one slot is due across both sweeps
+    // (a frequent cron would surface a *new* slot before any retry). backoff 0
+    // keeps the retry immediately eligible without wall-clock waiting.
+    let yaml = format!(
+        "schemaVersion: 1\nname: job\nenabled: true\nhosts: [{HOST}]\n\
+         trigger:\n  cron: \"0 0 * * *\"\n  missed_run: catch_up_once\n\
+         target: job:noop\n\
+         policy:\n  timeout_minutes: 10\n  overlap: forbid\n  \
+         retries: {{ max: 2, backoff_minutes: 0 }}\n"
+    );
+    let coll = collection(vec![loaded(parse_routine_yaml(&yaml).unwrap())]);
+    // `now` sits just ahead of wall-clock so the errored fire's stored
+    // updated_at is strictly in the past (backoff 0 is then satisfied).
+    let now = Utc::now() + Duration::minutes(1);
+    store
+        .routine_record_baseline("job", &(now - Duration::days(2)).to_rfc3339())
+        .unwrap();
+
+    // Sweep 1: the slot is due; the synchronous dispatch fails.
+    dispatch.set_fail(true);
+    let r1 = run_sweep_core(&store, HOST, &coll, &dispatch, SweepOptions::default(), now).unwrap();
+    assert_eq!(
+        r1[0].action, "error",
+        "dispatch failure is reported as error"
+    );
+    let errored = store.routine_latest_fire("job").unwrap().unwrap();
+    // Recorded as retryable Failed (nothing dispatched), not terminal Error.
+    assert_eq!(errored.state, RoutineFireState::Failed);
+    assert_eq!(errored.attempt, 1);
+    assert_eq!(
+        dispatch.submit_count(),
+        0,
+        "a failed submit dispatches nothing"
+    );
+    let slot = errored.slot.clone();
+
+    // Sweep 2: no new slot is due, but the dispatch error is now retryable.
+    // With submit healthy it re-dispatches attempt 2 under the SAME slot.
+    dispatch.set_fail(false);
+    let r2 = run_sweep_core(&store, HOST, &coll, &dispatch, SweepOptions::default(), now).unwrap();
+    assert_eq!(r2[0].action, "retry_fired");
+    let retried = store.routine_latest_fire("job").unwrap().unwrap();
+    assert_eq!(retried.state, RoutineFireState::Dispatched);
+    assert_eq!(retried.attempt, 2);
+    assert_eq!(retried.slot, slot, "retry re-uses the same scheduled slot");
+    assert_eq!(dispatch.submit_count(), 1);
+
+    // Idempotency: exactly two fires for the one slot (no double-dispatch).
+    let rows = fires(&store, "job");
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|f| f.slot == slot));
 }
 
 // ---- dry-run --------------------------------------------------------------
