@@ -113,24 +113,32 @@ pub fn serve(runtime: &OrbitRuntime, args: ServeArgs) -> Result<(), OrbitError> 
 /// workspace). Always serves in global mode: every registered workspace is
 /// selectable via the dropdown, regardless of cwd (`args.global` is accepted
 /// but ignored — see [`ServeArgs::global`]).
-pub fn serve_from_env(args: ServeArgs) -> Result<(), OrbitError> {
-    let state = build_state()?;
+///
+/// `root_override` is the top-level `--root <path>` flag, if given; it picks
+/// the dropdown's default-preselected workspace ahead of the process cwd (see
+/// [`build_state`]). This matters for `orbit web connect`: the remote `orbit
+/// web serve` it launches over `ssh` runs non-interactively with cwd set to
+/// the remote user's home directory, so `--root` is the only signal available
+/// to hint which workspace should be preselected there.
+pub fn serve_from_env(args: ServeArgs, root_override: Option<&Path>) -> Result<(), OrbitError> {
+    let state = build_state(root_override)?;
     run_server(&args, state)
 }
 
 /// Resolve dashboard state from the environment: global mode over every
 /// registered workspace (stale-path entries are listed but marked inactive
-/// and never built). The dropdown's default selection is the registered
-/// workspace containing the cwd, if any (see [`default_workspace_for_cwd`]);
-/// otherwise "All workspaces".
-fn build_state() -> Result<state::DashboardState, OrbitError> {
+/// and never built). The dropdown's default selection is, in priority order:
+/// the registered/active workspace matching `root_override` (an explicit
+/// `--root <path>`), else the registered workspace containing the cwd (see
+/// [`default_workspace_for_cwd`]), else "All workspaces". See
+/// [`default_workspace_selection`] for the precedence logic.
+fn build_state(root_override: Option<&Path>) -> Result<state::DashboardState, OrbitError> {
     let global_root = workspace_registry::global_orbit_dir()?;
     let mut registry = workspace_registry::load_registry()?;
     workspace_registry::validate_workspaces(&mut registry);
 
-    let default_workspace = std::env::current_dir()
-        .ok()
-        .and_then(|cwd| default_workspace_for_cwd(&registry, &cwd));
+    let cwd = std::env::current_dir().ok();
+    let default_workspace = default_workspace_selection(&registry, root_override, cwd.as_deref());
 
     let entries = registry
         .workspaces
@@ -161,6 +169,26 @@ fn default_workspace_for_cwd(registry: &WorkspaceRegistry, cwd: &Path) -> Option
         .filter(|ws| ws.status == WorkspaceStatus::Active && cwd.starts_with(&ws.root))
         .max_by_key(|ws| ws.root.as_os_str().len())
         .map(|ws| ws.id.clone())
+}
+
+/// Precedence logic for the dropdown's default-preselected workspace: an
+/// explicit `root_override` (the top-level `--root <path>` flag) always wins
+/// over `cwd` when given, even if it does not resolve to any registered/active
+/// workspace — in that case the result is `None` ("All workspaces"), not a
+/// fallback to the cwd-based default. This matches [`default_workspace_for_cwd`]:
+/// don't error, don't auto-register, just prefer the aggregate view.
+///
+/// `root_override` not being given falls back to the existing cwd-based
+/// behavior unchanged.
+fn default_workspace_selection(
+    registry: &WorkspaceRegistry,
+    root_override: Option<&Path>,
+    cwd: Option<&Path>,
+) -> Option<String> {
+    match root_override {
+        Some(root) => default_workspace_for_cwd(registry, root),
+        None => cwd.and_then(|cwd| default_workspace_for_cwd(registry, cwd)),
+    }
 }
 
 /// Build the axum app and block on the tokio runtime until graceful shutdown.

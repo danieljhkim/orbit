@@ -158,7 +158,9 @@ fn main() {
         // workspace initialization below (which fails outside a workspace).
         Commands::Web(WebCommand { command }) => {
             let result = match command {
-                WebSubcommand::Serve(args) => orbit_dashboard::serve_from_env(args),
+                WebSubcommand::Serve(args) => {
+                    orbit_dashboard::serve_from_env(args, root_override.as_deref())
+                }
                 WebSubcommand::Connect(args) => orbit_dashboard::connect(args),
             };
             if let Err(err) = result {
