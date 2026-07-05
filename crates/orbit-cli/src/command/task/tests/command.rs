@@ -2,7 +2,9 @@ use clap::{Parser, error::ErrorKind};
 
 use crate::command::Cli;
 
-/// The trimmed `orbit task` surface (ORB-10000): 12 subcommands.
+/// The trimmed `orbit task` surface (ORB-10000): 12 subcommands. Lock
+/// administration lives under the top-level `orbit locks` command (ORB-00420),
+/// not here.
 const EXPECTED_TASK_SUBCOMMANDS: [&str; 12] = [
     "add",
     "artifact",
@@ -82,22 +84,26 @@ fn task_help_describes_update_status_transitions() {
 }
 
 #[test]
-fn task_list_locked_conflicts_with_status_filters() {
-    let err =
-        match Cli::try_parse_from(["orbit", "task", "list", "--locked", "--status", "backlog"]) {
-            Ok(_) => panic!("--locked must conflict with --status"),
-            Err(err) => err,
-        };
-    assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
-
-    let err = match Cli::try_parse_from(["orbit", "task", "list", "--locked", "--all"]) {
-        Ok(_) => panic!("--locked must conflict with --all"),
+fn lock_administration_lives_under_top_level_locks_command() {
+    // `--locked` was removed from `task list` (ORB-00420).
+    let err = match Cli::try_parse_from(["orbit", "task", "list", "--locked"]) {
+        Ok(_) => panic!("`task list --locked` should no longer parse"),
         Err(err) => err,
     };
-    assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+    assert_eq!(err.kind(), ErrorKind::UnknownArgument);
 
-    Cli::try_parse_from(["orbit", "task", "list", "--locked", "--json"])
-        .expect("--locked composes with --json");
+    // Lock administration now lives under the top-level `orbit locks` command.
+    Cli::try_parse_from(["orbit", "locks", "list"]).expect("orbit locks list parses");
+    Cli::try_parse_from(["orbit", "locks", "list", "--json"])
+        .expect("orbit locks list --json parses");
+    Cli::try_parse_from(["orbit", "locks", "release", "R-123"])
+        .expect("orbit locks release <id> parses");
+
+    let err = match Cli::try_parse_from(["orbit", "locks", "release"]) {
+        Ok(_) => panic!("`locks release` requires a reservation id"),
+        Err(err) => err,
+    };
+    assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
 }
 
 #[test]

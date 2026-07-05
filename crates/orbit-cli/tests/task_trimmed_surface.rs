@@ -3,9 +3,9 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 //! End-to-end coverage for the trimmed `orbit task` surface (ORB-10000):
-//! approve/reject/unarchive folded into `update --status`, the locks
-//! projection folded into `list --locked`, and `prune-context` folded into
-//! `lint --fix`.
+//! approve/reject/unarchive folded into `update --status` and `prune-context`
+//! folded into `lint --fix`. Lock administration lives under the top-level
+//! `orbit locks` command (`list`/`release`, ORB-00420).
 
 use std::fs;
 use std::path::Path;
@@ -61,7 +61,7 @@ fn update_status_performs_approve_and_reject_transitions() {
 }
 
 #[test]
-fn list_locked_projects_files_held_by_active_tasks() {
+fn locks_list_projects_files_held_by_active_tasks() {
     let workspace = TestWorkspace::new();
     fs::write(workspace.work.join("held.rs"), "// held\n").expect("write held file");
 
@@ -82,13 +82,13 @@ fn list_locked_projects_files_held_by_active_tasks() {
         "start with context",
     );
 
-    let output = workspace.run(&["task", "list", "--locked", "--json"], "list --locked");
+    let output = workspace.run(&["locks", "list", "--json"], "locks list");
     let value: Value = serde_json::from_slice(&output.stdout).expect("locked JSON");
     assert_eq!(value["total_tasks"], json!(1));
     assert_eq!(value["locked_files"], json!(["file:held.rs"]));
     assert_eq!(value["by_task"][0]["id"], json!(id));
 
-    let text = workspace.run(&["task", "list", "--locked"], "list --locked text");
+    let text = workspace.run(&["locks", "list"], "locks list text");
     let stdout = String::from_utf8_lossy(&text.stdout);
     assert!(stdout.contains("file:held.rs"), "{stdout}");
 }
@@ -134,6 +134,28 @@ fn lint_fix_sweep_drops_stale_context_entries() {
     let again = workspace.run(&["task", "lint", "--fix", "--json"], "lint sweep again");
     let again: Value = serde_json::from_slice(&again.stdout).expect("second fix JSON");
     assert_eq!(again["total_dropped"], json!(0));
+}
+
+#[test]
+fn locks_release_reaches_admin_tool_bypassing_agent_gate() {
+    let workspace = TestWorkspace::new();
+
+    // `orbit.task.locks.release` is inactive on the agent tool surface, so
+    // `orbit locks release` must reach it through the admin `runtime.run_tool`
+    // bypass. An unknown reservation yields a structured `released: false`, NOT
+    // the `ensure_tool_agent_facing` rejection.
+    let output = workspace.run(
+        &["locks", "release", "no-such-reservation"],
+        "locks release",
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("release JSON");
+    assert_eq!(value["released"], json!(false));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("inactive on the agent tool surface"),
+        "locks-release must bypass the agent-surface gate:\n{stderr}"
+    );
 }
 
 struct TestWorkspace {

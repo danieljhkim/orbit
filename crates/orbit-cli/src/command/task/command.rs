@@ -34,7 +34,7 @@ pub enum TaskSubcommand {
     Add(TaskAddArgs),
     /// Manage task artifact files
     Artifact(TaskArtifactCommand),
-    /// List tasks with optional filters (`--locked` shows the file-lock projection)
+    /// List tasks with optional filters
     List(TaskListArgs),
     /// Show detailed information about a task
     Show(TaskShowArgs),

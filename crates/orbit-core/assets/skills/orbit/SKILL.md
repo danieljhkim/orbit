@@ -63,7 +63,7 @@ orbit tool run orbit.task.start --input '{"id": "<id>", "note": "...", "model": 
 orbit tool run orbit.task.update --input '{"id": "<id>", "status": "review", "model": "<agent-family>"}'
 orbit tool run orbit.task.update --input '{"id": "<id>", "comment": "...", "model": "<agent-family>"}'
 orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "...", "model": "<agent-family>"}' # proposed/friction -> backlog, review -> done
-orbit tool run orbit.task.reject --input '{"id": "<id>", "note": "...", "model": "<agent-family>"}'   # proposed/friction -> rejected
+orbit tool run orbit.task.update --input '{"id": "<id>", "status": "rejected", "comment": "...", "model": "<agent-family>"}'   # proposed/friction/backlog -> rejected
 # Review-thread commands: add/reply require `model`; list/resolve show it for provenance consistency, though it is optional there.
 orbit tool run orbit.task.review_thread.add --input '{"id": "<id>", "body": "...", "path": "<repo-relative path>", "line": "<line>", "model": "<agent-family>"}'
 orbit tool run orbit.task.review_thread.list --input '{"id": "<id>", "status": "open", "model": "<agent-family>"}'

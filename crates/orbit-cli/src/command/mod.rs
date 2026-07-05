@@ -11,6 +11,7 @@ pub mod hook;
 pub mod init;
 pub mod job;
 pub mod learning;
+pub mod locks;
 pub mod log;
 pub mod mcp;
 pub mod migrate;
@@ -63,6 +64,7 @@ Operate:
   sweep       Fire due routines on this host (the scheduler pass)
   routine     Inspect and control scheduled routines on this host
   task        Create, update, and manage tasks
+  locks       Inspect and release task file locks
   docs        Search and manage the indexed docs corpus
   adr         List and inspect Architecture Decision Records
   friction    Report, list, and triage friction records
@@ -113,6 +115,7 @@ pub enum Commands {
     Sweep(sweep::SweepCommand),
     Routine(routine::RoutineCommand),
     Task(Box<task::TaskCommand>),
+    Locks(locks::LocksCommand),
     Search(search::SearchCommand),
     Docs(docs::DocsCommand),
     Adr(adr::AdrCommand),
@@ -161,6 +164,7 @@ impl Execute for Commands {
             Commands::Sweep(cmd) => cmd.execute_without_runtime(),
             Commands::Routine(cmd) => cmd.execute_without_runtime(),
             Commands::Task(cmd) => (*cmd).execute(runtime),
+            Commands::Locks(cmd) => cmd.execute(runtime),
             Commands::Search(cmd) => cmd.execute(runtime),
             Commands::Docs(cmd) => cmd.execute(runtime),
             Commands::Adr(cmd) => cmd.execute(runtime),

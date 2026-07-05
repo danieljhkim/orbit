@@ -1,21 +1,17 @@
-use std::collections::BTreeSet;
-
 use clap::{ArgAction, Args};
 use orbit_core::{
     ExternalRef, OrbitError, OrbitRuntime, TaskPriority, TaskStatus, TaskType,
     build_task_status_index, task_dependencies_ready, task_selectors_contain_path,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::command::Execute;
 
-use super::output::{
-    print_task_locks, print_task_table, task_lock_to_json, task_to_json, task_to_signal_json,
-};
+use super::output::{print_task_table, task_to_json, task_to_signal_json};
 
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit task list\n  orbit task list --all\n  orbit task list --status backlog\n  orbit task list --status friction\n  orbit task list --status in-progress,review\n  orbit task list --type feature\n  orbit task list --priority high\n  orbit task list --parent T12345678-123456\n  orbit task list --ref jira:ENG-1234\n  orbit task list --has-ref jira\n  orbit task list --tag perf --tag bench\n  orbit task list --path src/auth/login.rs\n  orbit task list --locked\n  orbit task list --json"
+    after_help = "Examples:\n  orbit task list\n  orbit task list --all\n  orbit task list --status backlog\n  orbit task list --status friction\n  orbit task list --status in-progress,review\n  orbit task list --type feature\n  orbit task list --priority high\n  orbit task list --parent T12345678-123456\n  orbit task list --ref jira:ENG-1234\n  orbit task list --has-ref jira\n  orbit task list --tag perf --tag bench\n  orbit task list --path src/auth/login.rs\n  orbit task list --json"
 )]
 pub struct TaskListArgs {
     /// Filter by one or more statuses (comma-separated). Defaults to backlog,in-progress.
@@ -54,10 +50,6 @@ pub struct TaskListArgs {
     /// selector under it.
     #[arg(long)]
     pub path: Option<String>,
-    /// Show files locked by active (in-progress/review) tasks instead of the
-    /// task table (formerly `orbit task locks`)
-    #[arg(long, conflicts_with_all = ["status", "all", "ops", "full"])]
-    pub locked: bool,
     /// Output full task objects as JSON
     #[arg(long)]
     pub json: bool,
@@ -93,12 +85,8 @@ impl Execute for TaskListArgs {
         let tasks_matching_tags = runtime.list_tasks_by_tags(&tags)?;
         let status_by_id = build_task_status_index(&runtime.list_tasks()?);
         let active_statuses = [TaskStatus::Backlog, TaskStatus::InProgress];
-        let locked_statuses = [TaskStatus::InProgress, TaskStatus::Review];
-        let status_filter = if self.locked {
-            &locked_statuses[..]
-        } else {
-            default_task_list_status_filter(all, &status, job_run_id.as_deref(), &active_statuses)
-        };
+        let status_filter =
+            default_task_list_status_filter(all, &status, job_run_id.as_deref(), &active_statuses);
 
         let tasks: Vec<_> = tasks_matching_tags
             .into_iter()
@@ -136,10 +124,6 @@ impl Execute for TaskListArgs {
             })
             .collect();
 
-        if self.locked {
-            return print_locked_projection(tasks, self.json);
-        }
-
         if self.ops {
             let json_tasks: Vec<Value> = tasks.iter().map(task_to_signal_json).collect();
             crate::output::json::print_pretty(&Value::Array(json_tasks))
@@ -174,43 +158,5 @@ fn default_task_list_status_filter<'a>(
         &[]
     } else {
         active_statuses
-    }
-}
-
-/// Renders the file-lock projection (formerly `orbit task locks`) over the
-/// already-filtered in-progress/review task set.
-fn print_locked_projection(mut tasks: Vec<orbit_core::Task>, json: bool) -> Result<(), OrbitError> {
-    tasks.sort_by_key(|task| {
-        (
-            task_lock_status_rank(task.status),
-            task.created_at,
-            task.id.clone(),
-        )
-    });
-
-    let locked_files: BTreeSet<String> = tasks
-        .iter()
-        .flat_map(|task| task.context_files.iter().cloned())
-        .collect();
-
-    if json {
-        let json_by_task: Vec<Value> = tasks.iter().map(task_lock_to_json).collect();
-        crate::output::json::print_pretty(&json!({
-            "locked_files": locked_files.iter().cloned().collect::<Vec<_>>(),
-            "by_task": json_by_task,
-            "total_locked": locked_files.len(),
-            "total_tasks": tasks.len(),
-        }))
-    } else {
-        print_task_locks(&tasks, &locked_files);
-        Ok(())
-    }
-}
-
-fn task_lock_status_rank(status: TaskStatus) -> u8 {
-    match status {
-        TaskStatus::InProgress => 0,
-        TaskStatus::Review => 1,
-        _ => 2,
     }
 }
