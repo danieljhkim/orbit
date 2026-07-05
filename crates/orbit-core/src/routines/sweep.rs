@@ -436,16 +436,16 @@ fn sync_unresolved_fires(
             now_utc.signed_duration_since(created_at) > Duration::minutes(timeout_minutes as i64);
 
         match fire.state {
-            RoutineFireState::Intent => {
-                if expired {
-                    store.routine_mark_fire_outcome(
-                        &fire.routine_name,
-                        &fire.slot,
-                        fire.attempt,
-                        RoutineFireState::Error,
-                        Some("stale fire intent reclaimed (sweep died before dispatch)"),
-                    )?;
-                }
+            // A recorded intent whose sweep died before dispatch: reclaim it
+            // once past the timeout horizon, otherwise leave it for a later pass.
+            RoutineFireState::Intent if expired => {
+                store.routine_mark_fire_outcome(
+                    &fire.routine_name,
+                    &fire.slot,
+                    fire.attempt,
+                    RoutineFireState::Error,
+                    Some("stale fire intent reclaimed (sweep died before dispatch)"),
+                )?;
             }
             RoutineFireState::Dispatched => {
                 let run_state = fire.run_id.as_deref().and_then(|run_id| {
