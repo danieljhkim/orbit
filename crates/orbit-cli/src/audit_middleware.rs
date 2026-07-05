@@ -155,6 +155,10 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             use crate::command::config::ConfigSubcommand;
             let sub = match &config_cmd.command {
                 ConfigSubcommand::Show(_) => "show",
+                ConfigSubcommand::Get(_) => "get",
+                ConfigSubcommand::Set(_) => "set",
+                ConfigSubcommand::Keys(_) => "keys",
+                ConfigSubcommand::Path(_) => "path",
             };
             CommandMeta {
                 command: "config".to_string(),

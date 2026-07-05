@@ -2287,6 +2287,7 @@ dependencies = [
  "tempfile",
  "tiktoken-rs",
  "toml",
+ "toml_edit",
  "tracing",
 ]
 

@@ -18,12 +18,16 @@ pub mod agent_prompt;
 mod bootstrap;
 mod persistence;
 mod raw;
+mod registry;
 mod runtime;
+mod store;
 
 pub(crate) use bootstrap::seed_default_config;
 pub(crate) use persistence::PersistenceConfig;
 pub use raw::{RawAgentRoleConfig, RawCrewEntry};
+pub use registry::{CONFIG_KEY_REGISTRY, ConfigKeyDescriptor, describe as describe_config_key};
 pub(crate) use runtime::{CodexExecutionPolicy, DuelConfig, ExecutionEnvPolicy, RuntimeConfig};
+pub use store::{ConfigScope, ConfigSnapshot, ConfigStore, WorkspaceInitMode};
 
 /// Validate the effective (workspace-over-global) `config.toml` without
 /// exposing the internal `RuntimeConfig` shape. `pub` for the workspace

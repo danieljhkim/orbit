@@ -146,7 +146,25 @@ impl RuntimeConfig {
                 redact_home_dir(&config_path.display().to_string())
             ))
         })?;
-        let parsed = toml::from_str::<RawRuntimeConfig>(&raw).map_err(|err| {
+        Self::from_raw_str(&raw, &config_path, persistence)
+    }
+
+    /// Parse and validate a raw `config.toml` document string into a fully
+    /// resolved [`RuntimeConfig`], running it through the exact same
+    /// validation pipeline as [`Self::load_layered`].
+    ///
+    /// `config_path` is used only to build human-readable error messages
+    /// (it need not exist on disk — this is also the entry point used by
+    /// `ConfigStore::validate` to check an in-memory edit before it is
+    /// written to disk). `persistence` is supplied by the caller because
+    /// persistence paths are derived from the two data roots, not from the
+    /// config document itself.
+    pub(crate) fn from_raw_str(
+        raw: &str,
+        config_path: &Path,
+        persistence: PersistenceConfig,
+    ) -> Result<Self, OrbitError> {
+        let parsed = toml::from_str::<RawRuntimeConfig>(raw).map_err(|err| {
             OrbitError::InvalidInput(format!(
                 "invalid runtime config '{}': {err}",
                 redact_home_dir(&config_path.display().to_string())
@@ -201,7 +219,7 @@ impl RuntimeConfig {
             .and_then(|section| section.task_id_pattern.as_ref())
             .is_some()
         {
-            warn_deprecated_task_id_pattern(&config_path);
+            warn_deprecated_task_id_pattern(config_path);
         }
 
         Ok(Self {
