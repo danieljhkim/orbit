@@ -25,12 +25,12 @@ editing = false
 [workflow]
 auto_ship = true
 base_branch = "agent-main"
-default_crew = "codex"
+default_crew = "claude"
 
 [crews.claude]
-planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-implementer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+planner = { model = "claude-opus-4-8", provider = "claude", backend = "cli" }
+implementer = { model = "claude-opus-4-8", provider = "claude", backend = "cli" }
+reviewer = { model = "claude-opus-4-8", provider = "claude", backend = "cli" }
 
 [crews.codex]
 planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
@@ -56,7 +56,7 @@ candidates = ["codex", "claude", "grok"]
 
 [duel.models]                             
 codex  = "gpt-5.5"
-claude = "claude-opus-4-7"
+claude = "claude-opus-4-8"
 grok = "grok-build"
 
 [docs]
