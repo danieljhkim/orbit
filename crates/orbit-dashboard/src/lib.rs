@@ -25,7 +25,7 @@ mod tests;
 pub use connect::{ConnectArgs, connect};
 
 use std::net::{IpAddr, SocketAddr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Router;
@@ -186,9 +186,34 @@ fn default_workspace_selection(
     cwd: Option<&Path>,
 ) -> Option<String> {
     match root_override {
-        Some(root) => default_workspace_for_cwd(registry, root),
+        Some(root) => {
+            let resolved = resolve_root_override(root, cwd);
+            default_workspace_for_cwd(registry, &resolved)
+        }
         None => cwd.and_then(|cwd| default_workspace_for_cwd(registry, cwd)),
     }
+}
+
+/// Normalize a `--root <path>` value so it can be prefix-matched against
+/// registered workspace roots (which are canonical absolute paths after the
+/// pipeline's canonicalization; see `orbit-runtime/src/builder.rs`).
+///
+/// Relative paths are resolved against `cwd` before canonicalization — mirrors
+/// the pre-ORB-10029 single-mode `--root` behavior. If canonicalization fails
+/// (path may not exist, or symlink resolution errors), return the pre-canonical
+/// absolute path so behavior for nonexistent paths is preserved: a raw
+/// lexical prefix comparison against a stale/nonexistent path just misses,
+/// which is the existing "All workspaces" fallback.
+fn resolve_root_override(root: &Path, cwd: Option<&Path>) -> PathBuf {
+    let absolute = if root.is_absolute() {
+        root.to_path_buf()
+    } else {
+        match cwd {
+            Some(cwd) => cwd.join(root),
+            None => root.to_path_buf(),
+        }
+    };
+    absolute.canonicalize().unwrap_or(absolute)
 }
 
 /// Build the axum app and block on the tokio runtime until graceful shutdown.

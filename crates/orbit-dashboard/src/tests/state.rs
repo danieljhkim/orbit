@@ -125,6 +125,47 @@ fn default_workspace_selection_unmatched_root_override_falls_back_to_none() {
 }
 
 #[test]
+fn default_workspace_selection_resolves_relative_root_override_against_cwd() {
+    // ORB-10053: a relative --root (e.g. `--root .`) must resolve against
+    // cwd and canonicalize before the prefix-match against registered roots
+    // (which are canonical absolute paths). Prior behavior compared the raw
+    // relative path lexically and always missed, silently falling back to
+    // "All workspaces" instead of preselecting the workspace.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let parent = tmp.path().canonicalize().expect("canonicalize tmp");
+    let ws_dir = parent.join("my_workspace");
+    std::fs::create_dir(&ws_dir).expect("create ws dir");
+    let canonical_ws_root = ws_dir.canonicalize().expect("canonicalize ws root");
+
+    let registry = WorkspaceRegistry {
+        workspaces: vec![Workspace {
+            id: "my_workspace".to_string(),
+            name: "my_workspace".to_string(),
+            root: canonical_ws_root.clone(),
+            orbit_dir: canonical_ws_root.join(".orbit"),
+            git_remote: None,
+            base_branch: "main".to_string(),
+            status: WorkspaceStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }],
+        path_overrides: Default::default(),
+    };
+
+    // Relative root_override, resolved against a cwd that is the parent of
+    // the workspace, must preselect the workspace — matching the behavior of
+    // passing the equivalent absolute path.
+    assert_eq!(
+        default_workspace_selection(&registry, Some(Path::new("my_workspace")), Some(&parent),),
+        Some("my_workspace".to_string())
+    );
+    assert_eq!(
+        default_workspace_selection(&registry, Some(&canonical_ws_root), Some(&parent)),
+        Some("my_workspace".to_string())
+    );
+}
+
+#[test]
 fn default_workspace_selection_no_root_override_falls_back_to_cwd() {
     let registry = WorkspaceRegistry {
         workspaces: vec![workspace("outer", "/repos", WorkspaceStatus::Active)],
