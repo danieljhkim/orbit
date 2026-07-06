@@ -116,7 +116,7 @@ pub fn serve(runtime: &OrbitRuntime, args: ServeArgs) -> Result<(), OrbitError> 
 ///
 /// `root_override` is the top-level `--root <path>` flag, if given; it picks
 /// the dropdown's default-preselected workspace ahead of the process cwd (see
-/// [`build_state`]). This matters for `orbit web connect`: the remote `orbit
+/// `build_state`). This matters for `orbit web connect`: the remote `orbit
 /// web serve` it launches over `ssh` runs non-interactively with cwd set to
 /// the remote user's home directory, so `--root` is the only signal available
 /// to hint which workspace should be preselected there.
