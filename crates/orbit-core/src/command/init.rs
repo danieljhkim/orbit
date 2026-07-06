@@ -811,7 +811,10 @@ mod tests {
         assert!(!contents.contains("[agent.reviewer]"));
         assert!(contents.contains("default_crew = \"custom\""));
         assert!(contents.contains("provider = \"codex\""));
-        assert!(contents.contains(&format!("model = \"{}\"", orbit_common::test_fixtures::TEST_CLAUDE_MODEL)));
+        assert!(contents.contains(&format!(
+            "model = \"{}\"",
+            orbit_common::test_fixtures::TEST_CLAUDE_MODEL
+        )));
 
         // Round-trips through toml: custom crew contains all three roles.
         let parsed: toml::Value = toml::from_str(&contents).expect("parse");

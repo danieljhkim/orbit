@@ -82,9 +82,10 @@ fn task_locks_reserve_adapter_surfaces_new_validation_errors() {
     let _env = unmanaged_tool_env_guard();
     let (_root, runtime, _repo_root) = test_runtime();
 
-    let missing = invalid_input_message(
-        runtime.run_tool("orbit.task.locks.reserve", json!({ "model": orbit_common::test_fixtures::TEST_CODEX_MODEL })),
-    );
+    let missing = invalid_input_message(runtime.run_tool(
+        "orbit.task.locks.reserve",
+        json!({ "model": orbit_common::test_fixtures::TEST_CODEX_MODEL }),
+    ));
     assert!(missing.contains("exactly one of 'task_ids' or 'files' must be provided"));
 
     let both = invalid_input_message(runtime.run_tool(

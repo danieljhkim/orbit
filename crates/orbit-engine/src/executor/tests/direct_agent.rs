@@ -26,7 +26,10 @@ fn appends_runtime_model_after_operator_args_when_flag_and_model_present() {
 
     append_runtime_model_args(&mut argv, Some("--model"), Some(TEST_CODEX_MODEL));
 
-    assert_eq!(argv, args(&["--existing", "old", "--model", TEST_CODEX_MODEL]));
+    assert_eq!(
+        argv,
+        args(&["--existing", "old", "--model", TEST_CODEX_MODEL])
+    );
 }
 
 #[test]

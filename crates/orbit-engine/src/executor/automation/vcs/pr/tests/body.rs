@@ -169,7 +169,9 @@ fn single_task_pr_body_matches_snapshot() {
 
     assert_eq!(
         body,
-        format!("## Task\n\n[T20260508-3](https://orbit.example/tasks/T20260508-3) — Revise PR body template\n\n### Description\n\nReviewers can inspect the task contract without leaving the PR.\n\n### Acceptance Criteria\n\n- Description is rendered verbatim.\n- Acceptance criteria render as plain bullets.\n\n## Execution Summary\n\n<details>\n<summary>Click to expand</summary>\n\nReviewer context stays inline.\n\nSummary remains collapsible.\n\n</details>\n\n## Validation\n\n- Not reported\n\n## Branch Freshness\n\n- Base ref: `main`\n- Head ref: `feature/task`\n- Behind base: 0\n- Ahead of base: 2\n\n*authored by: {TEST_CODEX_MODEL}*")
+        format!(
+            "## Task\n\n[T20260508-3](https://orbit.example/tasks/T20260508-3) — Revise PR body template\n\n### Description\n\nReviewers can inspect the task contract without leaving the PR.\n\n### Acceptance Criteria\n\n- Description is rendered verbatim.\n- Acceptance criteria render as plain bullets.\n\n## Execution Summary\n\n<details>\n<summary>Click to expand</summary>\n\nReviewer context stays inline.\n\nSummary remains collapsible.\n\n</details>\n\n## Validation\n\n- Not reported\n\n## Branch Freshness\n\n- Base ref: `main`\n- Head ref: `feature/task`\n- Behind base: 0\n- Ahead of base: 2\n\n*authored by: {TEST_CODEX_MODEL}*"
+        )
     );
 }
 

@@ -175,14 +175,24 @@ fn summary_counts_tasks_created_and_planned_across_all_statuses() {
     // Mix of statuses including ones excluded from `tasks_completed`.
     let tasks = vec![
         test_task("T1", TaskStatus::Done, TEST_CLAUDE_MODEL, TEST_CLAUDE_MODEL),
-        test_task("T2", TaskStatus::Backlog, TEST_CLAUDE_MODEL, TEST_CODEX_MODEL),
+        test_task(
+            "T2",
+            TaskStatus::Backlog,
+            TEST_CLAUDE_MODEL,
+            TEST_CODEX_MODEL,
+        ),
         test_task(
             "T3",
             TaskStatus::Rejected,
             TEST_CLAUDE_MODEL,
             TEST_CLAUDE_MODEL,
         ),
-        test_task("T4", TaskStatus::Friction, TEST_CODEX_MODEL, TEST_CODEX_MODEL),
+        test_task(
+            "T4",
+            TaskStatus::Friction,
+            TEST_CODEX_MODEL,
+            TEST_CODEX_MODEL,
+        ),
         test_task_no_attrib("T5", TaskStatus::Done),
     ];
 
@@ -354,7 +364,12 @@ fn recent_7d_filters_tasks_workflows_and_surface_calls_by_window() {
     t_inside.created_at = inside;
     t_inside.updated_at = inside;
 
-    let mut t_inside2 = test_task("T-in2", TaskStatus::Backlog, TEST_CODEX_MODEL, TEST_CODEX_MODEL);
+    let mut t_inside2 = test_task(
+        "T-in2",
+        TaskStatus::Backlog,
+        TEST_CODEX_MODEL,
+        TEST_CODEX_MODEL,
+    );
     t_inside2.created_at = inside;
 
     let mut t_outside = test_task(
@@ -800,7 +815,12 @@ fn windowed_tasks_filter_by_created_at_and_done_at() {
     );
     t_in_created.created_at = inside;
 
-    let mut t_in_done = test_task("T-in-d", TaskStatus::Done, TEST_CODEX_MODEL, TEST_CODEX_MODEL);
+    let mut t_in_done = test_task(
+        "T-in-d",
+        TaskStatus::Done,
+        TEST_CODEX_MODEL,
+        TEST_CODEX_MODEL,
+    );
     t_in_done.created_at = outside; // not in created/planned window
     t_in_done.updated_at = inside; // task_done_at == updated_at, in window
     t_in_done.implemented_by = Some(TEST_CODEX_MODEL.to_string());

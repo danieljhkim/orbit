@@ -361,7 +361,10 @@ mod tests {
             .messages
             .first()
             .expect("first review message");
-        assert_eq!(first_message.by, orbit_common::test_fixtures::TEST_CODEX_MODEL);
+        assert_eq!(
+            first_message.by,
+            orbit_common::test_fixtures::TEST_CODEX_MODEL
+        );
         assert!(first_message.github_comment_id.is_none());
 
         let summary = runtime
