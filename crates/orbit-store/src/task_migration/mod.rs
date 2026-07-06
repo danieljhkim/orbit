@@ -21,6 +21,39 @@
 //!   run is **not** idempotent — a collision means "these are new local tasks,"
 //!   so each run mints fresh ids. Import once; the printed `.idmap.json` records
 //!   what landed.
+//!
+//! # Artifact blobs
+//! Bundles carry a `artifacts/manifest.yaml` sidecar and the referenced blobs
+//! under `artifacts/files/**`. Export tars the entire canonical bundle tree, so
+//! blobs are always present in the archive. Import validates each blob against
+//! the manifest during staging ([`read_bundle_at`] hashes every file), then
+//! writes the manifest with [`write_bundle_at`] and copies the blob tree with
+//! [`copy_artifact_blobs`] under the same rollback guard as the manifest.
+//!
+//! ## Backfilling stranded bundles
+//! Before ORB-10042, `write_bundle_at` wrote only the manifest, so any
+//! successfully-imported artifact bundle landed with `artifacts/files/` empty
+//! and later fails `read_bundle_at`. `orbit task artifact put` refuses tasks in
+//! `done` status, so those closed tasks have no in-CLI repair path. To backfill,
+//! keep the source archive that produced the stranded bundles and run:
+//!
+//! ```text
+//! # 1. Extract the archive next to your workspace's canonical tasks tree.
+//! tar --use-compress-program=unzstd -xf tasks.tar.zst -C /tmp/orbit-backfill
+//!
+//! # 2. For each stranded ORB-id, copy the blob tree onto the canonical bundle.
+//! rsync -av /tmp/orbit-backfill/bundles/ORB-XXXXX/artifacts/files/ \
+//!   <global>/tasks/workspaces/<ws-id>/ORB-XXXXX/artifacts/files/
+//!
+//! # 3. Re-index to validate the restored bundles end-to-end.
+//! orbit task reindex --workspace <ws-id>
+//! ```
+//!
+//! The manifest hashes are the source of truth — `orbit task reindex` reruns
+//! [`read_bundle_at`] on every bundle, which recomputes each blob's SHA-256 and
+//! surfaces any file whose bytes don't match the manifest. If the archive is
+//! gone, the bundle is unrecoverable from this side (regenerate the artifact
+//! upstream and paste it back at the recorded `blob` path with matching bytes).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -29,7 +62,9 @@ use chrono::{DateTime, Utc};
 use orbit_common::types::{OrbitError, TASK_ARTIFACT_SCHEMA_VERSION, validate_orb_task_id};
 use serde::{Deserialize, Serialize};
 
-use crate::file::task_store::v2_bundle::{TaskBundleV2, read_bundle_at, write_bundle_at};
+use crate::file::task_store::v2_bundle::{
+    TaskBundleV2, copy_artifact_blobs, read_bundle_at, write_bundle_at,
+};
 use crate::sqlite::task_registry::{
     BindWorkspaceParams, ProjectionRebuildResult, TaskRegistryStore, parse_orb_task_number,
 };
@@ -223,6 +258,10 @@ pub fn export_tasks(
 struct StagedBundle {
     source_id: String,
     bundle: TaskBundleV2,
+    /// Extracted bundle directory under the import staging tempdir; the source
+    /// of truth for `artifacts/files/**` blobs copied into the canonical
+    /// bundle during the write phase.
+    staging_dir: PathBuf,
 }
 
 /// Resolved import target after workspace resolution.
@@ -367,6 +406,15 @@ pub fn import_tasks(
             let dir = registry.canonical_task_bundle_path(&target.workspace_id, &final_id)?;
             write_bundle_at(&dir, &bundle)?;
             guard.written_dirs.push(dir.clone());
+            // Copy `artifacts/files/**` blobs from the staged archive tree
+            // *after* the manifest lands; the guard already tracks `dir`, so a
+            // failure here rolls back the whole bundle. `write_bundle_at`
+            // writes the manifest only, so without this step the canonical
+            // bundle would fail `read_bundle_at` on the next reindex pass
+            // (ORB-10042).
+            if let Some(manifest) = bundle.artifact_manifest.as_ref() {
+                copy_artifact_blobs(&staged.staging_dir, &dir, manifest)?;
+            }
             registry.register_task_bundle(&final_id, &target.workspace_id, &dir)?;
             guard.registered_ids.push(final_id.clone());
             if let Some(number) = parse_orb_task_number(&final_id) {
@@ -481,6 +529,7 @@ fn stage_bundles(
         staged.push(StagedBundle {
             source_id: id.clone(),
             bundle,
+            staging_dir: dir,
         });
     }
     Ok(staged)
