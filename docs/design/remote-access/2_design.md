@@ -1,16 +1,16 @@
 ---
 title: "Remote Access — Design"
 owner: claude
-last_updated: 2026-07-02
+last_updated: 2026-07-05
 status: Accepted
 feature: remote-access
 doc_role: design
 type: design
-summary: "The two shipped surfaces — global multi-workspace serve and SSH-tunnel connect — their state model, and how they compose."
+summary: "The two shipped surfaces — global multi-workspace serve (the only mode since ORB-10029) and SSH-tunnel connect — their state model, and how they compose."
 tags: [remote-access]
 paths: ["crates/orbit-dashboard/**", "crates/orbit-cli/src/command/web.rs"]
 related_features: [remote-access, user-interface]
-related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ADR-0200, ADR-0201]
+related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ADR-0200, ADR-0201]
 ---
 
 # Remote Access — Design
@@ -21,12 +21,9 @@ This document specifies the two shipped surfaces of remote access — global mul
 
 ## 1. Global multi-workspace serve
 
-`orbit web serve` resolves its own workspaces in [`build_state`](../../../crates/orbit-dashboard/src/lib.rs):
+`orbit web serve` always serves in global mode: [`build_state`](../../../crates/orbit-dashboard/src/lib.rs) unconditionally enumerates `~/.orbit/workspaces.json` via `orbit_core::workspace_registry` (`global_orbit_dir` → `load_registry` → `validate_workspaces`) and builds a `DashboardState::global`. Each registry entry becomes a `WsEntry { id, name, repo_root, orbit_dir, active }`, where `active` mirrors registry status — stale-path workspaces flip to inactive. `default_workspace_selection` picks the dropdown's default selection when a request omits `?workspace=`, in priority order: the top-level `--root <path>` flag (`root_override`), if given and it resolves to a registered/active workspace via `default_workspace_for_cwd`; else the longest active repo-root prefix of the process cwd (also `default_workspace_for_cwd`); else `None` (the frontend opens the aggregate "All workspaces" view). A given `--root` that matches no workspace resolves straight to `None` — it never falls back to the cwd-based default, is never an error, and never auto-registers. The `--root` path matters specifically for `orbit web connect` (§3): the remote `orbit web serve` it launches runs non-interactively over `ssh` with cwd set to the SSH user's home directory, so `--root` is the only signal that can hint which workspace to preselect there.
 
-- **Single mode.** Inside a workspace *without* `--global`, `build_state` opens the current workspace's runtime (`OrbitRuntime::try_initialize_existing`) and wraps it in `DashboardState::single` — one pre-built runtime, always selected. This preserves the exact pre-[ORB-00030] behavior and every existing handler test.
-- **Global mode.** With `--global`, or when run outside any workspace, `build_state` enumerates `~/.orbit/workspaces.json` via `orbit_core::workspace_registry` (`global_orbit_dir` → `load_registry` → `validate_workspaces`) and builds a `DashboardState::global`. Each registry entry becomes a `WsEntry { id, name, repo_root, orbit_dir, active }`, where `active` mirrors registry status — stale-path workspaces flip to inactive.
-
-`default_workspace_for_cwd` picks the default workspace when a request omits `?workspace=`: the longest active repo-root prefix of the current directory, or none (the frontend then opens the aggregate view).
+[ORB-10029] made this the only mode: single-workspace serving used to be the default when `orbit web serve` ran inside a workspace (opening that workspace's runtime via `OrbitRuntime::try_initialize_existing` and wrapping it in `DashboardState::single`), reachable only via the then-opt-in `--global` flag otherwise. `--global` is now a deprecated no-op, kept parsing only because `orbit web connect` (§3) unconditionally forwards it to the remote `orbit web serve`. `DashboardState::single` and the `serve(runtime, args)` entry point are retained for callers that already hold a built `OrbitRuntime` and want it embedded directly, and for the dashboard's handler tests (an in-memory runtime needs no lazy registry lookup) — but `orbit web serve` no longer reaches either.
 
 ## 2. Workspace-keyed state and the `Ws` extractor
 
@@ -50,7 +47,7 @@ The frontend adds a header workspace selector and an "All workspaces" aggregate 
 [`connect`](../../../crates/orbit-dashboard/src/connect.rs) automates the manual `ssh -L 7878:localhost:7878 <host> "orbit web serve --no-open"` dance and nothing more. Given `orbit web connect <ssh-host>`:
 
 1. **Local port.** `select_local_port` prefers the conventional `7878`, falling back to an OS-assigned ephemeral port if it is busy; an explicit `--port` is honored or fails loudly.
-2. **Remote command.** `remote_serve_command` builds `orbit web serve --no-open --port <remote_port> [--global] [--root <p>]`. `--no-open` is always present (the remote must never open a browser); `--root` is shell-quoted; `--global` is forwarded when set, so the tunnel can span every remote workspace.
+2. **Remote command.** `remote_serve_command` builds `orbit web serve --no-open --port <remote_port> [--global] [--root <p>]`. `--no-open` is always present (the remote must never open a browser); `--root` is shell-quoted; `--global` is forwarded when set — a no-op against a post-[ORB-10029] remote binary (global is always on), kept so `connect` still works against an older remote that still gates on the flag.
 3. **Tunnel.** `build_ssh_args` produces `ssh -tt -o ExitOnForwardFailure=yes -L <local>:localhost:<remote> <host> <remote-command>`. `-tt` forces a pty so the remote serve receives SIGHUP when the tunnel drops; `ExitOnForwardFailure=yes` fails fast rather than running the remote with no working forward; stdin is null so Ctrl-C reaches *us*.
 4. **Readiness.** `wait_until_ready` polls `GET /healthz` over the forwarded port until it answers `200`, the `ssh` child exits early (classified into an actionable error — `127` = orbit not on remote PATH, `255` = ssh connect failure), or a 30s timeout elapses.
 5. **Teardown.** `SshTunnel` is an RAII owner of the `ssh` child; on Ctrl-C / SIGTERM / remote exit, `Drop` sends SIGTERM then SIGKILL after a grace period. Closing `ssh` drops the connection, SIGHUP reaps the remote serve — no orphan.
@@ -80,5 +77,6 @@ Neither surface touches the loopback-only bind guard from [ORB-00360]: `check_bi
 - [ORB-00029] — Added `orbit web connect <ssh-host>` and later forwarded `--global` to the remote serve.
 - [ORB-00030] — Workspace-keyed state, `Ws` extractor, global serve, aggregate endpoints, frontend selector.
 - [ORB-00360] — Loopback-only bind guard and stored-XSS fix.
+- [ORB-10029] — Made global mode the only mode for `orbit web serve`; `--global` is now a deprecated no-op kept for `connect` passthrough compatibility.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -97,6 +97,21 @@ fn cli_parses_web_serve() {
 }
 
 #[test]
+fn cli_parses_web_serve_global_as_deprecated_noop() {
+    // `--global` is a deprecated no-op (ORB-10029): `orbit web serve` always
+    // serves in global mode now, but the flag must keep parsing since `orbit
+    // web connect` forwards it to remote hosts that may run an older binary.
+    let cli = Cli::parse_from(["orbit", "web", "serve", "--global"]);
+    match cli.command {
+        Commands::Web(command) => match command.command {
+            WebSubcommand::Serve(args) => assert!(args.global),
+            WebSubcommand::Connect(_) => panic!("expected serve"),
+        },
+        _ => panic!("expected top-level web command"),
+    }
+}
+
+#[test]
 fn cli_parses_web_connect() {
     let cli = Cli::parse_from(["orbit", "web", "connect", "my-host", "--no-open"]);
     match cli.command {

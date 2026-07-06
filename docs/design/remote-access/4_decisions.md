@@ -58,5 +58,6 @@ The workspace-keyed-state machinery (the `Ws` extractor vs. path-prefixed routes
 - [ORB-00029] — Added `orbit web connect <ssh-host>` and forwarded `--global` to the remote serve.
 - [ORB-00030] — Global multi-workspace dashboard, workspace-keyed state, aggregate endpoints.
 - [ORB-00360] — Loopback-only bind guard and stored-XSS fix.
+- [ORB-10029] — Made global mode the default and only mode for `orbit web serve` (single mode is no longer reachable from the CLI); `--global` is now a deprecated no-op kept for `connect` passthrough compatibility. Does not change either ADR above — the security posture and viewing-not-sync boundary are unaffected — but evolves the `web serve --global` behavior both describe.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

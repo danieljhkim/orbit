@@ -8,8 +8,8 @@ use chrono::Utc;
 use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
 use orbit_core::OrbitRuntime;
 
-use crate::default_workspace_for_cwd;
 use crate::state::{DashboardState, WsEntry};
+use crate::{default_workspace_for_cwd, default_workspace_selection};
 
 fn workspace(id: &str, root: &str, status: WorkspaceStatus) -> Workspace {
     let now = Utc::now();
@@ -77,4 +77,63 @@ fn default_workspace_for_cwd_picks_longest_active_prefix() {
         default_workspace_for_cwd(&registry, Path::new("/elsewhere")),
         None
     );
+}
+
+#[test]
+fn default_workspace_selection_root_override_beats_cwd() {
+    let registry = WorkspaceRegistry {
+        workspaces: vec![
+            workspace("outer", "/repos", WorkspaceStatus::Active),
+            workspace("inner", "/repos/inner", WorkspaceStatus::Active),
+        ],
+        path_overrides: Default::default(),
+    };
+
+    // cwd would resolve to "outer", but an explicit --root pointing at
+    // "inner" takes priority (ORB-10029 regression fix: this is the only
+    // signal `orbit web connect` can pass through for the remote's cwd,
+    // which is the SSH user's home directory, not any workspace).
+    assert_eq!(
+        default_workspace_selection(
+            &registry,
+            Some(Path::new("/repos/inner")),
+            Some(Path::new("/repos/pkg")),
+        ),
+        Some("inner".to_string())
+    );
+}
+
+#[test]
+fn default_workspace_selection_unmatched_root_override_falls_back_to_none() {
+    let registry = WorkspaceRegistry {
+        workspaces: vec![workspace("outer", "/repos", WorkspaceStatus::Active)],
+        path_overrides: Default::default(),
+    };
+
+    // An unmatched --root falls back to "All workspaces" (None) even though
+    // cwd would otherwise resolve to a real workspace — it must not silently
+    // fall through to the cwd-based default, and must not error or
+    // auto-register.
+    assert_eq!(
+        default_workspace_selection(
+            &registry,
+            Some(Path::new("/nowhere")),
+            Some(Path::new("/repos/pkg")),
+        ),
+        None
+    );
+}
+
+#[test]
+fn default_workspace_selection_no_root_override_falls_back_to_cwd() {
+    let registry = WorkspaceRegistry {
+        workspaces: vec![workspace("outer", "/repos", WorkspaceStatus::Active)],
+        path_overrides: Default::default(),
+    };
+
+    assert_eq!(
+        default_workspace_selection(&registry, None, Some(Path::new("/repos/pkg"))),
+        Some("outer".to_string())
+    );
+    assert_eq!(default_workspace_selection(&registry, None, None), None);
 }
