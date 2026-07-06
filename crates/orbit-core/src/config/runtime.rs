@@ -2,6 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
+use orbit_common::model_defaults::{
+    CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK, CODEX_DEFAULT_MODEL, GEMINI_CREW_MODEL,
+    GROK_DEFAULT_MODEL,
+};
 use orbit_common::types::{
     Crew, CrewRoleAssignment, OrbitError, activity_job::Backend, all_agent_families, resolve_crew,
 };
@@ -307,36 +311,36 @@ pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
         "claude".to_string(),
         Crew {
             name: "claude".to_string(),
-            planner: crew_role("claude-opus-4-7", "claude", "cli"),
-            implementer: crew_role("claude-opus-4-7", "claude", "cli"),
-            reviewer: crew_role("claude-opus-4-7", "claude", "cli"),
+            planner: crew_role(CLAUDE_DEFAULT_STRONG, "claude", "cli"),
+            implementer: crew_role(CLAUDE_DEFAULT_WEAK, "claude", "cli"),
+            reviewer: crew_role(CLAUDE_DEFAULT_STRONG, "claude", "cli"),
         },
     );
     crews.insert(
         "codex".to_string(),
         Crew {
             name: "codex".to_string(),
-            planner: crew_role("gpt-5.5", "codex", "cli"),
-            implementer: crew_role("gpt-5.5", "codex", "cli"),
-            reviewer: crew_role("gpt-5.5", "codex", "cli"),
+            planner: crew_role(CODEX_DEFAULT_MODEL, "codex", "cli"),
+            implementer: crew_role(CODEX_DEFAULT_MODEL, "codex", "cli"),
+            reviewer: crew_role(CODEX_DEFAULT_MODEL, "codex", "cli"),
         },
     );
     crews.insert(
         "gemini".to_string(),
         Crew {
             name: "gemini".to_string(),
-            planner: crew_role("pro", "gemini", "cli"),
-            implementer: crew_role("pro", "gemini", "cli"),
-            reviewer: crew_role("pro", "gemini", "cli"),
+            planner: crew_role(GEMINI_CREW_MODEL, "gemini", "cli"),
+            implementer: crew_role(GEMINI_CREW_MODEL, "gemini", "cli"),
+            reviewer: crew_role(GEMINI_CREW_MODEL, "gemini", "cli"),
         },
     );
     crews.insert(
         "grok".to_string(),
         Crew {
             name: "grok".to_string(),
-            planner: crew_role("grok-build", "grok", "cli"),
-            implementer: crew_role("grok-build", "grok", "cli"),
-            reviewer: crew_role("grok-build", "grok", "cli"),
+            planner: crew_role(GROK_DEFAULT_MODEL, "grok", "cli"),
+            implementer: crew_role(GROK_DEFAULT_MODEL, "grok", "cli"),
+            reviewer: crew_role(GROK_DEFAULT_MODEL, "grok", "cli"),
         },
     );
     crews

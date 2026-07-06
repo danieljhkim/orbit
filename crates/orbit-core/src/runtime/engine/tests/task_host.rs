@@ -736,7 +736,9 @@ fn automation_review_done_transitions_preserve_existing_implemented_by_without_m
             &task.id,
             TaskUpdateParams {
                 execution_summary: Some("Existing implementation summary.".to_string()),
-                implemented_by: Some(Some("claude-opus-4-7".to_string())),
+                implemented_by: Some(Some(
+                    orbit_common::test_fixtures::TEST_CLAUDE_MODEL.to_string(),
+                )),
                 ..Default::default()
             },
         )
@@ -752,7 +754,7 @@ fn automation_review_done_transitions_preserve_existing_implemented_by_without_m
         )
         .expect("automation review update");
     let reviewed = runtime.get_task(&task.id).expect("reload reviewed task");
-    assert_eq!(reviewed.implemented_by.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(reviewed.implemented_by.as_deref(), Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL));
 
     runtime
         .apply_task_automation_update(
@@ -764,7 +766,7 @@ fn automation_review_done_transitions_preserve_existing_implemented_by_without_m
         )
         .expect("automation done update");
     let done = runtime.get_task(&task.id).expect("reload done task");
-    assert_eq!(done.implemented_by.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(done.implemented_by.as_deref(), Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL));
 }
 
 #[test]

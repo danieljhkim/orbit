@@ -83,7 +83,7 @@ fn task_locks_reserve_adapter_surfaces_new_validation_errors() {
     let (_root, runtime, _repo_root) = test_runtime();
 
     let missing = invalid_input_message(
-        runtime.run_tool("orbit.task.locks.reserve", json!({ "model": "gpt-5.5" })),
+        runtime.run_tool("orbit.task.locks.reserve", json!({ "model": orbit_common::test_fixtures::TEST_CODEX_MODEL })),
     );
     assert!(missing.contains("exactly one of 'task_ids' or 'files' must be provided"));
 
@@ -92,7 +92,7 @@ fn task_locks_reserve_adapter_surfaces_new_validation_errors() {
         json!({
             "task_ids": ["T20260506-15"],
             "files": ["file:src/lib.rs"],
-            "model": "gpt-5.5",
+            "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
         }),
     ));
     assert!(both.contains("exactly one of 'task_ids' or 'files' must be provided"));
@@ -101,7 +101,7 @@ fn task_locks_reserve_adapter_surfaces_new_validation_errors() {
         "orbit.task.locks.reserve",
         json!({
             "files": ["src/lib.rs"],
-            "model": "gpt-5.5",
+            "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
         }),
     ));
     assert!(raw_path.contains("`file:`"));
@@ -111,7 +111,7 @@ fn task_locks_reserve_adapter_surfaces_new_validation_errors() {
         "orbit.task.locks.reserve",
         json!({
             "files": ["symbol:src/lib.rs#run:function"],
-            "model": "gpt-5.5",
+            "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
         }),
     ));
     assert!(symbol.contains("`file:`"));
@@ -236,7 +236,7 @@ fn reservation_conflicts_clear_immediately_after_release() {
             json!({
                 "task_ids": [first.id.clone()],
                 "ttl_seconds": 3600,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
         )
         .expect("reserve first task");
@@ -270,7 +270,7 @@ fn reservation_conflicts_clear_immediately_after_release() {
             json!({
                 "task_ids": [second.id.clone()],
                 "ttl_seconds": 3600,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
         )
         .expect("second reservation returns conflict");
@@ -289,7 +289,7 @@ fn reservation_conflicts_clear_immediately_after_release() {
             "orbit.task.locks.release",
             json!({
                 "reservation_id": reservation_id,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
         )
         .expect("release reservation");
@@ -301,7 +301,7 @@ fn reservation_conflicts_clear_immediately_after_release() {
             json!({
                 "task_ids": [second.id],
                 "ttl_seconds": 3600,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
         )
         .expect("second reservation succeeds after release");
@@ -329,7 +329,7 @@ fn v2_task_locks_store_workspace_binding_id() {
             json!({
                 "task_ids": [task.id],
                 "ttl_seconds": 3600,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
         )
         .expect("reserve v2 task");
@@ -358,7 +358,7 @@ fn v2_task_locks_fail_when_workspace_binding_config_disappears() {
             json!({
                 "files": ["file:src/lib.rs"],
                 "ttl_seconds": 3600,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
         )
         .expect_err("missing v2 binding config should fail");
@@ -382,7 +382,7 @@ fn files_shape_reservations_conflict_and_release_like_task_reservations() {
             json!({
                 "files": ["file:src/lib.rs", "dir:src/auth/"],
                 "ttl_seconds": 3600,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
         )
         .expect("reserve direct file selectors");
@@ -423,7 +423,7 @@ fn files_shape_reservations_conflict_and_release_like_task_reservations() {
             json!({
                 "task_ids": [task.id.clone()],
                 "ttl_seconds": 3600,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
         )
         .expect("task reservation returns conflict");
@@ -442,7 +442,7 @@ fn files_shape_reservations_conflict_and_release_like_task_reservations() {
             "orbit.task.locks.release",
             json!({
                 "reservation_id": reservation_id,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
         )
         .expect("release direct reservation");
@@ -454,7 +454,7 @@ fn files_shape_reservations_conflict_and_release_like_task_reservations() {
             json!({
                 "task_ids": [task.id],
                 "ttl_seconds": 3600,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
         )
         .expect("task reservation succeeds after release");

@@ -34,7 +34,7 @@ editing = false
 [agent.reviewer]
 provider = "claude"
 backend = "cli"
-model = "claude-opus-4-7"
+model = "opus"
 
 [agent.implementer]
 provider = "codex"
@@ -44,7 +44,7 @@ model = "gpt-5.5"
 [agent.planner]
 provider = "claude"
 backend = "cli"
-model = "claude-opus-4-7"
+model = "opus"
 ```
 
 The three roles — `reviewer`, `implementer`, and `planner` — are referenced by the seeded workflows. `backend = "cli"` is the only release-supported value in v1.

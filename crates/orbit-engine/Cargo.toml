@@ -30,4 +30,5 @@ tiktoken-rs.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+orbit-common = { path = "../orbit-common", features = ["test-util"] }
 tracing-subscriber.workspace = true

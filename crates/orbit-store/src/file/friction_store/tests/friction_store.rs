@@ -1,6 +1,7 @@
 // Migrated from file/friction_store.rs per ORB-00231
 use super::super::*;
 use chrono::TimeZone;
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::{TaskPriority, TaskType};
 
 #[test]
@@ -10,10 +11,10 @@ fn id_allocation_resets_across_month_boundary() {
     let may = Utc.with_ymd_and_hms(2026, 5, 31, 23, 59, 0).unwrap();
     let june = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
 
-    let first = add_friction(root, params("gpt-5.5", may, vec!["tooling"])).expect("first add");
-    let second = add_friction(root, params("gpt-5.5", may, vec!["docs"])).expect("second add");
+    let first = add_friction(root, params(TEST_CODEX_MODEL, may, vec!["tooling"])).expect("first add");
+    let second = add_friction(root, params(TEST_CODEX_MODEL, may, vec!["docs"])).expect("second add");
     let next_month =
-        add_friction(root, params("gpt-5.5", june, vec!["build"])).expect("next month add");
+        add_friction(root, params(TEST_CODEX_MODEL, june, vec!["build"])).expect("next month add");
 
     assert_eq!(first.record.id, "F2026-05-001");
     assert_eq!(second.record.id, "F2026-05-002");
@@ -25,12 +26,12 @@ fn tag_validation_uses_taxonomy_file() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
     ensure_default_tag_taxonomy(root).expect("taxonomy");
-    let err = add_friction(root, params("gpt-5.5", Utc::now(), vec!["surprise-tag"]))
+    let err = add_friction(root, params(TEST_CODEX_MODEL, Utc::now(), vec!["surprise-tag"]))
         .expect_err("unknown tag fails");
     assert!(err.to_string().contains("valid tags"), "{err}");
 
     fs::write(root.join(TAGS_FILENAME), "surprise-tag: allowed\n").expect("rewrite taxonomy");
-    add_friction(root, params("gpt-5.5", Utc::now(), vec!["surprise-tag"]))
+    add_friction(root, params(TEST_CODEX_MODEL, Utc::now(), vec!["surprise-tag"]))
         .expect("new taxonomy tag succeeds");
 }
 

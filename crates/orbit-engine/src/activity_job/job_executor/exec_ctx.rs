@@ -3,7 +3,8 @@
 
 use super::*;
 
-pub(super) const DEFAULT_MODEL_FOR_SESSION: &str = "claude-sonnet-4-5";
+pub(super) const DEFAULT_MODEL_FOR_SESSION: &str =
+    orbit_common::model_defaults::ANTHROPIC_HTTP_DEFAULT_MODEL;
 
 pub(super) struct ExecCtx<'a> {
     pub(super) run_id: String,

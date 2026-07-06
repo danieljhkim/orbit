@@ -753,7 +753,7 @@ mod audit_tests {
         let outcome = runtime
             .execute_tool_command_dispatch(
                 "orbit.search",
-                json!({ "query": "anything", "model": "gpt-5.5" }),
+                json!({ "query": "anything", "model": orbit_common::test_fixtures::TEST_CODEX_MODEL }),
                 None,
                 None,
                 ToolEntryPoint::Mcp,
@@ -771,7 +771,7 @@ mod audit_tests {
         assert_eq!(row.tool_name.as_deref(), Some("orbit.search"));
         assert_eq!(row.target_type.as_deref(), Some("tool"));
         assert_eq!(row.target_id.as_deref(), Some("orbit.search"));
-        assert_eq!(row.role, "gpt-5.5");
+        assert_eq!(row.role, orbit_common::test_fixtures::TEST_CODEX_MODEL);
         assert_eq!(row.status, AuditEventStatus::Success);
         assert_eq!(row.exit_code, 0);
         assert!(
@@ -823,7 +823,7 @@ mod audit_tests {
             "orbit.search",
             json!({ "query": "anything" }),
             Some("claude".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             ToolEntryPoint::Mcp,
         );
         assert!(result.is_err(), "identity rejection propagates");
@@ -851,7 +851,7 @@ mod audit_tests {
         runtime
             .execute_tool_command(
                 "orbit.search",
-                json!({ "query": "anything", "model": "gpt-5.5" }),
+                json!({ "query": "anything", "model": orbit_common::test_fixtures::TEST_CODEX_MODEL }),
                 None,
                 None,
             )
@@ -880,7 +880,7 @@ mod audit_tests {
                     runtime
                         .execute_tool_command_dispatch(
                             "orbit.search",
-                            json!({ "query": "anything", "model": "gpt-5.5" }),
+                            json!({ "query": "anything", "model": orbit_common::test_fixtures::TEST_CODEX_MODEL }),
                             None,
                             None,
                             ToolEntryPoint::Cli,
@@ -939,7 +939,7 @@ mod audit_tests {
         let role = audit_role_label(
             &json!({ "agent": "claude", "model": "opus-4.6" }),
             Some("codex"),
-            Some("gpt-5.5"),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL),
         );
         clear_identity_env();
         assert_eq!(role, "opus-4.6");
@@ -949,9 +949,13 @@ mod audit_tests {
     fn audit_role_label_prefers_flags_over_env_when_input_absent() {
         let _g = env_guard();
         set_identity_env("env-leak", "env-leak-model");
-        let role = audit_role_label(&json!({ "query": "x" }), Some("codex"), Some("gpt-5.5"));
+        let role = audit_role_label(
+            &json!({ "query": "x" }),
+            Some("codex"),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL),
+        );
         clear_identity_env();
-        assert_eq!(role, "gpt-5.5");
+        assert_eq!(role, orbit_common::test_fixtures::TEST_CODEX_MODEL);
     }
 
     #[test]
@@ -966,7 +970,7 @@ mod audit_tests {
     #[test]
     fn audit_role_label_overwrites_self_reported_model_with_env_family() {
         let _g = env_guard();
-        set_identity_env("claude", "claude-opus-4-7");
+        set_identity_env("claude", orbit_common::test_fixtures::TEST_CLAUDE_MODEL);
         let role = audit_role_label(&json!({ "model": "opus-4.7" }), None, None);
         clear_identity_env();
         assert_eq!(role, "claude");
@@ -995,7 +999,7 @@ mod audit_tests {
                     "id": task.id.clone(),
                     "status": "review",
                     "execution_summary": "Done.",
-                    "model": "claude-opus-4-7"
+                    "model": orbit_common::test_fixtures::TEST_CLAUDE_MODEL
                 }),
                 None,
                 None,
@@ -1130,7 +1134,7 @@ mod audit_tests {
         let outcome = runtime
             .execute_tool_command_dispatch(
                 "orbit.search",
-                json!({ "query": "anything", "model": "gpt-5.5" }),
+                json!({ "query": "anything", "model": orbit_common::test_fixtures::TEST_CODEX_MODEL }),
                 None,
                 None,
                 ToolEntryPoint::Cli,

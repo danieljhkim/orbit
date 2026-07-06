@@ -1,6 +1,8 @@
 mod resolution {
     use std::collections::BTreeMap;
 
+    use crate::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CLAUDE_WEAK_MODEL, TEST_CODEX_MODEL};
+
     use super::super::super::OrbitError;
     use super::super::super::agent_pair::*;
 
@@ -18,18 +20,18 @@ mod resolution {
             "codex".to_string(),
             Crew {
                 name: "codex".to_string(),
-                planner: assignment("gpt-5.5", "codex"),
-                implementer: assignment("gpt-5.5", "codex"),
-                reviewer: assignment("gpt-5.5", "codex"),
+                planner: assignment(TEST_CODEX_MODEL, "codex"),
+                implementer: assignment(TEST_CODEX_MODEL, "codex"),
+                reviewer: assignment(TEST_CODEX_MODEL, "codex"),
             },
         );
         registry.insert(
             "claude".to_string(),
             Crew {
                 name: "claude".to_string(),
-                planner: assignment("claude-opus-4-7", "claude"),
-                implementer: assignment("claude-sonnet-4-6", "claude"),
-                reviewer: assignment("claude-opus-4-7", "claude"),
+                planner: assignment(TEST_CLAUDE_MODEL, "claude"),
+                implementer: assignment(TEST_CLAUDE_WEAK_MODEL, "claude"),
+                reviewer: assignment(TEST_CLAUDE_MODEL, "claude"),
             },
         );
         registry
@@ -40,7 +42,7 @@ mod resolution {
         let crew = resolve_crew("codex", &registry()).expect("crew resolves");
 
         assert_eq!(crew.name, "codex");
-        assert_eq!(crew.planner.model, "gpt-5.5");
+        assert_eq!(crew.planner.model, TEST_CODEX_MODEL);
         assert_eq!(crew.implementer.provider, "codex");
         assert_eq!(crew.reviewer.backend, "cli");
     }

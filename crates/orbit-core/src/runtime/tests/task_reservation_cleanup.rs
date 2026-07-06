@@ -96,7 +96,7 @@ fn reserve_via_tool_for_owner(runtime: &OrbitRuntime, owner_run_id: &str, task_i
             json!({
                 "task_ids": [task_id],
                 "ttl_seconds": 3600,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
                 "owner_run_id": "caller-controlled-value-is-ignored",
             }),
             Role::Admin,
@@ -297,7 +297,7 @@ fn task_reservation_reserve_pressure_reconciles_stale_running_owner() {
             json!({
                 "task_ids": [waiter_task],
                 "ttl_seconds": 3600,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
         )
         .expect("reserve after pressure");

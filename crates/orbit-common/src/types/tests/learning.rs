@@ -131,6 +131,8 @@ Read full body via `orbit.learning.show <id>` if needed.\n\
 mod serialization {
     use chrono::{TimeZone, Utc};
 
+    use crate::test_fixtures::TEST_CLAUDE_MODEL;
+
     use super::super::super::learning::*;
 
     fn sample_learning() -> Learning {
@@ -155,7 +157,7 @@ mod serialization {
             legacy_ids: Vec::new(),
             created_at: ts,
             updated_at: ts,
-            created_by: Some("claude-opus-4-7".to_string()),
+            created_by: Some(TEST_CLAUDE_MODEL.to_string()),
             priority: None,
         }
     }

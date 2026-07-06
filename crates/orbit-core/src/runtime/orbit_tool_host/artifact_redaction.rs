@@ -761,7 +761,7 @@ mod tests {
                     "workspace": ".",
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("task add succeeds");
 
@@ -801,7 +801,7 @@ mod tests {
                     "body": format!("## Context\n{token}"),
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("adr add succeeds");
         assert_eq!(adr["redactions_applied"], true);
@@ -817,7 +817,7 @@ mod tests {
                     "evidence": [{ "kind": "task", "ref": format!("ref {token}") }],
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("learning add succeeds");
         assert_eq!(learning["redactions_applied"], true);
@@ -839,7 +839,7 @@ mod tests {
                     "workspace": ".",
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("task add succeeds");
         let id = created["id"].as_str().expect("task id");
@@ -852,7 +852,7 @@ mod tests {
                     "execution_summary": "already [REDACTED_ENV]",
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("task update succeeds");
 
@@ -881,7 +881,7 @@ mod tests {
                     "workspace": ".",
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("task add succeeds");
         assert_eq!(task["redactions_applied"], false);
@@ -895,7 +895,7 @@ mod tests {
                     "body": "## Context\nBody",
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("adr add succeeds");
         assert_eq!(adr["redactions_applied"], false);
@@ -909,7 +909,7 @@ mod tests {
                     "scope": { "paths": ["crates/**"], "tags": ["testing"] },
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("learning add succeeds");
         assert_eq!(learning["redactions_applied"], false);
@@ -923,7 +923,7 @@ mod tests {
                     "path": "src/lib.rs",
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("review thread add succeeds");
         assert_eq!(review["redactions_applied"], false);
@@ -936,7 +936,7 @@ mod tests {
                     "tags": ["tooling"],
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("friction add succeeds");
         assert_eq!(friction["redactions_applied"], false);
@@ -963,7 +963,7 @@ mod tests {
                     "tags": [tag],
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("friction add succeeds");
         assert_eq!(created["tags"], json!([tag]));
@@ -977,7 +977,7 @@ mod tests {
                     "tags": [tag],
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("friction update succeeds");
 

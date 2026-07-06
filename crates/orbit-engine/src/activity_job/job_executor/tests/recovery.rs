@@ -2,6 +2,7 @@
 
 use super::*;
 
+use orbit_common::test_fixtures::TEST_GEMINI_MODEL;
 use orbit_common::types::activity_job::{AgentLoopSpec, AgentRole, Backend, OnDenial, Provider};
 
 use crate::AgentRoleConfig;
@@ -213,7 +214,7 @@ fn recovery_agent_loop_uses_reviewer_role_config() {
         AgentRole::Reviewer,
         AgentRoleConfig {
             provider: Some(Provider::Gemini),
-            model: Some("gemini-3.1-pro".to_string()),
+            model: Some(TEST_GEMINI_MODEL.to_string()),
             backend: Some(Backend::Cli),
         },
     );
@@ -233,7 +234,7 @@ fn recovery_agent_loop_uses_reviewer_role_config() {
         panic!("expected agent_loop recovery spec");
     };
     assert_eq!(spec.provider, Provider::Gemini);
-    assert_eq!(spec.model.as_deref(), Some("gemini-3.1-pro"));
+    assert_eq!(spec.model.as_deref(), Some(TEST_GEMINI_MODEL));
     assert_eq!(spec.backend, Backend::Cli);
     assert_eq!(host.observed_role_lookups(), vec![AgentRole::Reviewer]);
 }

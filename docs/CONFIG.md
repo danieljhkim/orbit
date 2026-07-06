@@ -38,7 +38,7 @@ A **crew** assigns models to the three roles in the ship pipeline: `planner`, `i
 
 | Field | Purpose | Values |
 |---|---|---|
-| `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `claude-opus-4-7`, `gpt-5.5`, `pro`, `grok-build`) |
+| `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-5.5`, `pro`, `grok-build`) |
 | `provider` | Agent family | `claude`, `codex`, `gemini`, `grok` |
 | `backend` | How Orbit dispatches the agent | `cli` (today the only supported value for these roles) |
 
@@ -105,7 +105,7 @@ candidates = ["codex", "claude", "gemini", "grok"]
 
 [duel.models]
 codex  = "gpt-5.5"
-claude = "claude-opus-4-7"
+claude = "opus"
 gemini = "pro"
 grok   = "grok-build"
 ```

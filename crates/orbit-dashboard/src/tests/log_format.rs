@@ -1,3 +1,4 @@
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use serde_json::json;
 
 use super::super::log_format::*;
@@ -9,7 +10,7 @@ fn format_message_html_escapes_dynamic_field_values() {
         &json!({
             "task_id": "<script>alert(1)</script>",
             "agent": "codex",
-            "model": "gpt-5.5",
+            "model": TEST_CODEX_MODEL,
             "summary": "bad <b>markup</b>"
         }),
     );

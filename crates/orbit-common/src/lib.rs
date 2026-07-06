@@ -23,8 +23,14 @@
 pub mod friction;
 pub mod groundhog;
 pub mod migration;
+pub mod model_defaults;
 pub mod types;
 pub mod utility;
+
+/// Frozen model-name constants shared by tests across the workspace. Behind the
+/// `test-util` feature so integration tests in sibling crates can reach it.
+#[cfg(any(test, feature = "test-util"))]
+pub mod test_fixtures;
 
 /// Re-export Orbit's tracing facade for crates that already depend on
 /// `orbit-common` and need to emit structured events without expanding their

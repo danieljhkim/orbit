@@ -1,12 +1,13 @@
 //! Tests for runtime identity resolution in orbit tools.
 
+use orbit_common::test_fixtures::TEST_CLAUDE_MODEL;
 use serde_json::json;
 
 use super::super::*;
 
 #[test]
 fn runtime_identity_overwrites_self_reported_model_at_tool_boundary() {
-    let ctx = tool_context("claude", "claude-opus-4-7");
+    let ctx = tool_context("claude", TEST_CLAUDE_MODEL);
 
     let identity =
         resolve_identity(&ctx, &json!({ "model": "opus-4.7" })).expect("identity resolves");

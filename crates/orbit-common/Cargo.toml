@@ -16,6 +16,9 @@ clap = ["dep:clap"]
 # Shared SQLite connection defaults (utility::sqlite). Optional so that
 # non-SQLite consumers (orbit-policy, orbit-exec, ...) do not pull rusqlite.
 sqlite = ["dep:rusqlite"]
+# Exposes `test_fixtures` (frozen model-name constants) to integration tests in
+# sibling crates, which cannot see this crate's `#[cfg(test)]` items.
+test-util = []
 
 [dependencies]
 chrono.workspace = true

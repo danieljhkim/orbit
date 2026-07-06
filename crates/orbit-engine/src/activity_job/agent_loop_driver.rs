@@ -25,6 +25,7 @@ use orbit_agent::loop_engine::{
     ReplayTransport, ReplayTurn, Session, StopReason,
 };
 use orbit_agent::providers::anthropic::AnthropicMessagesTransport;
+use orbit_common::model_defaults::ANTHROPIC_HTTP_DEFAULT_MODEL;
 use orbit_common::types::activity_job::AgentLoopSpec;
 use orbit_common::types::{
     LearningInjectionCaps, LearningReminder, RoleSlot, prepend_reminder_block,
@@ -35,8 +36,6 @@ use serde_json::Value;
 use super::audit_writer::V2AuditWriter;
 use super::dispatcher::{DispatchError, V2RuntimeHost, v2_fs_audit_logger};
 use super::tool_enforcement::EnforcedAuditSink;
-
-const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-5";
 
 /// Drive a v2 agent_loop activity end-to-end with a fresh `Session`.
 ///
@@ -272,7 +271,7 @@ fn prompt_text(value: &Value) -> Result<String, DispatchError> {
 fn resolve_model(spec: &AgentLoopSpec) -> String {
     spec.model
         .clone()
-        .unwrap_or_else(|| DEFAULT_ANTHROPIC_MODEL.to_string())
+        .unwrap_or_else(|| ANTHROPIC_HTTP_DEFAULT_MODEL.to_string())
 }
 
 fn replay_active() -> bool {

@@ -37,6 +37,7 @@ tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+orbit-common = { path = "../orbit-common", features = ["test-util"] }
 assert_cmd.workspace = true
 predicates.workspace = true
 rusqlite.workspace = true

@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::ReviewThreadStatus;
 use orbit_core::ActorIdentity;
 use orbit_core::OrbitRuntime;
@@ -88,7 +89,7 @@ async fn list_review_threads_returns_threads_across_tasks() {
             Some("src/main.rs".to_string()),
             Some(42),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(TEST_CODEX_MODEL.to_string()),
         )
         .expect("add agent thread");
     runtime
@@ -142,7 +143,7 @@ async fn list_review_threads_filters_by_status_and_author_kind() {
             None,
             None,
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(TEST_CODEX_MODEL.to_string()),
         )
         .expect("add agent thread");
     runtime
@@ -188,7 +189,7 @@ async fn reply_resolve_reopen_review_thread_through_router() {
             Some("src/lib.rs".to_string()),
             Some(7),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(TEST_CODEX_MODEL.to_string()),
         )
         .expect("add thread");
     let runtime = Arc::new(runtime);

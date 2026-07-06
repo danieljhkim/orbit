@@ -35,7 +35,7 @@ pub const CONFIG_KEY_REGISTRY: &[ConfigKeyDescriptor] = &[
     ConfigKeyDescriptor {
         key: "duel.models",
         value_type: "table<string, string>",
-        description: "Per-family model override for planning-duel candidates, e.g. { codex = \"gpt-5.5\" }.",
+        description: "Per-family model override for planning-duel candidates, e.g. { codex = \"<model-id>\" }.",
     },
     ConfigKeyDescriptor {
         key: "execution.codex.approval_policy",

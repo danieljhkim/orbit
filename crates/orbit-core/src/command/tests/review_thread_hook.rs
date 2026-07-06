@@ -128,7 +128,7 @@ fn render_review_thread_block_marks_task_level_and_author_identity() {
                 ReviewMessage {
                     message_id: "rm-2".to_string(),
                     at: Utc::now(),
-                    by: "gpt-5.5".to_string(),
+                    by: orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string(),
                     body: "Acknowledged.".to_string(),
                     github_comment_id: None,
                 },

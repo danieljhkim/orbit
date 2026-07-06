@@ -10,7 +10,7 @@ use serde_json::{Map, Value, json};
 use super::{bad_request, bounded_limit, map_runtime_error, non_empty_string};
 
 const FRICTIONS_DEFAULT_LIMIT: usize = 100;
-const FRICTION_TOOL_MODEL: &str = "gpt-5.5";
+const FRICTION_TOOL_MODEL: &str = orbit_common::model_defaults::CODEX_DEFAULT_MODEL;
 
 #[derive(Deserialize, Default)]
 pub(super) struct FrictionsQuery {

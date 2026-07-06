@@ -3,12 +3,14 @@
 mod args {
     #![allow(missing_docs)]
 
+    use orbit_common::test_fixtures::TEST_CODEX_MODEL;
+
     use super::super::super::codex_cli::*;
 
     #[test]
     fn codex_args_use_exec_compatible_approval_config() {
         let transport = CodexCliTransport::new(
-            Some("gpt-5.5".to_string()),
+            Some(TEST_CODEX_MODEL.to_string()),
             "workspace-write".to_string(),
             Some("never".to_string()),
             vec!["/tmp/orbit".to_string()],
@@ -20,7 +22,7 @@ mod args {
                 "--config",
                 "approval_policy=\"never\"",
                 "--model",
-                "gpt-5.5",
+                TEST_CODEX_MODEL,
                 "--sandbox",
                 "workspace-write",
                 "--add-dir",

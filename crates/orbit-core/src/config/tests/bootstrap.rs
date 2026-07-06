@@ -14,7 +14,7 @@ fn sample_roles() -> BTreeMap<String, RawAgentRoleConfig> {
         RawAgentRoleConfig {
             provider: Some("claude".into()),
             backend: Some("cli".into()),
-            model: Some("claude-opus-4-7".into()),
+            model: Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL.into()),
         },
     );
     roles.insert(
@@ -22,7 +22,7 @@ fn sample_roles() -> BTreeMap<String, RawAgentRoleConfig> {
         RawAgentRoleConfig {
             provider: Some("codex".into()),
             backend: Some("cli".into()),
-            model: Some("gpt-5.5".into()),
+            model: Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.into()),
         },
     );
     roles.insert(
@@ -30,7 +30,7 @@ fn sample_roles() -> BTreeMap<String, RawAgentRoleConfig> {
         RawAgentRoleConfig {
             provider: Some("claude".into()),
             backend: Some("http".into()),
-            model: Some("claude-opus-4-7".into()),
+            model: Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL.into()),
         },
     );
     roles
@@ -100,15 +100,15 @@ fn seed_with_three_available_families_writes_duel_candidates_and_models() {
     assert_eq!(models.len(), 3);
     assert_eq!(
         models.get("claude").and_then(|v| v.as_str()),
-        Some("claude-opus-4-7")
+        Some(orbit_common::model_defaults::CLAUDE_DEFAULT_STRONG)
     );
     assert_eq!(
         models.get("codex").and_then(|v| v.as_str()),
-        Some("gpt-5.5")
+        Some(orbit_common::model_defaults::CODEX_DEFAULT_MODEL)
     );
     assert_eq!(
         models.get("gemini").and_then(|v| v.as_str()),
-        Some("gemini-3-pro")
+        Some(orbit_common::model_defaults::GEMINI_DEFAULT_MODEL)
     );
 }
 
@@ -239,8 +239,14 @@ fn seed_with_role_settings_writes_custom_crew() {
     assert!(contents.contains("[crews.custom]"));
     assert!(contents.contains("provider = \"claude\""));
     assert!(contents.contains("provider = \"codex\""));
-    assert!(contents.contains("model = \"claude-opus-4-7\""));
-    assert!(contents.contains("model = \"gpt-5.5\""));
+    assert!(contents.contains(&format!(
+        "model = \"{}\"",
+        orbit_common::test_fixtures::TEST_CLAUDE_MODEL
+    )));
+    assert!(contents.contains(&format!(
+        "model = \"{}\"",
+        orbit_common::test_fixtures::TEST_CODEX_MODEL
+    )));
 
     // Round-trips through toml::from_str (consumer side will need this).
     let parsed: toml::Value = toml::from_str(&contents).expect("parse");

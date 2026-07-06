@@ -6,6 +6,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use crate::command::Cli;
 
 use super::super::audit_middleware::*;
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::AuditEventStatus;
 use orbit_core::{OrbitError, OrbitRuntime};
 
@@ -102,13 +103,13 @@ fn tool_run_audit_meta_uses_agent_flags_for_role() {
         "--agent",
         "codex",
         "--model",
-        "gpt-5.5",
+        TEST_CODEX_MODEL,
     ]);
 
     assert_eq!(meta.command, "tool");
     assert_eq!(meta.subcommand.as_deref(), Some("run"));
     assert_eq!(meta.tool_name.as_deref(), Some("orbit.graph.search"));
-    assert_eq!(meta.role, "gpt-5.5");
+    assert_eq!(meta.role, TEST_CODEX_MODEL);
 }
 
 #[test]
@@ -122,7 +123,7 @@ fn tool_run_audit_meta_uses_input_identity_for_role() {
         r#"{"query":"actor","agent":"codex","model":"gpt-5.5"}"#,
     ]);
 
-    assert_eq!(meta.role, "gpt-5.5");
+    assert_eq!(meta.role, TEST_CODEX_MODEL);
 }
 
 #[test]
@@ -136,7 +137,7 @@ fn tool_run_audit_meta_uses_model_only_input_for_role() {
         r#"{"query":"actor","model":"gpt-5.5"}"#,
     ]);
 
-    assert_eq!(meta.role, "gpt-5.5");
+    assert_eq!(meta.role, TEST_CODEX_MODEL);
 }
 
 #[test]
@@ -149,7 +150,7 @@ fn tool_run_audit_meta_prefers_input_identity_over_flags() {
         "--agent",
         "codex",
         "--model",
-        "gpt-5.5",
+        TEST_CODEX_MODEL,
         "--input",
         r#"{"query":"actor","agent":"claude","model":"opus-4.6"}"#,
     ]);
@@ -276,7 +277,7 @@ fn snapshot_meta() -> CommandMeta {
         tool_name: Some("orbit.task.update".to_string()),
         target_type: Some("tool".to_string()),
         target_id: Some("orbit.task.update".to_string()),
-        role: "gpt-5.5".to_string(),
+        role: TEST_CODEX_MODEL.to_string(),
         arguments_json: Some(r#"{"id":"ORB-00002","model":"gpt-5.5"}"#.to_string()),
         job_run_id: None,
     }
