@@ -25,6 +25,16 @@ persistent failure trips the start limit instead of thrashing. `Restart=` on a
 `Type=oneshot` unit requires systemd >= 254 — on older hosts drop the
 `Restart=`/`RestartSec=` lines; the timer still retries every 20 minutes.
 
+The unit sets `KillMode=process` [ORB-10038]: the sweep dispatches pipeline
+runs by spawning **detached** worker processes and exits immediately, and the
+default `KillMode=control-group` kills the whole cgroup when the oneshot
+deactivates — reaping the just-spawned workers (observed as
+`task_auto_pipeline` runs flipping to `interrupted` with
+`process_not_found` seconds after "Finished orbit-ship-sweep.service").
+`orbit-qa-sweep.service` deliberately keeps the default: qa-sweep runs its
+checks inline and finishes its ledger run before exiting, so cgroup cleanup
+is correct there.
+
 ### Install (per host, e.g. dk-server-1)
 
 ```sh

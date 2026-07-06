@@ -14,6 +14,12 @@ WorkingDirectory=%h
 # tools the dispatched pipelines shell out to (git, gh, claude).
 Environment=PATH=%h/.local/bin:%h/.orbit/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/.orbit/bin/orbit run ship-sweep --json
+# The sweep spawns *detached* pipeline workers (setsid) and exits immediately;
+# the default KillMode=control-group would reap those workers the moment this
+# oneshot unit deactivates (observed live: a just-dispatched task_auto_pipeline
+# run marked interrupted seconds after "Finished orbit-ship-sweep.service").
+# KillMode=process signals only the sweep CLI itself. [ORB-10038]
+KillMode=process
 # Retry a failed sweep after a short pause instead of waiting a full timer
 # interval. Restart= on a Type=oneshot unit requires systemd >= 254; on older
 # systemd drop these two lines (the timer's OnUnitActiveSec still retries
