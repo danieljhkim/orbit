@@ -54,4 +54,5 @@ Given a `jrun-*` id, see [references/debug-job-failure.md](references/debug-job-
 - Do not kill a process until you've matched run id → `pid`/`pgid`/task id(s)/command; prefer terminating the process group for that run id only.
 - Do not kill parent auto/gate runs unless you've verified they own the same task(s).
 - Do not rely on top-level `state: failed` alone — find the first failed step/activity.
+- Do not parse agent prose as the durable handoff when task state, run state, or `orbit.state.*` records exist.
 - If Orbit tooling or diagnostics are misleading, file friction via `orbit-task`.
