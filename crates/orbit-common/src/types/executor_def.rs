@@ -56,6 +56,26 @@ impl ExecutorSandboxKind {
             Self::MacosSandboxExec => "macos-sandbox-exec",
         }
     }
+
+    /// OS this sandbox primitive can be applied on, named to match
+    /// `std::env::consts::OS` (e.g. `"macos"`, `"linux"`).
+    ///
+    /// Every kind is single-OS today. When a Linux variant (`linux-bwrap`
+    /// or similar) lands, add its arm here; the seed-time platform scrub in
+    /// `orbit-core` reads this to decide whether to keep a declaration.
+    pub fn target_os(self) -> &'static str {
+        match self {
+            Self::MacosSandboxExec => "macos",
+        }
+    }
+
+    /// Whether this sandbox primitive applies to the running host. Used to
+    /// scrub platform-mismatched sandbox declarations at seed time so a
+    /// shipped executor asset doesn't fail-closed at dispatch on an
+    /// unsupported OS (see [ORB-10047]).
+    pub fn is_available_on_current_platform(self) -> bool {
+        self.target_os() == std::env::consts::OS
+    }
 }
 
 impl fmt::Display for ExecutorSandboxKind {
