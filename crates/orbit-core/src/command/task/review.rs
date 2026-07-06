@@ -336,7 +336,7 @@ mod tests {
                 Some("src/lib.rs".to_string()),
                 Some(12),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("add review thread");
         runtime
@@ -345,12 +345,15 @@ mod tests {
                 &thread.thread_id,
                 "Follow-up review note.".to_string(),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("reply review thread");
 
         let scoreboard = read_task_review_scoreboard(&runtime);
-        assert_eq!(scoreboard["task-review-threads"]["gpt-5.5"], Value::from(1));
+        assert_eq!(
+            scoreboard["task-review-threads"][orbit_common::test_fixtures::TEST_CODEX_MODEL],
+            Value::from(1)
+        );
         let updated_threads = runtime
             .get_task_review_threads(&task.id)
             .expect("reload review threads");
@@ -358,7 +361,7 @@ mod tests {
             .messages
             .first()
             .expect("first review message");
-        assert_eq!(first_message.by, "gpt-5.5");
+        assert_eq!(first_message.by, orbit_common::test_fixtures::TEST_CODEX_MODEL);
         assert!(first_message.github_comment_id.is_none());
 
         let summary = runtime
@@ -413,12 +416,15 @@ mod tests {
                 None,
                 None,
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("add review thread with configured model");
 
         let scoreboard = read_task_review_scoreboard(&runtime);
-        assert_eq!(scoreboard["task-review-threads"]["gpt-5.5"], Value::from(1));
+        assert_eq!(
+            scoreboard["task-review-threads"][orbit_common::test_fixtures::TEST_CODEX_MODEL],
+            Value::from(1)
+        );
         assert!(scoreboard["task-review-threads"]["gpt-typo"].is_null());
         assert!(scoreboard["task-review-threads"]["opus-handle"].is_null());
     }
@@ -454,12 +460,15 @@ default_crew = "grok-review"
                 None,
                 None,
                 Some("grok".to_string()),
-                Some("grok-4".to_string()),
+                Some(orbit_common::test_fixtures::TEST_GROK_MODEL.to_string()),
             )
             .expect("add grok review thread");
 
         let scoreboard = read_task_review_scoreboard(&runtime);
-        assert_eq!(scoreboard["task-review-threads"]["grok-4"], Value::from(1));
+        assert_eq!(
+            scoreboard["task-review-threads"][orbit_common::test_fixtures::TEST_GROK_MODEL],
+            Value::from(1)
+        );
     }
 
     #[test]
