@@ -9,7 +9,7 @@
 
 use clap::Args;
 use orbit_core::OrbitError;
-use orbit_core::routines::{SweepOptions, SweepOutcome, run_sweep};
+use orbit_core::routines::{RoutineSweepReport, SweepOptions, SweepOutcome, run_sweep};
 use serde_json::json;
 
 #[derive(Args)]
@@ -20,6 +20,9 @@ use serde_json::json;
                   `[routines] role = \"source\"` in its config.toml, filters them for this\n\
                   host, and dispatches due targets as normal runs. Intended for the OS\n\
                   clock (launchd / systemd timer), e.g.:\n  orbit sweep --json\n\n\
+                  By default only noteworthy rows (fires, retries, baselines, errors)\n\
+                  print — the per-minute clock must not grow its log with `not_due`\n\
+                  churn. Use --verbose for every routine's row.\n\n\
                   Inspect routines with `orbit routine list`; dispatched fires appear in\n\
                   `orbit run history`."
 )]
@@ -27,9 +30,35 @@ pub struct SweepCommand {
     /// Report what would fire without recording or dispatching anything.
     #[arg(long)]
     pub dry_run: bool,
+    /// Print a row for every routine, including skipped/not-due ones.
+    #[arg(long)]
+    pub verbose: bool,
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
+}
+
+/// Actions worth a line on the once-a-minute clock path. The high-churn
+/// `skipped` / `not_due` / `would_*` rows are suppressed unless `--verbose`
+/// (or a dry-run, which is an interactive diagnostic) asks for everything —
+/// otherwise a healthy host writes one line per routine per minute forever.
+pub(crate) fn report_is_noteworthy(action: &str) -> bool {
+    matches!(action, "fired" | "retry_fired" | "baselined" | "error")
+}
+
+/// Render one report row (used for both quiet and verbose output).
+pub(crate) fn format_report_line(report: &RoutineSweepReport) -> String {
+    let mut line = format!("{} ({}): {}", report.routine, report.source, report.action);
+    if let Some(reason) = &report.reason {
+        line.push_str(&format!(" — {reason}"));
+    }
+    if let Some(slot) = &report.slot {
+        line.push_str(&format!(" — slot {slot}"));
+    }
+    if let Some(run_id) = &report.run_id {
+        line.push_str(&format!(" — run {run_id}"));
+    }
+    line
 }
 
 impl SweepCommand {
@@ -54,18 +83,15 @@ impl SweepCommand {
             println!("sweep[{}]: no routines configured", outcome.host_id);
             return Ok(());
         }
+
+        // Quiet by default; a dry-run is interactive so it shows everything.
+        let show_all = self.verbose || self.dry_run;
+        let mut shown = 0usize;
         for report in &outcome.reports {
-            let mut line = format!("{} ({}): {}", report.routine, report.source, report.action);
-            if let Some(reason) = &report.reason {
-                line.push_str(&format!(" — {reason}"));
+            if show_all || report_is_noteworthy(report.action) {
+                println!("{}", format_report_line(report));
+                shown += 1;
             }
-            if let Some(slot) = &report.slot {
-                line.push_str(&format!(" — slot {slot}"));
-            }
-            if let Some(run_id) = &report.run_id {
-                line.push_str(&format!(" — run {run_id}"));
-            }
-            println!("{line}");
         }
         for error in &outcome.load_errors {
             let path = error
@@ -78,11 +104,21 @@ impl SweepCommand {
                 error.source_workspace, path, error.message
             );
         }
+        // A one-line heartbeat when a healthy pass had nothing to report, so the
+        // log still shows the sweep ran (bounded by the log rotation in
+        // `run_sweep`) without a row per routine.
+        if shown == 0 && outcome.load_errors.is_empty() {
+            println!(
+                "sweep[{}]: {} routine(s), nothing due",
+                outcome.host_id,
+                outcome.reports.len()
+            );
+        }
         Ok(())
     }
 }
 
-fn outcome_json(outcome: &SweepOutcome, dry_run: bool) -> serde_json::Value {
+pub(crate) fn outcome_json(outcome: &SweepOutcome, dry_run: bool) -> serde_json::Value {
     json!({
         "host_id": outcome.host_id,
         "dry_run": dry_run,

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Local, Utc};
 use orbit_common::types::{JobRunState, OrbitError, OverlapPolicy};
+use orbit_common::utility::log_rotation::{self, LogRotationConfig};
 use orbit_store::{RoutineFireIntentParams, RoutineFireRecord, RoutineFireState, Store};
 use serde_json::json;
 
@@ -18,7 +19,59 @@ use crate::workspace_registry;
 
 use super::due::{DueDecision, due_decision, parse_cron};
 use super::host::resolve_host_id;
-use super::loader::{LoadedRoutine, RoutineLoadError, collect_routines, discover_workspaces};
+use super::loader::{
+    LoadedRoutine, RoutineCollection, RoutineLoadError, collect_routines, discover_workspaces,
+};
+
+/// Dispatch seam for the sweep [ORB-00421]. The production impl
+/// ([`RuntimeDispatch`]) wraps one `OrbitRuntime` per source workspace and
+/// dispatches through `submit_pipeline_run` / `show_job_run`; tests supply a
+/// fake so the sweep's fire / retry / overlap / outcome-sync orchestration is
+/// exercised deterministically without spawning pipeline workers.
+pub(crate) trait RoutineDispatch {
+    /// Submit `job_name` in the source workspace rooted at `source_orbit_dir`
+    /// under `actor`, returning the dispatched run id.
+    fn submit(
+        &self,
+        source_orbit_dir: &Path,
+        job_name: &str,
+        actor: &str,
+    ) -> Result<String, OrbitError>;
+
+    /// Current run state for a dispatched fire, when the run is queryable.
+    fn run_state(&self, source_orbit_dir: &Path, run_id: &str) -> Option<JobRunState>;
+}
+
+/// Production dispatch over the per-workspace runtimes discovered this pass.
+pub(crate) struct RuntimeDispatch<'a> {
+    runtimes: BTreeMap<PathBuf, &'a OrbitRuntime>,
+}
+
+impl RoutineDispatch for RuntimeDispatch<'_> {
+    fn submit(
+        &self,
+        source_orbit_dir: &Path,
+        job_name: &str,
+        actor: &str,
+    ) -> Result<String, OrbitError> {
+        let runtime = self.runtimes.get(source_orbit_dir).ok_or_else(|| {
+            OrbitError::WorkspaceError(format!(
+                "no runtime for source workspace '{}'",
+                source_orbit_dir.display()
+            ))
+        })?;
+        runtime
+            .submit_pipeline_run(job_name, json!({}), None, Some(actor))
+            .map(|invoke| invoke.run_id)
+    }
+
+    fn run_state(&self, source_orbit_dir: &Path, run_id: &str) -> Option<JobRunState> {
+        self.runtimes
+            .get(source_orbit_dir)
+            .and_then(|runtime| runtime.show_job_run(run_id).ok())
+            .map(|run| run.state)
+    }
+}
 
 /// Options for one sweep pass.
 #[derive(Debug, Clone, Copy, Default)]
@@ -61,6 +114,16 @@ pub struct SweepOutcome {
 /// Run one sweep pass against the default global root (`~/.orbit`).
 pub fn run_sweep(options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
     let global_root = workspace_registry::global_orbit_dir()?;
+    // The OS clock invokes this every minute forever; on macOS launchd
+    // redirects stdout/stderr into `logs/sweep.log`. Opportunistically roll +
+    // prune it here (rename-based, best-effort) so an always-on host cannot
+    // grow it without bound [ORB-00423]. No-op until the file exceeds the
+    // configured per-file budget. `run_sweep_at` (the test seam) is left
+    // untouched so tests never rotate real logs.
+    log_rotation::rotate_and_prune(
+        &super::clock::sweep_log_path(&global_root),
+        &LogRotationConfig::load_global_best_effort(),
+    );
     run_sweep_at(&global_root, options)
 }
 
@@ -89,44 +152,22 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
     let mut collection = collect_routines(&discovered.entries);
     load_errors.append(&mut collection.errors);
 
-    let routines_by_name: BTreeMap<String, &LoadedRoutine> = collection
-        .routines
-        .iter()
-        .map(|routine| (routine.definition.name.clone(), routine))
-        .collect();
-    let runtime_by_orbit_dir: BTreeMap<PathBuf, &OrbitRuntime> = discovered
-        .entries
-        .iter()
-        .map(|(workspace, runtime)| (workspace.orbit_dir.clone(), runtime))
-        .collect();
+    let dispatch = RuntimeDispatch {
+        runtimes: discovered
+            .entries
+            .iter()
+            .map(|(workspace, runtime)| (workspace.orbit_dir.clone(), runtime))
+            .collect(),
+    };
 
-    let now_utc = Utc::now();
-    if !options.dry_run {
-        sync_unresolved_fires(&store, &routines_by_name, &runtime_by_orbit_dir, now_utc)?;
-    }
-
-    let pauses = store.routine_pauses()?;
-
-    let mut reports = Vec::new();
-    for routine in &collection.routines {
-        let report = sweep_routine(
-            &store,
-            routine,
-            &runtime_by_orbit_dir,
-            &host_id,
-            &pauses,
-            options,
-        )
-        .unwrap_or_else(|error| RoutineSweepReport {
-            routine: routine.definition.name.clone(),
-            source: routine.source_workspace.clone(),
-            action: "error",
-            reason: Some(error.to_string()),
-            slot: None,
-            run_id: None,
-        });
-        reports.push(report);
-    }
+    let reports = run_sweep_core(
+        &store,
+        &host_id,
+        &collection,
+        &dispatch,
+        options,
+        Utc::now(),
+    )?;
 
     Ok(SweepOutcome {
         host_id,
@@ -136,13 +177,56 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
     })
 }
 
+/// The dispatch-agnostic core of one sweep pass [ORB-00421]: outcome-sync
+/// (unless dry-run), then per-routine due evaluation and fire/skip. Split out
+/// from [`run_sweep_at`] — which owns the lock, store, and workspace discovery
+/// — so the orchestration can be driven against a temp store, a hand-built
+/// [`RoutineCollection`], a fake [`RoutineDispatch`], and an explicit `now`.
+pub(crate) fn run_sweep_core(
+    store: &Store,
+    host_id: &str,
+    collection: &RoutineCollection,
+    dispatch: &dyn RoutineDispatch,
+    options: SweepOptions,
+    now_utc: DateTime<Utc>,
+) -> Result<Vec<RoutineSweepReport>, OrbitError> {
+    let routines_by_name: BTreeMap<String, &LoadedRoutine> = collection
+        .routines
+        .iter()
+        .map(|routine| (routine.definition.name.clone(), routine))
+        .collect();
+
+    if !options.dry_run {
+        sync_unresolved_fires(store, &routines_by_name, dispatch, now_utc)?;
+    }
+
+    let pauses = store.routine_pauses()?;
+
+    let mut reports = Vec::new();
+    for routine in &collection.routines {
+        let report = sweep_routine(store, routine, dispatch, host_id, &pauses, options, now_utc)
+            .unwrap_or_else(|error| RoutineSweepReport {
+                routine: routine.definition.name.clone(),
+                source: routine.source_workspace.clone(),
+                action: "error",
+                reason: Some(error.to_string()),
+                slot: None,
+                run_id: None,
+            });
+        reports.push(report);
+    }
+
+    Ok(reports)
+}
+
 fn sweep_routine(
     store: &Store,
     routine: &LoadedRoutine,
-    runtimes: &BTreeMap<PathBuf, &OrbitRuntime>,
+    dispatch: &dyn RoutineDispatch,
     host_id: &str,
     pauses: &BTreeMap<String, orbit_store::RoutinePauseRecord>,
     options: SweepOptions,
+    now_utc: DateTime<Utc>,
 ) -> Result<RoutineSweepReport, OrbitError> {
     let definition = &routine.definition;
     let name = &definition.name;
@@ -160,7 +244,7 @@ fn sweep_routine(
     }
 
     let cron = parse_cron(&definition.trigger.cron)?;
-    let now_local = Local::now();
+    let now_local = now_utc.with_timezone(&Local);
 
     let Some(cursor) = store.routine_cursor(name)? else {
         // First observation on this host: record the baseline and fire
@@ -169,7 +253,7 @@ fn sweep_routine(
         if options.dry_run {
             return Ok(action(routine, "would_baseline"));
         }
-        store.routine_record_baseline(name, &Utc::now().to_rfc3339())?;
+        store.routine_record_baseline(name, &now_utc.to_rfc3339())?;
         return Ok(action(routine, "baselined"));
     };
 
@@ -184,16 +268,17 @@ fn sweep_routine(
     )? {
         DueDecision::Fire { slot, .. } => {
             let slot_utc = slot.with_timezone(&Utc).to_rfc3339();
-            fire(store, routine, runtimes, &slot_utc, 1, "fired", options)
+            fire(store, routine, dispatch, &slot_utc, 1, "fired", options)
         }
         DueDecision::NotDue => {
-            // No new slot: a failed most-recent fire may still have retry
-            // budget under the same slot.
-            if let Some(retry) = retry_candidate(store, routine, Utc::now())? {
+            // No new slot: a most-recent fire that failed (run-level) or
+            // errored at dispatch may still have retry budget under the same
+            // slot.
+            if let Some(retry) = retry_candidate(store, routine, now_utc)? {
                 return fire(
                     store,
                     routine,
-                    runtimes,
+                    dispatch,
                     &retry.slot,
                     retry.attempt + 1,
                     "retry_fired",
@@ -205,8 +290,16 @@ fn sweep_routine(
     }
 }
 
-/// The most recent fire, when it failed with retry budget left and the
-/// fixed backoff has elapsed.
+/// The most recent fire, when it failed with retry budget left and the fixed
+/// backoff has elapsed.
+///
+/// Retryable means `Failed` — a run-level failure *or* a synchronous dispatch
+/// failure ([ORB-00422]): `fire` records a `submit_pipeline_run` that returns
+/// `Err` as `Failed` (not `Error`) precisely because nothing dispatched, so it
+/// is unambiguously safe to re-dispatch under the same slot. `Error` is
+/// reserved for the *ambiguous* case — a crashed sweep's stale intent reclaimed
+/// by the outcome sync, where a worker may have partially started — and stays
+/// terminal so a make-up fire never races an orphaned run.
 fn retry_candidate(
     store: &Store,
     routine: &LoadedRoutine,
@@ -237,7 +330,7 @@ fn retry_candidate(
 fn fire(
     store: &Store,
     routine: &LoadedRoutine,
-    runtimes: &BTreeMap<PathBuf, &OrbitRuntime>,
+    dispatch: &dyn RoutineDispatch,
     slot: &str,
     attempt: u32,
     fired_action: &'static str,
@@ -279,33 +372,34 @@ fn fire(
         });
     }
 
-    let runtime = runtimes.get(&routine.source_orbit_dir).ok_or_else(|| {
-        OrbitError::WorkspaceError(format!(
-            "no runtime for source workspace '{}'",
-            routine.source_workspace
-        ))
-    })?;
-
     let actor = format!("routine/{name}");
-    match runtime.submit_pipeline_run(definition.target.job_name(), json!({}), None, Some(&actor)) {
-        Ok(invoke) => {
-            store.routine_mark_fire_dispatched(name, slot, attempt, &invoke.run_id)?;
+    match dispatch.submit(
+        &routine.source_orbit_dir,
+        definition.target.job_name(),
+        &actor,
+    ) {
+        Ok(run_id) => {
+            store.routine_mark_fire_dispatched(name, slot, attempt, &run_id)?;
             Ok(RoutineSweepReport {
                 routine: name.clone(),
                 source: routine.source_workspace.clone(),
                 action: fired_action,
                 reason: None,
                 slot: Some(slot.to_string()),
-                run_id: Some(invoke.run_id),
+                run_id: Some(run_id),
             })
         }
         Err(error) => {
+            // A synchronous dispatch failure means nothing was dispatched, so
+            // record it as `Failed` — retryable under the same slot within
+            // `policy.retries` ([ORB-00422]) — rather than the terminal `Error`
+            // the outcome sync reserves for an ambiguous crash-orphaned intent.
             store.routine_mark_fire_outcome(
                 name,
                 slot,
                 attempt,
-                RoutineFireState::Error,
-                Some(&error.to_string()),
+                RoutineFireState::Failed,
+                Some(&format!("dispatch failed: {error}")),
             )?;
             Ok(RoutineSweepReport {
                 routine: name.clone(),
@@ -326,7 +420,7 @@ fn fire(
 fn sync_unresolved_fires(
     store: &Store,
     routines_by_name: &BTreeMap<String, &LoadedRoutine>,
-    runtimes: &BTreeMap<PathBuf, &OrbitRuntime>,
+    dispatch: &dyn RoutineDispatch,
     now_utc: DateTime<Utc>,
 ) -> Result<(), OrbitError> {
     for fire in store.routine_unresolved_fires()? {
@@ -342,28 +436,23 @@ fn sync_unresolved_fires(
             now_utc.signed_duration_since(created_at) > Duration::minutes(timeout_minutes as i64);
 
         match fire.state {
-            RoutineFireState::Intent => {
-                if expired {
-                    store.routine_mark_fire_outcome(
-                        &fire.routine_name,
-                        &fire.slot,
-                        fire.attempt,
-                        RoutineFireState::Error,
-                        Some("stale fire intent reclaimed (sweep died before dispatch)"),
-                    )?;
-                }
+            // A recorded intent whose sweep died before dispatch: reclaim it
+            // once past the timeout horizon, otherwise leave it for a later pass.
+            RoutineFireState::Intent if expired => {
+                store.routine_mark_fire_outcome(
+                    &fire.routine_name,
+                    &fire.slot,
+                    fire.attempt,
+                    RoutineFireState::Error,
+                    Some("stale fire intent reclaimed (sweep died before dispatch)"),
+                )?;
             }
             RoutineFireState::Dispatched => {
-                let run_state = fire
-                    .run_id
-                    .as_deref()
-                    .and_then(|run_id| {
-                        routines_by_name
-                            .get(&fire.routine_name)
-                            .and_then(|routine| runtimes.get(&routine.source_orbit_dir))
-                            .and_then(|runtime| runtime.show_job_run(run_id).ok())
-                    })
-                    .map(|run| run.state);
+                let run_state = fire.run_id.as_deref().and_then(|run_id| {
+                    routines_by_name
+                        .get(&fire.routine_name)
+                        .and_then(|routine| dispatch.run_state(&routine.source_orbit_dir, run_id))
+                });
                 let outcome = match run_state {
                     Some(JobRunState::Success) => Some((RoutineFireState::Succeeded, None)),
                     Some(JobRunState::Failed) => Some((RoutineFireState::Failed, None)),

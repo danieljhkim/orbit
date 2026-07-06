@@ -283,6 +283,22 @@ jq -r 'select(.level=="ERROR")
 `RUST_LOG` controls the tracing filter for any orbit process
 (e.g. `RUST_LOG=debug orbit task list` — standard `EnvFilter` syntax).
 
+**Routine sweep log (macOS).** The launchd agent (`com.orbit.sweep`, installed by
+`orbit routine init --install-clock`) redirects `orbit sweep` stdout/stderr to a separate
+file, since it is not the JSONL tracing sink:
+
+```
+~/.orbit/logs/sweep.log
+```
+
+Two things keep it bounded on an always-on host ([ORB-00423]): `orbit sweep` prints only
+noteworthy rows by default — fires, retries, baselines, and errors, plus a one-line
+heartbeat when a pass had nothing due (`--verbose` restores a row per routine) — and each
+pass opportunistically rolls + prunes `sweep.log` through the same
+`log_rotation` machinery and `[runtime]` caps as the JSONL sink above (rename-based archives
+`sweep.log.<UTC-timestamp>`). On Linux the sweep unit logs to the journal instead, which
+rotates on its own.
+
 ---
 
 ## 6. Audit trail
