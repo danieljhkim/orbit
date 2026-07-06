@@ -10,7 +10,7 @@ use orbit_common::types::{
     TASK_EVENTS_FILE_NAME, TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME,
     TASK_REVIEW_THREADS_DIR_NAME, TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2,
 };
-use orbit_common::utility::fs::{atomic_write_text, with_exclusive_file_lock};
+use orbit_common::utility::fs::{atomic_write_bytes, atomic_write_text, with_exclusive_file_lock};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
@@ -366,6 +366,60 @@ fn read_artifact_manifest(bundle_dir: &Path) -> Result<Option<ArtifactManifestV2
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(OrbitError::Io(err.to_string())),
     }
+}
+
+/// Copy every blob referenced by `manifest` from `source_bundle_dir` into
+/// `dest_bundle_dir`, validating source content against the manifest as it
+/// goes. Used by `orbit task import` to round-trip `artifacts/files/**`
+/// alongside the manifest — [`write_bundle_at`] intentionally writes only the
+/// manifest so callers can decide where blob bytes come from (a fresh
+/// `TaskBundleV2` has none; import staging supplies them from the extracted
+/// archive).
+///
+/// This is also the primitive to reach for when backfilling blobs onto an
+/// already-landed bundle whose files were lost (see the module-level docs on
+/// backfill in `task_migration::mod`).
+pub(crate) fn copy_artifact_blobs(
+    source_bundle_dir: &Path,
+    dest_bundle_dir: &Path,
+    manifest: &ArtifactManifestV2,
+) -> Result<(), OrbitError> {
+    if manifest.files.is_empty() {
+        return Ok(());
+    }
+    let source_artifact_dir = source_bundle_dir.join(TASK_ARTIFACTS_DIR_NAME);
+    let dest_artifact_dir = dest_bundle_dir.join(TASK_ARTIFACTS_DIR_NAME);
+    fs::create_dir_all(dest_artifact_dir.join(TASK_ARTIFACT_FILES_DIR_NAME))
+        .map_err(|err| OrbitError::Io(err.to_string()))?;
+    for file in &manifest.files {
+        let source = source_artifact_dir.join(&file.blob);
+        let bytes = fs::read(&source).map_err(|err| {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                OrbitError::Store(format!(
+                    "artifact source missing for blob {}",
+                    source.display()
+                ))
+            } else {
+                OrbitError::Io(err.to_string())
+            }
+        })?;
+        if bytes.len() as u64 != file.size_bytes {
+            return Err(OrbitError::Store(format!(
+                "artifact source size mismatch for {}",
+                source.display()
+            )));
+        }
+        let actual_sha256 = format!("{:x}", Sha256::digest(&bytes));
+        if actual_sha256 != file.sha256 {
+            return Err(OrbitError::Store(format!(
+                "artifact source sha256 mismatch for {}",
+                source.display()
+            )));
+        }
+        let dest = dest_artifact_dir.join(&file.blob);
+        atomic_write_bytes(&dest, &bytes).map_err(|err| OrbitError::Io(err.to_string()))?;
+    }
+    Ok(())
 }
 
 fn validate_artifact_manifest_files(

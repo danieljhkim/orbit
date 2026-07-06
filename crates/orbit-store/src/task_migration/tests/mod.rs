@@ -3,9 +3,11 @@ use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
 use orbit_common::types::{
-    TASK_ARTIFACT_SCHEMA_VERSION, TaskEnvelopeV2, TaskEventRowV2, TaskPriority, TaskRelation,
-    TaskRelationType, TaskStatus, TaskType,
+    ArtifactManifestFileV2, ArtifactManifestV2, TASK_ARTIFACT_FILES_DIR_NAME,
+    TASK_ARTIFACT_SCHEMA_VERSION, TASK_ARTIFACTS_DIR_NAME, TaskEnvelopeV2, TaskEventRowV2,
+    TaskPriority, TaskRelation, TaskRelationType, TaskStatus, TaskType,
 };
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 use crate::file::task_store::v2_bundle::{TaskBundleStoreV2, TaskBundleV2, read_bundle_at};
@@ -523,6 +525,179 @@ fn renumber_writes_id_map_file() {
     let map_path = outcome.id_map_path.expect("id map written");
     let map = read_id_map(&map_path);
     assert_eq!(map.get("ORB-00000"), outcome.id_remap.get("ORB-00000"));
+}
+
+/// Seed a blob at `path` (relative to the bundle's `artifacts/files/` dir) and
+/// return the manifest entry describing it. Callers must merge the returned
+/// entries into a single `ArtifactManifestV2` and `rewrite_artifact_manifest`
+/// so `read_bundle_at` accepts the bundle.
+fn seed_artifact_blob(
+    store: &TaskBundleStoreV2,
+    task_id: &str,
+    path: &str,
+    bytes: &[u8],
+    actor: &str,
+) -> ArtifactManifestFileV2 {
+    let bundle_dir = store.bundle_path(task_id).expect("bundle path");
+    let blob = format!("{TASK_ARTIFACT_FILES_DIR_NAME}/{path}");
+    let blob_path = bundle_dir.join(TASK_ARTIFACTS_DIR_NAME).join(&blob);
+    if let Some(parent) = blob_path.parent() {
+        fs::create_dir_all(parent).expect("create artifact parent");
+    }
+    fs::write(&blob_path, bytes).expect("write blob");
+    ArtifactManifestFileV2 {
+        path: path.to_string(),
+        blob,
+        sha256: format!("{:x}", Sha256::digest(bytes)),
+        media_type: "application/octet-stream".to_string(),
+        size_bytes: bytes.len() as u64,
+        created_by: actor.to_string(),
+        created_at: Utc.with_ymd_and_hms(2026, 6, 1, 9, 0, 0).unwrap(),
+    }
+}
+
+/// Regression for ORB-10042: import must round-trip artifact blobs. Before the
+/// fix, `write_bundle_at` wrote only the manifest, so the canonical bundle
+/// landed with `artifacts/files/` empty and `read_bundle_at` failed with
+/// "artifact manifest references missing file". The test covers a nested blob
+/// path (`artifacts/files/nested/output.bin`) to catch mkdir-parent regressions
+/// in the copy step.
+#[test]
+fn round_trip_preserves_artifact_blobs() {
+    let src = TempDir::new().unwrap();
+    let dst = TempDir::new().unwrap();
+    let archive = src.path().join("tasks.tar.zst");
+    let ws = "orbit-art-eeeeee";
+
+    // Source: one task with two blobs — a top-level file and a nested one.
+    let registry = open_registry(src.path());
+    let binding = bind(&registry, src.path(), ws);
+    let store = bundle_store(&registry, &binding);
+    let bundle = make_bundle("ORB-00000", "artifact task", Vec::new());
+    seed(&store, &registry, ws, &bundle);
+    let flat = seed_artifact_blob(&store, "ORB-00000", "top.txt", b"top-level", "codex");
+    let nested = seed_artifact_blob(
+        &store,
+        "ORB-00000",
+        "nested/output.bin",
+        b"\x00\x01\x02deep",
+        "codex",
+    );
+    let manifest = ArtifactManifestV2 {
+        schema_version: TASK_ARTIFACT_SCHEMA_VERSION,
+        files: vec![flat.clone(), nested.clone()],
+    };
+    store
+        .rewrite_artifact_manifest("ORB-00000", &manifest)
+        .expect("rewrite manifest");
+    // Reindex to reflect the new manifest state.
+    registry
+        .replace_task_index(ws, &store.read_bundle("ORB-00000").unwrap().envelope)
+        .expect("reindex");
+    // Sanity: the seeded bundle re-reads clean (validates blob hashes).
+    let seeded = store.read_bundle("ORB-00000").expect("read seeded");
+    assert_eq!(
+        seeded.artifact_manifest.as_ref().map(|m| m.files.len()),
+        Some(2)
+    );
+
+    export_tasks(&registry, ws, ExportSelection::All, &archive, exported_at()).unwrap();
+
+    // Import into a fresh registry and verify the canonical bundle validates
+    // end-to-end, including hash checks against restored blobs.
+    let target_registry = open_registry(dst.path());
+    let outcome =
+        import_tasks(&target_registry, &archive, None, ImportConflictPolicy::Fail).expect("import");
+    assert_eq!(outcome.tasks.len(), 1);
+    assert_eq!(outcome.tasks[0].action, ImportAction::Kept);
+
+    let landed_dir = target_registry
+        .canonical_task_bundle_path(ws, "ORB-00000")
+        .unwrap();
+    // `read_bundle_at` re-hashes every blob file — surviving this is the
+    // acceptance criterion for the round trip.
+    let landed = read_bundle_at(&landed_dir).expect("read landed bundle");
+    let landed_manifest = landed
+        .artifact_manifest
+        .expect("landed bundle has manifest");
+    assert_eq!(landed_manifest.files.len(), 2);
+
+    // Files present at the expected paths with the recorded hashes.
+    for expected in [&flat, &nested] {
+        let blob_path = landed_dir
+            .join(TASK_ARTIFACTS_DIR_NAME)
+            .join(&expected.blob);
+        let bytes = fs::read(&blob_path).expect("blob present");
+        assert_eq!(bytes.len() as u64, expected.size_bytes);
+        assert_eq!(format!("{:x}", Sha256::digest(&bytes)), expected.sha256);
+    }
+}
+
+/// Regression for the pre-ORB-10042 "half-imported" state: a canonical bundle
+/// with a manifest but no blob files. The documented backfill flow is to copy
+/// the blob tree back from the retained archive. `copy_artifact_blobs` is the
+/// primitive that path uses; this test pins its behavior so the recipe in the
+/// module docs stays honest.
+#[test]
+fn backfill_via_copy_artifact_blobs_restores_stranded_bundle() {
+    use crate::file::task_store::v2_bundle::copy_artifact_blobs;
+
+    let src = TempDir::new().unwrap();
+    let dst = TempDir::new().unwrap();
+    let archive = src.path().join("tasks.tar.zst");
+    let ws = "orbit-bkf-ffffff";
+
+    let src_registry = open_registry(src.path());
+    let src_binding = bind(&src_registry, src.path(), ws);
+    let src_store = bundle_store(&src_registry, &src_binding);
+    let seed_bundle = make_bundle("ORB-00007", "done task", Vec::new());
+    seed(&src_store, &src_registry, ws, &seed_bundle);
+    let entry = seed_artifact_blob(&src_store, "ORB-00007", "log.txt", b"payload", "codex");
+    let manifest = ArtifactManifestV2 {
+        schema_version: TASK_ARTIFACT_SCHEMA_VERSION,
+        files: vec![entry.clone()],
+    };
+    src_store
+        .rewrite_artifact_manifest("ORB-00007", &manifest)
+        .unwrap();
+    src_registry
+        .replace_task_index(ws, &src_store.read_bundle("ORB-00007").unwrap().envelope)
+        .unwrap();
+    export_tasks(
+        &src_registry,
+        ws,
+        ExportSelection::All,
+        &archive,
+        exported_at(),
+    )
+    .unwrap();
+
+    // Simulate a pre-fix stranded bundle: manifest present, blob missing.
+    let dst_registry = open_registry(dst.path());
+    let dst_binding = bind(&dst_registry, dst.path(), ws);
+    let dst_store = bundle_store(&dst_registry, &dst_binding);
+    seed(&dst_store, &dst_registry, ws, &seed_bundle);
+    dst_store
+        .rewrite_artifact_manifest("ORB-00007", &manifest)
+        .unwrap();
+    // Confirm read fails — this is the "stranded" state.
+    assert!(dst_store.read_bundle("ORB-00007").is_err());
+
+    // Extract the archive to a staging tree, mirroring the documented recipe.
+    let staging = TempDir::new().unwrap();
+    super::archive::extract_archive(&archive, staging.path()).unwrap();
+    let staged_bundle_dir = staging.path().join("bundles").join("ORB-00007");
+    let landed_dir = dst_registry
+        .canonical_task_bundle_path(ws, "ORB-00007")
+        .unwrap();
+    copy_artifact_blobs(&staged_bundle_dir, &landed_dir, &manifest).expect("backfill blobs");
+
+    // Bundle is now whole and re-reads cleanly.
+    let restored = dst_store.read_bundle("ORB-00007").expect("read restored");
+    let restored_manifest = restored.artifact_manifest.unwrap();
+    assert_eq!(restored_manifest.files.len(), 1);
+    let blob_path = landed_dir.join(TASK_ARTIFACTS_DIR_NAME).join(&entry.blob);
+    assert_eq!(fs::read(&blob_path).unwrap(), b"payload");
 }
 
 #[test]
