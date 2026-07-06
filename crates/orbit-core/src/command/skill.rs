@@ -9,59 +9,47 @@ use orbit_common::utility::fs::write_text_with_parent;
 use crate::OrbitRuntime;
 use crate::skill_catalog::{LoadedSkill, SkillCatalogDoctorStatus};
 
-const DEFAULT_SKILL_FILES: [(&str, &str); 12] = [
+const DEFAULT_SKILL_FILES: [(&str, &str); 6] = [
     ("orbit", include_str!("../../assets/skills/orbit/SKILL.md")),
     (
-        "orbit-adr",
-        include_str!("../../assets/skills/orbit-adr/SKILL.md"),
+        "orbit-task",
+        include_str!("../../assets/skills/orbit-task/SKILL.md"),
     ),
     (
-        "orbit-create-task",
-        include_str!("../../assets/skills/orbit-create-task/SKILL.md"),
-    ),
-    (
-        "orbit-debug-job-failure",
-        include_str!("../../assets/skills/orbit-debug-job-failure/SKILL.md"),
-    ),
-    (
-        "orbit-execute-task",
-        include_str!("../../assets/skills/orbit-execute-task/SKILL.md"),
-    ),
-    (
-        "orbit-docs",
-        include_str!("../../assets/skills/orbit-docs/SKILL.md"),
-    ),
-    (
-        "orbit-graph",
-        include_str!("../../assets/skills/orbit-graph/SKILL.md"),
-    ),
-    (
-        "orbit-guide",
-        include_str!("../../assets/skills/orbit-guide/SKILL.md"),
-    ),
-    (
-        "orbit-learning",
-        include_str!("../../assets/skills/orbit-learning/SKILL.md"),
-    ),
-    (
-        "orbit-review-task",
-        include_str!("../../assets/skills/orbit-review-task/SKILL.md"),
+        "orbit-workflow",
+        include_str!("../../assets/skills/orbit-workflow/SKILL.md"),
     ),
     (
         "orbit-search",
         include_str!("../../assets/skills/orbit-search/SKILL.md"),
     ),
     (
-        "orbit-track-issues",
-        include_str!("../../assets/skills/orbit-track-issues/SKILL.md"),
+        "orbit-knowledge",
+        include_str!("../../assets/skills/orbit-knowledge/SKILL.md"),
+    ),
+    (
+        "orbit-graph",
+        include_str!("../../assets/skills/orbit-graph/SKILL.md"),
     ),
 ];
 
-const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 1] = [(
-    "orbit-debug-job-failure",
-    "references/common_failures.md",
-    include_str!("../../assets/skills/orbit-debug-job-failure/references/common_failures.md"),
-)];
+const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 3] = [
+    (
+        "orbit-workflow",
+        "references/debug-job-failure.md",
+        include_str!("../../assets/skills/orbit-workflow/references/debug-job-failure.md"),
+    ),
+    (
+        "orbit-workflow",
+        "references/common_failures.md",
+        include_str!("../../assets/skills/orbit-workflow/references/common_failures.md"),
+    ),
+    (
+        "orbit",
+        "references/guide.md",
+        include_str!("../../assets/skills/orbit/references/guide.md"),
+    ),
+];
 
 /// Skills intentionally NOT shipped in `plugin/skills/` because they depend on
 /// CLI-only surfaces the Claude Code plugin does not expose. The CLI still
@@ -70,8 +58,9 @@ const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 1] = [(
 /// test reads it.
 #[cfg(test)]
 const PLUGIN_EXCLUDED_SKILLS: &[&str] = &[
-    // No `orbit run` surface in the plugin, so there are no jobs to debug.
-    "orbit-debug-job-failure",
+    // No `orbit run` surface in the plugin (see README "Plugin vs. CLI"), so
+    // there are no jobs/routines/sweeps to run or debug.
+    "orbit-workflow",
 ];
 use crate::paths::ORBIT_ROOT_TOKEN;
 
@@ -89,7 +78,7 @@ pub struct SkillDoctorResult {
     pub message: String,
 }
 
-pub(crate) fn default_skill_ids() -> [&'static str; 12] {
+pub(crate) fn default_skill_ids() -> [&'static str; 6] {
     DEFAULT_SKILL_FILES.map(|(id, _)| id)
 }
 

@@ -40,7 +40,7 @@ This repo has a semantic graph available via the `orbit` MCP server (no live LSP
 
 ## Design Docs
 
-- **Layout.** Feature design docs live under `docs/design/<feature>/`. Folder layout, required sections, ADR format, and glossary shape are documented in [`docs/design/CONVENTIONS.md`](docs/design/CONVENTIONS.md). Use the `orbit-docs` skill / `orbit docs` surface to retrieve indexed docs.
+- **Layout.** Feature design docs live under `docs/design/<feature>/`. Folder layout, required sections, ADR format, and glossary shape are documented in [`docs/design/CONVENTIONS.md`](docs/design/CONVENTIONS.md). Use the `orbit-search` skill / `orbit docs` surface to retrieve indexed docs.
 - **Same-PR updates.** Change the doc in the same PR as the code: flip affected ADR statuses (`Proposed → Accepted` with task ID), bump `**Last updated:**`, add a new ADR for any non-obvious decision the change embodies. Stale docs are a review blocker.
 
 ## Rust Practices
@@ -66,6 +66,6 @@ Conventions (not lint-enforced):
 
 ## Orbit Workflow
 
-For any Orbit lifecycle work (creating tasks, executing, reviewing, raising PRs), invoke the relevant `orbit-*` skill. The `orbit` skill is the entry point and router. Task authoring quality standards live in `orbit-create-task`.
+For any Orbit lifecycle work (creating tasks, executing, reviewing, raising PRs), invoke the relevant `orbit-*` skill. The `orbit` skill is the entry point and router. Task authoring quality standards live in `orbit-task`.
 
 Planning-duel scoreboards, when a duel has run, appear under `.orbit/state/scoreboard/` (e.g. `duel_plan.json`) — workspace-local runtime state, gitignored, so the path won't exist until then.

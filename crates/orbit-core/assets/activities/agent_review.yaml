@@ -68,7 +68,7 @@ spec:
     7. Before stopping, run the learning checkpoint: if this review surfaced a
        contradicted assumption, recurring failure mode, non-obvious gotcha that
        took more than 10 minutes to debug, or incident-style root cause, follow
-       the `orbit-learning` skill and call the `add` action on
+       the `orbit-knowledge` skill and call the `add` action on
        `orbit.learning` (or use that skill's update/supersede flow when it
        points to existing guidance).
        Skip if none apply.

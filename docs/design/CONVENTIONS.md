@@ -74,7 +74,7 @@ Every numbered doc ends with a **Task References** section listing only the task
 
 ## 4. ADR Template (strict)
 
-**Allocation order is non-negotiable.** Before writing the heading or body, allocate the global ID via `orbit.adr.add` (see the `orbit-adr` skill and [ADR-0153]). The local heading then uses the allocated global ID verbatim — never invent a four-digit number that "looks global." The store is the source of truth for ID, status, owner, `related_features`, and `related_tasks`; the local `4_decisions.md` entry is the long-form narrative log keyed on that same global ID.
+**Allocation order is non-negotiable.** Before writing the heading or body, allocate the global ID via `orbit.adr.add` (see the `orbit-knowledge` skill and [ADR-0153]). The local heading then uses the allocated global ID verbatim — never invent a four-digit number that "looks global." The store is the source of truth for ID, status, owner, `related_features`, and `related_tasks`; the local `4_decisions.md` entry is the long-form narrative log keyed on that same global ID.
 
 Copy the ADR block from [`_templates/4_decisions.md`](./_templates/4_decisions.md): a `## ADR-NNNN — <title>` heading, a `**Status:** <status> · YYYY-MM · [task]` line, then `Context` / `Decision` / `Consequences`, where the Consequences list ends with a `Cost:` bullet.
 

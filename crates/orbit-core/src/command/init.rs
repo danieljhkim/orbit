@@ -665,9 +665,9 @@ mod tests {
             home.path()
                 .join(".orbit")
                 .join("skills")
-                .join("orbit-debug-job-failure")
+                .join("orbit-workflow")
                 .join("references")
-                .join("common_failures.md")
+                .join("debug-job-failure.md")
                 .exists()
         );
         assert!(
