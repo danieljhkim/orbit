@@ -1,0 +1,21 @@
+[Unit]
+Description=orbit-web upgrade (rebuild agent-main, swap ~/.orbit/bin/orbit, restart, verify)
+# Never race the dashboard's own startup ordering: this unit restarts
+# orbit-web itself, so it must not be pulled in as one of its dependencies.
+
+[Service]
+Type=oneshot
+# The script cds into the orbit checkout itself; pin a stable directory anyway.
+WorkingDirectory=%h
+# systemd user units get a minimal PATH that omits cargo (~/.cargo/bin), orbit
+# (~/.orbit/bin), and the git/gh credential tooling in ~/.local/bin.
+Environment=PATH=%h/.cargo/bin:%h/.local/bin:%h/.orbit/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/workspace/constellation/codebases/orbit/deploy/orbit-web-upgrade.sh
+# Type=oneshot has no start timeout by default; this is a deliberate ceiling
+# so a wedged pull/build can't hang forever. A killed run is a safe pre-swap
+# abort — the daily timer retries. Raise it if a cold rebuild ever needs more.
+TimeoutStartSec=30min
+# No Restart=on-failure: a failed pull/build would just fail again seconds
+# later. The daily timer is the retry; failures stay visible in
+# `systemctl --user list-units --failed` until then.
+SyslogIdentifier=orbit-web-upgrade
