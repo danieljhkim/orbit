@@ -73,6 +73,21 @@ pub const CONFIG_KEY_REGISTRY: &[ConfigKeyDescriptor] = &[
         description: "Default v2 agent_loop execution backend: one of http, cli, auto.",
     },
     ConfigKeyDescriptor {
+        key: "runtime.log_max_file_mb",
+        value_type: "integer",
+        description: "Roll the active JSONL log once it grows past this many MiB (must be >= 1 and <= runtime.log_max_total_mb).",
+    },
+    ConfigKeyDescriptor {
+        key: "runtime.log_max_total_mb",
+        value_type: "integer",
+        description: "Total size budget (MiB) across JSONL log archives; oldest are pruned first when exceeded (must be >= 1).",
+    },
+    ConfigKeyDescriptor {
+        key: "runtime.log_retention_days",
+        value_type: "integer",
+        description: "Delete JSONL log archives whose mtime is older than this many days (must be >= 1).",
+    },
+    ConfigKeyDescriptor {
         key: "scoring.enabled",
         value_type: "bool",
         description: "Whether scoreboard metrics are recorded for task runs.",

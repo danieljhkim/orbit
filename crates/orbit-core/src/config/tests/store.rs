@@ -247,6 +247,152 @@ fn open_for_workspace_set_seeds_from_global() {
 }
 
 #[test]
+fn get_returns_default_log_rotation_values_when_absent() {
+    let dir = tempdir().expect("tempdir");
+    let path = config_path(dir.path());
+    let store = ConfigStore::open(ConfigScope::Workspace, &path).expect("open empty store");
+
+    assert_eq!(
+        store
+            .effective_value("runtime.log_retention_days")
+            .expect("get retention default"),
+        serde_json::json!(7)
+    );
+    assert_eq!(
+        store
+            .effective_value("runtime.log_max_total_mb")
+            .expect("get total mb default"),
+        serde_json::json!(500)
+    );
+    assert_eq!(
+        store
+            .effective_value("runtime.log_max_file_mb")
+            .expect("get file mb default"),
+        serde_json::json!(100)
+    );
+}
+
+#[test]
+fn get_returns_configured_log_rotation_values() {
+    let dir = tempdir().expect("tempdir");
+    let path = config_path(dir.path());
+    fs::write(
+        &path,
+        "[runtime]\nlog_retention_days = 14\nlog_max_total_mb = 200\nlog_max_file_mb = 20\n",
+    )
+    .expect("write config");
+
+    let store = ConfigStore::open(ConfigScope::Workspace, &path).expect("open store");
+    assert_eq!(
+        store
+            .effective_value("runtime.log_retention_days")
+            .expect("get retention"),
+        serde_json::json!(14)
+    );
+    assert_eq!(
+        store
+            .effective_value("runtime.log_max_total_mb")
+            .expect("get total mb"),
+        serde_json::json!(200)
+    );
+    assert_eq!(
+        store
+            .effective_value("runtime.log_max_file_mb")
+            .expect("get file mb"),
+        serde_json::json!(20)
+    );
+}
+
+#[test]
+fn set_log_rotation_writes_and_round_trips() {
+    let dir = tempdir().expect("tempdir");
+    let path = config_path(dir.path());
+    let mut store = ConfigStore::open(ConfigScope::Workspace, &path).expect("open store");
+
+    store
+        .set_value("runtime.log_retention_days", "30")
+        .expect("set retention");
+    store
+        .set_value("runtime.log_max_total_mb", "1000")
+        .expect("set total mb");
+    store
+        .set_value("runtime.log_max_file_mb", "50")
+        .expect("set file mb");
+    store.validate().expect("validate");
+    store.save().expect("save");
+
+    let saved = fs::read_to_string(&path).expect("read saved config");
+    assert!(
+        saved.contains("log_retention_days = 30"),
+        "expected integer literal, got:\n{saved}"
+    );
+    assert!(saved.contains("log_max_total_mb = 1000"), "{saved}");
+    assert!(saved.contains("log_max_file_mb = 50"), "{saved}");
+
+    let reopened = ConfigStore::open(ConfigScope::Workspace, &path).expect("reopen store");
+    assert_eq!(
+        reopened
+            .effective_value("runtime.log_retention_days")
+            .expect("get retention"),
+        serde_json::json!(30)
+    );
+    assert_eq!(
+        reopened
+            .effective_value("runtime.log_max_total_mb")
+            .expect("get total mb"),
+        serde_json::json!(1000)
+    );
+    assert_eq!(
+        reopened
+            .effective_value("runtime.log_max_file_mb")
+            .expect("get file mb"),
+        serde_json::json!(50)
+    );
+}
+
+#[test]
+fn set_log_rotation_rejects_out_of_range_via_validate() {
+    let dir = tempdir().expect("tempdir");
+    let path = config_path(dir.path());
+    let mut store = ConfigStore::open(ConfigScope::Workspace, &path).expect("open store");
+
+    // per-file budget above total must fail through the same
+    // LogRotationConfig::from_parts pipeline the runtime uses at load.
+    store
+        .set_value("runtime.log_max_total_mb", "10")
+        .expect("set_value only mutates in-memory");
+    store
+        .set_value("runtime.log_max_file_mb", "50")
+        .expect("set_value only mutates in-memory");
+    let error = store
+        .validate()
+        .expect_err("per-file budget above total must fail validation");
+    assert!(matches!(error, OrbitError::InvalidInput(_)), "{error}");
+    assert!(error.to_string().contains("log_max_file_mb"), "{error}");
+}
+
+#[test]
+fn keys_registry_lists_all_runtime_log_keys() {
+    use super::super::registry::CONFIG_KEY_REGISTRY;
+    let keys: Vec<&str> = CONFIG_KEY_REGISTRY.iter().map(|entry| entry.key).collect();
+    assert!(keys.contains(&"runtime.log_retention_days"), "{keys:?}");
+    assert!(keys.contains(&"runtime.log_max_total_mb"), "{keys:?}");
+    assert!(keys.contains(&"runtime.log_max_file_mb"), "{keys:?}");
+    for key in [
+        "runtime.log_retention_days",
+        "runtime.log_max_total_mb",
+        "runtime.log_max_file_mb",
+    ] {
+        let entry = CONFIG_KEY_REGISTRY
+            .iter()
+            .find(|e| e.key == key)
+            .expect("registered");
+        assert_eq!(entry.value_type, "integer", "key: {key}");
+        assert!(!entry.description.is_empty(), "key: {key}");
+    }
+}
+
+#[test]
 fn open_for_workspace_set_fresh_starts_empty() {
     let dir = tempdir().expect("tempdir");
     let workspace_path = config_path(dir.path());

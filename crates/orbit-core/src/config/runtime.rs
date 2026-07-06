@@ -65,6 +65,11 @@ pub(crate) struct RuntimeConfig {
     /// Applied forward-only on runtime build so machines can hold disjoint id
     /// ranges. `None` leaves the allocator untouched.
     pub(crate) tasks_id_start: Option<u32>,
+    /// Resolved JSONL log rotation/retention budgets [ORB-00415]. Sourced from
+    /// `[runtime] log_retention_days` / `log_max_total_mb` / `log_max_file_mb`;
+    /// defaults come from [`LogRotationConfig::default`]. Retained here so
+    /// `orbit config get`/`show` can report the effective values.
+    pub(crate) log_rotation: LogRotationConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +115,7 @@ impl RuntimeConfig {
             default_crew: Some(DEFAULT_WORKFLOW_CREW.to_string()),
             duel: DuelConfig::default(),
             tasks_id_start: None,
+            log_rotation: LogRotationConfig::default(),
         }
     }
 
@@ -201,8 +207,9 @@ impl RuntimeConfig {
         // [ORB-00415] Strict gate for the JSONL log rotation/retention knobs so
         // a malformed `[runtime]` value fails `orbit` startup with a clear
         // error. The subscriber itself reads these keys leniently at init
-        // (before config load); this validates the same values.
-        validate_log_rotation_from_raw(parsed.runtime.as_ref())?;
+        // (before config load); this validates the same values and retains the
+        // resolved budgets so `orbit config get`/`show` can report them.
+        let log_rotation = log_rotation_from_raw(parsed.runtime.as_ref())?;
 
         reject_stale_agent_role_tables(parsed.agent.as_ref())?;
 
@@ -250,6 +257,7 @@ impl RuntimeConfig {
             default_crew,
             duel,
             tasks_id_start,
+            log_rotation,
         })
     }
 
@@ -286,6 +294,10 @@ impl RuntimeConfig {
 
     pub(crate) fn duel_config(&self) -> &DuelConfig {
         &self.duel
+    }
+
+    pub(crate) fn log_rotation(&self) -> &LogRotationConfig {
+        &self.log_rotation
     }
 }
 
@@ -565,7 +577,7 @@ fn runtime_backend_from_raw(raw: Option<&RawRuntimeSection>) -> Result<Option<St
     Ok(Some(backend.as_str().to_string()))
 }
 
-fn validate_log_rotation_from_raw(raw: Option<&RawRuntimeSection>) -> Result<(), OrbitError> {
+fn log_rotation_from_raw(raw: Option<&RawRuntimeSection>) -> Result<LogRotationConfig, OrbitError> {
     let (retention_days, max_total_mb, max_file_mb) = match raw {
         Some(section) => (
             section.log_retention_days,
@@ -574,8 +586,7 @@ fn validate_log_rotation_from_raw(raw: Option<&RawRuntimeSection>) -> Result<(),
         ),
         None => (None, None, None),
     };
-    LogRotationConfig::from_parts(retention_days, max_total_mb, max_file_mb)?;
-    Ok(())
+    LogRotationConfig::from_parts(retention_days, max_total_mb, max_file_mb)
 }
 
 fn validate_task_artifact_store_from_raw(raw: Option<&RawTaskSection>) -> Result<(), OrbitError> {
