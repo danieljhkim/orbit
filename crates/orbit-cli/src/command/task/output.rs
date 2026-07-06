@@ -107,7 +107,7 @@ pub(crate) fn task_to_json_with_sidecars(
     Ok(value)
 }
 
-pub(super) fn task_lock_to_json(task: &orbit_core::Task) -> Value {
+pub(crate) fn task_lock_to_json(task: &orbit_core::Task) -> Value {
     json!({
         "id": task.id,
         "title": task.title,
@@ -155,7 +155,7 @@ pub(super) fn print_task_table(tasks: &[orbit_core::Task], full: bool) {
     println!("{table}");
 }
 
-pub(super) fn print_task_locks(tasks: &[orbit_core::Task], locked_files: &BTreeSet<String>) {
+pub(crate) fn print_task_locks(tasks: &[orbit_core::Task], locked_files: &BTreeSet<String>) {
     if tasks.is_empty() {
         println!("No files currently locked.");
         return;

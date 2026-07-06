@@ -645,7 +645,7 @@ impl OrbitRuntime {
         }
         if self.tool_registry().has(name) {
             return Err(OrbitError::Execution(format!(
-                "tool '{name}' is inactive on the agent tool surface; use the corresponding `orbit <subcommand>` CLI path for human/admin workflows"
+                "tool '{name}' is inactive on the agent tool surface; it is an admin/human-only operation — use the equivalent Orbit CLI or dashboard workflow"
             )));
         }
         Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()))
