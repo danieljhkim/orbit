@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the orbit-web upgrade daily
+
+[Timer]
+# Daily cadence. OnCalendar (not OnUnitActiveSec) because Persistent= only
+# takes effect on calendar timers — a box that was down at midnight catches
+# up on boot instead of skipping a day.
+OnCalendar=daily
+Persistent=true
+# Smear start times so the rebuild never lines up exactly with other timers.
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

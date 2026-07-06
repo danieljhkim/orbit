@@ -51,6 +51,56 @@ base_branch = "agent-main"   # repo's ship base, if not "main"
 auto_ship = true
 ```
 
+## orbit-web-upgrade (systemd user timer)
+
+Daily `orbit-web-upgrade.sh` run: rebuild `agent-main` in the orbit checkout,
+atomically swap `~/.orbit/bin/orbit` (previous binary kept as `orbit.bak`),
+restart `orbit-web`, and health-check `/healthz` + `/api/workspaces`. This
+automates the manual upgrade runbook in `docs/OPERATIONS.md` so the dashboard
+never drifts behind `agent-main`.
+
+Safety properties, in order:
+
+1. **No-op** when the freshly built binary is byte-identical to the installed
+   one — no swap, no restart, no daily service blip.
+2. **Pre-swap aborts leave everything untouched**: wrong branch, dirty tree,
+   failed `git pull --ff-only`, failed `cargo build --release`, or an
+   `orbit migrate --dry-run` that errors under the new binary (merely *pending*
+   migrations don't block — orbit auto-applies them on workspace open).
+3. **Deferral** instead of restart when any registered workspace has a
+   pending/running job run (`orbit run history`).
+4. **Rollback**: if `/healthz` + `/api/workspaces` don't come back healthy
+   within 30s of the restart, the script reinstalls `orbit.bak`, restarts
+   again, records a friction in polaris, and exits nonzero so the failure
+   shows in `systemctl --user list-units --failed`.
+
+It's a systemd user timer (not an orbit routine) deliberately: the job
+replaces and restarts the very binary the orbit scheduler runs on, so it
+lives outside orbit — like its siblings above, it still works when orbit is
+the thing that's broken.
+
+### Install (per host, e.g. dk-server-1)
+
+```sh
+cp deploy/orbit-web-upgrade.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now orbit-web-upgrade.timer
+```
+
+The service `ExecStart` points at this script inside the checkout
+(`~/workspace/constellation/codebases/orbit/deploy/orbit-web-upgrade.sh`), so
+script fixes land with a normal `git pull` — only `.service`/`.timer` edits
+need a re-copy + `daemon-reload`.
+
+### Inspect / disable
+
+```sh
+systemctl --user list-timers orbit-web-upgrade.timer     # next/last fire
+journalctl --user -t orbit-web-upgrade -n 50             # last run's output
+systemctl --user start orbit-web-upgrade.service         # run once now
+systemctl --user disable --now orbit-web-upgrade.timer   # stop the schedule
+```
+
 ## orbit-web (systemd user service)
 
 Runs `orbit web serve --global --no-open`: the always-on dashboard over every

@@ -473,3 +473,8 @@ sqlite3 ~/.orbit/orbit.db "VACUUM INTO '/backups/orbit.db'"   # global store (§
 Then upgrade the binary, run `orbit migrate --dry-run` to review, `orbit migrate` to
 apply, and `orbit doctor` to verify. After swapping the binary on a host running the
 dashboard: `systemctl --user restart orbit-web`.
+
+On hosts that track `agent-main` continuously, this whole sequence is automated by the
+daily `orbit-web-upgrade` timer (`deploy/orbit-web-upgrade.{sh,service,timer}` — see
+`deploy/README.md`): rebuild, no-op when unchanged, migrate gate, atomic swap with
+`orbit.bak`, restart, health-check, rollback on failure.
