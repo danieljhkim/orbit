@@ -43,23 +43,46 @@ pub(crate) fn seed_default_executors(
     Ok(created)
 }
 
-fn migrated_default_executor(existing: &ExecutorDef, seeded: &ExecutorDef) -> Option<ExecutorDef> {
+pub(super) fn migrated_default_executor(
+    existing: &ExecutorDef,
+    seeded: &ExecutorDef,
+) -> Option<ExecutorDef> {
     if existing.name != seeded.name {
         return None;
     }
 
-    if existing.executor_type != ExecutorType::AgentCli
-        || seeded.executor_type != ExecutorType::DirectAgent
+    let mut migrated = existing.clone();
+    let mut changed = false;
+
+    if existing.executor_type == ExecutorType::AgentCli
+        && seeded.executor_type == ExecutorType::DirectAgent
     {
-        return None;
+        migrated.executor_type = ExecutorType::DirectAgent;
+        changed = true;
     }
 
-    let mut migrated = existing.clone();
-    migrated.executor_type = ExecutorType::DirectAgent;
-    Some(migrated)
+    // Scrub a platform-mismatched sandbox left over from a prior install so
+    // re-seeding on a host that can't apply it (e.g. `macos-sandbox-exec` on
+    // Linux) drops the declaration instead of leaving dispatch fail-closed.
+    // See [ORB-10047].
+    if let Some(kind) = existing.sandbox {
+        if !kind.is_available_on_current_platform() {
+            tracing::warn!(
+                executor = %existing.name,
+                sandbox = %kind,
+                current_platform = std::env::consts::OS,
+                target_platform = kind.target_os(),
+                "scrubbing platform-mismatched sandbox from installed executor def on re-seed",
+            );
+            migrated.sandbox = None;
+            changed = true;
+        }
+    }
+
+    if changed { Some(migrated) } else { None }
 }
 
-fn parse_default_executor(name: &str, yaml: &str) -> Result<ExecutorDef, OrbitError> {
+pub(super) fn parse_default_executor(name: &str, yaml: &str) -> Result<ExecutorDef, OrbitError> {
     let resource: ExecutorResource = serde_yaml::from_str(yaml).map_err(|e| {
         OrbitError::InvalidInput(format!("invalid embedded executor def '{name}': {e}"))
     })?;
@@ -82,10 +105,30 @@ fn parse_default_executor(name: &str, yaml: &str) -> Result<ExecutorDef, OrbitEr
         )));
     }
 
-    Ok(ExecutorDef::from_resource_spec(
+    let mut def = ExecutorDef::from_resource_spec(
         resource.metadata.name,
         resource.spec.clone(),
         resource.spec.created_at,
         resource.spec.updated_at,
-    ))
+    );
+
+    // Shipped executor assets today declare a single-OS sandbox primitive
+    // (`macos-sandbox-exec`); dispatch fails closed if the runner platform
+    // can't apply it. Drop the declaration at parse time on hosts where it
+    // doesn't apply so first-install and re-install (overwrite mode) don't
+    // persist a platform-mismatched sandbox. See [ORB-10047].
+    if let Some(kind) = def.sandbox {
+        if !kind.is_available_on_current_platform() {
+            tracing::warn!(
+                executor = %def.name,
+                sandbox = %kind,
+                current_platform = std::env::consts::OS,
+                target_platform = kind.target_os(),
+                "shipped executor asset declares sandbox for another platform; installing without sandbox on this host",
+            );
+            def.sandbox = None;
+        }
+    }
+
+    Ok(def)
 }
