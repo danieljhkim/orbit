@@ -26,6 +26,8 @@ Orbit tools are reachable via two surfaces. Both accept identical JSON arguments
 
 **Mapping rule**: `orbit.<group>.<action>` ↔ `orbit_<group>_<action>` (dots become underscores; JSON args identical). For multi-segment names like `orbit.task.review_thread.add`, every dot becomes an underscore: `orbit_task_review_thread_add`.
 
+**Environment parity**: the orbit tool surface is identical everywhere. On machines without a local orbit store, the same `orbit_*` tools are served by the bridge MCP, which mirrors the orbit MCP exactly (plus an optional `workspace` routing param on tools that lack one); bridge-only extensions (`workflow_ship`, `agent_invoke`, …) handle cross-workspace and pipeline operations.
+
 **Surface coverage:**
 
 - Task lifecycle (`orbit.task.*`), ADR artifacts (`orbit.adr.*`), learnings (`orbit.learning.*`), unified search (`orbit.search`): both surfaces.
