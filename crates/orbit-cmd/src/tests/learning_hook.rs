@@ -351,7 +351,6 @@ fn reminders(ids: &[&str]) -> Vec<LearningReminder> {
         .map(|id| LearningReminder {
             id: (*id).to_string(),
             summary: format!("summary {id}"),
-            comments: Vec::new(),
         })
         .collect()
 }

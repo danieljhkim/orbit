@@ -75,13 +75,10 @@ pub use context::ActorIdentity;
 pub use orbit_common::types::{
     AuditEvent, AuditEventStatus, AuditStats, EvidenceKind, ExecutorDef, ExternalRef, JobRun,
     JobRunState, JobRunStep, JobTargetType, Learning, LearningEvidence, LearningScope,
-    LearningStatus, LearningVoteSummary, ReviewThreadStatus, Task, TaskComplexity, TaskPriority,
-    TaskStatus, TaskType, build_task_status_index, resolve_task_dependencies,
-    task_dependencies_ready,
+    LearningStatus, ReviewThreadStatus, Task, TaskComplexity, TaskPriority, TaskStatus, TaskType,
+    build_task_status_index, resolve_task_dependencies, task_dependencies_ready,
 };
-pub use orbit_common::types::{
-    LearningComment, MissedRunPolicy, NotFoundKind, OrbitError, OverlapPolicy,
-};
+pub use orbit_common::types::{MissedRunPolicy, NotFoundKind, OrbitError, OverlapPolicy};
 pub use orbit_common::utility::redaction::redact_sensitive_env_text;
 pub use orbit_store::learning_layout::LearningLayoutMigrationReport;
 pub use orbit_store::{
@@ -89,7 +86,6 @@ pub use orbit_store::{
 };
 pub use orbit_store::{
     LearningCreateParams, LearningListEntry, LearningSearchParams, LearningUpdateParams,
-    LearningUpvoteParams,
 };
 pub use runtime::OrbitRuntime;
 pub use runtime::engine::ResolvedCrewProjection;

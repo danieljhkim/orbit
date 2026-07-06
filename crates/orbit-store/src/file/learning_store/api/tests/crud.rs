@@ -38,8 +38,7 @@ fn round_trip_persistence_preserves_all_fields_including_phase_two_reservations(
         };
         let learning = store.create_learning(params).expect("create");
         let learning_dir = path_root.join(&learning.id);
-        assert!(learning_dir.join("votes.jsonl").is_file());
-        assert!(learning_dir.join("comments.jsonl").is_file());
+        assert!(learning_dir.exists());
         let allocation = store
             .id_allocator
             .learning_allocation(&learning.id)
@@ -648,18 +647,18 @@ fn partial_create_rolls_back_reservation_and_body() {
     let (dir, store) = store_with_index();
     let root = dir.path().to_path_buf();
 
-    // Inject a failure *between* the YAML body write and the allocation
-    // recording: pre-create the votes sidecar path (for the id the fresh
-    // allocator will hand out first) as a *directory*, so `ensure_empty_sidecar`
-    // fails when it opens it as a file. The first id in a fresh store is L-0001.
+    // Inject a failure at the body-write step: pre-create the `learning.yaml`
+    // path (for the id the fresh allocator will hand out first) as a *directory*,
+    // so `create_learning_file_exclusive` fails when it tries to open the target
+    // as a file. The first id in a fresh store is L-0001.
     let expected_id = "L-0001";
-    std::fs::create_dir_all(root.join(expected_id).join("votes.jsonl"))
-        .expect("seed sidecar collision");
+    std::fs::create_dir_all(root.join(expected_id).join("learning.yaml"))
+        .expect("seed body collision");
 
     let result = store.create_learning(create_params("rolled back", vec!["a/**"], vec!["t"]));
     assert!(
         result.is_err(),
-        "create must fail on the seeded sidecar collision"
+        "create must fail on the seeded body collision"
     );
 
     // No orphaned state: not indexed, body removed, reservation abandoned —
@@ -676,10 +675,8 @@ fn partial_create_rolls_back_reservation_and_body() {
             .is_none(),
         "reserved id must be abandoned (not left half-visible) after rollback"
     );
-    assert!(
-        !root.join(expected_id).join("learning.yaml").exists(),
-        "staged body file must be removed on rollback"
-    );
+    // (The seeded collision directory at `L-0001/learning.yaml` intentionally
+    // persists — the rollback path can't remove a directory it never wrote.)
 
     // The workspace is still usable: a subsequent create succeeds (the burned
     // id is not reissued, per abandon semantics).

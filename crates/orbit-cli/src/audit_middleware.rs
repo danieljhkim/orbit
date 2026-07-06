@@ -433,11 +433,9 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             use crate::command::learning::LearningSubcommand;
             let sub = match &cmd.command {
                 LearningSubcommand::Add(_) => "add",
-                LearningSubcommand::Comment(_) => "comment",
                 LearningSubcommand::List(_) => "list",
                 LearningSubcommand::Show(_) => "show",
                 LearningSubcommand::Update(_) => "update",
-                LearningSubcommand::Upvote(_) => "upvote",
                 LearningSubcommand::Supersede(_) => "supersede",
                 LearningSubcommand::Sync(_) => "sync",
                 LearningSubcommand::MigrateLayout(_) => "migrate-layout",

@@ -6,9 +6,8 @@ use orbit_common::types::{
 
 use super::contracts::{
     AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter, AdrStoreBackend,
-    ExecutorDefStoreBackend, LearningCommentAddParams, LearningCommentDeleteParams,
-    LearningCreateParams, LearningListEntry, LearningSearchParams, LearningSearchResult,
-    LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend,
+    ExecutorDefStoreBackend, LearningCreateParams, LearningListEntry, LearningSearchParams,
+    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend,
     RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
     TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
     TaskHistoryUpdateParams, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
@@ -275,42 +274,6 @@ impl LearningStoreBackend for LearningFileStore {
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
         self.search_learnings(params)
-    }
-
-    fn upvote_learning(
-        &self,
-        params: LearningUpvoteParams,
-    ) -> Result<orbit_common::types::LearningVoteSummary, OrbitError> {
-        self.upvote_learning(params)
-    }
-
-    fn learning_vote_summary(
-        &self,
-        id: &str,
-    ) -> Result<orbit_common::types::LearningVoteSummary, OrbitError> {
-        self.learning_vote_summary(id)
-    }
-
-    fn add_learning_comment(
-        &self,
-        params: LearningCommentAddParams,
-    ) -> Result<orbit_common::types::LearningComment, OrbitError> {
-        self.add_learning_comment(params)
-    }
-
-    fn list_learning_comments(
-        &self,
-        learning_id: &str,
-        include_deleted: bool,
-    ) -> Result<Vec<orbit_common::types::LearningComment>, OrbitError> {
-        self.list_learning_comments(learning_id, include_deleted)
-    }
-
-    fn delete_learning_comment(
-        &self,
-        params: LearningCommentDeleteParams,
-    ) -> Result<(), OrbitError> {
-        self.delete_learning_comment(params)
     }
 
     fn update_learning(

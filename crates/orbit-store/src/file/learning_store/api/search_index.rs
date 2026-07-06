@@ -1,15 +1,12 @@
 // ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
-use std::env;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{Learning, LearningStatus, OrbitError, decayed_vote_score};
+use orbit_common::types::{Learning, LearningStatus, OrbitError};
 use orbit_common::utility::glob::{compile_glob_regex, normalize_glob_path};
 
-use super::super::votes::validate_vote_files;
-use super::super::votes::{deduped_vote_times, read_vote_rows};
 use super::store::LearningFileStore;
 use crate::backend::{LearningSearchParams, LearningSearchResult};
 
@@ -44,8 +41,6 @@ impl LearningFileStore {
     /// No-op when no index is attached; otherwise wipes
     /// `learnings_index` and reinserts every record found on disk.
     pub(crate) fn sync_learnings(&self) -> Result<(), OrbitError> {
-        validate_vote_files(&self.root)?;
-        super::validation::validate_comment_files(&self.root)?;
         // [ORB-00413] Surface orphaned body files (the fingerprint of a legacy
         // partial create: body on disk, allocation never recorded) so the
         // resync command reports them with a remedy. Non-fatal to the sync.
@@ -143,14 +138,6 @@ impl LearningFileStore {
         &self,
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
-        self.search_learnings_at(params, Utc::now())
-    }
-
-    pub(crate) fn search_learnings_at(
-        &self,
-        params: LearningSearchParams,
-        now: DateTime<Utc>,
-    ) -> Result<Vec<LearningSearchResult>, OrbitError> {
         let limit = params.limit.unwrap_or(usize::MAX);
         let normalized_path = params
             .path
@@ -164,8 +151,7 @@ impl LearningFileStore {
 
         let unfiltered = normalized_path.is_none() && tag_lower.is_none() && query_lower.is_none();
 
-        let half_life_days = vote_half_life_days();
-        let mut matched: Vec<(&EnvelopeSnapshot, Vec<String>, f64)> = Vec::new();
+        let mut matched: Vec<(&EnvelopeSnapshot, Vec<String>)> = Vec::new();
         for envelope in candidates.iter() {
             let mut axes = Vec::new();
             if let Some(path) = &normalized_path {
@@ -190,25 +176,20 @@ impl LearningFileStore {
             if axes.is_empty() && !unfiltered {
                 continue;
             }
-            let vote_times = deduped_vote_times(&read_vote_rows(
-                &super::super::layout::votes_jsonl_path(&self.root, &envelope.id),
-            )?);
-            let vote_score = decayed_vote_score(&vote_times, now, half_life_days);
-            matched.push((envelope, axes, vote_score));
+            matched.push((envelope, axes));
         }
 
-        // Sort by decayed vote score first, then the prior priority and
-        // recency keys. RFC3339 string compare is correct because
-        // `Learning::updated_at` is `DateTime<Utc>`.
+        // Sort by priority then recency. RFC3339 string compare is correct
+        // because `Learning::updated_at` is `DateTime<Utc>`.
         matched.sort_by(|a, b| {
-            b.2.total_cmp(&a.2)
-                .then_with(|| priority_rank(b.0.priority).cmp(&priority_rank(a.0.priority)))
+            priority_rank(b.0.priority)
+                .cmp(&priority_rank(a.0.priority))
                 .then_with(|| b.0.updated_at_key.cmp(&a.0.updated_at_key))
                 .then_with(|| a.0.id.cmp(&b.0.id))
         });
 
         let mut results = Vec::with_capacity(limit.min(matched.len()));
-        for (envelope, axes, _score) in matched.into_iter().take(limit) {
+        for (envelope, axes) in matched.into_iter().take(limit) {
             let updated_at = parse_rfc3339_or_epoch(&envelope.updated_at_key);
             let learning = Learning {
                 id: envelope.id.clone(),
@@ -352,13 +333,4 @@ fn priority_rank(priority: Option<u8>) -> i16 {
         None => -1,
         Some(value) => value as i16,
     }
-}
-
-fn vote_half_life_days() -> f64 {
-    const DEFAULT_HALF_LIFE_DAYS: f64 = 180.0;
-    env::var("ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<f64>().ok())
-        .filter(|value| value.is_finite() && *value >= 0.0)
-        .unwrap_or(DEFAULT_HALF_LIFE_DAYS)
 }

@@ -82,13 +82,11 @@ pub(crate) const DOCS_TOOL_NAMES: &[&str] = &[];
 
 pub(crate) const LEARNING_TOOL_NAMES: &[&str] = &[
     "orbit.learning.add",
-    "orbit.learning.comment.add",
-    // ORB-00289: `orbit.learning.comment.delete` and `orbit.learning.prune`
-    // are destructive admin-only operations and are not exposed on the
-    // agent MCP surface; the CLI / `runtime.run_tool` path retains them.
-    // `orbit.learning.comment.list` and `orbit.learning.upvote` are also
-    // CLI-only — agents discover learnings via `orbit.search`, and upvote
-    // telemetry is an operator concern.
+    // ORB-00289: `orbit.learning.prune` is a destructive admin-only op and
+    // is not exposed on the agent MCP surface; the CLI / `runtime.run_tool`
+    // path retains it. ORB-10046: the comment and upvote surfaces were
+    // removed entirely (corrections use `update`/`supersede`; provenance
+    // uses `evidence`).
     "orbit.learning.show",
     "orbit.learning.update",
     "orbit.learning.supersede",

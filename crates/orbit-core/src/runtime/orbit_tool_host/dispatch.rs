@@ -37,15 +37,6 @@ pub(super) fn execute(
         OrbitBuiltinAction::FrictionTags => super::friction_tools::tags(runtime),
         OrbitBuiltinAction::FrictionUpdate => super::friction_tools::update(runtime, input),
         OrbitBuiltinAction::LearningAdd => super::learning_tools::add(runtime, input, agent, model),
-        OrbitBuiltinAction::LearningCommentAdd => {
-            super::learning_tools::comment_add(runtime, input, agent, model)
-        }
-        OrbitBuiltinAction::LearningCommentDelete => {
-            super::learning_tools::comment_delete(runtime, input, agent, model)
-        }
-        OrbitBuiltinAction::LearningCommentList => {
-            super::learning_tools::comment_list(runtime, input)
-        }
         OrbitBuiltinAction::LearningList => super::learning_tools::list(runtime, input),
         OrbitBuiltinAction::LearningPrune => super::learning_tools::prune(runtime, input),
         OrbitBuiltinAction::LearningSync => super::learning_tools::sync(runtime, input),
@@ -55,9 +46,6 @@ pub(super) fn execute(
         }
         OrbitBuiltinAction::LearningUpdate => {
             super::learning_tools::update(runtime, input, agent, model)
-        }
-        OrbitBuiltinAction::LearningUpvote => {
-            super::learning_tools::upvote(runtime, input, agent, model)
         }
         OrbitBuiltinAction::PipelineInvoke => {
             super::pipeline_tools::invoke(runtime, input, agent, model)

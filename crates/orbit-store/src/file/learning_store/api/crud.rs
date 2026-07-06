@@ -7,9 +7,7 @@ use orbit_common::types::{
     normalize_learning_tags,
 };
 
-use super::super::layout::{
-    comments_jsonl_path, learning_doc_path, locate_learning, validate_learning_id, votes_jsonl_path,
-};
+use super::super::layout::{learning_doc_path, locate_learning, validate_learning_id};
 use super::super::record::{
     create_learning_file_exclusive, read_learning_file, write_learning_file,
 };
@@ -112,8 +110,6 @@ impl LearningFileStore {
         path: &std::path::Path,
         learning: &Learning,
     ) -> Result<(), OrbitError> {
-        ensure_empty_sidecar(&votes_jsonl_path(&self.root, id))?;
-        ensure_empty_sidecar(&comments_jsonl_path(&self.root, id))?;
         self.id_allocator.record_learning_body_path(id, path)?;
         self.upsert_index_row(learning);
         self.invalidate_envelope_cache();
@@ -121,14 +117,12 @@ impl LearningFileStore {
     }
 
     /// [ORB-00413] Best-effort rollback of a partially-created learning: remove
-    /// the staged body + sidecars we wrote, drop the now-empty id directory, and
-    /// abandon the reservation so the ID is never left half-visible. Never fails
-    /// the caller — the original error is what propagates — and only logs if the
-    /// abandon itself fails.
+    /// the staged body, drop the now-empty id directory, and abandon the
+    /// reservation so the ID is never left half-visible. Never fails the caller
+    /// — the original error is what propagates — and only logs if the abandon
+    /// itself fails.
     fn rollback_partial_learning(&self, id: &str, path: &std::path::Path) {
         let _ = std::fs::remove_file(path);
-        let _ = std::fs::remove_file(votes_jsonl_path(&self.root, id));
-        let _ = std::fs::remove_file(comments_jsonl_path(&self.root, id));
         if let Some(dir) = path.parent() {
             // Only succeeds if the directory is now empty — leaves any
             // pre-existing/foreign content in place.
@@ -348,18 +342,6 @@ impl LearningFileStore {
         self.invalidate_envelope_cache();
         Ok(())
     }
-}
-
-fn ensure_empty_sidecar(path: &std::path::Path) -> Result<(), OrbitError> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| OrbitError::Io(error.to_string()))?;
-    }
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map(|_| ())
-        .map_err(|error| OrbitError::Io(error.to_string()))
 }
 
 fn remote_stub_from_allocation(record: &IdAllocationRecord) -> RemoteArtifactStub {

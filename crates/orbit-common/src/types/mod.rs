@@ -100,12 +100,10 @@ pub use job::{
     default_job_max_active_runs, default_max_iterations, default_retry_backoff_seconds,
 };
 pub use learning::{
-    DEFAULT_LEARNING_COMMENT_RENDER_CAP, DEFAULT_LEARNING_REMINDER_PER_CALL_CAP,
-    DEFAULT_LEARNING_REMINDER_SESSION_CAP, EvidenceKind, Learning, LearningComment,
-    LearningCommentEvent, LearningCommentTombstone, LearningEvidence, LearningInjectionCaps,
-    LearningInjectionState, LearningReminder, LearningScope, LearningStatus, LearningVoteRow,
-    LearningVoteSummary, decayed_vote_score, normalize_learning_paths, normalize_learning_tags,
-    prepend_reminder_block, read_comment_render_cap_env, render_reminder_block,
+    DEFAULT_LEARNING_REMINDER_PER_CALL_CAP, DEFAULT_LEARNING_REMINDER_SESSION_CAP, EvidenceKind,
+    Learning, LearningEvidence, LearningInjectionCaps, LearningInjectionState, LearningReminder,
+    LearningScope, LearningStatus, normalize_learning_paths, normalize_learning_tags,
+    prepend_reminder_block, render_reminder_block,
 };
 pub use metrics::MetricsEntry;
 pub use policy_decision::PolicyDecision;

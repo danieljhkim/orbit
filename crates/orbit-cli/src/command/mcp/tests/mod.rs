@@ -33,23 +33,19 @@ const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.semantic.uninstall",
     "orbit.task.delete",
     "orbit.task.lint",
-    "orbit.learning.comment.delete",
     "orbit.learning.prune",
     // Agent-surface narrowing: triage / human-decision tools — CLI-only.
     "orbit.task.reject",
     "orbit.friction.list",
     "orbit.friction.resolve",
     "orbit.friction.show",
-    "orbit.learning.comment.list",
-    "orbit.learning.upvote",
 ];
 
 // ORB-00289 + agent-surface narrowing: admin/destructive and triage tools
 // (`orbit.adr.list`, `orbit.semantic.uninstall`, `orbit.task.delete`,
-// `orbit.task.lint`, `orbit.task.reject`, `orbit.learning.comment.delete`,
-// `orbit.learning.prune`, `orbit.learning.comment.list`,
-// `orbit.learning.upvote`, `orbit.friction.list/show/resolve`) deliberately
-// omitted — retained on the CLI / `runtime.run_tool` path only.
+// `orbit.task.lint`, `orbit.task.reject`, `orbit.learning.prune`,
+// `orbit.friction.list/show/resolve`) deliberately omitted — retained on
+// the CLI / `runtime.run_tool` path only.
 const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.search",
     "orbit.task.add",
@@ -74,7 +70,6 @@ const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.learning.add",
     "orbit.learning.show",
     "orbit.learning.update",
-    "orbit.learning.comment.add",
     "orbit.friction.add",
     "orbit.friction.tags",
     "orbit.friction.update",
@@ -94,7 +89,7 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
 #[test]
 fn inactive_tools_are_not_in_the_mcp_safe_surface() {
     let safe_names: BTreeSet<&str> = safe_mcp_tool_names().into_iter().collect();
-    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 26);
+    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 23);
 
     for name in EXPECTED_INACTIVE_TOOL_NAMES {
         assert!(
@@ -385,7 +380,6 @@ mod audited_mcp_call_tests {
                     .and_then(serde_json::Value::as_str)
                     .expect("candidate summary")
                     .to_string(),
-                comments: Vec::new(),
             })
             .collect::<Vec<_>>();
         assert_eq!(

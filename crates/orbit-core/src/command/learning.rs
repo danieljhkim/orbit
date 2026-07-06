@@ -8,16 +8,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{
-    EvidenceKind, Learning, LearningComment, LearningStatus, NotFoundKind, OrbitError,
-};
-use orbit_common::types::{
-    LearningVoteSummary, all_agent_families, normalize_agent_family_for_model,
-};
+use orbit_common::types::{EvidenceKind, Learning, LearningStatus, NotFoundKind, OrbitError};
 use orbit_store::{
-    LearningCommentAddParams, LearningCommentDeleteParams, LearningCreateParams, LearningListEntry,
-    LearningSearchParams, LearningSearchResult, LearningUpdateParams, LearningUpvoteParams,
-    RemoteArtifactStub, learning_layout::LearningLayoutMigrationReport,
+    LearningCreateParams, LearningListEntry, LearningSearchParams, LearningSearchResult,
+    LearningUpdateParams, RemoteArtifactStub, learning_layout::LearningLayoutMigrationReport,
 };
 use serde::Deserialize;
 
@@ -100,64 +94,6 @@ impl OrbitRuntime {
 
     pub fn learning_search_config(&self) -> Result<LearningSearchConfig, OrbitError> {
         read_learning_search_config_from_config_path(&self.config_path())
-    }
-
-    pub fn upvote_learning(
-        &self,
-        params: LearningUpvoteParams,
-    ) -> Result<LearningVoteSummary, OrbitError> {
-        let voter_model = normalize_learning_voter_model(&params.voter_model)?;
-        self.stores().learnings().upvote(LearningUpvoteParams {
-            voter_model,
-            ..params
-        })
-    }
-
-    pub fn learning_vote_summary(&self, id: &str) -> Result<LearningVoteSummary, OrbitError> {
-        self.stores().learnings().vote_summary(id)
-    }
-
-    pub fn add_learning_comment(
-        &self,
-        learning_id: String,
-        body: String,
-        model: String,
-    ) -> Result<LearningComment, OrbitError> {
-        let author_model = normalize_learning_agent_model(&model)?;
-        self.stores()
-            .learnings()
-            .add_comment(LearningCommentAddParams {
-                learning_id,
-                body,
-                author_model,
-            })
-    }
-
-    pub fn list_learning_comments(
-        &self,
-        learning_id: &str,
-        include_deleted: bool,
-    ) -> Result<Vec<LearningComment>, OrbitError> {
-        self.stores()
-            .learnings()
-            .list_comments(learning_id, include_deleted)
-    }
-
-    pub fn delete_learning_comment(
-        &self,
-        comment_id: String,
-        deleted_by: Option<String>,
-    ) -> Result<(), OrbitError> {
-        let deleted_by = match deleted_by {
-            Some(model) => normalize_learning_agent_model(&model)?,
-            None => "unknown".to_string(),
-        };
-        self.stores()
-            .learnings()
-            .delete_comment(LearningCommentDeleteParams {
-                comment_id,
-                deleted_by,
-            })
     }
 
     pub fn update_learning(
@@ -394,31 +330,6 @@ fn classify_learning_search_path(
     }
 
     Ok(LearningSearchPathScope::OutsideWorkspace)
-}
-
-fn normalize_learning_voter_model(raw: &str) -> Result<String, OrbitError> {
-    normalize_learning_agent_model(raw)
-}
-
-fn normalize_learning_agent_model(raw: &str) -> Result<String, OrbitError> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "learning action requires a non-empty model".to_string(),
-        ));
-    }
-    if let Some(family) = normalize_agent_family_for_model(None, Some(trimmed))? {
-        return Ok(family);
-    }
-    let family = normalize_agent_family_for_model(Some(trimmed), None)?;
-    if let Some(family) = family
-        && all_agent_families().contains(&family.as_str())
-    {
-        return Ok(family);
-    }
-    Err(OrbitError::InvalidInput(format!(
-        "unknown agent model `{trimmed}`; use a canonical family (codex, claude, gemini, grok) or a recognized model name"
-    )))
 }
 
 fn workspace_relative_path_string(relative: &Path) -> String {

@@ -13,7 +13,6 @@ pub enum NotFoundKind {
     Adr,
     DesignFeature,
     Learning,
-    LearningComment,
     AgentSession,
     Workspace,
 }
@@ -30,7 +29,6 @@ impl std::fmt::Display for NotFoundKind {
             Self::Adr => "ADR",
             Self::DesignFeature => "design feature",
             Self::Learning => "learning",
-            Self::LearningComment => "learning comment",
             Self::AgentSession => "agent session",
             Self::Workspace => "workspace",
         };

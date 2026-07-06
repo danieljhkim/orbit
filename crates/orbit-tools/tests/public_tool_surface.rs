@@ -30,7 +30,6 @@ const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.semantic.uninstall",
     "orbit.task.delete",
     "orbit.task.lint",
-    "orbit.learning.comment.delete",
     "orbit.learning.prune",
 ];
 

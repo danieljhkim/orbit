@@ -228,7 +228,7 @@ Not every tool is intended for agent calls. Lifecycle/admin operations (`docs.in
 <summary><strong>Full tool reference</strong> — task, review, graph, search, semantic, adr, docs, learning, friction (click to expand)
 </summary>
 
-Agents discover project docs through `orbit.search`; docs, lock, semantic setup/index/status, graph history, learning sync/list/comment.list/upvote, and friction stats operations are CLI-only admin/setup workflows. Six further admin/destructive tools — `orbit.task.delete`, `orbit.task.lint`, `orbit.semantic.uninstall`, `orbit.adr.list` (use `orbit search --kind adr` from agents), `orbit.learning.prune`, `orbit.learning.comment.delete` — remain registered for admin use via `orbit tool run` and the `orbit adr list` / `orbit task lint` CLI surfaces, but are hidden from the agent MCP surface (ORB-00289).
+Agents discover project docs through `orbit.search`; docs, lock, semantic setup/index/status, graph history, learning sync/list, and friction stats operations are CLI-only admin/setup workflows. Five further admin/destructive tools — `orbit.task.delete`, `orbit.task.lint`, `orbit.semantic.uninstall`, `orbit.adr.list` (use `orbit search --kind adr` from agents), `orbit.learning.prune` — remain registered for admin use via `orbit tool run` and the `orbit adr list` / `orbit task lint` CLI surfaces, but are hidden from the agent MCP surface (ORB-00289). ORB-10046 removed the learning vote and comment surfaces entirely — corrections go through `update`/`supersede`, provenance through `evidence`.
 
 | Namespace | Tool | Purpose |
 |---|---|---|
@@ -268,9 +268,6 @@ Agents discover project docs through `orbit.search`; docs, lock, semantic setup/
 | | `orbit.learning.show` | Fetch a learning |
 | | `orbit.learning.list` | List learnings by tag / scope / `path` (glob-containment) |
 | | `orbit.learning.supersede` | Mark a learning superseded |
-| | `orbit.learning.upvote` | Record a task-anchored upvote |
-| | `orbit.learning.comment.add` | Append a footnote-style comment to a learning |
-| | `orbit.learning.comment.list` | List comments for a learning (CLI/operator-only; inactive on agent MCP surface) |
 | **friction** | `orbit.friction.add` | Record an operational friction |
 | | `orbit.friction.update` | Edit a friction |
 | | `orbit.friction.show` | Fetch a friction |
