@@ -43,7 +43,10 @@ CLAUDE = " opus-4.7 "
 
     let mut expected_models = BTreeMap::new();
     expected_models.insert("claude".to_string(), "opus-4.7".to_string());
-    expected_models.insert("codex".to_string(), "gpt-5.5".to_string());
+    expected_models.insert(
+        "codex".to_string(),
+        orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string(),
+    );
     assert_eq!(
         config.duel,
         DuelConfig {
@@ -268,7 +271,7 @@ default_crew = "codex"
             .expect("crew exists")
             .implementer
             .model,
-        "gpt-5.5"
+        orbit_common::test_fixtures::TEST_CODEX_MODEL
     );
 }
 

@@ -1,4 +1,4 @@
-use orbit_common::model_defaults::CLAUDE_DEFAULT_STRONG;
+use orbit_common::model_defaults::{CLAUDE_DEFAULT_STRONG, CODEX_DEFAULT_MODEL};
 
 use super::super::agent_detect::DetectedAgents;
 use super::super::agent_prompt::testing::CannedPrompter;
@@ -17,12 +17,12 @@ fn empty_answer_accepts_role_aware_recommended_setup() {
     let reviewer = result.get("reviewer").expect("reviewer entry");
     assert_eq!(reviewer.provider.as_deref(), Some("codex"));
     assert_eq!(reviewer.backend.as_deref(), Some("cli"));
-    assert_eq!(reviewer.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(reviewer.model.as_deref(), Some(CODEX_DEFAULT_MODEL));
 
     let implementer = result.get("implementer").expect("implementer entry");
     assert_eq!(implementer.provider.as_deref(), Some("codex"));
     assert_eq!(implementer.backend.as_deref(), Some("cli"));
-    assert_eq!(implementer.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(implementer.model.as_deref(), Some(CODEX_DEFAULT_MODEL));
 
     let planner = result.get("planner").expect("planner entry");
     assert_eq!(planner.provider.as_deref(), Some("claude"));
@@ -73,12 +73,12 @@ fn customization_enter_selects_role_recommendation() {
     let reviewer = result.get("reviewer").expect("reviewer entry");
     assert_eq!(reviewer.provider.as_deref(), Some("codex"));
     assert_eq!(reviewer.backend.as_deref(), Some("cli"));
-    assert_eq!(reviewer.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(reviewer.model.as_deref(), Some(CODEX_DEFAULT_MODEL));
 
     let implementer = result.get("implementer").expect("implementer entry");
     assert_eq!(implementer.provider.as_deref(), Some("codex"));
     assert_eq!(implementer.backend.as_deref(), Some("cli"));
-    assert_eq!(implementer.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(implementer.model.as_deref(), Some(CODEX_DEFAULT_MODEL));
 
     let planner = result.get("planner").expect("planner entry");
     assert_eq!(planner.provider.as_deref(), Some("claude"));
