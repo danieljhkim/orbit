@@ -271,6 +271,14 @@ pub struct ConfigSnapshot {
     pub scoring_enabled: bool,
     pub graph_editing: bool,
     pub runtime_backend: Option<String>,
+    /// Effective JSONL log retention window in days [ORB-00415]. Always
+    /// populated: falls back to the `LogRotationConfig` default when the key
+    /// is not explicitly set.
+    pub runtime_log_retention_days: u64,
+    /// Effective total-size budget across JSONL log archives, in MiB.
+    pub runtime_log_max_total_mb: u64,
+    /// Effective per-file roll threshold for the active JSONL log, in MiB.
+    pub runtime_log_max_file_mb: u64,
     pub workflow_base_branch: String,
     pub workflow_default_crew: Option<String>,
     pub workflow_auto_ship: bool,
@@ -283,6 +291,12 @@ pub struct ConfigSnapshot {
 
 impl From<&RuntimeConfig> for ConfigSnapshot {
     fn from(config: &RuntimeConfig) -> Self {
+        // The resolved `LogRotationConfig` stores byte budgets that were
+        // constructed by multiplying the raw MiB inputs by `BYTES_PER_MB`
+        // (or the analogous default constants), so integer division here
+        // recovers the exact MiB values the user set or would set.
+        const BYTES_PER_MB: u64 = 1024 * 1024;
+        let log_rotation = config.log_rotation();
         Self {
             execution_env_inherit: config.execution_env.inherit(),
             execution_env_pass: config.execution_env.pass().to_vec(),
@@ -296,6 +310,9 @@ impl From<&RuntimeConfig> for ConfigSnapshot {
             scoring_enabled: config.scoring_enabled,
             graph_editing: config.graph_editing,
             runtime_backend: config.v2_backend().map(ToString::to_string),
+            runtime_log_retention_days: log_rotation.retention_days,
+            runtime_log_max_total_mb: log_rotation.max_total_bytes / BYTES_PER_MB,
+            runtime_log_max_file_mb: log_rotation.max_file_bytes / BYTES_PER_MB,
             workflow_base_branch: config.workflow_base_branch().to_string(),
             workflow_default_crew: config.default_crew.clone(),
             workflow_auto_ship: config.workflow_auto_ship(),
@@ -327,6 +344,9 @@ impl ConfigSnapshot {
                 None
             }),
             "runtime.backend" => json!(self.runtime_backend),
+            "runtime.log_max_file_mb" => json!(self.runtime_log_max_file_mb),
+            "runtime.log_max_total_mb" => json!(self.runtime_log_max_total_mb),
+            "runtime.log_retention_days" => json!(self.runtime_log_retention_days),
             "scoring.enabled" => json!(self.scoring_enabled),
             "task.approval.delegate_approval" => json!(self.task_delegate_approval),
             "task.approval.required_for_agent" => json!(self.task_approval_required_for_agent),
