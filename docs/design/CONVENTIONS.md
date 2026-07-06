@@ -7,7 +7,7 @@ status: Accepted
 
 # Design Doc Conventions
 
-Recommended conventions that feature leads follow when writing and maintaining design docs under `docs/design/<feature>/`. The goal is a set of feature folders that read as one coherent documentation system regardless of which agent authored them. These are recommendations (not hard rules enforced by tooling; `orbit-design` has been retired in favor of the more tolerant `orbit-docs` surface).
+Recommended conventions that feature leads follow when writing and maintaining design docs under `docs/design/<feature>/`. The goal is a set of feature folders that read as one coherent documentation system regardless of which agent authored them. These are recommendations (not hard rules enforced by tooling; `orbit-design` has been retired in favor of the more tolerant docs surface — see the `orbit-search` skill).
 
 This doc is itself the source of truth for the conventions. When a convention changes, update this doc and then update existing feature folders to match — do not silently diverge.
 
@@ -53,7 +53,7 @@ Every numbered design doc starts with the YAML frontmatter carried by the [`_tem
 - `feature` is the folder slug (e.g. `groundhog`, `knowledge-graph`). Lets tooling group docs by feature without parsing paths.
 - `doc_role` is one of `overview`, `design`, `vision`, `decisions` — corresponds 1:1 with the filename prefix `1_`/`2_`/`3_`/`4_`.
 
-The template frontmatter also carries the orbit-docs retrieval fields (`type`, `summary`, `tags`, `paths`, `related_features`, `related_artifacts`) so the doc is indexable on day one. `type` and `summary` are required by the strict parser. `summary` must be a non-empty single line. `related_artifacts` accepts `ORB-NNNNN`, `L-NNNN`, `FYYYY-MM-NNN`, and `ADR-NNNN` strings. The tolerant indexer infers these fields for legacy design docs and pattern docs, but new docs should write them explicitly. Orbit-docs does not index `.orbit/`; ADR bodies remain owned by `orbit-adr`.
+The template frontmatter also carries the orbit-docs retrieval fields (`type`, `summary`, `tags`, `paths`, `related_features`, `related_artifacts`) so the doc is indexable on day one. `type` and `summary` are required by the strict parser. `summary` must be a non-empty single line. `related_artifacts` accepts `ORB-NNNNN`, `L-NNNN`, `FYYYY-MM-NNN`, and `ADR-NNNN` strings. The tolerant indexer infers these fields for legacy design docs and pattern docs, but new docs should write them explicitly. The docs indexer does not index `.orbit/`; ADR bodies remain owned by the ADR tool surface (see the `orbit-knowledge` skill).
 
 ---
 
@@ -74,7 +74,7 @@ Every numbered doc ends with a **Task References** section listing only the task
 
 ## 4. ADR Template (strict)
 
-**Allocation order is non-negotiable.** Before writing the heading or body, allocate the global ID via `orbit.adr.add` (see the `orbit-adr` skill and [ADR-0153]). The local heading then uses the allocated global ID verbatim — never invent a four-digit number that "looks global." The store is the source of truth for ID, status, owner, `related_features`, and `related_tasks`; the local `4_decisions.md` entry is the long-form narrative log keyed on that same global ID.
+**Allocation order is non-negotiable.** Before writing the heading or body, allocate the global ID via `orbit.adr.add` (see the `orbit-knowledge` skill and [ADR-0153]). The local heading then uses the allocated global ID verbatim — never invent a four-digit number that "looks global." The store is the source of truth for ID, status, owner, `related_features`, and `related_tasks`; the local `4_decisions.md` entry is the long-form narrative log keyed on that same global ID.
 
 Copy the ADR block from [`_templates/4_decisions.md`](./_templates/4_decisions.md): a `## ADR-NNNN — <title>` heading, a `**Status:** <status> · YYYY-MM · [task]` line, then `Context` / `Decision` / `Consequences`, where the Consequences list ends with a `Cost:` bullet.
 
@@ -168,7 +168,7 @@ There is no `Deprecated` status at the doc level. If the feature is retired, arc
 
 ## 11. Enforcement
 
-These are recommendations, not mechanically enforced by `orbit-design` (retired) or `orbit-docs`. The tolerant indexer in `orbit-docs` accepts both strict numbered design folders and free-form docs.
+These are recommendations, not mechanically enforced by `orbit-design` (retired) or the docs indexer. The tolerant indexer (see the `orbit-search` skill) accepts both strict numbered design folders and free-form docs.
 
 Two mechanical checks worth adding later (as optional lints, never blocking):
 

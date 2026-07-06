@@ -99,7 +99,7 @@ spec:
     12. Before handoff, run the learning checkpoint: if this task surfaced a
         contradicted assumption, recurring failure mode, non-obvious gotcha that
         took more than 10 minutes to debug, or incident-style root cause, follow
-        the `orbit-learning` skill and call the `add` action on
+        the `orbit-knowledge` skill and call the `add` action on
         `orbit.learning` (or use that skill's update/supersede flow when it
         points to existing guidance).
         Skip if none apply.
@@ -107,12 +107,12 @@ spec:
         (the engine performed workflow admission via `admit_task_for_workflow`
         during worktree setup, before dispatching the implement step). Do **not**
         call `orbit.task.start` — this envelope rule overrides the direct-execution
-        start step described in the `orbit-execute-task` skill's Step 3. Proceed
+        start step described in the `orbit-task` skill's Execute Step 3. Proceed
         directly to implementation.
     14. Persist an execution summary when useful, but do not move the task to
         `review`; the pipeline does that only after commit/merge or PR steps
         succeed. This envelope rule overrides the direct-execution review
-        transition described in the `orbit-execute-task` skill's Step 5 and Exit
+        transition described in the `orbit-task` skill's Execute Step 5 and Exit
         Criteria.
     15. Return a short structured summary. Include a `diff` string only when you
         can produce it cheaply and accurately.

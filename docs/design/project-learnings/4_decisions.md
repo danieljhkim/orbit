@@ -12,7 +12,7 @@ tags: ["project-learnings"]
 
 # Project Learnings — Decisions
 
-ADR-style log of non-obvious project-learnings decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are keyed by global ADR ID and ordered ascending. New entries are allocated via `orbit.adr.add` *before* the local heading is written — see [../CONVENTIONS.md §4](../CONVENTIONS.md) and the `orbit-adr` skill.
+ADR-style log of non-obvious project-learnings decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are keyed by global ADR ID and ordered ascending. New entries are allocated via `orbit.adr.add` *before* the local heading is written — see [../CONVENTIONS.md §4](../CONVENTIONS.md) and the `orbit-knowledge` skill.
 
 Format for each entry: **Status · Date · Task(s) · legacy_id (if backfilled)**, then *Context → Decision → Consequences*. Every ADR names at least one cost.
 

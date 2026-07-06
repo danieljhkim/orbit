@@ -12,7 +12,7 @@ tags: ["agent-families"]
 
 # Agent Families — Decisions
 
-ADR entries are append-only and ordered ascending by global ID. New entries are allocated via `orbit.adr.add` *before* the local heading is written — see [../CONVENTIONS.md §4](../CONVENTIONS.md) and the `orbit-adr` skill. The local heading uses the allocated global ID verbatim.
+ADR entries are append-only and ordered ascending by global ID. New entries are allocated via `orbit.adr.add` *before* the local heading is written — see [../CONVENTIONS.md §4](../CONVENTIONS.md) and the `orbit-knowledge` skill. The local heading uses the allocated global ID verbatim.
 
 Historical note: prior to 2026-05-17, ADR-0154 / ADR-0155 / ADR-0156 in this file were authored with locally-invented IDs (`ADR-0152` / `ADR-0153` / `ADR-0154`) that did not match the global store. They were re-allocated through `orbit.adr.add` per [ORB-00098]; the original local IDs survive as `legacy_ids` so prior citations still resolve.
 

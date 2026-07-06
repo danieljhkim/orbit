@@ -75,7 +75,7 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 >    - `docs/design/CONVENTIONS.md` — design-doc structure
 >    - `docs/CONFIG.md` — config reference: crew/workflow/duel knobs and per-task crew override
 > 8. After setup, run `orbit task list` and `orbit semantic stats` and show me the output.
-> 9. Ask me what my first real task should be and create it properly using Orbit's task surface (use the `orbit-create-task` skill — it should be auto-discovered after step 5).
+> 9. Ask me what my first real task should be and create it properly using Orbit's task surface (use the `orbit-task` skill — it should be auto-discovered after step 5).
 >
 > Rules:
 > - Never run destructive commands without explicit confirmation. Specifically: cloning, installing rustup, running `make install` outside `~/.cargo/bin`, and any shell-profile modification all need a confirmation prompt.
@@ -206,15 +206,13 @@ Two install surfaces. The CLI gives you the full power of Orbit. Choose the plug
 
 `orbit workspace init` seeds skill files under `~/.orbit/skills/` and symlinks them into `~/.claude/skills/` and `~/.agents/skills/`, so Claude Code, Codex, and Gemini CLI discover them at session start with no per-agent configuration. The router skill (`orbit`) classifies intent; workflow-specific skills do the work:
 
-- `orbit-guide` — onboard a first-time user when `.orbit/` is absent; also handles "what is orbit" tour requests
-- `orbit-create-task` — author a task with strong acceptance criteria
-- `orbit-execute-task` — carry an approved task through implementation and review
-- `orbit-review-task` — file findings on another agent's work without transitioning status
-- `orbit-adr` — author, accept, or supersede an Architecture Decision Record
+- `orbit-task` — author a task, carry it through implementation and review, file findings on another agent's work, or capture agent-self-reported tooling friction
+- `orbit-workflow` — use jobs, activities, routines, and `orbit sweep`/`orbit run`; diagnose failed, stuck, or cancelled runs
+- `orbit-search` — search tasks, docs, learnings, and ADRs; dedup and related-task lookups; docs-corpus admin
+- `orbit-knowledge` — author, accept, or supersede learnings and Architecture Decision Records
 - `orbit-graph` — query the parsed code graph (refs, callees, impact, implementors)
-- `orbit-search` — search tasks, docs, learnings, and ADRs; dedup and related-task lookups
-- `orbit-debug-job-failure` — diagnose failed, stuck, or cancelled runs
-- `orbit-track-issues` — capture agent-self-reported friction with Orbit tooling itself
+
+First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are handled by the `orbit` skill itself, via its bundled setup reference.
 
 `orbit skill doctor` flags drift between the local copy and the upstream definition. Edit any seeded `SKILL.md` to customize behavior for your team.
 

@@ -1,104 +1,101 @@
 ---
 name: orbit-search
-description: Use when searching tasks, docs, learnings, or ADRs through the unified `orbit search` query surface; also covers the secondary `orbit semantic` lifecycle namespace for installing, removing, inspecting, and indexing the local embedding companion.
+description: Use when searching tasks, docs, learnings, or ADRs through the unified `orbit search` query surface; also covers the `orbit semantic` embedding-companion lifecycle, and the human-authored docs corpus — searching, listing, showing, registering, reindexing, or migrating docs (locked frontmatter schema, recommended docs layout, learning-vs-doc boundary, ADR routing).
 ---
 
 # Orbit Search
 
-Use `orbit search` when you need to find project context by topic, literal phrase, or related task ID. The query surface is `orbit search`; the lifecycle surface is `orbit semantic install|uninstall|stats|index`.
-
-`orbit graph` remains the tool for code-structure questions such as callers, refs, implementors, and symbol selectors. Search is for corpus retrieval; graph is for structural traversal.
+Use `orbit search` to find project context by topic, literal phrase, or related task ID. The query surface is `orbit search`; the lifecycle surface is `orbit semantic install|uninstall|stats|index`. `orbit graph` remains the tool for code-structure questions (callers, refs, implementors, symbol selectors) — search is corpus retrieval, graph is structural traversal.
 
 ## Query Surface
-
-Both CLI and MCP expose the same operation.
 
 | Tool | MCP | CLI |
 |------|-----|-----|
 | `orbit.search` | `orbit_search({...})` | `orbit tool run orbit.search --input '{...}'` |
 
-Mapping rule: `orbit.search` ↔ `orbit_search`. See the `orbit` skill for the full surface mapping. Include `model` in JSON inputs when available for provenance; pass your agent family (`codex`, `claude`, `gemini`, or `grok`).
-
-Use these shapes:
+Include `model` in JSON inputs for provenance (your agent family). See the `orbit` skill for the full surface-mapping rule.
 
 ```bash
 # Lexical global search across tasks, docs, learnings, and ADRs
 orbit search "slow inference after model swap" --limit 5
-orbit tool run orbit.search --input '{"query":"slow inference after model swap","limit":5,"model":"<agent-family>"}'
 
-# Cross-artifact label and path filters
+# Cross-artifact label and path filters (--tag is AND when repeated)
 orbit search "scheduler" --tag perf --kind all
 orbit search path crates/orbit-search/src/lib.rs --kind all
-orbit tool run orbit.search --input '{"tag":"perf","kind":"all","model":"<agent-family>"}'
-orbit tool run orbit.search --input '{"path":"crates/orbit-search/src/lib.rs","kind":"all","model":"<agent-family>"}'
 
-# Hybrid lexical + cosine over indexed task, doc, learning, or ADR fields
+# Hybrid lexical + cosine over indexed fields
 orbit search "agent loop deadlock" --hybrid --kind task --limit 5
-orbit tool run orbit.search --input '{"query":"agent loop deadlock","hybrid":true,"kind":"task","limit":5,"model":"<agent-family>"}'
 
-# Cosine neighbors of a known task
-orbit search similar "<task-id>" --limit 5
-orbit tool run orbit.search --input '{"semantic":"<task-id>","limit":5,"model":"<agent-family>"}'
+# Cosine neighbors of a known task (requires the semantic companion)
+orbit search similar "<task-id>" --limit 5   # MCP: {"semantic":"<task-id>","limit":5}
 ```
 
-`orbit search similar <id>` uses task vectors, so it requires the companion. The MCP tool keeps the parameterized form: `semantic: "<task-id>"`.
+`orbit search path <path>` applicability lookup: task results use selector containment over `context_files`; learning/ADR results use glob-containment over stored path scopes; docs are content-indexed and don't match by applicability path. `--status` values use `kind:value` tokens (e.g. `--status task:open,doc:active,adr:proposed`) — bare tokens are rejected since statuses collide across corpora.
 
-`--tag` uses AND semantics when repeated. `orbit search path <path>` is the CLI applicability lookup: task results use selector containment over `context_files`; learning and ADR results use glob-containment over their stored path scopes; docs are content-indexed and do not match by applicability path. The MCP equivalent is `{"path":"<path>"}`.
+**Index coverage:** lexical covers tasks, docs, learnings, ADRs. Vector search covers task fields plus docs/learnings/ADRs after `orbit semantic index --kind docs|learnings|adrs`. Missing vectors under `--hybrid` fall back to lexical with a note rather than failing.
 
-`--status` values must use `kind:value` tokens, for example `--status task:open,doc:active,adr:proposed`. Bare status tokens are rejected so same-named statuses across corpora stay unambiguous.
+**When to use:** (1) pre-create dedup check — `--hybrid --kind task` before adding a task; (2) pre-execute related lookup — `semantic: "<task-id>"` after `orbit.task.show` to surface prior decisions the author may not have linked; (3) ad-hoc — "where did we decide X" starts with `orbit search "X" --kind all`.
 
-## Index Coverage
+**Stop rule:** if one well-formed query returns useful hits, stop and inspect — don't chain rewrites chasing higher scores. Don't use search for "find every symbol matching X" — that's `orbit.graph.search`.
 
-Lexical search covers tasks, docs, learnings, and ADRs. Vector search covers task fields plus docs, learnings, and ADRs after their corpora are indexed with `orbit semantic index --kind docs|learnings|adrs`. When `--hybrid` is set and vectors are missing for a requested corpus, Orbit returns lexical results with a fallback note instead of failing the user search.
+## Semantic Companion Lifecycle
 
-## When To Use
+`orbit semantic` manages the local embedding companion — it is not the query namespace.
 
-Three patterns cover almost every call:
+| Purpose | Form |
+|---------|------|
+| Install / remove | `orbit semantic install [--model M] [--force]` / `orbit semantic uninstall [--model M] [--all]` |
+| Status | `orbit semantic stats` |
+| Rebuild embeddings | `orbit semantic index --kind tasks\|docs\|learnings\|adrs\|all [--model M] [--force]` |
 
-1. **Pre-create context check.** Before adding a new task, query the proposed title or description to find related prior work. Use `--hybrid --kind task` when vocabulary mismatch is likely; use plain lexical search when looking for exact names, errors, or paths.
-2. **Pre-execute related lookup.** After `orbit.task.show` loads a task, call `orbit.search` with `semantic` set to that task ID to surface prior tasks the original author may not have linked in `context_files`. Skim the top 3-5; ignore irrelevant hits.
-3. **Ad-hoc project search.** "Where did we decide X?" or "didn't we have a doc about Y?" starts with `orbit search "X" --kind all`.
+Supports macOS arm64 and Linux x86_64/aarch64 with glibc ≥ 2.38; no x86_64-apple-darwin asset. Don't run `install` without operator consent; if a semantic query fails because the companion is missing, fall back to lexical `orbit search --kind <kind> <query>` and continue unless the user explicitly opted in.
 
-## Stop Rule
+Result shape: `mode`, `kind`, `notes`, `results[]` — each with `kind`, `source`, and some of `id`/`path`/`title`/`summary`/`status`/`best_field`/`snippet`/`score`/`matched_by`. Treat scores as relative ordering, not confidence; read snippets/matched fields before judging relevance.
 
-If one well-formed `orbit search` query returns useful hits, stop and inspect them. Do not chain repeated rewrites to chase higher scores. If the top hits are unrelated, treat the work as new and move on.
+## Docs Corpus
 
-Do not use search for "find every symbol matching pattern X"; use `orbit.graph.search` instead.
+Orbit docs are PR-reviewed Markdown under configured `[docs].roots` (default `docs/`) — designs, reusable patterns, domain notes, glossaries, runbooks. Registration-light: Orbit walks configured roots on demand and indexes files with valid frontmatter (tolerant fallback for legacy design/pattern docs).
 
-## Lifecycle Namespace
+Frontmatter (`type` and `summary` required; `summary` non-empty single line):
 
-`orbit semantic` manages the local embedding companion. It is not the query namespace.
+```yaml
+---
+type: design | pattern | context | glossary | runbook
+summary: One-line hook for agent retrieval
+tags: [hook, learning, audit]
+paths: ["crates/orbit-cli/**"]
+related_features: [hook-rewrite]
+related_artifacts: ["<task-id>", "<adr-id>", "<learning-id>"]
+---
+```
 
-| Purpose | Surface | Form |
-|---------|---------|------|
-| Install companion/model | CLI-only | `orbit semantic install [--model MODEL] [--force]` |
-| Remove companion/model | CLI-only | `orbit semantic uninstall [--model MODEL] [--all]` |
-| Show status | CLI-only | `orbit semantic stats` |
-| Rebuild embeddings | CLI-only | `orbit semantic index --kind tasks|docs|learnings|adrs|all [--model MODEL] [--force]` |
+Recommended (not enforced) layout: `docs/design/<feature>/`, `docs/design-patterns/`, `docs/context/`, `docs/glossary.md`, `docs/runbooks/`.
 
-The released semantic companion supports macOS arm64 and Linux x86_64/aarch64
-with glibc >= 2.38. Intel macOS can run the CLI, but semantic search is
-unsupported because there is no x86_64-apple-darwin companion asset.
+**Learning vs Doc:** a learning is a load-bearing rule with a known failure mode — managed through `orbit.learning.*` (see `orbit-knowledge`), scope-glob push-injected, updatable/supersedable. A doc is explanatory context — PR-reviewed, retrieved via `orbit.search --kind doc`, no supersede flow. Link a doc to a load-bearing learning with `related_artifacts: [L-NNNN]`.
 
-Do not run `install` without operator consent. If a semantic query fails because the companion is missing, fall back to plain `orbit search --kind <kind> <query>` (lexical) and continue unless the user explicitly asked to enable embeddings.
+**Routing:** ADRs are owned by `orbit-knowledge` and live at `.orbit/adrs/{accepted,proposed,superseded}/<adr-id>/` — docs does not walk `.orbit/`, but `orbit search --kind all|adr` federates ADR metadata alongside doc hits (`--all` includes superseded ADRs for archaeology). `orbit-design` is retired in favor of this tolerant surface.
 
-## Result Shape
+**Admin/CLI-only workflows** (agents use `orbit.search` for retrieval; these are human/admin):
 
-`orbit.search` returns `mode`, `kind`, `notes`, and `results`. Each result has `kind`, `source`, and one or more of `id`, `path`, `title`, `summary`, `status`, `best_field`, `snippet`, `score`, and `matched_by`.
-
-Treat scores as relative ordering signals, not absolute confidence thresholds. Snippets and matched fields are the most useful parts to read before deciding whether a hit is relevant.
+| Verb | Form |
+| --- | --- |
+| List | `orbit docs list --json [--type <type>] [--tag <tag>]` |
+| Show | `orbit docs show <path> --json` |
+| Add root | `orbit docs add <path>` (existing non-`.orbit/` roots only) |
+| Index | `orbit docs index --json` (after substantial edits/moves; idempotent via content hashes) |
+| Migrate | `orbit docs migrate --dry-run` then without, to backfill locked frontmatter for legacy `docs/design/<feature>/*.md` and `docs/design-patterns/*.md` — never touches `.orbit/` |
 
 ## Common Mistakes
 
 | Mistake | Why it fails | Correct form |
-|---------|--------------|--------------|
-| Calling lifecycle commands to search | `orbit semantic` manages the companion | Use `orbit search` or `orbit.search` |
-| Aborting when the companion is not installed | Embeddings are optional infrastructure | Fall back to lexical search unless the user opted in |
-| Using semantic search for exact identifiers | Lexical matching is cheaper and more predictable for names, paths, and error strings | Use plain `orbit search` or `orbit.graph.search` |
-| Calling `--semantic <id>` on a brand-new task before indexing completes | New tasks may not have embeddings yet | Search the task title/description with `--hybrid --kind task` |
+|---------|---------------|--------------|
+| Calling lifecycle commands to search | `orbit semantic` manages the companion | Use `orbit search` / `orbit.search` |
+| Aborting when the companion isn't installed | Embeddings are optional infra | Fall back to lexical unless the user opted in |
+| Using semantic search for exact identifiers | Lexical is cheaper/predictable for names, paths, error strings | Plain `orbit search` or `orbit.graph.search` |
+| `--semantic <id>` on a brand-new task | May not have embeddings yet | `--hybrid --kind task` on title/description |
 
 ## Cross-References
 
 - `orbit-graph` — code-structure queries.
-- `orbit-create-task` — optional pre-create search.
-- `orbit-execute-task` — pre-execute related-task lookup.
+- `orbit-task` — pre-create dedup check, pre-execute related-task lookup.
+- `orbit-knowledge` — learnings and ADRs this skill retrieves but does not author.
