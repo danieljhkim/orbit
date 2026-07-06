@@ -32,7 +32,7 @@ health_ok() {
   local i
   for i in $(seq 1 30); do
     if [[ "$(curl -fsS --max-time 2 "$WEB_URL/healthz" 2>/dev/null)" == "ok" ]] &&
-      curl -fsS --max-time 2 "$WEB_URL/api/workspaces" 2>/dev/null | grep -q '"id":"ws_'; then
+      grep -Eq '"id" *: *"ws_' <<<"$(curl -fsS --max-time 2 "$WEB_URL/api/workspaces" 2>/dev/null)"; then
       return 0
     fi
     sleep 1
@@ -62,6 +62,11 @@ install_binary() {
 
 main() {
   cd "$REPO"
+
+  # Fail-soft gates below iterate the registered workspaces; make an
+  # unreadable registry observable instead of silently checking nothing.
+  [[ -r "$WORKSPACES_JSON" ]] ||
+    log "warning: $WORKSPACES_JSON unreadable — migrate + deferral gates have nothing to check"
 
   # ---- guards: pre-swap failures leave the installed binary untouched ------
   local head
@@ -96,11 +101,21 @@ main() {
       [[ -d "$ws_root/.orbit" ]] || continue
       if out=$("$new" migrate --dry-run --json --root "$ws_root/.orbit" 2>/dev/null); then
         :
-      elif echo "$out" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then
-        # Nonzero exit but valid JSON = migrations pending, inspection worked.
+      elif echo "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+for comp in ("layout", "schema"):
+    c = d.get(comp, {})
+    if c.get("current", 0) > c.get("supported", 0):
+        sys.exit(2)  # workspace newer than this binary = downgrade
+' 2>/dev/null; then
+        # Nonzero exit, valid JSON, current <= supported everywhere: migrations
+        # merely pending — orbit auto-applies them on workspace open.
         log "pending migrations in $ws_root (auto-apply on open): $(echo "$out" | tr -d '\n' | head -c 300)"
       else
-        die "migrate --dry-run failed in $ws_root with $new_ver: $("$new" migrate --dry-run --root "$ws_root/.orbit" 2>&1 | tail -5 | tr '\n' ' ')"
+        # Hard error or a workspace newer than the new binary (downgrade):
+        # never swap in a binary that can't open every active workspace.
+        die "migrate --dry-run failed in $ws_root with $new_ver (downgrade or hard error): $("$new" migrate --dry-run --root "$ws_root/.orbit" 2>&1 | tail -5 | tr '\n' ' ')"
       fi
     done < <(active_workspace_roots)
   fi
@@ -112,7 +127,7 @@ main() {
   while IFS= read -r ws_root; do
     [[ -d "$ws_root/.orbit" ]] || continue
     if "$BIN" run history --json --limit 20 --root "$ws_root/.orbit" 2>/dev/null |
-      grep -Eq '"status" *: *"(running|pending)"'; then
+      grep -Eq '"state" *: *"(running|pending)"'; then
       log "active job run in $ws_root — deferring upgrade to the next timer tick"
       exit 0
     fi

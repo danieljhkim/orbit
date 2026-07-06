@@ -70,7 +70,7 @@ Safety properties, in order:
 3. **Deferral** instead of restart when any registered workspace has a
    pending/running job run (`orbit run history`).
 4. **Rollback**: if `/healthz` + `/api/workspaces` don't come back healthy
-   within 30s of the restart, the script reinstalls `orbit.bak`, restarts
+   within the post-restart retry window (30 attempts), the script reinstalls `orbit.bak`, restarts
    again, records a friction in polaris, and exits nonzero so the failure
    shows in `systemctl --user list-units --failed`.
 

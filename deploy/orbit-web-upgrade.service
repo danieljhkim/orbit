@@ -11,8 +11,9 @@ WorkingDirectory=%h
 # (~/.orbit/bin), and the git/gh credential tooling in ~/.local/bin.
 Environment=PATH=%h/.cargo/bin:%h/.local/bin:%h/.orbit/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/workspace/constellation/codebases/orbit/deploy/orbit-web-upgrade.sh
-# A full release rebuild can take several minutes; don't let the default
-# oneshot start timeout kill the build mid-way.
+# Type=oneshot has no start timeout by default; this is a deliberate ceiling
+# so a wedged pull/build can't hang forever. A killed run is a safe pre-swap
+# abort — the daily timer retries. Raise it if a cold rebuild ever needs more.
 TimeoutStartSec=30min
 # No Restart=on-failure: a failed pull/build would just fail again seconds
 # later. The daily timer is the retry; failures stay visible in
