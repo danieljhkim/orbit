@@ -49,6 +49,7 @@ pub mod config;
 pub mod context;
 pub mod metrics;
 mod paths;
+pub mod qa;
 pub mod routines;
 pub mod runtime;
 pub mod workspace_registry;

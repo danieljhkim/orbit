@@ -25,6 +25,7 @@ mod store;
 pub(crate) use bootstrap::seed_default_config;
 pub(crate) use persistence::PersistenceConfig;
 pub use raw::{RawAgentRoleConfig, RawCrewEntry};
+pub(crate) use raw::{RawQaCheckConfig, RawQaConfig, RawQaWorkspaceConfig};
 pub use registry::{CONFIG_KEY_REGISTRY, ConfigKeyDescriptor, describe as describe_config_key};
 pub(crate) use runtime::{CodexExecutionPolicy, DuelConfig, ExecutionEnvPolicy, RuntimeConfig};
 pub use store::{ConfigScope, ConfigSnapshot, ConfigStore, WorkspaceInitMode};

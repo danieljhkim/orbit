@@ -51,6 +51,53 @@ base_branch = "agent-main"   # repo's ship base, if not "main"
 auto_ship = true
 ```
 
+## orbit-qa-sweep (systemd user timer)
+
+Periodically runs `orbit run qa-sweep` [ORB-10039]: the trailing QA pass over
+direct-push workspaces (design D4 — writes to `agent-main` stay fast;
+validation happens on a lag). Per workspace listed in the `[qa]` section of
+the **global** `~/.orbit/config.toml`:
+
+1. skip unless the live checkout is on the expected branch and its HEAD moved
+   past the per-workspace last-validated watermark
+   (`~/.orbit/state/qa-sweep.json`);
+2. run the configured checks (`sh -c`, from the workspace root; per-check
+   timeout, muted checks skipped);
+3. file a fingerprint-deduped orbit task per distinct failure (tags
+   `qa-sweep` + `fp-<hash>`; an open task with the same fingerprint suppresses
+   refiling);
+4. advance the watermark only when every non-muted check passed.
+
+Each validating pass is recorded in the workspace's run ledger under job id
+`qa_sweep` (`orbit run history -j qa_sweep`, `orbit run show <run_id>`). The
+unit exits non-zero only on workspace *errors* (misconfig, git/probe
+failures) — a red check files a task and exits 0, so `--failed` means the
+sweep itself is broken, not the code it checks.
+
+Config lives in the **global** config.toml only (workspace `config.toml`
+files are rewritten by task-mutation commands and are replace-not-merge):
+
+```toml
+# ~/.orbit/config.toml
+[qa]
+default_priority = "medium"    # priority of auto-filed QA tasks
+task_status = "backlog"        # or "proposed" to require human approval
+
+[[qa.workspace]]
+name = "polaris"               # registry name (orbit workspace list)
+branch = "agent-main"          # defaults to the registered base_branch
+
+[[qa.workspace.check]]
+name = "frontmatter"
+command = "python3 scripts/check_frontmatter.py"
+
+[[qa.workspace.check]]
+name = "lint"
+command = "make lint"
+mute = true                    # flaky: keep the definition, skip the check
+timeout_minutes = 10           # default 30
+```
+
 ## orbit-web-upgrade (systemd user timer)
 
 Daily `orbit-web-upgrade.sh` run: rebuild `agent-main` in the orbit checkout,
@@ -82,6 +129,7 @@ the thing that's broken.
 ### Install (per host, e.g. dk-server-1)
 
 ```sh
+<<<<<<< HEAD
 cp deploy/orbit-web-upgrade.{service,timer} ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now orbit-web-upgrade.timer
@@ -99,6 +147,20 @@ systemctl --user list-timers orbit-web-upgrade.timer     # next/last fire
 journalctl --user -t orbit-web-upgrade -n 50             # last run's output
 systemctl --user start orbit-web-upgrade.service         # run once now
 systemctl --user disable --now orbit-web-upgrade.timer   # stop the schedule
+=======
+mkdir -p ~/.config/systemd/user
+cp deploy/orbit-qa-sweep.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now orbit-qa-sweep.timer
+```
+
+### Verify
+
+```sh
+orbit run qa-sweep --dry-run --json     # what would be validated, runs nothing
+systemctl --user list-timers orbit-qa-sweep.timer
+journalctl --user -u orbit-qa-sweep -n 50
+>>>>>>> 1ec6d2d3 (feat(qa-sweep): scheduled QA routine trailing agent-main)
 ```
 
 ## orbit-web (systemd user service)

@@ -725,6 +725,7 @@ fn run_command_meta(cmd: &crate::command::run::RunCommand) -> CommandMeta {
         RunSubcommand::Ship(_) => ("ship", Some("workflow"), Some("ship")),
         RunSubcommand::ShipLocal(_) => ("ship-local", Some("workflow"), Some("ship-local")),
         RunSubcommand::ShipSweep(_) => ("ship-sweep", Some("workflow"), Some("ship-sweep")),
+        RunSubcommand::QaSweep(_) => ("qa-sweep", Some("workflow"), Some("qa-sweep")),
         RunSubcommand::DuelPlan(args) => ("duel-plan", Some("task"), Some(args.task_id.as_str())),
         RunSubcommand::History(args) => ("history", Some("job_run"), args.job_id.as_deref()),
         RunSubcommand::Show(args) => ("show", Some("job_run"), args.run_id.as_deref()),

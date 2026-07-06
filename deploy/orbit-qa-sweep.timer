@@ -1,0 +1,14 @@
+[Unit]
+Description=Run orbit qa-sweep every 6 hours
+
+[Timer]
+OnBootSec=15min
+# QA trails agent-main on a lag by design (D4): checks can be heavy
+# (builds/tests) and findings are deduped, so a slow cadence loses nothing.
+OnUnitActiveSec=6h
+# Smear start times so the sweep never lines up exactly with other timers
+# (notably orbit-ship-sweep, which dispatches into the same workspaces).
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
