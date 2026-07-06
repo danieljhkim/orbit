@@ -16,6 +16,7 @@ pub(super) struct RawRuntimeConfig {
     pub(super) runtime: Option<RawRuntimeSection>,
     pub(super) workflow: Option<RawWorkflowConfig>,
     pub(super) routines: Option<RawRoutinesConfig>,
+    pub(crate) qa: Option<RawQaConfig>,
     pub(super) duel: Option<RawDuelSection>,
     /// Removed in ORB-00058. Kept only so config loading can reject stale
     /// `[agent.<role>]` tables with an explicit migration error.
@@ -39,6 +40,54 @@ pub(super) struct RawWorkflowConfig {
     /// Named crew used when a task does not declare `crew` and no CLI
     /// override is provided.
     pub(super) default_crew: Option<String>,
+}
+
+/// `[qa]` — configuration for the trailing QA validation sweep
+/// (`orbit run qa-sweep`) [ORB-10039]. Host-level: the sweep reads this from
+/// the **global** `~/.orbit/config.toml` only (like the workspace registry it
+/// iterates), so a workspace-level `config.toml` — which task-mutation
+/// commands rewrite — can never strip or override it.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct RawQaConfig {
+    /// `qa.default_priority` — priority for auto-filed QA tasks when a check
+    /// does not override it. One of `low`, `medium`, `high`, `critical`;
+    /// defaults to `medium`.
+    pub(crate) default_priority: Option<String>,
+    /// `qa.task_status` — status auto-filed QA tasks are created with. One of
+    /// `backlog` (default; lets `ship-sweep` dispatch the fix unattended, per
+    /// design D4) or `proposed` (require human approval first).
+    pub(crate) task_status: Option<String>,
+    /// `[[qa.workspace]]` — one entry per direct-push workspace to validate.
+    pub(crate) workspace: Option<Vec<RawQaWorkspaceConfig>>,
+}
+
+/// One `[[qa.workspace]]` entry.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct RawQaWorkspaceConfig {
+    /// Workspace name as registered in the global workspace registry.
+    pub(crate) name: Option<String>,
+    /// Branch the sweep expects the checkout to be on. Defaults to the
+    /// workspace's registered `base_branch` when absent.
+    pub(crate) branch: Option<String>,
+    /// `[[qa.workspace.check]]` — the checks run against the checkout.
+    pub(crate) check: Option<Vec<RawQaCheckConfig>>,
+}
+
+/// One `[[qa.workspace.check]]` entry.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct RawQaCheckConfig {
+    /// Stable check name; part of the failure fingerprint.
+    pub(crate) name: Option<String>,
+    /// Shell command run from the workspace root (`sh -c <command>`).
+    pub(crate) command: Option<String>,
+    /// Muted checks are skipped (not executed) without deleting their
+    /// definition — the escape hatch for flaky checks. Defaults to `false`.
+    pub(crate) mute: Option<bool>,
+    /// Per-check priority override for auto-filed QA tasks.
+    pub(crate) priority: Option<String>,
+    /// Kill the check and record a failure after this many minutes.
+    /// Defaults to 30.
+    pub(crate) timeout_minutes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

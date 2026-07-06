@@ -52,6 +52,7 @@ Two roots. **Workspace state** lives in `<repo>/.orbit/`; **user/machine state**
 | `tasks/workspaces/<ws-id>/<task-id>/` | canonical task bundles (survive repo moves) | **authoritative** |
 | `resources/`, `skills/` | default activity/job/executor/policy defs, skills | regenerable (`orbit init` reseeds) |
 | `state/logs/orbit.jsonl` (+ rotated archives) | unified JSONL log sink for all orbit processes | disposable |
+| `state/qa-sweep.json` (+ `.lock`) | per-workspace last-validated watermarks for `orbit run qa-sweep` [ORB-10039] | regenerable (deleting it only re-validates current HEADs) |
 | `embed/` | semantic-search companion binary + models | regenerable (`orbit semantic install`) |
 | `bin/` | installed orbit binary (when installed via `install.sh`) | reinstallable |
 
@@ -408,12 +409,26 @@ User units, installed to `~/.config/systemd/user/` (see
   circuit breaker.
 - **`orbit-ship-sweep.service` + `.timer`** — every 20 min, dispatch ship runs in
   workspaces opted in via `[workflow] auto_ship = true`.
+- **`orbit-qa-sweep.service` + `.timer`** — every 6 h, run `orbit run qa-sweep`
+  [ORB-10039]: the trailing QA pass over direct-push workspaces (design D4). Per
+  workspace listed under `[qa]` in the **global** `~/.orbit/config.toml`, it diffs the
+  live checkout's HEAD against the last-validated watermark
+  (`~/.orbit/state/qa-sweep.json`), runs the configured `sh -c` checks when new commits
+  exist (per-check timeout; `mute = true` skips a flaky check without deleting it), files
+  one fingerprint-deduped orbit task per distinct failure (tags `qa-sweep` +
+  `fp-<hash>`; an open task with the same fingerprint suppresses refiling), and advances
+  the watermark only on a fully green pass. Every validating pass is a ledger run under
+  job id `qa_sweep` (`orbit run history -j qa_sweep` in the workspace). The unit fails
+  only on sweep *errors* — a red check files a task and exits 0. Config schema and
+  install steps: [deploy/README.md](../deploy/README.md).
 
 ```sh
 systemctl --user status orbit-web
-systemctl --user list-timers orbit-ship-sweep.timer
+systemctl --user list-timers orbit-ship-sweep.timer orbit-qa-sweep.timer
 systemctl --user list-units --failed
 journalctl --user -u orbit-ship-sweep -n 50
+journalctl --user -u orbit-qa-sweep -n 50
+orbit run qa-sweep --dry-run --json       # what QA would validate, runs nothing
 systemctl --user restart orbit-web        # after swapping the binary
 systemctl --user reset-failed orbit-web   # if the circuit breaker tripped
 ```
