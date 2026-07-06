@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use orbit_common::types::{
-    Learning, LearningComment, LearningVoteSummary, OrbitError, Task, TaskArtifact, TaskComment,
-    TaskHistoryEntry, TaskStatus, build_task_status_index, resolve_task_dependencies,
+    Learning, OrbitError, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskStatus,
+    build_task_status_index, resolve_task_dependencies,
 };
 use serde_json::{Map, Value, json};
 
@@ -36,39 +36,8 @@ pub(super) fn learning_to_json(learning: &Learning) -> Value {
     })
 }
 
-pub(super) fn learning_show_to_json(
-    learning: &Learning,
-    vote_summary: &LearningVoteSummary,
-) -> Value {
-    let mut value = learning_to_json(learning);
-    if let Some(object) = value.as_object_mut() {
-        object.insert("vote_count".to_string(), json!(vote_summary.vote_count));
-        object.insert(
-            "last_voted_at".to_string(),
-            vote_summary
-                .last_voted_at
-                .map(|ts| json!(ts.to_rfc3339()))
-                .unwrap_or(Value::Null),
-        );
-    }
-    value
-}
-
-pub(super) fn learning_vote_summary_to_json(summary: &LearningVoteSummary) -> Value {
-    json!({
-        "vote_count": summary.vote_count,
-        "last_voted_at": summary.last_voted_at.map(|ts| ts.to_rfc3339()),
-    })
-}
-
-pub(super) fn learning_comment_to_json(comment: &LearningComment) -> Value {
-    json!({
-        "id": comment.id,
-        "learning_id": comment.learning_id,
-        "body": comment.body,
-        "author_model": comment.author_model,
-        "created_at": comment.created_at.to_rfc3339(),
-    })
+pub(super) fn learning_show_to_json(learning: &Learning) -> Value {
+    learning_to_json(learning)
 }
 
 pub(super) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStatus>) -> Value {

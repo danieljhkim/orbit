@@ -216,7 +216,6 @@ fn summary_counts_knowledge_artifacts_by_author_family() {
         test_learning("L-0016", Some("claude-opus-4-7")),
         test_learning("L-0003", None),
     ];
-    let learning_votes = vec![("L-0015".to_string(), 2), ("L-0016".to_string(), 1)];
     let now = Utc::now();
     let adrs = vec![
         test_adr("ADR-0001", "codex", AdrStatus::Accepted, Some(now)),
@@ -234,7 +233,6 @@ fn summary_counts_knowledge_artifacts_by_author_family() {
         &[],
         &ScoreboardInputs {
             learnings: &learnings,
-            learning_vote_counts: &learning_votes,
             adrs: &adrs,
             ..ScoreboardInputs::default()
         },
@@ -243,14 +241,12 @@ fn summary_counts_knowledge_artifacts_by_author_family() {
 
     let codex = summary.agents.get("codex").expect("codex summary");
     assert_eq!(codex.knowledge.learnings_created, 1);
-    assert_eq!(codex.knowledge.learning_votes_received, 2);
     assert_eq!(codex.knowledge.adrs_created, 2);
     assert_eq!(codex.knowledge.adrs_accepted, 1);
     assert_eq!(codex.knowledge.adrs_proposed_open, 1);
 
     let claude = summary.agents.get("claude").expect("claude summary");
     assert_eq!(claude.knowledge.learnings_created, 1);
-    assert_eq!(claude.knowledge.learning_votes_received, 1);
     assert_eq!(claude.knowledge.adrs_created, 1);
     assert_eq!(claude.knowledge.adrs_accepted, 1);
     assert_eq!(claude.knowledge.adrs_proposed_open, 0);

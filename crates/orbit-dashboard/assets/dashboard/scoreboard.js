@@ -110,7 +110,6 @@ const REVIEW_SCOREBOARD_COLUMNS = [
 const KNOWLEDGE_SCOREBOARD_COLUMNS = [
   { key: "agent", label: "agent", num: false },
   { key: "knowledge.learnings_created", label: "learnings", num: true },
-  { key: "knowledge.learning_votes_received", label: "votes", num: true },
   { key: "knowledge.adrs_created", label: "adrs", num: true },
   { key: "knowledge.adrs_accepted", label: "accepted", num: true },
   { key: "knowledge.adrs_proposed_open", label: "proposed", num: true },
@@ -291,7 +290,6 @@ function agentActivityTotal(agent) {
     asScoreboardNumber(agent?.task_review?.threads) +
     asScoreboardNumber(agent?.pr?.review_comments) +
     asScoreboardNumber(knowledge.learnings_created) +
-    asScoreboardNumber(knowledge.learning_votes_received) +
     asScoreboardNumber(knowledge.adrs_created) +
     asScoreboardNumber(knowledge.adrs_accepted) +
     asScoreboardNumber(knowledge.adrs_proposed_open) +
@@ -306,7 +304,6 @@ function knowledgeScore(agent) {
   const knowledge = agent?.knowledge || {};
   return (
     asScoreboardNumber(knowledge.learnings_created) +
-    asScoreboardNumber(knowledge.learning_votes_received) +
     asScoreboardNumber(knowledge.adrs_created) +
     asScoreboardNumber(knowledge.adrs_accepted) +
     asScoreboardNumber(knowledge.adrs_proposed_open)

@@ -1,6 +1,6 @@
 ---
 name: orbit-knowledge
-description: Create, search, update, supersede, prune, or audit Orbit's two durable-decision primitives — project learnings (recurring gotchas, incident root-causes, cross-session guardrails, push-injected by scope) and Architecture Decision Records (ADRs — decisions with a real alternative, accepted/proposed/superseded lifecycle, global ID allocation). Triggers on "learning", "gotcha", "guardrail", "ADR", "decision record", "4_decisions.md", accepting/superseding a decision, or adding a `## ADR-` heading. Covers scope-OR matching, evidence shape, update-vs-supersede, and why to never hand-edit `.orbit/learnings/` or `.orbit/adrs/`.
+description: Create, search, update, supersede, prune, or audit Orbit's two durable-decision primitives — project learnings (recurring gotchas, incident root-causes, cross-session guardrails, push-injected by scope) and Architecture Decision Records (ADRs — decisions with a real alternative, accepted/proposed/superseded lifecycle, global ID allocation). Triggers on "learning", "gotcha", "guardrail", "ADR", "decision record", "4_decisions.md", accepting/superseding a decision, or adding a `## ADR-` heading. Covers scope-OR matching, evidence shape, update-vs-supersede (there is no comment or vote surface — corrections go through `update`/`supersede`, provenance through `evidence`), and why to never hand-edit `.orbit/learnings/` or `.orbit/adrs/`.
 ---
 
 # Orbit Knowledge
@@ -25,12 +25,11 @@ Both surfaces (MCP `orbit_learning_*`/`orbit_adr_*`, CLI `orbit tool run orbit.l
 | Add | `orbit_learning_add({...})` | `orbit learning add --summary "..." --path "crates/orbit-core/**/*.rs" --tag rust --body-file note.md` |
 | Search | `orbit_search({...})` | `orbit search --kind learning <text>` (add `--hybrid` after `orbit semantic index --kind learnings`) |
 | Show / update / supersede | `orbit_learning_show/update/supersede({...})` | `orbit learning show --id L-0001` / `update --id L-0001 --priority 200` / `supersede --id L-0001 --with L-0007` |
-| Comment add | `orbit_learning_comment_add({...})` | `orbit learning comment add --learning-id L-0001 --body "..." --model codex` |
-| List/audit, prune, sync, comment list/delete | CLI-only | `orbit learning list --status active --tag rust [--path <glob>]`, `orbit learning prune --stale-only [--delete]`, `orbit learning sync` |
+| List/audit, prune, sync | CLI-only | `orbit learning list --status active --tag rust [--path <glob>]`, `orbit learning prune --stale-only [--delete]`, `orbit learning sync` |
 
 **Workflow:** (1) search first — `orbit learning list --path/--tag` or `orbit search --kind learning` — prefer `update`/`supersede` over a duplicate. (2) Add with tight `scope: { paths?, tags? }` (OR semantics — fires on *any* path glob OR *any* tag; split concerns into separate learnings rather than over-broadening one). Include `evidence: [{kind: "task"|"commit"|"external", ref: "..."}]` whenever it came from a real incident/PR/task — a learning you can't cite a source for is a hunch. `priority` (0–255) is a secondary search-ranking key, not an importance badge. Keep `summary` ≤280 chars, written as a directive ("Always X before Y in `<crate>`"), since push-injection surfaces it first. (3) `prune --stale-only` periodically to surface learnings whose `scope.paths` no longer resolve; read before `--delete`. (4) `sync` (CLI-only) re-syncs the SQLite envelope index if YAML was touched out-of-band (merge, branch switch) — YAML is the source of truth.
 
-Legacy `L<YYYYMMDD>-N` IDs were migrated by ORB-00200 and should only appear in `legacy_ids`; canonical format is `L-NNNN`. Comments (`comment.add`) are for brief footnotes (≤500 chars) on current wording, append-only — delete+re-add to correct, or supersede for material changes.
+Legacy `L<YYYYMMDD>-N` IDs were migrated by ORB-00200 and should only appear in `legacy_ids`; canonical format is `L-NNNN`. Corrections to current wording go through `update`; material changes go through `supersede`; provenance for a new observation goes into `evidence`. (ORB-10046 removed the vote and comment surfaces — `priority` + search rank cover ranking, and `update`/`supersede`/`evidence` cover corrections/provenance.)
 
 ```bash
 orbit learning add --summary "Always run \`make fmt\` before committing under crates/orbit-cli — clippy fails on stray spacing" \

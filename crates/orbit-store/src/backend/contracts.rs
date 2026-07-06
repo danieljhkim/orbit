@@ -2,10 +2,9 @@ use chrono::{DateTime, Utc};
 use orbit_common::types::{
     Adr, AdrStatus, ArtifactManifestFileV2, AuditEvent, Crew, ExecutorDef, ExternalRef, JobRun,
     JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence, LearningInjectionState,
-    LearningScope, LearningVoteSummary, LegacyValidation, OrbitError, OrbitId, PipelineState,
-    PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity,
-    TaskHistoryEntry, TaskPriority, TaskRelation, TaskStatus, TaskType, normalize_task_tags,
-    task_matches_tags,
+    LearningScope, LegacyValidation, OrbitError, OrbitId, PipelineState, PolicyDef, ReviewThread,
+    StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority,
+    TaskRelation, TaskStatus, TaskType, normalize_task_tags, task_matches_tags,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -717,29 +716,6 @@ pub struct LearningSearchResult {
     pub matched_by: Vec<String>,
 }
 
-/// Parameters for recording a re-validation vote on a learning.
-#[derive(Debug, Clone)]
-pub struct LearningUpvoteParams {
-    pub learning_id: OrbitId,
-    pub voter_model: String,
-    pub task_id: Option<OrbitId>,
-}
-
-/// Parameters for adding a footnote-style comment to a learning.
-#[derive(Debug, Clone)]
-pub struct LearningCommentAddParams {
-    pub learning_id: OrbitId,
-    pub body: String,
-    pub author_model: String,
-}
-
-/// Parameters for soft-deleting a learning comment.
-#[derive(Debug, Clone)]
-pub struct LearningCommentDeleteParams {
-    pub comment_id: OrbitId,
-    pub deleted_by: String,
-}
-
 pub trait LearningStoreBackend: Send + Sync {
     fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError>;
     fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
@@ -758,24 +734,6 @@ pub trait LearningStoreBackend: Send + Sync {
         &self,
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError>;
-    fn upvote_learning(
-        &self,
-        params: LearningUpvoteParams,
-    ) -> Result<LearningVoteSummary, OrbitError>;
-    fn learning_vote_summary(&self, id: &str) -> Result<LearningVoteSummary, OrbitError>;
-    fn add_learning_comment(
-        &self,
-        params: LearningCommentAddParams,
-    ) -> Result<orbit_common::types::LearningComment, OrbitError>;
-    fn list_learning_comments(
-        &self,
-        learning_id: &str,
-        include_deleted: bool,
-    ) -> Result<Vec<orbit_common::types::LearningComment>, OrbitError>;
-    fn delete_learning_comment(
-        &self,
-        params: LearningCommentDeleteParams,
-    ) -> Result<(), OrbitError>;
     fn update_learning(
         &self,
         id: &str,

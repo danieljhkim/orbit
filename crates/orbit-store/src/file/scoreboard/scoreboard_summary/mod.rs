@@ -136,7 +136,6 @@ pub struct TaskReviewSummary {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KnowledgeSummary {
     pub learnings_created: u64,
-    pub learning_votes_received: u64,
     pub adrs_created: u64,
     pub adrs_accepted: u64,
     pub adrs_proposed_open: u64,
@@ -293,8 +292,6 @@ pub struct ScoreboardInputs<'a> {
     pub top_tool_calls: &'a [AuditTopToolCall],
     /// Workspace learning records, used for knowledge-stewardship counters.
     pub learnings: &'a [Learning],
-    /// Per-learning vote counts keyed by learning ID.
-    pub learning_vote_counts: &'a [(String, u64)],
     /// Workspace ADR records, used for knowledge-stewardship counters.
     pub adrs: &'a [Adr],
     /// Append-only friction records from `.orbit/frictions/`. Used to populate
@@ -318,7 +315,6 @@ impl<'a> Default for ScoreboardInputs<'a> {
         static EMPTY_JOB: [JobRun; 0] = [];
         static EMPTY_TOP: [AuditTopToolCall; 0] = [];
         static EMPTY_LEARNING: [Learning; 0] = [];
-        static EMPTY_VOTES: [(String, u64); 0] = [];
         static EMPTY_ADR: [Adr; 0] = [];
         Self {
             audit_tool_calls: &EMPTY_AUDIT,
@@ -327,7 +323,6 @@ impl<'a> Default for ScoreboardInputs<'a> {
             job_runs: &EMPTY_JOB,
             top_tool_calls: &EMPTY_TOP,
             learnings: &EMPTY_LEARNING,
-            learning_vote_counts: &EMPTY_VOTES,
             adrs: &EMPTY_ADR,
             frictions: &[],
             now: None,
@@ -765,13 +760,6 @@ fn overlay_knowledge_counters(
         };
         let summary = agents.entry(family_key(&created_by)).or_default();
         summary.knowledge.learnings_created = summary.knowledge.learnings_created.saturating_add(1);
-        summary.knowledge.learning_votes_received = summary
-            .knowledge
-            .learning_votes_received
-            .saturating_add(learning_vote_count(
-                inputs.learning_vote_counts,
-                &learning.id,
-            ));
     }
 
     for adr in inputs.adrs {
@@ -815,13 +803,6 @@ fn overlay_friction_reported(
         let summary = agents.entry(family).or_default();
         summary.friction.reported = count;
     }
-}
-
-fn learning_vote_count(counts: &[(String, u64)], id: &str) -> u64 {
-    counts
-        .iter()
-        .find_map(|(learning_id, count)| (learning_id == id).then_some(*count))
-        .unwrap_or(0)
 }
 
 fn family_key(label: &str) -> String {

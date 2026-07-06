@@ -150,8 +150,6 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
 
     let learning_dir = linked_orbit.join("learnings").join(&learning_id);
     assert!(learning_dir.join("learning.yaml").is_file());
-    assert!(learning_dir.join("votes.jsonl").is_file());
-    assert!(learning_dir.join("comments.jsonl").is_file());
     assert!(!main_orbit.join("learnings").join(&learning_id).exists());
 
     let local_orbit_entries = sorted_child_names(&linked_orbit);

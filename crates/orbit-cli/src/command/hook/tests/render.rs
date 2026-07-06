@@ -28,7 +28,6 @@ fn core_renderer_combines_learning_and_review_thread_output_for_cli_formats() {
     let learnings = vec![LearningReminder {
         id: "L-0017".to_string(),
         summary: "learning reminder".to_string(),
-        comments: Vec::new(),
     }];
     let review_threads = reminders_from_threads(
         "ORB-00001",

@@ -188,13 +188,6 @@ fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
                 nested_arrays: LEARNING_NESTED,
             })
         }
-        OrbitBuiltinAction::LearningCommentAdd => Some(ActionPolicy {
-            free_text_fields: &["body"],
-            free_text_arrays: &[],
-            path_fields: &[],
-            path_arrays: &[],
-            nested_arrays: &[],
-        }),
         OrbitBuiltinAction::TaskAdd => Some(ActionPolicy {
             free_text_fields: &["title", "description", "plan", "comment"],
             free_text_arrays: &["acceptance_criteria"],
@@ -272,7 +265,6 @@ fn is_covered_mutating_action(action: OrbitBuiltinAction) -> bool {
             | OrbitBuiltinAction::LearningAdd
             | OrbitBuiltinAction::LearningUpdate
             | OrbitBuiltinAction::LearningSupersede
-            | OrbitBuiltinAction::LearningCommentAdd
             | OrbitBuiltinAction::TaskAdd
             | OrbitBuiltinAction::TaskUpdate
             | OrbitBuiltinAction::TaskReject
@@ -507,11 +499,6 @@ fn artifact_target(
             artifact_id: learning_response_id(action, response)?,
             task_id: None,
         }),
-        OrbitBuiltinAction::LearningCommentAdd => Ok(ArtifactTarget {
-            artifact_type: "learning_comment",
-            artifact_id: response_string(response, "id")?,
-            task_id: None,
-        }),
         OrbitBuiltinAction::TaskAdd
         | OrbitBuiltinAction::TaskUpdate
         | OrbitBuiltinAction::TaskReject => {
@@ -570,7 +557,6 @@ fn tool_name(action: OrbitBuiltinAction) -> &'static str {
         OrbitBuiltinAction::LearningAdd => "orbit.learning.add",
         OrbitBuiltinAction::LearningUpdate => "orbit.learning.update",
         OrbitBuiltinAction::LearningSupersede => "orbit.learning.supersede",
-        OrbitBuiltinAction::LearningCommentAdd => "orbit.learning.comment.add",
         OrbitBuiltinAction::TaskAdd => "orbit.task.add",
         OrbitBuiltinAction::TaskUpdate => "orbit.task.update",
         OrbitBuiltinAction::TaskReject => "orbit.task.reject",

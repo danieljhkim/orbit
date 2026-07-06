@@ -1,7 +1,5 @@
 schema_version: 1
 id: L-0005
-legacy_ids:
-- L20260517-5
 status: active
 scope:
   paths:
@@ -12,7 +10,7 @@ scope:
   - skills
   - agents
 summary: When modifying an Orbit skill, edit `crates/orbit-core/assets/skills/<name>/SKILL.md` — NOT `~/.claude/skills/<name>/SKILL.md` (packaged copy). The asset dir is the source of truth; ORB-00022's drift tests enforce parity across the four catalogs.
-body: |-
+body: |
   ## The mistake to prevent
 
   When an agent is asked to modify an Orbit skill (e.g. `orbit-create-task`, `orbit-graph`, `orbit-execute-task`), the easy-to-find paths are wrong:
@@ -34,6 +32,10 @@ body: |-
   4. **Router enumeration**: `crates/orbit-core/assets/skills/orbit/SKILL.md`'s `## Skill Selection` section — every skill ID must appear as a backtick-quoted token.
 
   For pure content edits to an existing skill: only #1 changes. For adding or removing a skill: all four.
+
+  ### Sibling failure mode: retiring a packaged skill
+
+  **When retiring a packaged skill asset, also remove or update the matching `include_str!` entry in `crates/orbit-core/src/command/skill.rs`.** ORB-00166 hit this: retiring the asset without dropping the `include_str!` line causes `cargo test` to fail *before* task code even compiles, because the embedded string references a path that no longer exists. Removing the skill asset directory is only half the change — the registry array must lose the entry (or point to a replacement) in the same edit.
 
   ## How to find the right file
 
@@ -61,6 +63,8 @@ evidence:
   reference: ORB-00022
 - kind: external
   reference: '2026-05-17 forensic session: agent initially looked at ~/.claude/skills/ and ran `find` against the repo before locating the canonical asset via orbit.graph.search; resulting edit to crates/orbit-core/assets/skills/orbit-create-task/SKILL.md sits uncommitted in working tree.'
+legacy_ids:
+- L20260517-5
 created_at: 2026-05-17T05:58:42.304901Z
-updated_at: 2026-05-17T05:59:29.198536Z
+updated_at: 2026-07-06T02:28:15.186116406Z
 created_by: claude

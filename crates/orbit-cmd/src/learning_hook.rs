@@ -226,7 +226,6 @@ pub fn reminders_from_search_results(
         .map(|result| LearningReminder {
             id: result.learning.id,
             summary: result.learning.summary,
-            comments: Vec::new(),
         })
         .collect()
 }

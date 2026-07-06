@@ -4,7 +4,6 @@ use orbit_core::{OrbitError, OrbitRuntime};
 use crate::command::Execute;
 
 use super::add::LearningAddArgs;
-use super::comment::LearningCommentCommand;
 use super::list::LearningListArgs;
 use super::migrate_layout::LearningMigrateLayoutArgs;
 use super::prune::LearningPruneArgs;
@@ -12,7 +11,6 @@ use super::show::LearningShowArgs;
 use super::supersede::LearningSupersedeArgs;
 use super::sync::LearningSyncArgs;
 use super::update::LearningUpdateArgs;
-use super::upvote::LearningUpvoteArgs;
 
 #[derive(Args)]
 #[command(about = "Create, search, and curate project learnings")]
@@ -31,16 +29,12 @@ impl Execute for LearningCommand {
 pub enum LearningSubcommand {
     /// Create a new active learning
     Add(LearningAddArgs),
-    /// Add, list, or delete comments anchored to a learning
-    Comment(LearningCommentCommand),
     /// List learnings filtered by status, tag, or path
     List(LearningListArgs),
     /// Show a single learning by ID
     Show(LearningShowArgs),
     /// Update an existing active learning
     Update(LearningUpdateArgs),
-    /// Record a task-anchored upvote for a learning
-    Upvote(LearningUpvoteArgs),
     /// Mark a learning as superseded by another
     Supersede(LearningSupersedeArgs),
     /// Reconcile the SQLite envelope index from YAML
@@ -55,11 +49,9 @@ impl Execute for LearningSubcommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         match self {
             LearningSubcommand::Add(args) => args.execute(runtime),
-            LearningSubcommand::Comment(args) => args.execute(runtime),
             LearningSubcommand::List(args) => args.execute(runtime),
             LearningSubcommand::Show(args) => args.execute(runtime),
             LearningSubcommand::Update(args) => args.execute(runtime),
-            LearningSubcommand::Upvote(args) => args.execute(runtime),
             LearningSubcommand::Supersede(args) => args.execute(runtime),
             LearningSubcommand::Sync(args) => args.execute(runtime),
             LearningSubcommand::MigrateLayout(args) => args.execute(runtime),

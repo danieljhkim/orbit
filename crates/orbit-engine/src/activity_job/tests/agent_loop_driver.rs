@@ -279,7 +279,6 @@ fn l1_learning_reminder_prepends_prompt_for_matching_task() {
         reminders: vec![LearningReminder {
             id: "L-0001".to_string(),
             summary: "Remember to validate the output.".to_string(),
-            comments: Vec::new(),
         }],
     };
     let mut session = Session::new("replay", "test-model", "test", None);
@@ -342,7 +341,6 @@ fn l1_learning_reminder_applies_default_per_call_cap() {
             .map(|idx| LearningReminder {
                 id: format!("L-{idx:04}"),
                 summary: format!("Learning {idx}"),
-                comments: Vec::new(),
             })
             .collect(),
     };

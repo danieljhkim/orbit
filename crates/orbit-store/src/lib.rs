@@ -117,9 +117,8 @@ use chrono::{DateTime, Utc};
 pub use backend::{
     ActiveTaskReservation, AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter,
     AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation,
-    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams,
-    LearningCommentDeleteParams, LearningCreateParams, LearningListEntry, LearningSearchParams,
-    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams,
+    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCreateParams, LearningListEntry,
+    LearningSearchParams, LearningSearchResult, LearningStoreBackend, LearningUpdateParams,
     PolicyDefStoreBackend, ReleasedTaskReservation, RemoteArtifactStub,
     SessionLearningStateStoreBackend, TaskArtifactStoreBackend, TaskArtifactUpdateParams,
     TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,

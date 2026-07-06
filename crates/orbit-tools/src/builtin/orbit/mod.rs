@@ -79,12 +79,6 @@ pub fn register(registry: &mut ToolRegistry) {
     // compatibility stub were decommissioned. The agent graph surface is now
     // served by the in-process orbit-graph (v2) adapter in orbit-mcp.
     registry.register(learning::add::OrbitLearningAddTool);
-    registry.register(learning::comment_add::OrbitLearningCommentAddTool);
-    // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
-    registry.register_inactive(learning::comment_delete::OrbitLearningCommentDeleteTool);
-    // Agents discover learnings via `orbit.search`; comment listing is a
-    // review-time / operator concern — CLI / dashboard only.
-    registry.register_inactive(learning::comment_list::OrbitLearningCommentListTool);
     registry.register_inactive(learning::list::OrbitLearningListTool);
     // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
     registry.register_inactive(learning::prune::OrbitLearningPruneTool);
@@ -92,8 +86,6 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(learning::show::OrbitLearningShowTool);
     registry.register(learning::supersede::OrbitLearningSupersedeTool);
     registry.register(learning::update::OrbitLearningUpdateTool);
-    // Upvote telemetry is an operator concern — CLI / dashboard only.
-    registry.register_inactive(learning::upvote::OrbitLearningUpvoteTool);
     registry.register(pipeline::invoke::OrbitPipelineInvokeTool);
     registry.register(pipeline::wait::OrbitPipelineWaitTool);
     registry.register(review_thread::add::OrbitReviewThreadAddTool);

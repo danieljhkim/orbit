@@ -3,7 +3,7 @@ summary: "Project Learnings — Decisions"
 type: design
 title: "Project Learnings — Decisions"
 owner: claude
-last_updated: 2026-05-17
+last_updated: 2026-07-06
 status: Draft
 feature: project-learnings
 doc_role: decisions
@@ -152,7 +152,7 @@ The vendor-locked single-layer options are non-starters because the project supp
 
 ## ADR-0157 — Rank matched learnings by task-anchored decay-weighted upvotes
 
-**Status:** Accepted · 2026-05 · [ORB-00095] · legacy_id: `project-learnings/ADR-006`
+**Status:** Superseded by ADR-0210 · 2026-05 · [ORB-00095] · legacy_id: `project-learnings/ADR-006`
 
 **Context.** Recency and manual priority do not capture whether a learning is still load-bearing. An older learning that agents keep relying on should outrank a newer marginal note, but `updated_at` only moves when the learning body changes. The natural re-validation moment is duplicate-check: an agent reads a candidate learning, decides it already covers the concern, and does not author a competing record.
 
@@ -178,8 +178,36 @@ Votes are derived from per-learning JSONL on read. `orbit learning sync` validat
 
 ---
 
+## ADR-0210 — Remove the learning vote and comment surfaces
+
+**Status:** Accepted · 2026-07 · [ORB-10046]
+
+**Context.** Two auxiliary surfaces shipped beside the core learning primitives: task-anchored decayed upvotes (ADR-0157) and free-text comments anchored to a learning. After months of availability, orbit's own 50-record learning corpus contained zero votes and exactly one comment (L-0005). The infrastructure carrying those surfaces was disproportionate to their use: two JSONL sidecars per learning, a decayed-score search-ranking pass, a `learning_votes_received` scoreboard column, an `orbit.learning.comment.add` entry in the artifact-redaction policy (with its own audit path), a `LearningReminder.comments` field hydrated on every reminder render, and the CLI/MCP tool surfaces themselves. ORB-00289/00348 had already flipped `upvote`, `comment.list`, and `comment.delete` to `register_inactive`; this decision finishes the direction.
+
+Alternatives considered:
+
+| Approach | Profile |
+|----------|---------|
+| **Keep both, narrower** | Preserve `comment.add` as an annotation channel and `upvote` for recency, with clearer docs on when to prefer `update`/`supersede`. |
+| **Remove comments, keep upvote** | Halves the removal but keeps the sidecar and the decayed-score ranking; still no observed votes to justify. |
+| **Remove both (this ADR)** | Corrections funnel through `update`, material changes through `supersede`, provenance through `evidence`; ranking reduces to `priority` → `updated_at` → `id`. |
+
+**Decision.** Remove both surfaces entirely. Delete `orbit.learning.{upvote,comment.add,comment.list,comment.delete}`, the CLI `orbit learning upvote` / `comment` subcommands, the store trait methods (`upvote_learning`, `learning_vote_summary`, `add_learning_comment`, `list_learning_comments`, `delete_learning_comment`), the `votes.jsonl`/`comments.jsonl` sidecars and their layout/validation helpers, the `learning_votes_received` scoreboard column, the `LearningComment{,Event,Tombstone}` / `LearningVote{Row,Summary}` / `decayed_vote_score` / `read_comment_render_cap_env` / `DEFAULT_LEARNING_COMMENT_RENDER_CAP` types, the `NotFoundKind::LearningComment` variant, the `LearningCommentAdd` artifact-redaction policy entry, and the `LearningReminder.comments` field. Preserve the one existing comment (L-0005/C20260519-1) by folding its content into that learning's body via `orbit.learning.update` before deleting the surface.
+
+**Consequences.**
+- Search ranking becomes `priority` desc → `updated_at` desc → `id` asc. Since no learning had votes, this changes no observed rankings today.
+- The free-text redaction burden shrinks (the `comment.add` policy entry, its `learning_comment` artifact-target mapping, and the audit-emit branch are gone).
+- The store layout simplifies: each learning is `<L-id>/learning.yaml` and nothing else in the common case. `sync`/reindex no longer validates comment JSONL. Partial-create rollback no longer removes sidecar files.
+- `LearningReminder` shrinks; consumers that hand-constructed reminders with `comments: []` no longer compile.
+- Duplicate-check regains its original character: "this already exists" is a signal to the human curator, not a mechanical vote against the duplicate. If a stronger signal is needed later, it can be added with usage data behind it.
+- Cost: breaking change to the MCP/CLI/store trait surface; the `EXPECTED_INACTIVE_TOOL_NAMES` length canary moves from 26 to 22. External callers of the removed tools or types must migrate to `update`/`supersede`/`evidence`. Documented under Breaking Changes in `CHANGELOG.md` [ORB-10046].
+- Cost: the ranking signal ADR-0157 was designed for — repeated task-anchored validation of an older but still load-bearing learning — is not replaced. `updated_at` (bumped on every `update`) is the natural proxy; if evidence emerges that it's insufficient, a scoped feedback primitive can be reintroduced with real usage data behind it.
+
+---
+
 ## Task References
 
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
+- [ORB-10046] — Remove the vote and comment surfaces from the learning subsystem (ADR-0210 supersedes ADR-0157).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
