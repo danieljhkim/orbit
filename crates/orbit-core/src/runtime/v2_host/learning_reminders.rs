@@ -161,7 +161,7 @@ mod tests {
                 },
                 body: "body must not be injected".to_string(),
                 evidence: Vec::new(),
-                created_by: Some("gpt-5.5".to_string()),
+                created_by: Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
                 priority,
             })
             .expect("create learning")

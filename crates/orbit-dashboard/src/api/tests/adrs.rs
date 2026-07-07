@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_core::OrbitRuntime;
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -21,12 +22,12 @@ fn seed_adr(runtime: &OrbitRuntime, title: &str, related_tasks: Vec<&str>) -> Va
             json!({
                 "title": title,
                 "body": ADR_BODY,
-                "owner": "gpt-5.5",
+                "owner": TEST_CODEX_MODEL,
                 "related_features": ["dashboard"],
                 "related_tasks": related_tasks,
             }),
             None,
-            Some("gpt-5.5".to_string()),
+            Some(TEST_CODEX_MODEL.to_string()),
         )
         .expect("seed ADR")
 }
@@ -40,7 +41,7 @@ fn accept_adr(runtime: &OrbitRuntime, id: &str) -> Value {
                 "status": "accepted",
             }),
             None,
-            Some("gpt-5.5".to_string()),
+            Some(TEST_CODEX_MODEL.to_string()),
         )
         .expect("accept ADR")
 }
@@ -109,7 +110,7 @@ async fn post_adr_routes_require_localhost_origin() {
             "orbit.adr.show",
             json!({ "id": adr_id(&proposed) }),
             None,
-            Some("gpt-5.5".to_string()),
+            Some(TEST_CODEX_MODEL.to_string()),
         )
         .expect("show proposed");
     assert_eq!(stored["status"], "proposed");
@@ -133,7 +134,7 @@ async fn post_adr_routes_require_localhost_origin() {
             "orbit.adr.show",
             json!({ "id": adr_id(&old) }),
             None,
-            Some("gpt-5.5".to_string()),
+            Some(TEST_CODEX_MODEL.to_string()),
         )
         .expect("show old");
     assert_eq!(stored["status"], "accepted");
@@ -195,7 +196,7 @@ async fn supersede_rejects_malformed_by() {
             "orbit.adr.show",
             json!({ "id": adr_id(&old) }),
             None,
-            Some("gpt-5.5".to_string()),
+            Some(TEST_CODEX_MODEL.to_string()),
         )
         .expect("show old");
     assert_eq!(stored["status"], "accepted");

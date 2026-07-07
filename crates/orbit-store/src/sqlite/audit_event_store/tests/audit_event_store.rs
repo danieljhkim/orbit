@@ -1,6 +1,7 @@
 // Migrated from sqlite/audit_event_store.rs per ORB-00231
 use super::super::*;
 use crate::Store;
+use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
 
 fn sample_params() -> AuditEventInsertParams {
     AuditEventInsertParams {
@@ -10,7 +11,7 @@ fn sample_params() -> AuditEventInsertParams {
         tool_name: Some("orbit.task.show".to_string()),
         target_type: Some("tool".to_string()),
         target_id: Some("orbit.task.show".to_string()),
-        role: "claude-opus-4-7".to_string(),
+        role: TEST_CLAUDE_MODEL.to_string(),
         status: AuditEventStatus::Success,
         exit_code: 0,
         duration_ms: 42,
@@ -227,7 +228,7 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
 
     let mut graph_search = sample_params_with(
         "exec-graph-search-1",
-        "claude-opus-4-7",
+        TEST_CLAUDE_MODEL,
         AuditEventStatus::Success,
     );
     graph_search.tool_name = Some("orbit.graph.search".to_string());
@@ -238,7 +239,7 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
 
     let mut graph_search_failed = sample_params_with(
         "exec-graph-search-2",
-        "claude-opus-4-7",
+        TEST_CLAUDE_MODEL,
         AuditEventStatus::Failure,
     );
     graph_search_failed.tool_name = Some("orbit.graph.search".to_string());
@@ -247,16 +248,22 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
         .insert_audit_event_record(&graph_search_failed)
         .expect("insert");
 
-    let mut graph_show =
-        sample_params_with("exec-graph-show", "gpt-5.5", AuditEventStatus::Success);
+    let mut graph_show = sample_params_with(
+        "exec-graph-show",
+        TEST_CODEX_MODEL,
+        AuditEventStatus::Success,
+    );
     graph_show.tool_name = Some("orbit.graph.show".to_string());
     graph_show.target_id = Some("orbit.graph.show".to_string());
     store
         .insert_audit_event_record(&graph_show)
         .expect("insert");
 
-    let mut task_update =
-        sample_params_with("exec-task-update", "gpt-5.5", AuditEventStatus::Success);
+    let mut task_update = sample_params_with(
+        "exec-task-update",
+        TEST_CODEX_MODEL,
+        AuditEventStatus::Success,
+    );
     task_update.tool_name = Some("orbit.task.update".to_string());
     task_update.target_id = Some("orbit.task.update".to_string());
     store
@@ -266,7 +273,7 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
     // Non-orbit tool name must be excluded.
     let mut external = sample_params_with(
         "exec-external",
-        "claude-opus-4-7",
+        TEST_CLAUDE_MODEL,
         AuditEventStatus::Success,
     );
     external.tool_name = Some("github.create_pr".to_string());
@@ -276,7 +283,7 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
     // Non-`run`/`run-mcp` subcommand must be excluded even on an orbit name.
     let mut non_run = sample_params_with(
         "exec-show-noise",
-        "claude-opus-4-7",
+        TEST_CLAUDE_MODEL,
         AuditEventStatus::Success,
     );
     non_run.subcommand = Some("show".to_string());
@@ -293,19 +300,19 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
         vec![
             AuditToolCallCountsBySurfaceAndRole {
                 surface: "graph".to_string(),
-                role: "claude-opus-4-7".to_string(),
+                role: TEST_CLAUDE_MODEL.to_string(),
                 total: 2,
                 failed: 1,
             },
             AuditToolCallCountsBySurfaceAndRole {
                 surface: "graph".to_string(),
-                role: "gpt-5.5".to_string(),
+                role: TEST_CODEX_MODEL.to_string(),
                 total: 1,
                 failed: 0,
             },
             AuditToolCallCountsBySurfaceAndRole {
                 surface: "task".to_string(),
-                role: "gpt-5.5".to_string(),
+                role: TEST_CODEX_MODEL.to_string(),
                 total: 1,
                 failed: 0,
             },
@@ -321,7 +328,7 @@ fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
     for i in 0..3 {
         let mut p = sample_params_with(
             &format!("exec-show-{i}"),
-            "gpt-5.5",
+            TEST_CODEX_MODEL,
             AuditEventStatus::Success,
         );
         p.tool_name = Some("orbit.graph.show".to_string());
@@ -333,7 +340,7 @@ fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
     for i in 0..2 {
         let mut p = sample_params_with(
             &format!("exec-claude-search-{i}"),
-            "claude-opus-4-7",
+            TEST_CLAUDE_MODEL,
             AuditEventStatus::Success,
         );
         p.tool_name = Some("orbit.graph.search".to_string());
@@ -343,7 +350,11 @@ fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
 
     // gpt-5.5: 1× orbit.task.update
     {
-        let mut p = sample_params_with("exec-task-update", "gpt-5.5", AuditEventStatus::Success);
+        let mut p = sample_params_with(
+            "exec-task-update",
+            TEST_CODEX_MODEL,
+            AuditEventStatus::Success,
+        );
         p.tool_name = Some("orbit.task.update".to_string());
         p.target_id = Some("orbit.task.update".to_string());
         store.insert_audit_event_record(&p).expect("insert");
@@ -351,7 +362,11 @@ fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
 
     // Non-orbit tool — must be excluded.
     {
-        let mut p = sample_params_with("exec-non-orbit", "gpt-5.5", AuditEventStatus::Success);
+        let mut p = sample_params_with(
+            "exec-non-orbit",
+            TEST_CODEX_MODEL,
+            AuditEventStatus::Success,
+        );
         p.tool_name = Some("github.create_pr".to_string());
         p.target_id = Some("github.create_pr".to_string());
         store.insert_audit_event_record(&p).expect("insert");
@@ -359,7 +374,11 @@ fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
 
     // Non-`run`/`run-mcp` subcommand on an orbit name — must be excluded.
     {
-        let mut p = sample_params_with("exec-show-noise", "gpt-5.5", AuditEventStatus::Success);
+        let mut p = sample_params_with(
+            "exec-show-noise",
+            TEST_CODEX_MODEL,
+            AuditEventStatus::Success,
+        );
         p.subcommand = Some("show".to_string());
         p.tool_name = Some("orbit.graph.show".to_string());
         p.target_id = Some("orbit.graph.show".to_string());
@@ -374,17 +393,17 @@ fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
         vec![
             AuditTopToolCall {
                 tool_name: "orbit.graph.show".to_string(),
-                role: "gpt-5.5".to_string(),
+                role: TEST_CODEX_MODEL.to_string(),
                 total: 3,
             },
             AuditTopToolCall {
                 tool_name: "orbit.graph.search".to_string(),
-                role: "claude-opus-4-7".to_string(),
+                role: TEST_CLAUDE_MODEL.to_string(),
                 total: 2,
             },
             AuditTopToolCall {
                 tool_name: "orbit.task.update".to_string(),
-                role: "gpt-5.5".to_string(),
+                role: TEST_CODEX_MODEL.to_string(),
                 total: 1,
             },
         ]

@@ -26,7 +26,7 @@ fn main() {
     };
 
     let model = env::var("ORBIT_EXAMPLE_ANTHROPIC_MODEL")
-        .unwrap_or_else(|_| "claude-haiku-4-5-20251001".to_string());
+        .unwrap_or_else(|_| orbit_common::model_defaults::ANTHROPIC_EXAMPLE_MODEL.to_string());
 
     let transport =
         AnthropicMessagesTransport::new(api_key, &model).expect("build anthropic transport");

@@ -124,10 +124,13 @@ fn default_backend_unknown_provider_is_http() {
 
 #[test]
 fn model_registry_returns_expected_defaults() {
-    assert_eq!(default_model_for("claude"), Some("claude-opus-4-7"));
-    assert_eq!(default_model_for("codex"), Some("gpt-5.5"));
-    assert_eq!(default_model_for("gemini"), Some("gemini-3-pro"));
-    assert_eq!(default_model_for("grok"), Some("grok-build"));
+    use orbit_common::model_defaults::{
+        CLAUDE_DEFAULT_STRONG, CODEX_DEFAULT_MODEL, GEMINI_DEFAULT_MODEL, GROK_DEFAULT_MODEL,
+    };
+    assert_eq!(default_model_for("claude"), Some(CLAUDE_DEFAULT_STRONG));
+    assert_eq!(default_model_for("codex"), Some(CODEX_DEFAULT_MODEL));
+    assert_eq!(default_model_for("gemini"), Some(GEMINI_DEFAULT_MODEL));
+    assert_eq!(default_model_for("grok"), Some(GROK_DEFAULT_MODEL));
     assert_eq!(default_model_for("ollama"), None);
     assert_eq!(default_model_for("unknown"), None);
 }

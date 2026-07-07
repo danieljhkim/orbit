@@ -1,5 +1,6 @@
 // Migrated from file/scoreboard/scoreboard_summary.rs per ORB-00231
 use super::super::*;
+use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL, TEST_GROK_MODEL};
 
 #[test]
 fn summary_overlays_audit_tool_call_counts_by_normalized_model() {
@@ -57,7 +58,7 @@ fn summary_agent_keys_are_families_not_models() {
     .expect("write tokens scoreboard");
 
     let summary = generate_summary(temp.path(), &[]).expect("generate summary");
-    for forbidden in ["grok-4", "claude-opus-4-7", "gpt-5.5"] {
+    for forbidden in [TEST_GROK_MODEL, TEST_CLAUDE_MODEL, TEST_CODEX_MODEL] {
         assert!(
             !summary.agents.contains_key(forbidden),
             "model key leaked into summary agents: {forbidden}"
@@ -173,15 +174,25 @@ fn summary_counts_tasks_created_and_planned_across_all_statuses() {
 
     // Mix of statuses including ones excluded from `tasks_completed`.
     let tasks = vec![
-        test_task("T1", TaskStatus::Done, "claude-opus-4-7", "claude-opus-4-7"),
-        test_task("T2", TaskStatus::Backlog, "claude-opus-4-7", "gpt-5.5"),
+        test_task("T1", TaskStatus::Done, TEST_CLAUDE_MODEL, TEST_CLAUDE_MODEL),
+        test_task(
+            "T2",
+            TaskStatus::Backlog,
+            TEST_CLAUDE_MODEL,
+            TEST_CODEX_MODEL,
+        ),
         test_task(
             "T3",
             TaskStatus::Rejected,
-            "claude-opus-4-7",
-            "claude-opus-4-7",
+            TEST_CLAUDE_MODEL,
+            TEST_CLAUDE_MODEL,
         ),
-        test_task("T4", TaskStatus::Friction, "gpt-5.5", "gpt-5.5"),
+        test_task(
+            "T4",
+            TaskStatus::Friction,
+            TEST_CODEX_MODEL,
+            TEST_CODEX_MODEL,
+        ),
         test_task_no_attrib("T5", TaskStatus::Done),
     ];
 
@@ -212,17 +223,17 @@ fn summary_counts_tasks_created_and_planned_across_all_statuses() {
 fn summary_counts_knowledge_artifacts_by_author_family() {
     let temp = tempfile::tempdir().expect("create tempdir");
     let learnings = vec![
-        test_learning("L-0015", Some("gpt-5.5")),
-        test_learning("L-0016", Some("claude-opus-4-7")),
+        test_learning("L-0015", Some(TEST_CODEX_MODEL)),
+        test_learning("L-0016", Some(TEST_CLAUDE_MODEL)),
         test_learning("L-0003", None),
     ];
     let now = Utc::now();
     let adrs = vec![
         test_adr("ADR-0001", "codex", AdrStatus::Accepted, Some(now)),
-        test_adr("ADR-0002", "gpt-5.5", AdrStatus::Proposed, None),
+        test_adr("ADR-0002", TEST_CODEX_MODEL, AdrStatus::Proposed, None),
         test_adr(
             "ADR-0003",
-            "claude-opus-4-7",
+            TEST_CLAUDE_MODEL,
             AdrStatus::Superseded,
             Some(now),
         ),
@@ -259,19 +270,19 @@ fn summary_overlays_per_surface_tool_call_counts() {
     let surface_rows = vec![
         AuditToolCallCountsBySurfaceAndRole {
             surface: "graph".to_string(),
-            role: "claude-opus-4-7".to_string(),
+            role: TEST_CLAUDE_MODEL.to_string(),
             total: 56,
             failed: 2,
         },
         AuditToolCallCountsBySurfaceAndRole {
             surface: "graph".to_string(),
-            role: "gpt-5.5".to_string(),
+            role: TEST_CODEX_MODEL.to_string(),
             total: 697,
             failed: 5,
         },
         AuditToolCallCountsBySurfaceAndRole {
             surface: "task".to_string(),
-            role: "gpt-5.5".to_string(),
+            role: TEST_CODEX_MODEL.to_string(),
             total: 410,
             failed: 1,
         },
@@ -347,20 +358,25 @@ fn recent_7d_filters_tasks_workflows_and_surface_calls_by_window() {
     let mut t_inside = test_task(
         "T-in",
         TaskStatus::Done,
-        "claude-opus-4-7",
-        "claude-opus-4-7",
+        TEST_CLAUDE_MODEL,
+        TEST_CLAUDE_MODEL,
     );
     t_inside.created_at = inside;
     t_inside.updated_at = inside;
 
-    let mut t_inside2 = test_task("T-in2", TaskStatus::Backlog, "gpt-5.5", "gpt-5.5");
+    let mut t_inside2 = test_task(
+        "T-in2",
+        TaskStatus::Backlog,
+        TEST_CODEX_MODEL,
+        TEST_CODEX_MODEL,
+    );
     t_inside2.created_at = inside;
 
     let mut t_outside = test_task(
         "T-out",
         TaskStatus::Done,
-        "claude-opus-4-7",
-        "claude-opus-4-7",
+        TEST_CLAUDE_MODEL,
+        TEST_CLAUDE_MODEL,
     );
     t_outside.created_at = outside;
     t_outside.updated_at = outside; // legacy: no history transition
@@ -370,7 +386,7 @@ fn recent_7d_filters_tasks_workflows_and_surface_calls_by_window() {
 
     let surface_recent = vec![AuditToolCallCountsBySurfaceAndRole {
         surface: "graph".to_string(),
-        role: "claude-opus-4-7".to_string(),
+        role: TEST_CLAUDE_MODEL.to_string(),
         total: 12,
         failed: 0,
     }];
@@ -422,12 +438,12 @@ fn summary_passes_top_tools_through_unchanged() {
 
     let rows = vec![
         AuditTopToolCall {
-            role: "gpt-5.5".to_string(),
+            role: TEST_CODEX_MODEL.to_string(),
             tool_name: "orbit.graph.show".to_string(),
             total: 355,
         },
         AuditTopToolCall {
-            role: "claude-opus-4-7".to_string(),
+            role: TEST_CLAUDE_MODEL.to_string(),
             tool_name: "orbit.graph.search".to_string(),
             total: 45,
         },
@@ -447,12 +463,12 @@ fn summary_passes_top_tools_through_unchanged() {
         summary.top_tools,
         vec![
             TopToolCall {
-                role: "gpt-5.5".to_string(),
+                role: TEST_CODEX_MODEL.to_string(),
                 tool_name: "orbit.graph.show".to_string(),
                 count: 355,
             },
             TopToolCall {
-                role: "claude-opus-4-7".to_string(),
+                role: TEST_CLAUDE_MODEL.to_string(),
                 tool_name: "orbit.graph.search".to_string(),
                 count: 45,
             },
@@ -794,25 +810,30 @@ fn windowed_tasks_filter_by_created_at_and_done_at() {
     let mut t_in_created = test_task(
         "T-in-c",
         TaskStatus::Backlog,
-        "claude-opus-4-7",
-        "claude-opus-4-7",
+        TEST_CLAUDE_MODEL,
+        TEST_CLAUDE_MODEL,
     );
     t_in_created.created_at = inside;
 
-    let mut t_in_done = test_task("T-in-d", TaskStatus::Done, "gpt-5.5", "gpt-5.5");
+    let mut t_in_done = test_task(
+        "T-in-d",
+        TaskStatus::Done,
+        TEST_CODEX_MODEL,
+        TEST_CODEX_MODEL,
+    );
     t_in_done.created_at = outside; // not in created/planned window
     t_in_done.updated_at = inside; // task_done_at == updated_at, in window
-    t_in_done.implemented_by = Some("gpt-5.5".to_string());
+    t_in_done.implemented_by = Some(TEST_CODEX_MODEL.to_string());
 
     let mut t_out = test_task(
         "T-out",
         TaskStatus::Done,
-        "claude-opus-4-7",
-        "claude-opus-4-7",
+        TEST_CLAUDE_MODEL,
+        TEST_CLAUDE_MODEL,
     );
     t_out.created_at = outside;
     t_out.updated_at = outside;
-    t_out.implemented_by = Some("claude-opus-4-7".to_string());
+    t_out.implemented_by = Some(TEST_CLAUDE_MODEL.to_string());
 
     let tasks = vec![t_in_created, t_in_done, t_out];
 

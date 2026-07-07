@@ -13,7 +13,7 @@ use serde_json::{Map, Value, json};
 use super::{bad_request, bounded_limit, map_runtime_error, non_empty_string};
 
 const ADRS_DEFAULT_LIMIT: usize = 100;
-const ADR_TOOL_MODEL: &str = "gpt-5.5";
+const ADR_TOOL_MODEL: &str = orbit_common::model_defaults::CODEX_DEFAULT_MODEL;
 
 #[derive(Deserialize, Default)]
 pub(super) struct AdrsQuery {

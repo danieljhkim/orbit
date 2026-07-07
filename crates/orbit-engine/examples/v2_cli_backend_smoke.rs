@@ -429,7 +429,7 @@ fn cli_agent_loop_spec(provider: Option<Provider>) -> AgentLoopSpec {
         instruction: "cli smoke".to_string(),
         tools: vec!["fs.read".to_string(), "fs.delete".to_string()],
         on_denial: OnDenial::Terminate,
-        model: Some("claude-sonnet-4-5".to_string()),
+        model: Some(orbit_common::model_defaults::ANTHROPIC_HTTP_DEFAULT_MODEL.to_string()),
         max_iterations: 1,
         backend: Backend::Cli,
         provider: provider.unwrap_or(Provider::Claude),

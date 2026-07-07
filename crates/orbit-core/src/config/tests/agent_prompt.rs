@@ -1,3 +1,5 @@
+use orbit_common::model_defaults::{CLAUDE_DEFAULT_STRONG, CODEX_DEFAULT_MODEL};
+
 use super::super::agent_detect::DetectedAgents;
 use super::super::agent_prompt::testing::CannedPrompter;
 use super::super::agent_prompt::*;
@@ -15,17 +17,17 @@ fn empty_answer_accepts_role_aware_recommended_setup() {
     let reviewer = result.get("reviewer").expect("reviewer entry");
     assert_eq!(reviewer.provider.as_deref(), Some("codex"));
     assert_eq!(reviewer.backend.as_deref(), Some("cli"));
-    assert_eq!(reviewer.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(reviewer.model.as_deref(), Some(CODEX_DEFAULT_MODEL));
 
     let implementer = result.get("implementer").expect("implementer entry");
     assert_eq!(implementer.provider.as_deref(), Some("codex"));
     assert_eq!(implementer.backend.as_deref(), Some("cli"));
-    assert_eq!(implementer.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(implementer.model.as_deref(), Some(CODEX_DEFAULT_MODEL));
 
     let planner = result.get("planner").expect("planner entry");
     assert_eq!(planner.provider.as_deref(), Some("claude"));
     assert_eq!(planner.backend.as_deref(), Some("cli"));
-    assert_eq!(planner.model.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(planner.model.as_deref(), Some(CLAUDE_DEFAULT_STRONG));
 
     let transcript = prompter.transcript();
     assert!(transcript.contains("Orbit uses agents for three workflow roles"));
@@ -45,17 +47,17 @@ fn claude_only_detection_still_recommends_claude_for_all_roles() {
     let reviewer = result.get("reviewer").expect("reviewer entry");
     assert_eq!(reviewer.provider.as_deref(), Some("claude"));
     assert_eq!(reviewer.backend.as_deref(), Some("cli"));
-    assert_eq!(reviewer.model.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(reviewer.model.as_deref(), Some(CLAUDE_DEFAULT_STRONG));
 
     let implementer = result.get("implementer").expect("implementer entry");
     assert_eq!(implementer.provider.as_deref(), Some("claude"));
     assert_eq!(implementer.backend.as_deref(), Some("cli"));
-    assert_eq!(implementer.model.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(implementer.model.as_deref(), Some(CLAUDE_DEFAULT_STRONG));
 
     let planner = result.get("planner").expect("planner entry");
     assert_eq!(planner.provider.as_deref(), Some("claude"));
     assert_eq!(planner.backend.as_deref(), Some("cli"));
-    assert_eq!(planner.model.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(planner.model.as_deref(), Some(CLAUDE_DEFAULT_STRONG));
 }
 
 #[test]
@@ -71,17 +73,17 @@ fn customization_enter_selects_role_recommendation() {
     let reviewer = result.get("reviewer").expect("reviewer entry");
     assert_eq!(reviewer.provider.as_deref(), Some("codex"));
     assert_eq!(reviewer.backend.as_deref(), Some("cli"));
-    assert_eq!(reviewer.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(reviewer.model.as_deref(), Some(CODEX_DEFAULT_MODEL));
 
     let implementer = result.get("implementer").expect("implementer entry");
     assert_eq!(implementer.provider.as_deref(), Some("codex"));
     assert_eq!(implementer.backend.as_deref(), Some("cli"));
-    assert_eq!(implementer.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(implementer.model.as_deref(), Some(CODEX_DEFAULT_MODEL));
 
     let planner = result.get("planner").expect("planner entry");
     assert_eq!(planner.provider.as_deref(), Some("claude"));
     assert_eq!(planner.backend.as_deref(), Some("cli"));
-    assert_eq!(planner.model.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(planner.model.as_deref(), Some(CLAUDE_DEFAULT_STRONG));
 
     let transcript = prompter.transcript();
     assert!(transcript.contains("Choose an agent for Reviewer:"));
@@ -110,7 +112,7 @@ fn custom_provider_prompts_for_backend_and_model() {
     let implementer = result.get("implementer").expect("implementer entry");
     assert_eq!(implementer.provider.as_deref(), Some("claude"));
     assert_eq!(implementer.backend.as_deref(), Some("http"));
-    assert_eq!(implementer.model.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(implementer.model.as_deref(), Some(CLAUDE_DEFAULT_STRONG));
 }
 
 #[test]

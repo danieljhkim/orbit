@@ -771,7 +771,7 @@ mod tests {
             RawAgentRoleConfig {
                 provider: Some("claude".into()),
                 backend: Some("cli".into()),
-                model: Some("claude-opus-4-7".into()),
+                model: Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL.into()),
             },
         );
         roles.insert(
@@ -779,7 +779,7 @@ mod tests {
             RawAgentRoleConfig {
                 provider: Some("codex".into()),
                 backend: Some("cli".into()),
-                model: Some("gpt-5.5".into()),
+                model: Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.into()),
             },
         );
         roles.insert(
@@ -787,7 +787,7 @@ mod tests {
             RawAgentRoleConfig {
                 provider: Some("gemini".into()),
                 backend: Some("http".into()),
-                model: Some("gemini-3.1-pro".into()),
+                model: Some(orbit_common::test_fixtures::TEST_GEMINI_MODEL.into()),
             },
         );
 
@@ -811,7 +811,10 @@ mod tests {
         assert!(!contents.contains("[agent.reviewer]"));
         assert!(contents.contains("default_crew = \"custom\""));
         assert!(contents.contains("provider = \"codex\""));
-        assert!(contents.contains("model = \"claude-opus-4-7\""));
+        assert!(contents.contains(&format!(
+            "model = \"{}\"",
+            orbit_common::test_fixtures::TEST_CLAUDE_MODEL
+        )));
 
         // Round-trips through toml: custom crew contains all three roles.
         let parsed: toml::Value = toml::from_str(&contents).expect("parse");
@@ -836,7 +839,7 @@ mod tests {
             .expect("planner table");
         assert_eq!(
             planner.get("model").and_then(|v| v.as_str()),
-            Some("gemini-3.1-pro")
+            Some(orbit_common::test_fixtures::TEST_GEMINI_MODEL)
         );
     }
 

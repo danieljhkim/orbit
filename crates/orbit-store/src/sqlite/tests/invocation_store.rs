@@ -2,6 +2,7 @@
 // invocation_store.rs) to sibling under `sqlite/tests/` per ORB-00247 and
 // docs/design-patterns/test_layout.md.
 
+use orbit_common::test_fixtures::{TEST_CODEX_MODEL, TEST_GEMINI_MODEL};
 use orbit_common::types::{InvocationTrace, RoleSlot, TokenUsage, ToolCallTrace};
 
 use super::super::invocation_store::{InvocationInsertParams, InvocationQuery};
@@ -16,7 +17,7 @@ fn invocation_records_persist_planning_duel_slot() {
             job_run_id: "jrun-1".to_string(),
             activity_id: "propose_duel_plan".to_string(),
             agent: "gemini".to_string(),
-            model: Some("gemini-3.1-pro".to_string()),
+            model: Some(TEST_GEMINI_MODEL.to_string()),
             slot: Some(RoleSlot::PlannerA),
             task_ids: vec!["ORB-1".to_string()],
             trace: InvocationTrace::default(),
@@ -44,7 +45,7 @@ fn invocation_records_persist_non_duel_slot_as_null() {
             job_run_id: "jrun-2".to_string(),
             activity_id: "implement_one".to_string(),
             agent: "codex".to_string(),
-            model: Some("gpt-5.5".to_string()),
+            model: Some(TEST_CODEX_MODEL.to_string()),
             slot: None,
             task_ids: vec!["ORB-2".to_string()],
             trace: InvocationTrace::default(),
@@ -71,7 +72,7 @@ fn invocation_records_filter_by_nested_task_and_tool() {
             job_run_id: "jrun-filter-match".to_string(),
             activity_id: "implement_one".to_string(),
             agent: "codex".to_string(),
-            model: Some("gpt-5.5".to_string()),
+            model: Some(TEST_CODEX_MODEL.to_string()),
             slot: None,
             task_ids: vec!["ORB-1".to_string()],
             trace: InvocationTrace {
@@ -95,7 +96,7 @@ fn invocation_records_filter_by_nested_task_and_tool() {
             job_run_id: "jrun-filter-other".to_string(),
             activity_id: "implement_one".to_string(),
             agent: "codex".to_string(),
-            model: Some("gpt-5.5".to_string()),
+            model: Some(TEST_CODEX_MODEL.to_string()),
             slot: None,
             task_ids: vec!["ORB-2".to_string()],
             trace: InvocationTrace {

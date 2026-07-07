@@ -8,6 +8,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use axum::response::Response;
 use chrono::{Duration, SecondsFormat};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::{InvocationTrace, KnowledgeRunMetrics, TokenUsage, ToolCallTrace};
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::metrics::{KnowledgeStatsSummary, aggregate as aggregate_knowledge_stats};
@@ -80,7 +81,7 @@ fn seed_metrics_runtime() -> OrbitRuntime {
             job_run_id: RUN_ID,
             activity_id: "implement_one",
             agent: "codex",
-            model: Some("gpt-5.5"),
+            model: Some(TEST_CODEX_MODEL),
             duration_ms: 1_234,
             input_tokens: 100,
             cache_read_tokens: 25,
@@ -273,7 +274,7 @@ async fn metrics_invocations_accepts_full_filter_set() {
     assert_eq!(rows[0]["job_run_id"], RUN_ID);
     assert_eq!(rows[0]["activity_id"], "implement_one");
     assert_eq!(rows[0]["agent"], "codex");
-    assert_eq!(rows[0]["model"], "gpt-5.5");
+    assert_eq!(rows[0]["model"], TEST_CODEX_MODEL);
     assert_eq!(rows[0]["task_ids"][0], TASK_ID);
     assert_eq!(rows[0]["tool_calls"][0]["tool_name"], "fs.read");
 }

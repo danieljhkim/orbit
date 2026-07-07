@@ -115,8 +115,8 @@ pub fn agent_family_from_cli(agent_cli: &str) -> String {
 ///
 /// Orbit stores model-only attribution on tasks, but some execution paths still
 /// need to recover the agent family for provider dispatch. This helper accepts
-/// both the new exact model strings (for example `claude-opus-4.6`) and the
-/// older shorthand values that may still appear in legacy artifacts.
+/// both the new exact model strings (for example a `claude-opus` build id) and
+/// the older shorthand values that may still appear in legacy artifacts.
 pub fn infer_agent_family_from_model(model: &str) -> Option<String> {
     let model = model.trim().to_ascii_lowercase();
     if model.is_empty() {

@@ -532,7 +532,7 @@ mod tests {
             Store::open_in_memory().expect("audit store"),
             "ws_test",
             "http-identity-regression",
-            "claude:claude-opus-4-7".to_string(),
+            format!("claude:{}", orbit_common::test_fixtures::TEST_CLAUDE_MODEL),
             None,
         )
         .expect("audit writer");
@@ -540,7 +540,7 @@ mod tests {
             instruction: "exercise tool identity".to_string(),
             tools: vec!["orbit.task.update".to_string()],
             on_denial: OnDenial::Terminate,
-            model: Some("claude-opus-4-7".to_string()),
+            model: Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL.to_string()),
             max_iterations: 2,
             backend: Backend::Http,
             provider: Provider::Claude,

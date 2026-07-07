@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_core::OrbitRuntime;
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -19,7 +20,7 @@ fn seed_friction(runtime: &OrbitRuntime, body: &str, tags: &[&str]) -> Value {
             json!({
                 "body": body,
                 "tags": tags,
-                "model": "gpt-5.5",
+                "model": TEST_CODEX_MODEL,
             }),
         )
         .expect("seed friction")
@@ -154,7 +155,7 @@ async fn stats_shape_exposes_triage_counts() {
             json!({
                 "id": triaged["id"],
                 "status": "triaged",
-                "model": "gpt-5.5",
+                "model": TEST_CODEX_MODEL,
             }),
         )
         .expect("triage friction");
@@ -163,7 +164,7 @@ async fn stats_shape_exposes_triage_counts() {
             "orbit.friction.resolve",
             json!({
                 "id": resolved["id"],
-                "model": "gpt-5.5",
+                "model": TEST_CODEX_MODEL,
             }),
         )
         .expect("resolve friction");

@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_core::{
     EvidenceKind, Learning, LearningCreateParams, LearningEvidence, LearningScope, LearningStatus,
     OrbitRuntime,
@@ -29,7 +30,7 @@ fn seed_learning(runtime: &OrbitRuntime, summary: &str) -> Learning {
                 kind: EvidenceKind::Task,
                 reference: "ORB-00061".to_string(),
             }],
-            created_by: Some("gpt-5.5".to_string()),
+            created_by: Some(TEST_CODEX_MODEL.to_string()),
             priority: Some(3),
         })
         .expect("seed learning")

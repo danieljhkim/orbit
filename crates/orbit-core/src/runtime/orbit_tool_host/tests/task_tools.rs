@@ -122,7 +122,7 @@ fn task_add_tool_creates_proposed_tasks_for_agents() {
                 "workspace": ".",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
 
@@ -155,7 +155,7 @@ fn mcp_task_add_uses_session_workspace_from_worktree_cwd() {
                 "description": "Session workspace must beat process cwd."
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             ToolEntryPoint::Mcp,
             ToolSessionContext::with_workspace(repo_root_string.clone()),
         )
@@ -198,7 +198,7 @@ fn duel_plan_add_persists_gemini_planner_artifact() {
                 "content": content,
             }),
             Some("gemini".to_string()),
-            Some("gemini-3.1-pro".to_string()),
+            Some(orbit_common::test_fixtures::TEST_GEMINI_MODEL.to_string()),
         )
         .expect("gemini duel plan add succeeds");
 
@@ -240,7 +240,7 @@ fn duel_plan_winner_persists_gemini_arbiter_artifact() {
                 "arbiter_rationale": "Tighter scope and clearer staged plan.",
             }),
             Some("gemini".to_string()),
-            Some("gemini-3.1-pro".to_string()),
+            Some(orbit_common::test_fixtures::TEST_GEMINI_MODEL.to_string()),
         )
         .expect("gemini duel plan winner succeeds");
 
@@ -278,7 +278,7 @@ fn task_add_tool_rejects_dropped_task_types_and_ignores_retired_status() {
                 "type": dropped_type,
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         ));
         assert!(message.contains(dropped_type), "{message}");
         assert!(
@@ -299,7 +299,7 @@ fn task_add_tool_rejects_dropped_task_types_and_ignores_retired_status() {
                 "status": "friction",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("retired status field is ignored");
     assert_eq!(
@@ -320,7 +320,7 @@ fn friction_add_writes_markdown_record_and_validates_tags() {
                 "tags": ["tooling", "skill-guidance"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("friction add succeeds");
 
@@ -339,7 +339,7 @@ fn friction_add_writes_markdown_record_and_validates_tags() {
             "tags": ["not-a-real-tag"],
         }),
         Some("codex".to_string()),
-        Some("gpt-5.5".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
     ));
     assert!(message.contains("valid tags"), "{message}");
 }
@@ -484,7 +484,7 @@ fn task_add_tool_ignores_retired_dependencies() {
                 "dependencies": [dependency.id.clone()],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
 
@@ -505,7 +505,7 @@ fn task_add_and_show_tools_roundtrip_tags() {
                 "tags": ["perf", "bench"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
     let task_id = added["id"].as_str().expect("task id");
@@ -515,7 +515,7 @@ fn task_add_and_show_tools_roundtrip_tags() {
             "orbit.task.show",
             json!({ "id": task_id }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task show tool succeeds");
 
@@ -539,7 +539,7 @@ fn task_show_tool_includes_empty_tags_array() {
             "orbit.task.show",
             json!({ "id": task.id }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task show tool succeeds");
 
@@ -569,7 +569,7 @@ fn task_show_tool_with_context_includes_related_docs() {
             "orbit.task.show",
             json!({ "id": task.id, "with_context": true, "max_docs": 1 }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task show tool succeeds");
 
@@ -601,7 +601,7 @@ fn task_add_tool_normalizes_tags_at_write_time() {
                 "tags": ["  Perf ", "BENCH"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
 
@@ -627,7 +627,7 @@ fn task_add_tool_ignores_retired_external_refs() {
                 ],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
 
@@ -652,7 +652,7 @@ fn task_add_tool_recovers_mcp_encoded_acceptance_and_context_arrays() {
                 "context_files": ["[\"file:src/lib.rs\"]"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
 
@@ -677,7 +677,7 @@ fn task_add_tool_infers_agent_from_model_only_input() {
                 "title": "Propose model-only task",
                 "description": "Exercise model-first provenance.",
                 "workspace": ".",
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
             None,
             None,
@@ -690,7 +690,7 @@ fn task_add_tool_infers_agent_from_model_only_input() {
     assert!(output.get("model").is_none_or(serde_json::Value::is_null));
     assert_eq!(
         output.get("created_by").and_then(Value::as_str),
-        Some("gpt-5.5")
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL)
     );
 }
 
@@ -744,7 +744,7 @@ fn task_update_tool_rejects_dropped_task_types() {
                 "type": dropped_type,
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         ));
         assert!(message.contains(dropped_type), "{message}");
         assert!(
@@ -790,7 +790,7 @@ fn task_update_tool_replaces_dependencies() {
                 "dependencies": [first_dependency.id.clone()],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool sets dependency");
 
@@ -807,7 +807,7 @@ fn task_update_tool_replaces_dependencies() {
                 "dependencies": [second_dependency.id.clone()],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool replaces dependency");
 
@@ -838,7 +838,7 @@ fn task_update_tool_persists_source_task_id_and_history() {
                 "type": "bug",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
     let task_id = added["id"].as_str().expect("task id").to_string();
@@ -889,7 +889,7 @@ fn task_update_tool_persists_source_task_id_and_history() {
             "orbit.task.show",
             json!({ "id": output["id"].as_str().expect("task id") }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task show tool succeeds");
     assert_eq!(
@@ -921,7 +921,7 @@ fn task_update_tool_clears_source_task_id_with_empty_string() {
                 "type": "bug",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
     let seeded = runtime
@@ -932,7 +932,7 @@ fn task_update_tool_clears_source_task_id_with_empty_string() {
                 "source_task_id": source.id.clone(),
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool sets source task");
     assert_eq!(
@@ -948,7 +948,7 @@ fn task_update_tool_clears_source_task_id_with_empty_string() {
                 "source_task_id": "",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool succeeds");
 
@@ -986,7 +986,7 @@ fn task_update_tool_stores_unresolved_source_task_id() {
                 "source_task_id": "ORB-99998",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
     assert_eq!(
@@ -1002,7 +1002,7 @@ fn task_update_tool_stores_unresolved_source_task_id() {
                 "source_task_id": unresolved_from_update,
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("update stores a loose source reference");
 
@@ -1026,7 +1026,7 @@ fn task_update_tool_replaces_tags() {
                 "tags": ["perf", "bench"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
     let task_id = added["id"].as_str().expect("task id").to_string();
@@ -1039,7 +1039,7 @@ fn task_update_tool_replaces_tags() {
                 "tags": ["docs"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool replaces tags");
 
@@ -1064,7 +1064,7 @@ fn task_update_tool_replaces_context_files_and_keeps_future_paths() {
                 "context_files": ["file:src/lib.rs"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
     let task_id = added["id"].as_str().expect("task id").to_string();
@@ -1081,7 +1081,7 @@ fn task_update_tool_replaces_context_files_and_keeps_future_paths() {
                 "context_files": ["[\"file:src/main.rs\", \"file:src/future.rs\"]"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool replaces context_files");
 
@@ -1099,7 +1099,7 @@ fn task_update_tool_replaces_context_files_and_keeps_future_paths() {
             "orbit.task.show",
             json!({ "id": output["id"].as_str().expect("task id") }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task show tool succeeds");
     assert_eq!(
@@ -1139,7 +1139,7 @@ fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
                     "tags": tags,
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("create tagged task");
     }
@@ -1149,7 +1149,7 @@ fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
             "orbit.task.list",
             json!({ "tag": ["perf"] }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("list by tag");
     assert_task_titles(&perf_list, &["Perf task", "Perf bench task"]);
@@ -1159,7 +1159,7 @@ fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
             "orbit.task.list",
             json!({ "tag": ["perf", "bench"] }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("list by both tags");
     assert_task_titles(&both_list, &["Perf bench task"]);
@@ -1172,7 +1172,7 @@ fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
             "orbit.search",
             json!({ "query": "tag-search", "kind": "task", "tag": ["bench"] }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("search by tag");
     assert_task_titles(&bench_search["results"], &["Bench task", "Perf bench task"]);
@@ -1182,7 +1182,7 @@ fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
             "orbit.search",
             json!({ "query": "tag-search", "kind": "task", "tag": ["perf", "bench"] }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("search by both tags");
     assert_task_titles(&both_search["results"], &["Perf bench task"]);
@@ -1208,7 +1208,7 @@ fn task_update_tool_recovers_mcp_encoded_acceptance_array() {
                 "acceptance_criteria": ["[\"Criterion A\", \"Criterion B\"]"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool succeeds");
 
@@ -1238,7 +1238,7 @@ fn task_show_tool_recovers_mcp_encoded_fields_array() {
                 "fields": ["[\"description\", \"context_files\"]"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task show tool succeeds");
 
@@ -1272,7 +1272,7 @@ fn task_update_tool_allows_explicit_attribution_updates() {
                 "implemented_by": "manual-implementer",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool succeeds");
 
@@ -1294,7 +1294,7 @@ fn task_update_tool_allows_explicit_attribution_updates() {
                 "implemented_by": "",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool clears attribution");
 
@@ -1348,7 +1348,7 @@ fn task_tool_rejects_mismatched_agent_and_model() {
                 "description": "Exercise explicit mismatch validation.",
                 "workspace": ".",
                 "agent": "claude",
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
             None,
             None,

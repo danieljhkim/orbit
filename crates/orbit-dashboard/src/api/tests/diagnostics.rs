@@ -9,6 +9,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::response::Response;
 use chrono::Utc;
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_core::{OrbitRuntime, V2AuditEventInsertParams};
 use serde_json::json;
 use tempfile::tempdir;
@@ -123,7 +124,7 @@ fn diagnostics_metrics_values_adapt_invocation_records() {
         job_run_id: "jrun-1".to_string(),
         activity_id: "implement_one".to_string(),
         agent: "codex".to_string(),
-        model: Some("gpt-5.5".to_string()),
+        model: Some(TEST_CODEX_MODEL.to_string()),
         slot: None,
         duration_ms: 1234,
         input_tokens: 100,

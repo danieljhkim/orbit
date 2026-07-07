@@ -1,7 +1,9 @@
 use chrono::Utc;
 use orbit_common::types::{ExecutorDef, ExecutorSandboxKind, ExecutorType};
 
-use crate::command::executor::{migrated_default_executor, parse_default_executor};
+use crate::command::executor::{
+    DEFAULT_EXECUTOR_FILES, migrated_default_executor, parse_default_executor,
+};
 
 fn base_def(name: &str, executor_type: ExecutorType) -> ExecutorDef {
     let now = Utc::now();
@@ -96,4 +98,24 @@ fn migrated_default_executor_returns_none_when_nothing_needs_migrating() {
     let existing = base_def("claude", ExecutorType::DirectAgent);
     let seeded = base_def("claude", ExecutorType::DirectAgent);
     assert!(migrated_default_executor(&existing, &seeded).is_none());
+}
+
+/// ADR-0211 asset↔const seam: the shipped `claude.yaml` cannot reference the
+/// Rust constants, so this test pins the executor asset's model pair to the
+/// authoritative `orbit-common::model_defaults` values. A drift on either side
+/// (bumping the const without the asset, or vice versa) fails here.
+#[test]
+fn shipped_claude_executor_pair_matches_model_defaults() {
+    use orbit_common::model_defaults::{CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK};
+
+    let (_name, yaml) = DEFAULT_EXECUTOR_FILES
+        .iter()
+        .find(|(name, _)| *name == "claude")
+        .expect("claude executor asset present");
+    let def = parse_default_executor("claude", yaml).expect("parse claude executor");
+    let pair = def
+        .model_pair_override()
+        .expect("claude executor declares a model pair");
+    assert_eq!(pair.strong, CLAUDE_DEFAULT_STRONG);
+    assert_eq!(pair.weak, CLAUDE_DEFAULT_WEAK);
 }

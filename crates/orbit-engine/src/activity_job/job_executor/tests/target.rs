@@ -4,6 +4,7 @@ use super::*;
 
 // ----- Role override regression tests (ADR-029, T20260428-12) ---------
 
+use orbit_common::test_fixtures::TEST_CLAUDE_MODEL;
 use orbit_common::types::activity_job::{AgentLoopSpec, AgentRole, Backend, OnDenial, Provider};
 use std::sync::Mutex as RoleHostMutex;
 
@@ -82,7 +83,7 @@ fn inline_agent_loop_spec() -> AgentLoopSpec {
         instruction: "inline".to_string(),
         tools: Vec::new(),
         on_denial: OnDenial::Terminate,
-        model: Some("claude-opus-4-7".to_string()),
+        model: Some(TEST_CLAUDE_MODEL.to_string()),
         max_iterations: 1,
         backend: Backend::Cli,
         provider: Provider::Claude,
@@ -141,7 +142,7 @@ fn role_override_pulls_provider_from_host_for_step_role() {
     let overridden = role_overridden_spec(&target, &ctx).expect("override expected");
     assert_eq!(overridden.provider, Provider::Codex);
     // Field-by-field fallback: model and backend stay inline.
-    assert_eq!(overridden.model.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(overridden.model.as_deref(), Some(TEST_CLAUDE_MODEL));
     assert_eq!(overridden.backend, Backend::Cli);
     assert_eq!(host.observed_lookups(), vec![AgentRole::Implementer]);
 }
@@ -199,7 +200,7 @@ fn role_override_returns_none_when_host_has_no_matching_entry() {
 
     let overridden = role_overridden_spec(&target, &ctx).expect("override expected");
     assert_eq!(overridden.provider, Provider::Claude);
-    assert_eq!(overridden.model.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(overridden.model.as_deref(), Some(TEST_CLAUDE_MODEL));
     assert_eq!(overridden.backend, Backend::Cli);
     assert_eq!(host.observed_lookups(), vec![AgentRole::Reviewer]);
 }

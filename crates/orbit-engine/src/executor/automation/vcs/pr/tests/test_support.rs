@@ -5,6 +5,7 @@ use std::process::Command;
 use std::sync::Mutex;
 
 use chrono::Utc;
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::{
     Activity, ExternalRef, Job, JobTargetType, NotFoundKind, OrbitError, OrbitEvent, Role, Task,
     TaskArtifact, TaskComment, TaskPriority, TaskStatus, TaskType, push_external_ref_if_missing,
@@ -375,7 +376,7 @@ pub fn task(id: &str, title: &str, execution_summary: &str) -> Task {
         plan: String::new(),
         execution_summary: execution_summary.to_string(),
         context_files: Vec::new(),
-        created_by: Some("gpt-5.5".to_string()),
+        created_by: Some(TEST_CODEX_MODEL.to_string()),
         planned_by: None,
         implemented_by: None,
         status: TaskStatus::Review,

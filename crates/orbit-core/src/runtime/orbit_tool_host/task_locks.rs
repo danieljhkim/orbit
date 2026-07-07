@@ -608,7 +608,7 @@ mod tests {
         let input = json!({
             "files": ["file:src/lib.rs"],
             "ttl_seconds": 3600,
-            "model": "gpt-5.5",
+            "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
         });
         let output = match owner_run_id {
             Some(owner_run_id) => runtime
@@ -651,7 +651,7 @@ mod tests {
                 "orbit.task.locks.release",
                 json!({
                     "reservation_id": reservation_id.clone(),
-                    "model": "gpt-5.5",
+                    "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
                 }),
             )
             .expect("release reservation");
@@ -681,7 +681,7 @@ mod tests {
                 "orbit.task.locks.release",
                 json!({
                     "reservation_id": reservation_id.clone(),
-                    "model": "gpt-5.5",
+                    "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
                 }),
             )
             .expect("release reservation");
@@ -717,7 +717,7 @@ mod tests {
                 json!({
                     "task_ids": [task.id.clone()],
                     "ttl_seconds": 3600,
-                    "model": "gpt-5.5",
+                    "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
                 }),
             )
             .expect("reserve task scope");

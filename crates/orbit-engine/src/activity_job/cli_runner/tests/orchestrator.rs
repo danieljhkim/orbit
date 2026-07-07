@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use orbit_agent::loop_engine::audit::AuditSink;
+use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
 use orbit_common::types::activity_job::{AgentRole, V2AuditEventKind};
 use orbit_store::Store;
 use tempfile::tempdir;
@@ -713,7 +714,7 @@ fn mixed_crew_drives_exact_models_to_planner_and_implementer() {
     let sink_for_writer_p: Arc<dyn AuditSink> = Arc::new(RecordingSink::default());
     let audit_p = Arc::new(V2AuditWriter::new(
         "job-crew-planner",
-        "claude:claude-opus-4-7",
+        format!("claude:{TEST_CLAUDE_MODEL}"),
         sink_for_writer_p,
     ));
     let host_p = TestHost::with_command(claude_script.display().to_string());
@@ -725,7 +726,7 @@ fn mixed_crew_drives_exact_models_to_planner_and_implementer() {
         "task_id": "T-crew"
     });
     let resolved_p = resolve_agent_settings(AgentRole::Planner, &host_p, &spec_p, &input_p);
-    assert_eq!(resolved_p.model.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(resolved_p.model.as_deref(), Some(TEST_CLAUDE_MODEL));
     let mut spec_p_run = spec_p.clone();
     apply_resolved_settings(&mut spec_p_run, &resolved_p);
     let _ = run_cli_backend(
@@ -762,15 +763,15 @@ fn mixed_crew_drives_exact_models_to_planner_and_implementer() {
         .expect("planner argv has --model");
     assert_eq!(
         argv_p.get(model_idx_p + 1).map(String::as_str),
-        Some("claude-opus-4-7"),
-        "planner --model must be exact claude-opus-4-7, not family"
+        Some(TEST_CLAUDE_MODEL),
+        "planner --model must be exact {TEST_CLAUDE_MODEL}, not family"
     );
 
     // implementer leg via same crew
     let sink_for_writer_i: Arc<dyn AuditSink> = Arc::new(RecordingSink::default());
     let audit_i = Arc::new(V2AuditWriter::new(
         "job-crew-impl",
-        "codex:gpt-5.5",
+        format!("codex:{TEST_CODEX_MODEL}"),
         sink_for_writer_i,
     ));
     let host_i = TestHost::with_command(codex_script.display().to_string());
@@ -782,7 +783,7 @@ fn mixed_crew_drives_exact_models_to_planner_and_implementer() {
         "task_id": "T-crew"
     });
     let resolved_i = resolve_agent_settings(AgentRole::Implementer, &host_i, &spec_i, &input_i);
-    assert_eq!(resolved_i.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(resolved_i.model.as_deref(), Some(TEST_CODEX_MODEL));
     let mut spec_i_run = spec_i.clone();
     apply_resolved_settings(&mut spec_i_run, &resolved_i);
     let _ = run_cli_backend(
@@ -819,8 +820,8 @@ fn mixed_crew_drives_exact_models_to_planner_and_implementer() {
         .expect("impl argv has --model");
     assert_eq!(
         argv_i.get(model_idx_i + 1).map(String::as_str),
-        Some("gpt-5.5"),
-        "implementer --model must be exact gpt-5.5, not family"
+        Some(TEST_CODEX_MODEL),
+        "implementer --model must be exact {TEST_CODEX_MODEL}, not family"
     );
 }
 

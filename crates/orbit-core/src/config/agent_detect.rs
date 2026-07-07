@@ -139,17 +139,14 @@ pub fn default_crew_name(detected: &DetectedAgents) -> &'static str {
         .unwrap_or("codex")
 }
 
-/// Hardcoded "latest known good" model per provider. Returned to seed prompt
-/// defaults; users can override at the prompt. Update this map when new
-/// flagship models ship.
+/// "Latest known good" model per provider. Returned to seed prompt defaults;
+/// users can override at the prompt.
+///
+/// Thin delegate to [`orbit_common::model_defaults::default_model_for_provider`],
+/// the single source of truth for production default model names. Update that
+/// module when new flagship models ship.
 pub fn default_model_for(provider: &str) -> Option<&'static str> {
-    match provider {
-        "claude" => Some("claude-opus-4-7"),
-        "codex" => Some("gpt-5.5"),
-        "gemini" => Some("gemini-3-pro"),
-        "grok" => Some("grok-build"),
-        _ => None,
-    }
+    orbit_common::model_defaults::default_model_for_provider(provider)
 }
 
 /// Pick a default provider for the role given a detection snapshot.

@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
 
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::{ExecutionResult, JobRunState};
 
 use super::super::direct_agent::{append_runtime_model_args, map_exec_result_to_outcome};
@@ -23,16 +24,19 @@ fn args(values: &[&str]) -> Vec<String> {
 fn appends_runtime_model_after_operator_args_when_flag_and_model_present() {
     let mut argv = args(&["--existing", "old"]);
 
-    append_runtime_model_args(&mut argv, Some("--model"), Some("gpt-5.5"));
+    append_runtime_model_args(&mut argv, Some("--model"), Some(TEST_CODEX_MODEL));
 
-    assert_eq!(argv, args(&["--existing", "old", "--model", "gpt-5.5"]));
+    assert_eq!(
+        argv,
+        args(&["--existing", "old", "--model", TEST_CODEX_MODEL])
+    );
 }
 
 #[test]
 fn leaves_args_unchanged_when_model_flag_missing() {
     let mut argv = args(&["--existing", "old"]);
 
-    append_runtime_model_args(&mut argv, None, Some("gpt-5.5"));
+    append_runtime_model_args(&mut argv, None, Some(TEST_CODEX_MODEL));
 
     assert_eq!(argv, args(&["--existing", "old"]));
 }

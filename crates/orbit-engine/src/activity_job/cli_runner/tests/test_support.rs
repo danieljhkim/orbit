@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
+
 use crate::context::AgentRoleConfig;
 use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
 use orbit_common::types::ExecutorSandboxKind;
@@ -305,12 +307,12 @@ impl V2RuntimeHost for TestHost {
         match role {
             AgentRole::Planner => Some(AgentRoleConfig {
                 provider: Some(Provider::Claude),
-                model: Some("claude-opus-4-7".to_string()),
+                model: Some(TEST_CLAUDE_MODEL.to_string()),
                 backend: None,
             }),
             AgentRole::Implementer => Some(AgentRoleConfig {
                 provider: Some(Provider::Codex),
-                model: Some("gpt-5.5".to_string()),
+                model: Some(TEST_CODEX_MODEL.to_string()),
                 backend: None,
             }),
             _ => None,

@@ -92,7 +92,7 @@ fn review_thread_reply_rejects_missing_model() {
             None,
             None,
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("add review thread");
 

@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderValue, Method, Request, StatusCode, header};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::TaskArtifact;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{OrbitRuntime, TaskComplexity, TaskStatus};
@@ -51,7 +52,7 @@ fn seed_task_with_artifact_payload(
                 ..Default::default()
             },
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(TEST_CODEX_MODEL.to_string()),
         )
         .expect("upsert artifact")
 }
@@ -95,7 +96,7 @@ fn seed_lock_task(
                     ..Default::default()
                 },
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(TEST_CODEX_MODEL.to_string()),
             )
             .expect("set job run")
     } else {

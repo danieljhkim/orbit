@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Barrier};
 
 use chrono::{TimeZone as _, Utc};
+use orbit_common::test_fixtures::TEST_CLAUDE_MODEL;
 use orbit_common::types::{EvidenceKind, LearningEvidence, LearningScope, LearningStatus};
 use tempfile::tempdir;
 
@@ -33,7 +34,7 @@ fn round_trip_persistence_preserves_all_fields_including_phase_two_reservations(
                 kind: EvidenceKind::Task,
                 reference: "T20260510-1".to_string(),
             }],
-            created_by: Some("claude-opus-4-7".to_string()),
+            created_by: Some(TEST_CLAUDE_MODEL.to_string()),
             priority: None,
         };
         let learning = store.create_learning(params).expect("create");

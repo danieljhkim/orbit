@@ -3,7 +3,7 @@ summary: "Agent Families — Decisions"
 type: design
 title: "Agent Families — Decisions"
 owner: grok
-last_updated: 2026-05-18
+last_updated: 2026-07-06
 status: Draft
 feature: agent-families
 doc_role: decisions
@@ -94,6 +94,21 @@ AO-002 scope: planning-duel plan quality on the Orbit codebase, single window in
 - Implementer selection is unchanged. AO-002's scope is planning-duel plan quality only; implementer rankings live in a separate observation thread when there's data.
 - Re-evaluation triggers: (1) a new Gemini-family release with a stable model alias; (2) the missing AO-002 experimental cell (post-rubric Gemini run on `gemini-3.1-pro-preview` against an implementation-shaped task) producing a counter-finding; (3) a non-Orbit codebase producing a different ranking; (4) a same-task within-model-version repeat that flips the outcome. Any of these reopens AO-002 or spawns a follow-up observation that this ADR must be reconciled against.
 - Cost: surrendering planning diversity. Defaulting to one family forfeits the safety net of cross-family disagreement, concentrates dependency on a single provider, and risks anchoring on claude's distinctive design patterns (e.g. the metric-major preference observed in ORB-00154) as if they were universally correct. The duel mechanism partially mitigates this when explicitly invoked: a duel still gathers multiple plans before selecting one.
+
+## ADR-0211 — Default Claude to opus/sonnet CLI aliases; centralize model defaults in orbit-common::model_defaults
+
+**Status:** Proposed · 2026-07-06 · relates [ORB-10051] · cites [ADR-0167](#adr-0167--favor-claude-opus-for-planner-role-on-planning-duels-and-design-shaped-plans)
+
+**Context.** Default model names were hardcoded as version-pinned string literals scattered across ~7 production sites, and the pins had drifted out of sync: the default Claude model appeared as `claude-opus-4-7` (`agent_detect`, seeded crews, `claude.yaml` strong), `claude-sonnet-4-6` (`claude.yaml` weak), and `claude-sonnet-4-5` (`exec_ctx::DEFAULT_MODEL_FOR_SESSION`, `agent_loop_driver::DEFAULT_ANTHROPIC_MODEL`) depending on the code path. The Claude CLI accepts the unversioned `opus`/`sonnet` aliases, which never drift.
+
+**Decision.** Introduce `orbit-common::model_defaults` as the single source of truth for production default model names; every production default now references a constant there (`agent_detect::default_model_for` delegates to `default_model_for_provider`; seeded crews, the Anthropic HTTP session/loop defaults, and the dashboard ADR/friction tool models reference the constants). The default Claude CLI model becomes the unversioned `opus` (strong) / `sonnet` (weak) aliases — planner+reviewer=opus, implementer=sonnet — applied to `assets/executors/claude.yaml` and the Rust crew/duel seeds. codex/gemini/grok keep their existing values (no unversioned aliases invented for CLIs that may not accept them). The Anthropic **HTTP Messages API** default stays version-pinned (`claude-sonnet-4-5`, `ANTHROPIC_HTTP_DEFAULT_MODEL`) because the Messages API rejects bare aliases. Tests keep referencing model strings via frozen `orbit-common::test_fixtures` constants (behind the `test-util` feature) rather than being deleted.
+
+**Consequences.**
+- One edit updates every production default; the opus-4-7 / sonnet-4-6 / sonnet-4-5 drift can no longer recur.
+- Fresh workspaces seed `opus`/`sonnet` for the claude crew and duel default; existing workspaces are unchanged until `orbit init --refresh-defaults` (config.toml is never overwritten; executor defs re-seed only on refresh).
+- Asset ↔ const seam: YAML/TOML assets cannot reference a Rust const, so `claude.yaml` uses the alias directly while `model_defaults` stays authoritative for Rust paths; an executor-asset guard test pins the `claude.yaml` pair to `{CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK}`.
+- Scoreboard attribution matches model strings exactly, so historical review/duel artifacts recorded as `claude-opus-4-7` stop matching the new `opus` pair; only new runs match. A family-equality fallback was considered and left as a possible follow-up.
+- Cost: default model names now live in two layers (Rust `model_defaults` const for code paths, literal alias duplicated into the executor/config assets); a future model bump must touch both the const and the YAML asset, and the asset↔const guard test is what keeps them honest.
 
 ## Task References
 
