@@ -28,9 +28,11 @@ use super::support::TASK_AUTO_PIPELINE_JOB;
                   Inspect dispatched runs per workspace with `orbit run history -j task_auto_pipeline`."
 )]
 pub struct ShipSweepCommand {
-    /// Pipeline mode for dispatched ship runs.
-    #[arg(short = 'm', long, value_enum, default_value = "pr")]
-    pub mode: ShipMode,
+    /// Override the pipeline mode for every dispatched ship run. When omitted,
+    /// each workspace's mode is resolved from its registry entry
+    /// (explicit `ship_mode`, else defaults to `local`).
+    #[arg(short = 'm', long, value_enum)]
+    pub mode: Option<ShipMode>,
     /// Report what would be dispatched without submitting any run.
     #[arg(long)]
     pub dry_run: bool,
@@ -45,6 +47,10 @@ struct SweepReport {
     action: &'static str,
     reason: Option<String>,
     ready_backlog: usize,
+    /// Resolved ship mode for this workspace (`pr` / `local`). Set for the
+    /// dispatch paths (`would_dispatch` / `dispatched`) so the operator can
+    /// confirm per-workspace mode resolution; `None` for skips/errors.
+    mode: Option<&'static str>,
     run_id: Option<String>,
     run_state: Option<&'static str>,
 }
@@ -57,6 +63,7 @@ impl SweepReport {
             action: "skipped",
             reason: Some(reason.to_string()),
             ready_backlog,
+            mode: None,
             run_id: None,
             run_state: None,
         }
@@ -69,6 +76,7 @@ impl SweepReport {
             "action": self.action,
             "reason": self.reason,
             "ready_backlog": self.ready_backlog,
+            "mode": self.mode,
             "run_id": self.run_id,
             "run_state": self.run_state,
         })
@@ -79,6 +87,9 @@ impl SweepReport {
             "{}: {} (ready backlog: {})",
             self.workspace_name, self.action, self.ready_backlog
         );
+        if let Some(mode) = self.mode {
+            line.push_str(&format!(" [{mode}]"));
+        }
         if let Some(reason) = &self.reason {
             line.push_str(&format!(" — {reason}"));
         }
@@ -103,11 +114,11 @@ impl ShipSweepCommand {
         workspace_registry::validate_workspaces(&mut registry);
         workspace_registry::save_registry_to(&registry, &registry_path)?;
 
-        let mode = self.mode.to_core();
+        let mode_override = self.mode.map(ShipMode::to_core);
         let reports: Vec<SweepReport> = registry
             .workspaces
             .iter()
-            .map(|ws| sweep_workspace(&global_root, ws, mode, self.dry_run))
+            .map(|ws| sweep_workspace(&global_root, ws, mode_override, self.dry_run))
             .collect();
 
         let failed = reports.iter().filter(|r| r.action == "error").count();
@@ -142,18 +153,25 @@ impl ShipSweepCommand {
 fn sweep_workspace(
     global_root: &Path,
     ws: &Workspace,
-    mode: orbit_core::ShipMode,
+    mode_override: Option<orbit_core::ShipMode>,
     dry_run: bool,
 ) -> SweepReport {
     if ws.status != WorkspaceStatus::Active || !ws.orbit_dir.exists() {
         return SweepReport::skipped(ws, "workspace_inactive", 0);
     }
+    // An explicit `--mode` override wins for every workspace; otherwise resolve
+    // per-workspace from its registry entry (explicit `ship_mode`, else the
+    // `local` default). This keeps direct-commit workspaces on the `local`
+    // pipeline instead of failing `pr_open` — only workspaces that carry an
+    // explicit `ship_mode = "pr"` ship via PR.
+    let mode = mode_override.unwrap_or_else(|| orbit_core::resolved_ship_mode(ws));
     sweep_active_workspace(global_root, ws, mode, dry_run).unwrap_or_else(|error| SweepReport {
         workspace_id: ws.id.clone(),
         workspace_name: ws.name.clone(),
         action: "error",
         reason: Some(error.to_string()),
         ready_backlog: 0,
+        mode: None,
         run_id: None,
         run_state: None,
     })
@@ -202,6 +220,7 @@ fn sweep_active_workspace(
             action: "would_dispatch",
             reason: None,
             ready_backlog,
+            mode: Some(mode.as_input_value()),
             run_id: None,
             run_state: None,
         });
@@ -214,6 +233,7 @@ fn sweep_active_workspace(
         action: "dispatched",
         reason: None,
         ready_backlog,
+        mode: Some(mode.as_input_value()),
         run_id: Some(invoke.run_id),
         run_state: Some(if invoke.queued { "queued" } else { "submitted" }),
     })

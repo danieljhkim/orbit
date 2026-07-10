@@ -93,6 +93,7 @@ fn fixture_with_qa(qa_toml: &str) -> Fixture {
         root: repo.clone(),
         orbit_dir: orbit_dir.clone(),
         git_remote: None,
+        ship_mode: None,
         base_branch: "agent-main".to_string(),
         status: WorkspaceStatus::Active,
         created_at: Utc::now(),
