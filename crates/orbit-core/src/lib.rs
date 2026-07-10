@@ -68,7 +68,7 @@ pub use command::learning::migrate_learning_layout_at;
 pub use command::search::{
     GlobalSearchHit, GlobalSearchKind, GlobalSearchParams, task_selectors_contain_path,
 };
-pub use command::workflow::{ShipMode, build_ship_input, find_workflow};
+pub use command::workflow::{ShipMode, build_ship_input, find_workflow, resolved_ship_mode};
 pub use context::ActorIdentity;
 // Shared domain types (owned by orbit-common) that the CLI and dashboard
 // render or construct.

@@ -42,7 +42,7 @@ fn parses_ship_auto_mode_defaults() {
     match command.command {
         RunSubcommand::Ship(args) => {
             assert!(args.task_ids.is_empty());
-            assert_eq!(args.mode, super::ship::ShipMode::Pr);
+            assert_eq!(args.mode, None);
             assert_eq!(args.base, None);
         }
         _ => panic!("expected ship"),
@@ -55,7 +55,7 @@ fn parses_explicit_ship_defaults() {
     match command.command {
         RunSubcommand::Ship(args) => {
             assert_eq!(args.task_ids, vec!["T1", "T2"]);
-            assert_eq!(args.mode, super::ship::ShipMode::Pr);
+            assert_eq!(args.mode, None);
             assert_eq!(args.base, None);
         }
         _ => panic!("expected ship"),
@@ -68,7 +68,7 @@ fn parses_explicit_ship_mode_and_base() {
     match command.command {
         RunSubcommand::Ship(args) => {
             assert_eq!(args.task_ids, vec!["T1"]);
-            assert_eq!(args.mode, super::ship::ShipMode::Local);
+            assert_eq!(args.mode, Some(super::ship::ShipMode::Local));
             assert_eq!(args.base.as_deref(), Some("main"));
         }
         _ => panic!("expected ship"),

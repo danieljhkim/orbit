@@ -18,6 +18,10 @@ pub struct WorkspaceInitArgs {
     /// Base branch for this workspace (default: main)
     #[arg(long, default_value = "main")]
     pub base_branch: String,
+    /// Ship-pipeline mode for this workspace: `pr` or `local`. When omitted, the
+    /// effective mode defaults to `local` (only PR-gated workspaces set `pr`).
+    #[arg(long, value_name = "MODE")]
+    pub ship_mode: Option<String>,
     /// Seed the local task-id allocator so the next task id is N (e.g. hand this
     /// machine a disjoint id range like 10000+). The counter only moves forward;
     /// a value below the current position is refused.
@@ -135,6 +139,12 @@ impl WorkspaceInitArgs {
         seed_default_orbitignore(cwd)?;
         ensure_orbit_gitignore_entry(cwd, orbit_dir)?;
 
+        // Validate an explicit ship mode up front so a bad value is rejected at
+        // registration rather than surfacing later during a sweep.
+        if let Some(mode) = self.ship_mode.as_deref() {
+            orbit_core::ShipMode::parse(mode)?;
+        }
+
         let name = self.name.unwrap_or_else(|| dir_name_or_fallback(cwd));
 
         let id = format!("ws_{name}");
@@ -146,6 +156,7 @@ impl WorkspaceInitArgs {
             root: cwd.to_path_buf(),
             orbit_dir: orbit_dir.to_path_buf(),
             git_remote,
+            ship_mode: self.ship_mode,
             base_branch: self.base_branch,
             status: WorkspaceStatus::Active,
             created_at: Utc::now(),

@@ -534,6 +534,7 @@ fn run_sweep_at_dry_run_discovers_loads_and_fails_closed() {
         root: ws_root.clone(),
         orbit_dir: ws_orbit.clone(),
         git_remote: None,
+        ship_mode: None,
         base_branch: "agent-main".to_string(),
         status: WorkspaceStatus::Active,
         created_at: Utc::now(),

@@ -35,9 +35,11 @@ pub struct ShipCommand {
     /// Optional task IDs to seed explicit gated shipment. Omit for auto mode.
     #[arg(value_name = "TASK_ID", num_args = 0..)]
     pub task_ids: Vec<String>,
-    /// Pipeline mode for selected or auto-discovered task bundles.
-    #[arg(short = 'm', long, value_enum, default_value = "pr")]
-    pub mode: ShipMode,
+    /// Pipeline mode for selected or auto-discovered task bundles. When omitted,
+    /// the mode is resolved from the current workspace's registry entry
+    /// (explicit `ship_mode`, else defaults to `local`).
+    #[arg(short = 'm', long, value_enum)]
+    pub mode: Option<ShipMode>,
     /// Base branch for shipment. Defaults to
     /// `[workflow] base_branch` from `config.toml` (or `main` if unset).
     #[arg(short = 'b', long)]
@@ -49,10 +51,36 @@ pub struct ShipCommand {
 
 impl Execute for ShipCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let plan = build_ship_run_plan(&self, runtime.workflow_base_branch())?;
+        let mode = resolve_ship_mode(&self, runtime)?;
+        let plan = build_ship_run_plan(&self, runtime.workflow_base_branch(), mode)?;
         let runs = dispatch_workflow(runtime, plan.workflow_alias, &plan.input, false, false, 1)?;
         print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)
     }
+}
+
+/// Resolve the effective ship mode for a `ship` invocation.
+///
+/// An explicit `--mode` wins. Otherwise the mode is resolved from the current
+/// workspace's registry entry (matched by `orbit_dir`): explicit `ship_mode`,
+/// else the `local` default. If the current workspace isn't found in the
+/// registry, fall back to `local` (the safe default — a repo without an explicit
+/// `pr` mode should never attempt a PR that could fail structurally).
+fn resolve_ship_mode(
+    args: &ShipCommand,
+    runtime: &OrbitRuntime,
+) -> Result<orbit_core::ShipMode, OrbitError> {
+    if let Some(mode) = args.mode {
+        return Ok(mode.to_core());
+    }
+    let registry = orbit_core::workspace_registry::load_registry()?;
+    let orbit_dir = runtime.shared_root();
+    let mode = registry
+        .workspaces
+        .iter()
+        .find(|ws| ws.orbit_dir == orbit_dir)
+        .map(orbit_core::resolved_ship_mode)
+        .unwrap_or(orbit_core::ShipMode::Local);
+    Ok(mode)
 }
 
 #[derive(Args)]
@@ -91,6 +119,7 @@ pub(crate) struct WorkflowRunPlan {
 pub(crate) fn build_ship_run_plan(
     args: &ShipCommand,
     config_base_branch: &str,
+    mode: orbit_core::ShipMode,
 ) -> Result<WorkflowRunPlan, OrbitError> {
     validate_task_selection(&args.task_ids)?;
     let workflow_alias = SHIP_WORKFLOW;
@@ -98,7 +127,7 @@ pub(crate) fn build_ship_run_plan(
     let base = args.base.as_deref().unwrap_or(config_base_branch);
     Ok(WorkflowRunPlan {
         workflow_alias,
-        input: build_ship_input(args.mode.to_core(), base, &args.task_ids)?,
+        input: build_ship_input(mode, base, &args.task_ids)?,
     })
 }
 
