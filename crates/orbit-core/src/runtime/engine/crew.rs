@@ -1,3 +1,4 @@
+use orbit_common::types::activity_job::ProviderSource;
 use orbit_common::types::{
     Crew, CrewRoleAssignment, OrbitError, Task, all_agent_families, infer_agent_family_from_model,
     resolve_crew,
@@ -7,6 +8,36 @@ use serde_json::Value;
 
 use crate::OrbitRuntime;
 use crate::runtime::run_input::{non_empty, singular_task_id_from_input};
+
+/// Select the crew *name* to dispatch by the Constellation provider-resolution
+/// precedence (ORB-10091, contract §3): explicit > task_config >
+/// workspace_default > environment_default > system_default. Empty /
+/// whitespace-only values are skipped (not a selection). Returns the chosen
+/// name and the tier it came from; `None` only when no tier supplies a value.
+/// Pure and table-tested so the precedence cannot drift from the shared
+/// contract or from the `Provider::resolve` surface it mirrors.
+pub(crate) fn select_crew_name<'a>(
+    explicit: Option<&'a str>,
+    task_config: Option<&'a str>,
+    workspace_default: Option<&'a str>,
+    environment_default: Option<&'a str>,
+    system_default: Option<&'a str>,
+) -> Option<(&'a str, ProviderSource)> {
+    [
+        (explicit, ProviderSource::Explicit),
+        (task_config, ProviderSource::TaskConfig),
+        (workspace_default, ProviderSource::WorkspaceDefault),
+        (environment_default, ProviderSource::EnvironmentDefault),
+        (system_default, ProviderSource::SystemDefault),
+    ]
+    .into_iter()
+    .find_map(|(value, source)| {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| (value, source))
+    })
+}
 
 /// Runtime crew registry projection for dashboard/API consumers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -94,12 +125,19 @@ impl OrbitRuntime {
         cli_override: Option<&str>,
         task_crew: Option<&str>,
     ) -> Result<Crew, OrbitError> {
-        let selected = cli_override
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .or_else(|| task_crew.map(str::trim).filter(|value| !value.is_empty()))
-            .or_else(|| self.context.default_crew());
-        let Some(selected) = selected else {
+        // Runtime precedence is explicit > task_config > the default projected
+        // by RuntimeConfig. That projection has already resolved workspace >
+        // environment > system-default precedence, so lower tiers are not
+        // re-read here and cannot drift during a run.
+        let selection = select_crew_name(
+            cli_override,
+            task_crew,
+            self.context.default_crew(),
+            None,
+            None,
+        );
+
+        let Some((selected, _source)) = selection else {
             return Err(OrbitError::InvalidInput(
                 "no crew selected; set [workflow].default_crew, task.crew, or pass crew"
                     .to_string(),

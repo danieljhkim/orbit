@@ -61,11 +61,17 @@ fn full_override_replaces_every_field() {
     assert_eq!(resolved.backend, Backend::Http);
 }
 
-/// Table-driven coverage of the field-by-field crew-override precedence
-/// (ORB-10091). Each row states the crew-config override and the expected
-/// resolved triple against a fixed `Provider::Claude` inline spec. The rows
-/// where `config.provider` is `None` assert the persisted/inline provider
-/// identity is preserved and never re-defaulted to `Provider::default()`.
+/// Table-driven coverage of **step 2** of provider resolution (ORB-10091): the
+/// selected crew role's `(provider, model, backend)` values override the
+/// activity's inline `agent_loop` baseline, field by field. This is *not* the
+/// crew-*selection* precedence (explicit > task_config > workspace_default >
+/// environment_default > system_default) — that runs earlier, in orbit-core's
+/// `select_crew_name` / `resolve_crew_for_task`, and is table-tested there.
+///
+/// Each row states the crew-config override and the expected resolved triple
+/// against a fixed `Provider::Claude` inline spec. The rows where
+/// `config.provider` is `None` assert the inline provider identity is preserved
+/// and never re-defaulted to `Provider::default()`.
 #[test]
 fn resolve_from_config_precedence_table() {
     struct Row {

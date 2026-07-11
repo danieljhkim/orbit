@@ -315,9 +315,24 @@ mod tests {
         serde_json::from_str(&raw).expect("parse task review scoreboard")
     }
 
+    fn test_runtime_with_codex_reviewer() -> (tempfile::TempDir, OrbitRuntime) {
+        test_runtime_with_workspace_config(&format!(
+            r#"
+[crews.codex-review]
+planner = {{ model = "{model}", provider = "codex", backend = "cli" }}
+implementer = {{ model = "{model}", provider = "codex", backend = "cli" }}
+reviewer = {{ model = "{model}", provider = "codex", backend = "cli" }}
+
+[workflow]
+default_crew = "codex-review"
+"#,
+            model = orbit_common::test_fixtures::TEST_CODEX_MODEL,
+        ))
+    }
+
     #[test]
     fn add_and_reply_review_threads_score_local_review_threads_once() {
-        let (_root, runtime) = test_runtime();
+        let (_root, runtime) = test_runtime_with_codex_reviewer();
         let scoreboard_dir = runtime.data_root().join("state").join("scoreboard");
         fs::create_dir_all(&scoreboard_dir).expect("create scoreboard dir");
         let task = runtime
@@ -377,7 +392,7 @@ mod tests {
 
     #[test]
     fn typo_prefixed_models_do_not_score_local_review_threads() {
-        let (_root, runtime) = test_runtime();
+        let (_root, runtime) = test_runtime_with_codex_reviewer();
         let scoreboard_dir = runtime.data_root().join("state").join("scoreboard");
         fs::create_dir_all(&scoreboard_dir).expect("create scoreboard dir");
         let task = runtime

@@ -74,29 +74,49 @@ Every `provider` string Orbit reads — in `[crews.<name>]` roles, in an activit
 | `codex` | — | yes | no | yes |
 | `gemini` | — | yes | no | yes |
 | `grok` | — | yes | no | yes |
-| `ollama` | — | yes | no | **no** |
+| `ollama` | — | **unsupported at the Orbit CLI entry point** | no | **no** |
 | `openai_compat` | `openai-compat` | **no** (HTTP-only) | no | **no** |
 
-- **Parsing is case- and whitespace-insensitive.** `Claude`, `  claude `, and `CLAUDE` all resolve to `claude`. Aliases (e.g. `openai-compat`) normalize to their canonical id.
+- **Parsing is case- and whitespace-insensitive.** `Claude`, `  claude `, and `CLAUDE` all resolve to `claude`. `openai-compat` normalizes to `openai_compat`.
+- **Deprecated aliases resolve *and* warn.** The legacy vendor names normalize to their canonical id and log an `orbit.config.crew` deprecation warning (`{alias, canonical}`) — they never fail, but update the config:
+
+  | Deprecated alias | Canonical |
+  |---|---|
+  | `anthropic` | `claude` |
+  | `openai`, `chatgpt` | `codex` |
+  | `google` | `gemini` |
+  | `xai` | `grok` |
+
 - **Canonical ≠ Worker-executable.** Orbit's canonical set is deliberately wider than what the model-neutral Worker leaf executor can run: `ollama` and `openai_compat` are first-class Orbit providers but Worker does not execute them. This distinction is preserved on purpose — do not narrow the canonical set to Worker's subset.
+- **Known ≠ executable at this entry point.** The shared contract recognizes `ollama`, but the Orbit CLI capability set is the canonical cross-repo four; explicitly selecting `ollama` fails as `provider.unsupported` rather than falling back.
 - **`openai_compat` is HTTP-only.** It has no CLI runtime, so selecting it with `backend = "cli"` fails structurally (see below) rather than falling back.
 
 ### Resolution precedence
 
-For a role's effective `(provider, model, backend)` the resolver applies, per field:
+Provider selection is **two composed steps**, not one. Describe them precisely — the inline `provider` on an activity is the *template baseline*, **not** an explicit override that outranks the crew.
 
-1. **Explicit** value on the activity/step (inline spec).
-2. **Task crew** — `task.crew` on the task artifact.
-3. **Workspace default crew** — `[workflow].default_crew`.
-4. **Environment / system default** — what `orbit init`'s detection seeds when nothing above is set.
+**1 — Which crew is dispatched** (`resolve_crew_for_task`). The crew *name* is chosen by the Constellation provider-resolution precedence (contract §3), first non-empty tier wins:
 
-A field is only overridden by a lower-precedence layer when that layer supplies a value; an override that omits a field (e.g. a crew role that sets `model` but leaves `provider` unparseable) leaves the higher-precedence value in place. This is why **persisted provider identity is never re-defaulted** during reconciliation: a resolved provider already recorded on a run is preserved, not silently reset to the enum default.
+1. **explicit** — `--crew` flag / run-input `crew`.
+2. **task_config** — `task.crew` on the task artifact.
+3. **workspace_default** — `[workflow].default_crew` in `config.toml`.
+4. **environment_default** — the `CONSTELLATION_DEFAULT_PROVIDER` environment variable (a canonical provider id, which names the same-named single-family crew).
+5. **system_default** — the canonical baseline (see below).
+
+**2 — The selected crew's role values override the activity's inline baseline** (`resolve_from_config`). For each `(provider, model, backend)` field independently: the selected crew role's value wins **when present**; otherwise the activity's inline `agent_loop` value stands. A crew override that omits a field (or whose `provider` string is unparseable) leaves the inline baseline in place — so a config typo never coerces dispatch onto a wrong runtime. This is also why **persisted provider identity is never re-defaulted** during reconciliation: a provider already frozen on a run record is reused verbatim, not reset to the enum default.
+
+### The one setting that changes the default — `CONSTELLATION_DEFAULT_PROVIDER`
+
+`CONSTELLATION_DEFAULT_PROVIDER` occupies the **environment_default** tier (4) — below any explicit / task / workspace choice, above the persisted baseline. Setting it to a canonical id (or a deprecated alias, which normalizes) re-defaults **every otherwise-defaulted resolution path at once**, without editing any repo or per-workspace config; a path that already made a higher-precedence choice is deliberately unaffected. Because Orbit seeds `[workflow].default_crew` on `orbit init`, a normally-configured workspace resolves at the workspace tier, so the env lever governs paths that reach resolution without a configured crew and **never overrides a configured `[workflow].default_crew`**.
+
+> **System default.** The canonical Constellation system default is `claude`. When no higher tier selects a crew, Orbit dispatches the same-named `claude` crew. Existing workspaces whose `[workflow].default_crew` is `codex` retain that higher-precedence configured choice; the system fallback does not rewrite workspace configuration.
 
 ### No silent fallback
 
 Explicit selections that are unsupported or unavailable **fail with a stable diagnostic and never fall back** to a different runtime:
 
-- `provider openai_compat has no CLI runtime (HTTP-only)` — a CLI-executable dispatch selected an HTTP-only provider.
+- `provider openai_compat is unsupported by the Orbit CLI entry point (HTTP-only)` — a CLI-executable dispatch selected an HTTP-only provider.
+- `provider ollama is unsupported by the Orbit CLI entry point` — a known provider is outside this entry point's capability set.
 - `unknown provider '<x>'; expected one of claude, codex, gemini, grok, ollama, openai_compat — no CLI runtime registered` — the provider string did not resolve to a canonical id.
 
 An **unrecognized `[crews.<name>].provider` value** is the one non-fatal case: it is logged (`orbit.config.crew` warn) and that field falls back to the activity's inline `provider`, because a config typo should not coerce dispatch onto a wrong runtime — the inline value is the known-good identity, not a default guess.
@@ -105,11 +125,13 @@ An **unrecognized `[crews.<name>].provider` value** is the one non-fatal case: i
 
 ## Per-task crew override
 
-`[workflow].default_crew` is the workspace fallback, not a global verdict. **Every task carries an optional `crew` field**, and `orbit run ship` resolves which crew to dispatch per task in this order:
+`[workflow].default_crew` is the workspace fallback, not a global verdict. **Every task carries an optional `crew` field**, and `orbit run ship` resolves which crew to dispatch per task by the [resolution precedence](#resolution-precedence) above:
 
-1. `task.crew` if set on the task artifact, otherwise
-2. `[workflow].default_crew` from `config.toml`, otherwise
-3. error: `no crew selected; set [workflow].default_crew, task.crew, or pass crew`.
+1. explicit `--crew` / run-input `crew`, otherwise
+2. `task.crew` if set on the task artifact, otherwise
+3. `[workflow].default_crew` from `config.toml`, otherwise
+4. `CONSTELLATION_DEFAULT_PROVIDER` if set (environment tier), otherwise
+5. the canonical `claude` system-default crew.
 
 This means you can mix-and-match in a single ship run: route a tricky refactor to `claude` while routing routine cleanups to `codex` — both go through the same `orbit run ship` invocation, each picking its own crew at dispatch time.
 

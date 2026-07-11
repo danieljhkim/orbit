@@ -1,5 +1,5 @@
 use orbit_common::types::ExecutorType;
-use orbit_common::types::activity_job::Provider;
+use orbit_common::types::activity_job::{Provider, ProviderEntryPoint};
 use orbit_engine::{DispatchError, ResolvedCliExecutor};
 
 use crate::OrbitRuntime;
@@ -64,12 +64,21 @@ pub(super) fn resolve_cli_executor(
     // fails with a stable diagnostic and never silently falls back to a
     // different runtime.
     match Provider::parse(provider) {
-        Ok(parsed) if parsed.has_cli_runtime() => Ok(ResolvedCliExecutor {
-            command: parsed.as_str().to_string(),
-            args: Vec::new(),
-        }),
+        Ok(parsed)
+            if Provider::capabilities(ProviderEntryPoint::Orbit).contains(&parsed)
+                && parsed.has_cli_runtime() =>
+        {
+            Ok(ResolvedCliExecutor {
+                command: parsed.as_str().to_string(),
+                args: Vec::new(),
+            })
+        }
+        Ok(Provider::OpenaiCompat) => Err(DispatchError::CliInvocationFailed(
+            "provider openai_compat is unsupported by the Orbit CLI entry point (HTTP-only)"
+                .to_string(),
+        )),
         Ok(parsed) => Err(DispatchError::CliInvocationFailed(format!(
-            "provider {parsed} has no CLI runtime (HTTP-only)"
+            "provider {parsed} is unsupported by the Orbit CLI entry point"
         ))),
         Err(err) => Err(DispatchError::CliInvocationFailed(format!(
             "{err} — no CLI runtime registered"
@@ -106,7 +115,7 @@ mod tests {
     fn cli_executor_selection_diagnostics_table() {
         let runtime = OrbitRuntime::in_memory().expect("build runtime");
 
-        for provider in ["claude", "codex", "gemini", "grok", "ollama"] {
+        for provider in ["claude", "codex", "gemini", "grok"] {
             let resolved = runtime
                 .resolve_cli_executor(provider)
                 .unwrap_or_else(|err| panic!("{provider} should resolve: {err:?}"));
@@ -114,13 +123,15 @@ mod tests {
             assert!(resolved.args.is_empty(), "fallback args for {provider}");
         }
 
-        let http_only = runtime
-            .resolve_cli_executor("openai_compat")
-            .expect_err("openai_compat is HTTP-only and must not fall back to CLI");
-        assert!(
-            format!("{http_only:?}").contains("no CLI runtime (HTTP-only)"),
-            "http-only diagnostic: {http_only:?}"
-        );
+        for unsupported in ["ollama", "openai_compat"] {
+            let error = runtime
+                .resolve_cli_executor(unsupported)
+                .expect_err("unsupported provider must not fall back to CLI");
+            assert!(
+                format!("{error:?}").contains("unsupported by the Orbit CLI entry point"),
+                "unsupported diagnostic for {unsupported}: {error:?}"
+            );
+        }
 
         let unknown = runtime
             .resolve_cli_executor("bogus_provider")

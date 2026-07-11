@@ -7,7 +7,9 @@ use orbit_common::model_defaults::{
     GROK_DEFAULT_MODEL,
 };
 use orbit_common::types::{
-    Crew, CrewRoleAssignment, OrbitError, activity_job::Backend, all_agent_families, resolve_crew,
+    Crew, CrewRoleAssignment, OrbitError,
+    activity_job::{Backend, Provider},
+    all_agent_families, resolve_crew,
 };
 use orbit_common::utility::log_rotation::LogRotationConfig;
 use orbit_common::utility::redaction::redact_home_dir;
@@ -25,12 +27,13 @@ use super::raw::{
 const DEFAULT_ENV_INHERIT: bool = false;
 const DEFAULT_TASK_APPROVAL_REQUIRED_FOR_AGENT: bool = false;
 const DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL: bool = false;
-// Keep the runtime fallback aligned with the seeded default config so repos
-// without an explicit Orbit config still record scoreboard metrics.
+// Canonical system fallback from the Constellation provider contract. A seeded
+// or explicit workspace default remains a higher-precedence configured choice.
 const DEFAULT_SCORING_ENABLED: bool = true;
 const DEFAULT_GRAPH_EDITING: bool = false;
 const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
-const DEFAULT_WORKFLOW_CREW: &str = "codex";
+const DEFAULT_WORKFLOW_CREW: &str = "claude";
+const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
@@ -539,12 +542,31 @@ pub(super) fn workflow_default_crew_from_raw(
     raw: Option<&RawWorkflowConfig>,
     crews: &BTreeMap<String, Crew>,
 ) -> Result<Option<String>, OrbitError> {
+    let env_default = std::env::var(CONSTELLATION_DEFAULT_PROVIDER_ENV).ok();
+    workflow_default_crew_from_raw_with_env(raw, crews, env_default.as_deref())
+}
+
+pub(super) fn workflow_default_crew_from_raw_with_env(
+    raw: Option<&RawWorkflowConfig>,
+    crews: &BTreeMap<String, Crew>,
+    env_default: Option<&str>,
+) -> Result<Option<String>, OrbitError> {
     let value = raw.and_then(|workflow| workflow.default_crew.as_deref());
     let Some(value) = value else {
-        // No explicit [workflow].default_crew. Fall back to the seeded default
-        // when its crew is still present; otherwise demand the user pick one
-        // explicitly so downstream `start`/`show` calls don't surprise them
-        // with a generic "no crew selected" error.
+        // No explicit workspace default. Apply the environment tier before the
+        // canonical system default. A selected invalid value is a loud error,
+        // never a silent fall-through to a lower tier.
+        if let Some(raw_env) = env_default.filter(|value| !value.trim().is_empty()) {
+            let provider = Provider::parse(raw_env).map_err(|err| {
+                OrbitError::InvalidInput(format!(
+                    "{CONSTELLATION_DEFAULT_PROVIDER_ENV} has invalid value: {err}"
+                ))
+            })?;
+            let crew = provider.as_str();
+            resolve_crew(crew, crews)?;
+            return Ok(Some(crew.to_string()));
+        }
+
         if crews.contains_key(DEFAULT_WORKFLOW_CREW) {
             return Ok(Some(DEFAULT_WORKFLOW_CREW.to_string()));
         }

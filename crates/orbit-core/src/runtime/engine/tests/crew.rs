@@ -1,11 +1,26 @@
 //! Sibling tests for `crew.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
 
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
 use chrono::Utc;
+use orbit_common::types::activity_job::ProviderSource;
 use serde_json::json;
 use tempfile::{TempDir, tempdir};
 
+use super::super::crew::select_crew_name;
 use crate::OrbitRuntime;
 use crate::command::task::TaskAddParams;
+
+const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
+
+/// Serialize the process-wide `CONSTELLATION_DEFAULT_PROVIDER` mutations so the
+/// env-default test cannot race concurrent tests.
+fn env_lock() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 fn runtime_with_named_crews() -> (TempDir, OrbitRuntime) {
     let root = tempdir().expect("create temp root");
@@ -124,4 +139,138 @@ fn multi_task_ids_without_override_falls_back_to_default_crew() {
 
     assert_eq!(crew.name, "primary");
     assert_eq!(crew.implementer.model, "default-implementer");
+}
+
+/// Table-driven proof of the crew-selection precedence (ORB-10091, contract §3)
+/// and of the environment-default tier. Each row fixes the higher tiers and
+/// varies the `env` column (`CONSTELLATION_DEFAULT_PROVIDER`): a row that has an
+/// explicit / task / workspace choice keeps its result regardless of `env`,
+/// while the otherwise-defaulted rows flip when the single env setting changes.
+#[test]
+fn select_crew_name_precedence_and_environment_default() {
+    struct Row {
+        name: &'static str,
+        explicit: Option<&'static str>,
+        task: Option<&'static str>,
+        workspace: Option<&'static str>,
+        env: Option<&'static str>,
+        system: Option<&'static str>,
+        expect: Option<(&'static str, ProviderSource)>,
+    }
+
+    let rows = [
+        // Explicit wins over every lower tier, including a set env.
+        Row {
+            name: "explicit beats all (env ignored)",
+            explicit: Some("gamma"),
+            task: Some("beta"),
+            workspace: Some("primary"),
+            env: Some("gemini"),
+            system: Some("claude"),
+            expect: Some(("gamma", ProviderSource::Explicit)),
+        },
+        // Task config wins over workspace + env when there is no explicit choice.
+        Row {
+            name: "task beats workspace+env",
+            explicit: None,
+            task: Some("beta"),
+            workspace: Some("primary"),
+            env: Some("gemini"),
+            system: Some("claude"),
+            expect: Some(("beta", ProviderSource::TaskConfig)),
+        },
+        // A configured workspace default is never overridden by the env lever.
+        Row {
+            name: "workspace beats env (unchanged by env)",
+            explicit: None,
+            task: None,
+            workspace: Some("primary"),
+            env: Some("gemini"),
+            system: Some("claude"),
+            expect: Some(("primary", ProviderSource::WorkspaceDefault)),
+        },
+        // Otherwise-defaulted: the env setting is the selection...
+        Row {
+            name: "env applies when otherwise-defaulted (claude)",
+            explicit: None,
+            task: None,
+            workspace: None,
+            env: Some("claude"),
+            system: Some("claude"),
+            expect: Some(("claude", ProviderSource::EnvironmentDefault)),
+        },
+        // ...and changing that one setting changes the resolved crew.
+        Row {
+            name: "env applies when otherwise-defaulted (gemini)",
+            explicit: None,
+            task: None,
+            workspace: None,
+            env: Some("gemini"),
+            system: Some("claude"),
+            expect: Some(("gemini", ProviderSource::EnvironmentDefault)),
+        },
+        // No env set: fall through to the system default.
+        Row {
+            name: "system default when nothing else",
+            explicit: None,
+            task: None,
+            workspace: None,
+            env: None,
+            system: Some("claude"),
+            expect: Some(("claude", ProviderSource::SystemDefault)),
+        },
+        // Whitespace at a tier is not a selection; fall through.
+        Row {
+            name: "whitespace at a tier is skipped",
+            explicit: Some("   "),
+            task: None,
+            workspace: None,
+            env: Some("codex"),
+            system: Some("claude"),
+            expect: Some(("codex", ProviderSource::EnvironmentDefault)),
+        },
+        // Nothing at any tier -> no selection (caller surfaces the error).
+        Row {
+            name: "nothing selected",
+            explicit: None,
+            task: None,
+            workspace: None,
+            env: None,
+            system: None,
+            expect: None,
+        },
+    ];
+
+    for row in rows {
+        let got = select_crew_name(row.explicit, row.task, row.workspace, row.env, row.system);
+        assert_eq!(got, row.expect, "{}", row.name);
+    }
+}
+
+/// End-to-end wiring: `resolve_crew_for_task` actually reads
+/// `CONSTELLATION_DEFAULT_PROVIDER`, and the environment tier stays subordinate
+/// to a configured `[workflow].default_crew`. Because a workspace default beats
+/// the env tier, a leaked value cannot affect concurrent tests.
+#[test]
+fn resolve_crew_for_task_reads_env_default_but_workspace_crew_wins() {
+    let _lock = env_lock();
+    let saved = std::env::var(CONSTELLATION_DEFAULT_PROVIDER_ENV).ok();
+    // SAFETY: serialized by env_lock(); restored before we assert or return.
+    unsafe { std::env::set_var(CONSTELLATION_DEFAULT_PROVIDER_ENV, "claude") };
+
+    let (_root, runtime) = runtime_with_named_crews();
+    let resolved = runtime.resolve_crew_for_task(None, None);
+
+    // Restore the prior environment before asserting so a failure never leaks.
+    // SAFETY: same serialization lock still held.
+    unsafe {
+        match saved {
+            Some(value) => std::env::set_var(CONSTELLATION_DEFAULT_PROVIDER_ENV, value),
+            None => std::env::remove_var(CONSTELLATION_DEFAULT_PROVIDER_ENV),
+        }
+    }
+
+    let crew = resolved.expect("resolve crew");
+    // `[workflow].default_crew = "primary"` (workspace tier) beats the env tier.
+    assert_eq!(crew.name, "primary");
 }

@@ -74,17 +74,31 @@ pub(crate) fn typed_role_config_from_assignment(
     let provider = Some(raw.provider.as_str()).and_then(|raw_value| {
         // Canonical string→provider parsing lives on the orbit-common `Provider`
         // surface (ORB-10091); the crew path routes through it so casing/alias
-        // handling cannot drift from the other layers.
-        let parsed = Provider::parse(raw_value).ok();
-        if parsed.is_none() {
-            tracing::warn!(
-                target: "orbit.config.crew",
-                role = role.as_str(),
-                raw = raw_value,
-                "[crews.<name>].provider has an unrecognized value; falling back to inline activity provider",
-            );
+        // handling cannot drift from the other layers. `resolve_name` preserves
+        // the deprecation signal so a legacy alias resolves *and* warns.
+        match Provider::resolve_name(raw_value) {
+            Ok(identity) => {
+                if let Some(deprecation) = identity.deprecation {
+                    tracing::warn!(
+                        target: "orbit.config.crew",
+                        role = role.as_str(),
+                        alias = %deprecation.alias,
+                        canonical = %deprecation.canonical,
+                        "[crews.<name>].provider uses a deprecated alias; resolving to the canonical id — update the config",
+                    );
+                }
+                Some(identity.provider)
+            }
+            Err(_) => {
+                tracing::warn!(
+                    target: "orbit.config.crew",
+                    role = role.as_str(),
+                    raw = raw_value,
+                    "[crews.<name>].provider has an unrecognized value; falling back to inline activity provider",
+                );
+                None
+            }
         }
-        parsed
     });
 
     let backend = Some(raw.backend.as_str()).and_then(|raw_value| {

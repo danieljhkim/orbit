@@ -1,11 +1,25 @@
 use super::super::runtime::*;
-use orbit_common::types::{OrbitError, all_agent_families};
+use orbit_common::types::{Crew, CrewRoleAssignment, OrbitError, all_agent_families};
 use std::collections::BTreeMap;
 use std::path::Path;
 use tempfile::tempdir;
 
 fn write_config(dir: &Path, body: &str) {
     std::fs::write(dir.join("config.toml"), body).expect("write config");
+}
+
+fn single_family_crew(name: &str) -> Crew {
+    let role = CrewRoleAssignment {
+        model: format!("{name}-model"),
+        provider: name.to_string(),
+        backend: "cli".to_string(),
+    };
+    Crew {
+        name: name.to_string(),
+        planner: role.clone(),
+        implementer: role.clone(),
+        reviewer: role,
+    }
 }
 
 fn load_config(body: &str) -> Result<RuntimeConfig, OrbitError> {
@@ -327,20 +341,20 @@ reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 fn default_crew_unset_with_seeded_crew_still_loads() {
     let global = tempdir().expect("global tempdir");
     let workspace = tempdir().expect("workspace tempdir");
-    // The seeded codex crew is present, so the default-crew fallback applies.
+    // The canonical claude system crew is present, so the fallback applies.
     write_config(
         workspace.path(),
         r#"
-[crews.codex]
-planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+[crews.claude]
+planner = { model = "opus", provider = "claude", backend = "cli" }
+implementer = { model = "opus", provider = "claude", backend = "cli" }
+reviewer = { model = "opus", provider = "claude", backend = "cli" }
 "#,
     );
 
     let config =
         RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
-    assert_eq!(config.default_crew.as_deref(), Some("codex"));
+    assert_eq!(config.default_crew.as_deref(), Some("claude"));
 }
 
 #[test]
@@ -351,6 +365,26 @@ fn workflow_default_crew_no_crews_defined_is_noop() {
         workflow_default_crew_from_raw(None, &crews).expect("empty registry is allowed");
 
     assert_eq!(default_crew, None);
+}
+
+#[test]
+fn workflow_default_crew_uses_environment_then_claude_system_default() {
+    let crews = BTreeMap::from([
+        ("claude".to_string(), single_family_crew("claude")),
+        ("gemini".to_string(), single_family_crew("gemini")),
+    ]);
+
+    let env = workflow_default_crew_from_raw_with_env(None, &crews, Some("google"))
+        .expect("deprecated environment alias resolves");
+    assert_eq!(env.as_deref(), Some("gemini"));
+
+    let system = workflow_default_crew_from_raw_with_env(None, &crews, None)
+        .expect("canonical system default resolves");
+    assert_eq!(system.as_deref(), Some("claude"));
+
+    let error = workflow_default_crew_from_raw_with_env(None, &crews, Some("bogus"))
+        .expect_err("selected invalid environment value must not fall back");
+    assert!(error.to_string().contains("CONSTELLATION_DEFAULT_PROVIDER"));
 }
 
 #[test]
