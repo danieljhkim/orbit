@@ -63,5 +63,19 @@ fn non_interactive_init_writes_generated_crew_config() {
     assert!(contents.contains("[crews.codex]"));
     assert!(contents.contains("[crews.gemini]"));
     assert!(contents.contains("[crews.grok]"));
-    toml::from_str::<toml::Value>(&contents).expect("seeded config parses");
+    let config = toml::from_str::<toml::Value>(&contents).expect("seeded config parses");
+    let codex = config
+        .get("crews")
+        .and_then(|crews| crews.get("codex"))
+        .expect("codex crew is seeded");
+    for role in ["planner", "implementer", "reviewer"] {
+        assert_eq!(
+            codex
+                .get(role)
+                .and_then(|role_config| role_config.get("model"))
+                .and_then(toml::Value::as_str),
+            Some("gpt-5.6-terra"),
+            "codex {role} model",
+        );
+    }
 }

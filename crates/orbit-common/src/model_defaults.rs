@@ -22,8 +22,8 @@
 //! them to the current flagship, so the CLI defaults never drift. The Anthropic
 //! **HTTP Messages API** rejects bare aliases and requires a fully-qualified
 //! model id, so [`ANTHROPIC_HTTP_DEFAULT_MODEL`] stays version pinned. codex,
-//! gemini, and grok keep their existing values — no unversioned aliases were
-//! invented for CLIs that may not accept them.
+//! gemini, and grok use provider-specific version pins because no stable
+//! unversioned aliases are available for those CLIs.
 
 /// Default "strong" Claude model: the unversioned `opus` CLI alias.
 pub const CLAUDE_DEFAULT_STRONG: &str = "opus";
@@ -39,7 +39,7 @@ pub const CLAUDE_DEFAULT_WEAK: &str = "sonnet";
 pub const ANTHROPIC_HTTP_DEFAULT_MODEL: &str = "claude-sonnet-4-5";
 
 /// Default codex model (strong role and provider default).
-pub const CODEX_DEFAULT_MODEL: &str = "gpt-5.5";
+pub const CODEX_DEFAULT_MODEL: &str = "gpt-5.6-terra";
 
 /// Default codex "weak" model used by the executor model pair.
 pub const CODEX_DEFAULT_WEAK: &str = "gpt-5.4-mini";
@@ -69,7 +69,7 @@ pub const ANTHROPIC_EXAMPLE_MODEL: &str = "claude-haiku-4-5-20251001";
 ///
 /// Mirrors the historical `agent_detect::default_model_for` map; `claude` now
 /// resolves to the unversioned [`CLAUDE_DEFAULT_STRONG`] alias. codex/gemini/
-/// grok keep their prior values.
+/// grok use their provider-specific defaults.
 pub fn default_model_for_provider(provider: &str) -> Option<&'static str> {
     match provider {
         "claude" => Some(CLAUDE_DEFAULT_STRONG),
