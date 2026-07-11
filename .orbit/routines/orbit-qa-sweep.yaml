@@ -1,0 +1,13 @@
+schemaVersion: 1
+name: orbit-qa-sweep
+description: Validate new agent-main commits in the orbit workspace once per day
+enabled: true
+hosts: [dk-server-1]
+trigger:
+  cron: "0 3 * * *"
+  missed_run: skip
+target: job:qa_sweep_routine
+policy:
+  timeout_minutes: 120
+  retries: { max: 1, backoff_minutes: 15 }
+  overlap: forbid

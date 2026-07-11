@@ -42,6 +42,7 @@ impl QaSweepCommand {
     pub fn execute_without_runtime(self) -> Result<(), OrbitError> {
         let outcome = run_qa_sweep(QaSweepOptions {
             dry_run: self.dry_run,
+            workspace: None,
         })?;
 
         let failed = outcome

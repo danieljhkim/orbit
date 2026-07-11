@@ -27,6 +27,9 @@ auto_ship = true
 base_branch = "agent-main"
 default_crew = "claude"
 
+[routines]
+role = "source"
+
 [crews.claude]
 planner = { model = "claude-opus-4-8", provider = "claude", backend = "cli" }
 implementer = { model = "claude-opus-4-8", provider = "claude", backend = "cli" }
