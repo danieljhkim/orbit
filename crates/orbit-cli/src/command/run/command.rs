@@ -14,12 +14,14 @@ use super::ship;
 use super::show::RunShowArgs;
 use super::sweep;
 use super::trace::RunTraceArgs;
+use super::triage;
 
 const RUN_AFTER_HELP: &str = "\
 Workflow entrypoints:
   orbit run ship [task_id ...]
   orbit run ship-sweep [--dry-run] [--json]
   orbit run qa-sweep [--dry-run] [--json]
+  orbit run triage [task_id ...]
   orbit run duel-plan <task_id>
   orbit run job <job_id> [--input key=value] [--json] [--debug]
 
@@ -51,6 +53,7 @@ Workflows:
   ship        Ship backlog or explicitly selected tasks through the gated task pipeline
   ship-sweep  Dispatch ship runs in every registered workspace with ready backlog tasks
   qa-sweep    Validate new agent-main commits in configured direct-push workspaces
+  triage      Triage tasks blocked by failed runs; re-backlog environmental failures
   duel-plan   Run a planning duel for one task
   job         Run an arbitrary job by ID
 
@@ -92,6 +95,8 @@ pub enum RunSubcommand {
     /// Validate new agent-main commits in configured direct-push workspaces
     #[command(name = "qa-sweep")]
     QaSweep(qa_sweep::QaSweepCommand),
+    /// Triage tasks blocked by failed runs; re-backlog environmental failures
+    Triage(triage::TriageCommand),
     /// Run a planning duel for one task
     #[command(name = "duel-plan")]
     DuelPlan(duel::DuelPlanCommand),
@@ -120,6 +125,7 @@ impl Execute for RunSubcommand {
             // registry-driven sweep never uses the cwd-derived runtime.
             RunSubcommand::ShipSweep(command) => command.execute_without_runtime(),
             RunSubcommand::QaSweep(command) => command.execute_without_runtime(),
+            RunSubcommand::Triage(command) => command.execute(runtime),
             RunSubcommand::DuelPlan(command) => command.execute(runtime),
             RunSubcommand::History(command) => command.execute(runtime),
             RunSubcommand::Show(command) => command.execute(runtime),

@@ -49,7 +49,7 @@ fn task_is_blockable_on_run_failure(status: TaskStatus) -> bool {
 /// most recent errored step. The pipeline records a single job-level
 /// diagnostic step whose message already names the failing step, so surfacing
 /// it verbatim keeps the note actionable.
-fn failed_run_error_context(run: &JobRun) -> (Option<String>, Option<String>) {
+pub(crate) fn failed_run_error_context(run: &JobRun) -> (Option<String>, Option<String>) {
     run.steps
         .iter()
         .rev()

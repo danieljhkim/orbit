@@ -10,6 +10,7 @@ use crate::command::activity::seed_default_activities;
 use crate::command::executor::seed_default_executors;
 use crate::command::job::seed_default_jobs;
 use crate::command::policy::seed_default_policies;
+use crate::command::routine::seed_default_routines;
 use crate::command::skill::{
     default_skill_ids, is_default_skill_file_for_root, seed_default_skills,
 };
@@ -33,6 +34,7 @@ pub struct InitResult {
     pub refreshed_default_jobs: usize,
     pub refreshed_default_executors: usize,
     pub refreshed_default_policies: usize,
+    pub refreshed_default_routines: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -176,6 +178,7 @@ pub fn init_workspace_at_root(
         }
     }
 
+    let mut refreshed_default_routines = 0usize;
     let (
         refreshed_default_activities,
         refreshed_default_jobs,
@@ -216,6 +219,23 @@ pub fn init_workspace_at_root(
         )?;
         refreshed_skill_files = global_result.refreshed_skill_files;
         created_skills_symlink = global_result.created_skills_symlink;
+        // Routines are workspace-authored (`.orbit/routines/`, no global
+        // directory), so defaults seed here rather than in the global
+        // branch. Host resolution is best-effort: an unresolvable host id
+        // skips routine seeding instead of failing the whole init.
+        match crate::routines::resolve_host_id(&global_root) {
+            Ok(host_id) => {
+                refreshed_default_routines = seed_default_routines(
+                    &orbit_root.join("routines"),
+                    &host_id,
+                    workspace_slug_from_orbit_root(&orbit_root).as_deref(),
+                    overwrite,
+                )?;
+            }
+            Err(error) => {
+                tracing::warn!("skipping default routine seeding: {error}");
+            }
+        }
         (
             global_result.refreshed_default_activities,
             global_result.refreshed_default_jobs,
@@ -240,7 +260,17 @@ pub fn init_workspace_at_root(
         refreshed_default_jobs,
         refreshed_default_executors,
         refreshed_default_policies,
+        refreshed_default_routines,
     })
+}
+
+/// Derive the routine-name suffix for seeded default routines from the
+/// workspace directory containing `.orbit/`.
+fn workspace_slug_from_orbit_root(orbit_root: &Path) -> Option<String> {
+    orbit_root
+        .parent()
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
 }
 
 /// Default `.orbitignore` patterns seeded into a freshly initialized

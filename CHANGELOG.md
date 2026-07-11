@@ -9,6 +9,7 @@
 
 ### Highlights
 
+- **Default failed-run triage**: a seeded `task_triage_pipeline` (+ hourly routine, `orbit run triage`) diagnoses tasks blocked by failed runs, re-backlogs environmental failures with a bounded retry budget, and leaves the rest blocked with a diagnosis attached. See ADR-0215/ADR-0216. ([ORB-10129])
 - **Orphaned pending job runs now reconcile to `interrupted`**: workers claim their queued run's pid, the open-time orphan scan and `orbit doctor` cover pending runs, `orbit run cancel <run_id>` terminalizes stuck runs, and orbit-web-upgrade's deferral gate checks worker liveness. ([ORB-10070])
 - **Remote dashboard task actions now reach the selected workspace**: `approve`/`reject`/`archive` used a raw `fetch()` that skipped the workspace-routing helper, so they silently no-op'd against a non-default remote workspace; the workspace selector also no longer renders its filesystem path beneath the dropdown. ([ORB-10124])
 - **CI runner ENOSPC fixes**: the coverage and `ci` jobs reclaim ~25-30 GB of preinstalled runner bloat before building, set `CARGO_INCREMENTAL=0` and `CARGO_PROFILE_TEST_DEBUG=line-tables-only` to shrink `target/`, and the coverage cache is now deps-only (no instrumented `target/`). ([ORB-10126])

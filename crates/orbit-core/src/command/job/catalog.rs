@@ -10,9 +10,10 @@ use serde_json::Value;
 use crate::OrbitRuntime;
 
 /// Shippable default workflow assets, seeded under
-/// `<orbit_root>/resources/jobs/<name>.yaml` on `orbit init`. The five
-/// entries here are the admission-controlled task shipment workflows
-/// (auto / epic / gate / local / pr) plus the planning-duel workflow.
+/// `<orbit_root>/resources/jobs/<name>.yaml` on `orbit init`. The entries
+/// here are the admission-controlled task shipment workflows
+/// (auto / epic / gate / local / pr), the planning-duel workflow, and the
+/// failed-run triage workflow [ORB-10129].
 /// Example and smoke fixtures live
 /// under `crates/orbit-core/assets/jobs/examples/` and are NOT seeded —
 /// they exist for `crates/orbit-engine/examples/v2_job_runtime_smoke.rs`
@@ -41,6 +42,10 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
     (
         "task_pr_pipeline",
         include_str!("../../../assets/jobs/task_pr_pipeline.yaml"),
+    ),
+    (
+        "task_triage_pipeline",
+        include_str!("../../../assets/jobs/task_triage_pipeline.yaml"),
     ),
 ];
 
@@ -700,6 +705,69 @@ spec:
         );
     }
 
+    /// [ORB-10129] Structural invariants of the triage pipeline: it is
+    /// single-flight (`max_active_runs: 1` — one half of the overlap
+    /// guarantee, the routine's `overlap: forbid` is the other), an empty
+    /// candidate list skips both downstream steps (clean no-op), and the
+    /// lifecycle write is the deterministic `apply_dispositions` step, not
+    /// the agent.
+    #[test]
+    fn triage_pipeline_is_single_flight_and_gates_on_candidates() {
+        let yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(name, yaml)| (*name == "task_triage_pipeline").then_some(*yaml))
+            .expect("task triage pipeline default exists");
+        let asset = load_job_asset(yaml).expect("parse task triage pipeline");
+        assert_eq!(asset.spec.max_active_runs, 1);
+
+        let step_ids = asset
+            .spec
+            .steps
+            .iter()
+            .map(|step| step.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            step_ids,
+            ["list_candidates", "triage", "apply_dispositions"]
+        );
+
+        for step_id in ["triage", "apply_dispositions"] {
+            let step = asset
+                .spec
+                .steps
+                .iter()
+                .find(|step| step.id == step_id)
+                .expect("triage pipeline step");
+            assert_eq!(
+                step.when.as_deref(),
+                Some("{{ steps.list_candidates.output.candidate_count }} != 0"),
+                "step {step_id} must be skipped on an empty candidate list"
+            );
+        }
+
+        let apply = asset
+            .spec
+            .steps
+            .iter()
+            .find(|step| step.id == "apply_dispositions")
+            .expect("apply step");
+        match &apply.body {
+            JobV2StepBody::TargetRef(target) => {
+                assert_eq!(target.target, "activity:apply_triage_dispositions");
+                let input = target.default_input.as_ref().expect("apply input");
+                assert_eq!(
+                    input["dispositions"],
+                    Value::String("{{ steps.triage.output.dispositions }}".to_string())
+                );
+                assert_eq!(
+                    input["candidates"],
+                    Value::String("{{ steps.list_candidates.output.candidates }}".to_string())
+                );
+            }
+            other => panic!("expected apply target ref, got {other:?}"),
+        }
+    }
+
     #[test]
     fn default_jobs_template_only_declared_agent_loop_handoffs() {
         let agent_activity_names = DEFAULT_ACTIVITY_FILES
@@ -709,11 +777,22 @@ spec:
                 matches!(asset.spec.spec, ActivityV2Spec::AgentLoop(_)).then_some(*name)
             })
             .collect::<BTreeSet<_>>();
-        let allowed_handoffs = BTreeSet::from([(
-            "task_epic_pipeline",
-            "orchestrator_iter",
-            "steps.orchestrator_iter.output.dispatched_run_ids",
-        )]);
+        let allowed_handoffs = BTreeSet::from([
+            (
+                "task_epic_pipeline",
+                "orchestrator_iter",
+                "steps.orchestrator_iter.output.dispatched_run_ids",
+            ),
+            // [ORB-10129] The triage agent's dispositions flow into the
+            // deterministic `apply_triage_dispositions` step, which bounds
+            // them (candidates-only, environmental-only re-backlog, durable
+            // budget) instead of trusting them.
+            (
+                "task_triage_pipeline",
+                "triage",
+                "steps.triage.output.dispositions",
+            ),
+        ]);
 
         for (job_name, yaml) in DEFAULT_JOB_FILES {
             let asset = load_job_asset(yaml)
@@ -805,6 +884,7 @@ spec:
             "task_auto_pipeline",
             "task_epic_pipeline",
             "task_gate_pipeline",
+            "task_triage_pipeline",
         ] {
             let yaml = DEFAULT_JOB_FILES
                 .iter()
