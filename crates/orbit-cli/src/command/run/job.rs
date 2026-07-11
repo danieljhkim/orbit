@@ -233,6 +233,10 @@ pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineSt
         "job_id": run.job_id,
         "attempt": run.attempt,
         "state": run.state.to_string(),
+        // Recorded owner process, when a worker claimed the run [ORB-10070].
+        // Lets operators (and deploy/orbit-web-upgrade.sh) probe whether an
+        // active run's worker is actually alive.
+        "pid": run.pid,
         "waiting_on_deps": waiting_on_deps,
         "waiting_on_locks": waiting_on_locks,
         "scheduled_at": run.scheduled_at.to_rfc3339(),

@@ -182,6 +182,20 @@ impl JobRunStoreBackend for SqliteJobRunStore {
         })
     }
 
+    fn claim_pending_job_run_owner(&self, run_id: &str, pid: u32) -> Result<bool, OrbitError> {
+        let mut claimed = false;
+        let found = self.update_run(run_id, |run| {
+            if run.state != JobRunState::Pending {
+                return Ok(());
+            }
+            run.pid = Some(pid);
+            run.pid_start_time = process_start_identity_token(pid);
+            claimed = true;
+            Ok(())
+        })?;
+        Ok(found && claimed)
+    }
+
     fn abandon_job_run(
         &self,
         run_id: &str,
@@ -800,6 +814,52 @@ mod tests {
             .expect("some");
         assert_eq!(loaded.state, JobRunState::Success);
         assert_eq!(loaded.steps.len(), 1);
+    }
+
+    /// [ORB-10070] A pending run accepts an owner claim (pid recorded); once
+    /// the run leaves `pending` the claim is refused without writing.
+    #[test]
+    fn claim_pending_job_run_owner_only_claims_pending_runs() {
+        let backend = SqliteJobRunStore::new(Store::open_in_memory().expect("store"), "ws_a");
+        let scheduled_at = Utc::now();
+        let run = backend
+            .insert_job_run("job-claim", 1, scheduled_at, None, None)
+            .expect("insert");
+        assert!(run.pid.is_none());
+
+        assert!(
+            backend
+                .claim_pending_job_run_owner(&run.run_id, 4242)
+                .expect("claim pending")
+        );
+        let claimed = backend
+            .get_job_run(&run.run_id)
+            .expect("get")
+            .expect("some");
+        assert_eq!(claimed.state, JobRunState::Pending);
+        assert_eq!(claimed.pid, Some(4242));
+
+        assert!(
+            backend
+                .mark_job_run_running(&run.run_id, scheduled_at, 4242)
+                .expect("running")
+        );
+        assert!(
+            !backend
+                .claim_pending_job_run_owner(&run.run_id, 9999)
+                .expect("claim running is refused")
+        );
+        let running = backend
+            .get_job_run(&run.run_id)
+            .expect("get")
+            .expect("some");
+        assert_eq!(running.pid, Some(4242));
+
+        assert!(
+            !backend
+                .claim_pending_job_run_owner("jrun-missing", 4242)
+                .expect("claim missing run is refused")
+        );
     }
 
     #[test]

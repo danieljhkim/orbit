@@ -38,6 +38,26 @@ pub(crate) fn insert_pending_run(runtime: &OrbitRuntime, job_id: &str) -> JobRun
         .expect("insert run")
 }
 
+/// Rewrites a run's `created_at` so tests can age a run past reconcile grace
+/// windows without sleeping [ORB-10070].
+pub(crate) fn backdate_run_created_at(
+    runtime: &OrbitRuntime,
+    run: &JobRun,
+    created_at: DateTime<Utc>,
+) {
+    let conn = Connection::open(runtime.global_root().join("orbit.db")).expect("open orbit db");
+    conn.execute(
+        "UPDATE job_runs SET created_at = ?3 \
+         WHERE workspace_id = ?1 AND run_id = ?2",
+        params![
+            runtime.workspace_id().expect("workspace id"),
+            run.run_id,
+            created_at.to_rfc3339(),
+        ],
+    )
+    .expect("backdate run created_at");
+}
+
 pub(crate) fn strip_run_timing(runtime: &OrbitRuntime, run: &JobRun) {
     let conn = Connection::open(runtime.global_root().join("orbit.db")).expect("open orbit db");
     conn.execute(

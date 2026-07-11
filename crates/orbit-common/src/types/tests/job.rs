@@ -32,12 +32,12 @@ fn interrupted_is_terminal_and_rejects_further_events() {
 }
 
 #[test]
-fn pending_rejects_interrupt() {
-    assert!(
-        JobRunState::Pending
-            .try_transition(RunEvent::Interrupt)
-            .is_err(),
-        "only running runs can be interrupted"
+fn pending_interrupt_transitions_to_interrupted() {
+    // [ORB-10070] Orphaned queued runs (dead or never-claimed worker) finalize
+    // as interrupted, the same terminal state as orphaned running runs.
+    assert_eq!(
+        JobRunState::Pending.try_transition(RunEvent::Interrupt),
+        Ok(JobRunState::Interrupted)
     );
 }
 
