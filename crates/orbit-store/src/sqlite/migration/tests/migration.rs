@@ -154,7 +154,7 @@ fn learnings_index_migration_rekeys_by_workspace_and_discards_legacy_rows() {
     assert_eq!(pk_columns, vec!["workspace_id", "id"]);
 
     // Legacy rows are discarded (YAML is the source of truth; each runtime
-    // rebuilds its own rows via sync), and the migration records version 2.
+    // rebuilds its own rows via sync), and all migrations are recorded.
     let remaining: i64 = conn
         .query_row("SELECT COUNT(*) FROM learnings_index", [], |row| row.get(0))
         .expect("count rows");
@@ -162,7 +162,10 @@ fn learnings_index_migration_rekeys_by_workspace_and_discards_legacy_rows() {
         remaining, 0,
         "legacy envelope rows must be discarded, not migrated"
     );
-    assert_eq!(current_schema_version(&conn).expect("schema version"), 2);
+    assert_eq!(
+        current_schema_version(&conn).expect("schema version"),
+        SUPPORTED_SCHEMA_VERSION
+    );
 }
 
 // ── read-only ledger inspection for `orbit migrate --dry-run` [ORB-10012] ──

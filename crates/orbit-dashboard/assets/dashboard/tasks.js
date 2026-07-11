@@ -64,9 +64,7 @@ export function normalizeCrewPayload(payload) {
       .filter((crew) => crew && crew.name)
       .map((crew) => ({
         name: String(crew.name),
-        planner_model: crew.planner_model == null ? "" : String(crew.planner_model),
-        implementer_model: crew.implementer_model == null ? "" : String(crew.implementer_model),
-        reviewer_model: crew.reviewer_model == null ? "" : String(crew.reviewer_model),
+        model: crew.model == null ? "" : String(crew.model),
         is_default: Boolean(crew.is_default),
       }))
     : [];
@@ -117,12 +115,7 @@ function defaultCrewOptionText(task) {
 }
 
 function crewOptionTitle(crew) {
-  const parts = [
-    `planner=${crew.planner_model || "-"}`,
-    `implementer=${crew.implementer_model || "-"}`,
-    `reviewer=${crew.reviewer_model || "-"}`,
-  ];
-  return parts.join(" · ");
+  return `model=${crew.model || "-"}`;
 }
 
 function applyUpdatedTask(updatedTask, context) {

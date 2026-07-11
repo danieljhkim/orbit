@@ -144,7 +144,7 @@ orbit web connect my-server
 
 Full command reference: `orbit --help` and [orbit-cli.com](https://orbit-cli.com).
 
-Customizing crews (which model runs planner/implementer/reviewer), the base branch, and `duel-plan` candidates: see [docs/CONFIG.md](docs/CONFIG.md).
+Customizing crews (which provider-model runs a task), the base branch, and `duel-plan` candidates: see [docs/CONFIG.md](docs/CONFIG.md).
 
 ---
 

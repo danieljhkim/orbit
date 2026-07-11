@@ -21,8 +21,8 @@ pub(super) struct RawRuntimeConfig {
     /// Removed in ORB-00058. Kept only so config loading can reject stale
     /// `[agent.<role>]` tables with an explicit migration error.
     pub(super) agent: Option<BTreeMap<String, RawAgentRoleConfig>>,
-    /// `[crews.<name>]` registry. Each table supplies the three role
-    /// assignments Orbit resolves at task run start.
+    /// `[crews.<name>]` registry. Each table supplies one assignment Orbit
+    /// resolves for every activity role at task run start.
     pub(super) crews: Option<BTreeMap<String, RawCrewEntry>>,
 }
 
@@ -134,6 +134,14 @@ pub struct RawAgentRoleConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RawCrewEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    /// Legacy three-role fields retained for compatibility. Runtime loading
+    /// selects `implementer` and warns when the discarded roles diverge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub planner: Option<RawAgentRoleConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

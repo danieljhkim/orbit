@@ -3,7 +3,7 @@ summary: "Agent Families — Design"
 type: design
 title: "Agent Families — Design"
 owner: human
-last_updated: 2026-05-22
+last_updated: 2026-07-11
 status: Draft
 feature: agent-families
 doc_role: design
@@ -12,7 +12,7 @@ tags: ["agent-families"]
 
 # Agent Families — Design
 
-This document describes the current implementation of Orbit agent families, crew-based role assignment, and duel-plan participant configuration. It covers the family registry, workspace config surfaces, task and CLI override surfaces, and where resolved run metadata is persisted.
+This document describes the current implementation of Orbit agent families, crew-based model assignment, and duel-plan participant configuration. It covers the family registry, workspace config surfaces, task and CLI override surfaces, and where resolved run metadata is persisted.
 
 ## 1. Family Registry
 
@@ -24,11 +24,7 @@ Adding a family is still a cross-cutting change: executor assets, sandbox behavi
 
 ## 2. Crew Registry
 
-Workspace config now defines concrete role lineups under `[crews.<name>]`. Each crew has three role assignments:
-
-- `planner = { model, provider, backend }`
-- `implementer = { model, provider, backend }`
-- `reviewer = { model, provider, backend }`
+Workspace config defines one concrete assignment under each `[crews.<name>]`: flat `model`, `provider`, and `backend` fields. Activity roles remain labels, but all resolve through the same assignment.
 
 `crates/orbit-core/src/config/raw.rs` owns the TOML shape, and `crates/orbit-core/src/config/runtime.rs` materializes it into `Crew` values from `orbit-common`. Runtime loading rejects incomplete crews and rejects `[workflow].default_crew` when it does not name a defined crew.
 
@@ -44,11 +40,11 @@ The precedence chain is:
 2. `Task.crew`
 3. `[workflow].default_crew`
 
-`orbit.task.show` surfaces the task field and, when the current registry resolves it, the effective crew name plus planner, implementer, and reviewer model strings.
+`orbit.task.show` surfaces the task field and, when the current registry resolves it, the effective crew name plus one `crew_model` string.
 
 ## 4. Run Records
 
-Run-start code resolves the crew before dispatch, emits structured tracing fields for `resolved_crew`, `planner_model`, `implementer_model`, and `reviewer_model`, and persists those four strings on the job run record. Persisting resolved values protects audit trails from later config edits.
+Run-start code resolves the crew before dispatch, emits structured tracing fields for `resolved_crew` and `crew_model`, and persists those strings on the job run record. Persisting resolved values protects audit trails from later config edits.
 
 Legacy records without crew fields still deserialize because the run-record fields are optional. Display code may use `infer_agent_family_from_model()` only as a recovery path for older artifacts.
 

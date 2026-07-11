@@ -31,24 +31,24 @@ default_crew = "claude"
 role = "source"
 
 [crews.claude]
-planner = { model = "claude-opus-4-8", provider = "claude", backend = "cli" }
-implementer = { model = "claude-opus-4-8", provider = "claude", backend = "cli" }
-reviewer = { model = "claude-opus-4-8", provider = "claude", backend = "cli" }
+model = "claude-opus-4-8"
+provider = "claude"
+backend = "cli"
 
 [crews.codex]
-planner = { model = "gpt-5.6-terra", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.6-terra", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.6-terra", provider = "codex", backend = "cli" }
+model = "gpt-5.6-terra"
+provider = "codex"
+backend = "cli"
 
 [crews.gemini]
-planner = { model = "pro", provider = "gemini", backend = "cli" }
-implementer = { model = "pro", provider = "gemini", backend = "cli" }
-reviewer = { model = "pro", provider = "gemini", backend = "cli" }
+model = "pro"
+provider = "gemini"
+backend = "cli"
 
 [crews.grok]
-planner = { model = "grok-build", provider = "grok", backend = "cli" }
-implementer = { model = "grok-build", provider = "grok", backend = "cli" }
-reviewer = { model = "grok-build", provider = "grok", backend = "cli" }
+model = "grok-build"
+provider = "grok"
+backend = "cli"
 
 
 [pr]

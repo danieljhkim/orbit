@@ -126,9 +126,7 @@ impl JobRunStoreBackend for SqliteJobRunStore {
             retry_source_run_id,
             knowledge_metrics: None,
             resolved_crew: None,
-            planner_model: None,
-            implementer_model: None,
-            reviewer_model: None,
+            crew_model: None,
             steps: Vec::new(),
         };
         self.store
@@ -246,9 +244,7 @@ impl JobRunStoreBackend for SqliteJobRunStore {
     fn record_job_run_crew(&self, run_id: &str, crew: &Crew) -> Result<bool, OrbitError> {
         self.update_run(run_id, |run| {
             run.resolved_crew = Some(crew.name.clone());
-            run.planner_model = Some(crew.planner.model.clone());
-            run.implementer_model = Some(crew.implementer.model.clone());
-            run.reviewer_model = Some(crew.reviewer.model.clone());
+            run.crew_model = Some(crew.assignment.model.clone());
             Ok(())
         })
     }
@@ -445,7 +441,7 @@ impl Store {
         let mut sql = format!(
             "SELECT run_id, job_id, attempt, state, scheduled_at, started_at, finished_at, \
              duration_ms, created_at, pid, pid_start_time, input_json, retry_source_run_id, \
-             knowledge_metrics_json, resolved_crew, planner_model, implementer_model, reviewer_model \
+             knowledge_metrics_json, resolved_crew, COALESCE(crew_model, implementer_model) \
              FROM job_runs WHERE {} ORDER BY created_at DESC, run_id ASC",
             conditions.join(" AND ")
         );
@@ -553,8 +549,8 @@ fn upsert_job_run_for_workspace_conn(
             run_id, workspace_id, job_id, attempt, state, scheduled_at,
             started_at, finished_at, duration_ms, created_at, pid, pid_start_time,
             input_json, retry_source_run_id, knowledge_metrics_json, resolved_crew,
-            planner_model, implementer_model, reviewer_model, pipeline_state_json
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+            crew_model, pipeline_state_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
         ON CONFLICT(workspace_id, run_id) DO UPDATE SET
             job_id = excluded.job_id,
             attempt = excluded.attempt,
@@ -570,9 +566,7 @@ fn upsert_job_run_for_workspace_conn(
             retry_source_run_id = excluded.retry_source_run_id,
             knowledge_metrics_json = excluded.knowledge_metrics_json,
             resolved_crew = excluded.resolved_crew,
-            planner_model = excluded.planner_model,
-            implementer_model = excluded.implementer_model,
-            reviewer_model = excluded.reviewer_model,
+            crew_model = excluded.crew_model,
             pipeline_state_json = COALESCE(excluded.pipeline_state_json, job_runs.pipeline_state_json)"#,
         rusqlite::params![
             run.run_id,
@@ -591,9 +585,7 @@ fn upsert_job_run_for_workspace_conn(
             run.retry_source_run_id,
             knowledge_metrics_json,
             run.resolved_crew,
-            run.planner_model,
-            run.implementer_model,
-            run.reviewer_model,
+            run.crew_model,
             pipeline_state_json,
         ],
     )
@@ -610,7 +602,7 @@ fn get_job_run_for_workspace_conn(
         .prepare(
             "SELECT run_id, job_id, attempt, state, scheduled_at, started_at, finished_at, \
              duration_ms, created_at, pid, pid_start_time, input_json, retry_source_run_id, \
-             knowledge_metrics_json, resolved_crew, planner_model, implementer_model, reviewer_model \
+             knowledge_metrics_json, resolved_crew, COALESCE(crew_model, implementer_model) \
              FROM job_runs WHERE workspace_id = ?1 AND run_id = ?2",
         )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -650,9 +642,7 @@ fn row_to_job_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRun> {
         retry_source_run_id: row.get(12)?,
         knowledge_metrics: parse_optional_json(knowledge_metrics_json, "knowledge_metrics_json")?,
         resolved_crew: row.get(14)?,
-        planner_model: row.get(15)?,
-        implementer_model: row.get(16)?,
-        reviewer_model: row.get(17)?,
+        crew_model: row.get(15)?,
         steps: Vec::new(),
     })
 }
@@ -810,6 +800,46 @@ mod tests {
             .expect("some");
         assert_eq!(loaded.state, JobRunState::Success);
         assert_eq!(loaded.steps.len(), 1);
+    }
+
+    #[test]
+    fn legacy_role_model_row_loads_as_flat_crew_model() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("orbit.db");
+        drop(Store::open(&db_path).expect("create current schema"));
+
+        let conn = rusqlite::Connection::open(&db_path).expect("open raw db");
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO job_runs(
+                run_id, workspace_id, job_id, attempt, state, scheduled_at, created_at,
+                resolved_crew, implementer_model
+             ) VALUES (?1, ?2, ?3, 1, 'success', ?4, ?4, ?5, ?6)",
+            rusqlite::params![
+                "legacy-run",
+                "ws_a",
+                "legacy-job",
+                now,
+                "legacy-crew",
+                "legacy-implementer-model"
+            ],
+        )
+        .expect("insert legacy-shaped row");
+        drop(conn);
+
+        let loaded = SqliteJobRunStore::new(
+            Store::open(&db_path).expect("reopen migrated store"),
+            "ws_a",
+        )
+        .get_job_run("legacy-run")
+        .expect("read legacy run")
+        .expect("legacy run exists");
+
+        assert_eq!(loaded.resolved_crew.as_deref(), Some("legacy-crew"));
+        assert_eq!(
+            loaded.crew_model.as_deref(),
+            Some("legacy-implementer-model")
+        );
     }
 
     /// [ORB-10002] Checkpoint storage round-trip: per-step recovery metadata

@@ -580,9 +580,7 @@ fn run_detail_uses_v2_audit_steps_when_step_bundle_is_empty() {
         retry_source_run_id: None,
         knowledge_metrics: None,
         resolved_crew: None,
-        planner_model: None,
-        implementer_model: None,
-        reviewer_model: None,
+        crew_model: None,
         steps: Vec::new(),
     };
 

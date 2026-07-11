@@ -3,7 +3,7 @@ summary: "Agent Families — Decisions"
 type: design
 title: "Agent Families — Decisions"
 owner: grok
-last_updated: 2026-07-06
+last_updated: 2026-07-11
 status: Draft
 feature: agent-families
 doc_role: decisions
@@ -32,7 +32,7 @@ See full ADR-0151 for context, alternatives considered, and cost analysis.
 
 ## ADR-0154 — Replace `[agent.<role>]` tables with named `[crews.*]` registry
 
-**Status:** Accepted · 2026-05 · [ORB-00058] · legacy_id: `agent-families/ADR-0152`
+**Status:** Superseded by [ADR-0213](#adr-0213--flatten-crews-to-one-provider-model-assignment) · 2026-07-11 · [ORB-00058] · legacy_id: `agent-families/ADR-0152`
 
 **Context.** Workspace config previously selected planner, implementer, and reviewer models with three top-level `[agent.<role>]` tables, while task execution had no durable way to request a different lineup. Layering a new registry beside the old role tables would have forced Orbit to validate and explain two schemas for the same decision.
 
@@ -110,11 +110,26 @@ AO-002 scope: planning-duel plan quality on the Orbit codebase, single window in
 - Scoreboard attribution matches model strings exactly, so historical review/duel artifacts recorded as `claude-opus-4-7` stop matching the new `opus` pair; only new runs match. A family-equality fallback was considered and left as a possible follow-up.
 - Cost: default model names now live in two layers (Rust `model_defaults` const for code paths, literal alias duplicated into the executor/config assets); a future model bump must touch both the const and the YAML asset, and the asset↔const guard test is what keeps them honest.
 
+## ADR-0213 — Flatten crews to one provider-model assignment
+
+**Status:** Accepted · 2026-07-11 · [ORB-10130] · supersedes ADR-0154
+
+**Context.** Named crews carried separate planner, implementer, and reviewer assignments, but production crews were homogeneous and only implementer was on the primary ship path. Role labels still matter for prompts and telemetry; three independent model-selection slots added configuration and persistence complexity without selecting distinct behavior.
+
+**Decision.** A crew is one provider-model-backend assignment. Every activity role resolves to it; role labels remain descriptive, duel participant selection stays independent, and legacy three-role config is accepted by choosing implementer while warning when discarded roles diverge.
+
+**Consequences.**
+- Per-task and default crew selection directly choose one provider-model binding.
+- Run records and projections expose one crew model; legacy SQLite role columns remain nullable for compatibility.
+- Existing homogeneous legacy crew configuration continues to load without behavior changes.
+- Cost: deliberately heterogeneous legacy crews collapse to their implementer assignment and require a warning-guided config rewrite; cross-provider review must use duel machinery or a future explicit mechanism.
+
 ## Task References
 
 - ORB-00042: Onboard Grok (xAI) as a first-class supported agent family.
 - ORB-00058: Introduce per-task crew override for agent model selection.
 - ORB-00072: Make duel-plan agent pool and per-family model configurable via `[duel]`.
 - ORB-00080: Collapse agent identity to family; isolate model strings to invocation surface.
+- ORB-10130: Flatten each crew to one provider-model assignment.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -30,13 +30,16 @@ fn fresh_db_applies_baseline_and_records_ledger() {
         SUPPORTED_SCHEMA_VERSION
     );
     let applied = applied_migrations(&conn).expect("applied migrations");
-    assert_eq!(applied.len(), 2);
+    assert_eq!(applied.len(), 3);
     assert_eq!(applied[0].version, 1);
     assert_eq!(applied[0].name, "baseline");
     assert!(!applied[0].applied_at.is_empty());
     assert_eq!(applied[1].version, 2);
     assert_eq!(applied[1].name, "learnings_index_workspace_scope");
     assert!(!applied[1].applied_at.is_empty());
+    assert_eq!(applied[2].version, 3);
+    assert_eq!(applied[2].name, "flat_crew_model");
+    assert!(!applied[2].applied_at.is_empty());
 }
 
 #[test]
@@ -148,6 +151,7 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0002".to_string(),
                 "learnings_index_workspace_scope".to_string()
             ),
+            ("migration.v0003".to_string(), "flat_crew_model".to_string()),
         ]
     );
 }
@@ -159,7 +163,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0003', 'from-the-future', '2099-01-01T00:00:00Z')",
+         VALUES ('migration.v0004', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");

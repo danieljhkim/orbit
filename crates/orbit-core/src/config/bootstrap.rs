@@ -72,21 +72,32 @@ fn render_crews(
             (
                 name,
                 RawCrewEntry {
-                    planner: Some(raw_role_from_assignment(&crew.planner)),
-                    implementer: Some(raw_role_from_assignment(&crew.implementer)),
-                    reviewer: Some(raw_role_from_assignment(&crew.reviewer)),
+                    provider: Some(crew.assignment.provider),
+                    model: Some(crew.assignment.model),
+                    backend: Some(crew.assignment.backend),
+                    planner: None,
+                    implementer: None,
+                    reviewer: None,
                 },
             )
         })
         .collect();
 
     if let Some(roles) = role_settings {
+        let assignment = roles.get("implementer").ok_or_else(|| {
+            OrbitError::InvalidInput(
+                "custom crew is missing required `implementer` settings".to_string(),
+            )
+        })?;
         crews.insert(
             "custom".to_string(),
             RawCrewEntry {
-                planner: roles.get("planner").cloned(),
-                implementer: roles.get("implementer").cloned(),
-                reviewer: roles.get("reviewer").cloned(),
+                provider: assignment.provider.clone(),
+                model: assignment.model.clone(),
+                backend: assignment.backend.clone(),
+                planner: None,
+                implementer: None,
+                reviewer: None,
             },
         );
     }
@@ -100,31 +111,21 @@ fn render_crews(
 
 fn render_crew_table(name: &str, entry: &RawCrewEntry) -> Result<String, OrbitError> {
     let mut rendered = format!("[crews.{name}]\n");
-    for (role, config) in [
-        ("planner", entry.planner.as_ref()),
-        ("implementer", entry.implementer.as_ref()),
-        ("reviewer", entry.reviewer.as_ref()),
+    for (field, value) in [
+        ("model", entry.model.as_deref()),
+        ("provider", entry.provider.as_deref()),
+        ("backend", entry.backend.as_deref()),
     ] {
-        let config = config.ok_or_else(|| {
-            OrbitError::InvalidInput(format!("crew `{name}` is missing `{role}` role settings"))
+        let value = value.ok_or_else(|| {
+            OrbitError::InvalidInput(format!("crew `{name}` is missing `{field}`"))
         })?;
-        let value = toml::Value::try_from(config).map_err(|err| {
-            OrbitError::Io(format!("serialize [crews.{name}].{role} assignment: {err}"))
-        })?;
-        rendered.push_str(&format!("{role} = {value}\n"));
+        rendered.push_str(&format!(
+            "{field} = {}\n",
+            toml::Value::String(value.to_string())
+        ));
     }
     rendered.push('\n');
     Ok(rendered)
-}
-
-fn raw_role_from_assignment(
-    assignment: &orbit_common::types::CrewRoleAssignment,
-) -> RawAgentRoleConfig {
-    RawAgentRoleConfig {
-        provider: Some(assignment.provider.clone()),
-        model: Some(assignment.model.clone()),
-        backend: Some(assignment.backend.clone()),
-    }
 }
 
 fn render_duel(detected: &DetectedAgents) -> Result<String, OrbitError> {
@@ -165,22 +166,20 @@ fn render_duel(detected: &DetectedAgents) -> Result<String, OrbitError> {
 fn validate_complete_role_settings(
     roles: &BTreeMap<String, RawAgentRoleConfig>,
 ) -> Result<(), OrbitError> {
-    for role in ["planner", "implementer", "reviewer"] {
-        let Some(config) = roles.get(role) else {
+    let config = roles.get("implementer").ok_or_else(|| {
+        OrbitError::InvalidInput(
+            "custom crew is missing required `implementer` settings".to_string(),
+        )
+    })?;
+    for (field, value) in [
+        ("provider", config.provider.as_deref()),
+        ("backend", config.backend.as_deref()),
+        ("model", config.model.as_deref()),
+    ] {
+        if value.map(str::trim).is_none_or(str::is_empty) {
             return Err(OrbitError::InvalidInput(format!(
-                "custom crew is missing required `{role}` role settings"
+                "custom crew is missing required `{field}`"
             )));
-        };
-        for (field, value) in [
-            ("provider", config.provider.as_deref()),
-            ("backend", config.backend.as_deref()),
-            ("model", config.model.as_deref()),
-        ] {
-            if value.map(str::trim).is_none_or(str::is_empty) {
-                return Err(OrbitError::InvalidInput(format!(
-                    "custom crew role `{role}` is missing required `{field}`"
-                )));
-            }
         }
     }
     Ok(())

@@ -16,9 +16,7 @@ fn single_family_crew(name: &str) -> Crew {
     };
     Crew {
         name: name.to_string(),
-        planner: role.clone(),
-        implementer: role.clone(),
-        reviewer: role,
+        assignment: role,
     }
 }
 
@@ -265,9 +263,9 @@ fn crews_load_when_present_and_well_formed() {
         workspace.path(),
         r#"
 [crews.codex]
-planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+model = "gpt-5.5"
+provider = "codex"
+backend = "cli"
 
 [workflow]
 default_crew = "codex"
@@ -283,7 +281,7 @@ default_crew = "codex"
             .crews
             .get("codex")
             .expect("crew exists")
-            .implementer
+            .assignment
             .model,
         orbit_common::test_fixtures::TEST_CODEX_MODEL
     );
@@ -297,9 +295,9 @@ fn default_crew_must_reference_defined_crew() {
         workspace.path(),
         r#"
 [crews.codex]
-planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+model = "gpt-5.5"
+provider = "codex"
+backend = "cli"
 
 [workflow]
 default_crew = "missing"
@@ -322,9 +320,9 @@ fn default_crew_unset_with_custom_crews_fails_load() {
         workspace.path(),
         r#"
 [crews.my-team]
-planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+model = "gpt-5.5"
+provider = "codex"
+backend = "cli"
 "#,
     );
 
@@ -346,9 +344,9 @@ fn default_crew_unset_with_seeded_crew_still_loads() {
         workspace.path(),
         r#"
 [crews.claude]
-planner = { model = "opus", provider = "claude", backend = "cli" }
-implementer = { model = "opus", provider = "claude", backend = "cli" }
-reviewer = { model = "opus", provider = "claude", backend = "cli" }
+model = "opus"
+provider = "claude"
+backend = "cli"
 "#,
     );
 
@@ -388,15 +386,15 @@ fn workflow_default_crew_uses_environment_then_claude_system_default() {
 }
 
 #[test]
-fn crews_with_incomplete_role_fail_load() {
+fn flat_crews_with_incomplete_assignment_fail_load() {
     let global = tempdir().expect("global tempdir");
     let workspace = tempdir().expect("workspace tempdir");
     write_config(
         workspace.path(),
         r#"
 [crews.codex]
-planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+model = "gpt-5.5"
+provider = "codex"
 "#,
     );
 
@@ -405,7 +403,27 @@ implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 
     assert!(matches!(error, OrbitError::InvalidInput(_)));
     assert!(error.to_string().contains("[crews.codex]"));
-    assert!(error.to_string().contains("reviewer"));
+    assert!(error.to_string().contains("backend"));
+}
+
+#[test]
+fn legacy_divergent_crew_uses_implementer_assignment() {
+    let config = load_config(
+        r#"
+[crews.legacy]
+planner = { model = "planner-model", provider = "claude", backend = "cli" }
+implementer = { model = "implementer-model", provider = "codex", backend = "cli" }
+reviewer = { model = "reviewer-model", provider = "gemini", backend = "cli" }
+
+[workflow]
+default_crew = "legacy"
+"#,
+    )
+    .expect("legacy crew loads");
+
+    let crew = config.crews.get("legacy").expect("legacy crew");
+    assert_eq!(crew.assignment.model, "implementer-model");
+    assert_eq!(crew.assignment.provider, "codex");
 }
 
 #[test]

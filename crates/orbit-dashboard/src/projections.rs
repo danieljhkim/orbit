@@ -149,9 +149,7 @@ pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineSt
         "error_message": last.and_then(|s| s.error_message.as_deref()),
         "knowledge_metrics": run.knowledge_metrics,
         "resolved_crew": run.resolved_crew,
-        "planner_model": run.planner_model,
-        "implementer_model": run.implementer_model,
-        "reviewer_model": run.reviewer_model,
+        "crew_model": run.crew_model,
         "steps": run.steps.iter().map(|s| json!({
             "step_index": s.step_index,
             "target_type": s.target_type.to_string(),
@@ -230,18 +228,7 @@ pub(crate) fn task_to_json_with_sidecars(
     );
     if let Some(projection) = dashboard_resolved_crew_projection(runtime, task)? {
         object.insert("resolved_crew".to_string(), Value::String(projection.name));
-        object.insert(
-            "planner_model".to_string(),
-            Value::String(projection.planner_model),
-        );
-        object.insert(
-            "implementer_model".to_string(),
-            Value::String(projection.implementer_model),
-        );
-        object.insert(
-            "reviewer_model".to_string(),
-            Value::String(projection.reviewer_model),
-        );
+        object.insert("crew_model".to_string(), Value::String(projection.model));
     }
     Ok(value)
 }
@@ -254,9 +241,7 @@ fn dashboard_resolved_crew_projection(
         let crew = runtime.resolve_crew_for_task(None, None)?;
         return Ok(Some(ResolvedCrewProjection {
             name: crew.name,
-            planner_model: crew.planner.model,
-            implementer_model: crew.implementer.model,
-            reviewer_model: crew.reviewer.model,
+            model: crew.assignment.model,
         }));
     }
     runtime.resolved_crew_projection(task)

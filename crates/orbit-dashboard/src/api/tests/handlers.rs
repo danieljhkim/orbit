@@ -83,14 +83,14 @@ fn runtime_with_custom_crews() -> (tempfile::TempDir, OrbitRuntime) {
         workspace_root.join("config.toml"),
         r#"
 [crews.beta]
-planner = { model = "claude-beta-plan", provider = "claude", backend = "cli" }
-implementer = { model = "codex-beta-impl", provider = "codex", backend = "cli" }
-reviewer = { model = "codex-beta-review", provider = "codex", backend = "cli" }
+model = "codex-beta"
+provider = "codex"
+backend = "cli"
 
 [crews.alpha]
-planner = { model = "alpha-plan-model", provider = "claude", backend = "cli" }
-implementer = { model = "alpha-impl-model", provider = "codex", backend = "cli" }
-reviewer = { model = "alpha-review-model", provider = "codex", backend = "cli" }
+model = "alpha-model"
+provider = "codex"
+backend = "cli"
 
 [workflow]
 default_crew = "beta"
@@ -113,14 +113,14 @@ fn runtime_with_stale_task_crew() -> (tempfile::TempDir, OrbitRuntime, String) {
         workspace_root.join("config.toml"),
         r#"
 [crews.beta]
-planner = { model = "claude-beta-plan", provider = "claude", backend = "cli" }
-implementer = { model = "codex-beta-impl", provider = "codex", backend = "cli" }
-reviewer = { model = "codex-beta-review", provider = "codex", backend = "cli" }
+model = "codex-beta"
+provider = "codex"
+backend = "cli"
 
 [crews.all-codex]
-planner = { model = "legacy-plan-model", provider = "codex", backend = "cli" }
-implementer = { model = "legacy-impl-model", provider = "codex", backend = "cli" }
-reviewer = { model = "legacy-review-model", provider = "codex", backend = "cli" }
+model = "all-codex-model"
+provider = "codex"
+backend = "cli"
 
 [workflow]
 default_crew = "beta"
@@ -144,9 +144,9 @@ default_crew = "beta"
         workspace_root.join("config.toml"),
         r#"
 [crews.beta]
-planner = { model = "claude-beta-plan", provider = "claude", backend = "cli" }
-implementer = { model = "codex-beta-impl", provider = "codex", backend = "cli" }
-reviewer = { model = "codex-beta-review", provider = "codex", backend = "cli" }
+model = "codex-beta"
+provider = "codex"
+backend = "cli"
 
 [workflow]
 default_crew = "beta"
@@ -191,9 +191,7 @@ async fn tasks_with_stale_explicit_crew_fall_back_to_default_projection() {
         .expect("stale crew task is listed");
     assert_eq!(task["crew"], json!("all-codex"));
     assert_eq!(task["resolved_crew"], json!("beta"));
-    assert_eq!(task["planner_model"], json!("claude-beta-plan"));
-    assert_eq!(task["implementer_model"], json!("codex-beta-impl"));
-    assert_eq!(task["reviewer_model"], json!("codex-beta-review"));
+    assert_eq!(task["crew_model"], json!("codex-beta"));
 
     let response = patch_task_crew(runtime, &task_id, "all-codex").await;
 
@@ -210,9 +208,7 @@ async fn patch_task_crew_null_clears_stale_explicit_crew_to_default() {
     let task = body_json(response).await;
     assert_eq!(task["crew"], json!(null));
     assert_eq!(task["resolved_crew"], json!("beta"));
-    assert_eq!(task["planner_model"], json!("claude-beta-plan"));
-    assert_eq!(task["implementer_model"], json!("codex-beta-impl"));
-    assert_eq!(task["reviewer_model"], json!("codex-beta-review"));
+    assert_eq!(task["crew_model"], json!("codex-beta"));
 }
 
 #[tokio::test]
@@ -228,14 +224,10 @@ async fn crews_endpoint_returns_sorted_runtime_registry() {
     assert_eq!(crews.len(), 2);
     assert_eq!(crews[0]["name"], json!("alpha"));
     assert_eq!(crews[0]["is_default"], json!(false));
-    assert_eq!(crews[0]["planner_model"], json!("alpha-plan-model"));
-    assert_eq!(crews[0]["implementer_model"], json!("alpha-impl-model"));
-    assert_eq!(crews[0]["reviewer_model"], json!("alpha-review-model"));
+    assert_eq!(crews[0]["model"], json!("alpha-model"));
     assert_eq!(crews[1]["name"], json!("beta"));
     assert_eq!(crews[1]["is_default"], json!(true));
-    assert_eq!(crews[1]["planner_model"], json!("claude-beta-plan"));
-    assert_eq!(crews[1]["implementer_model"], json!("codex-beta-impl"));
-    assert_eq!(crews[1]["reviewer_model"], json!("codex-beta-review"));
+    assert_eq!(crews[1]["model"], json!("codex-beta"));
 }
 
 #[tokio::test]

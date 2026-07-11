@@ -35,7 +35,7 @@ impl AgentModelPair {
     }
 }
 
-/// One role assignment inside a named crew.
+/// The provider-model-backend assignment selected by a named crew.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CrewRoleAssignment {
     pub model: String,
@@ -43,21 +43,18 @@ pub struct CrewRoleAssignment {
     pub backend: String,
 }
 
-/// A named planner/implementer/reviewer lineup.
+/// A named provider-model assignment used for every activity role.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Crew {
     pub name: String,
-    pub planner: CrewRoleAssignment,
-    pub implementer: CrewRoleAssignment,
-    pub reviewer: CrewRoleAssignment,
+    pub assignment: CrewRoleAssignment,
 }
 
 impl Crew {
     pub fn role(&self, role: &str) -> Option<&CrewRoleAssignment> {
+        // ADR-0213: roles remain labels; a crew selects exactly one assignment.
         match role {
-            "planner" => Some(&self.planner),
-            "implementer" => Some(&self.implementer),
-            "reviewer" => Some(&self.reviewer),
+            "planner" | "implementer" | "reviewer" => Some(&self.assignment),
             _ => None,
         }
     }

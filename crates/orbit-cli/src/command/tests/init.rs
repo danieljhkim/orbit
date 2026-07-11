@@ -68,14 +68,8 @@ fn non_interactive_init_writes_generated_crew_config() {
         .get("crews")
         .and_then(|crews| crews.get("codex"))
         .expect("codex crew is seeded");
-    for role in ["planner", "implementer", "reviewer"] {
-        assert_eq!(
-            codex
-                .get(role)
-                .and_then(|role_config| role_config.get("model"))
-                .and_then(toml::Value::as_str),
-            Some("gpt-5.6-terra"),
-            "codex {role} model",
-        );
-    }
+    assert_eq!(
+        codex.get("model").and_then(toml::Value::as_str),
+        Some("gpt-5.6-terra"),
+    );
 }
