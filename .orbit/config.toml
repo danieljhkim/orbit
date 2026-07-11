@@ -10,7 +10,7 @@ pass = [
 ]
 
 [execution.codex]
-sandbox = "workspace-write"
+sandbox = "danger-full-access"
 
 [task.approval]
 delegate_approval = true
