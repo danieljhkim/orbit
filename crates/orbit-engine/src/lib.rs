@@ -58,8 +58,10 @@ pub use context::{
     AgentRoleConfig, AttemptOutcome, DirectActivityRunOutcome, EngineHost, EnvironmentHost,
     ExecutionContext, ExecutorHost, ExecutorLookupHost, JobRunHost, JobRunResult, PrConfig,
     RuntimeHost, STALE_RUN_GRACE_SECONDS, TaskActivityUpdate, TaskAutomationUpdate, TaskHost,
-    TaskReadHost, TaskWriteHost, ensure_task_can_enter_workflow, execution_working_directory,
+    TaskReadHost, TaskWriteHost, WORKFLOW_RUN_FAILED_EVENT, blocked_workflow_failure_update,
+    ensure_task_can_enter_workflow, execution_working_directory,
     execution_working_directory_with_task, input_workspace_path, redact_attempt_outcome,
+    workflow_failure_note,
 };
 pub use executor::automation::{
     StateExecutionContext, execute_action as execute_deterministic_action,

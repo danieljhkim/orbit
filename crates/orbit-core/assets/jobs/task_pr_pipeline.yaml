@@ -1,9 +1,16 @@
 # Task bundle PR pipeline.
 #
-# Mid-bundle failure semantics:
+# Failure semantics:
 # - `implement_bundle` runs one task at a time in the shared worktree.
 # - If `implement_one` fails, earlier commits remain on the bundle branch.
-# - Tasks stay `in-progress` until `pr_open` ships the whole bundle to review.
+# - While the run is still alive, tasks stay `in-progress`: a mid-bundle step
+#   failure that the run recovers from does not block anything, and `pr_open`
+#   ships the whole bundle to `review` only once the run succeeds.
+# - When the run itself terminalizes as `failed` (also `cancelled`/`timeout`),
+#   every task coupled to it (stamped with its `job_run_id` by `worktree_setup`)
+#   is moved to `blocked` with a `workflow_run_failed` status event — a dead end
+#   for automation that requires a human/orchestrator decision to clear. Tasks
+#   already in `review`/`done` are left untouched.
 #
 # Optional review step:
 # - `review_bundle` runs after `implement_bundle` when `input.review` is

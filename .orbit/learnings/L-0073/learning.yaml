@@ -1,0 +1,14 @@
+schema_version: 1
+id: L-0073
+status: active
+scope:
+  paths: []
+  tags: []
+summary: finalize_run returns changed=true even when re-finalizing an already-terminal job run, so it cannot gate once-only side effects at run terminalization
+body: ''
+evidence:
+- kind: task
+  reference: ORB-10127
+created_at: 2026-07-11T19:38:38.881274026Z
+updated_at: 2026-07-11T19:38:38.881274026Z
+created_by: claude

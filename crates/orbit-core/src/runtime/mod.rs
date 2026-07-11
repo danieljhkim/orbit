@@ -22,6 +22,7 @@ mod resolve;
 pub mod run_audit;
 pub(crate) mod run_input;
 mod store_delegates;
+mod task_block_on_run_failure;
 mod task_reservation_cleanup;
 mod v2_host;
 
