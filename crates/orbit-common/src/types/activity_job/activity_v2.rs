@@ -241,12 +241,46 @@ impl Provider {
         Provider::OpenaiCompat,
     ];
 
-    /// Accepted non-canonical spellings, normalized by [`Provider::parse`].
-    pub const ALIASES: &'static [ProviderAlias] = &[ProviderAlias {
-        alias: "openai-compat",
-        canonical: Provider::OpenaiCompat,
-        deprecated: false,
-    }];
+    /// Accepted non-canonical spellings, normalized by [`Provider::parse`] /
+    /// [`Provider::resolve_name`]. The five legacy **vendor** names are the
+    /// deprecated aliases from the Constellation provider-resolution contract
+    /// (§2): they resolve successfully but carry an observable deprecation
+    /// signal. `openai-compat` is a non-deprecated spelling variant of the
+    /// canonical `openai_compat` id (it is also a serde alias on the enum).
+    /// This table is **closed** — an unlisted string is `provider.unknown`,
+    /// never guessed. New aliases require a contract bump.
+    pub const ALIASES: &'static [ProviderAlias] = &[
+        ProviderAlias {
+            alias: "anthropic",
+            canonical: Provider::Claude,
+            deprecated: true,
+        },
+        ProviderAlias {
+            alias: "openai",
+            canonical: Provider::Codex,
+            deprecated: true,
+        },
+        ProviderAlias {
+            alias: "chatgpt",
+            canonical: Provider::Codex,
+            deprecated: true,
+        },
+        ProviderAlias {
+            alias: "google",
+            canonical: Provider::Gemini,
+            deprecated: true,
+        },
+        ProviderAlias {
+            alias: "xai",
+            canonical: Provider::Grok,
+            deprecated: true,
+        },
+        ProviderAlias {
+            alias: "openai-compat",
+            canonical: Provider::OpenaiCompat,
+            deprecated: false,
+        },
+    ];
 
     /// Human-readable canonical id list used in diagnostics.
     pub const CANONICAL_LIST: &'static str = "claude, codex, gemini, grok, ollama, openai_compat";
@@ -262,28 +296,52 @@ impl Provider {
         }
     }
 
-    /// Canonical parse with alias normalization. Trims surrounding whitespace
+    /// Canonical parse with alias normalization, **preserving** the observable
+    /// alias/deprecation metadata (contract §2). Trims surrounding whitespace
     /// and lower-cases before matching, so config/env casing variants resolve
-    /// to the same identity. Unknown strings return [`ProviderParseError`] —
-    /// this is the *only* string→provider entry point; callers must not invent
-    /// their own match and must not silently fall back on error.
-    pub fn parse(raw: &str) -> Result<Provider, ProviderParseError> {
+    /// to the same identity (`"  OpenAI "` → `codex` + deprecation signal).
+    /// Unknown strings return [`ProviderParseError`] — this is the *only*
+    /// string→provider entry point; callers must not invent their own match and
+    /// must not silently fall back on error.
+    ///
+    /// Prefer this over [`Provider::parse`] wherever the caller can surface the
+    /// deprecation (e.g. a config warn-log): `parse` discards the signal.
+    pub fn resolve_name(raw: &str) -> Result<ProviderIdentity, ProviderParseError> {
         let normalized = raw.trim().to_ascii_lowercase();
         if let Some(provider) = Provider::ALL
             .into_iter()
             .find(|provider| provider.as_str() == normalized)
         {
-            return Ok(provider);
+            return Ok(ProviderIdentity {
+                provider,
+                deprecation: None,
+            });
         }
         if let Some(alias) = Provider::ALIASES
             .iter()
             .find(|alias| alias.alias == normalized)
         {
-            return Ok(alias.canonical);
+            let deprecation = alias.deprecated.then(|| ProviderDeprecation {
+                // The signal carries the normalized alias spelling, not the raw
+                // casing, so `"OpenAI"` and `"openai"` produce the same signal.
+                alias: normalized.clone(),
+                canonical: alias.canonical,
+            });
+            return Ok(ProviderIdentity {
+                provider: alias.canonical,
+                deprecation,
+            });
         }
         Err(ProviderParseError {
             raw: raw.to_string(),
         })
+    }
+
+    /// Canonical parse that discards alias/deprecation metadata. Thin wrapper
+    /// over [`Provider::resolve_name`] for the many call sites that only need
+    /// the canonical identity. Same normalization and same no-fallback error.
+    pub fn parse(raw: &str) -> Result<Provider, ProviderParseError> {
+        Provider::resolve_name(raw).map(|identity| identity.provider)
     }
 
     /// Whether Phase 2c wires an HTTP transport for this provider. Used by the
@@ -326,6 +384,271 @@ impl FromStr for Provider {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Provider::parse(value)
     }
+}
+
+/// A resolved provider identity plus any observable deprecation signal emitted
+/// while normalizing a legacy alias (contract §2). Returned by
+/// [`Provider::resolve_name`] so callers can warn on a deprecated alias without
+/// losing the fact that normalization occurred.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderIdentity {
+    /// The canonical provider the input normalized to.
+    pub provider: Provider,
+    /// `Some` when the input was a **deprecated** alias; `None` for a canonical
+    /// id or a non-deprecated spelling variant.
+    pub deprecation: Option<ProviderDeprecation>,
+}
+
+/// Observable deprecation signal: a legacy alias was normalized to a canonical
+/// provider. Resolution still succeeds (contract §2); callers surface this as a
+/// warning carrying `{alias, canonical}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderDeprecation {
+    /// The normalized (trimmed, lower-cased) alias spelling that was accepted.
+    pub alias: String,
+    /// The canonical provider it resolved to.
+    pub canonical: Provider,
+}
+
+/// Which entry point's capability set applies during full resolution
+/// (contract §5). The canonical four providers are executable at every entry
+/// point; `ollama` / `openai_compat` are known Orbit identities that no CLI
+/// entry point can execute.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderEntryPoint {
+    Orbit,
+    Worker,
+    Bridge,
+}
+
+/// The precedence tier that supplied the resolved value (contract §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderSource {
+    Explicit,
+    TaskConfig,
+    WorkspaceDefault,
+    EnvironmentDefault,
+    SystemDefault,
+    PersistedReconciliation,
+}
+
+impl ProviderSource {
+    /// Stable contract spelling used in diagnostics / conformance assertions.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProviderSource::Explicit => "explicit",
+            ProviderSource::TaskConfig => "task_config",
+            ProviderSource::WorkspaceDefault => "workspace_default",
+            ProviderSource::EnvironmentDefault => "environment_default",
+            ProviderSource::SystemDefault => "system_default",
+            ProviderSource::PersistedReconciliation => "persisted_reconciliation",
+        }
+    }
+}
+
+/// Stable diagnostic code for a resolution outcome (contract §6). Each repo
+/// maps its native error/log to the shared code; conformance asserts the code,
+/// not the wording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderDiagnostic {
+    Ok,
+    Defaulted,
+    AliasDeprecated,
+    Unknown,
+    Unsupported,
+    Unavailable,
+}
+
+impl ProviderDiagnostic {
+    /// Stable contract code string (e.g. `"provider.alias_deprecated"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProviderDiagnostic::Ok => "provider.ok",
+            ProviderDiagnostic::Defaulted => "provider.defaulted",
+            ProviderDiagnostic::AliasDeprecated => "provider.alias_deprecated",
+            ProviderDiagnostic::Unknown => "provider.unknown",
+            ProviderDiagnostic::Unsupported => "provider.unsupported",
+            ProviderDiagnostic::Unavailable => "provider.unavailable",
+        }
+    }
+
+    /// Whether the diagnostic represents a successful resolution (§6).
+    pub fn is_success(self) -> bool {
+        matches!(
+            self,
+            ProviderDiagnostic::Ok
+                | ProviderDiagnostic::Defaulted
+                | ProviderDiagnostic::AliasDeprecated
+        )
+    }
+}
+
+/// Inputs to a single provider resolution (contract §8). Every tier is an
+/// optional raw string (empty / whitespace-only counts as "not selected" and
+/// falls through, not an error). `host_available` is `None` when availability
+/// is not exercised.
+#[derive(Debug, Clone)]
+pub struct ProviderResolveRequest<'a> {
+    pub entry_point: ProviderEntryPoint,
+    pub requested: Option<&'a str>,
+    pub task_provider: Option<&'a str>,
+    pub workspace_default: Option<&'a str>,
+    pub env_default: Option<&'a str>,
+    pub system_default: Option<&'a str>,
+    pub persisted_resolution: Option<&'a str>,
+    pub host_available: Option<bool>,
+}
+
+impl ProviderResolveRequest<'_> {
+    /// A request with only the entry point set; fill tiers with struct-update
+    /// syntax (`ProviderResolveRequest { requested: Some(x), ..base }`).
+    pub fn new(entry_point: ProviderEntryPoint) -> Self {
+        Self {
+            entry_point,
+            requested: None,
+            task_provider: None,
+            workspace_default: None,
+            env_default: None,
+            system_default: None,
+            persisted_resolution: None,
+            host_available: None,
+        }
+    }
+}
+
+/// Outcome of a provider resolution (contract §8): the normalized identity (or
+/// `None` on `provider.unknown`), the tier it came from, the stable diagnostic,
+/// and any deprecation signal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderResolution {
+    pub normalized_provider: Option<Provider>,
+    pub source: ProviderSource,
+    pub diagnostic: ProviderDiagnostic,
+    pub deprecation: Option<ProviderDeprecation>,
+}
+
+impl ProviderResolution {
+    /// Whether resolution succeeded (identity usable for dispatch).
+    pub fn is_success(&self) -> bool {
+        self.diagnostic.is_success()
+    }
+}
+
+impl Provider {
+    /// Providers this entry point can execute (contract §5 capability set). The
+    /// canonical four are executable everywhere; `ollama` / `openai_compat` are
+    /// known but unsupported at every CLI entry point — the identity resolves,
+    /// only execution capability is missing.
+    pub fn capabilities(_entry_point: ProviderEntryPoint) -> &'static [Provider] {
+        const CANONICAL: [Provider; 4] = [
+            Provider::Claude,
+            Provider::Codex,
+            Provider::Gemini,
+            Provider::Grok,
+        ];
+        &CANONICAL
+    }
+
+    /// Full contract resolution (§8): reconciliation short-circuit, then
+    /// precedence (§3), alias normalization (§2), and identity → capability →
+    /// availability checks (§5) — never falling back to another provider. This
+    /// is the surface the vendored conformance cases assert against, so Orbit
+    /// stays in parity with Worker and Bridge.
+    pub fn resolve(request: &ProviderResolveRequest<'_>) -> ProviderResolution {
+        // Reconciliation short-circuit: a frozen resolution is reused verbatim
+        // and precedence is not re-run (§7).
+        if let Some(persisted) = non_empty(request.persisted_resolution) {
+            // A persisted identity is already canonical; if it somehow fails to
+            // parse we surface `unknown` rather than inventing a fallback.
+            return match Provider::parse(persisted) {
+                Ok(provider) => ProviderResolution {
+                    normalized_provider: Some(provider),
+                    source: ProviderSource::PersistedReconciliation,
+                    diagnostic: ProviderDiagnostic::Ok,
+                    deprecation: None,
+                },
+                Err(_) => ProviderResolution {
+                    normalized_provider: None,
+                    source: ProviderSource::PersistedReconciliation,
+                    diagnostic: ProviderDiagnostic::Unknown,
+                    deprecation: None,
+                },
+            };
+        }
+
+        // Precedence: first non-empty tier wins (§3).
+        let tiers = [
+            (request.requested, ProviderSource::Explicit),
+            (request.task_provider, ProviderSource::TaskConfig),
+            (request.workspace_default, ProviderSource::WorkspaceDefault),
+            (request.env_default, ProviderSource::EnvironmentDefault),
+            (request.system_default, ProviderSource::SystemDefault),
+        ];
+        let Some((raw, source)) = tiers
+            .into_iter()
+            .find_map(|(value, source)| non_empty(value).map(|raw| (raw, source)))
+        else {
+            // No tier supplied a value. The contract always provides a system
+            // default (canonical `claude`); treat an absent one as that so
+            // resolution is total.
+            return ProviderResolution {
+                normalized_provider: Some(Provider::default()),
+                source: ProviderSource::SystemDefault,
+                diagnostic: ProviderDiagnostic::Defaulted,
+                deprecation: None,
+            };
+        };
+
+        // Normalize (§2), then identity → capability → availability (§5).
+        let identity = match Provider::resolve_name(raw) {
+            Ok(identity) => identity,
+            Err(_) => {
+                return ProviderResolution {
+                    normalized_provider: None,
+                    source,
+                    diagnostic: ProviderDiagnostic::Unknown,
+                    deprecation: None,
+                };
+            }
+        };
+
+        if !Provider::capabilities(request.entry_point).contains(&identity.provider) {
+            return ProviderResolution {
+                normalized_provider: Some(identity.provider),
+                source,
+                diagnostic: ProviderDiagnostic::Unsupported,
+                deprecation: None,
+            };
+        }
+
+        if request.host_available == Some(false) {
+            return ProviderResolution {
+                normalized_provider: Some(identity.provider),
+                source,
+                diagnostic: ProviderDiagnostic::Unavailable,
+                deprecation: None,
+            };
+        }
+
+        let diagnostic = if identity.deprecation.is_some() {
+            ProviderDiagnostic::AliasDeprecated
+        } else if source == ProviderSource::Explicit {
+            ProviderDiagnostic::Ok
+        } else {
+            ProviderDiagnostic::Defaulted
+        };
+        ProviderResolution {
+            normalized_provider: Some(identity.provider),
+            source,
+            diagnostic,
+            deprecation: identity.deprecation,
+        }
+    }
+}
+
+/// Trim a tier value and treat empty / whitespace-only as "not selected" (§3).
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

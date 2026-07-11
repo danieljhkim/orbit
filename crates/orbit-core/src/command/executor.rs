@@ -65,18 +65,18 @@ pub(super) fn migrated_default_executor(
     // re-seeding on a host that can't apply it (e.g. `macos-sandbox-exec` on
     // Linux) drops the declaration instead of leaving dispatch fail-closed.
     // See [ORB-10047].
-    if let Some(kind) = existing.sandbox {
-        if !kind.is_available_on_current_platform() {
-            tracing::warn!(
-                executor = %existing.name,
-                sandbox = %kind,
-                current_platform = std::env::consts::OS,
-                target_platform = kind.target_os(),
-                "scrubbing platform-mismatched sandbox from installed executor def on re-seed",
-            );
-            migrated.sandbox = None;
-            changed = true;
-        }
+    if let Some(kind) = existing.sandbox
+        && !kind.is_available_on_current_platform()
+    {
+        tracing::warn!(
+            executor = %existing.name,
+            sandbox = %kind,
+            current_platform = std::env::consts::OS,
+            target_platform = kind.target_os(),
+            "scrubbing platform-mismatched sandbox from installed executor def on re-seed",
+        );
+        migrated.sandbox = None;
+        changed = true;
     }
 
     if changed { Some(migrated) } else { None }
@@ -117,17 +117,17 @@ pub(super) fn parse_default_executor(name: &str, yaml: &str) -> Result<ExecutorD
     // can't apply it. Drop the declaration at parse time on hosts where it
     // doesn't apply so first-install and re-install (overwrite mode) don't
     // persist a platform-mismatched sandbox. See [ORB-10047].
-    if let Some(kind) = def.sandbox {
-        if !kind.is_available_on_current_platform() {
-            tracing::warn!(
-                executor = %def.name,
-                sandbox = %kind,
-                current_platform = std::env::consts::OS,
-                target_platform = kind.target_os(),
-                "shipped executor asset declares sandbox for another platform; installing without sandbox on this host",
-            );
-            def.sandbox = None;
-        }
+    if let Some(kind) = def.sandbox
+        && !kind.is_available_on_current_platform()
+    {
+        tracing::warn!(
+            executor = %def.name,
+            sandbox = %kind,
+            current_platform = std::env::consts::OS,
+            target_platform = kind.target_os(),
+            "shipped executor asset declares sandbox for another platform; installing without sandbox on this host",
+        );
+        def.sandbox = None;
     }
 
     Ok(def)
