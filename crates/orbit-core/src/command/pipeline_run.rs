@@ -189,6 +189,24 @@ impl OrbitRuntime {
     }
 
     pub fn execute_pipeline_run_worker(&self, run_id: &str) -> Result<(), OrbitError> {
+        // [ORB-10070] Claim the queued run for this worker process so orphan
+        // reconciliation can tell a pending run whose worker is alive and
+        // polling for its admission slot apart from one whose worker died
+        // (crash, SIGKILL, host reboot). Best-effort: the run may already be
+        // running/terminal, and a claim failure must never block execution.
+        if let Err(error) = self
+            .stores()
+            .jobs()
+            .claim_pending_run_owner(run_id, std::process::id())
+        {
+            tracing::warn!(
+                target: "orbit.core.job_run",
+                run_id,
+                error = %error,
+                "pipeline worker could not claim its pending run; orphan \
+                 detection falls back to the unclaimed-run grace window",
+            );
+        }
         loop {
             let run = self.show_job_run(run_id)?;
             match run.state {

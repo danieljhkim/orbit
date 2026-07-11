@@ -1,3 +1,4 @@
+mod cancel;
 mod command;
 pub mod duel;
 mod events;

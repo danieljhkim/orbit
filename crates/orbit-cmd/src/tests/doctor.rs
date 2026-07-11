@@ -235,6 +235,96 @@ fn orphaned_running_run_is_reported() {
     );
 }
 
+/// [ORB-10070] A `pending` run no worker ever claimed, old enough that the
+/// claim grace window has passed, is reported as an orphan.
+#[test]
+fn orphaned_pending_run_is_reported() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let workspace_id = runtime.workspace_id().expect("workspace id");
+    let created_at = Utc::now() - chrono::Duration::days(4);
+    let run = JobRun {
+        run_id: "run-pending-orphan".to_string(),
+        job_id: "task_gate_pipeline".to_string(),
+        attempt: 1,
+        state: JobRunState::Pending,
+        scheduled_at: created_at,
+        started_at: None,
+        finished_at: None,
+        duration_ms: None,
+        created_at,
+        // Never claimed by a worker; far past the unclaimed grace window.
+        pid: None,
+        pid_start_time: None,
+        input: None,
+        retry_source_run_id: None,
+        knowledge_metrics: None,
+        resolved_crew: None,
+        crew_model: None,
+        steps: Vec::new(),
+    };
+    runtime
+        .sqlite_store()
+        .expect("store")
+        .upsert_job_run_for_workspace(&workspace_id, &run, None)
+        .expect("seed pending run");
+
+    let results = runtime.doctor_workspace().expect("doctor");
+    let job_runs = status_of(&results, "job-runs");
+    assert_eq!(
+        job_runs.status,
+        WorkspaceDoctorStatus::Warning,
+        "{job_runs:?}"
+    );
+    assert!(
+        job_runs.message.contains("run-pending-orphan"),
+        "message names the orphaned pending run: {}",
+        job_runs.message
+    );
+    assert!(
+        job_runs
+            .message
+            .contains("pending run(s) with no live worker"),
+        "message explains the pending orphan class: {}",
+        job_runs.message
+    );
+}
+
+/// A freshly queued run inside the claim grace window is healthy, not an orphan.
+#[test]
+fn fresh_pending_run_is_not_reported_as_orphan() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let workspace_id = runtime.workspace_id().expect("workspace id");
+    let now = Utc::now();
+    let run = JobRun {
+        run_id: "run-pending-fresh".to_string(),
+        job_id: "task_gate_pipeline".to_string(),
+        attempt: 1,
+        state: JobRunState::Pending,
+        scheduled_at: now,
+        started_at: None,
+        finished_at: None,
+        duration_ms: None,
+        created_at: now,
+        pid: None,
+        pid_start_time: None,
+        input: None,
+        retry_source_run_id: None,
+        knowledge_metrics: None,
+        resolved_crew: None,
+        crew_model: None,
+        steps: Vec::new(),
+    };
+    runtime
+        .sqlite_store()
+        .expect("store")
+        .upsert_job_run_for_workspace(&workspace_id, &run, None)
+        .expect("seed pending run");
+
+    let results = runtime.doctor_workspace().expect("doctor");
+    let job_runs = status_of(&results, "job-runs");
+    assert_eq!(job_runs.status, WorkspaceDoctorStatus::Ok, "{job_runs:?}");
+}
+
 #[cfg(unix)]
 #[test]
 fn process_liveness_probe_distinguishes_dead_from_live() {

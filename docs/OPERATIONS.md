@@ -162,12 +162,16 @@ job that genuinely failed is `failed`; `interrupted` means the *worker* died.
 
 ### Orphan scan
 
-Every run records its owner `pid` + a pid-start-time token. A reconcile pass probes
-liveness and finalizes conclusively-dead-owner `running` runs to `interrupted` (releasing
-their task reservations). It runs best-effort at workspace open and lazily on
-`orbit run history/show`; `orbit doctor`'s `job-runs` check reports orphans read-only. A
-run whose pid is alive but unverifiable is deliberately left `running` — never assume a
-long-`running` run is stuck without checking the pid yourself.
+Every run records its owner `pid` + a pid-start-time token; pipeline workers claim their
+queued run at startup, so `pending` runs carry an owner too [ORB-10070]. A reconcile pass
+probes liveness and finalizes conclusively-orphaned runs to `interrupted` (releasing
+their task reservations): `running` runs with a dead owner, `pending` runs whose claimed
+worker died, and `pending` runs never claimed within a 30-minute grace window (e.g.
+queued children stranded when their parent run was interrupted by a reboot). It runs
+best-effort at workspace open and lazily on `orbit run history/show`; `orbit doctor`'s
+`job-runs` check reports orphans read-only, and `orbit run cancel <run_id>` terminalizes
+a stuck run on demand. A run whose pid is alive but unverifiable is deliberately left
+alone — never assume a long-`running` run is stuck without checking the pid yourself.
 
 Real sequence (worker SIGKILLed mid-step):
 
