@@ -239,3 +239,150 @@ async fn supersede_moves_source_to_superseded_and_populates_edge() {
         .join(adr_id(&old));
     assert!(!accepted_dir.exists(), "{}", accepted_dir.display());
 }
+
+async fn request_update(
+    runtime: OrbitRuntime,
+    id: &str,
+    origin: Option<&str>,
+    body: Option<Value>,
+) -> axum::response::Response {
+    let mut builder = Request::builder()
+        .method(Method::PATCH)
+        .uri(format!("/adrs/{id}"));
+    if let Some(origin) = origin {
+        builder = builder.header(header::ORIGIN, origin);
+    }
+    let request = if let Some(body) = body {
+        builder
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("request")
+    } else {
+        builder.body(Body::empty()).expect("request")
+    };
+
+    router()
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(request)
+        .await
+        .expect("response")
+}
+
+#[tokio::test]
+async fn update_requires_localhost_origin() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let adr = seed_adr(&runtime, "Cross-origin ADR", vec!["ORB-00063"]);
+
+    let response = request_update(
+        runtime.clone(),
+        adr_id(&adr),
+        None,
+        Some(json!({ "tags": ["blocked"] })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn update_rejects_empty_body() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let adr = seed_adr(&runtime, "Empty patch ADR", vec!["ORB-00063"]);
+
+    let response = request_update(
+        runtime,
+        adr_id(&adr),
+        Some("http://localhost:7878"),
+        Some(json!({})),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn update_sets_status_and_tags() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let adr = seed_adr(&runtime, "Curated ADR", vec!["ORB-00063"]);
+
+    let response = request_update(
+        runtime.clone(),
+        adr_id(&adr),
+        Some("http://localhost:7878"),
+        Some(json!({ "status": "accepted", "tags": ["curated", "api"] })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_json(response).await;
+    assert_eq!(payload["status"], "accepted");
+    assert_eq!(payload["tags"][0], "curated");
+    assert_eq!(payload["tags"][1], "api");
+    // Body is re-attached from disk on the update response.
+    assert!(payload["body"].as_str().is_some());
+
+    let stored = runtime
+        .execute_tool_command(
+            "orbit.adr.show",
+            json!({ "id": adr_id(&adr) }),
+            None,
+            Some(TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("show adr");
+    assert_eq!(stored["status"], "accepted");
+}
+
+#[tokio::test]
+async fn update_rejects_invalid_status_transition() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let adr = seed_adr(&runtime, "Accepted ADR", vec!["ORB-00063"]);
+    accept_adr(&runtime, adr_id(&adr));
+
+    // accepted -> proposed is a rejected lifecycle transition.
+    let response = request_update(
+        runtime.clone(),
+        adr_id(&adr),
+        Some("http://localhost:7878"),
+        Some(json!({ "status": "proposed" })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = body_json(response).await;
+    assert!(
+        payload["error"]
+            .as_str()
+            .expect("error")
+            .contains("Invalid ADR status transition"),
+        "{}",
+        payload["error"]
+    );
+
+    let stored = runtime
+        .execute_tool_command(
+            "orbit.adr.show",
+            json!({ "id": adr_id(&adr) }),
+            None,
+            Some(TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("show adr");
+    assert_eq!(stored["status"], "accepted");
+}
+
+#[tokio::test]
+async fn update_rejects_direct_write_to_superseded() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let adr = seed_adr(&runtime, "Guarded ADR", vec!["ORB-00063"]);
+    accept_adr(&runtime, adr_id(&adr));
+
+    // Direct writes to `superseded` must go through the supersede route.
+    let response = request_update(
+        runtime,
+        adr_id(&adr),
+        Some("http://localhost:7878"),
+        Some(json!({ "status": "superseded" })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
