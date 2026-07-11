@@ -8,9 +8,8 @@ Orbit artifact tools persist repo-backed YAML, markdown, and JSON. Their write b
 |------|----------------------------------------------|-------------------------------|------|
 | `orbit.adr.add` / `orbit.adr.update` | `title`, `body` | - | status, owner, related ids/features/tasks, legacy ids |
 | `orbit.adr.supersede` | - | - | `old_id`, `new_id` |
-| `orbit.learning.add` / `orbit.learning.update` | `summary`, `body`, `scope.tags[]`, `evidence[].ref` | `scope.paths[]` | status, ids, priority, votes, model fields |
+| `orbit.learning.add` / `orbit.learning.update` | `summary`, `body`, `scope.tags[]`, `evidence[].ref` | `scope.paths[]` | status, ids, priority, model fields |
 | `orbit.learning.supersede` | - | - | `old_id`, `new_id` |
-| `orbit.learning.comment.add` | `body` | - | `learning_id`, `model` |
 | `orbit.task.add` | `title`, `description`, `plan`, `acceptance_criteria[]`, `comment` | `context_files[]`, `context`, `external_refs[].url` | workspace, ids, enums, dependency/relation targets, crew, tags |
 | `orbit.task.update` | `title`, `description`, `plan`, `execution_summary`, `acceptance_criteria[]`, `comment` | `context_files[]`, `context` | provenance/status/identity fields, tags, raw artifacts |
 | `orbit.task.reject` | `note`, `comment` | - | `id` |
