@@ -106,6 +106,14 @@ impl DashboardState {
         &self.inner.entries
     }
 
+    /// Global orbit root (`~/.orbit`) this server was launched against. Empty
+    /// in single mode ([`DashboardState::single`]). Host-level views (routine
+    /// scheduler health) read from here rather than any one workspace runtime,
+    /// because routine fires live in the global store.
+    pub(crate) fn global_root(&self) -> &std::path::Path {
+        &self.inner.global_root
+    }
+
     pub(crate) fn default_workspace(&self) -> Option<&str> {
         self.inner.default_workspace.as_deref()
     }

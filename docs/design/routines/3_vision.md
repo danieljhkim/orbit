@@ -50,9 +50,11 @@ and an ADR, not by drifting in.
 6. **Missed-run variants.** `catch_up_once | skip` covers current needs; a count-preserving
    `catch_up_all` (anacron-style) is additive if a routine ever needs per-slot semantics.
 7. **Cross-host visibility.** Each host's state is local, so "did the nightly commit fire
-   on the other box?" requires asking that box. A read-only aggregation surface (dashboard
-   projection or bridge tool querying both stores) is open; state *sync* is explicitly not
-   the answer.
+   on the other box?" requires asking that box. The single-host half of this is now built:
+   `GET /api/routines` projects this host's routine health (last fire, outcome, duration,
+   next due) over the dashboard HTTP API [ORB-10138], so a stopped sweep is visible remotely
+   without box ssh. True cross-host *aggregation* (one surface querying every box's store)
+   remains open; state *sync* is still explicitly not the answer.
 
 ---
 

@@ -30,6 +30,7 @@ mod learnings;
 mod log;
 mod metrics;
 mod review_threads;
+mod routines;
 mod runs;
 mod scoreboard;
 mod tasks;
@@ -347,6 +348,7 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
         .route("/log", get(log::get_log))
         .route("/log/stream", get(log::stream_log))
         .route("/audit/summary", get(audit::audit_summary))
+        .route("/routines", get(routines::list_routine_health))
         .route("/scoreboard", get(scoreboard::scoreboard))
         .route("/metrics/knowledge", get(metrics::knowledge_metrics))
         .route("/metrics/activity", get(metrics::activity_metrics))
