@@ -78,6 +78,12 @@ impl Tool for OrbitTaskAddTool {
                 param_type: "array".to_string(),
                 required: false,
             },
+            ToolParam {
+                name: "crew".to_string(),
+                description: "Optional named crew to use when running this task".to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
         ];
         parameters.extend(super::super::model_identity_params());
 

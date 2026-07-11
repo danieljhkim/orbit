@@ -71,7 +71,7 @@ pub(super) fn add(
             system_created: false,
             external_refs: Vec::new(),
             source_task_id: None,
-            crew: None,
+            crew: optional_string(&input, "crew")?,
         },
         agent,
         model,

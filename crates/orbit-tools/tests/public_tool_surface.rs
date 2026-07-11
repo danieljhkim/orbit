@@ -252,6 +252,7 @@ fn task_add_schema_uses_trimmed_authoring_surface() {
             "complexity",
             "type",
             "relations",
+            "crew",
             "model",
         ]
     );

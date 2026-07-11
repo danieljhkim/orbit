@@ -468,6 +468,7 @@ fn task_add_mcp_schema_exposes_trimmed_fields_with_complexity_and_model_enums() 
         param_with_type("complexity", "string"),
         param_with_type("type", "string"),
         param_with_type("relations", "array"),
+        param_with_type("crew", "string"),
         param_with_type("model", "string"),
     ];
     let schema = build_input_schema("orbit.task.add", &params);
@@ -483,6 +484,7 @@ fn task_add_mcp_schema_exposes_trimmed_fields_with_complexity_and_model_enums() 
             "acceptance_criteria",
             "complexity",
             "context_files",
+            "crew",
             "description",
             "model",
             "priority",
@@ -521,7 +523,6 @@ fn task_add_mcp_schema_exposes_trimmed_fields_with_complexity_and_model_enums() 
     for removed in [
         "plan",
         "status",
-        "crew",
         "parent_id",
         "source_task_id",
         "external_refs",
@@ -534,4 +535,10 @@ fn task_add_mcp_schema_exposes_trimmed_fields_with_complexity_and_model_enums() 
             "{removed} must not appear in MCP schema properties for orbit.task.add"
         );
     }
+
+    // crew was un-retired (ORB-10123): it is now an authoring param again.
+    assert!(
+        properties.contains_key("crew"),
+        "crew must appear in MCP schema properties for orbit.task.add"
+    );
 }

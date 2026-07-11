@@ -523,6 +523,68 @@ fn task_add_and_show_tools_roundtrip_tags() {
 }
 
 #[test]
+fn task_add_and_show_tools_roundtrip_crew() {
+    // ORB-10123: `crew` is no longer a retired/stripped field on orbit.task.add.
+    // The tool reads it from input, validates it, and persists it onto the
+    // created task (pre-un-retire it was silently dropped before host execution).
+    let (_root, runtime, _repo_root) = test_runtime();
+
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Crew task",
+                "description": "Exercise crew input on the agent-facing create path.",
+                "workspace": ".",
+                "crew": "codex",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task add tool succeeds with a valid crew");
+    let task_id = added["id"].as_str().expect("task id");
+    assert_eq!(added.get("crew"), Some(&json!("codex")));
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task_id }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task show tool succeeds");
+    assert_eq!(shown.get("crew"), Some(&json!("codex")));
+}
+
+#[test]
+fn task_add_tool_rejects_unknown_crew() {
+    // Un-retiring crew also means it is validated: an unknown crew is now
+    // rejected rather than silently ignored.
+    let (_root, runtime, _repo_root) = test_runtime();
+
+    let result = runtime.execute_tool_command(
+        "orbit.task.add",
+        json!({
+            "title": "Bad crew task",
+            "description": "Unknown crew must be rejected on the create path.",
+            "workspace": ".",
+            "crew": "does-not-exist",
+        }),
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    );
+
+    let message = match result {
+        Err(error) => format!("{error:?}"),
+        Ok(value) => panic!("expected unknown crew to be rejected, got {value}"),
+    };
+    assert!(
+        message.contains("crew 'does-not-exist' is not defined"),
+        "error should explain the crew is undefined: {message}"
+    );
+}
+
+#[test]
 fn task_show_tool_includes_empty_tags_array() {
     let (_root, runtime, repo_root) = test_runtime();
     let task = create_task(
