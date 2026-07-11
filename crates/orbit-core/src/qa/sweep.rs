@@ -59,11 +59,14 @@ const EVIDENCE_OUTPUT_BYTES: usize = 4000;
 const CHECK_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Options for one qa-sweep pass.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct QaSweepOptions {
     /// Report what would be validated without running checks, recording runs,
     /// filing tasks, or advancing watermarks.
     pub dry_run: bool,
+    /// Restrict the pass to one configured workspace. `None` preserves the
+    /// host-wide behavior used by the transitional systemd entry point.
+    pub workspace: Option<String>,
 }
 
 /// Result of one qa-sweep pass.
@@ -177,6 +180,12 @@ pub fn run_qa_sweep_at(
     let reports = qa
         .workspaces
         .iter()
+        .filter(|ws_config| {
+            options
+                .workspace
+                .as_deref()
+                .is_none_or(|workspace| ws_config.name == workspace)
+        })
         .map(|ws_config| {
             let Some(workspace) = registry
                 .workspaces
@@ -194,11 +203,18 @@ pub fn run_qa_sweep_at(
                 .workspaces
                 .get(&ws_config.name)
                 .map(|watermark| watermark.last_validated_sha.clone());
-            sweep_workspace(global_root, &qa, ws_config, workspace, baseline, options)
-                .unwrap_or_else(|error| QaWorkspaceReport {
-                    reason: Some(error.to_string()),
-                    ..QaWorkspaceReport::bare(&ws_config.name, "error")
-                })
+            sweep_workspace(
+                global_root,
+                &qa,
+                ws_config,
+                workspace,
+                baseline,
+                options.dry_run,
+            )
+            .unwrap_or_else(|error| QaWorkspaceReport {
+                reason: Some(error.to_string()),
+                ..QaWorkspaceReport::bare(&ws_config.name, "error")
+            })
         })
         .collect();
 
@@ -214,7 +230,7 @@ fn sweep_workspace(
     ws_config: &QaWorkspaceConfig,
     workspace: &Workspace,
     baseline: Option<String>,
-    options: QaSweepOptions,
+    dry_run: bool,
 ) -> Result<QaWorkspaceReport, OrbitError> {
     if workspace.status != WorkspaceStatus::Active || !workspace.orbit_dir.exists() {
         return Ok(QaWorkspaceReport::skipped(
@@ -271,7 +287,7 @@ fn sweep_workspace(
         ..QaWorkspaceReport::bare(&ws_config.name, "validated")
     };
 
-    if options.dry_run {
+    if dry_run {
         report.action = "would_validate";
         report.checks = ws_config
             .checks

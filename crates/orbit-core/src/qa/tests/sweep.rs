@@ -369,7 +369,10 @@ fn checkout_on_another_branch_is_skipped() {
 #[test]
 fn dry_run_reports_but_records_nothing() {
     let fixture = fixture(FAILING_CHECK);
-    let report = fixture.sweep_with(QaSweepOptions { dry_run: true });
+    let report = fixture.sweep_with(QaSweepOptions {
+        dry_run: true,
+        ..QaSweepOptions::default()
+    });
 
     assert_eq!(report.action, "would_validate");
     assert_eq!(report.checks[0].outcome, "would_run");
@@ -386,6 +389,27 @@ fn dry_run_reports_but_records_nothing() {
                 .is_empty(),
         "dry run must not create ledger runs"
     );
+}
+
+#[test]
+fn workspace_filter_excludes_other_configured_workspaces() {
+    let fixture = fixture_with_qa(&format!(
+        "[qa]\n\n[[qa.workspace]]\nname = \"{WS_NAME}\"\n{PASSING_CHECK}\n\
+         [[qa.workspace]]\nname = \"ghost\"\n\
+         [[qa.workspace.check]]\nname = \"ok\"\ncommand = \"true\"\n"
+    ));
+    let outcome = run_qa_sweep_at(
+        &fixture.global,
+        QaSweepOptions {
+            dry_run: true,
+            workspace: Some(WS_NAME.to_string()),
+        },
+    )
+    .expect("filtered sweep");
+
+    assert_eq!(outcome.reports.len(), 1);
+    assert_eq!(outcome.reports[0].workspace, WS_NAME);
+    assert_eq!(outcome.reports[0].action, "would_validate");
 }
 
 #[test]
