@@ -125,7 +125,10 @@ Safety properties, in order:
    `orbit migrate --dry-run` that errors under the new binary (merely *pending*
    migrations don't block — orbit auto-applies them on workspace open).
 3. **Deferral** instead of restart when any registered workspace has a
-   pending/running job run (`orbit run history`).
+   pending/running job run whose worker process is genuinely alive
+   (`orbit run history` + a pid/cmdline liveness probe). Stale orphans —
+   e.g. `pending` runs stranded by a reboot — no longer defer the swap;
+   orbit reconciles them to `interrupted` on workspace open [ORB-10070].
 4. **Rollback**: if `/healthz` + `/api/workspaces` don't come back healthy
    within the post-restart retry window (30 attempts), the script reinstalls `orbit.bak`, restarts
    again, records a friction in polaris, and exits nonzero so the failure

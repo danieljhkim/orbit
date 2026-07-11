@@ -4,7 +4,7 @@
 //! surfaces with whole-workspace checks: config validity, store database
 //! integrity and schema-ledger version, free disk space on the volume
 //! holding `.orbit`, semantic/graph index staleness, leftover lock files
-//! from crashed holders, and orphaned `running` job runs.
+//! from crashed holders, and orphaned `running`/`pending` job runs.
 //!
 //! Every check degrades rather than errors: subsystems that are absent in a
 //! fresh workspace report [`WorkspaceDoctorStatus::Skipped`], and probe
@@ -277,35 +277,63 @@ fn doctor_check_stale_locks(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
     }
 }
 
-/// `running` job runs whose recorded owner process is conclusively gone
-/// (read-only view of the reconcile signal; see `job/run/reconcile.rs`).
+/// `running`/`pending` job runs with no live worker process — dead recorded
+/// owner, or a queued run no worker ever claimed (read-only view of the
+/// reconcile signal; see `job/run/reconcile.rs`) [ORB-10070].
 fn doctor_check_job_runs(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
-    match runtime.list_orphaned_running_job_runs() {
-        Err(error) => check(
-            "job-runs",
-            WorkspaceDoctorStatus::Warning,
-            format!("cannot inspect job runs: {error}"),
-        ),
-        Ok(orphans) if orphans.is_empty() => check(
-            "job-runs",
-            WorkspaceDoctorStatus::Ok,
-            "no orphaned running job runs".to_string(),
-        ),
-        Ok(orphans) => {
-            let ids: Vec<&str> = orphans.iter().map(|run| run.run_id.as_str()).collect();
-            check(
+    let running = match runtime.list_orphaned_running_job_runs() {
+        Ok(orphans) => orphans,
+        Err(error) => {
+            return check(
                 "job-runs",
                 WorkspaceDoctorStatus::Warning,
-                format!(
-                    "{} running run(s) whose owner process is gone: {} — they \
-                     finalize as `interrupted` on reconcile; resume with \
-                     `orbit job resume <run_id>`",
-                    orphans.len(),
-                    ids.join(", ")
-                ),
-            )
+                format!("cannot inspect job runs: {error}"),
+            );
         }
+    };
+    let pending = match runtime.list_orphaned_pending_job_runs() {
+        Ok(orphans) => orphans,
+        Err(error) => {
+            return check(
+                "job-runs",
+                WorkspaceDoctorStatus::Warning,
+                format!("cannot inspect job runs: {error}"),
+            );
+        }
+    };
+    if running.is_empty() && pending.is_empty() {
+        return check(
+            "job-runs",
+            WorkspaceDoctorStatus::Ok,
+            "no orphaned running or pending job runs".to_string(),
+        );
     }
+    let mut segments = Vec::new();
+    if !running.is_empty() {
+        let ids: Vec<&str> = running.iter().map(|run| run.run_id.as_str()).collect();
+        segments.push(format!(
+            "{} running run(s) whose owner process is gone: {} — they \
+             finalize as `interrupted` on reconcile; resume with \
+             `orbit job resume <run_id>`",
+            running.len(),
+            ids.join(", ")
+        ));
+    }
+    if !pending.is_empty() {
+        let ids: Vec<&str> = pending.iter().map(|run| run.run_id.as_str()).collect();
+        segments.push(format!(
+            "{} pending run(s) with no live worker process: {} — they \
+             finalize as `interrupted` on reconcile; clear immediately with \
+             `orbit run cancel <run_id>`",
+            pending.len(),
+            ids.join(", ")
+        ));
+    }
+    check(
+        "job-runs",
+        WorkspaceDoctorStatus::Warning,
+        segments.join("; "),
+    )
 }
 
 /// Free/total space thresholds for the volume containing `path`.

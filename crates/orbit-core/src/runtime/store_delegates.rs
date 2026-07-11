@@ -442,6 +442,14 @@ impl JobRecords<'_> {
         self.run.mark_job_run_running(run_id, started_at, pid)
     }
 
+    pub(crate) fn claim_pending_run_owner(
+        &self,
+        run_id: &str,
+        pid: u32,
+    ) -> Result<bool, OrbitError> {
+        self.run.claim_pending_job_run_owner(run_id, pid)
+    }
+
     pub(crate) fn take_over_running_run(
         &self,
         run_id: &str,

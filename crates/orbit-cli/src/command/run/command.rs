@@ -3,6 +3,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 
 use crate::command::Execute;
 
+use super::cancel::RunCancelArgs;
 use super::duel;
 use super::events::RunEventsArgs;
 use super::history::RunHistoryArgs;
@@ -31,6 +32,9 @@ Run history:
   orbit run logs [run_id] [-s step_id] [--json]
   orbit run events [run_id] [-s step_id] [--type event_type] [--json]
   orbit run trace [run_id] [--json]
+
+Maintenance:
+  orbit run cancel <run_id>
 ";
 
 #[derive(Args)]
@@ -59,6 +63,9 @@ Audits:
   logs       Print raw stdout/stderr captured for a job run
   events     Show audit events recorded for a job run
   trace      Show audit event parent/child trace for a job run
+
+Maintenance:
+  cancel     Cancel a pending or running job run
 
 Options:
 {options}
@@ -103,6 +110,8 @@ pub enum RunSubcommand {
     Events(RunEventsArgs),
     /// Show audit event parent/child trace for a job run
     Trace(RunTraceArgs),
+    /// Cancel a pending or running job run
+    Cancel(RunCancelArgs),
     /// Run an arbitrary job by ID
     Job(JobRunArgs),
 }
@@ -123,6 +132,7 @@ impl Execute for RunSubcommand {
             RunSubcommand::Logs(command) => command.execute(runtime),
             RunSubcommand::Events(command) => command.execute(runtime),
             RunSubcommand::Trace(command) => command.execute(runtime),
+            RunSubcommand::Cancel(command) => command.execute(runtime),
             RunSubcommand::Job(command) => command.execute(runtime),
         }
     }

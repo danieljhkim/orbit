@@ -7,7 +7,8 @@ use orbit_store::TaskReservationReleaseReason;
 use crate::OrbitRuntime;
 
 use super::owner::{
-    running_run_owner_is_stale, running_run_owner_stale_reason, stale_job_run_message,
+    pending_run_stale_reason, running_run_owner_is_stale, running_run_owner_stale_reason,
+    stale_job_run_message, stale_pending_run_message,
 };
 
 impl OrbitRuntime {
@@ -15,6 +16,9 @@ impl OrbitRuntime {
     /// `running` runs with a conclusively-dead owner as `interrupted`; when
     /// owner liveness cannot be determined confidently the run is left alone
     /// (see `owner::classify_run_owner`). Never fails runtime construction.
+    /// [ORB-10070] The same scan finalizes orphaned `pending` runs (claimed
+    /// worker conclusively gone, or never claimed past the grace window) so a
+    /// terminal parent's queued children cannot stay `pending` forever.
     pub(crate) fn reconcile_stale_job_runs_on_open(&self) {
         match self.reconcile_stale_job_runs(None) {
             Ok(0) => {}
@@ -50,6 +54,19 @@ impl OrbitRuntime {
             .collect())
     }
 
+    /// [ORB-10070] Read-only orphan probe for `orbit doctor`: `pending` runs
+    /// with no live worker (claimed owner conclusively gone, or never claimed
+    /// past the grace window), without mutating any state.
+    pub fn list_orphaned_pending_job_runs(&self) -> Result<Vec<JobRun>, OrbitError> {
+        Ok(self
+            .stores()
+            .jobs()
+            .list_all_pending_or_running()?
+            .into_iter()
+            .filter(|run| pending_run_stale_reason(run).is_some())
+            .collect())
+    }
+
     pub(crate) fn reconcile_stale_job_runs(
         &self,
         job_id: Option<&str>,
@@ -73,10 +90,24 @@ impl OrbitRuntime {
         if terminal_run_timing_is_incomplete(run) {
             return self.repair_terminal_job_run_timing(run);
         }
+        // [ORB-10070] Orphaned queued runs (claimed worker conclusively gone,
+        // or never claimed past the grace window) finalize exactly like
+        // orphaned running runs.
+        if let Some(reason) = pending_run_stale_reason(run) {
+            return self.finalize_orphaned_job_run(run, &stale_pending_run_message(run, reason));
+        }
         if !running_run_owner_is_stale(run) {
             return Ok(false);
         }
+        let stale_reason = running_run_owner_stale_reason(run);
+        self.finalize_orphaned_job_run(run, &stale_job_run_message(run, stale_reason))
+    }
 
+    /// [ORB-10002] Orphaned runs (owner process conclusively gone) become
+    /// `interrupted`, not `failed`: the job did not fail, its worker died.
+    /// Interrupted runs are resumable from their step checkpoints via
+    /// `orbit job resume <run_id>`.
+    fn finalize_orphaned_job_run(&self, run: &JobRun, message: &str) -> Result<bool, OrbitError> {
         let finished_at = Utc::now();
         let duration_ms = run.started_at.map(|started_at| {
             finished_at
@@ -84,10 +115,6 @@ impl OrbitRuntime {
                 .num_milliseconds()
                 .max(0) as u64
         });
-        // [ORB-10002] Orphaned runs (owner process conclusively gone) become
-        // `interrupted`, not `failed`: the job did not fail, its worker died.
-        // Interrupted runs are resumable from their step checkpoints via
-        // `orbit job resume <run_id>`.
         let changed = self.finalize_job_run_with_reservation_cleanup(
             &run.run_id,
             JobRunState::Interrupted,
@@ -107,12 +134,11 @@ impl OrbitRuntime {
         }
 
         let step_started_at = run.started_at.unwrap_or(run.scheduled_at);
-        let stale_reason = running_run_owner_stale_reason(run);
         let _ = self.record_pipeline_diagnostic_step(
             run,
             step_started_at,
             finished_at,
-            &stale_job_run_message(run, stale_reason),
+            message,
             JobRunState::Interrupted,
         );
         self.record_event(OrbitEvent::JobRunCompleted {

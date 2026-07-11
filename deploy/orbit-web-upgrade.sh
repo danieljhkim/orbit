@@ -123,14 +123,42 @@ for comp in ("layout", "schema"):
   # ---- mid-flight check (cheap, fail-soft) ----------------------------------
   # Don't restart under an active pipeline/ship run; defer to tomorrow's tick.
   # Worker CLI runs don't go through orbit-web, so only job runs matter here.
-  local ws_root
+  # A run defers only when it is genuinely alive [ORB-10070]: with a recorded
+  # owner pid the pid must still exist; without one (queued runs written by
+  # older binaries never record a worker), a process holding the run id on its
+  # command line must exist. A stale `pending`/`running` orphan (parent run
+  # interrupted, worker gone after a crash/reboot) previously deferred the
+  # daily upgrade forever.
+  local ws_root run_id state pid
   while IFS= read -r ws_root; do
     [[ -d "$ws_root/.orbit" ]] || continue
-    if "$BIN" run history --json --limit 20 --root "$ws_root/.orbit" 2>/dev/null |
-      grep -Eq '"state" *: *"(running|pending)"'; then
-      log "active job run in $ws_root — deferring upgrade to the next timer tick"
-      exit 0
-    fi
+    while IFS=$'\t' read -r run_id state pid; do
+      [[ -n "$run_id" ]] || continue
+      if [[ "$pid" != "-" ]] && kill -0 "$pid" 2>/dev/null; then
+        log "active job run $run_id ($state, pid $pid) in $ws_root — deferring upgrade to the next timer tick"
+        exit 0
+      fi
+      if [[ "$pid" == "-" ]] && pgrep -f "$run_id" >/dev/null 2>&1; then
+        log "active job run $run_id ($state, live worker) in $ws_root — deferring upgrade to the next timer tick"
+        exit 0
+      fi
+      log "job run $run_id in $ws_root is $state with no live worker — not deferring (orbit reconciles it on workspace open)"
+    done < <("$BIN" run history --json --limit 20 --root "$ws_root/.orbit" 2>/dev/null |
+      python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for run in data.get("runs", []):
+    if run.get("state") in ("running", "pending"):
+        pid = run.get("pid")
+        print("\t".join([
+            str(run.get("run_id", "")),
+            str(run.get("state", "")),
+            str(pid) if pid is not None else "-",
+        ]))
+' 2>/dev/null)
   done < <(active_workspace_roots)
 
   # ---- swap -----------------------------------------------------------------

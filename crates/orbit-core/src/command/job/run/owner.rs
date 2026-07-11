@@ -165,6 +165,95 @@ pub(super) fn running_run_owner_is_stale(run: &JobRun) -> bool {
     running_run_owner_stale_reason(run).is_some()
 }
 
+/// [ORB-10070] Grace window before an unclaimed `pending` run (no recorded
+/// owner pid) may be treated as orphaned. Pipeline workers claim their queued
+/// run within seconds of spawn, so the window only shields (a) a reconcile
+/// racing that claim and (b) still-live queued runs submitted by binaries
+/// predating the pending-owner claim. A claimed pending run needs no grace:
+/// its owner liveness is probed exactly like a running run's.
+pub(super) const PENDING_RUN_UNCLAIMED_GRACE_MINUTES: i64 = 30;
+
+/// Why a `pending` run is conclusively orphaned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PendingStaleReason {
+    /// A worker claimed the run and that owner process is conclusively gone.
+    #[cfg(unix)]
+    Owner(OwnerIdentity),
+    /// No worker ever claimed the run and the claim window has long passed
+    /// (e.g. the spawned worker died before claiming, or a host reboot killed
+    /// queued workers left by an older binary that never recorded owners).
+    NeverClaimed,
+}
+
+/// Returns `Some(reason)` only when a `pending` run is conclusively orphaned:
+/// its claimed owner process is gone (Mismatch/Missing), or it was never
+/// claimed and is older than [`PENDING_RUN_UNCLAIMED_GRACE_MINUTES`].
+/// Inconclusive owner probes keep the run pending, mirroring the running-run
+/// policy.
+#[cfg(unix)]
+pub(super) fn pending_run_stale_reason(run: &JobRun) -> Option<PendingStaleReason> {
+    if run.state != JobRunState::Pending {
+        return None;
+    }
+    if run.pid.is_some() {
+        return match classify_run_owner(run) {
+            identity @ (OwnerIdentity::Mismatch | OwnerIdentity::Missing) => {
+                Some(PendingStaleReason::Owner(identity))
+            }
+            OwnerIdentity::Verified
+            | OwnerIdentity::LegacyLiveUnverified
+            | OwnerIdentity::ProbeUnavailable => None,
+        };
+    }
+    pending_run_unclaimed_past_grace(run).then_some(PendingStaleReason::NeverClaimed)
+}
+
+/// Non-Unix: owner liveness cannot be probed, so a claimed pending run is
+/// always presumed live; only the never-claimed grace window applies.
+#[cfg(not(unix))]
+pub(super) fn pending_run_stale_reason(run: &JobRun) -> Option<PendingStaleReason> {
+    if run.state != JobRunState::Pending || run.pid.is_some() {
+        return None;
+    }
+    pending_run_unclaimed_past_grace(run).then_some(PendingStaleReason::NeverClaimed)
+}
+
+fn pending_run_unclaimed_past_grace(run: &JobRun) -> bool {
+    chrono::Utc::now().signed_duration_since(run.created_at)
+        > chrono::Duration::minutes(PENDING_RUN_UNCLAIMED_GRACE_MINUTES)
+}
+
+/// Builds the diagnostic message recorded in the interrupted step when an
+/// orphaned `pending` run is reconciled.
+pub(super) fn stale_pending_run_message(run: &JobRun, reason: PendingStaleReason) -> String {
+    let reason_str = match reason {
+        #[cfg(unix)]
+        PendingStaleReason::Owner(OwnerIdentity::Mismatch) => "token_mismatch",
+        #[cfg(unix)]
+        PendingStaleReason::Owner(OwnerIdentity::Missing) => "process_not_found",
+        // Verified / LegacyLiveUnverified / ProbeUnavailable never reach the
+        // stale path; keep them tagged so a future caller is never silently
+        // wrong (mirrors `stale_job_run_message`).
+        #[cfg(unix)]
+        PendingStaleReason::Owner(OwnerIdentity::Verified) => "verified",
+        #[cfg(unix)]
+        PendingStaleReason::Owner(OwnerIdentity::LegacyLiveUnverified) => "legacy_live_unverified",
+        #[cfg(unix)]
+        PendingStaleReason::Owner(OwnerIdentity::ProbeUnavailable) => "probe_unavailable",
+        PendingStaleReason::NeverClaimed => "never_claimed",
+    };
+    format!(
+        "queued job run marked interrupted because no live worker process owns it (reason={}, pid={}, pid_start_time={}, created_at={}, unclaimed_grace_minutes={})",
+        reason_str,
+        run.pid
+            .map(|pid| pid.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        run.pid_start_time.as_deref().unwrap_or("-"),
+        run.created_at.to_rfc3339(),
+        PENDING_RUN_UNCLAIMED_GRACE_MINUTES,
+    )
+}
+
 #[cfg(not(unix))]
 pub(super) fn running_run_owner_is_stale(_run: &JobRun) -> bool {
     false

@@ -151,6 +151,10 @@ impl JobRunState {
         match (self, event) {
             (Self::Pending, RunEvent::Start) => Ok(Self::Running),
             (Self::Pending, RunEvent::Cancel) => Ok(Self::Cancelled),
+            // [ORB-10070] A queued run whose worker process died (or was never
+            // claimed after a host reboot) is orphaned exactly like a running
+            // run with a dead owner; reconcile finalizes both as interrupted.
+            (Self::Pending, RunEvent::Interrupt) => Ok(Self::Interrupted),
             (Self::Running, RunEvent::Complete) => Ok(Self::Success),
             (Self::Running, RunEvent::Fail) => Ok(Self::Failed),
             (Self::Running, RunEvent::Timeout) => Ok(Self::Timeout),

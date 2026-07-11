@@ -562,6 +562,21 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 - Cost: the `Ok(success = false)` audit-message path lost its only coverage — the two shell-specific tests asserting it were removed rather than migrated, because `deterministic` actions cannot produce that outcome.
 - Cost: workspaces that legitimately used `type: shell` must migrate to a registered `deterministic` action or an `agent_loop`; there is no compatibility shim, and old YAML fails at load.
 
+## ADR-0214 — Pending job runs are owned and reconciled like running runs
+
+**Status:** Accepted · 2026-07 · [ORB-10070]
+
+**Context.** A parent pipeline run reaching terminal `interrupted` (crash, host reboot) could strand its queued child runs in `pending` forever: pending runs recorded no owner process, the workspace-open orphan scan and `orbit doctor` only covered orphaned `running` runs, and no CLI could terminalize a stuck run. One stale `pending` run permanently deferred `deploy/orbit-web-upgrade.sh` (observed live 2026-07-10: two 4-day-old pending `task_gate_pipeline` runs in `codebases/sextant` blocked the daily binary swap).
+
+**Decision.** Give queued runs the same owner-liveness contract as running runs. The pipeline worker claims its run at startup (`claim_pending_job_run_owner` records `pid` + start-time token while the run is still `pending`), and reconcile finalizes a pending run as `interrupted` (`Pending + Interrupt` becomes a legal transition) only in two conclusive cases: the claimed owner is Mismatch/Missing, or the run was never claimed and is older than a 30-minute grace window. Inconclusive probes and fresh unclaimed runs stay pending. `orbit doctor` reports both orphan classes, `orbit run cancel <run_id>` is the manual terminalization path, and the upgrade script's deferral gate checks worker liveness (recorded pid, else a process holding the run id on its cmdline) instead of trusting `running|pending` state — so it self-heals even while the pre-fix binary is still installed.
+
+Rejected alternatives: reconciling by parent linkage (no parent run id is persisted on child runs, and it misses stale pendings whose parent succeeded); an age-only heuristic for all pendings (queued runs legitimately wait hours behind `max_active_runs`); probing with the freshly built binary in the upgrade script (its workspace-open auto-migrations could run ahead of a swap that then defers).
+
+**Consequences.**
+- Orphaned pending runs self-heal at workspace open and lazily on run list/show; dead state can no longer block the daily upgrade.
+- A still-live queued run written by a pre-claim binary is shielded only by the grace window; past it, reconcile terminalizes it once (its worker observes the terminal state and exits cleanly; the run is resumable with `orbit job resume`). One-time upgrade-window cost, accepted.
+- `pid` on a `pending` run now means "claiming worker", not "executing worker"; `mark_job_run_running` overwrites it with the same process id at execution start.
+
 ---
 
 ## ADR-0216 — Triage dispositions are applied by a dedicated bounded deterministic action, not `update_task` or the agent
