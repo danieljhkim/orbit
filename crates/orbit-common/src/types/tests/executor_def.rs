@@ -6,6 +6,13 @@ mod sandbox_kind_platform {
         assert_eq!(ExecutorSandboxKind::MacosSandboxExec.target_os(), "macos");
     }
 
+    #[test]
+    fn is_available_on_matches_only_its_target_os() {
+        assert!(ExecutorSandboxKind::MacosSandboxExec.is_available_on("macos"));
+        assert!(!ExecutorSandboxKind::MacosSandboxExec.is_available_on("linux"));
+        assert!(!ExecutorSandboxKind::MacosSandboxExec.is_available_on("windows"));
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn is_available_on_current_platform_is_true_on_macos() {
