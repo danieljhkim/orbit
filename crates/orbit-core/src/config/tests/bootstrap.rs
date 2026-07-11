@@ -191,6 +191,7 @@ fn seed_with_no_role_settings_writes_generated_agent_block() {
     assert!(no_active_role_section(&contents));
     assert_all_base_crews_present(&contents);
     assert!(contents.contains("default_crew = \"codex\""));
+    assert!(contents.contains("sandbox = \"danger-full-access\""));
 }
 
 fn seed_contents(
