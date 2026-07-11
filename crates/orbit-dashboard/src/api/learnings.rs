@@ -5,7 +5,7 @@ use axum::extract::{Path, Query};
 use axum::response::{IntoResponse, Json, Response};
 use orbit_core::{Learning, LearningSearchParams};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use super::{bad_request, bounded_limit, map_runtime_error, non_empty_string, server_error};
 use crate::projections::learning_to_json;
@@ -32,6 +32,26 @@ pub(super) struct SupersedeLearningBody {
     by: Option<String>,
     #[serde(default)]
     reason: Option<String>,
+}
+
+/// Partial-update payload for `PATCH /learnings/:id`, mirroring the
+/// `orbit.learning.update` tool's mutable fields. Every field replaces the
+/// corresponding record field wholesale (matching CLI semantics); `scope`
+/// carries the learning's `paths`/`tags`. Lifecycle transitions
+/// (supersede) stay on the dedicated `/learnings/:id/supersede` route so a
+/// superseded record is never mutated or deleted through this path.
+#[derive(Deserialize, Default)]
+pub(super) struct LearningPatchBody {
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    scope: Option<Value>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    evidence: Option<Value>,
+    #[serde(default)]
+    priority: Option<i64>,
 }
 
 pub(super) async fn list_learnings(
@@ -90,6 +110,59 @@ pub(super) async fn list_learnings(
 pub(super) async fn get_learning(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     match runtime.get_learning(&id) {
         Ok(learning) => Json(learning_to_json(&learning)).into_response(),
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+pub(super) async fn update_learning_action(
+    Ws(runtime): Ws,
+    Path(id): Path<String>,
+    body: Option<Json<LearningPatchBody>>,
+) -> Response {
+    let Some(Json(body)) = body else {
+        return bad_request(
+            "request body must include one of `summary`, `scope`, `body`, `evidence`, `priority`"
+                .to_string(),
+        );
+    };
+    let LearningPatchBody {
+        summary,
+        scope,
+        body,
+        evidence,
+        priority,
+    } = body;
+    let summary = summary.as_deref().and_then(non_empty_string);
+
+    let mut input = Map::new();
+    if let Some(summary) = summary {
+        input.insert("summary".to_string(), Value::String(summary));
+    }
+    if let Some(scope) = scope {
+        input.insert("scope".to_string(), scope);
+    }
+    if let Some(body) = body {
+        input.insert("body".to_string(), Value::String(body));
+    }
+    if let Some(evidence) = evidence {
+        input.insert("evidence".to_string(), evidence);
+    }
+    if let Some(priority) = priority {
+        input.insert("priority".to_string(), Value::from(priority));
+    }
+    if input.is_empty() {
+        return bad_request(
+            "request body must include one of `summary`, `scope`, `body`, `evidence`, `priority`"
+                .to_string(),
+        );
+    }
+    input.insert("id".to_string(), Value::String(id));
+
+    // Delegate to the `orbit.learning.update` tool so the HTTP route inherits
+    // the CLI lifecycle rules verbatim — notably the rejection of updates on a
+    // superseded record (supersede, don't mutate/delete).
+    match runtime.run_tool("orbit.learning.update", Value::Object(input)) {
+        Ok(learning) => Json(learning).into_response(),
         Err(e) => map_runtime_error(e),
     }
 }

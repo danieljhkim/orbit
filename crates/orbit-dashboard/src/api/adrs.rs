@@ -4,6 +4,7 @@ use std::fs;
 use std::io::ErrorKind;
 
 use crate::state::Ws;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query};
 use axum::response::{IntoResponse, Json, Response};
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -29,12 +30,63 @@ pub(super) struct AdrsQuery {
     offset: Option<usize>,
 }
 
+/// Create body for `POST /adrs`. Mirrors the `orbit.adr.add` tool schema:
+/// `title` and `body` are required (validated in the handler for a structured
+/// 400 rather than serde's default rejection); the remaining fields default to
+/// empty. Status is not a field — the tool always creates a Proposed ADR.
+#[derive(Deserialize, Default)]
+pub(super) struct CreateAdrBody {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    owner: Option<String>,
+    #[serde(default)]
+    related_features: Vec<String>,
+    #[serde(default)]
+    related_tasks: Vec<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    paths: Vec<String>,
+}
+
 #[derive(Deserialize, Default)]
 pub(super) struct SupersedeAdrBody {
     #[serde(default)]
     by: Option<String>,
     #[serde(default)]
     reason: Option<String>,
+}
+
+/// Partial-update payload for `PATCH /adrs/:id`, mirroring the mutable fields
+/// of the `orbit.adr.update` tool. Status transitions follow the ADR
+/// lifecycle rules (e.g. `accepted -> proposed` and direct writes to
+/// `superseded` are rejected — supersede has its own route). List fields
+/// replace wholesale; an empty list clears, absence leaves unchanged.
+#[derive(Deserialize, Default)]
+pub(super) struct AdrPatchBody {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    owner: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    related_features: Option<Vec<String>>,
+    #[serde(default)]
+    related_tasks: Option<Vec<String>>,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+    #[serde(default)]
+    paths: Option<Vec<String>>,
+    #[serde(default)]
+    supersedes: Option<Vec<String>>,
+    #[serde(default)]
+    legacy_ids: Option<Vec<String>>,
 }
 
 pub(super) async fn list_adrs(Ws(runtime): Ws, Query(query): Query<AdrsQuery>) -> Response {
@@ -92,6 +144,53 @@ pub(super) async fn get_adr(Ws(runtime): Ws, Path(id): Path<String>) -> Response
     }
 }
 
+/// `POST /adrs` — record a new Proposed ADR, mirroring `orbit adr` creation
+/// semantics (`orbit.adr.add`). The freshly created ADR is returned with its
+/// body attached so callers see the same shape `GET /adrs/:id` produces, and it
+/// is immediately visible via the existing read surfaces. Malformed payloads
+/// (unparseable JSON, or a missing/empty `title` or `body`) are rejected with a
+/// structured 400; deeper validation errors from the tool surface through
+/// [`map_runtime_error`].
+pub(super) async fn create_adr_action(
+    Ws(runtime): Ws,
+    body: Result<Json<CreateAdrBody>, JsonRejection>,
+) -> Response {
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(rejection) => {
+            return bad_request(format!("malformed ADR create payload: {rejection}"));
+        }
+    };
+    let Some(title) = body.title.as_deref().and_then(non_empty_string) else {
+        return bad_request("request body must include non-empty `title`".to_string());
+    };
+    let Some(adr_body) = body.body.as_deref().and_then(non_empty_string) else {
+        return bad_request("request body must include non-empty `body`".to_string());
+    };
+
+    let mut input = json!({
+        "title": title,
+        "body": adr_body,
+        "related_features": body.related_features,
+        "related_tasks": body.related_tasks,
+        "tags": body.tags,
+        "paths": body.paths,
+    });
+    if let Some(owner) = body.owner.as_deref().and_then(non_empty_string)
+        && let Some(object) = input.as_object_mut()
+    {
+        object.insert("owner".to_string(), Value::String(owner));
+    }
+
+    match run_adr_tool(&runtime, "orbit.adr.add", input) {
+        Ok(mut adr) => match attach_body(&runtime, &mut adr) {
+            Ok(()) => Json(adr).into_response(),
+            Err(e) => map_runtime_error(e),
+        },
+        Err(e) => map_runtime_error(e),
+    }
+}
+
 pub(super) async fn accept_adr_action(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let result = run_adr_tool(
         &runtime,
@@ -102,6 +201,52 @@ pub(super) async fn accept_adr_action(Ws(runtime): Ws, Path(id): Path<String>) -
         }),
     );
     match result {
+        Ok(mut adr) => match attach_body(&runtime, &mut adr) {
+            Ok(()) => Json(adr).into_response(),
+            Err(e) => map_runtime_error(e),
+        },
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+pub(super) async fn update_adr_action(
+    Ws(runtime): Ws,
+    Path(id): Path<String>,
+    body: Option<Json<AdrPatchBody>>,
+) -> Response {
+    let Some(Json(body)) = body else {
+        return bad_request("request body must include at least one updatable field".to_string());
+    };
+    let AdrPatchBody {
+        title,
+        owner,
+        body,
+        status,
+        related_features,
+        related_tasks,
+        tags,
+        paths,
+        supersedes,
+        legacy_ids,
+    } = body;
+
+    let mut input = Map::new();
+    insert_optional_string(&mut input, "title", title);
+    insert_optional_string(&mut input, "owner", owner);
+    insert_optional_string(&mut input, "body", body);
+    insert_optional_string(&mut input, "status", status);
+    insert_optional_list(&mut input, "related_features", related_features);
+    insert_optional_list(&mut input, "related_tasks", related_tasks);
+    insert_optional_list(&mut input, "tags", tags);
+    insert_optional_list(&mut input, "paths", paths);
+    insert_optional_list(&mut input, "supersedes", supersedes);
+    insert_optional_list(&mut input, "legacy_ids", legacy_ids);
+    if input.is_empty() {
+        return bad_request("request body must include at least one updatable field".to_string());
+    }
+    input.insert("id".to_string(), Value::String(id));
+
+    match run_adr_tool(&runtime, "orbit.adr.update", Value::Object(input)) {
         Ok(mut adr) => match attach_body(&runtime, &mut adr) {
             Ok(()) => Json(adr).into_response(),
             Err(e) => map_runtime_error(e),
@@ -152,6 +297,18 @@ pub(super) async fn supersede_adr_action(
             .into_response()
         }
         Err(e) => map_runtime_error(e),
+    }
+}
+
+fn insert_optional_string(input: &mut Map<String, Value>, key: &str, value: Option<String>) {
+    if let Some(value) = value.as_deref().and_then(non_empty_string) {
+        input.insert(key.to_string(), Value::String(value));
+    }
+}
+
+fn insert_optional_list(input: &mut Map<String, Value>, key: &str, value: Option<Vec<String>>) {
+    if let Some(value) = value {
+        input.insert(key.to_string(), json!(value));
     }
 }
 
