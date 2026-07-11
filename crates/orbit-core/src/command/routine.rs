@@ -1,0 +1,170 @@
+//! Default routine seeding [ORB-10129].
+//!
+//! Routines are workspace-authored YAML under `.orbit/routines/` — unlike
+//! activities and jobs there is no global routines directory, so defaults
+//! are seeded per workspace on `orbit init`. Two placeholders are resolved
+//! at seed time:
+//!
+//! - `__ORBIT_HOST_ID__` — routines v1 has no "any host", so the seeded
+//!   definition pins the initializing host (`resolve_host_id`).
+//! - `__ORBIT_ROUTINE_NAME__` — routine names must be unique across all
+//!   routine sources on a host, so the seeded name carries a
+//!   workspace-derived suffix (`task-triage-<workspace>`) to keep two
+//!   seeded source workspaces from colliding fail-closed.
+//!
+//! Seeded routines are inert until the workspace opts into
+//! `[routines] role = "source"`; they exist so a fresh workspace gets
+//! working periodic triage the moment it becomes a routine source.
+
+use std::path::Path;
+
+use orbit_common::types::{OrbitError, parse_routine_yaml};
+use orbit_common::utility::fs::write_text_with_parent;
+
+/// Shippable default routine assets, seeded under
+/// `<workspace>/.orbit/routines/<file>.yaml` on `orbit init`. Every entry
+/// must keep the `__ORBIT_HOST_ID__` / `__ORBIT_ROUTINE_NAME__`
+/// placeholders parseable once substituted — `seed_default_routines`
+/// validates each rendered document fail-closed before writing.
+pub(crate) const DEFAULT_ROUTINE_FILES: &[(&str, &str)] = &[(
+    "task_triage",
+    include_str!("../../assets/routines/task_triage.yaml"),
+)];
+
+const HOST_ID_PLACEHOLDER: &str = "__ORBIT_HOST_ID__";
+const ROUTINE_NAME_PLACEHOLDER: &str = "__ORBIT_ROUTINE_NAME__";
+
+/// Seed every entry in [`DEFAULT_ROUTINE_FILES`] under `routines_dir`,
+/// resolving the host and routine-name placeholders. Mirrors the activity /
+/// job seeding convention: when `overwrite` is false (plain re-init),
+/// existing files are preserved; `--refresh-defaults` / `--force` set
+/// `overwrite` and re-render them.
+// ADR-0215: default routines are seeded per workspace with host and name
+// resolved at seed time — routines have no global directory and v1 requires
+// explicit host pinning and host-unique names.
+pub(crate) fn seed_default_routines(
+    routines_dir: &Path,
+    host_id: &str,
+    workspace_slug: Option<&str>,
+    overwrite: bool,
+) -> Result<usize, OrbitError> {
+    let host_id = host_id.trim();
+    if host_id.is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "cannot seed default routines without a host id".to_string(),
+        ));
+    }
+    let mut count = 0usize;
+    for (file_stem, template) in DEFAULT_ROUTINE_FILES {
+        let path = routines_dir.join(format!("{file_stem}.yaml"));
+        if !overwrite && path.exists() {
+            continue;
+        }
+        let routine_name = routine_name_for(file_stem, workspace_slug);
+        let rendered = template
+            .replace(ROUTINE_NAME_PLACEHOLDER, &routine_name)
+            .replace(HOST_ID_PLACEHOLDER, host_id);
+        // Fail-closed: never seed a file the routine loader would reject.
+        parse_routine_yaml(&rendered).map_err(|error| {
+            OrbitError::InvalidInput(format!(
+                "default routine `{file_stem}` failed validation after placeholder \
+                 substitution (host `{host_id}`, name `{routine_name}`): {error}"
+            ))
+        })?;
+        write_text_with_parent(&path, &rendered)?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+/// Compose a per-workspace routine name: `<stem>-<workspace-slug>`, using
+/// the routine name charset (lowercase alphanumeric plus `-`/`_`, starting
+/// alphanumeric). Names must be unique across all routine sources on a
+/// host, so the workspace suffix is what lets two seeded sources coexist.
+fn routine_name_for(file_stem: &str, workspace_slug: Option<&str>) -> String {
+    let base = file_stem.replace('_', "-");
+    match workspace_slug.map(sanitize_routine_name_part) {
+        Some(slug) if !slug.is_empty() => format!("{base}-{slug}"),
+        _ => base,
+    }
+}
+
+fn sanitize_routine_name_part(raw: &str) -> String {
+    let lowered = raw.trim().to_ascii_lowercase();
+    let mut out = String::with_capacity(lowered.len());
+    for ch in lowered.chars() {
+        if ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_' {
+            out.push(ch);
+        } else {
+            out.push('-');
+        }
+    }
+    out.trim_matches(|ch| ch == '-' || ch == '_').to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use orbit_common::types::{OverlapPolicy, RoutineTarget};
+    use tempfile::tempdir;
+
+    use crate::routines::parse_cron;
+
+    use super::*;
+
+    #[test]
+    fn seeded_triage_routine_is_valid_pinned_and_overlap_forbidden() {
+        let root = tempdir().expect("create tempdir");
+        let routines_dir = root.path().join(".orbit/routines");
+        let seeded = seed_default_routines(&routines_dir, "test-host", Some("My Repo!"), true)
+            .expect("seed default routines");
+        assert_eq!(seeded, DEFAULT_ROUTINE_FILES.len());
+
+        let yaml = std::fs::read_to_string(routines_dir.join("task_triage.yaml"))
+            .expect("read seeded triage routine");
+        let definition = parse_routine_yaml(&yaml).expect("seeded routine parses fail-closed");
+        assert_eq!(definition.name, "task-triage-my-repo");
+        assert_eq!(definition.hosts, vec!["test-host".to_string()]);
+        assert_eq!(
+            definition.target,
+            RoutineTarget::Job("task_triage_pipeline".to_string())
+        );
+        assert_eq!(definition.policy.overlap, OverlapPolicy::Forbid);
+        assert!(definition.enabled);
+
+        // Cadence: hourly — deliberately sparser than the ~20-minute ship
+        // sweep, and parseable by the scheduler.
+        assert_eq!(definition.trigger.cron, "15 * * * *");
+        parse_cron(&definition.trigger.cron).expect("seeded cron parses");
+    }
+
+    #[test]
+    fn seeding_preserves_existing_files_unless_overwrite() {
+        let root = tempdir().expect("create tempdir");
+        let routines_dir = root.path().join("routines");
+        seed_default_routines(&routines_dir, "host-a", None, false).expect("first seed");
+        let path = routines_dir.join("task_triage.yaml");
+        std::fs::write(&path, "user edited").expect("simulate user edit");
+
+        let seeded = seed_default_routines(&routines_dir, "host-a", None, false).expect("re-seed");
+        assert_eq!(seeded, 0);
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "user edited",
+            "plain re-init must not clobber user edits"
+        );
+
+        seed_default_routines(&routines_dir, "host-b", None, true).expect("refresh defaults");
+        let refreshed = std::fs::read_to_string(&path).expect("read refreshed");
+        assert!(refreshed.contains("host-b"));
+        let definition = parse_routine_yaml(&refreshed).expect("refreshed routine parses");
+        assert_eq!(definition.name, "task-triage");
+    }
+
+    #[test]
+    fn seeding_requires_a_host_id() {
+        let root = tempdir().expect("create tempdir");
+        let err = seed_default_routines(&root.path().join("routines"), "  ", None, true)
+            .expect_err("empty host id must not seed an unloadable routine");
+        assert!(err.to_string().contains("host id"), "{err}");
+    }
+}

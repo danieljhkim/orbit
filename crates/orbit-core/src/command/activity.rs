@@ -21,6 +21,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/agent_review.yaml"),
     ),
     (
+        "apply_triage_dispositions",
+        include_str!("../../assets/activities/apply_triage_dispositions.yaml"),
+    ),
+    (
         "dispatch_agent",
         include_str!("../../assets/activities/dispatch_agent.yaml"),
     ),
@@ -61,6 +65,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/list_backlog_tasks.yaml"),
     ),
     (
+        "list_triage_candidates",
+        include_str!("../../assets/activities/list_triage_candidates.yaml"),
+    ),
+    (
         "load_epic",
         include_str!("../../assets/activities/load_epic.yaml"),
     ),
@@ -88,6 +96,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "summarize_epic",
         include_str!("../../assets/activities/summarize_epic.yaml"),
+    ),
+    (
+        "triage_failed_runs",
+        include_str!("../../assets/activities/triage_failed_runs.yaml"),
     ),
     (
         "update_task",
@@ -129,7 +141,7 @@ pub(crate) fn seed_default_activities(
 
 #[cfg(test)]
 mod tests {
-    use orbit_common::types::activity_job::AgentRole;
+    use orbit_common::types::activity_job::{AgentRole, OnDenial, tool_allowed};
     use orbit_common::types::{ActivityV2Spec, load_activity_asset};
     use tempfile::tempdir;
 
@@ -146,6 +158,8 @@ mod tests {
             ("git_commit", "git_commit"),
             ("release_locks", "release_locks"),
             ("pipeline_wait", "pipeline_wait"),
+            ("list_triage_candidates", "list_triage_candidates"),
+            ("apply_triage_dispositions", "apply_triage_dispositions"),
         ] {
             let yaml = std::fs::read_to_string(activities_dir.join(format!("{name}.yaml")))
                 .unwrap_or_else(|error| panic!("read {name} activity: {error}"));
@@ -179,6 +193,73 @@ mod tests {
                 assert!(instruction.contains("not as a perfect inventory"));
                 assert!(instruction.contains("make the smallest compatible change"));
                 assert!(instruction.contains("Stop after commenting"));
+            }
+            other => panic!("expected agent_loop activity, got {other:?}"),
+        }
+    }
+
+    /// [ORB-10129] The triage agent's hard bounds are structural: its tool
+    /// allowlist must exclude every write/dispatch surface (code edits,
+    /// commits/pushes/merges, PR approval, pipeline invocation, task
+    /// lifecycle writes), `proc_allowed_programs` must not include `git`,
+    /// and `on_denial: terminate` must be set so a denied tool kills the
+    /// run (termination semantics proven by
+    /// `replay_denial_terminate_surfaces_structural_tool_denied` in
+    /// orbit-engine).
+    #[test]
+    fn triage_agent_allowlist_makes_write_surfaces_structurally_impossible() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "triage_failed_runs")
+            .expect("triage agent activity is seeded");
+        let asset = load_activity_asset(yaml).expect("parse triage agent activity");
+        match asset.spec.spec {
+            ActivityV2Spec::AgentLoop(spec) => {
+                assert_eq!(spec.role, Some(AgentRole::Reviewer));
+                assert_eq!(spec.on_denial, OnDenial::Terminate);
+                for denied in [
+                    // code edits
+                    "fs.write",
+                    "fs.patch",
+                    "fs.create",
+                    "fs.move",
+                    "fs.copy",
+                    // pipeline / job dispatch
+                    "orbit.pipeline.invoke",
+                    "orbit.pipeline.wait",
+                    // task lifecycle writes (dispositions are applied by the
+                    // deterministic step, never the agent)
+                    "orbit.task.update",
+                    "orbit.task.start",
+                    "orbit.task.approve",
+                    "orbit.task.reject",
+                    "orbit.task.add",
+                    "orbit.task.delete",
+                    "orbit.task.locks.reserve",
+                    "orbit.task.locks.release",
+                ] {
+                    assert!(
+                        !tool_allowed(denied, &spec.tools),
+                        "triage agent must not be able to call `{denied}`"
+                    );
+                }
+                for allowed in [
+                    "orbit.task.show",
+                    "orbit.friction.add",
+                    "fs.read",
+                    "fs.delete",
+                ] {
+                    assert!(
+                        tool_allowed(allowed, &spec.tools),
+                        "triage agent should be able to call `{allowed}`"
+                    );
+                }
+                // No `git` subprocess: commits/pushes/merges stay impossible
+                // even through proc.spawn.
+                assert_eq!(
+                    spec.proc_allowed_programs.as_deref(),
+                    Some(&["rg".to_string()][..])
+                );
             }
             other => panic!("expected agent_loop activity, got {other:?}"),
         }

@@ -16,7 +16,7 @@ use crate::runtime::orbit_tool_host::{
     requested_task_files, task_lock_conflicts, workspace_orbit_dir, workspace_task_reservation_id,
 };
 
-use super::{backlog_exclusion, pipeline_actions};
+use super::{backlog_exclusion, pipeline_actions, triage};
 
 pub(super) fn run_deterministic(
     runtime: &OrbitRuntime,
@@ -239,6 +239,15 @@ pub(super) fn run_deterministic(
         // high → medium → low then by `created_at` ascending so older
         // high-priority work ships first. Caps at `max_tasks` (default 50).
         "list_backlog_tasks" => backlog_exclusion::list_backlog_tasks(runtime, action, input),
+        // Materialize blocked tasks attributable to a terminally-failed job
+        // run for the triage pipeline [ORB-10129]. Human-blocked tasks (no
+        // `job_run_id`, or a non-failed run) never appear; tasks whose
+        // re-backlog budget is exhausted take the gave-up path here.
+        "list_triage_candidates" => triage::list_triage_candidates(runtime, action, input),
+        // Apply the triage agent's per-task verdicts under deterministic
+        // bounds: candidates-only, `environmental`-only re-backlog, durable
+        // re-backlog budget, idempotent under overlap [ORB-10129].
+        "apply_triage_dispositions" => triage::apply_triage_dispositions(runtime, action, input),
         // Materialize an epic's working set for the orchestrator:
         // the epic task itself plus non-terminal subtasks
         // (`parent_id == epic_task_id` and status not done, review,

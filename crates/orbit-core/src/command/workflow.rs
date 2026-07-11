@@ -42,6 +42,17 @@ pub const WORKFLOWS: &[Workflow] = &[
         max_tasks: None,
     },
     Workflow {
+        alias: "triage",
+        job_id: "task_triage_pipeline",
+        description: "Triage tasks blocked by failed runs; re-backlog environmental failures",
+        supports_tasks: true,
+        supports_parallelism: false,
+        supports_base: false,
+        supports_pr_number: false,
+        requires_pr_number: false,
+        max_tasks: None,
+    },
+    Workflow {
         alias: "duel-plan",
         job_id: "job_duel_plan_pipeline",
         description: "Single-task planning duel: two planners and one arbiter, scored",
@@ -295,6 +306,17 @@ mod tests {
         assert!(!workflow.supports_parallelism);
         assert!(find_workflow("ship-auto").is_none());
         assert!(find_workflow("ship-local").is_none());
+    }
+
+    #[test]
+    fn triage_workflow_routes_to_triage_pipeline() {
+        let workflow = find_workflow("triage").expect("triage workflow");
+
+        assert_eq!(workflow.job_id, "task_triage_pipeline");
+        assert!(workflow.supports_tasks);
+        assert!(!workflow.supports_base);
+        assert!(!workflow.supports_parallelism);
+        assert!(!workflow.supports_pr_number);
     }
 }
 
