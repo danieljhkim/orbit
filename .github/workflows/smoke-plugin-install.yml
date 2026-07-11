@@ -1,8 +1,9 @@
 name: smoke-plugin-install
 
-# Exercises the /plugin install orbit chain end-to-end against the
-# published @orbit-tools/cli@latest and the latest GitHub Release tag.
-# Catches drift between npm registry, plugin manifest, and release assets.
+# Exercises the Claude and Codex plugin install chains end-to-end against the
+# published @orbit-tools/cli@latest and the latest GitHub Release tag. Catches
+# drift between npm registry, plugin manifests, Codex packaging, and release
+# assets.
 
 on:
   schedule:
@@ -35,6 +36,9 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
+
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex@latest
 
       - name: Run plugin install smoke
         shell: bash

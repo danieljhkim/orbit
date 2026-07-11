@@ -1,11 +1,13 @@
 # Release Procedure
 
-How to cut an Orbit release such that `/plugin install orbit` works against
-the new version. The version invariant is load-bearing: the npm package, the
-plugin manifest, and the GitHub Release tag must all agree, or the
+How to cut an Orbit release such that `/plugin install orbit` and
+`codex plugin add orbit@orbit` work against the new version. The version
+invariant is load-bearing: the npm package, the Claude and Codex plugin
+manifests, and the GitHub Release tag must all agree, or the
 `npx -y @orbit-tools/cli@latest mcp serve` indirection in
-[`plugin/.mcp.json`](../plugin/.mcp.json) downloads a binary that does not
-match the plugin manifest.
+[`plugin/.mcp.json`](../plugin/.mcp.json) and
+[`plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json)
+downloads a binary that does not match the installed plugin manifest.
 
 See also [../RELEASING.md](../RELEASING.md) for the higher-level release runbook and versioning policy.
 
@@ -61,9 +63,11 @@ Each step names the exact file or command. Do them in order.
    derives the binary tag as `v${PKG.version}`; this field is the source of
    truth that gets in front of users.
 
-2. **Bump the plugin manifest version** in
+2. **Bump the plugin manifest versions** in
    [`plugin/.claude-plugin/plugin.json`](../plugin/.claude-plugin/plugin.json)
-   (`.version`). Must match step 1.
+   and
+   [`plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json)
+   (`.version`). Both must match step 1.
 
 3. **Run `make release-check`.** Pre-tag, it will exit non-zero because
    `npm view @orbit-tools/cli version` and the latest `gh release list -L 1`
@@ -73,8 +77,8 @@ Each step names the exact file or command. Do them in order.
    in one of the files the check inspects.
 
 4. **Commit the version bumps** and merge to the release branch
-   (`agent-main`). One commit, one PR, one bump pair — do not let the two
-   files drift across commits.
+   (`agent-main`). One commit, one PR, one bump set — do not let the two
+   plugin manifests or the npm package drift across commits.
 
 5. **Push the matching tag.** From the merge commit:
 
@@ -126,7 +130,8 @@ Each step names the exact file or command. Do them in order.
 
 8. **Verify.** After npm publish completes:
 
-   - `make release-check` should now pass (all four sources agree).
+   - `make release-check` should now pass (all local manifests, npm, and the
+     release tag agree).
    - The on-tag run of
      [`.github/workflows/smoke-plugin-install.yml`](../.github/workflows/smoke-plugin-install.yml)
      should be green on macOS and Linux. (If you re-run via
@@ -138,6 +143,14 @@ Each step names the exact file or command. Do them in order.
      ./scripts/smoke-plugin-install.sh
      ```
 
+   Codex users who installed from the Git marketplace update by refreshing the
+   marketplace snapshot and reinstalling the plugin:
+
+   ```bash
+   codex plugin marketplace upgrade orbit
+   codex plugin add orbit@orbit
+   ```
+
 ## Continuous verification
 
 [`.github/workflows/smoke-plugin-install.yml`](../.github/workflows/smoke-plugin-install.yml)
@@ -145,14 +158,22 @@ runs the smoke on `macos-15` and `ubuntu-22.04` weekly (Monday 12:00 UTC)
 and on every `v*` tag. It pulls the published `@orbit-tools/cli@latest`
 from npm, exercises the postinstall download + sha256 verification, and
 drives the orbit MCP server through a JSON-RPC `initialize` + `tools/list`
-handshake. The pass criterion is that the response advertises at least one
-`orbit_*` tool. (Tool names are emitted with underscores on the wire — see
+handshake. It also installs the repository's Codex plugin into an isolated
+`CODEX_HOME`, renders a fresh Codex task prompt to confirm the shared Orbit
+skills are discovered, and calls the read-only `orbit.task.list` MCP tool
+through the installed Codex MCP transport. The pass criterion is that the
+response advertises Orbit MCP tools and the read-only call succeeds. (Tool
+names are emitted with underscores on the wire — see
 `crates/orbit-mcp/src/adapter.rs::sanitize_tool_name` — even though the
 canonical selectors used in skills and CLI args are dot-form.)
 
 The smoke runs against published artifacts, not the local working tree, so
-it catches version drift that local builds would miss. Windows is not
-covered — the npm proxy only ships `darwin` and `linux` builds.
+it catches version drift that local builds would miss. The Codex plugin
+installation uses the checked-out repository marketplace
+([`.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json))
+so manifest and skill packaging regressions are caught before publication.
+Windows is not covered — the npm proxy only ships `darwin` and `linux`
+builds.
 
 Installer environment overrides are trust-boundary changes:
 
@@ -231,17 +252,24 @@ catches a lingering broken state.
 ## What `make release-check` enforces
 
 The script at [`scripts/release-check.sh`](../scripts/release-check.sh)
-asserts equality across four sources, when each is reachable:
+asserts equality across these sources, when each is reachable:
 
 - `.version` in [`plugin/npm/package.json`](../plugin/npm/package.json)
 - `.version` in [`plugin/.claude-plugin/plugin.json`](../plugin/.claude-plugin/plugin.json)
+- `.version` in [`plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json)
 - `npm view @orbit-tools/cli version`
 - `gh release list -L 1` (latest tag, leading `v` stripped)
 
+It also runs
+[`scripts/validate-codex-plugin.sh`](../scripts/validate-codex-plugin.sh),
+which checks the Codex manifest, repository marketplace entry, shared skill
+paths, and the absence of user-specific absolute paths or
+`CLAUDE_PROJECT_DIR` in Codex MCP configuration.
+
 Missing `npm` or `gh` is treated as a skip with a stderr note, not a hard
-failure, so the target stays usable on a fresh checkout without
-credentials. Mismatch across any reachable sources exits non-zero — so
-the pre-tag failure described in step 3 is by design.
+failure, so the target stays usable on a fresh checkout without credentials.
+Mismatch across any reachable sources exits non-zero — so the pre-tag failure
+described in step 3 is by design.
 
 ## Out-of-band fixes
 

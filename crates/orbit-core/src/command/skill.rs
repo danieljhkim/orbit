@@ -187,13 +187,13 @@ impl OrbitRuntime {
 #[cfg(test)]
 mod drift_tests {
     //! Parity tests guarding against drift between the four skill catalogs:
-    //! the on-disk assets, the seeded registry, the plugin symlinks, and the
+    //! the on-disk assets, the seeded registry, the plugin package, and the
     //! router skill's enumeration. The next agent who adds a skill folder
     //! must update all four; these tests fail loudly if any catalog lags.
 
     use super::*;
     use std::collections::BTreeSet;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn assets_skills_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/skills")
@@ -208,6 +208,76 @@ mod drift_tests {
             .parent()
             .expect("crates/ has a parent (repo root)")
             .to_path_buf()
+    }
+
+    fn collect_relative_files(root: &Path) -> Result<BTreeSet<PathBuf>, String> {
+        let mut pending = vec![root.to_path_buf()];
+        let mut files = BTreeSet::new();
+
+        while let Some(dir) = pending.pop() {
+            let entries =
+                std::fs::read_dir(&dir).map_err(|e| format!("read_dir({}): {e}", dir.display()))?;
+            for entry in entries {
+                let entry = entry.map_err(|e| format!("read_dir({}) entry: {e}", dir.display()))?;
+                let path = entry.path();
+                let file_type = entry
+                    .file_type()
+                    .map_err(|e| format!("file_type({}): {e}", path.display()))?;
+                if file_type.is_dir() {
+                    pending.push(path);
+                    continue;
+                }
+                if file_type.is_file() || file_type.is_symlink() {
+                    let relative = path
+                        .strip_prefix(root)
+                        .map_err(|e| {
+                            format!("strip_prefix({}, {}): {e}", root.display(), path.display())
+                        })?
+                        .to_path_buf();
+                    files.insert(relative);
+                }
+            }
+        }
+
+        Ok(files)
+    }
+
+    fn plugin_skill_matches_asset(plugin_skill: &Path, asset_skill: &Path) -> Result<(), String> {
+        let expected_path = asset_skill
+            .canonicalize()
+            .map_err(|e| format!("canonicalize asset path failed: {e}"))?;
+        let actual_path = plugin_skill
+            .canonicalize()
+            .map_err(|e| format!("canonicalize plugin skill failed: {e}"))?;
+        if actual_path == expected_path {
+            return Ok(());
+        }
+
+        let plugin_files = collect_relative_files(plugin_skill)?;
+        let asset_files = collect_relative_files(asset_skill)?;
+        if plugin_files != asset_files {
+            let missing_from_plugin: Vec<&PathBuf> =
+                asset_files.difference(&plugin_files).collect();
+            let extra_in_plugin: Vec<&PathBuf> = plugin_files.difference(&asset_files).collect();
+            return Err(format!(
+                "materialized files differ from asset directory (missing from plugin: {missing_from_plugin:?}; extra in plugin: {extra_in_plugin:?})"
+            ));
+        }
+
+        for relative in asset_files {
+            let plugin_bytes = std::fs::read(plugin_skill.join(&relative))
+                .map_err(|e| format!("read plugin file {}: {e}", relative.display()))?;
+            let asset_bytes = std::fs::read(asset_skill.join(&relative))
+                .map_err(|e| format!("read asset file {}: {e}", relative.display()))?;
+            if plugin_bytes != asset_bytes {
+                return Err(format!(
+                    "materialized file {} differs from asset source",
+                    relative.display()
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     #[test]
@@ -243,20 +313,20 @@ mod drift_tests {
     }
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "plugin/skills/ symlinks rely on POSIX symlinks; Windows checkouts with core.symlinks=false break this test"
-    )]
     fn plugin_skill_symlinks_resolve_to_assets() {
         let repo = repo_root();
         let plugin_skills = repo.join("plugin/skills");
         let assets = repo.join("crates/orbit-core/assets/skills");
+        let codex_manifest_path = repo.join("plugin/.codex-plugin/plugin.json");
+        let marketplace_path = repo.join(".agents/plugins/marketplace.json");
         let excluded: BTreeSet<&str> = PLUGIN_EXCLUDED_SKILLS.iter().copied().collect();
 
         let mut failures: Vec<String> = Vec::new();
 
-        // Forward: every non-excluded default skill must have a symlink resolving
-        // to the corresponding asset directory.
+        // Forward: every non-excluded default skill must have a package entry
+        // that either resolves to the asset directory or is a byte-for-byte
+        // materialized copy. Codex plugin installs copy the plugin package
+        // without following directory symlinks, so materialized files are valid.
         let expected_ids: BTreeSet<&str> = default_skill_ids()
             .iter()
             .copied()
@@ -266,37 +336,21 @@ mod drift_tests {
             let link = plugin_skills.join(id);
             if !link.exists() {
                 failures.push(format!(
-                    "  {id}: plugin/skills/{id} does not exist (run: ln -s ../../crates/orbit-core/assets/skills/{id} plugin/skills/{id})"
+                    "  {id}: plugin/skills/{id} does not exist (create a symlink to or materialized copy of crates/orbit-core/assets/skills/{id})"
                 ));
                 continue;
             }
-            let expected_path = match assets.join(id).canonicalize() {
-                Ok(p) => p,
-                Err(e) => {
-                    failures.push(format!("  {id}: canonicalize asset path failed: {e}"));
-                    continue;
-                }
-            };
-            let actual = match link.canonicalize() {
-                Ok(p) => p,
-                Err(e) => {
-                    failures.push(format!(
-                        "  {id}: canonicalize plugin/skills/{id} failed: {e}"
-                    ));
-                    continue;
-                }
-            };
-            if actual != expected_path {
+            if let Err(e) = plugin_skill_matches_asset(&link, &assets.join(id)) {
                 failures.push(format!(
-                    "  {id}: plugin/skills/{id} resolves to {actual:?}, expected {expected_path:?}"
+                    "  {id}: plugin/skills/{id} does not match asset: {e}"
                 ));
             }
         }
 
-        // L-0020: retired skills can leave dangling symlinks behind, so
-        // keep this reverse check strict about orphan plugin entries.
-        // Reverse: no orphan symlinks in plugin/skills/ (catches stale entries
-        // for retired skills and accidental inclusion of an excluded skill).
+        // L-0020: retired skills can leave stale package entries behind, so
+        // keep this reverse check strict about orphans. Reverse: no orphan
+        // entries in plugin/skills/ (catches stale entries for retired skills
+        // and accidental inclusion of an excluded skill).
         let on_disk: BTreeSet<String> = std::fs::read_dir(&plugin_skills)
             .unwrap_or_else(|e| panic!("read_dir({}): {e}", plugin_skills.display()))
             .filter_map(|entry| {
@@ -319,9 +373,108 @@ mod drift_tests {
             }
         }
 
+        // The Codex plugin package intentionally reuses the same shared skill
+        // directory as the Claude plugin. Keep that manifest pointed at
+        // plugin/skills/ and make sure its MCP config is Codex-specific rather
+        // than a copy of the Claude config that depends on CLAUDE_PROJECT_DIR.
+        let codex_manifest: serde_json::Value = match std::fs::read_to_string(&codex_manifest_path)
+        {
+            Ok(contents) => match serde_json::from_str(&contents) {
+                Ok(value) => value,
+                Err(e) => {
+                    failures.push(format!(
+                        "  {}: invalid JSON: {e}",
+                        codex_manifest_path.display()
+                    ));
+                    serde_json::Value::Null
+                }
+            },
+            Err(e) => {
+                failures.push(format!(
+                    "  {}: failed to read Codex plugin manifest: {e}",
+                    codex_manifest_path.display()
+                ));
+                serde_json::Value::Null
+            }
+        };
+        if !codex_manifest.is_null() {
+            if codex_manifest
+                .get("skills")
+                .and_then(|value| value.as_str())
+                != Some("./skills/")
+            {
+                failures.push(
+                    "  plugin/.codex-plugin/plugin.json: `skills` must point at ./skills/ so Codex and Claude share the canonical skill package"
+                        .to_string(),
+                );
+            }
+            if codex_manifest.get("hooks").is_some() {
+                failures.push(
+                    "  plugin/.codex-plugin/plugin.json: must not declare Claude-only hooks"
+                        .to_string(),
+                );
+            }
+            let mcp_servers = codex_manifest.get("mcpServers");
+            if !matches!(mcp_servers, Some(serde_json::Value::Object(map)) if !map.is_empty()) {
+                failures.push(
+                    "  plugin/.codex-plugin/plugin.json: `mcpServers` must be a non-empty object"
+                        .to_string(),
+                );
+            }
+            if mcp_servers
+                .map(|value| value.to_string().contains("CLAUDE_PROJECT_DIR"))
+                .unwrap_or(false)
+            {
+                failures.push(
+                    "  plugin/.codex-plugin/plugin.json: Codex MCP config must not reference CLAUDE_PROJECT_DIR"
+                        .to_string(),
+                );
+            }
+        }
+
+        let marketplace: serde_json::Value = match std::fs::read_to_string(&marketplace_path) {
+            Ok(contents) => match serde_json::from_str(&contents) {
+                Ok(value) => value,
+                Err(e) => {
+                    failures.push(format!(
+                        "  {}: invalid JSON: {e}",
+                        marketplace_path.display()
+                    ));
+                    serde_json::Value::Null
+                }
+            },
+            Err(e) => {
+                failures.push(format!(
+                    "  {}: failed to read Codex marketplace manifest: {e}",
+                    marketplace_path.display()
+                ));
+                serde_json::Value::Null
+            }
+        };
+        if let Some(plugins) = marketplace
+            .get("plugins")
+            .and_then(|value| value.as_array())
+        {
+            let source_path = plugins
+                .iter()
+                .find(|entry| entry.get("name").and_then(|value| value.as_str()) == Some("orbit"))
+                .and_then(|entry| entry.get("source"))
+                .and_then(|source| source.get("path"))
+                .and_then(|value| value.as_str());
+            if source_path != Some("./plugin") {
+                failures.push(
+                    "  .agents/plugins/marketplace.json: orbit entry must point at ./plugin"
+                        .to_string(),
+                );
+            }
+        } else if !marketplace.is_null() {
+            failures
+                .push("  .agents/plugins/marketplace.json: `plugins` must be an array".to_string());
+        }
+
         assert!(
             failures.is_empty(),
-            "plugin/skills/ symlink parity failed for {} skill(s):\n{}",
+            "plugin/skills/ package parity failed for {} skill(s):\n{}",
             failures.len(),
             failures.join("\n"),
         );
