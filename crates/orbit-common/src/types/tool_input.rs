@@ -5,7 +5,6 @@ use crate::types::OrbitError;
 pub const RETIRED_TASK_ADD_INPUT_FIELDS: &[&str] = &[
     "plan",
     "status",
-    "crew",
     "parent_id",
     "source_task_id",
     "external_refs",

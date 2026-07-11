@@ -164,6 +164,7 @@ fn schema_exposes_only_trimmed_create_task_fields() {
             "complexity",
             "type",
             "relations",
+            "crew",
             "model",
         ]
     );
@@ -233,7 +234,7 @@ fn add_call_with_retired_fields_warns_once_and_ignores_them() {
         "model": "grok",
         "plan": "ignored plan",
         "status": "done",
-        "crew": "ignored-crew",
+        "crew": "release-crew",
         "parent_id": "ORB-00003",
         "source_task_id": "ORB-00004",
         "external_refs": [{"system": "ENG", "id": "123"}],
@@ -285,6 +286,7 @@ fn add_call_with_retired_fields_warns_once_and_ignores_them() {
         "complexity",
         "type",
         "relations",
+        "crew",
         "model",
     ] {
         assert!(
@@ -293,6 +295,10 @@ fn add_call_with_retired_fields_warns_once_and_ignores_them() {
         );
     }
     assert_eq!(rec_input["complexity"], "medium");
+    assert_eq!(
+        rec_input["crew"], "release-crew",
+        "crew must survive host execution and reach the create path"
+    );
     assert_eq!(
         rec_input["context_files"][0],
         "file:crates/orbit-tools/src/builtin/orbit/task/add.rs"
