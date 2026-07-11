@@ -235,6 +235,41 @@ fn apply_baseline_schema(conn: &Connection) -> Result<(), OrbitError> {
     Ok(())
 }
 
+/// v2 `learnings_index_workspace_scope` migration (ORB-10113): re-key the
+/// learning envelope index by `(workspace_id, id)`.
+///
+/// The index previously had no workspace discriminator and was keyed only by
+/// learning ID, so in the shared host-global database rows written by one
+/// workspace leaked into another workspace's searches and reminders. YAML
+/// under each `.orbit/learnings/` is the source of truth, and legacy rows
+/// cannot be attributed to a workspace reliably, so this migration discards
+/// every indexed row and lets each runtime rebuild its own rows from YAML via
+/// `sync_learnings`. It touches only SQLite — no `learning.yaml` file is read
+/// or modified.
+fn apply_learning_index_workspace_scope(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            DROP TABLE IF EXISTS learnings_index;
+
+            CREATE TABLE learnings_index (
+                workspace_id TEXT NOT NULL,
+                id           TEXT NOT NULL,
+                status       TEXT NOT NULL,
+                paths        TEXT NOT NULL,
+                tags         TEXT NOT NULL,
+                summary      TEXT NOT NULL,
+                updated_at   TEXT NOT NULL,
+                priority     INTEGER,
+                PRIMARY KEY (workspace_id, id)
+            );
+
+            CREATE INDEX IF NOT EXISTS learnings_active
+                ON learnings_index(workspace_id, status) WHERE status = 'active';
+        "#,
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))
+}
+
 fn ensure_routine_schema(conn: &Connection) -> Result<(), OrbitError> {
     conn.execute_batch(
         r#"

@@ -31,16 +31,23 @@ pub(crate) struct Migration {
 
 /// Stable ordered registry of store-database migrations. Append-only:
 /// never renumber or edit an entry that has shipped.
-pub(crate) const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "baseline",
-    apply: super::apply_baseline_schema,
-}];
+pub(crate) const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "baseline",
+        apply: super::apply_baseline_schema,
+    },
+    Migration {
+        version: 2,
+        name: "learnings_index_workspace_scope",
+        apply: super::apply_learning_index_workspace_scope,
+    },
+];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 1;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 2;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

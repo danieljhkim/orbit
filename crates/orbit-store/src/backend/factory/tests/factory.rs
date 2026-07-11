@@ -85,7 +85,7 @@ fn workspace_learning_backend_rejects_legacy_flat_layout() {
 
     let id_allocator =
         IdAllocator::for_test_roots(temp.path().join("adrs"), temp.path().join("learnings2"));
-    let err = match workspace_learning_backend(root, store, id_allocator) {
+    let err = match workspace_learning_backend(root, store, id_allocator, "ws-000000".to_string()) {
         Ok(_) => panic!("legacy rejected"),
         Err(err) => err,
     };

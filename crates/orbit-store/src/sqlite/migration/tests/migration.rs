@@ -105,6 +105,66 @@ fn apply_schema_creates_adrs_table_and_indexes() {
     }
 }
 
+#[test]
+fn learnings_index_migration_rekeys_by_workspace_and_discards_legacy_rows() {
+    let conn = Connection::open_in_memory().expect("open in-memory connection");
+    // Simulate a legacy database whose learning envelope index is keyed only
+    // by id — no workspace discriminator — carrying a row that cannot be
+    // attributed to any workspace (the `dk1` shape from ORB-10113).
+    conn.execute_batch(
+        r#"
+            CREATE TABLE learnings_index (
+                id          TEXT PRIMARY KEY,
+                status      TEXT NOT NULL,
+                paths       TEXT NOT NULL,
+                tags        TEXT NOT NULL,
+                summary     TEXT NOT NULL,
+                updated_at  TEXT NOT NULL,
+                priority    INTEGER
+            );
+            INSERT INTO learnings_index (id, status, paths, tags, summary, updated_at, priority)
+            VALUES ('L-0002', 'active', '[]', '[]', 'legacy orrery summary', '2026-07-11T00:00:00Z', NULL);
+        "#,
+    )
+    .expect("seed legacy learnings_index");
+
+    apply_schema(&conn).expect("migrate legacy learnings_index");
+
+    // The index is now scoped: `workspace_id` exists and the primary key is
+    // the composite `(workspace_id, id)`.
+    assert!(
+        table_has_column(&conn, "learnings_index", "workspace_id").expect("workspace_id column")
+    );
+    let mut primary_key: Vec<(i64, String)> = conn
+        .prepare("PRAGMA table_info(learnings_index)")
+        .expect("prepare pragma")
+        .query_map([], |row| {
+            let name: String = row.get(1)?;
+            let pk: i64 = row.get(5)?;
+            Ok((pk, name))
+        })
+        .expect("query pragma")
+        .filter_map(|row| {
+            let (pk, name) = row.expect("pragma row");
+            (pk > 0).then_some((pk, name))
+        })
+        .collect();
+    primary_key.sort_by_key(|(pk, _)| *pk);
+    let pk_columns: Vec<String> = primary_key.into_iter().map(|(_, name)| name).collect();
+    assert_eq!(pk_columns, vec!["workspace_id", "id"]);
+
+    // Legacy rows are discarded (YAML is the source of truth; each runtime
+    // rebuilds its own rows via sync), and the migration records version 2.
+    let remaining: i64 = conn
+        .query_row("SELECT COUNT(*) FROM learnings_index", [], |row| row.get(0))
+        .expect("count rows");
+    assert_eq!(
+        remaining, 0,
+        "legacy envelope rows must be discarded, not migrated"
+    );
+    assert_eq!(current_schema_version(&conn).expect("schema version"), 2);
+}
+
 // ── read-only ledger inspection for `orbit migrate --dry-run` [ORB-10012] ──
 
 #[test]

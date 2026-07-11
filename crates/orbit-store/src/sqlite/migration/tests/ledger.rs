@@ -30,10 +30,13 @@ fn fresh_db_applies_baseline_and_records_ledger() {
         SUPPORTED_SCHEMA_VERSION
     );
     let applied = applied_migrations(&conn).expect("applied migrations");
-    assert_eq!(applied.len(), 1);
+    assert_eq!(applied.len(), 2);
     assert_eq!(applied[0].version, 1);
     assert_eq!(applied[0].name, "baseline");
     assert!(!applied[0].applied_at.is_empty());
+    assert_eq!(applied[1].version, 2);
+    assert_eq!(applied[1].name, "learnings_index_workspace_scope");
+    assert!(!applied[1].applied_at.is_empty());
 }
 
 #[test]
@@ -46,7 +49,7 @@ fn reapplying_schema_is_a_noop() {
     let second = applied_migrations(&conn).expect("applied after second apply");
 
     assert_eq!(first, second);
-    assert_eq!(ledger_rows(&conn).len(), 1);
+    assert_eq!(ledger_rows(&conn).len(), SUPPORTED_SCHEMA_VERSION as usize);
 }
 
 #[test]
@@ -139,7 +142,13 @@ fn legacy_db_adopts_versioned_ledger() {
     );
     assert_eq!(
         ledger_rows(&conn),
-        vec![("migration.v0001".to_string(), "baseline".to_string())]
+        vec![
+            ("migration.v0001".to_string(), "baseline".to_string()),
+            (
+                "migration.v0002".to_string(),
+                "learnings_index_workspace_scope".to_string()
+            ),
+        ]
     );
 }
 
@@ -150,7 +159,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0002', 'from-the-future', '2099-01-01T00:00:00Z')",
+         VALUES ('migration.v0003', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -180,7 +189,7 @@ fn non_migration_schema_meta_keys_are_ignored() {
     .expect("record import marker");
 
     let applied = applied_migrations(&conn).expect("applied migrations");
-    assert_eq!(applied.len(), 1);
+    assert_eq!(applied.len(), SUPPORTED_SCHEMA_VERSION as usize);
     assert_eq!(applied[0].version, 1);
     apply_schema(&conn).expect("marker must not break reopen");
 }

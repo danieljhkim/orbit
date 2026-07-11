@@ -386,6 +386,7 @@ fn learning_store_for_worktree(
         worktree_root.join(".orbit/learnings"),
         Store::open_in_memory().expect("index"),
         allocator,
+        super::super::store::TEST_WORKSPACE_ID.to_string(),
     )
 }
 
@@ -418,7 +419,7 @@ fn index_reflects_create_update_and_supersede() {
         .index
         .as_ref()
         .expect("index")
-        .get_learning_index_row(&learning.id)
+        .get_learning_index_row(super::super::store::TEST_WORKSPACE_ID, &learning.id)
         .expect("query")
         .expect("present");
     assert_eq!(row.status, LearningStatus::Active);
@@ -444,7 +445,7 @@ fn index_reflects_create_update_and_supersede() {
         .index
         .as_ref()
         .expect("index")
-        .get_learning_index_row(&learning.id)
+        .get_learning_index_row(super::super::store::TEST_WORKSPACE_ID, &learning.id)
         .expect("query")
         .expect("present");
     assert_eq!(row.summary, "Revised");
@@ -462,7 +463,7 @@ fn index_reflects_create_update_and_supersede() {
         .index
         .as_ref()
         .expect("index")
-        .get_learning_index_row(&learning.id)
+        .get_learning_index_row(super::super::store::TEST_WORKSPACE_ID, &learning.id)
         .expect("query old")
         .expect("present");
     assert_eq!(old_row.status, LearningStatus::Superseded);
@@ -471,7 +472,7 @@ fn index_reflects_create_update_and_supersede() {
         .index
         .as_ref()
         .expect("index")
-        .get_learning_index_row(&new_learning.id)
+        .get_learning_index_row(super::super::store::TEST_WORKSPACE_ID, &new_learning.id)
         .expect("query new")
         .expect("present");
     assert_eq!(new_row.status, LearningStatus::Active);

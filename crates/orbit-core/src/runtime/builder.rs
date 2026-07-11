@@ -89,8 +89,16 @@ pub(crate) fn build_context_from_roots(
     let local_adr_dir = paths.local_dir.join("adrs");
     let local_learning_dir = paths.local_dir.join("learnings");
     let adr_store = workspace_adr_backends(local_adr_dir, store.clone(), id_allocator.clone());
-    let learning_store =
-        workspace_learning_backend(local_learning_dir, store.clone(), id_allocator)?;
+    // Scope the shared learning envelope index to this workspace's stable
+    // registered id (the same id used for job runs / v2 audit), so a
+    // multi-workspace sweep over the host-global database can't read, truncate,
+    // or overwrite another workspace's learning rows (ORB-10113).
+    let learning_store = workspace_learning_backend(
+        local_learning_dir,
+        store.clone(),
+        id_allocator,
+        workspace_id.clone(),
+    )?;
     let semantic_vector_store = Arc::new(VectorStore::open(&persistence.semantic_db)?);
     let semantic_worker = Arc::new(EmbedWorker::start((*semantic_vector_store).clone()));
     let job_run_store = workspace_job_run_store(store.clone(), workspace_id);

@@ -4,7 +4,7 @@ use orbit_common::types::LearningStatus;
 use tempfile::tempdir;
 
 use super::super::super::record::read_learning_file;
-use super::super::store::LearningFileStore;
+use super::super::store::{LearningFileStore, TEST_WORKSPACE_ID};
 use super::test_support::{create_params, legacy_learning_yaml, store_with_index};
 use crate::Store;
 
@@ -39,11 +39,11 @@ fn supersession_moves_yaml_and_updates_both_records() {
     // Both index rows reflect new state.
     let index = store.index.as_ref().expect("index");
     let old_row = index
-        .get_learning_index_row(&old.id)
+        .get_learning_index_row(TEST_WORKSPACE_ID, &old.id)
         .expect("query old")
         .expect("present");
     let new_row = index
-        .get_learning_index_row(&new.id)
+        .get_learning_index_row(TEST_WORKSPACE_ID, &new.id)
         .expect("query new")
         .expect("present");
     assert_eq!(old_row.status, LearningStatus::Superseded);
@@ -65,13 +65,13 @@ fn reindex_rebuilds_index_from_yaml() {
         .index
         .as_ref()
         .expect("index")
-        .truncate_learning_index()
+        .truncate_learning_index(TEST_WORKSPACE_ID)
         .expect("truncate");
     let active = store
         .index
         .as_ref()
         .expect("index")
-        .list_active_learning_rows()
+        .list_active_learning_rows(TEST_WORKSPACE_ID)
         .expect("list");
     assert!(active.is_empty());
 
@@ -80,7 +80,7 @@ fn reindex_rebuilds_index_from_yaml() {
         .index
         .as_ref()
         .expect("index")
-        .list_active_learning_rows()
+        .list_active_learning_rows(TEST_WORKSPACE_ID)
         .expect("list");
     assert_eq!(active.len(), 2);
 }
@@ -106,17 +106,17 @@ fn migrate_layout_preserves_list_parity_and_reindex_projection() {
         read_learning_file(&root.join("superseded").join("L-0002.yaml")).expect("superseded");
     let index = Store::open_in_memory().expect("index");
     index
-        .upsert_learning_index_row(&legacy_active)
+        .upsert_learning_index_row(TEST_WORKSPACE_ID, &legacy_active)
         .expect("index active");
     index
-        .upsert_learning_index_row(&legacy_superseded)
+        .upsert_learning_index_row(TEST_WORKSPACE_ID, &legacy_superseded)
         .expect("index superseded");
     let before_active_row = index
-        .get_learning_index_row("L-0001")
+        .get_learning_index_row(TEST_WORKSPACE_ID, "L-0001")
         .expect("row active")
         .expect("present");
     let before_superseded_row = index
-        .get_learning_index_row("L-0002")
+        .get_learning_index_row(TEST_WORKSPACE_ID, "L-0002")
         .expect("row superseded")
         .expect("present");
 
@@ -134,14 +134,14 @@ fn migrate_layout_preserves_list_parity_and_reindex_projection() {
     assert_eq!(superseded, vec![legacy_superseded]);
     assert_eq!(
         index
-            .get_learning_index_row("L-0001")
+            .get_learning_index_row(TEST_WORKSPACE_ID, "L-0001")
             .expect("row active after")
             .expect("present"),
         before_active_row
     );
     assert_eq!(
         index
-            .get_learning_index_row("L-0002")
+            .get_learning_index_row(TEST_WORKSPACE_ID, "L-0002")
             .expect("row superseded after")
             .expect("present"),
         before_superseded_row

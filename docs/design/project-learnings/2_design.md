@@ -100,22 +100,26 @@ The legacy flat layout (`.orbit/learnings/<id>.yaml` plus `.orbit/learnings/supe
 
 ### 2.2 SQLite index
 
-A SQLite table `learnings_index` mirrors a few columns for fast scope matching, since brute-forcing path globs over every YAML on every tool call is the wrong shape:
+A SQLite table `learnings_index` mirrors a few columns for fast scope matching, since brute-forcing path globs over every YAML on every tool call is the wrong shape. The table lives in the host-global `orbit.db` and holds rows for every workspace bound to that database, so it is **partitioned by the stable registered workspace ID** — the composite `(workspace_id, id)` key (ADR-0212). Without the discriminator, a multi-workspace sweep over the shared database searched, truncated, or overwrote another workspace's rows:
 
 ```sql
 CREATE TABLE learnings_index (
-    id          TEXT PRIMARY KEY,         -- L-0001
-    status      TEXT NOT NULL,            -- "active" | "superseded"
-    paths       TEXT NOT NULL,            -- JSON array of glob patterns
-    tags        TEXT NOT NULL,            -- JSON array of tags
-    summary     TEXT NOT NULL,            -- denormalized for fast read
-    updated_at  TEXT NOT NULL
+    workspace_id TEXT NOT NULL,           -- stable registered Orbit workspace id
+    id           TEXT NOT NULL,           -- L-0001
+    status       TEXT NOT NULL,           -- "active" | "superseded"
+    paths        TEXT NOT NULL,           -- JSON array of glob patterns
+    tags         TEXT NOT NULL,           -- JSON array of tags
+    summary      TEXT NOT NULL,           -- denormalized for fast read
+    updated_at   TEXT NOT NULL,
+    priority     INTEGER,                 -- optional ranking key
+    PRIMARY KEY (workspace_id, id)
 );
 
-CREATE INDEX learnings_active ON learnings_index(status) WHERE status = 'active';
+CREATE INDEX learnings_active
+    ON learnings_index(workspace_id, status) WHERE status = 'active';
 ```
 
-Query path: filter to `status = 'active'`, load the small set of `(paths, tags)` rows, run the in-memory glob match. At expected scale (low hundreds of active learnings), this is sub-millisecond; the index exists to avoid YAML I/O on every tool call.
+Query path: filter to the runtime's own `workspace_id` and `status = 'active'`, load the small set of `(paths, tags)` rows, run the in-memory glob match. At expected scale (low hundreds of active learnings), this is sub-millisecond; the index exists to avoid YAML I/O on every tool call.
 
 The YAML files are the source of truth. The index is rebuildable from them via `orbit learning sync`.
 
@@ -420,7 +424,7 @@ Authoring policy ([§7.1](#71-authoring)) is enforced by reviewer judgment, not 
 
 ### 8.7 Privacy posture
 
-Learnings are workspace-scoped and checked into the repo. They travel exactly where the repo travels. There is no telemetry surface in the loop, no remote API, no shared store across workspaces. Like task content, learning content stays local by construction.
+Learnings are workspace-scoped and checked into the repo. They travel exactly where the repo travels. There is no telemetry surface in the loop and no remote API. The authoritative content (the YAML) stays local by construction, like task content. The only shared artifact is the rebuildable SQLite envelope index in the host-global `orbit.db`, and it is partitioned by `workspace_id` so one workspace never reads another's rows (ADR-0212).
 
 ---
 
