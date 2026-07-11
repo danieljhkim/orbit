@@ -49,14 +49,14 @@ content-type: application/json
     if stored_str.contains(secret) {
         eprintln!(
             "FAIL: stored blob contains raw secret. first 200 chars: {}",
-            &stored_str.chars().take(200).collect::<String>()
+            stored_str.chars().take(200).collect::<String>()
         );
         return ExitCode::FAILURE;
     }
     if !stored_str.contains("[REDACTED_AUTH]") {
         eprintln!(
             "FAIL: stored blob missing redaction marker. first 200 chars: {}",
-            &stored_str.chars().take(200).collect::<String>()
+            stored_str.chars().take(200).collect::<String>()
         );
         return ExitCode::FAILURE;
     }
