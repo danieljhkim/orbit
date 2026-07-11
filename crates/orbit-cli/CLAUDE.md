@@ -20,8 +20,8 @@ forces a directory.
 
 - [`hook/`](src/command/hook) — three subcommands, one `.rs` per body, shared
   enum types in `render.rs`.
-- [`learning/`](src/command/learning) — ten subcommands, a `comment` parent
-  with its own nested subcommands, shared formatting in `output.rs`.
+- [`learning/`](src/command/learning) — eight subcommands, one `.rs` per body,
+  shared formatting in `output.rs`.
 - [`task/`](src/command/task) — large surface with `artifact` nested parent
   and a `tests/` subdir mirroring source files.
 

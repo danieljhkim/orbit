@@ -753,38 +753,6 @@
     "name": "orbit_learning_add"
   },
   {
-    "description": "Append a footnote-style comment to an active learning. Returns `{ id, learning_id, created_at }`.",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "body": {
-          "description": "Comment body (trimmed, non-empty, ≤ 500 chars).",
-          "type": "string"
-        },
-        "learning_id": {
-          "description": "ID of the parent learning.",
-          "type": "string"
-        },
-        "model": {
-          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
-          "enum": [
-            "codex",
-            "claude",
-            "gemini",
-            "grok"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "learning_id",
-        "body"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_learning_comment_add"
-  },
-  {
     "description": "Fetch a single learning by ID as JSON. Returns the full record including body and evidence.",
     "inputSchema": {
       "additionalProperties": true,
