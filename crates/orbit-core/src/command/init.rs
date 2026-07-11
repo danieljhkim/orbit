@@ -49,9 +49,9 @@ pub struct InitOptions {
     pub global_root_override: Option<PathBuf>,
     /// When true, create/update user-level skill symlinks for global skills.
     pub link_global_skills: bool,
-    /// Per-role agent settings to embed in the freshly seeded `config.toml`
-    /// as a `[crews.custom]` table. Keyed by role name (`reviewer`,
-    /// `implementer`, `planner`). `None` and an empty map both mean "use
+    /// Agent settings collected by the legacy init prompt. The implementer
+    /// assignment is embedded as the flat `[crews.custom]` table. `None` and
+    /// an empty map both mean "use
     /// the default crew template". Ignored when config.toml already exists
     /// — init remains idempotent.
     pub role_settings: Option<BTreeMap<String, RawAgentRoleConfig>>,
@@ -813,10 +813,10 @@ mod tests {
         assert!(contents.contains("provider = \"codex\""));
         assert!(contents.contains(&format!(
             "model = \"{}\"",
-            orbit_common::test_fixtures::TEST_CLAUDE_MODEL
+            orbit_common::test_fixtures::TEST_CODEX_MODEL
         )));
 
-        // Round-trips through toml: custom crew contains all three roles.
+        // Round-trips through toml: custom crew is one flat assignment.
         let parsed: toml::Value = toml::from_str(&contents).expect("parse");
         let custom = parsed
             .get("crews")
@@ -825,21 +825,13 @@ mod tests {
             .and_then(|v| v.as_table())
             .expect("custom crew table");
         assert_eq!(custom.len(), 3);
-        let reviewer = custom
-            .get("reviewer")
-            .and_then(|v| v.as_table())
-            .expect("reviewer table");
         assert_eq!(
-            reviewer.get("provider").and_then(|v| v.as_str()),
-            Some("claude")
+            custom.get("provider").and_then(|v| v.as_str()),
+            Some("codex")
         );
-        let planner = custom
-            .get("planner")
-            .and_then(|v| v.as_table())
-            .expect("planner table");
         assert_eq!(
-            planner.get("model").and_then(|v| v.as_str()),
-            Some(orbit_common::test_fixtures::TEST_GEMINI_MODEL)
+            custom.get("model").and_then(|v| v.as_str()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL)
         );
     }
 

@@ -242,10 +242,6 @@ fn seed_with_role_settings_writes_custom_crew() {
     assert!(contents.contains("provider = \"codex\""));
     assert!(contents.contains(&format!(
         "model = \"{}\"",
-        orbit_common::test_fixtures::TEST_CLAUDE_MODEL
-    )));
-    assert!(contents.contains(&format!(
-        "model = \"{}\"",
         orbit_common::test_fixtures::TEST_CODEX_MODEL
     )));
 
@@ -260,9 +256,15 @@ fn seed_with_role_settings_writes_custom_crew() {
         .get("custom")
         .and_then(|v| v.as_table())
         .expect("custom crew");
-    assert!(custom.contains_key("reviewer"));
-    assert!(custom.contains_key("implementer"));
-    assert!(custom.contains_key("planner"));
+    assert_eq!(
+        custom.get("provider").and_then(|v| v.as_str()),
+        Some("codex")
+    );
+    assert_eq!(custom.get("backend").and_then(|v| v.as_str()), Some("cli"));
+    assert_eq!(
+        custom.get("model").and_then(|v| v.as_str()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL)
+    );
 }
 
 #[test]
@@ -298,14 +300,18 @@ fn seed_with_incomplete_role_settings_fails() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
     let mut roles = sample_roles();
-    roles.get_mut("planner").expect("planner").model.take();
+    roles
+        .get_mut("implementer")
+        .expect("implementer")
+        .model
+        .take();
     let detected = DetectedAgents::default();
     let error =
         seed_default_config(&path, &detected, Some(&roles)).expect_err("missing model fails");
     assert!(
         error
             .to_string()
-            .contains("custom crew role `planner` is missing required `model`")
+            .contains("custom crew is missing required `model`")
     );
     assert!(!path.exists());
 }

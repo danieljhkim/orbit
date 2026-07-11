@@ -437,9 +437,7 @@ mod tests {
             retry_source_run_id: None,
             knowledge_metrics: None,
             resolved_crew: None,
-            planner_model: None,
-            implementer_model: None,
-            reviewer_model: None,
+            crew_model: None,
             steps: Vec::new(),
         };
         let run_dir = orbit.join("state/job-runs/job-a/run-1");
@@ -524,9 +522,7 @@ mod tests {
             retry_source_run_id: None,
             knowledge_metrics: None,
             resolved_crew: None,
-            planner_model: None,
-            implementer_model: None,
-            reviewer_model: None,
+            crew_model: None,
             steps: Vec::new(),
         };
         let valid_dir = orbit.join("state/job-runs/job-a/run-good");

@@ -42,12 +42,17 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "learnings_index_workspace_scope",
         apply: super::apply_learning_index_workspace_scope,
     },
+    Migration {
+        version: 3,
+        name: "flat_crew_model",
+        apply: super::apply_flat_crew_model,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 2;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 3;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

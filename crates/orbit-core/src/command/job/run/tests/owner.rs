@@ -307,9 +307,7 @@ fn running_run_owner_stale_reason_excludes_probe_unavailable() {
         steps: Vec::new(),
         knowledge_metrics: None,
         resolved_crew: None,
-        planner_model: None,
-        implementer_model: None,
-        reviewer_model: None,
+        crew_model: None,
     };
     // We can't override the probe at this seam (production wrapper), but
     // we can assert the lower-level helper agrees: ProbeUnavailable is
@@ -346,9 +344,7 @@ fn stale_failure_message_distinguishes_probe_outcomes() {
         steps: Vec::new(),
         knowledge_metrics: None,
         resolved_crew: None,
-        planner_model: None,
-        implementer_model: None,
-        reviewer_model: None,
+        crew_model: None,
     };
     let mismatch_message = stale_job_run_message(&run, Some(OwnerIdentity::Mismatch));
     let missing_message = stale_job_run_message(&run, Some(OwnerIdentity::Missing));

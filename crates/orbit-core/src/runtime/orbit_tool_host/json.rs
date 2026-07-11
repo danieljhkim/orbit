@@ -118,18 +118,7 @@ fn insert_resolved_crew(
         return Ok(());
     };
     object.insert("resolved_crew".to_string(), Value::String(projection.name));
-    object.insert(
-        "planner_model".to_string(),
-        Value::String(projection.planner_model),
-    );
-    object.insert(
-        "implementer_model".to_string(),
-        Value::String(projection.implementer_model),
-    );
-    object.insert(
-        "reviewer_model".to_string(),
-        Value::String(projection.reviewer_model),
-    );
+    object.insert("crew_model".to_string(), Value::String(projection.model));
     Ok(())
 }
 

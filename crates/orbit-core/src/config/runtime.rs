@@ -3,8 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use orbit_common::model_defaults::{
-    CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK, CODEX_DEFAULT_MODEL, GEMINI_CREW_MODEL,
-    GROK_DEFAULT_MODEL,
+    CLAUDE_DEFAULT_WEAK, CODEX_DEFAULT_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
 };
 use orbit_common::types::{
     Crew, CrewRoleAssignment, OrbitError,
@@ -64,7 +63,7 @@ pub(crate) struct RuntimeConfig {
     /// loads it from `~/.orbit/config.toml`; workspace configs are never
     /// consulted for it (they get rewritten by task-mutation commands).
     pub(crate) qa: crate::qa::QaSweepConfig,
-    /// Named planner/implementer/reviewer lineups from `[crews.<name>]`.
+    /// Named provider-model assignments from `[crews.<name>]`.
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
     pub(crate) duel: DuelConfig,
@@ -314,36 +313,28 @@ pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
         "claude".to_string(),
         Crew {
             name: "claude".to_string(),
-            planner: crew_role(CLAUDE_DEFAULT_STRONG, "claude", "cli"),
-            implementer: crew_role(CLAUDE_DEFAULT_WEAK, "claude", "cli"),
-            reviewer: crew_role(CLAUDE_DEFAULT_STRONG, "claude", "cli"),
+            assignment: crew_role(CLAUDE_DEFAULT_WEAK, "claude", "cli"),
         },
     );
     crews.insert(
         "codex".to_string(),
         Crew {
             name: "codex".to_string(),
-            planner: crew_role(CODEX_DEFAULT_MODEL, "codex", "cli"),
-            implementer: crew_role(CODEX_DEFAULT_MODEL, "codex", "cli"),
-            reviewer: crew_role(CODEX_DEFAULT_MODEL, "codex", "cli"),
+            assignment: crew_role(CODEX_DEFAULT_MODEL, "codex", "cli"),
         },
     );
     crews.insert(
         "gemini".to_string(),
         Crew {
             name: "gemini".to_string(),
-            planner: crew_role(GEMINI_CREW_MODEL, "gemini", "cli"),
-            implementer: crew_role(GEMINI_CREW_MODEL, "gemini", "cli"),
-            reviewer: crew_role(GEMINI_CREW_MODEL, "gemini", "cli"),
+            assignment: crew_role(GEMINI_CREW_MODEL, "gemini", "cli"),
         },
     );
     crews.insert(
         "grok".to_string(),
         Crew {
             name: "grok".to_string(),
-            planner: crew_role(GROK_DEFAULT_MODEL, "grok", "cli"),
-            implementer: crew_role(GROK_DEFAULT_MODEL, "grok", "cli"),
-            reviewer: crew_role(GROK_DEFAULT_MODEL, "grok", "cli"),
+            assignment: crew_role(GROK_DEFAULT_MODEL, "grok", "cli"),
         },
     );
     crews
@@ -491,13 +482,7 @@ fn crews_from_raw(
         }
         let crew = Crew {
             name: trimmed.to_string(),
-            planner: required_role_assignment(trimmed, "planner", entry.planner.as_ref())?,
-            implementer: required_role_assignment(
-                trimmed,
-                "implementer",
-                entry.implementer.as_ref(),
-            )?,
-            reviewer: required_role_assignment(trimmed, "reviewer", entry.reviewer.as_ref())?,
+            assignment: crew_assignment_from_raw(trimmed, entry)?,
         };
         crews.insert(trimmed.to_string(), crew);
     }
@@ -509,7 +494,39 @@ fn crews_from_raw(
     Ok(crews)
 }
 
-fn required_role_assignment(
+fn crew_assignment_from_raw(
+    crew: &str,
+    raw: &RawCrewEntry,
+) -> Result<CrewRoleAssignment, OrbitError> {
+    let has_flat = raw.model.is_some() || raw.provider.is_some() || raw.backend.is_some();
+    let has_legacy = raw.planner.is_some() || raw.implementer.is_some() || raw.reviewer.is_some();
+    if has_flat && has_legacy {
+        return Err(OrbitError::InvalidInput(format!(
+            "[crews.{crew}] mixes the flat {{ model, provider, backend }} shape with legacy planner/implementer/reviewer assignments"
+        )));
+    }
+    if has_flat {
+        return Ok(CrewRoleAssignment {
+            model: required_crew_field(crew, "model", raw.model.as_deref())?,
+            provider: required_crew_field(crew, "provider", raw.provider.as_deref())?,
+            backend: required_crew_field(crew, "backend", raw.backend.as_deref())?,
+        });
+    }
+
+    let implementer = required_legacy_assignment(crew, "implementer", raw.implementer.as_ref())?;
+    let planner = required_legacy_assignment(crew, "planner", raw.planner.as_ref())?;
+    let reviewer = required_legacy_assignment(crew, "reviewer", raw.reviewer.as_ref())?;
+    if planner != implementer || reviewer != implementer {
+        tracing::warn!(
+            target: "orbit.config.crew",
+            crew,
+            "legacy three-role crew assignments diverge; using implementer for every role — rewrite [crews.<name>] with flat model/provider/backend fields",
+        );
+    }
+    Ok(implementer)
+}
+
+fn required_legacy_assignment(
     crew: &str,
     role: &str,
     raw: Option<&RawAgentRoleConfig>,
@@ -520,13 +537,13 @@ fn required_role_assignment(
         ))
     })?;
     Ok(CrewRoleAssignment {
-        model: required_role_field(crew, role, "model", raw.model.as_deref())?,
-        provider: required_role_field(crew, role, "provider", raw.provider.as_deref())?,
-        backend: required_role_field(crew, role, "backend", raw.backend.as_deref())?,
+        model: required_legacy_field(crew, role, "model", raw.model.as_deref())?,
+        provider: required_legacy_field(crew, role, "provider", raw.provider.as_deref())?,
+        backend: required_legacy_field(crew, role, "backend", raw.backend.as_deref())?,
     })
 }
 
-fn required_role_field(
+fn required_legacy_field(
     crew: &str,
     role: &str,
     field: &str,
@@ -535,6 +552,13 @@ fn required_role_field(
     let value = value.map(str::trim).filter(|value| !value.is_empty());
     value.map(ToOwned::to_owned).ok_or_else(|| {
         OrbitError::InvalidInput(format!("[crews.{crew}].{role}.{field} must not be empty"))
+    })
+}
+
+fn required_crew_field(crew: &str, field: &str, value: Option<&str>) -> Result<String, OrbitError> {
+    let value = value.map(str::trim).filter(|value| !value.is_empty());
+    value.map(ToOwned::to_owned).ok_or_else(|| {
+        OrbitError::InvalidInput(format!("[crews.{crew}].{field} must not be empty"))
     })
 }
 

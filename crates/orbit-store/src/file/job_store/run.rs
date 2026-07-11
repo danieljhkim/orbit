@@ -47,9 +47,7 @@ impl JobFileStore {
             steps: vec![],
             knowledge_metrics: None,
             resolved_crew: None,
-            planner_model: None,
-            implementer_model: None,
-            reviewer_model: None,
+            crew_model: None,
         };
         self.write_run(job_id, &run)?;
         Ok(run)
@@ -176,9 +174,7 @@ impl JobFileStore {
         };
         let mut run = self.read_run_at(&run_dir)?;
         run.resolved_crew = Some(crew.name.clone());
-        run.planner_model = Some(crew.planner.model.clone());
-        run.implementer_model = Some(crew.implementer.model.clone());
-        run.reviewer_model = Some(crew.reviewer.model.clone());
+        run.crew_model = Some(crew.assignment.model.clone());
         self.write_run(&job_id, &run)?;
         Ok(true)
     }

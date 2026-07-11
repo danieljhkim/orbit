@@ -644,6 +644,7 @@ fn ensure_v2_state_consolidation_schema(conn: &Connection) -> Result<(), OrbitEr
                 retry_source_run_id TEXT,
                 knowledge_metrics_json TEXT,
                 resolved_crew TEXT,
+                crew_model TEXT,
                 planner_model TEXT,
                 implementer_model TEXT,
                 reviewer_model TEXT,
@@ -696,6 +697,12 @@ fn ensure_v2_state_consolidation_schema(conn: &Connection) -> Result<(), OrbitEr
         "#,
     )
     .map_err(|e| OrbitError::Store(e.to_string()))
+}
+
+fn apply_flat_crew_model(conn: &Connection) -> Result<(), OrbitError> {
+    // ADR-0213: keep the legacy role columns nullable for existing databases;
+    // new reads fall back to implementer_model when crew_model is not populated.
+    add_column_if_missing(conn, "ALTER TABLE job_runs ADD COLUMN crew_model TEXT")
 }
 
 fn ensure_task_reservations_schema(conn: &Connection) -> Result<(), OrbitError> {

@@ -81,9 +81,7 @@ pub(super) fn seed_run(
         retry_source_run_id: None,
         knowledge_metrics: None,
         resolved_crew: None,
-        planner_model: None,
-        implementer_model: None,
-        reviewer_model: None,
+        crew_model: None,
         steps: Vec::new(),
     };
     write_seeded_run(runtime, &run);

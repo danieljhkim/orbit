@@ -212,9 +212,7 @@ fn orphaned_running_run_is_reported() {
         retry_source_run_id: None,
         knowledge_metrics: None,
         resolved_crew: None,
-        planner_model: None,
-        implementer_model: None,
-        reviewer_model: None,
+        crew_model: None,
         steps: Vec::new(),
     };
     runtime

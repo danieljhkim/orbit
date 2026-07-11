@@ -32,9 +32,9 @@ default_crew = "codex"      # fallback crew when a task has no `crew` set
 
 ---
 
-## `[crews.<name>]` — who runs which role
+## `[crews.<name>]` — which provider-model runs the task
 
-A **crew** assigns models to the three roles in the ship pipeline: `planner`, `implementer`, `reviewer`. Each role takes three fields:
+A **crew** is one provider-model-backend assignment. Every activity role (`planner`, `implementer`, or `reviewer`) resolves to that same assignment; the role remains a prompt and telemetry label, not a separate model-selection slot.
 
 | Field | Purpose | Values |
 |---|---|---|
@@ -42,21 +42,18 @@ A **crew** assigns models to the three roles in the ship pipeline: `planner`, `i
 | `provider` | Agent family | `claude`, `codex`, `gemini`, `grok` (the CLI-executable families; see [Provider identity and resolution](#provider-identity-and-resolution) for the full canonical set) |
 | `backend` | How Orbit dispatches the agent | `cli` (today the only supported value for these roles) |
 
-Example — a single-family Codex crew:
+Example — a Codex crew:
 
 ```toml
 [crews.codex]
-planner     = { model = "gpt-5.5",         provider = "codex",  backend = "cli" }
-implementer = { model = "gpt-5.5",         provider = "codex",  backend = "cli" }
-reviewer    = { model = "gpt-5.5",         provider = "codex",  backend = "cli" }
+model = "gpt-5.5"
+provider = "codex"
+backend = "cli"
 ```
 
-You can define any number of crews. Set the workspace-wide fallback with `workflow.default_crew`; assign a specific crew to individual tasks via the [per-task crew override](#per-task-crew-override). Common patterns:
+You can define any number of crews. Set the workspace-wide fallback with `workflow.default_crew`; assign a specific crew to individual tasks via the [per-task crew override](#per-task-crew-override). Crews are validated at load time: each crew must have non-empty `model`, `provider`, and `backend`; `workflow.default_crew` must name a defined crew.
 
-- **Single-family crew** (`claude`, `codex`, `gemini`, `grok`) — useful when you only have one CLI authenticated, or when you want consistent behaviour end-to-end.
-- **Mixed crew** — different model for each role, e.g. a strong planner with a fast implementer, or a different vendor for review than implementation so the reviewer isn't reviewing its own output.
-
-Crews are validated at load time: each role must have non-empty `model`, `provider`, and `backend`; `workflow.default_crew` must name a defined crew.
+> **Legacy compatibility.** Orbit still accepts the former `planner` / `implementer` / `reviewer` inline-table shape. It uses the `implementer` assignment for every role and logs an `orbit.config.crew` warning when planner or reviewer differs. Rewrite legacy crews to the flat shape above; cross-provider comparison belongs in the duel system.
 
 > **Note.** Earlier Orbit versions used `[agent.<role>]` tables. That schema was removed in [ORB-00058](../.orbit/) — config load now hard-errors if `[agent.*]` is present. Migrate to `[crews.<name>]` + `workflow.default_crew`.
 
@@ -64,7 +61,7 @@ Crews are validated at load time: each role must have non-empty `model`, `provid
 
 ## Provider identity and resolution
 
-Every `provider` string Orbit reads — in `[crews.<name>]` roles, in an activity's inline `provider`, and in setup detection — is parsed through **one canonical surface** (`orbit_common::types::activity_job::Provider`, ORB-10091). Centralizing parsing means the crew layer, the agent-role resolver, the CLI executor, and reconciliation cannot disagree with each other or with Worker/Bridge about what a provider name means.
+Every `provider` string Orbit reads — in `[crews.<name>]`, in an activity's inline `provider`, and in setup detection — is parsed through **one canonical surface** (`orbit_common::types::activity_job::Provider`, ORB-10091). Centralizing parsing means the crew layer, the agent-role resolver, the CLI executor, and reconciliation cannot disagree with each other or with Worker/Bridge about what a provider name means.
 
 ### Canonical providers
 
@@ -103,7 +100,7 @@ Provider selection is **two composed steps**, not one. Describe them precisely �
 4. **environment_default** — the `CONSTELLATION_DEFAULT_PROVIDER` environment variable (a canonical provider id, which names the same-named single-family crew).
 5. **system_default** — the canonical baseline (see below).
 
-**2 — The selected crew's role values override the activity's inline baseline** (`resolve_from_config`). For each `(provider, model, backend)` field independently: the selected crew role's value wins **when present**; otherwise the activity's inline `agent_loop` value stands. A crew override that omits a field (or whose `provider` string is unparseable) leaves the inline baseline in place — so a config typo never coerces dispatch onto a wrong runtime. This is also why **persisted provider identity is never re-defaulted** during reconciliation: a provider already frozen on a run record is reused verbatim, not reset to the enum default.
+**2 — The selected crew's assignment overrides the activity's inline baseline** (`resolve_from_config`). For each `(provider, model, backend)` field independently: the selected crew value wins **when present**; otherwise the activity's inline `agent_loop` value stands. A crew override that omits a field (or whose `provider` string is unparseable) leaves the inline baseline in place — so a config typo never coerces dispatch onto a wrong runtime. This is also why **persisted provider identity is never re-defaulted** during reconciliation: a provider already frozen on a run record is reused verbatim, not reset to the enum default.
 
 ### The one setting that changes the default — `CONSTELLATION_DEFAULT_PROVIDER`
 
@@ -152,7 +149,7 @@ The dropdown label `default: codex` in the dashboard means *the task has no `cre
 `orbit.task.show` returns both fields when a run exists:
 
 - `crew` — the task's own `crew` field (the *selection*).
-- `resolved_crew` + `planner_model` / `implementer_model` / `reviewer_model` — what was actually dispatched (the *resolution*, including default-crew fallback). Pulled from the persisted job-run record so it stays accurate even if `default_crew` is edited later.
+- `resolved_crew` + `crew_model` — what was actually dispatched (the *resolution*, including default-crew fallback). Pulled from the persisted job-run record so it stays accurate even if `default_crew` is edited later.
 
 `task.crew` is validated at write time, so you can't `orbit task add --crew <name>` with an unknown crew. The only way to end up with a stale task-level override is to delete a crew from `config.toml` after it was already written onto tasks. In that case `orbit run ship` fails fast at run start — before any agent dispatches and before the `JobRunStarted` event is emitted — so no work is wasted.
 

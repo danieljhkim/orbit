@@ -46,13 +46,11 @@ pub struct ConfiguredCrewRegistryProjection {
     pub crews: Vec<ConfiguredCrewProjection>,
 }
 
-/// Named crew and role-model strings from the active runtime configuration.
+/// Named crew and model string from the active runtime configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConfiguredCrewProjection {
     pub name: String,
-    pub planner_model: String,
-    pub implementer_model: String,
-    pub reviewer_model: String,
+    pub model: String,
     pub is_default: bool,
 }
 
@@ -60,34 +58,28 @@ impl ConfiguredCrewProjection {
     fn from_crew(crew: &Crew, is_default: bool) -> Self {
         Self {
             name: crew.name.clone(),
-            planner_model: crew.planner.model.clone(),
-            implementer_model: crew.implementer.model.clone(),
-            reviewer_model: crew.reviewer.model.clone(),
+            model: crew.assignment.model.clone(),
             is_default,
         }
     }
 }
 
-/// Crew/role-model strings to surface on a task projection.
+/// Crew/model strings to surface on a task projection.
 ///
 /// Decouples projection consumers from the full `Crew` type so this struct can
 /// also be hydrated directly from persisted run-record fields, which carry only
-/// the model strings (not provider/backend).
+/// the model string (not provider/backend).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedCrewProjection {
     pub name: String,
-    pub planner_model: String,
-    pub implementer_model: String,
-    pub reviewer_model: String,
+    pub model: String,
 }
 
 impl ResolvedCrewProjection {
     fn from_crew(crew: Crew) -> Self {
         Self {
             name: crew.name,
-            planner_model: crew.planner.model,
-            implementer_model: crew.implementer.model,
-            reviewer_model: crew.reviewer.model,
+            model: crew.assignment.model,
         }
     }
 }
@@ -162,7 +154,7 @@ impl OrbitRuntime {
     /// Resolve a crew/role-model projection for `orbit.task.show` consumers.
     ///
     /// Selection truth comes first: when the task points at a run record that
-    /// persisted the resolved crew, those four strings win — they reflect what
+    /// persisted the resolved crew, those two strings win — they reflect what
     /// was selected for routing, even if the workspace registry has been edited
     /// since. "Who actually ran?" projections read invocation records instead.
     ///
@@ -176,23 +168,11 @@ impl OrbitRuntime {
     ) -> Result<Option<ResolvedCrewProjection>, OrbitError> {
         if let Some(run_id) = task.job_run_id.as_deref()
             && let Some(run) = self.get_job_run_backend(run_id)?
-            && let (
-                Some(resolved_crew),
-                Some(planner_model),
-                Some(implementer_model),
-                Some(reviewer_model),
-            ) = (
-                run.resolved_crew,
-                run.planner_model,
-                run.implementer_model,
-                run.reviewer_model,
-            )
+            && let (Some(resolved_crew), Some(model)) = (run.resolved_crew, run.crew_model)
         {
             return Ok(Some(ResolvedCrewProjection {
                 name: resolved_crew,
-                planner_model,
-                implementer_model,
-                reviewer_model,
+                model,
             }));
         }
 
@@ -215,9 +195,7 @@ impl OrbitRuntime {
         tracing::info!(
             run_id,
             resolved_crew = %crew.name,
-            planner_model = %crew.planner.model,
-            implementer_model = %crew.implementer.model,
-            reviewer_model = %crew.reviewer.model,
+            crew_model = %crew.assignment.model,
             "crew resolved for run",
         );
         self.stores().jobs().record_run_crew(run_id, &crew)?;
@@ -248,13 +226,13 @@ impl OrbitRuntime {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             && let Ok(crew) = resolve_crew(crew_name, self.context.crews())
-            && let Some(family) = family_from_assignment(&crew.implementer)
+            && let Some(family) = family_from_assignment(&crew.assignment)
         {
             return Ok((Some(family.clone()), Some(family)));
         }
 
         if let Some(family) = run
-            .implementer_model
+            .crew_model
             .as_deref()
             .and_then(infer_agent_family_from_model)
         {
@@ -274,9 +252,7 @@ impl OrbitRuntime {
         tracing::info!(
             task_id,
             resolved_crew = %crew.name,
-            planner_model = %crew.planner.model,
-            implementer_model = %crew.implementer.model,
-            reviewer_model = %crew.reviewer.model,
+            crew_model = %crew.assignment.model,
             "crew resolved for task start",
         );
         Ok(crew)

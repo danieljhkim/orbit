@@ -33,19 +33,19 @@ fn runtime_with_named_crews() -> (TempDir, OrbitRuntime) {
         workspace_root.join("config.toml"),
         r#"
 [crews.primary]
-planner = { model = "default-planner", provider = "codex", backend = "cli" }
-implementer = { model = "default-implementer", provider = "codex", backend = "cli" }
-reviewer = { model = "default-reviewer", provider = "codex", backend = "cli" }
+model = "default-model"
+provider = "codex"
+backend = "cli"
 
 [crews.beta]
-planner = { model = "beta-planner", provider = "codex", backend = "cli" }
-implementer = { model = "beta-implementer", provider = "codex", backend = "cli" }
-reviewer = { model = "beta-reviewer", provider = "codex", backend = "cli" }
+model = "beta-model"
+provider = "codex"
+backend = "cli"
 
 [crews.gamma]
-planner = { model = "gamma-planner", provider = "codex", backend = "cli" }
-implementer = { model = "gamma-implementer", provider = "codex", backend = "cli" }
-reviewer = { model = "gamma-reviewer", provider = "codex", backend = "cli" }
+model = "gamma-model"
+provider = "codex"
+backend = "cli"
 
 [workflow]
 default_crew = "primary"
@@ -78,9 +78,9 @@ fn run_input_task_ids_singleton_resolves_task_crew() {
         .expect("resolve crew");
 
     assert_eq!(crew.name, "beta");
-    assert_eq!(crew.planner.model, "beta-planner");
-    assert_eq!(crew.implementer.model, "beta-implementer");
-    assert_eq!(crew.reviewer.model, "beta-reviewer");
+    assert_eq!(crew.assignment.model, "beta-model");
+    assert_eq!(crew.role("planner"), Some(&crew.assignment));
+    assert_eq!(crew.role("reviewer"), Some(&crew.assignment));
 }
 
 #[test]
@@ -101,12 +101,7 @@ fn record_run_crew_persists_singleton_task_ids_task_crew_models() {
 
     assert_eq!(crew.name, "beta");
     assert_eq!(stored.resolved_crew.as_deref(), Some("beta"));
-    assert_eq!(stored.planner_model.as_deref(), Some("beta-planner"));
-    assert_eq!(
-        stored.implementer_model.as_deref(),
-        Some("beta-implementer")
-    );
-    assert_eq!(stored.reviewer_model.as_deref(), Some("beta-reviewer"));
+    assert_eq!(stored.crew_model.as_deref(), Some("beta-model"));
 }
 
 #[test]
@@ -122,7 +117,7 @@ fn explicit_crew_override_wins_over_singleton_task_ids_task_crew() {
         .expect("resolve crew");
 
     assert_eq!(crew.name, "gamma");
-    assert_eq!(crew.implementer.model, "gamma-implementer");
+    assert_eq!(crew.assignment.model, "gamma-model");
 }
 
 #[test]
@@ -138,7 +133,7 @@ fn multi_task_ids_without_override_falls_back_to_default_crew() {
         .expect("resolve crew");
 
     assert_eq!(crew.name, "primary");
-    assert_eq!(crew.implementer.model, "default-implementer");
+    assert_eq!(crew.assignment.model, "default-model");
 }
 
 /// Table-driven proof of the crew-selection precedence (ORB-10091, contract §3)
