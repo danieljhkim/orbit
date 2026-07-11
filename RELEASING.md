@@ -74,6 +74,16 @@ Bullet shape:
 
 Group related task IDs into a single themed bullet rather than emitting one bullet per task. Cite the lead task ID only; skip commit SHAs.
 
+#### Unreleased entries use this same shape — at write time
+
+The `## Unreleased` section is not a staging area for full PR descriptions. Every entry — the one each PR adds during accumulation, not just the ones drafted at release time — uses the bullet shape above from the moment it is written:
+
+- Format: `- **Theme**: 1–2 sentences that read in isolation. ([ORB-XXXXX])`. Hard cap **~50 words per bullet** (the `scripts/check-changelog-style.sh` guardrail fails past ~60 words or 3 physical lines).
+- Migration steps, rationale, rejected alternatives, and test inventories live in the cited Orbit task / ADR / commit message — **the task ID is the pointer, don't duplicate the detail here.** Anyone who wants the full story follows the ID.
+- **Breaking changes** get one extra line max, with the migration as a phrase (`x removed → use y`). Multi-step migration guides go in the task or docs, not the CHANGELOG.
+
+Only `## Unreleased` is linted; released `## <X.Y.Z>` sections are frozen history and are never reflowed. At release time, drafting a version section (steps above) is just moving already-terse Unreleased bullets into place and dropping the ones that aren't Highlights.
+
 ### 3. Confirm breaking changes with the human
 
 Surface the breaking-change candidate list before drafting the final section. Show each candidate with its task ID, title, and the reason it was flagged. Let the human accept, downgrade, or add to the list. Do not classify autonomously.

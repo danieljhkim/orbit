@@ -123,6 +123,7 @@ ci-fast:
 	./scripts/check-learning-layout.sh
 	./scripts/check-artifact-redaction-guardrail.sh
 	./scripts/check-changelog-freshness.sh
+	./scripts/check-changelog-style.sh
 	./scripts/check-error-translation.sh
 
 # Verify every workspace crate declares its stability tier

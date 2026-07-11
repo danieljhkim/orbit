@@ -43,6 +43,10 @@ This repo has a semantic graph available via the `orbit` MCP server (no live LSP
 - **Layout.** Feature design docs live under `docs/design/<feature>/`. Folder layout, required sections, ADR format, and glossary shape are documented in [`docs/design/CONVENTIONS.md`](docs/design/CONVENTIONS.md). Use the `orbit-search` skill / `orbit docs` surface to retrieve indexed docs.
 - **Same-PR updates.** Change the doc in the same PR as the code: flip affected ADR statuses (`Proposed → Accepted` with task ID), bump `**Last updated:**`, add a new ADR for any non-obvious decision the change embodies. Stale docs are a review blocker.
 
+## CHANGELOG entries
+
+The freshness guardrail makes every PR add a `## Unreleased` bullet — keep it **terse**. Use the release bullet shape at write time: `- **Theme**: 1–2 sentences that read in isolation. ([ORB-XXXXX])`, hard-capped at ~50 words (enforced by `scripts/check-changelog-style.sh`). Migration steps, rationale, rejected alternatives, and test inventories belong in the cited task / ADR / commit message — **the task ID is the pointer, don't duplicate.** Breaking changes get one extra line max (migration as a phrase, `x removed → use y`). Full rule: [`RELEASING.md`](RELEASING.md) step 2.
+
 ## Rust Practices
 
 Lint-enforced rules (full set in `[workspace.lints]`; key implications below):
