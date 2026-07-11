@@ -36,9 +36,9 @@ implementer = { model = "claude-opus-4-8", provider = "claude", backend = "cli" 
 reviewer = { model = "claude-opus-4-8", provider = "claude", backend = "cli" }
 
 [crews.codex]
-planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+planner = { model = "gpt-5.6-terra", provider = "codex", backend = "cli" }
+implementer = { model = "gpt-5.6-terra", provider = "codex", backend = "cli" }
+reviewer = { model = "gpt-5.6-terra", provider = "codex", backend = "cli" }
 
 [crews.gemini]
 planner = { model = "pro", provider = "gemini", backend = "cli" }
@@ -58,7 +58,7 @@ task_url_template = "https://orbit-cli.com/tasks/{task_id}"
 candidates = ["codex", "claude", "grok"]
 
 [duel.models]                             
-codex  = "gpt-5.5"
+codex  = "gpt-5.6-terra"
 claude = "claude-opus-4-8"
 grok = "grok-build"
 
