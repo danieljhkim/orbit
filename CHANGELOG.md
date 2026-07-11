@@ -9,6 +9,8 @@
 
 ### Highlights
 
+- **Constellation crew catalog uses model-level names**: the checked-in Orbit workspace now offers Claude `opus`/`sonnet`/`fable` and Codex `sol`/`terra`/`luna` crews, defaulting to `opus`. ([ORB-10133])
+
 - **Codex init default avoids nested sandboxing**: fresh Orbit configurations now seed Codex with `danger-full-access`, leaving Orbit and the host as the execution boundary. ([ORB-10131])
 - **Crews are one provider-model assignment**: `[crews.<name>]` now uses flat `model`, `provider`, and `backend` fields shared by every activity role; legacy three-role crews load through their implementer assignment. See ADR-0213. ([ORB-10130])
 - **Model defaults de-hardcoded and centralized**: a new `orbit-common::model_defaults` module is the single source of truth for production model defaults; default Claude CLI models are now the unversioned `opus`/`sonnet` aliases and default Codex is `gpt-5.6-terra`. Existing workspaces are unchanged until `orbit init --refresh-defaults`. See ADR-0211. ([ORB-10051])
