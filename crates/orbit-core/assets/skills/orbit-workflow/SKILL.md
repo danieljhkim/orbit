@@ -45,6 +45,13 @@ Fires appear in `orbit run history` under actor `routine/<name>`. `orbit routine
 
 Read the full schema at `docs/design/routines/2_design.md` §1 before hand-authoring a routine — don't answer field semantics from memory.
 
+## Checking Operational Logs
+
+For a host-level incident, service warning, JSONL tracing problem, or missing
+run output, use [references/operational-logs.md](references/operational-logs.md).
+It separates journal/service logs, global JSONL tracing, and per-run evidence
+and keeps runtime state read-only during diagnosis.
+
 ## Diagnosing a failed/stuck/cancelled run
 
 Given a `jrun-*` id, see [references/debug-job-failure.md](references/debug-job-failure.md) for the full investigation flow (run bundle, v2 audit trail, logs/blobs, failure classification, task/git/process state, kill procedure, report format). Don't use it for ordinary task implementation unless the request is specifically about a failed run.
