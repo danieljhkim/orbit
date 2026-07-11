@@ -9,6 +9,7 @@
 
 ### Highlights
 
+- **ADR create over HTTP**: `POST /api/adrs` records a Proposed ADR (mirroring `orbit.adr.add`), so remote orchestrators can author decisions without an on-box run; malformed payloads get a structured 400. Friction/learning create routes stay absent. ([ORB-10141])
 - **Learning + ADR update routes on the HTTP API**: `PATCH /learnings/:id` (summary/scope/tags/body/evidence/priority) and `PATCH /adrs/:id` (status/tags and mutable metadata) delegate to the CLI tools, preserving supersede-don't-delete and invalid-transition rejection; no create routes added. ([ORB-10143])
 - **Default failed-run triage**: a seeded `task_triage_pipeline` (+ hourly routine, `orbit run triage`) diagnoses tasks blocked by failed runs, re-backlogs environmental failures with a bounded retry budget, and leaves the rest blocked with a diagnosis attached. See ADR-0215/ADR-0216. ([ORB-10129])
 - **Orphaned pending job runs now reconcile to `interrupted`**: workers claim their queued run's pid, the open-time orphan scan and `orbit doctor` cover pending runs, `orbit run cancel <run_id>` terminalizes stuck runs, and orbit-web-upgrade's deferral gate checks worker liveness. ([ORB-10070])

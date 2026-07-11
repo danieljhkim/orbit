@@ -318,7 +318,7 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
             "/learnings/:id/supersede",
             post(learnings::supersede_learning_action),
         )
-        .route("/adrs", get(adrs::list_adrs))
+        .route("/adrs", get(adrs::list_adrs).post(adrs::create_adr_action))
         .route(
             "/adrs/:id",
             get(adrs::get_adr).patch(adrs::update_adr_action),
