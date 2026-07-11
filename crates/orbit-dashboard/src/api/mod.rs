@@ -310,13 +310,19 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
         .route("/tasks/:id/reject", post(tasks::reject_task_action))
         .route("/tasks/:id/archive", post(tasks::archive_task_action))
         .route("/learnings", get(learnings::list_learnings))
-        .route("/learnings/:id", get(learnings::get_learning))
+        .route(
+            "/learnings/:id",
+            get(learnings::get_learning).patch(learnings::update_learning_action),
+        )
         .route(
             "/learnings/:id/supersede",
             post(learnings::supersede_learning_action),
         )
         .route("/adrs", get(adrs::list_adrs).post(adrs::create_adr_action))
-        .route("/adrs/:id", get(adrs::get_adr))
+        .route(
+            "/adrs/:id",
+            get(adrs::get_adr).patch(adrs::update_adr_action),
+        )
         .route("/adrs/:id/accept", post(adrs::accept_adr_action))
         .route("/adrs/:id/supersede", post(adrs::supersede_adr_action))
         .route("/frictions", get(frictions::list_frictions))
