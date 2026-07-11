@@ -157,25 +157,7 @@
         vertical-align: middle;
       }
 
-      /* ORB-00037: selected-workspace filesystem path beneath the selector,
-         plus the full location in a task's Details box. */
-      .workspace-select-wrap {
-        display: inline-flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 1px;
-        margin: 0 2px;
-      }
-      .workspace-select-wrap .workspace-select { margin: 0; }
-      .workspace-path {
-        max-width: 190px;
-        font-family: var(--font-mono);
-        font-size: 10px;
-        color: var(--fg-dim);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
+      /* ORB-00037: full workspace location in a task's Details box. */
       .detail-side .ws-location {
         font-size: 11px;
         color: var(--fg-dim);

@@ -47,7 +47,7 @@ export function renderPanelPlaceholder(bodyId) {
 
 // Append the selected workspace to an API path, unless one is already present
 // (aggregate endpoints like /api/tasks/all are called with no workspace set).
-function withWorkspace(path) {
+export function withWorkspace(path) {
   if (!currentWorkspace || /[?&]workspace=/.test(path)) return path;
   const sep = path.includes("?") ? "&" : "?";
   return `${path}${sep}workspace=${encodeURIComponent(currentWorkspace)}`;
