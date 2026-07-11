@@ -1,0 +1,42 @@
+{
+  "name": "orbit",
+  "version": "0.9.2",
+  "description": "Knowledge-graph code intelligence and task/activity orchestration for AI coding agents. Adds Orbit's MCP tool surface and skills to Codex.",
+  "author": {
+    "name": "danieljhkim",
+    "url": "https://github.com/danieljhkim"
+  },
+  "homepage": "https://github.com/danieljhkim/orbit",
+  "repository": "https://github.com/danieljhkim/orbit",
+  "license": "MIT",
+  "keywords": [
+    "orbit",
+    "codex",
+    "knowledge-graph",
+    "code-intelligence",
+    "agent-orchestration",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": {
+    "orbit": {
+      "command": "npx",
+      "args": ["-y", "@orbit-tools/cli@latest", "mcp", "serve"]
+    }
+  },
+  "interface": {
+    "displayName": "Orbit",
+    "shortDescription": "Task, knowledge, and code-graph tools for Codex.",
+    "longDescription": "Orbit adds a local task lifecycle, project learnings, Architecture Decision Records, and code-graph MCP tools for Codex workspaces.",
+    "developerName": "danieljhkim",
+    "category": "Developer Tools",
+    "capabilities": ["MCP", "Skills", "Code Intelligence"],
+    "websiteURL": "https://github.com/danieljhkim/orbit",
+    "defaultPrompt": [
+      "Create an Orbit task for this change.",
+      "Search Orbit for related decisions.",
+      "Use Orbit graph to inspect this code."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

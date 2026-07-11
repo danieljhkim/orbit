@@ -102,6 +102,9 @@ curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | 
 # or, in Claude Code:
 #   /plugin marketplace add danieljhkim/orbit
 #   /plugin install orbit
+# or, in Codex CLI:
+#   codex plugin marketplace add danieljhkim/orbit --ref main
+#   codex plugin add orbit@orbit
 
 # initialize
 orbit init                                 # global state (~/.orbit)
@@ -168,28 +171,36 @@ After install, task writes are embedded automatically in the background; `orbit 
 
 ---
 
-## Claude Code Plugin vs CLI
+## Agent Plugins vs CLI
 
-Two install surfaces. The CLI gives you the full power of Orbit. Choose the plugin if you just want a taste. Plugin will strap orbit's MCP tools automatically.
+Orbit ships lightweight Claude Code and Codex plugins. The CLI gives you the full power of Orbit; choose a plugin when you want Orbit's MCP tools and shared skills strapped onto one agent without installing `orbit` on your `$PATH`.
 
 ```bash
+# Claude Code
 /plugin marketplace add danieljhkim/orbit
-
-# Install the plugin
 /plugin install orbit
+
+# Codex CLI
+codex plugin marketplace add danieljhkim/orbit --ref main
+codex plugin add orbit@orbit
+
+# Later, after an Orbit release:
+codex plugin marketplace upgrade orbit
+codex plugin add orbit@orbit
 ```
 
 <details>
 <summary><strong>Plugin vs. CLI</strong> — (click to expand)</summary>
 
-|   | **Claude Code plugin** | **CLI (curl / brew)** |
-|---|---|---|
-| Install | `/plugin install orbit` (after `/plugin marketplace add danieljhkim/orbit`) | `curl … \| sh` or `brew install danieljhkim/tap/orbit` |
-| Orbit binary | Lives inside the plugin sandbox (not on `$PATH`) | Installed on `$PATH` |
-| MCP registration | Automatic | Manual: `orbit workspace init --mcp` per workspace |
-| Web dashboard (`orbit web serve`) | No | Yes |
-| Works with Codex / Gemini CLI | No (Claude Code only) | Yes |
-| workflows (i.e. `orbit run ship`) | No | Yes |
+|   | **Claude Code plugin** | **Codex plugin** | **CLI (curl / brew)** |
+|---|---|---|---|
+| Install | `/plugin install orbit` after `/plugin marketplace add danieljhkim/orbit` | `codex plugin add orbit@orbit` after `codex plugin marketplace add danieljhkim/orbit --ref main` | `curl … \| sh` or `brew install danieljhkim/tap/orbit` |
+| Orbit binary | Lives inside the plugin sandbox (not on `$PATH`) | Lives inside the plugin cache (not on `$PATH`) | Installed on `$PATH` |
+| MCP registration | Automatic in Claude Code | Automatic in Codex | Manual: `orbit workspace init --mcp` per workspace |
+| Shared Orbit skills | Bundled from `plugin/skills/` | Bundled from `plugin/skills/` | Seeded by `orbit workspace init` |
+| Web dashboard (`orbit web serve`) | No | No | Yes |
+| Other agent CLIs | No, scoped to Claude Code | No, scoped to Codex | Yes |
+| Workflows (i.e. `orbit run ship`) | No | No | Yes |
 
 </details>
 
