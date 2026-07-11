@@ -69,12 +69,20 @@ impl ExecutorSandboxKind {
         }
     }
 
+    /// Whether this sandbox primitive applies to a given host OS, named to
+    /// match `std::env::consts::OS`. Injecting the platform lets shipped-executor
+    /// seed-time selection (see `orbit-core`) be tested deterministically on
+    /// either OS without a `#[cfg]` split (see [ORB-10112]).
+    pub fn is_available_on(self, target_os: &str) -> bool {
+        self.target_os() == target_os
+    }
+
     /// Whether this sandbox primitive applies to the running host. Used to
     /// scrub platform-mismatched sandbox declarations at seed time so a
     /// shipped executor asset doesn't fail-closed at dispatch on an
     /// unsupported OS (see [ORB-10047]).
     pub fn is_available_on_current_platform(self) -> bool {
-        self.target_os() == std::env::consts::OS
+        self.is_available_on(std::env::consts::OS)
     }
 }
 
