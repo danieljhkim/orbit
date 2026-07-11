@@ -72,7 +72,10 @@ pub(crate) fn typed_role_config_from_assignment(
     raw: &CrewRoleAssignment,
 ) -> AgentRoleConfig {
     let provider = Some(raw.provider.as_str()).and_then(|raw_value| {
-        let parsed = parse_provider(raw_value);
+        // Canonical string→provider parsing lives on the orbit-common `Provider`
+        // surface (ORB-10091); the crew path routes through it so casing/alias
+        // handling cannot drift from the other layers.
+        let parsed = Provider::parse(raw_value).ok();
         if parsed.is_none() {
             tracing::warn!(
                 target: "orbit.config.crew",
@@ -104,18 +107,6 @@ pub(crate) fn typed_role_config_from_assignment(
         provider,
         model,
         backend,
-    }
-}
-
-fn parse_provider(raw: &str) -> Option<Provider> {
-    match raw.trim() {
-        "claude" => Some(Provider::Claude),
-        "codex" => Some(Provider::Codex),
-        "gemini" => Some(Provider::Gemini),
-        "grok" => Some(Provider::Grok),
-        "ollama" => Some(Provider::Ollama),
-        "openai_compat" | "openai-compat" => Some(Provider::OpenaiCompat),
-        _ => None,
     }
 }
 

@@ -1,3 +1,6 @@
+use std::fmt;
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -169,6 +172,15 @@ impl Backend {
 /// Named provider whose runtime executes an `agent_loop` activity. The enum is
 /// closed-set: adding a provider means wiring a new HTTP transport AND/OR a new
 /// CLI runtime factory, both of which are code changes.
+///
+/// This is the **single canonical provider-identity surface** for Orbit
+/// (ORB-10091): every crew/runtime path that turns a string into a provider —
+/// crew-role parsing, agent-role resolution, CLI executor selection, setup
+/// detection — routes through [`Provider::parse`] so canonical IDs, alias
+/// normalization, and capability predicates cannot drift across layers or
+/// disagree with Worker/Bridge. The set mirrors the Constellation
+/// provider-resolution contract (see `docs/CONFIG.md` and the pinned fixture
+/// under `tests/fixtures/provider_contract.json`).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
@@ -182,7 +194,63 @@ pub enum Provider {
     OpenaiCompat,
 }
 
+/// One accepted non-canonical spelling for a [`Provider`]. Alias normalization
+/// is table-driven so the accepted surface stays declarative and testable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderAlias {
+    /// The accepted alternate spelling (already lower-cased / trimmed form).
+    pub alias: &'static str,
+    /// The canonical provider the alias resolves to.
+    pub canonical: Provider,
+    /// Whether the alias is deprecated. Callers may warn on a deprecated alias;
+    /// resolution still succeeds so persisted identities are never broken.
+    pub deprecated: bool,
+}
+
+/// Error returned when a provider identifier cannot be resolved to a canonical
+/// [`Provider`]. Carries the offending raw string so callers can build stable,
+/// non-silent diagnostics instead of falling back to a default runtime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderParseError {
+    /// The raw input (as received, before normalization) that failed to parse.
+    pub raw: String,
+}
+
+impl fmt::Display for ProviderParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "unknown provider '{}'; expected one of {}",
+            self.raw,
+            Provider::CANONICAL_LIST
+        )
+    }
+}
+
+impl std::error::Error for ProviderParseError {}
+
 impl Provider {
+    /// Every canonical provider, in declaration order. Adding a variant here is
+    /// a compile-time forcing function for the match arms below.
+    pub const ALL: [Provider; 6] = [
+        Provider::Claude,
+        Provider::Codex,
+        Provider::Gemini,
+        Provider::Grok,
+        Provider::Ollama,
+        Provider::OpenaiCompat,
+    ];
+
+    /// Accepted non-canonical spellings, normalized by [`Provider::parse`].
+    pub const ALIASES: &'static [ProviderAlias] = &[ProviderAlias {
+        alias: "openai-compat",
+        canonical: Provider::OpenaiCompat,
+        deprecated: false,
+    }];
+
+    /// Human-readable canonical id list used in diagnostics.
+    pub const CANONICAL_LIST: &'static str = "claude, codex, gemini, grok, ollama, openai_compat";
+
     pub fn as_str(self) -> &'static str {
         match self {
             Provider::Claude => "claude",
@@ -194,12 +262,69 @@ impl Provider {
         }
     }
 
+    /// Canonical parse with alias normalization. Trims surrounding whitespace
+    /// and lower-cases before matching, so config/env casing variants resolve
+    /// to the same identity. Unknown strings return [`ProviderParseError`] —
+    /// this is the *only* string→provider entry point; callers must not invent
+    /// their own match and must not silently fall back on error.
+    pub fn parse(raw: &str) -> Result<Provider, ProviderParseError> {
+        let normalized = raw.trim().to_ascii_lowercase();
+        if let Some(provider) = Provider::ALL
+            .into_iter()
+            .find(|provider| provider.as_str() == normalized)
+        {
+            return Ok(provider);
+        }
+        if let Some(alias) = Provider::ALIASES
+            .iter()
+            .find(|alias| alias.alias == normalized)
+        {
+            return Ok(alias.canonical);
+        }
+        Err(ProviderParseError {
+            raw: raw.to_string(),
+        })
+    }
+
     /// Whether Phase 2c wires an HTTP transport for this provider. Used by the
     /// dispatcher's §3.1 no-silent-fallback check: `backend: http` against a
     /// provider whose HTTP transport is not wired must fail structurally, not
     /// silently fall back to CLI.
     pub fn has_http_transport(self) -> bool {
         matches!(self, Provider::Claude)
+    }
+
+    /// Whether Orbit ships a CLI runtime for this provider. `openai_compat` is
+    /// HTTP-only, so `backend: cli` selecting it must fail structurally rather
+    /// than fall back. All other canonical providers have a CLI runtime.
+    pub fn has_cli_runtime(self) -> bool {
+        !matches!(self, Provider::OpenaiCompat)
+    }
+
+    /// Whether the model-neutral Worker leaf executor can execute this
+    /// provider. Worker only wires the CLI agent families; `ollama` and
+    /// `openai_compat` are Orbit-canonical capabilities Worker does not run.
+    /// Preserving this distinction is an explicit ORB-10091 constraint — Orbit
+    /// keeps the wider set even though Worker cannot execute all of it.
+    pub fn is_worker_executable(self) -> bool {
+        matches!(
+            self,
+            Provider::Claude | Provider::Codex | Provider::Gemini | Provider::Grok
+        )
+    }
+}
+
+impl fmt::Display for Provider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for Provider {
+    type Err = ProviderParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Provider::parse(value)
     }
 }
 

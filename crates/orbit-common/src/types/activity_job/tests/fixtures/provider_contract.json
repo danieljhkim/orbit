@@ -1,0 +1,51 @@
+{
+  "contract": "constellation-provider-resolution",
+  "contract_version": "1.0.0",
+  "source": "Polaris ORB-10089 (contract from ORB-10058); Orbit consumer ORB-10091",
+  "note": "Pinned local copy of the shared Constellation provider-identity contract. Cross-workspace dependencies are intentionally NOT encoded, so this file is the Orbit-side source of truth. Bump contract_version and update the rows whenever the upstream Polaris contract changes; the table-driven tests in tests/activity_v2.rs assert the orbit-common Provider surface against every row.",
+  "providers": [
+    {
+      "canonical": "claude",
+      "aliases": [],
+      "has_cli_runtime": true,
+      "has_http_transport": true,
+      "worker_executable": true
+    },
+    {
+      "canonical": "codex",
+      "aliases": [],
+      "has_cli_runtime": true,
+      "has_http_transport": false,
+      "worker_executable": true
+    },
+    {
+      "canonical": "gemini",
+      "aliases": [],
+      "has_cli_runtime": true,
+      "has_http_transport": false,
+      "worker_executable": true
+    },
+    {
+      "canonical": "grok",
+      "aliases": [],
+      "has_cli_runtime": true,
+      "has_http_transport": false,
+      "worker_executable": true
+    },
+    {
+      "canonical": "ollama",
+      "aliases": [],
+      "has_cli_runtime": true,
+      "has_http_transport": false,
+      "worker_executable": false
+    },
+    {
+      "canonical": "openai_compat",
+      "aliases": ["openai-compat"],
+      "has_cli_runtime": false,
+      "has_http_transport": false,
+      "worker_executable": false
+    }
+  ],
+  "unknown_provider_examples": ["", "   ", "anthropic", "openai", "gpt", "claude-3", "grokk"]
+}

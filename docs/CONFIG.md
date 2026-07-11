@@ -39,7 +39,7 @@ A **crew** assigns models to the three roles in the ship pipeline: `planner`, `i
 | Field | Purpose | Values |
 |---|---|---|
 | `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-5.5`, `pro`, `grok-build`) |
-| `provider` | Agent family | `claude`, `codex`, `gemini`, `grok` |
+| `provider` | Agent family | `claude`, `codex`, `gemini`, `grok` (the CLI-executable families; see [Provider identity and resolution](#provider-identity-and-resolution) for the full canonical set) |
 | `backend` | How Orbit dispatches the agent | `cli` (today the only supported value for these roles) |
 
 Example — a single-family Codex crew:
@@ -59,6 +59,47 @@ You can define any number of crews. Set the workspace-wide fallback with `workfl
 Crews are validated at load time: each role must have non-empty `model`, `provider`, and `backend`; `workflow.default_crew` must name a defined crew.
 
 > **Note.** Earlier Orbit versions used `[agent.<role>]` tables. That schema was removed in [ORB-00058](../.orbit/) — config load now hard-errors if `[agent.*]` is present. Migrate to `[crews.<name>]` + `workflow.default_crew`.
+
+---
+
+## Provider identity and resolution
+
+Every `provider` string Orbit reads — in `[crews.<name>]` roles, in an activity's inline `provider`, and in setup detection — is parsed through **one canonical surface** (`orbit_common::types::activity_job::Provider`, ORB-10091). Centralizing parsing means the crew layer, the agent-role resolver, the CLI executor, and reconciliation cannot disagree with each other or with Worker/Bridge about what a provider name means.
+
+### Canonical providers
+
+| Canonical id | Aliases | CLI runtime | HTTP transport | Worker-executable |
+|---|---|---|---|---|
+| `claude` | — | yes | yes | yes |
+| `codex` | — | yes | no | yes |
+| `gemini` | — | yes | no | yes |
+| `grok` | — | yes | no | yes |
+| `ollama` | — | yes | no | **no** |
+| `openai_compat` | `openai-compat` | **no** (HTTP-only) | no | **no** |
+
+- **Parsing is case- and whitespace-insensitive.** `Claude`, `  claude `, and `CLAUDE` all resolve to `claude`. Aliases (e.g. `openai-compat`) normalize to their canonical id.
+- **Canonical ≠ Worker-executable.** Orbit's canonical set is deliberately wider than what the model-neutral Worker leaf executor can run: `ollama` and `openai_compat` are first-class Orbit providers but Worker does not execute them. This distinction is preserved on purpose — do not narrow the canonical set to Worker's subset.
+- **`openai_compat` is HTTP-only.** It has no CLI runtime, so selecting it with `backend = "cli"` fails structurally (see below) rather than falling back.
+
+### Resolution precedence
+
+For a role's effective `(provider, model, backend)` the resolver applies, per field:
+
+1. **Explicit** value on the activity/step (inline spec).
+2. **Task crew** — `task.crew` on the task artifact.
+3. **Workspace default crew** — `[workflow].default_crew`.
+4. **Environment / system default** — what `orbit init`'s detection seeds when nothing above is set.
+
+A field is only overridden by a lower-precedence layer when that layer supplies a value; an override that omits a field (e.g. a crew role that sets `model` but leaves `provider` unparseable) leaves the higher-precedence value in place. This is why **persisted provider identity is never re-defaulted** during reconciliation: a resolved provider already recorded on a run is preserved, not silently reset to the enum default.
+
+### No silent fallback
+
+Explicit selections that are unsupported or unavailable **fail with a stable diagnostic and never fall back** to a different runtime:
+
+- `provider openai_compat has no CLI runtime (HTTP-only)` — a CLI-executable dispatch selected an HTTP-only provider.
+- `unknown provider '<x>'; expected one of claude, codex, gemini, grok, ollama, openai_compat — no CLI runtime registered` — the provider string did not resolve to a canonical id.
+
+An **unrecognized `[crews.<name>].provider` value** is the one non-fatal case: it is logged (`orbit.config.crew` warn) and that field falls back to the activity's inline `provider`, because a config typo should not coerce dispatch onto a wrong runtime — the inline value is the known-good identity, not a default guess.
 
 ---
 
