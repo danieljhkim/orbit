@@ -10,6 +10,8 @@
 ### Highlights
 
 - **Remote dashboard task actions now reach the selected workspace**: `approve`/`reject`/`archive` used a raw `fetch()` that skipped the workspace-routing helper, so they silently no-op'd against a non-default remote workspace; the workspace selector also no longer renders its filesystem path beneath the dropdown. ([ORB-10124])
+- **CI runner ENOSPC fixes**: the coverage and `ci` jobs reclaim ~25-30 GB of preinstalled runner bloat before building, set `CARGO_INCREMENTAL=0` and `CARGO_PROFILE_TEST_DEBUG=line-tables-only` to shrink `target/`, and the coverage cache is now deps-only (no instrumented `target/`). ([ORB-10126])
+
 - **Constellation crew catalog uses model-level names**: the checked-in Orbit workspace now offers Claude `opus`/`sonnet`/`fable` and Codex `sol`/`terra`/`luna` crews, defaulting to `opus`. ([ORB-10133])
 
 - **Codex init default avoids nested sandboxing**: fresh Orbit configurations now seed Codex with `danger-full-access`, leaving Orbit and the host as the execution boundary. ([ORB-10131])

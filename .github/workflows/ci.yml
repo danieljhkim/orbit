@@ -10,6 +10,13 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # [ORB-10126] ENOSPC controls on ubuntu-latest (~14 GB free). Incremental
+  # artifacts roughly double target/ and are useless on ephemeral runners;
+  # full test debuginfo is the single biggest target-size lever. Coverage
+  # only needs line tables, so trim the whole workspace test profile to
+  # line-tables-only (deps included) — 50–70% smaller target/.
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
   NEXTEST_VERSION: 0.9.136
   NEXTEST_LINUX_SHA256: a098eed56f2dd88c7fdca1e554a6b99fa1ffbd2a7a1c41b865700112981f6f52
   CARGO_DENY_VERSION: 0.19.9
@@ -100,6 +107,25 @@ jobs:
     name: Coverage (informational)
     runs-on: ubuntu-latest
     steps:
+      # [ORB-10126] Reclaim ~25-30 GB of preinstalled runner bloat before the
+      # instrumented build. No maintained free-disk action is pinned in this
+      # repo, so an explicit rm list keeps the repo's pinned-action convention
+      # intact (nothing new to pin/audit). df -h brackets it for diagnosis.
+      - name: Free up runner disk space
+        run: |
+          set -euo pipefail
+          echo "Disk before cleanup:"
+          df -h /
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc /usr/local/.ghcup
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/swift
+          echo "Disk after cleanup:"
+          df -h /
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
@@ -109,15 +135,18 @@ jobs:
         with:
           components: llvm-tools-preview
 
+      # [ORB-10126] Deps-only cache: the instrumented target/ is dropped from
+      # the cache path (it churns near actions/cache's ~10 GB cap and its
+      # restore competes with fresh instrumented artifacts + profraw for disk).
+      # Only the immutable registry/git deps are cached here.
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-coverage-deps-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-coverage-
+            ${{ runner.os }}-cargo-coverage-deps-
 
       # Same pinned-tarball convention as the nextest install in the ci job.
       - name: Install cargo-llvm-cov
@@ -150,10 +179,34 @@ jobs:
           path: lcov.info
           if-no-files-found: error
 
+      # [ORB-10126] Confirm headroom survived the instrumented build (runs even
+      # if a prior step failed, so an ENOSPC crash still surfaces disk state).
+      - name: Report disk usage
+        if: always()
+        run: df -h /
+
   ci:
     name: Check / Clippy / Test
     runs-on: ubuntu-latest
     steps:
+      # [ORB-10126] Same runner-bloat reclaim as the coverage job; the ci job
+      # compiles the whole workspace from the same target/ and sits close to
+      # the ubuntu-latest disk limit. Runs ahead of the build.
+      - name: Free up runner disk space
+        run: |
+          set -euo pipefail
+          echo "Disk before cleanup:"
+          df -h /
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc /usr/local/.ghcup
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/swift
+          echo "Disk after cleanup:"
+          df -h /
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
@@ -205,6 +258,11 @@ jobs:
 
       - name: Run CI guardrails
         run: ./scripts/ci-guardrails.sh
+
+      # [ORB-10126] Confirm disk headroom survived the workspace build/test.
+      - name: Report disk usage
+        if: always()
+        run: df -h /
 
       - name: Create orbit task on CI failure
         if: failure() && github.event_name == 'pull_request'
