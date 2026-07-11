@@ -9,6 +9,8 @@
 
 ### Highlights
 
+- **CI runner ENOSPC fixes**: the coverage and `ci` jobs reclaim ~25-30 GB of preinstalled runner bloat before building, set `CARGO_INCREMENTAL=0` and `CARGO_PROFILE_TEST_DEBUG=line-tables-only` to shrink `target/`, and the coverage cache is now deps-only (no instrumented `target/`). ([ORB-10126])
+
 - **Constellation crew catalog uses model-level names**: the checked-in Orbit workspace now offers Claude `opus`/`sonnet`/`fable` and Codex `sol`/`terra`/`luna` crews, defaulting to `opus`. ([ORB-10133])
 
 - **Codex init default avoids nested sandboxing**: fresh Orbit configurations now seed Codex with `danger-full-access`, leaving Orbit and the host as the execution boundary. ([ORB-10131])
