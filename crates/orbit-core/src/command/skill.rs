@@ -33,7 +33,7 @@ const DEFAULT_SKILL_FILES: [(&str, &str); 6] = [
     ),
 ];
 
-const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 3] = [
+const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 4] = [
     (
         "orbit-workflow",
         "references/debug-job-failure.md",
@@ -43,6 +43,11 @@ const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 3] = [
         "orbit-workflow",
         "references/common_failures.md",
         include_str!("../../assets/skills/orbit-workflow/references/common_failures.md"),
+    ),
+    (
+        "orbit-workflow",
+        "references/operational-logs.md",
+        include_str!("../../assets/skills/orbit-workflow/references/operational-logs.md"),
     ),
     (
         "orbit",
