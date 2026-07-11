@@ -4,6 +4,7 @@ use std::fs;
 use std::io::ErrorKind;
 
 use crate::state::Ws;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query};
 use axum::response::{IntoResponse, Json, Response};
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -27,6 +28,28 @@ pub(super) struct AdrsQuery {
     limit: Option<usize>,
     #[serde(default)]
     offset: Option<usize>,
+}
+
+/// Create body for `POST /adrs`. Mirrors the `orbit.adr.add` tool schema:
+/// `title` and `body` are required (validated in the handler for a structured
+/// 400 rather than serde's default rejection); the remaining fields default to
+/// empty. Status is not a field — the tool always creates a Proposed ADR.
+#[derive(Deserialize, Default)]
+pub(super) struct CreateAdrBody {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    owner: Option<String>,
+    #[serde(default)]
+    related_features: Vec<String>,
+    #[serde(default)]
+    related_tasks: Vec<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    paths: Vec<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -88,6 +111,53 @@ pub(super) async fn list_adrs(Ws(runtime): Ws, Query(query): Query<AdrsQuery>) -
 pub(super) async fn get_adr(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     match adr_show(&runtime, &id) {
         Ok(adr) => Json(adr).into_response(),
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+/// `POST /adrs` — record a new Proposed ADR, mirroring `orbit adr` creation
+/// semantics (`orbit.adr.add`). The freshly created ADR is returned with its
+/// body attached so callers see the same shape `GET /adrs/:id` produces, and it
+/// is immediately visible via the existing read surfaces. Malformed payloads
+/// (unparseable JSON, or a missing/empty `title` or `body`) are rejected with a
+/// structured 400; deeper validation errors from the tool surface through
+/// [`map_runtime_error`].
+pub(super) async fn create_adr_action(
+    Ws(runtime): Ws,
+    body: Result<Json<CreateAdrBody>, JsonRejection>,
+) -> Response {
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(rejection) => {
+            return bad_request(format!("malformed ADR create payload: {rejection}"));
+        }
+    };
+    let Some(title) = body.title.as_deref().and_then(non_empty_string) else {
+        return bad_request("request body must include non-empty `title`".to_string());
+    };
+    let Some(adr_body) = body.body.as_deref().and_then(non_empty_string) else {
+        return bad_request("request body must include non-empty `body`".to_string());
+    };
+
+    let mut input = json!({
+        "title": title,
+        "body": adr_body,
+        "related_features": body.related_features,
+        "related_tasks": body.related_tasks,
+        "tags": body.tags,
+        "paths": body.paths,
+    });
+    if let Some(owner) = body.owner.as_deref().and_then(non_empty_string)
+        && let Some(object) = input.as_object_mut()
+    {
+        object.insert("owner".to_string(), Value::String(owner));
+    }
+
+    match run_adr_tool(&runtime, "orbit.adr.add", input) {
+        Ok(mut adr) => match attach_body(&runtime, &mut adr) {
+            Ok(()) => Json(adr).into_response(),
+            Err(e) => map_runtime_error(e),
+        },
         Err(e) => map_runtime_error(e),
     }
 }

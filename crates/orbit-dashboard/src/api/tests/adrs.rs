@@ -50,6 +50,31 @@ fn adr_id(adr: &Value) -> &str {
     adr["id"].as_str().expect("ADR id")
 }
 
+async fn request_create(
+    runtime: OrbitRuntime,
+    origin: Option<&str>,
+    body: Option<Value>,
+) -> axum::response::Response {
+    let mut builder = Request::builder().method(Method::POST).uri("/adrs");
+    if let Some(origin) = origin {
+        builder = builder.header(header::ORIGIN, origin);
+    }
+    let request = if let Some(body) = body {
+        builder
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("request")
+    } else {
+        builder.body(Body::empty()).expect("request")
+    };
+
+    router()
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(request)
+        .await
+        .expect("response")
+}
+
 async fn request_accept(
     runtime: OrbitRuntime,
     id: &str,
@@ -95,6 +120,113 @@ async fn request_supersede(
         .oneshot(request)
         .await
         .expect("response")
+}
+
+#[tokio::test]
+async fn create_persists_proposed_adr_and_reads_back() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request_create(
+        runtime.clone(),
+        Some("http://localhost:7878"),
+        Some(json!({
+            "title": "Created over HTTP",
+            "body": ADR_BODY,
+            "owner": TEST_CODEX_MODEL,
+            "related_features": ["dashboard"],
+            "related_tasks": ["ORB-00063"],
+        })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let created = body_json(response).await;
+    let id = created["id"].as_str().expect("created ADR id").to_string();
+    assert_eq!(created["status"], "proposed");
+    assert_eq!(created["title"], "Created over HTTP");
+    assert!(
+        created["body"]
+            .as_str()
+            .is_some_and(|b| b.contains("Fixture decision")),
+        "response carries the ADR body"
+    );
+
+    // On-disk shape matches the CLI/tool: proposed/<ID>/{adr.yaml,body.md}.
+    let adr_dir = runtime.data_root().join("adrs").join("proposed").join(&id);
+    assert!(adr_dir.join("adr.yaml").is_file(), "{}", adr_dir.display());
+    assert!(adr_dir.join("body.md").is_file(), "{}", adr_dir.display());
+
+    // Immediately visible via the existing read surface.
+    let stored = runtime
+        .execute_tool_command(
+            "orbit.adr.show",
+            json!({ "id": id }),
+            None,
+            Some(TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("show created");
+    assert_eq!(stored["id"], id);
+    assert_eq!(stored["status"], "proposed");
+    assert_eq!(stored["title"], "Created over HTTP");
+}
+
+#[tokio::test]
+async fn create_requires_localhost_origin() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request_create(
+        runtime.clone(),
+        None,
+        Some(json!({ "title": "No origin", "body": ADR_BODY })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn create_rejects_missing_title() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request_create(
+        runtime,
+        Some("http://localhost:7878"),
+        Some(json!({ "body": ADR_BODY })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = body_json(response).await;
+    let error = payload["error"].as_str().expect("error");
+    assert!(error.contains("title"), "{error}");
+}
+
+#[tokio::test]
+async fn create_rejects_malformed_json() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = router()
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/adrs")
+                .header(header::ORIGIN, "http://localhost:7878")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{not valid json"))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = body_json(response).await;
+    assert!(
+        payload["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("malformed")),
+        "structured error names the malformed payload"
+    );
 }
 
 #[tokio::test]
