@@ -87,5 +87,7 @@ pub use orbit_store::{
 pub use orbit_store::{
     LearningCreateParams, LearningListEntry, LearningSearchParams, LearningUpdateParams,
 };
+// Routine fire records surfaced by the dashboard's routine-health JSON API.
+pub use orbit_store::{RoutineFireRecord, RoutineFireState};
 pub use runtime::OrbitRuntime;
 pub use runtime::engine::ResolvedCrewProjection;

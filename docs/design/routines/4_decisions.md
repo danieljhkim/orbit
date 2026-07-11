@@ -222,5 +222,9 @@ the workspace opts into `[routines] role = "source"`.
 - [ORB-10001] — authored this design-doc folder (proposal).
 - [ORB-10021] — implemented routines v1; allocated and accepted ADR-0204..ADR-0208.
 - [ORB-10129] — shipped the default triage routine; allocated and accepted ADR-0215.
+- [ORB-10138] — exposed per-routine scheduler health over the dashboard HTTP API
+  (`GET /api/routines`), realizing the single-host half of the §7 cross-host-visibility
+  vision. Read-only projection of `routine_statuses`; no new ADR (no new architectural
+  constraint — mirrors the existing `orbit routine list --json` surface).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
