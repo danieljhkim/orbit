@@ -1,4 +1,5 @@
 use orbit_common::types::ExecutorType;
+use orbit_common::types::activity_job::Provider;
 use orbit_engine::{DispatchError, ResolvedCliExecutor};
 
 use crate::OrbitRuntime;
@@ -57,16 +58,21 @@ pub(super) fn resolve_cli_executor(
         });
     }
 
-    match provider {
-        "claude" | "codex" | "gemini" | "grok" | "ollama" => Ok(ResolvedCliExecutor {
-            command: provider.to_string(),
+    // Canonical provider identity + capability live on the orbit-common
+    // `Provider` surface (ORB-10091). Selecting a provider that parses but has
+    // no CLI runtime (`openai_compat`, HTTP-only) or does not parse at all
+    // fails with a stable diagnostic and never silently falls back to a
+    // different runtime.
+    match Provider::parse(provider) {
+        Ok(parsed) if parsed.has_cli_runtime() => Ok(ResolvedCliExecutor {
+            command: parsed.as_str().to_string(),
             args: Vec::new(),
         }),
-        "openai_compat" => Err(DispatchError::CliInvocationFailed(
-            "provider openai_compat has no CLI runtime (HTTP-only)".to_string(),
-        )),
-        other => Err(DispatchError::CliInvocationFailed(format!(
-            "unknown provider `{other}` — no CLI runtime registered"
+        Ok(parsed) => Err(DispatchError::CliInvocationFailed(format!(
+            "provider {parsed} has no CLI runtime (HTTP-only)"
+        ))),
+        Err(err) => Err(DispatchError::CliInvocationFailed(format!(
+            "{err} — no CLI runtime registered"
         ))),
     }
 }
@@ -89,5 +95,44 @@ mod tests {
 
         assert_eq!(resolved.command, "codex");
         assert_eq!(resolved.args, ["exec", "--json"]);
+    }
+
+    /// Table-driven coverage of executor selection through the centralized
+    /// `Provider` surface (ORB-10091): every provider that ships a CLI runtime
+    /// resolves to a command named after its canonical id; a provider that
+    /// parses but is HTTP-only (`openai_compat`) and a provider that does not
+    /// parse both fail with a stable diagnostic and never fall back.
+    #[test]
+    fn cli_executor_selection_diagnostics_table() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+        for provider in ["claude", "codex", "gemini", "grok", "ollama"] {
+            let resolved = runtime
+                .resolve_cli_executor(provider)
+                .unwrap_or_else(|err| panic!("{provider} should resolve: {err:?}"));
+            assert_eq!(resolved.command, provider, "command for {provider}");
+            assert!(resolved.args.is_empty(), "fallback args for {provider}");
+        }
+
+        let http_only = runtime
+            .resolve_cli_executor("openai_compat")
+            .expect_err("openai_compat is HTTP-only and must not fall back to CLI");
+        assert!(
+            format!("{http_only:?}").contains("no CLI runtime (HTTP-only)"),
+            "http-only diagnostic: {http_only:?}"
+        );
+
+        let unknown = runtime
+            .resolve_cli_executor("bogus_provider")
+            .expect_err("unknown provider must not resolve to a default runtime");
+        let msg = format!("{unknown:?}");
+        assert!(
+            msg.contains("unknown provider"),
+            "unknown diagnostic: {msg}"
+        );
+        assert!(
+            msg.contains("no CLI runtime registered"),
+            "unknown diagnostic: {msg}"
+        );
     }
 }

@@ -61,6 +61,97 @@ fn full_override_replaces_every_field() {
     assert_eq!(resolved.backend, Backend::Http);
 }
 
+/// Table-driven coverage of the field-by-field crew-override precedence
+/// (ORB-10091). Each row states the crew-config override and the expected
+/// resolved triple against a fixed `Provider::Claude` inline spec. The rows
+/// where `config.provider` is `None` assert the persisted/inline provider
+/// identity is preserved and never re-defaulted to `Provider::default()`.
+#[test]
+fn resolve_from_config_precedence_table() {
+    struct Row {
+        name: &'static str,
+        config: Option<AgentRoleConfig>,
+        expect_provider: Provider,
+        expect_model: Option<&'static str>,
+        expect_backend: Backend,
+    }
+
+    let rows = [
+        Row {
+            name: "no crew config -> inline preserved",
+            config: None,
+            expect_provider: Provider::Claude,
+            expect_model: Some(TEST_CLAUDE_MODEL),
+            expect_backend: Backend::Cli,
+        },
+        Row {
+            name: "provider-only override keeps inline model + backend",
+            config: Some(AgentRoleConfig {
+                provider: Some(Provider::Codex),
+                model: None,
+                backend: None,
+            }),
+            expect_provider: Provider::Codex,
+            expect_model: Some(TEST_CLAUDE_MODEL),
+            expect_backend: Backend::Cli,
+        },
+        Row {
+            name: "full override replaces every field",
+            config: Some(AgentRoleConfig {
+                provider: Some(Provider::Codex),
+                model: Some(TEST_CODEX_MODEL.to_string()),
+                backend: Some(Backend::Http),
+            }),
+            expect_provider: Provider::Codex,
+            expect_model: Some(TEST_CODEX_MODEL),
+            expect_backend: Backend::Http,
+        },
+        Row {
+            name: "model-only override preserves persisted provider",
+            config: Some(AgentRoleConfig {
+                provider: None,
+                model: Some(TEST_CODEX_MODEL.to_string()),
+                backend: None,
+            }),
+            expect_provider: Provider::Claude,
+            expect_model: Some(TEST_CODEX_MODEL),
+            expect_backend: Backend::Cli,
+        },
+        Row {
+            name: "backend-only override preserves persisted provider + model",
+            config: Some(AgentRoleConfig {
+                provider: None,
+                model: None,
+                backend: Some(Backend::Http),
+            }),
+            expect_provider: Provider::Claude,
+            expect_model: Some(TEST_CLAUDE_MODEL),
+            expect_backend: Backend::Http,
+        },
+    ];
+
+    let inline = inline_spec();
+    for row in rows {
+        let resolved = resolve_from_config(row.config.as_ref(), &inline);
+        assert_eq!(
+            resolved.provider, row.expect_provider,
+            "provider: {}",
+            row.name
+        );
+        assert_eq!(
+            resolved.model.as_deref(),
+            row.expect_model,
+            "model: {}",
+            row.name
+        );
+        assert_eq!(
+            resolved.backend, row.expect_backend,
+            "backend: {}",
+            row.name
+        );
+    }
+}
+
 #[test]
 fn apply_mutates_spec_in_place() {
     let mut spec = inline_spec();
