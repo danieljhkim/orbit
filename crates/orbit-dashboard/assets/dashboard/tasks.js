@@ -1,7 +1,7 @@
 // Orbit dashboard task-domain rendering and actions.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, statusPill, patchJson, syncNodes } from './common.js';
+import { el, statusPill, patchJson, syncNodes, withWorkspace } from './common.js';
 import { renderMarkdown, renderMarkdownInline } from './markdown.js';
 
 const $ = (id) => document.getElementById(id);
@@ -830,7 +830,7 @@ async function runAction(task, kind, detail, body, btnNode, context, opts = {}) 
   const prior = detail.querySelector(".action-error");
   if (prior) prior.remove();
   try {
-    const res = await fetch(opts.path || `/api/tasks/${encodeURIComponent(task.id)}/${kind}`, {
+    const res = await fetch(withWorkspace(opts.path || `/api/tasks/${encodeURIComponent(task.id)}/${kind}`), {
       method: opts.method || "POST",
       headers: body ? { "content-type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,

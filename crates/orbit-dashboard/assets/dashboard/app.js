@@ -1301,34 +1301,11 @@ function buildWorkspaceSelector() {
 
   select.addEventListener("change", () => {
     setWorkspace(select.value);
-    updateWorkspacePath();
     refreshDashboard();
   });
 
-  // ORB-00037: the option labels stay short (workspace name); the selected
-  // workspace's filesystem location (home-abbreviated to ~ server-side) shows as
-  // a secondary line beneath the <select> to disambiguate same-named workspaces.
-  const pathLine = el("div", { class: "workspace-path" });
-  pathLine.id = "workspace-path";
-  const wrap = el("div", { class: "workspace-select-wrap" }, [select, pathLine]);
-
   const meta = $("meta");
-  meta.insertBefore(wrap, $("refresh-btn"));
-  updateWorkspacePath();
-}
-
-// ORB-00037: render the selected workspace's filesystem path beneath the
-// selector (and as a tooltip). Hidden for the aggregate "All workspaces" view or
-// when the path is unknown/empty.
-function updateWorkspacePath() {
-  const line = $("workspace-path");
-  if (!line) return;
-  const current = getWorkspace();
-  const ws = current && dashboardWorkspaces.find((w) => w.id === current);
-  const loc = (ws && ws.root) || "";
-  line.textContent = loc;
-  line.title = loc;
-  line.style.display = loc ? "" : "none";
+  meta.insertBefore(select, $("refresh-btn"));
 }
 
 function activeRefreshJobs() {

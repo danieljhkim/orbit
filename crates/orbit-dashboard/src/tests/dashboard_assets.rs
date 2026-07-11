@@ -65,22 +65,62 @@ fn dashboard_markdown_call_sites_use_sanitizing_wrapper() {
 
 #[test]
 fn dashboard_surfaces_workspace_location() {
-    // ORB-00037: the selector renders the selected workspace's path as a
-    // secondary line, and each aggregate task shows its workspace location in
-    // the Details box. Asserted against the embedded asset sources since the
-    // dashboard has no JS test runner (see dashboard_markdown_call_sites above).
+    // ORB-10124: the selector shows only the selected workspace's label — the
+    // secondary filesystem-path line (ORB-00037) was removed as distracting
+    // implementation detail. Each aggregate task still shows its workspace
+    // location in the Details box (a separate, unrelated feature). Asserted
+    // against the embedded asset sources since the dashboard has no JS test
+    // runner (see dashboard_markdown_call_sites above).
     let app = include_str!("../../assets/dashboard/app.js");
     let tasks = include_str!("../../assets/dashboard/tasks.js");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
 
-    // Selector secondary line: a dedicated element updated from the entry `root`.
-    assert!(app.contains("workspace-path"));
-    assert!(app.contains("updateWorkspacePath"));
-    assert!(app.contains("ws.root"));
+    // Selector secondary line must be gone, along with its update helper and style.
+    assert!(
+        !app.contains("workspace-path"),
+        "the selector must no longer render a secondary filesystem-path line"
+    );
+    assert!(
+        !app.contains("updateWorkspacePath"),
+        "updateWorkspacePath must be removed along with the path line it rendered"
+    );
+    assert!(
+        !css.contains(".workspace-path"),
+        "the workspace-path CSS rule must be removed with its markup"
+    );
 
     // Task Details box: a "location" field driven by the tagged workspace_root.
     assert!(tasks.contains("workspace_root"));
     assert!(tasks.contains(r#"addField(rightCol, "location""#));
     assert!(tasks.contains("ws-location"));
+}
+
+#[test]
+fn dashboard_task_actions_route_to_selected_workspace() {
+    // ORB-10124: approve/reject/archive built their request with a raw
+    // `fetch()`, bypassing the `withWorkspace()` helper that every other
+    // dashboard request goes through (fetchJson/requestJson in common.js).
+    // Against a remote registered workspace the mutation silently applied to
+    // the default workspace (or 400'd) instead of the selected one, so the
+    // dashboard never reflected the change. Asserted against the embedded
+    // asset sources since the dashboard has no JS test runner.
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+    let common = include_str!("../../assets/dashboard/common.js");
+
+    assert!(
+        common.contains("export function withWorkspace("),
+        "withWorkspace must be exported from common.js so other modules can reuse it"
+    );
+    assert!(
+        tasks.contains("withWorkspace } from './common.js'"),
+        "tasks.js must import withWorkspace from common.js"
+    );
+    assert!(
+        tasks.contains(
+            "fetch(withWorkspace(opts.path || `/api/tasks/${encodeURIComponent(task.id)}/${kind}`)"
+        ),
+        "runAction (approve/reject/archive) must route its request through withWorkspace"
+    );
 }
 
 #[test]
