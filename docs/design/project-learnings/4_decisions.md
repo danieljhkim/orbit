@@ -3,7 +3,7 @@ summary: "Project Learnings — Decisions"
 type: design
 title: "Project Learnings — Decisions"
 owner: claude
-last_updated: 2026-07-06
+last_updated: 2026-07-11
 status: Draft
 feature: project-learnings
 doc_role: decisions
@@ -202,6 +202,30 @@ Alternatives considered:
 - Duplicate-check regains its original character: "this already exists" is a signal to the human curator, not a mechanical vote against the duplicate. If a stronger signal is needed later, it can be added with usage data behind it.
 - Cost: breaking change to the MCP/CLI/store trait surface; the `EXPECTED_INACTIVE_TOOL_NAMES` length canary moves from 26 to 22. External callers of the removed tools or types must migrate to `update`/`supersede`/`evidence`. Documented under Breaking Changes in `CHANGELOG.md` [ORB-10046].
 - Cost: the ranking signal ADR-0157 was designed for — repeated task-anchored validation of an older but still load-bearing learning — is not replaced. `updated_at` (bumped on every `update`) is the natural proxy; if evidence emerges that it's insufficient, a scoped feedback primitive can be reintroduced with real usage data behind it.
+
+---
+
+## ADR-0212 — Workspace-scope the learning envelope index in the shared host-global database
+
+**Status:** Accepted · 2026-07 · [ORB-10113]
+
+**Context.** The learning envelope index lives in the host-global `~/.orbit/orbit.db`, but `learnings_index` had no workspace discriminator and was keyed only by learning ID. Each workspace runtime pairs that shared table with its own workspace-local `.orbit/learnings/` YAML root, and `sync_learnings` truncated the entire table before reinserting one workspace's records. During the multi-workspace ship sweep on `dk1`, runtimes searched index rows written by *other* workspaces, emitting repeated `skipping learning reminder because the YAML body is missing … learning not found: L-0002` warnings during reminder hydration. This is more than log noise: several legacy workspaces hold different records under the same canonical-looking ID (e.g. `L-0002`), so when the foreign ID also exists locally the existence check passes and Orbit can silently inject the foreign indexed summary under the local learning ID. This directly contradicts the design's §5.3 framing ("no shared store across workspaces") — the store *is* shared; only the YAML was ever partitioned.
+
+Alternatives considered:
+
+| Approach | Profile |
+|----------|---------|
+| **Attribute legacy rows to a workspace during migration** | Impossible to do reliably — the pre-scoping table records no owner, and duplicate IDs across workspaces make any guess a potential silent-injection vector. |
+| **Move the index into each workspace's `.orbit/state/`** | Ends sharing entirely, but fragments the single host-global store the rest of the SQLite state (`job_runs`, `v2_audit_events`) already lives in, and duplicates open/migration cost per workspace. |
+| **Composite `(workspace_id, id)` key (this ADR)** | Keeps one shared table but partitions rows by the stable registered workspace ID, matching how `job_runs`/`v2_audit_events` already scope. |
+
+**Decision.** Re-key `learnings_index` by the composite `(workspace_id, id)`, where `workspace_id` is the **stable registered Orbit workspace ID** read from `.orbit/config.yaml` (the same id used for `job_runs` and `v2_audit_events`), not a path-derived label that changes across worktrees. Every index operation — search, upsert, delete, truncate/rebuild, cache materialization, and reminder lookup — is filtered by the runtime's own `workspace_id`; `LearningFileStore` carries the id and passes it to each `Store` index method. A v2 schema migration (`learnings_index_workspace_scope`) drops and recreates the table with the composite key. Because YAML is the source of truth and legacy rows cannot be attributed to a workspace, the migration **discards every envelope row** and lets each runtime rebuild its own via `sync`. The migration touches only SQLite and never reads or modifies any `learning.yaml`.
+
+**Consequences.**
+- Syncing workspace A can no longer read, truncate, or overwrite workspace B's rows; sequential and concurrent multi-workspace sweeps over the shared database are safe.
+- The reminder defensive local-body check (`get_learning` before injecting a summary) still skips genuine *same-workspace* index ghosts, which is now the only class of ghost it can see.
+- Cost: existing envelope rows are discarded on upgrade and rebuilt from YAML on each workspace's next `sync`. The documented rollback is the same operation — rerun `orbit learning sync` per workspace; discarded legacy rows are intentionally not restored.
+- Cost: the design doc §2.2 schema and §5.3 sharing statement were stale and are corrected in the same change; any external reader of `learnings_index` must now include `workspace_id` in its predicates.
 
 ---
 

@@ -84,12 +84,14 @@ pub fn workspace_learning_backend(
     learning_dir: PathBuf,
     store: Store,
     id_allocator: IdAllocator,
+    workspace_id: String,
 ) -> Result<Arc<dyn LearningStoreBackend>, orbit_common::types::OrbitError> {
     LearningFileStore::reject_legacy_flat_layout(&learning_dir)?;
     Ok(Arc::new(LearningFileStore::new_with_index_and_allocator(
         learning_dir,
         store,
         id_allocator,
+        workspace_id,
     )))
 }
 

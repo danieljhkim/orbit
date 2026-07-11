@@ -107,7 +107,7 @@ impl LearningFileStore {
             std::fs::remove_dir(parent).map_err(|e| OrbitError::Io(e.to_string()))?;
         }
         if let Some(index) = &self.index {
-            index.delete_learning_index_row(id)?;
+            index.delete_learning_index_row(&self.workspace_id, id)?;
         }
         self.invalidate_envelope_cache();
         Ok(true)

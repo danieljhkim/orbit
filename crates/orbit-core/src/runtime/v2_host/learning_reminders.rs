@@ -315,4 +315,88 @@ mod tests {
         assert_eq!(reminders[0].summary, "Available reminder.");
         assert!(!reminders.iter().any(|reminder| reminder.id == missing.id));
     }
+
+    /// ORB-10113: two workspaces bound to the same host-global database must
+    /// not cross-pollinate reminders. Workspace A's task never receives
+    /// workspace B's learning summary, while a genuine same-workspace index
+    /// row whose YAML body is missing is still skipped by the defensive check.
+    #[test]
+    fn reminders_never_cross_workspaces_but_skip_same_workspace_ghosts() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let global_root = root.path().join("global");
+        std::fs::create_dir_all(&global_root).expect("global root");
+        let ws_a = root.path().join("repo-a").join(".orbit");
+        let ws_b = root.path().join("repo-b").join(".orbit");
+        std::fs::create_dir_all(&ws_a).expect("ws a");
+        std::fs::create_dir_all(&ws_b).expect("ws b");
+
+        // Both runtimes share `global_root/orbit.db`, so they share the single
+        // `learnings_index` table but have distinct registered workspace ids.
+        let runtime_a = OrbitRuntime::from_roots(&global_root, &ws_a).expect("runtime a");
+        let runtime_b = OrbitRuntime::from_roots(&global_root, &ws_b).expect("runtime b");
+
+        // Workspace B owns a learning on a shared path glob. Its canonical id
+        // is `L-0001`, colliding with workspace A's first record — the exact
+        // duplicate-id shape that let a foreign summary leak in before scoping.
+        create_learning(
+            &runtime_b,
+            "workspace B leak",
+            &["crates/orbit-engine/**"],
+            &[],
+            Some(9),
+        );
+
+        // Workspace A: a genuine same-workspace ghost (index row whose YAML is
+        // removed) plus a live record. The ghost must be skipped, the live one
+        // kept, and B's row must never appear.
+        let ghost = create_learning(
+            &runtime_a,
+            "workspace A ghost",
+            &["crates/orbit-engine/**"],
+            &[],
+            Some(5),
+        );
+        create_learning(
+            &runtime_a,
+            "workspace A live",
+            &["crates/orbit-engine/**"],
+            &[],
+            Some(1),
+        );
+        std::fs::remove_file(
+            runtime_a
+                .paths()
+                .learnings_dir
+                .join(&ghost.id)
+                .join("learning.yaml"),
+        )
+        .expect("remove ghost yaml");
+
+        let task = task_with_context(
+            &runtime_a,
+            vec!["dir:crates/orbit-engine/src".to_string()],
+            Vec::new(),
+        );
+        let reminders = runtime_a
+            .learning_reminders_for_task(
+                &json!({"task_id": task.id}),
+                LearningInjectionCaps::default(),
+            )
+            .expect("learning reminders");
+
+        assert_eq!(
+            reminders.len(),
+            1,
+            "only workspace A's live learning should remind: {reminders:?}"
+        );
+        assert_eq!(reminders[0].summary, "workspace A live");
+        assert!(
+            !reminders.iter().any(|r| r.summary == "workspace B leak"),
+            "workspace B's learning must not cross into workspace A",
+        );
+        assert!(
+            !reminders.iter().any(|r| r.id == ghost.id),
+            "the same-workspace ghost (missing YAML) must be skipped",
+        );
+    }
 }

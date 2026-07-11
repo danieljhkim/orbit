@@ -67,9 +67,9 @@ impl LearningFileStore {
             return Ok(());
         };
         let learnings = self.list_learnings(None)?;
-        index.truncate_learning_index()?;
+        index.truncate_learning_index(&self.workspace_id)?;
         for learning in &learnings {
-            index.upsert_learning_index_row(learning)?;
+            index.upsert_learning_index_row(&self.workspace_id, learning)?;
         }
         self.invalidate_envelope_cache();
         Ok(())
@@ -236,7 +236,7 @@ impl LearningFileStore {
 
         // Build under the index/yaml path, then publish.
         let built: Vec<EnvelopeSnapshot> = if let Some(index) = &self.index {
-            let rows = index.list_active_learning_rows()?;
+            let rows = index.list_active_learning_rows(&self.workspace_id)?;
             rows.into_iter()
                 .map(|row| {
                     build_envelope(
@@ -284,7 +284,7 @@ impl LearningFileStore {
         let Some(index) = &self.index else {
             return;
         };
-        if let Err(err) = index.upsert_learning_index_row(learning) {
+        if let Err(err) = index.upsert_learning_index_row(&self.workspace_id, learning) {
             orbit_common::tracing::warn!(
                 target: "orbit.store.learning",
                 learning_id = learning.id.as_str(),
