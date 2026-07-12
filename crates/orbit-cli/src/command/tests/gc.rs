@@ -26,10 +26,40 @@ fn gc_help_lists_every_target_and_uniform_flags() {
         "--retention",
         "--success-retention-days",
         "--failure-retention-days",
+        "--archive-after-days",
+        "--purge-after-days",
+        "--failure-archive-after-days",
+        "--failure-purge-after-days",
         "--workspace",
         "--global",
     ] {
         assert!(help.contains(value), "missing `{value}` from help:\n{help}");
+    }
+}
+
+#[test]
+fn gc_parses_qualified_run_retention_overrides() {
+    let cli = Cli::parse_from([
+        "orbit",
+        "gc",
+        "runs",
+        "--archive-after-days",
+        "7",
+        "--purge-after-days",
+        "30",
+        "--failure-archive-after-days",
+        "14",
+        "--failure-purge-after-days",
+        "90",
+    ]);
+    match cli.command {
+        Commands::Gc(command) => {
+            assert_eq!(command.archive_after_days, Some(7));
+            assert_eq!(command.purge_after_days, Some(30));
+            assert_eq!(command.failure_archive_after_days, Some(14));
+            assert_eq!(command.failure_purge_after_days, Some(90));
+        }
+        _ => panic!("expected gc command"),
     }
 }
 

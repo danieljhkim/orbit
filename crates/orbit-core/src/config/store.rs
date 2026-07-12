@@ -285,6 +285,10 @@ pub struct ConfigSnapshot {
     pub routines_source: bool,
     pub worktree_gc_success_retention_days: u64,
     pub worktree_gc_failure_retention_days: u64,
+    pub run_gc_archive_after_days: u64,
+    pub run_gc_purge_after_days: u64,
+    pub run_gc_failure_archive_after_days: u64,
+    pub run_gc_failure_purge_after_days: u64,
     pub tasks_id_start: Option<u32>,
     pub duel_candidates: Vec<String>,
     pub duel_models: std::collections::BTreeMap<String, String>,
@@ -299,6 +303,8 @@ impl From<&RuntimeConfig> for ConfigSnapshot {
         // recovers the exact MiB values the user set or would set.
         const BYTES_PER_MB: u64 = 1024 * 1024;
         let log_rotation = config.log_rotation();
+        let (run_archive, run_purge, run_failure_archive, run_failure_purge) =
+            config.run_gc_retention_days();
         Self {
             execution_env_inherit: config.execution_env.inherit(),
             execution_env_pass: config.execution_env.pass().to_vec(),
@@ -321,6 +327,10 @@ impl From<&RuntimeConfig> for ConfigSnapshot {
             routines_source: config.routines_source(),
             worktree_gc_success_retention_days: config.worktree_gc_success_retention_days(),
             worktree_gc_failure_retention_days: config.worktree_gc_failure_retention_days(),
+            run_gc_archive_after_days: run_archive,
+            run_gc_purge_after_days: run_purge,
+            run_gc_failure_archive_after_days: run_failure_archive,
+            run_gc_failure_purge_after_days: run_failure_purge,
             tasks_id_start: config.tasks_id_start(),
             duel_candidates: config.duel_config().candidates.clone(),
             duel_models: config.duel_config().models.clone(),
@@ -341,6 +351,12 @@ impl ConfigSnapshot {
             "execution.codex.sandbox" => json!(self.codex_sandbox),
             "execution.env.pass" => json!(self.execution_env_pass),
             "graph.editing" => json!(self.graph_editing),
+            "gc.runs.archive_after_days" => json!(self.run_gc_archive_after_days),
+            "gc.runs.purge_after_days" => json!(self.run_gc_purge_after_days),
+            "gc.runs.failure_archive_after_days" => {
+                json!(self.run_gc_failure_archive_after_days)
+            }
+            "gc.runs.failure_purge_after_days" => json!(self.run_gc_failure_purge_after_days),
             "gc.worktrees.failure_retention_days" => {
                 json!(self.worktree_gc_failure_retention_days)
             }

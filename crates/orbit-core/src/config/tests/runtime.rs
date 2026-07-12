@@ -514,3 +514,19 @@ fn worktree_gc_retention_classes_are_independently_configurable() {
     assert_eq!(configured.worktree_gc_success_retention_days(), 2);
     assert_eq!(configured.worktree_gc_failure_retention_days(), 30);
 }
+
+#[test]
+fn run_gc_archive_and_purge_ages_are_independently_configurable_and_ordered() {
+    let defaults = load_config("").expect("default config loads");
+    assert_eq!(defaults.run_gc_retention_days(), (7, 30, 30, 90));
+
+    let configured = load_config(
+        "[gc.runs]\narchive_after_days = 2\npurge_after_days = 10\nfailure_archive_after_days = 14\nfailure_purge_after_days = 60\n",
+    )
+    .expect("run retention config loads");
+    assert_eq!(configured.run_gc_retention_days(), (2, 10, 14, 60));
+
+    let error = load_config("[gc.runs]\narchive_after_days = 10\npurge_after_days = 2\n")
+        .expect_err("purge before archive must fail");
+    assert!(error.to_string().contains("purge ages"), "{error}");
+}

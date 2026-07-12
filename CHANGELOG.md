@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Terminal job-run retention**: `orbit gc runs` archives then purges conclusively terminal runs with independent success/failure ages, while retaining active, resumable, live, task/reservation/scoreboard-linked runs and leaving audit evidence to `orbit gc audit`. ([ORB-10183])
 - **Managed worktree collection**: `orbit gc worktrees` plans or applies retention while protecting live, dirty, resumable, unmerged, and unpushed work. A per-run claim guard shared with the run claim/start path is held across revalidation and `git worktree remove`, so a concurrent claim blocks GC (fail closed) or forces re-evaluation. Terminal cleanup shares the classifier. ([ORB-10182])
 - **Shared garbage-collection framework**: `orbit gc` now exposes every retention target with plan-first/apply, scope, retention, locking, immutable candidate, safety revalidation, manifest, and equivalent human/JSON report contracts for domain collectors. ([ORB-10180])
 - **Managed-skill ownership + retirement metadata**: skill seed/link records skill id, a no-follow whole-tree fingerprint (paths, entry types, contents of every generated file), version, owned root, and managed link destinations in a `.ownership.json` manifest, with tombstones preserving retired fingerprints. Modified/added/removed files and embedded symlinks fail closed; unlink/teardown remove only proven Orbit-owned links. ([ORB-10181])

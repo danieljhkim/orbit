@@ -10,7 +10,7 @@ summary: Specifies GC grammar, collector ownership, retention clocks, safety inv
 tags: [gc, retention, safety]
 paths: ["crates/orbit-cli/src/command/gc/**", "crates/orbit-core/src/command/gc/**", "crates/orbit-core/src/config/**"]
 related_features: [gc, activity-job, auditability, task-artifacts, worktree-artifacts]
-related_artifacts: [ORB-10178, ORB-10180, ORB-10181, ADR-0220]
+related_artifacts: [ORB-10178, ORB-10180, ORB-10181, ORB-10183, ADR-0220]
 ---
 
 # Garbage Collection — Design
@@ -135,6 +135,17 @@ stages with distinct ages, and failed/interrupted evidence may have a longer
 retention. Active, resumable, task-held, or liveness-inconclusive runs are
 protected. Audit envelopes and blobs are not run-owned deletion side effects;
 they remain the audit collector's responsibility.
+
+After [ORB-10183], archive is represented durably on the authoritative run row;
+ordinary run queries hide archived rows while GC inventory retains them until
+purge. Purge transactionally removes the row, cascading steps and checkpoint
+state and deleting released owner reservations, while active reservations,
+task/retry references, and aggregate scoreboard references remain hard holds.
+Legacy bundles move beneath `state/job-runs/archived/` before the row stage is
+committed, making interruption and retry idempotent. The four policy keys are
+`gc.runs.archive_after_days`, `purge_after_days`,
+`failure_archive_after_days`, and `failure_purge_after_days`; purge ages may
+not be shorter than their archive ages.
 
 ### 3.3 Logs (global)
 
@@ -395,7 +406,7 @@ limited to non-destructive setup and active-file rotation.
 - [ORB-10178] — defined this retention and safety contract.
 - [ORB-10180] — will implement the shared GC framework.
 - [ORB-10182] — implemented managed worktree collection and terminal cleanup reuse.
-- [ORB-10183] — will implement run retention.
+- [ORB-10183] — implemented staged terminal run archival and purge.
 - [ORB-10184] — will unify log retention.
 - [ORB-10185] — will implement diagnostics retention.
 - [ORB-10186] — will implement audit and blob collection.

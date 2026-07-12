@@ -11,8 +11,10 @@ use fs2::FileExt;
 use orbit_common::types::{OrbitError, audit_execution_id};
 use serde::{Deserialize, Serialize};
 
+mod runs;
 mod worktrees;
 
+pub use runs::{RunGcCollector, RunGcPolicy};
 pub use worktrees::{WorktreeGcCollector, WorktreeGcPolicy};
 
 const LOCK_WAIT: Duration = Duration::from_secs(2);

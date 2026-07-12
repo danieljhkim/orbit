@@ -5,13 +5,16 @@ use std::sync::Mutex;
 
 use chrono::{DateTime, TimeZone, Utc};
 use fs2::FileExt;
-use orbit_common::types::OrbitError;
+use orbit_common::types::{JobRunState, OrbitError, PipelineState};
 use tempfile::TempDir;
 
+use crate::OrbitRuntime;
 use crate::command::gc::{
     EmptyGcCollector, GcCandidate, GcClock, GcCollector, GcContext, GcMode, GcMutation, GcOutcome,
-    GcPlan, GcRequest, GcRevalidation, GcScope, GcTarget, execute_gc, validate_candidate_path,
+    GcPlan, GcRequest, GcRevalidation, GcScope, GcTarget, RunGcCollector, RunGcPolicy, execute_gc,
+    validate_candidate_path,
 };
+use crate::command::task::{TaskAddParams, TaskUpdateParams};
 
 struct FakeClock(DateTime<Utc>);
 
@@ -273,4 +276,205 @@ fn containment_rejects_symlink_escape_and_can_unlink_owned_final_symlink() {
     );
     assert!(validate_candidate_path(&fixture.root, &fixture.root.join("escape"), false).is_err());
     assert!(validate_candidate_path(&fixture.root, &fixture.root.join("escape"), true).is_ok());
+}
+
+#[test]
+fn run_gc_stages_archive_then_purge_and_protects_active_failed_and_task_linked_runs() {
+    let temp = TempDir::new().expect("tempdir");
+    let global = temp.path().join("global");
+    let orbit = temp.path().join("repo/.orbit");
+    fs::create_dir_all(&global).expect("global root");
+    fs::create_dir_all(&orbit).expect("workspace root");
+    fs::write(
+        orbit.join("config.toml"),
+        "[gc.runs]\narchive_after_days = 0\npurge_after_days = 0\nfailure_archive_after_days = 30\nfailure_purge_after_days = 90\n",
+    )
+    .expect("config");
+    let runtime = OrbitRuntime::from_roots(&global, &orbit).expect("runtime");
+    let terminal_at = Utc
+        .with_ymd_and_hms(2026, 6, 1, 0, 0, 0)
+        .single()
+        .expect("terminal time");
+    let clock = FakeClock(
+        Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0)
+            .single()
+            .expect("collection time"),
+    );
+    let insert = |state: JobRunState| {
+        let run = runtime
+            .stores()
+            .jobs()
+            .insert_run("job", 1, terminal_at, None, None)
+            .expect("insert run");
+        if state != JobRunState::Pending {
+            runtime
+                .stores()
+                .jobs()
+                .mark_run_running(&run.run_id, terminal_at, std::process::id())
+                .expect("start run");
+        }
+        if state.is_terminal() {
+            runtime
+                .stores()
+                .jobs()
+                .finalize_run(&run.run_id, state, terminal_at, Some(0))
+                .expect("finalize run");
+        }
+        runtime
+            .stores()
+            .jobs()
+            .get_run(&run.run_id)
+            .expect("read run")
+            .expect("stored run")
+    };
+    let success = insert(JobRunState::Success);
+    let failed = insert(JobRunState::Failed);
+    let active = insert(JobRunState::Pending);
+    let resumable = insert(JobRunState::Interrupted);
+    let mut checkpoint = PipelineState::new(
+        resumable.run_id.clone(),
+        resumable.job_id.clone(),
+        serde_json::json!({}),
+    );
+    checkpoint.record_step(
+        0,
+        JobRunState::Success,
+        Some(serde_json::json!({"ok": true})),
+        None,
+    );
+    runtime
+        .stores()
+        .jobs()
+        .write_run_state(&resumable.run_id, &checkpoint)
+        .expect("write resumable checkpoint");
+    let mut live_owner = std::process::Command::new("sh")
+        .args(["-c", "sleep 30"])
+        .spawn()
+        .expect("spawn live owner");
+    let live_terminal = runtime
+        .stores()
+        .jobs()
+        .insert_run("job", 1, terminal_at, None, None)
+        .expect("insert live terminal run");
+    runtime
+        .stores()
+        .jobs()
+        .mark_run_running(&live_terminal.run_id, terminal_at, live_owner.id())
+        .expect("mark live-owned run running");
+    runtime
+        .stores()
+        .jobs()
+        .finalize_run(
+            &live_terminal.run_id,
+            JobRunState::Success,
+            terminal_at,
+            Some(0),
+        )
+        .expect("finalize live-owned run");
+    let linked = insert(JobRunState::Success);
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "linked".to_string(),
+            description: "linked".to_string(),
+            ..Default::default()
+        })
+        .expect("add task");
+    runtime
+        .update_task(
+            task.id.as_str(),
+            TaskUpdateParams {
+                job_run_id: Some(Some(linked.run_id.clone())),
+                ..Default::default()
+            },
+        )
+        .expect("link task");
+
+    let collector = RunGcCollector::new(&runtime, RunGcPolicy::from_runtime(&runtime));
+    let global_state = global.join("state");
+    let request = |apply| GcRequest {
+        apply,
+        scope: GcScope::Workspace {
+            workspace_id: None,
+            root: orbit.clone(),
+        },
+        retention_override: None,
+        global_state_dir: &global_state,
+        clock: &clock,
+    };
+    let plan = execute_gc(&collector, request(false)).expect("plan");
+    assert_eq!(plan.targets[0].counts.eligible, 1);
+    assert_eq!(plan.targets[0].items[0].id, success.run_id);
+    for code in [
+        "retained",
+        "active_run",
+        "resumable",
+        "live_or_inconclusive",
+        "task_linked",
+    ] {
+        assert!(
+            plan.targets[0].skipped.iter().any(|skip| skip.code == code),
+            "missing skip {code}: {:?}",
+            plan.targets[0].skipped
+        );
+    }
+
+    let archive = execute_gc(&collector, request(true)).expect("archive");
+    assert_eq!(archive.targets[0].counts.reclaimed, 1);
+    assert!(runtime.show_job_run(&success.run_id).is_err());
+    let purge = execute_gc(&collector, request(true)).expect("purge");
+    assert_eq!(purge.targets[0].counts.reclaimed, 1);
+    assert!(
+        runtime
+            .stores()
+            .jobs()
+            .list_runs_for_gc()
+            .expect("inventory")
+            .iter()
+            .all(|record| record.run.run_id != success.run_id)
+    );
+    let idempotent = execute_gc(&collector, request(true)).expect("idempotent");
+    assert_eq!(idempotent.targets[0].counts.reclaimed, 0);
+
+    let legacy = orbit
+        .join("state/job-runs")
+        .join(&success.job_id)
+        .join(&success.run_id);
+    fs::create_dir_all(&legacy).expect("legacy bundle");
+    fs::write(
+        legacy.join("jrun.yaml"),
+        serde_yaml::to_string(&serde_json::json!({
+            "schema_version": 1,
+            "run": success,
+        }))
+        .expect("legacy yaml"),
+    )
+    .expect("legacy run document");
+    let corrupt = orbit.join("state/job-runs/job/jrun-corrupt");
+    fs::create_dir_all(&corrupt).expect("corrupt legacy bundle");
+    fs::write(corrupt.join("jrun.yaml"), "not: [valid").expect("corrupt document");
+    let stale_archive = execute_gc(&collector, request(true)).expect("archive stale bundle");
+    assert_eq!(stale_archive.targets[0].counts.reclaimed, 1);
+    assert_eq!(stale_archive.outcome, GcOutcome::Partial);
+    assert!(stale_archive.has_errors());
+    let stale_purge = execute_gc(&collector, request(true)).expect("purge stale bundle");
+    assert_eq!(stale_purge.targets[0].counts.reclaimed, 1);
+    assert!(!legacy.exists());
+    assert!(
+        runtime
+            .stores()
+            .jobs()
+            .get_run(&failed.run_id)
+            .expect("failed retained")
+            .is_some()
+    );
+    assert!(
+        runtime
+            .stores()
+            .jobs()
+            .get_run(&active.run_id)
+            .expect("active retained")
+            .is_some()
+    );
+    live_owner.kill().expect("stop live owner");
+    live_owner.wait().expect("wait for live owner");
 }

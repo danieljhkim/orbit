@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
 use orbit_core::command::gc::{
-    EmptyGcCollector, GcCollector, GcRequest, GcScope, GcTarget, SystemGcClock,
-    WorktreeGcCollector, WorktreeGcPolicy, execute_gc,
+    EmptyGcCollector, GcCollector, GcRequest, GcScope, GcTarget, RunGcCollector, RunGcPolicy,
+    SystemGcClock, WorktreeGcCollector, WorktreeGcPolicy, execute_gc,
 };
 use orbit_core::{OrbitError, OrbitRuntime};
 
@@ -63,6 +63,22 @@ pub struct GcCommand {
     #[arg(long, value_name = "DAYS")]
     pub failure_retention_days: Option<u64>,
 
+    /// Override successful/cancelled run archive age in days
+    #[arg(long, value_name = "DAYS")]
+    pub archive_after_days: Option<u64>,
+
+    /// Override successful/cancelled run purge age in days
+    #[arg(long, value_name = "DAYS")]
+    pub purge_after_days: Option<u64>,
+
+    /// Override failed/timeout/interrupted run archive age in days
+    #[arg(long, value_name = "DAYS")]
+    pub failure_archive_after_days: Option<u64>,
+
+    /// Override failed/timeout/interrupted run purge age in days
+    #[arg(long, value_name = "DAYS")]
+    pub failure_purge_after_days: Option<u64>,
+
     /// Select the current registered workspace by ID or path
     #[arg(long, value_name = "ID_OR_PATH", conflicts_with = "global")]
     pub workspace: Option<String>,
@@ -82,6 +98,15 @@ impl Execute for GcCommand {
                 "worktree retention overrides require the `worktrees` target".to_string(),
             ));
         }
+        let has_run_override = self.archive_after_days.is_some()
+            || self.purge_after_days.is_some()
+            || self.failure_archive_after_days.is_some()
+            || self.failure_purge_after_days.is_some();
+        if target != GcTarget::Runs && has_run_override {
+            return Err(OrbitError::InvalidInput(
+                "run retention overrides require the `runs` target".to_string(),
+            ));
+        }
         let defaults_global = matches!(target, GcTarget::Logs | GcTarget::Skills);
         let scope = if self.global || (self.workspace.is_none() && defaults_global) {
             GcScope::Global {
@@ -90,15 +115,16 @@ impl Execute for GcCommand {
         } else {
             resolve_workspace_scope(self.workspace.as_deref(), runtime)?
         };
-        let selected_runtime =
-            if target == GcTarget::Worktrees && scope.root() != runtime.paths().orbit_dir {
-                Some(OrbitRuntime::from_roots(
-                    &runtime.paths().global_dir,
-                    scope.root(),
-                )?)
-            } else {
-                None
-            };
+        let selected_runtime = if matches!(target, GcTarget::Worktrees | GcTarget::Runs)
+            && scope.root() != runtime.paths().orbit_dir
+        {
+            Some(OrbitRuntime::from_roots(
+                &runtime.paths().global_dir,
+                scope.root(),
+            )?)
+        } else {
+            None
+        };
         let collector_runtime = selected_runtime.as_ref().unwrap_or(runtime);
         let clock = SystemGcClock;
         let worktree_policy = WorktreeGcPolicy {
@@ -110,9 +136,24 @@ impl Execute for GcCommand {
                 .unwrap_or_else(|| collector_runtime.worktree_gc_failure_retention_days()),
         };
         let worktrees = WorktreeGcCollector::new(collector_runtime, worktree_policy);
+        let (archive, purge, failure_archive, failure_purge) =
+            collector_runtime.run_gc_retention_days();
+        let runs = RunGcCollector::new(
+            collector_runtime,
+            RunGcPolicy {
+                archive_after_days: self.archive_after_days.unwrap_or(archive),
+                purge_after_days: self.purge_after_days.unwrap_or(purge),
+                failure_archive_after_days: self
+                    .failure_archive_after_days
+                    .unwrap_or(failure_archive),
+                failure_purge_after_days: self.failure_purge_after_days.unwrap_or(failure_purge),
+            },
+        );
         let empty = EmptyGcCollector::new(target);
         let collector: &dyn GcCollector = if target == GcTarget::Worktrees {
             &worktrees
+        } else if target == GcTarget::Runs {
+            &runs
         } else {
             &empty
         };
