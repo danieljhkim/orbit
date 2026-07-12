@@ -102,6 +102,18 @@ protected. Unknown directories are inventory entries, not candidates. Removal
 uses Git worktree operations and is language-neutral. On-terminal cleanup calls
 the same classifier and apply primitive as manual GC.
 
+Owner liveness is proven, not assumed: the collector reuses run
+reconciliation's PID + process-start-identity probe, so a row that reads
+terminal while its worker process is still alive (e.g. a zero-day success still
+winding down after finalizing) is retained. Only a conclusively dead owner
+(missing PID, or a PID now held by an unrelated process) — or this same
+collecting process, whose cwd guard covers the in-use case — permits removal;
+verified-live, unverifiable-live, and inconclusive probes all fail closed. Per
+§5.6, this owner state/identity/liveness plus Git revalidation is re-run as the
+immediately preceding operation to `git worktree remove`, under the host GC
+lock, so a candidate whose owner is claimed or transitioned live between
+planning and mutation is refused rather than removed.
+
 ### 3.2 Runs (workspace)
 
 The run collector coordinates authoritative rows, steps, reservations,

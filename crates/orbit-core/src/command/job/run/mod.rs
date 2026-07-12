@@ -17,3 +17,5 @@ mod types;
 mod tests;
 
 pub use types::{JobRunCancelResult, JobRunListParams};
+
+pub(crate) use owner::gc_owner_permits_reclaim;

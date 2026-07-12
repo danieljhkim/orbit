@@ -9,6 +9,7 @@ use orbit_common::types::{JobRun, JobRunState, OrbitError};
 use serde::{Deserialize, Serialize};
 
 use crate::OrbitRuntime;
+use crate::command::job::gc_owner_permits_reclaim;
 
 use super::{
     GcCandidate, GcCollector, GcContext, GcItemError, GcMutation, GcPlan, GcRequest,
@@ -142,11 +143,23 @@ impl<'a> WorktreeGcCollector<'a> {
         ) {
             RunClassification::Skip { code, reason } => Ok(Classified::skip(id, code, reason)),
             RunClassification::Eligible { retention_evidence } => {
+                // Fail closed on owner liveness even for terminal rows: a run
+                // can persist a terminal state while its worker process is
+                // still winding down (0-day success retention races finalize).
+                if !gc_owner_permits_reclaim(&run) {
+                    return Ok(Classified::skip(
+                        id,
+                        "live_or_inconclusive",
+                        "recorded owner process is still alive or its liveness is inconclusive",
+                    ));
+                }
                 let bytes = directory_bytes_no_follow(path).ok();
                 let expected = ExpectedState {
                     run_id: run.run_id.clone(),
                     state: run.state,
                     finished_at: run.finished_at,
+                    pid: run.pid,
+                    pid_start_time: run.pid_start_time.clone(),
                     head: git.head,
                     branch: git.branch,
                 };
@@ -205,10 +218,14 @@ impl<'a> WorktreeGcCollector<'a> {
                 "owning run record disappeared after planning",
             ));
         };
-        if run.state != expected.state || run.finished_at != expected.finished_at {
+        if run.state != expected.state
+            || run.finished_at != expected.finished_at
+            || run.pid != expected.pid
+            || run.pid_start_time != expected.pid_start_time
+        {
             return Ok(skip_revalidation(
                 "owner_changed",
-                "owning run state changed after planning",
+                "owning run state or owner identity changed after planning",
             ));
         }
         if !matches!(
@@ -223,6 +240,16 @@ impl<'a> WorktreeGcCollector<'a> {
             return Ok(skip_revalidation(
                 "retention_changed",
                 "owning run is no longer eligible",
+            ));
+        }
+        // Fail closed if the owner became live (or its liveness is now
+        // inconclusive) between planning and this final check — the process may
+        // have re-acquired the tree even though the persisted row still reads
+        // terminal.
+        if !gc_owner_permits_reclaim(&run) {
+            return Ok(skip_revalidation(
+                "live_or_inconclusive",
+                "recorded owner process is alive or its liveness is inconclusive at revalidation",
             ));
         }
         let Some(git) = inspect_git_worktree(
@@ -359,11 +386,28 @@ impl GcCollector for WorktreeGcCollector<'_> {
     fn apply(
         &self,
         candidate: &GcCandidate,
-        _context: &GcContext<'_>,
+        context: &GcContext<'_>,
     ) -> Result<GcMutation, OrbitError> {
         let path = candidate.path.as_deref().ok_or_else(|| {
             OrbitError::Execution("worktree GC candidate has no path".to_string())
         })?;
+        // Atomic ownership guard: re-run the full owner state / identity /
+        // liveness and Git revalidation as the immediately preceding operation
+        // to removal, with no intervening store write or fs sync. `execute_gc`
+        // holds the host-global GC lock across this apply, so the frozen plan
+        // cannot be consumed concurrently; combined with this final check, the
+        // window between validating ownership and removing the tree collapses
+        // to adjacent instructions. If the owner was claimed / transitioned
+        // after planning, we fail closed rather than remove a tree that a live
+        // run may have re-acquired.
+        match self.revalidate_candidate(candidate, context)? {
+            GcRevalidation::Ready => {}
+            GcRevalidation::Skip { code, reason } => {
+                return Err(OrbitError::Execution(format!(
+                    "worktree ownership changed between planning and removal ({code}): {reason}"
+                )));
+            }
+        }
         let path_arg = path.to_string_lossy();
         git_checked(
             &self.runtime.paths().repo_root,
@@ -464,6 +508,13 @@ struct ExpectedState {
     run_id: String,
     state: JobRunState,
     finished_at: Option<DateTime<Utc>>,
+    /// Persisted owner PID and process-start-identity token captured at plan
+    /// time. A concurrent claim / takeover rewrites these, so revalidation
+    /// rejects a candidate whose owner identity changed after planning.
+    #[serde(default)]
+    pid: Option<u32>,
+    #[serde(default)]
+    pid_start_time: Option<String>,
     head: String,
     branch: Option<String>,
 }
@@ -633,6 +684,8 @@ fn skip_revalidation(code: &str, reason: &str) -> GcRevalidation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orbit_common::utility::process_identity::process_start_identity_token;
+    use rusqlite::{Connection, params};
     use tempfile::TempDir;
 
     static CLOCK: SystemGcClock = SystemGcClock;
@@ -957,6 +1010,164 @@ mod tests {
                 .state,
             JobRunState::Running
         );
+    }
+
+    /// Reaps a spawned owner process even if the test panics.
+    struct ChildGuard(std::process::Child);
+
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    fn spawn_live_owner() -> ChildGuard {
+        ChildGuard(
+            Command::new("sleep")
+                .arg("30")
+                .spawn()
+                .expect("spawn live owner process"),
+        )
+    }
+
+    fn gc_context<'a>(scope: &'a GcScope) -> GcContext<'a> {
+        GcContext {
+            scope,
+            retention_override: None,
+            clock: &CLOCK,
+        }
+    }
+
+    fn workspace_scope(fixture: &Fixture) -> GcScope {
+        GcScope::Workspace {
+            workspace_id: Some("test".to_string()),
+            root: fixture.runtime.paths().orbit_dir.clone(),
+        }
+    }
+
+    /// Rewrites only the persisted owner identity of a run, leaving its
+    /// terminal state intact — models a reused/handed-off PID.
+    fn set_run_owner(runtime: &OrbitRuntime, run_id: &str, pid: u32, token: Option<&str>) {
+        let conn = Connection::open(runtime.global_root().join("orbit.db")).expect("open orbit db");
+        conn.execute(
+            "UPDATE job_runs SET pid = ?3, pid_start_time = ?4 \
+             WHERE workspace_id = ?1 AND run_id = ?2",
+            params![
+                runtime.workspace_id().expect("workspace id"),
+                run_id,
+                pid as i64,
+                token,
+            ],
+        )
+        .expect("set run owner");
+    }
+
+    /// Transitions a run back to a live `running` owner — models a concurrent
+    /// claim/resume that takes the run live between planning and mutation.
+    fn claim_run_live(runtime: &OrbitRuntime, run_id: &str, pid: u32, token: Option<&str>) {
+        let conn = Connection::open(runtime.global_root().join("orbit.db")).expect("open orbit db");
+        conn.execute(
+            "UPDATE job_runs SET state = 'running', started_at = ?3, finished_at = NULL, \
+             pid = ?4, pid_start_time = ?5 \
+             WHERE workspace_id = ?1 AND run_id = ?2",
+            params![
+                runtime.workspace_id().expect("workspace id"),
+                run_id,
+                Utc::now().to_rfc3339(),
+                pid as i64,
+                token,
+            ],
+        )
+        .expect("claim run live");
+    }
+
+    #[test]
+    fn terminal_run_with_live_owner_is_retained() {
+        // A row can read terminal while its worker process is still alive
+        // (e.g. 0-day success retention racing finalize). The persisted
+        // PID + process-start-identity probe must fail closed even here.
+        let fixture = Fixture::new();
+        let run = fixture.insert_run(JobRunState::Success);
+        let path = fixture.add_worktree(&run.run_id);
+
+        let owner = spawn_live_owner();
+        let pid = owner.0.id();
+        let token = process_start_identity_token(pid);
+        set_run_owner(&fixture.runtime, &run.run_id, pid, token.as_deref());
+
+        let plan = execute_gc(&fixture.collector(), fixture.request(false)).expect("plan");
+        let target = &plan.targets[0];
+        assert_eq!(target.counts.eligible, 0, "live owner is never eligible");
+        assert!(
+            target
+                .skipped
+                .iter()
+                .any(|skip| skip.code == "live_or_inconclusive"),
+            "expected live_or_inconclusive skip, got {:?}",
+            target.skipped
+        );
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn frozen_candidate_is_not_removed_when_owner_claimed_before_mutation() {
+        // The deterministic revalidate-to-remove race: an eligible candidate is
+        // frozen by planning, the owner is then claimed live between planning
+        // and mutation, and the frozen candidate must be refused — the worktree
+        // is neither removed nor the run cancelled/mutated by GC.
+        let fixture = Fixture::new();
+        let run = fixture.insert_run(JobRunState::Success);
+        let path = fixture.add_worktree(&run.run_id);
+
+        let scope = workspace_scope(&fixture);
+        let context = gc_context(&scope);
+        let collector = fixture.collector();
+
+        // Plan freezes an eligible candidate against the terminal owner.
+        let plan = collector.plan(&context).expect("frozen plan");
+        assert_eq!(
+            plan.candidates.len(),
+            1,
+            "candidate is eligible before claim"
+        );
+        let frozen = plan.candidates[0].clone();
+
+        // A concurrent worker claims the run live after planning.
+        let owner = spawn_live_owner();
+        let pid = owner.0.id();
+        let token = process_start_identity_token(pid);
+        claim_run_live(&fixture.runtime, &run.run_id, pid, token.as_deref());
+
+        // Revalidation refuses the frozen candidate...
+        assert!(
+            matches!(
+                collector
+                    .revalidate(&frozen, &context)
+                    .expect("revalidate frozen candidate"),
+                GcRevalidation::Skip { .. }
+            ),
+            "revalidation must refuse a claimed owner"
+        );
+
+        // ...and the apply-time atomic guard fails closed rather than removing.
+        let applied = collector.apply(&frozen, &context);
+        assert!(
+            applied.is_err(),
+            "apply must fail closed on a claimed owner, got {applied:?}"
+        );
+
+        // The worktree survives and GC left the run exactly as the claimer set
+        // it — not cancelled, not removed.
+        assert!(path.exists(), "worktree must survive the race");
+        let reread = fixture
+            .runtime
+            .stores()
+            .jobs()
+            .get_run(&run.run_id)
+            .expect("read run")
+            .expect("run still exists");
+        assert_eq!(reread.state, JobRunState::Running);
     }
 
     fn git_ok(repo: &Path, args: &[&str]) {

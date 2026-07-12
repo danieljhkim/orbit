@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Managed worktree collection**: `orbit gc worktrees` plans or explicitly applies status-aware retention while protecting live, dirty, resumable, ambiguous, unmerged, and unpushed work. Terminal cleanup uses the same classifier. ([ORB-10182])
+- **Managed worktree collection**: `orbit gc worktrees` plans or explicitly applies status-aware retention while protecting live, dirty, resumable, ambiguous, unmerged, and unpushed work. Owner PID + start-identity is revalidated atomically before removal, failing closed on live or inconclusive owners. Terminal cleanup shares the classifier. ([ORB-10182])
 - **Shared garbage-collection framework**: `orbit gc` now exposes every retention target with plan-first/apply, scope, retention, locking, immutable candidate, safety revalidation, manifest, and equivalent human/JSON report contracts for domain collectors. ([ORB-10180])
 - **Safety-first garbage collection contract**: the `orbit gc` design standardizes explicit apply, retention clocks, ownership/revalidation invariants, locking, and equivalent human/JSON reports across global and workspace collectors. ([ORB-10178])
 - **Systemd routine workers survive sweep exit**: the user sweep service now limits shutdown to its main oneshot process, allowing detached pipeline workers to claim and complete clock-dispatched runs. ([ORB-10153])
