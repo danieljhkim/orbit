@@ -169,6 +169,38 @@ fn git_commit_batch_uses_templated_single_task_message() {
 }
 
 #[test]
+fn git_commit_batch_errors_on_empty_stage() {
+    // Regression (ORB-10134): a clean worktree (implement step wrote nothing)
+    // must make `commit_batch_changes` error, not return a silent `Ok`.
+    let temp = initialized_git_repo();
+    let workspace = temp.path();
+
+    let tasks = vec![task_with_file(
+        "T1",
+        "Empty task",
+        "src/missing.txt",
+        "claude-opus-4-7",
+    )];
+    let host = CommitTestHost::new(tasks, workspace.to_path_buf());
+    let input = json!({
+        "scope": "all",
+        "job_run_id": "batch-1",
+        "workspace_path": workspace.to_string_lossy().to_string(),
+    });
+
+    let error = git_commit(&host, &input).expect_err("empty stage must error");
+    assert!(
+        error.to_string().contains("no staged changes to commit"),
+        "expected empty-diff error, got: {error}"
+    );
+
+    // The index is left clean (the staging reset ran before erroring), so no
+    // commit was created beyond the repo's initial commit.
+    let log = git_output(workspace, &["rev-list", "--count", "HEAD"]).expect("count commits");
+    assert_eq!(log.trim(), "1", "no commit should have been created");
+}
+
+#[test]
 fn git_commit_batch_rejects_multiple_tasks() {
     let temp = initialized_git_repo();
     let workspace = temp.path();
