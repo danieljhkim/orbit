@@ -62,7 +62,7 @@ fn retired_skill_moves_to_tombstone_and_stays_owned_by_hash() {
     reconcile_managed_skills(&skills_root, &[ga.clone(), gb.clone()]).expect("seed both");
 
     // Drop orbit-legacy from the catalog.
-    reconcile_managed_skills(&skills_root, &[ga.clone()]).expect("retire legacy");
+    reconcile_managed_skills(&skills_root, std::slice::from_ref(&ga)).expect("retire legacy");
 
     let manifest = load_manifest(&skills_root).expect("load");
     assert!(!manifest.managed.contains_key("orbit-legacy"));
@@ -89,9 +89,9 @@ fn template_change_keeps_previous_hash_as_tombstone() {
     fs::create_dir_all(&skills_root).expect("mkdir");
 
     let (v1, v1_content) = generated("orbit", "V1");
-    reconcile_managed_skills(&skills_root, &[v1.clone()]).expect("seed v1");
+    reconcile_managed_skills(&skills_root, std::slice::from_ref(&v1)).expect("seed v1");
     let (v2, _) = generated("orbit", "V2");
-    reconcile_managed_skills(&skills_root, &[v2.clone()]).expect("seed v2");
+    reconcile_managed_skills(&skills_root, std::slice::from_ref(&v2)).expect("seed v2");
 
     let manifest = load_manifest(&skills_root).expect("load");
     // Current hash is v2; v1 hash survives as a known-generated hash.
