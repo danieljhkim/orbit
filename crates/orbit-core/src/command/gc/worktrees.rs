@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::OrbitRuntime;
 use crate::command::job::gc_owner_permits_reclaim;
+use crate::runtime::run_claim_guard;
 
 use super::{
     GcCandidate, GcCollector, GcContext, GcItemError, GcMutation, GcPlan, GcRequest,
@@ -391,15 +392,30 @@ impl GcCollector for WorktreeGcCollector<'_> {
         let path = candidate.path.as_deref().ok_or_else(|| {
             OrbitError::Execution("worktree GC candidate has no path".to_string())
         })?;
-        // Atomic ownership guard: re-run the full owner state / identity /
-        // liveness and Git revalidation as the immediately preceding operation
-        // to removal, with no intervening store write or fs sync. `execute_gc`
-        // holds the host-global GC lock across this apply, so the frozen plan
-        // cannot be consumed concurrently; combined with this final check, the
-        // window between validating ownership and removing the tree collapses
-        // to adjacent instructions. If the owner was claimed / transitioned
-        // after planning, we fail closed rather than remove a tree that a live
-        // run may have re-acquired.
+        // Recover the owning run id from the frozen plan so we can take that
+        // run's claim guard.
+        let expected: ExpectedState =
+            serde_json::from_str(&candidate.expected_state).map_err(|error| {
+                OrbitError::Execution(format!("invalid frozen worktree state: {error}"))
+            })?;
+
+        // Atomic ownership guard (ORB-10182). Acquire the per-run claim guard —
+        // the *same* advisory lock the run claim/start path
+        // (`mark_run_running` / `claim_pending_run_owner` /
+        // `take_over_running_run`) holds across its ownership transition — and
+        // keep holding it while we (1) re-run the full owner state / identity /
+        // liveness + Git revalidation and (2) `git worktree remove`. No store
+        // write or fs sync intervenes. Lock ordering: `execute_gc` already holds
+        // the host-global GC lock (ADR-0220); we take the per-run guard beneath
+        // it, then mutate the filesystem — GC host lock → per-run guard →
+        // filesystem, and never the global SQLite write lock across the git
+        // operation. A concurrent claim contends on this same guard: if it
+        // committed first, revalidation observes the live/changed owner and we
+        // fail closed; if we hold first, the claimant blocks until removal
+        // completes and then re-evaluates (its worktree setup recreates the
+        // tree) rather than entering a removed worktree.
+        let _run_guard =
+            run_claim_guard::acquire(&self.runtime.paths().state_dir, &expected.run_id)?;
         match self.revalidate_candidate(candidate, context)? {
             GcRevalidation::Ready => {}
             GcRevalidation::Skip { code, reason } => {
@@ -1168,6 +1184,128 @@ mod tests {
             .expect("read run")
             .expect("run still exists");
         assert_eq!(reread.state, JobRunState::Running);
+    }
+
+    #[test]
+    fn apply_blocks_on_a_claimant_held_run_guard_and_fails_closed() {
+        // Two real actors contend for the *same* per-run claim guard that the
+        // run claim/start path holds. A claimant grabs the guard first and
+        // records a live owner (models a takeover). The collector's `apply`
+        // then blocks acquiring that guard — proving the collector genuinely
+        // takes it — and, once it wins the guard after the claimant releases,
+        // its revalidation observes the live owner and fails closed. Ordering
+        // is deterministic: the GC actor is only started after the claimant is
+        // already holding the guard, so `apply` provably cannot revalidate
+        // until the claim has committed and released.
+        let fixture = Fixture::new();
+        let run = fixture.insert_run(JobRunState::Success);
+        let path = fixture.add_worktree(&run.run_id);
+
+        let scope = workspace_scope(&fixture);
+        let context = gc_context(&scope);
+        let collector = fixture.collector();
+
+        // Freeze an eligible candidate against the terminal, currently-dead
+        // owner.
+        let plan = collector.plan(&context).expect("frozen plan");
+        assert_eq!(plan.candidates.len(), 1, "candidate eligible before claim");
+        let frozen = plan.candidates[0].clone();
+
+        let state_dir = fixture.runtime.paths().state_dir.clone();
+        let run_id = run.run_id.clone();
+
+        std::thread::scope(|threads| {
+            // Claimant holds the guard first, exactly as the claim/start path
+            // does around its ownership transition.
+            let guard =
+                run_claim_guard::acquire(&state_dir, &run_id).expect("claimant acquires guard");
+
+            let (started_tx, started_rx) = std::sync::mpsc::channel::<()>();
+            let collector_ref = &collector;
+            let context_ref = &context;
+            let frozen_ref = &frozen;
+            let apply_handle = threads.spawn(move || {
+                // Only begin the GC apply once the claimant holds the guard, so
+                // `apply` must block on it rather than racing ahead.
+                started_rx.recv().expect("gc actor start signal");
+                collector_ref.apply(frozen_ref, context_ref)
+            });
+            started_tx.send(()).expect("signal gc actor");
+
+            // Record a live owner while holding the guard — a concurrent
+            // takeover that GC must observe once it finally acquires the guard.
+            let owner = spawn_live_owner();
+            let token = process_start_identity_token(owner.0.id());
+            set_run_owner(&fixture.runtime, &run_id, owner.0.id(), token.as_deref());
+
+            drop(guard); // release; the blocked GC apply now proceeds
+
+            let applied = apply_handle.join().expect("gc apply thread");
+            assert!(
+                applied.is_err(),
+                "apply must fail closed once the claim won the guard, got {applied:?}"
+            );
+        });
+
+        assert!(path.exists(), "worktree survives because the claim won");
+    }
+
+    #[test]
+    fn claimant_blocks_on_a_gc_held_run_guard_and_re_evaluates_after_removal() {
+        // The mirror interleaving: GC wins the guard and removes the worktree
+        // while holding it. A concurrent claimant contending for the same
+        // per-run guard must block until removal completes and then re-evaluate
+        // — it can never enter a worktree that GC is removing. GC's real
+        // removal sequence (`git worktree remove` + `prune`) runs under the
+        // guard here, mirroring `apply`; `apply_blocks_on_a_claimant_held_run_guard_and_fails_closed`
+        // proves `apply` itself acquires this guard, so the two together cover
+        // the collector holding it continuously across revalidation and removal.
+        let fixture = Fixture::new();
+        let run = fixture.insert_run(JobRunState::Success);
+        let path = fixture.add_worktree(&run.run_id);
+        assert!(path.exists());
+
+        let state_dir = fixture.runtime.paths().state_dir.clone();
+        let run_id = run.run_id.clone();
+        let repo_root = fixture.runtime.paths().repo_root.clone();
+        let path_for_claimant = path.clone();
+
+        std::thread::scope(|threads| {
+            // GC holds the guard for the whole removal.
+            let guard = run_claim_guard::acquire(&state_dir, &run_id).expect("gc acquires guard");
+
+            let (started_tx, started_rx) = std::sync::mpsc::channel::<()>();
+            let state_dir_ref = &state_dir;
+            let run_id_ref = &run_id;
+            let claimant = threads.spawn(move || {
+                started_rx.recv().expect("claimant start signal");
+                // Contend for the same guard, then re-evaluate under it.
+                let _held = run_claim_guard::acquire(state_dir_ref, run_id_ref)
+                    .expect("claimant eventually acquires guard");
+                path_for_claimant.exists()
+            });
+            started_tx.send(()).expect("signal claimant");
+
+            // Remove the worktree under the guard, as `apply` does.
+            git_ok(
+                &repo_root,
+                &["worktree", "remove", path.to_str().expect("utf8")],
+            );
+            git_ok(&repo_root, &["worktree", "prune"]);
+
+            drop(guard); // release; the blocked claimant now proceeds
+
+            let claimant_entered_live_tree = claimant.join().expect("claimant thread");
+            assert!(
+                !claimant_entered_live_tree,
+                "claimant must block on the guard and re-evaluate after removal, never enter a removed tree"
+            );
+        });
+
+        assert!(
+            !path.exists(),
+            "GC removed the worktree while holding the guard"
+        );
     }
 
     fn git_ok(repo: &Path, args: &[&str]) {

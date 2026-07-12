@@ -110,9 +110,21 @@ winding down after finalizing) is retained. Only a conclusively dead owner
 collecting process, whose cwd guard covers the in-use case — permits removal;
 verified-live, unverifiable-live, and inconclusive probes all fail closed. Per
 §5.6, this owner state/identity/liveness plus Git revalidation is re-run as the
-immediately preceding operation to `git worktree remove`, under the host GC
-lock, so a candidate whose owner is claimed or transitioned live between
-planning and mutation is refused rather than removed.
+immediately preceding operation to `git worktree remove`. It is not enough for
+that revalidation to be adjacent to the removal: the host GC lock serializes GC
+against other GC processes, not against a worker claiming or reclaiming a run,
+so revalidate-then-remove was not atomic against a concurrent claim. The
+collector therefore takes a **per-run claim guard** — one advisory file lock
+keyed by run id under `state/run-guards/` — and holds it continuously across
+revalidation and removal. The run claim/start path (`mark_run_running`,
+`claim_pending_run_owner`, `take_over_running_run`) acquires the *same* guard
+around its ownership transition, so the two paths are mutually exclusive: a
+claim that commits first is observed by revalidation (GC fails closed); a GC
+removal that wins first forces the blocked claimant to re-evaluate (its worktree
+setup recreates the tree) rather than enter a removed worktree. Lock ordering is
+fixed — **host GC lock → per-run guard → filesystem** — and the guard is a
+filesystem advisory lock, never the global SQLite write lock, so no unrelated
+database lock is held across the git operation.
 
 ### 3.2 Runs (workspace)
 

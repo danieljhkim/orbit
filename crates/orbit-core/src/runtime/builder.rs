@@ -150,6 +150,7 @@ pub(crate) fn build_context_from_roots(
     let default_crew = runtime_config.default_crew.clone();
     let duel = runtime_config.duel_config().clone();
 
+    let run_guard_state_dir = paths.state_dir.clone();
     Ok(OrbitContext::new(
         paths,
         OrbitStores::new(
@@ -168,6 +169,7 @@ pub(crate) fn build_context_from_roots(
             audit_event_store,
             executor_def_store,
             policy_def_store,
+            run_guard_state_dir,
         ),
         OrbitExecutionAssets::new(Arc::new(registry), skill_catalog),
         OrbitPolicyContext::new(

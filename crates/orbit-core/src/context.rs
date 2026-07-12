@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use orbit_common::types::{Crew, WorkspacePaths};
@@ -89,6 +89,10 @@ pub(crate) struct OrbitStores {
     pub(crate) audit_event: Arc<dyn AuditEventStoreBackend>,
     pub(crate) executor_def: Arc<dyn ExecutorDefStoreBackend>,
     pub(crate) policy_def: Arc<dyn PolicyDefStoreBackend>,
+    /// Workspace `state` dir; the per-run claim guard (`run-guards/<id>.lock`)
+    /// is derived from it so the claim/start path and the worktree collector
+    /// rendezvous on the same lock (ORB-10182).
+    pub(crate) run_guard_state_dir: PathBuf,
 }
 
 impl OrbitStores {
@@ -109,6 +113,7 @@ impl OrbitStores {
         audit_event: Arc<dyn AuditEventStoreBackend>,
         executor_def: Arc<dyn ExecutorDefStoreBackend>,
         policy_def: Arc<dyn PolicyDefStoreBackend>,
+        run_guard_state_dir: PathBuf,
     ) -> Self {
         Self {
             task,
@@ -126,6 +131,7 @@ impl OrbitStores {
             audit_event,
             executor_def,
             policy_def,
+            run_guard_state_dir,
         }
     }
 }
