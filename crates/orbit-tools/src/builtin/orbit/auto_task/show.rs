@@ -1,0 +1,26 @@
+use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
+use serde_json::Value;
+
+use crate::{OrbitBuiltinAction, Tool, ToolContext};
+
+pub struct OrbitAutoTaskShowTool;
+
+impl Tool for OrbitAutoTaskShowTool {
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: "orbit.auto_task.show".to_string(),
+            description: "Show a single auto-task definition by name.".to_string(),
+            parameters: vec![ToolParam {
+                name: "name".to_string(),
+                description: "Definition name. Required.".to_string(),
+                param_type: "string".to_string(),
+                required: true,
+            }],
+            builtin: true,
+        }
+    }
+
+    fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
+        super::super::execute_host_action(ctx, input, OrbitBuiltinAction::AutoTaskShow)
+    }
+}

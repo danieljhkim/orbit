@@ -9,6 +9,7 @@
 
 ### Highlights
 
+- **Auto-task primitive**: recurring chores are data, not code. `orbit auto-task add/list/show/update/toggle` (+ `orbit.auto_task.*` tools) define `.orbit/auto_tasks/*.yaml` templates with a cron/interval schedule and dedupe policy; one seeded scheduler routine mints tasks from the due ones with catch-up collapse and `skip_if_open` dedupe. Provider-neutral (ADR-0217). ([ORB-10149])
 - **Ship `--mode pr` fails loudly on an empty diff**: an implement step that writes nothing no longer reports success — an empty commit and a `0 commits ahead` branch now hard-fail (no empty branch pushed, no PR, no promote-to-review), the premature pre-commit `push` is removed, and the agent envelope gets `repo_root` plus a fail-closed `workspace_path`. ([ORB-10134])
 - **Codex plugin documentation parity**: Website install/MCP guides now cover Codex plugin installation, upgrades, fresh-task discovery, and read-only MCP smoke checks alongside Claude; the npm proxy README clarifies how both supported plugins consume the binary without manual asset copying. ([ORB-10117])
 - **Routine scheduler health over HTTP**: `GET /api/routines` on the dashboard exposes each routine's last fire (timestamp, ok/error outcome, duration) and next-due slot, so a stopped `ship-sweep`/`qa-sweep` is visible remotely as a stale `last_fire` without box ssh. ([ORB-10138])

@@ -231,6 +231,15 @@ pub(super) fn run_deterministic(
                 "reports": reports,
             }))
         }
+        // Fire every due, enabled auto-task definition and mint a task from
+        // its template [ORB-10149]. Reads definitions from this workspace's
+        // `.orbit/auto_tasks/`; catch-up collapses and `skip_if_open` dedupe
+        // are enforced in the scheduler core.
+        "run_auto_task_scheduler" => crate::auto_tasks::run_scheduler_action_json(runtime, input)
+            .map_err(|error| DispatchError::DeterministicActionFailed {
+                action: action.to_string(),
+                message: error.to_string(),
+            }),
         // Materialize the workspace backlog for auto-dispatch.
         // Filters by `status: backlog`; legacy untriaged
         // `status: friction` reports remain absent. In automatic

@@ -85,6 +85,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/release_locks.yaml"),
     ),
     (
+        "run_auto_task_scheduler",
+        include_str!("../../assets/activities/run_auto_task_scheduler.yaml"),
+    ),
+    (
         "run_planning_duel",
         include_str!("../../assets/activities/run_planning_duel.yaml"),
     ),

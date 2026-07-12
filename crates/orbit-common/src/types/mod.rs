@@ -29,6 +29,7 @@ pub mod agent_pair;
 pub mod artifact_ids;
 pub mod audit;
 pub mod audit_event;
+pub mod auto_task;
 pub mod duel;
 pub mod error;
 pub mod event;
@@ -80,6 +81,10 @@ pub use artifact_ids::{
 };
 pub use audit::Audit;
 pub use audit_event::{AuditEvent, AuditEventStatus, AuditStats, audit_execution_id};
+pub use auto_task::{
+    AUTO_TASK_SCHEMA_VERSION, AUTO_TASK_TAG_PREFIX, AutoTaskDefinition, AutoTaskSchedule,
+    AutoTaskTemplate, DedupePolicy, auto_task_tag, is_valid_auto_task_name, parse_auto_task_yaml,
+};
 pub use duel::{
     Ambiguity, ArbiterVerdict, Cost, Decision, DuelRun, EfficiencyMetrics, ImplementerStats,
     Outcome, PerCommentVerdict, PlannerSlot, PlanningDuelRun, PlanningEfficiency, PlanningOutcome,

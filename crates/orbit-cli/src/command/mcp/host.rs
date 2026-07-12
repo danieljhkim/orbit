@@ -80,6 +80,16 @@ pub(crate) const ADR_TOOL_NAMES: &[&str] = &[
 
 pub(crate) const DOCS_TOOL_NAMES: &[&str] = &[];
 
+// Auto-task definitions [ORB-10149]: agents can define, retune, and disable
+// recurring chores. `orbit.auto_task.list` is admin-only (mirrors
+// `orbit.learning.list`) and stays on the CLI / `runtime.run_tool` path.
+pub(crate) const AUTO_TASK_TOOL_NAMES: &[&str] = &[
+    "orbit.auto_task.add",
+    "orbit.auto_task.show",
+    "orbit.auto_task.update",
+    "orbit.auto_task.toggle",
+];
+
 pub(crate) const LEARNING_TOOL_NAMES: &[&str] = &[
     "orbit.learning.add",
     // ORB-00289: `orbit.learning.prune` is a destructive admin-only op and
@@ -101,7 +111,8 @@ pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
             + SEMANTIC_TOOL_NAMES.len()
             + ADR_TOOL_NAMES.len()
             + DOCS_TOOL_NAMES.len()
-            + LEARNING_TOOL_NAMES.len(),
+            + LEARNING_TOOL_NAMES.len()
+            + AUTO_TASK_TOOL_NAMES.len(),
     );
     names.extend_from_slice(TASK_TOOL_NAMES);
     names.extend_from_slice(FRICTION_TOOL_NAMES);
@@ -111,6 +122,7 @@ pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
     names.extend_from_slice(ADR_TOOL_NAMES);
     names.extend_from_slice(DOCS_TOOL_NAMES);
     names.extend_from_slice(LEARNING_TOOL_NAMES);
+    names.extend_from_slice(AUTO_TASK_TOOL_NAMES);
     names
 }
 
@@ -123,6 +135,7 @@ pub(crate) fn is_mcp_tool_exposed(name: &str) -> bool {
         || ADR_TOOL_NAMES.contains(&name)
         || DOCS_TOOL_NAMES.contains(&name)
         || LEARNING_TOOL_NAMES.contains(&name)
+        || AUTO_TASK_TOOL_NAMES.contains(&name)
 }
 
 fn ensure_mcp_tool_exposed(name: &str) -> Result<(), OrbitError> {

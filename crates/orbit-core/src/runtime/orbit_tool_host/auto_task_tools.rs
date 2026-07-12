@@ -1,0 +1,109 @@
+//! MCP host functions for the `orbit.auto_task.*` tools [ORB-10149]. Thin
+//! adapters that parse the JSON tool input into the shared CRUD params and
+//! call the same `OrbitRuntime` methods the CLI uses, so both entry points
+//! stay consistent. Each returns the full definition as JSON.
+
+use orbit_common::types::{AutoTaskSchedule, AutoTaskTemplate, DedupePolicy, OrbitError};
+use serde_json::Value;
+
+use crate::OrbitRuntime;
+use crate::auto_tasks::crud::{AutoTaskAddParams, AutoTaskUpdateParams};
+
+pub(super) fn add(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+    let name = required_str(&input, "name")?;
+    let description = optional_str(&input, "description").unwrap_or_default();
+    let schedule: AutoTaskSchedule = parse_field(&input, "schedule", true)?
+        .ok_or_else(|| OrbitError::InvalidInput("missing `schedule`".to_string()))?;
+    let template: AutoTaskTemplate = parse_field(&input, "template", true)?
+        .ok_or_else(|| OrbitError::InvalidInput("missing `template`".to_string()))?;
+    let dedupe: DedupePolicy = parse_field(&input, "dedupe", false)?.unwrap_or_default();
+
+    let definition = runtime.auto_task_add(AutoTaskAddParams {
+        name,
+        description,
+        schedule,
+        template,
+        dedupe,
+    })?;
+    to_json(&definition)
+}
+
+pub(super) fn list(runtime: &OrbitRuntime, _input: Value) -> Result<Value, OrbitError> {
+    let definitions = runtime.auto_task_list()?;
+    let array = definitions
+        .iter()
+        .map(|definition| serde_json::to_value(definition).unwrap_or(Value::Null))
+        .collect();
+    Ok(Value::Array(array))
+}
+
+pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+    let name = required_str(&input, "name")?;
+    let definition = runtime
+        .auto_task_show(&name)?
+        .ok_or_else(|| OrbitError::InvalidInput(format!("no such auto-task '{name}'")))?;
+    to_json(&definition)
+}
+
+pub(super) fn update(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+    let name = required_str(&input, "name")?;
+    let params = AutoTaskUpdateParams {
+        description: optional_str(&input, "description"),
+        schedule: parse_field(&input, "schedule", false)?,
+        dedupe: parse_field(&input, "dedupe", false)?,
+        template: parse_field(&input, "template", false)?,
+    };
+    let definition = runtime.auto_task_update(&name, params)?;
+    to_json(&definition)
+}
+
+pub(super) fn toggle(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+    let name = required_str(&input, "name")?;
+    let enabled = input
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| OrbitError::InvalidInput("missing boolean `enabled`".to_string()))?;
+    let definition = runtime.auto_task_toggle(&name, enabled)?;
+    to_json(&definition)
+}
+
+fn required_str(input: &Value, field: &str) -> Result<String, OrbitError> {
+    input
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| OrbitError::InvalidInput(format!("missing non-empty `{field}`")))
+}
+
+fn optional_str(input: &Value, field: &str) -> Option<String> {
+    input
+        .get(field)
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+/// Deserialize a nested object field into a typed value. `required` only
+/// affects the error when the field is present-but-malformed; an absent field
+/// always yields `Ok(None)`.
+fn parse_field<T: serde::de::DeserializeOwned>(
+    input: &Value,
+    field: &str,
+    required: bool,
+) -> Result<Option<T>, OrbitError> {
+    match input.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => serde_json::from_value(value.clone())
+            .map(Some)
+            .map_err(|error| {
+                let context = if required { "required " } else { "" };
+                OrbitError::InvalidInput(format!("invalid {context}`{field}`: {error}"))
+            }),
+    }
+}
+
+fn to_json(definition: &orbit_common::types::AutoTaskDefinition) -> Result<Value, OrbitError> {
+    serde_json::to_value(definition)
+        .map_err(|error| OrbitError::Io(format!("encode auto-task: {error}")))
+}

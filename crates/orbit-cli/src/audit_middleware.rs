@@ -452,6 +452,26 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 job_run_id: None,
             }
         }
+        Commands::AutoTask(cmd) => {
+            use crate::command::auto_task::AutoTaskSubcommand;
+            let (sub, target_id): (&str, Option<&str>) = match &cmd.command {
+                AutoTaskSubcommand::Add(args) => ("add", Some(args.name.as_str())),
+                AutoTaskSubcommand::List(_) => ("list", None),
+                AutoTaskSubcommand::Show(args) => ("show", Some(args.name.as_str())),
+                AutoTaskSubcommand::Update(args) => ("update", Some(args.name.as_str())),
+                AutoTaskSubcommand::Toggle(args) => ("toggle", Some(args.name.as_str())),
+            };
+            CommandMeta {
+                command: "auto-task".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("auto_task".to_string()),
+                target_id: target_id.map(String::from),
+                role: "admin".to_string(),
+                arguments_json: None,
+                job_run_id: None,
+            }
+        }
         Commands::Activity(cmd) => {
             use crate::command::activity::ActivitySubcommand;
             let (sub, target_id): (&str, Option<&str>) = match &cmd.command {

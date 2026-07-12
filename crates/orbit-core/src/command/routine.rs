@@ -26,10 +26,16 @@ use orbit_common::utility::fs::write_text_with_parent;
 /// must keep the `__ORBIT_HOST_ID__` / `__ORBIT_ROUTINE_NAME__`
 /// placeholders parseable once substituted — `seed_default_routines`
 /// validates each rendered document fail-closed before writing.
-pub(crate) const DEFAULT_ROUTINE_FILES: &[(&str, &str)] = &[(
-    "task_triage",
-    include_str!("../../assets/routines/task_triage.yaml"),
-)];
+pub(crate) const DEFAULT_ROUTINE_FILES: &[(&str, &str)] = &[
+    (
+        "auto_task_scheduler",
+        include_str!("../../assets/routines/auto_task_scheduler.yaml"),
+    ),
+    (
+        "task_triage",
+        include_str!("../../assets/routines/task_triage.yaml"),
+    ),
+];
 
 const HOST_ID_PLACEHOLDER: &str = "__ORBIT_HOST_ID__";
 const ROUTINE_NAME_PLACEHOLDER: &str = "__ORBIT_ROUTINE_NAME__";
