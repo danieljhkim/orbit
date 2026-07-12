@@ -287,6 +287,153 @@
     "name": "orbit_adr_update"
   },
   {
+    "description": "Create a recurring auto-task definition. The generic scheduler mints a task from its template on each due slot.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "dedupe": {
+          "description": "Dedupe policy: `skip_if_open` (default) or `always`.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Human description of the recurring chore.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Unique definition name (lowercase alphanumeric, `-`/`_`, starts alphanumeric). Required.",
+          "type": "string"
+        },
+        "schedule": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Schedule object: exactly one of `{ cron: string }` (5-field cron) or `{ every_minutes: number }`. Required."
+        },
+        "template": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Task template: `{ title, description?, acceptance_criteria?, task_type?, tags?, priority?, crew?, status? }`. Provider-neutral — no turn knobs. Required."
+        }
+      },
+      "required": [
+        "name",
+        "schedule",
+        "template"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_auto_task_add"
+  },
+  {
+    "description": "Show a single auto-task definition by name.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "description": "Definition name. Required.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_auto_task_show"
+  },
+  {
+    "description": "Enable or disable an auto-task definition without deleting it.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "description": "Whether to enable (`true`) or disable (`false`) the definition. Disabling is the kill-switch, not a delete. Required.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Definition name. Required.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_auto_task_toggle"
+  },
+  {
+    "description": "Update an existing auto-task definition (present fields only).",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "dedupe": {
+          "description": "New dedupe policy: `skip_if_open` or `always`.",
+          "type": "string"
+        },
+        "description": {
+          "description": "New description.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Definition name. Required.",
+          "type": "string"
+        },
+        "schedule": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "New schedule object: `{ cron: string }` or `{ every_minutes: number }`."
+        },
+        "template": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Replacement task template object."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_auto_task_update"
+  },
+  {
     "description": "Append an Orbit friction report under .orbit/frictions/",
     "inputSchema": {
       "additionalProperties": true,
