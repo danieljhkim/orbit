@@ -19,8 +19,8 @@ use crate::paths;
 use super::persistence::PersistenceConfig;
 use super::raw::{
     RawAgentRoleConfig, RawCodexExecutionConfig, RawCrewEntry, RawDuelSection,
-    RawExecutionEnvConfig, RawPrSection, RawRoutinesConfig, RawRuntimeConfig, RawRuntimeSection,
-    RawTaskSection, RawWorkflowConfig,
+    RawExecutionEnvConfig, RawGcConfig, RawPrSection, RawRoutinesConfig, RawRuntimeConfig,
+    RawRuntimeSection, RawTaskSection, RawWorkflowConfig,
 };
 
 const DEFAULT_ENV_INHERIT: bool = false;
@@ -32,6 +32,8 @@ const DEFAULT_SCORING_ENABLED: bool = true;
 const DEFAULT_GRAPH_EDITING: bool = false;
 const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
 const DEFAULT_WORKFLOW_CREW: &str = "claude";
+pub(crate) const DEFAULT_WORKTREE_SUCCESS_RETENTION_DAYS: u64 = 0;
+pub(crate) const DEFAULT_WORKTREE_FAILURE_RETENTION_DAYS: u64 = 7;
 const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
 
 #[derive(Debug, Clone)]
@@ -58,6 +60,8 @@ pub(crate) struct RuntimeConfig {
     /// "source"` in `config.toml`; defaults to `false`). Consulted by
     /// `orbit sweep` before loading `.orbit/routines/*.yaml`.
     pub(crate) routines_source: bool,
+    pub(crate) worktree_gc_success_retention_days: u64,
+    pub(crate) worktree_gc_failure_retention_days: u64,
     /// Named provider-model assignments from `[crews.<name>]`.
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
@@ -111,6 +115,8 @@ impl RuntimeConfig {
             workflow_base_branch: DEFAULT_WORKFLOW_BASE_BRANCH.to_string(),
             workflow_auto_ship: false,
             routines_source: false,
+            worktree_gc_success_retention_days: DEFAULT_WORKTREE_SUCCESS_RETENTION_DAYS,
+            worktree_gc_failure_retention_days: DEFAULT_WORKTREE_FAILURE_RETENTION_DAYS,
             crews: default_crews(),
             default_crew: Some(DEFAULT_WORKFLOW_CREW.to_string()),
             duel: DuelConfig::default(),
@@ -220,6 +226,8 @@ impl RuntimeConfig {
             .and_then(|workflow| workflow.auto_ship)
             .unwrap_or(false);
         let routines_source = routines_source_from_raw(parsed.routines.as_ref())?;
+        let (worktree_gc_success_retention_days, worktree_gc_failure_retention_days) =
+            worktree_gc_retention_from_raw(parsed.gc.as_ref());
         let crews = crews_from_raw(parsed.crews.as_ref())?;
         let default_crew = workflow_default_crew_from_raw(parsed.workflow.as_ref(), &crews)?;
         let duel = duel_from_raw(parsed.duel.as_ref())?;
@@ -251,6 +259,8 @@ impl RuntimeConfig {
             workflow_base_branch,
             workflow_auto_ship,
             routines_source,
+            worktree_gc_success_retention_days,
+            worktree_gc_failure_retention_days,
             crews,
             default_crew,
             duel,
@@ -279,6 +289,14 @@ impl RuntimeConfig {
 
     pub(crate) fn routines_source(&self) -> bool {
         self.routines_source
+    }
+
+    pub(crate) fn worktree_gc_success_retention_days(&self) -> u64 {
+        self.worktree_gc_success_retention_days
+    }
+
+    pub(crate) fn worktree_gc_failure_retention_days(&self) -> u64 {
+        self.worktree_gc_failure_retention_days
     }
 
     pub(crate) fn pr_config(&self) -> &PrConfig {
@@ -646,6 +664,18 @@ fn routines_source_from_raw(raw: Option<&RawRoutinesConfig>) -> Result<bool, Orb
             "[routines] role has invalid value '{other}'; the only supported value is 'source'"
         ))),
     }
+}
+
+fn worktree_gc_retention_from_raw(raw: Option<&RawGcConfig>) -> (u64, u64) {
+    let worktrees = raw.and_then(|gc| gc.worktrees.as_ref());
+    (
+        worktrees
+            .and_then(|worktrees| worktrees.success_retention_days)
+            .unwrap_or(DEFAULT_WORKTREE_SUCCESS_RETENTION_DAYS),
+        worktrees
+            .and_then(|worktrees| worktrees.failure_retention_days)
+            .unwrap_or(DEFAULT_WORKTREE_FAILURE_RETENTION_DAYS),
+    )
 }
 
 fn workflow_base_branch_from_raw(raw: Option<&RawWorkflowConfig>) -> Result<String, OrbitError> {

@@ -1,0 +1,29 @@
+schema_version: 1
+id: L-0080
+status: active
+scope:
+  paths:
+  - crates/orbit-core/src/command/gc/**
+  - crates/orbit-engine/src/executor/automation/vcs/worktree/**
+  tags:
+  - pipeline
+  - worktree
+  - gc
+  - disk
+summary: Collect pipeline worktrees only through the shared GC classifier; retain uncertainty and never force-delete branches or directories.
+body: |-
+  Pipeline worktrees caused the largest known disk leak, but the first ORB-10173 cleanup model was unsafe: name matching plus a liveness check did not prove ownership, raw recursive deletion bypassed Git safety, and branch -D could discard unmerged or unpushed task work.
+
+  Use `orbit gc worktrees` and its shared terminal-cleanup path. Mutation requires explicit apply (terminal cleanup supplies it internally), a Git-registered worktree plus persisted terminal run timestamp, and immediate revalidation under the host GC lock. Retain live/inconclusive, current-cwd, dirty, unknown-owner, resumable interrupted, unmerged, and unpushed task worktrees with explicit reasons. Use `git worktree remove` without force and `git worktree prune`; never raw-remove a candidate or auto-delete its branch.
+
+  Success/cancelled and failure/interrupted use separate typed retention classes. The collector is language-neutral because ignored build artifacts are removed with their clean worktree, not by special-casing Cargo or another build system. ORB-10182 supersedes the rejected ORB-10173 implementation and explicitly re-scopes F2026-07-019 / the ORB-10153 overlap to the safety-first collector contract.
+evidence:
+- kind: task
+  reference: ORB-10182
+- kind: task
+  reference: ORB-10173
+- kind: external
+  reference: F2026-07-019
+created_at: 2026-07-12T22:03:13.925534303Z
+updated_at: 2026-07-12T22:03:13.925534303Z
+created_by: codex

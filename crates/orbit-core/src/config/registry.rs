@@ -53,6 +53,16 @@ pub const CONFIG_KEY_REGISTRY: &[ConfigKeyDescriptor] = &[
         description: "Environment variable names allow-listed for passthrough into agent subprocesses.",
     },
     ConfigKeyDescriptor {
+        key: "gc.worktrees.failure_retention_days",
+        value_type: "integer",
+        description: "Days to retain failed/timeout/interrupted managed worktrees; resumable interrupted worktrees remain protected.",
+    },
+    ConfigKeyDescriptor {
+        key: "gc.worktrees.success_retention_days",
+        value_type: "integer",
+        description: "Days to retain success/cancelled managed worktrees after their persisted terminal transition (zero permits immediate collection).",
+    },
+    ConfigKeyDescriptor {
         key: "graph.editing",
         value_type: "bool",
         description: "Whether the code graph editing surface is enabled.",

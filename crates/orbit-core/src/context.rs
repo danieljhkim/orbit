@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use orbit_common::types::{Crew, WorkspacePaths};
@@ -89,6 +89,10 @@ pub(crate) struct OrbitStores {
     pub(crate) audit_event: Arc<dyn AuditEventStoreBackend>,
     pub(crate) executor_def: Arc<dyn ExecutorDefStoreBackend>,
     pub(crate) policy_def: Arc<dyn PolicyDefStoreBackend>,
+    /// Workspace `state` dir; the per-run claim guard (`run-guards/<id>.lock`)
+    /// is derived from it so the claim/start path and the worktree collector
+    /// rendezvous on the same lock (ORB-10182).
+    pub(crate) run_guard_state_dir: PathBuf,
 }
 
 impl OrbitStores {
@@ -109,6 +113,7 @@ impl OrbitStores {
         audit_event: Arc<dyn AuditEventStoreBackend>,
         executor_def: Arc<dyn ExecutorDefStoreBackend>,
         policy_def: Arc<dyn PolicyDefStoreBackend>,
+        run_guard_state_dir: PathBuf,
     ) -> Self {
         Self {
             task,
@@ -126,6 +131,7 @@ impl OrbitStores {
             audit_event,
             executor_def,
             policy_def,
+            run_guard_state_dir,
         }
     }
 }
@@ -186,6 +192,8 @@ pub(crate) struct OrbitRuntimeSettings {
     /// Whether this workspace is a routine source
     /// (`[routines] role = "source"` in `config.toml`, default `false`).
     routines_source: bool,
+    worktree_gc_success_retention_days: u64,
+    worktree_gc_failure_retention_days: u64,
     crews: std::collections::BTreeMap<String, Crew>,
     default_crew: Option<String>,
     duel: DuelConfig,
@@ -205,6 +213,8 @@ impl OrbitRuntimeSettings {
         workflow_base_branch: String,
         workflow_auto_ship: bool,
         routines_source: bool,
+        worktree_gc_success_retention_days: u64,
+        worktree_gc_failure_retention_days: u64,
         crews: std::collections::BTreeMap<String, Crew>,
         default_crew: Option<String>,
         duel: DuelConfig,
@@ -221,6 +231,8 @@ impl OrbitRuntimeSettings {
             workflow_base_branch,
             workflow_auto_ship,
             routines_source,
+            worktree_gc_success_retention_days,
+            worktree_gc_failure_retention_days,
             crews,
             default_crew,
             duel,
@@ -245,6 +257,14 @@ impl OrbitRuntimeSettings {
 
     pub(crate) fn routines_source(&self) -> bool {
         self.routines_source
+    }
+
+    pub(crate) fn worktree_gc_success_retention_days(&self) -> u64 {
+        self.worktree_gc_success_retention_days
+    }
+
+    pub(crate) fn worktree_gc_failure_retention_days(&self) -> u64 {
+        self.worktree_gc_failure_retention_days
     }
 
     pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {
@@ -383,6 +403,14 @@ impl OrbitContext {
     /// (`[routines] role = "source"` in `config.toml`, default `false`).
     pub(crate) fn routines_source(&self) -> bool {
         self.runtime.routines_source()
+    }
+
+    pub(crate) fn worktree_gc_success_retention_days(&self) -> u64 {
+        self.runtime.worktree_gc_success_retention_days()
+    }
+
+    pub(crate) fn worktree_gc_failure_retention_days(&self) -> u64 {
+        self.runtime.worktree_gc_failure_retention_days()
     }
 
     pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {

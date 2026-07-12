@@ -6,7 +6,6 @@ use serde_json::{Map, Value, json};
 use crate::context::RuntimeHost;
 use crate::executor::automation::input::input_string_field;
 
-use super::super::git::{git_output, git_output_raw, git_success};
 use super::{resolve_shared_worktree_path, resolve_worktree_path_from_prefix};
 
 const DEFAULT_BRANCH_PREFIX: &str = "orbit";
@@ -20,25 +19,15 @@ pub(in crate::executor::automation) fn cleanup_worktree<H: RuntimeHost + ?Sized>
     let repo_root = Path::new(&repo_root_str);
     let workspace_path = resolve_workspace_path(repo_root, input, run_id)?;
     let workspace_path_str = workspace_path.to_string_lossy().to_string();
-    let branch_name = detect_branch_name(repo_root, &workspace_path);
-
-    if workspace_path.exists() {
-        git_success(
-            repo_root,
-            &["worktree", "remove", "--force", workspace_path_str.as_str()],
-        )?;
-    }
-    git_success(repo_root, &["worktree", "prune"])?;
-    if let Some(branch_name) = branch_name.as_deref() {
-        git_success(repo_root, &["branch", "-D", branch_name])?;
-    }
 
     let mut output = Map::new();
-    output.insert("cleaned_up".to_string(), json!(true));
+    // Destructive cleanup is intentionally deferred until the owning run has
+    // a persisted terminal timestamp. OrbitRuntime then invokes the shared
+    // worktree GC collector, which applies the same retention and safety
+    // classifier as `orbit gc worktrees --apply`.
+    output.insert("cleaned_up".to_string(), json!(false));
+    output.insert("cleanup_deferred".to_string(), json!(true));
     output.insert("workspace_path".to_string(), json!(workspace_path_str));
-    if let Some(branch_name) = branch_name {
-        output.insert("branch".to_string(), json!(branch_name));
-    }
     Ok(Value::Object(output))
 }
 
@@ -77,44 +66,4 @@ fn has_task_id(input: &Value) -> bool {
         .and_then(Value::as_str)
         .map(str::trim)
         .is_some_and(|task_id| !task_id.is_empty())
-}
-
-fn detect_branch_name(repo_root: &Path, workspace_path: &Path) -> Option<String> {
-    if workspace_path.is_dir()
-        && let Ok(branch_name) = git_output(workspace_path, &["rev-parse", "--abbrev-ref", "HEAD"])
-    {
-        let branch_name = branch_name.trim();
-        if !branch_name.is_empty() && branch_name != "HEAD" {
-            return Some(branch_name.to_string());
-        }
-    }
-
-    let worktree_list = git_output_raw(repo_root, &["worktree", "list", "--porcelain"]).ok()?;
-    branch_name_from_worktree_list(&worktree_list, workspace_path)
-}
-
-fn branch_name_from_worktree_list(worktree_list: &str, workspace_path: &Path) -> Option<String> {
-    let target_path = workspace_path.to_string_lossy();
-    let mut matching_block = false;
-
-    for line in worktree_list.lines() {
-        if let Some(path) = line.strip_prefix("worktree ") {
-            matching_block = path == target_path;
-            continue;
-        }
-
-        if !matching_block {
-            continue;
-        }
-
-        if let Some(branch_name) = line.strip_prefix("branch refs/heads/") {
-            return Some(branch_name.to_string());
-        }
-
-        if line.is_empty() {
-            matching_block = false;
-        }
-    }
-
-    None
 }
