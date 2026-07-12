@@ -123,6 +123,31 @@ fn open_batch_pr_rejects_zero_commits_ahead_branch() {
 }
 
 #[test]
+fn pr_open_skips_change_checks_for_no_diff_expected_task() {
+    let workspace = no_diff_pr_workspace();
+    let mut task = batch_task(
+        "T20260712-1",
+        "Perform QA validation",
+        "Outcome: success\n\nChanges:\n- Filed follow-up tasks through Orbit.",
+    );
+    task.tags
+        .push(orbit_common::types::NO_DIFF_EXPECTED_TAG.to_string());
+    let host = PrOpenTestHost::new(vec![task], workspace.repo.clone())
+        .with_activity_implementer("codex", "codex");
+
+    let result = pr_open(&host, &pr_open_input(&workspace.repo, vec!["T20260712-1"]))
+        .expect("no-diff task should bypass commit and PR checks");
+
+    assert_eq!(result["pr_created"], json!(false));
+    assert_eq!(result["skipped_no_diff_expected"], json!(true));
+    assert!(host.tool_calls().is_empty());
+    assert_eq!(
+        host.get_task("T20260712-1").expect("task").status,
+        TaskStatus::Review
+    );
+}
+
+#[test]
 fn pr_open_generates_body_with_all_completed_task_summaries() {
     let workspace = pr_workspace();
     let first_summary =

@@ -201,6 +201,27 @@ fn git_commit_batch_errors_on_empty_stage() {
 }
 
 #[test]
+fn git_commit_batch_allows_empty_stage_for_no_diff_expected_task() {
+    let temp = initialized_git_repo();
+    let workspace = temp.path();
+
+    let mut task = task_with_file("T1", "QA validation", "src/missing.txt", "sonnet");
+    task.tags
+        .push(orbit_common::types::NO_DIFF_EXPECTED_TAG.to_string());
+    let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+    let input = json!({
+        "scope": "all",
+        "job_run_id": "batch-1",
+        "workspace_path": workspace.to_string_lossy().to_string(),
+    });
+
+    let result = git_commit(&host, &input).expect("exempt empty stage succeeds");
+    assert_eq!(result["skipped_no_diff_expected"], json!(true));
+    let log = git_output(workspace, &["rev-list", "--count", "HEAD"]).expect("count commits");
+    assert_eq!(log.trim(), "1");
+}
+
+#[test]
 fn git_commit_batch_rejects_multiple_tasks() {
     let temp = initialized_git_repo();
     let workspace = temp.path();

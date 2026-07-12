@@ -96,7 +96,7 @@ fn show_job_run_repairs_terminal_run_missing_timing() {
 /// [ORB-10070] The workspace-open orphan scan terminalizes `pending` children
 /// left behind by an interrupted parent run: never claimed by any worker and
 /// far older than the claim grace window, they finalize as `interrupted`
-/// instead of deferring consumers (e.g. orbit-web-upgrade) forever.
+/// instead of deferring consumers forever.
 #[test]
 fn workspace_open_reconciles_orphaned_pending_children_of_interrupted_parent() {
     let (root, runtime) = test_runtime();

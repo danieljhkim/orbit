@@ -58,11 +58,6 @@ pub(crate) struct RuntimeConfig {
     /// "source"` in `config.toml`; defaults to `false`). Consulted by
     /// `orbit sweep` before loading `.orbit/routines/*.yaml`.
     pub(crate) routines_source: bool,
-    /// Host-level `[qa]` section for `orbit run qa-sweep` [ORB-10039].
-    /// Meaningful only when this config is the **global** one — the sweep
-    /// loads it from `~/.orbit/config.toml`; workspace configs are never
-    /// consulted for it (they get rewritten by task-mutation commands).
-    pub(crate) qa: crate::qa::QaSweepConfig,
     /// Named provider-model assignments from `[crews.<name>]`.
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
@@ -116,7 +111,6 @@ impl RuntimeConfig {
             workflow_base_branch: DEFAULT_WORKFLOW_BASE_BRANCH.to_string(),
             workflow_auto_ship: false,
             routines_source: false,
-            qa: crate::qa::QaSweepConfig::default(),
             crews: default_crews(),
             default_crew: Some(DEFAULT_WORKFLOW_CREW.to_string()),
             duel: DuelConfig::default(),
@@ -226,7 +220,6 @@ impl RuntimeConfig {
             .and_then(|workflow| workflow.auto_ship)
             .unwrap_or(false);
         let routines_source = routines_source_from_raw(parsed.routines.as_ref())?;
-        let qa = crate::qa::QaSweepConfig::from_raw(parsed.qa.as_ref())?;
         let crews = crews_from_raw(parsed.crews.as_ref())?;
         let default_crew = workflow_default_crew_from_raw(parsed.workflow.as_ref(), &crews)?;
         let duel = duel_from_raw(parsed.duel.as_ref())?;
@@ -258,7 +251,6 @@ impl RuntimeConfig {
             workflow_base_branch,
             workflow_auto_ship,
             routines_source,
-            qa,
             crews,
             default_crew,
             duel,
@@ -287,11 +279,6 @@ impl RuntimeConfig {
 
     pub(crate) fn routines_source(&self) -> bool {
         self.routines_source
-    }
-
-    /// The validated `[qa]` section [ORB-10039].
-    pub(crate) fn qa_sweep(&self) -> &crate::qa::QaSweepConfig {
-        &self.qa
     }
 
     pub(crate) fn pr_config(&self) -> &PrConfig {

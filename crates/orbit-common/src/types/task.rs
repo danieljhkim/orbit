@@ -49,6 +49,11 @@ use crate::types::task_artifacts::{TaskRelation, TaskRelationType};
 use crate::types::{OrbitError, OrbitId};
 use crate::utility::selector::exists_in_workspace;
 
+/// Tasks carrying this tag may complete successfully without producing a
+/// repository diff. Their durable side effects live outside git (for example,
+/// QA validation tasks file follow-up Orbit tasks).
+pub const NO_DIFF_EXPECTED_TAG: &str = "no-diff-expected";
+
 /// Current lifecycle state of a task.
 ///
 /// See the module-level doc for the full state transition diagram.

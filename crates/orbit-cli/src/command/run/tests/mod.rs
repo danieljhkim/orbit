@@ -3,7 +3,6 @@
 mod duel;
 mod format;
 mod job;
-mod qa_sweep;
 mod ship;
 mod support;
 

@@ -63,6 +63,7 @@ fn non_interactive_init_writes_generated_crew_config() {
     assert!(contents.contains("[crews.codex]"));
     assert!(contents.contains("[crews.gemini]"));
     assert!(contents.contains("[crews.grok]"));
+    assert!(contents.contains("[crews.qa]"));
     let config = toml::from_str::<toml::Value>(&contents).expect("seeded config parses");
     let codex = config
         .get("crews")
