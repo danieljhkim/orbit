@@ -1,6 +1,7 @@
 pub mod activity;
 pub mod adr;
 pub mod audit;
+pub mod auto_task;
 pub mod config;
 pub mod docs;
 pub mod doctor;
@@ -78,6 +79,7 @@ Observe:
   doctor      Diagnose workspace health (config, database, disk, indexes)
 
 Definitions:
+  auto-task   Define recurring auto-task templates (the scheduler primitive)
   activity    View activity definitions
   job         View job definitions
   tool        View tool registry
@@ -129,6 +131,8 @@ pub enum Commands {
     Doctor(doctor::DoctorCommand),
 
     // ── Definitions ──
+    #[command(name = "auto-task")]
+    AutoTask(auto_task::AutoTaskCommand),
     Activity(activity::ActivityCommand),
     Job(job::JobCommand),
     Tool(tool::ToolCommand),
@@ -174,6 +178,7 @@ impl Execute for Commands {
             Commands::Audit(cmd) => cmd.execute(runtime),
             Commands::Log(cmd) => cmd.execute(runtime),
             Commands::Doctor(cmd) => cmd.execute(runtime),
+            Commands::AutoTask(cmd) => cmd.execute(runtime),
             Commands::Activity(cmd) => cmd.execute(runtime),
             Commands::Job(cmd) => cmd.execute(runtime),
             Commands::Tool(cmd) => cmd.execute(runtime),

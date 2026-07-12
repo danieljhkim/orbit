@@ -1,4 +1,5 @@
 pub mod adr;
+pub mod auto_task;
 pub mod docs;
 pub mod duel;
 pub mod friction;
@@ -39,6 +40,13 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(adr::show::OrbitAdrShowTool);
     registry.register(adr::supersede::OrbitAdrSupersedeTool);
     registry.register(adr::update::OrbitAdrUpdateTool);
+    // Auto-task definitions [ORB-10149]: agents can define/retune/disable
+    // recurring chores. `list` stays CLI/admin only (mirrors learning::list).
+    registry.register(auto_task::add::OrbitAutoTaskAddTool);
+    registry.register_inactive(auto_task::list::OrbitAutoTaskListTool);
+    registry.register(auto_task::show::OrbitAutoTaskShowTool);
+    registry.register(auto_task::update::OrbitAutoTaskUpdateTool);
+    registry.register(auto_task::toggle::OrbitAutoTaskToggleTool);
     registry.register_inactive(docs::OrbitDocsListTool);
     registry.register_inactive(docs::OrbitDocsShowTool);
     registry.register_inactive(docs::OrbitDocsAddTool);

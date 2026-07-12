@@ -20,6 +20,10 @@ use crate::OrbitRuntime;
 /// only.
 const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
     (
+        "auto_task_scheduler_pipeline",
+        include_str!("../../../assets/jobs/auto_task_scheduler_pipeline.yaml"),
+    ),
+    (
         "job_duel_plan_pipeline",
         include_str!("../../../assets/jobs/job_duel_plan_pipeline.yaml"),
     ),

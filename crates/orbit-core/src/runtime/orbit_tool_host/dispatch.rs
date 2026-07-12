@@ -24,6 +24,11 @@ pub(super) fn execute(
         OrbitBuiltinAction::AdrSupersede => {
             super::adr_tools::supersede(runtime, input, agent, model)
         }
+        OrbitBuiltinAction::AutoTaskAdd => super::auto_task_tools::add(runtime, input),
+        OrbitBuiltinAction::AutoTaskList => super::auto_task_tools::list(runtime, input),
+        OrbitBuiltinAction::AutoTaskShow => super::auto_task_tools::show(runtime, input),
+        OrbitBuiltinAction::AutoTaskUpdate => super::auto_task_tools::update(runtime, input),
+        OrbitBuiltinAction::AutoTaskToggle => super::auto_task_tools::toggle(runtime, input),
         OrbitBuiltinAction::DocsList => super::docs_tools::list(runtime, input),
         OrbitBuiltinAction::DocsShow => super::docs_tools::show(runtime, input),
         OrbitBuiltinAction::DocsAdd => super::docs_tools::add(runtime, input),
