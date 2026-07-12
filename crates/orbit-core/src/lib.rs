@@ -77,7 +77,7 @@ pub use orbit_common::types::{
     AuditEvent, AuditEventStatus, AuditStats, AutoTaskDefinition, AutoTaskSchedule,
     AutoTaskTemplate, DedupePolicy, EvidenceKind, ExecutorDef, ExternalRef, JobRun, JobRunState,
     JobRunStep, JobTargetType, Learning, LearningEvidence, LearningScope, LearningStatus,
-    ReviewThreadStatus, Task, TaskComplexity, TaskPriority, TaskStatus, TaskType,
+    ReviewThreadStatus, Task, TaskComplexity, TaskCreateStatus, TaskPriority, TaskStatus, TaskType,
     build_task_status_index, resolve_task_dependencies, task_dependencies_ready,
 };
 pub use orbit_common::types::{MissedRunPolicy, NotFoundKind, OrbitError, OverlapPolicy};

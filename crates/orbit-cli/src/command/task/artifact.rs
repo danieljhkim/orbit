@@ -45,9 +45,6 @@ pub struct TaskArtifactPutArgs {
     /// Artifact path relative to the task artifacts directory. Defaults to the source file name.
     #[arg(long = "path")]
     pub artifact_path: Option<String>,
-    /// Explicit agent name to persist on the task artifact update
-    #[arg(long)]
-    pub agent: Option<String>,
     /// Explicit agent model to persist on the task artifact update
     #[arg(long)]
     pub model: Option<String>,
@@ -62,10 +59,10 @@ impl Execute for TaskArtifactPutArgs {
             id,
             source_path,
             artifact_path,
-            agent,
             model,
             json,
         } = self;
+        let (agent, model) = super::mutation_identity(model);
         let artifact = TaskArtifact::from_source_file(&source_path, artifact_path.as_deref())?;
         let artifact_path = artifact.path.clone();
         let task = runtime.update_task_with_identity(

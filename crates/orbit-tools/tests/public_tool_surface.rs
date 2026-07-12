@@ -287,11 +287,16 @@ fn task_update_dependency_params_remain_in_agent_tool_schema() {
 }
 
 #[test]
-fn task_add_update_schemas_use_model_only_identity() {
+fn task_mutation_schemas_use_model_only_identity() {
     let mut registry = ToolRegistry::new();
     registry.register_builtins();
 
-    for tool_name in ["orbit.task.add", "orbit.task.update"] {
+    for tool_name in [
+        "orbit.task.add",
+        "orbit.task.update",
+        "orbit.task.start",
+        "orbit.task.artifact.put",
+    ] {
         let schema = registry
             .get_schema(tool_name)
             .unwrap_or_else(|| panic!("{tool_name} schema"));

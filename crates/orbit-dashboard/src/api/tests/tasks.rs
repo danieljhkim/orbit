@@ -15,6 +15,16 @@ use tower::ServiceExt;
 use super::super::router;
 use super::test_support::body_json;
 
+fn post_json(uri: &str, body: Value) -> Request<Body> {
+    Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(header::ORIGIN, "http://localhost:7878")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("request")
+}
+
 fn seed_task_with_artifact(runtime: &OrbitRuntime) -> orbit_core::Task {
     seed_task_with_artifact_payload(
         runtime,
@@ -746,4 +756,41 @@ async fn create_task_rejects_stray_workspace_body_key() {
     let message = body["error"].as_str().expect("error message");
     assert!(message.contains("workspace"), "names the offending key");
     assert!(message.contains("?workspace="), "points at the query param");
+}
+
+#[tokio::test]
+async fn create_task_only_accepts_creation_legal_statuses_and_ignores_comment() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let app = router().with_state(crate::state::DashboardState::single(Arc::new(runtime)));
+
+    let rejected = app
+        .clone()
+        .oneshot(post_json(
+            "/tasks",
+            json!({
+                "title": "illegal status",
+                "description": "must not start done",
+                "status": "done",
+            }),
+        ))
+        .await
+        .expect("response");
+    assert!(rejected.status().is_client_error());
+
+    let created = app
+        .oneshot(post_json(
+            "/tasks",
+            json!({
+                "title": "legal status",
+                "description": "starts in backlog",
+                "status": "backlog",
+                "comment": "retired create input",
+            }),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(created.status(), StatusCode::OK);
+    let body = body_json(created).await;
+    assert_eq!(body["status"], json!("backlog"));
+    assert_eq!(body["comments"], json!([]));
 }

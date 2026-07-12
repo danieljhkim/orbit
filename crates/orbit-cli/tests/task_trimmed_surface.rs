@@ -137,6 +137,47 @@ fn lint_fix_sweep_drops_stale_context_entries() {
 }
 
 #[test]
+fn task_add_attributes_from_model_flag_and_managed_identity_env() {
+    let workspace = TestWorkspace::new();
+
+    let explicit = workspace.task_json(&[
+        "task",
+        "add",
+        "--title",
+        "Explicit model",
+        "--description",
+        "Model flag attribution",
+        "--model",
+        "gpt-5.6-sol",
+        "--json",
+    ]);
+    assert_eq!(explicit["created_by"], json!("gpt-5.6-sol"));
+
+    let output = run_orbit_with_identity(
+        &workspace.work,
+        &workspace.home,
+        &[
+            "task",
+            "add",
+            "--title",
+            "Managed identity",
+            "--description",
+            "Environment attribution",
+            "--json",
+        ],
+        "codex",
+        "gpt-5.6-terra",
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let managed: Value = serde_json::from_slice(&output.stdout).expect("managed task JSON");
+    assert_eq!(managed["created_by"], json!("gpt-5.6-terra"));
+}
+
+#[test]
 fn locks_release_reaches_admin_tool_bypassing_agent_gate() {
     let workspace = TestWorkspace::new();
 
@@ -261,6 +302,29 @@ fn run_orbit(cwd: &Path, home: &Path, args: &[&str]) -> Output {
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env_remove("ORBIT_ROOT")
+        .env_remove("ORBIT_AGENT_NAME")
+        .env_remove("ORBIT_AGENT_MODEL")
+        .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
         .args(args);
     command.output().expect("run orbit")
+}
+
+fn run_orbit_with_identity(
+    cwd: &Path,
+    home: &Path,
+    args: &[&str],
+    agent: &str,
+    model: &str,
+) -> Output {
+    let mut command = cargo_bin_cmd!("orbit");
+    command
+        .current_dir(cwd)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env_remove("ORBIT_ROOT")
+        .env("ORBIT_AGENT_NAME", agent)
+        .env("ORBIT_AGENT_MODEL", model)
+        .env("ORBIT_MANAGED_RUN_CONTEXT", "1")
+        .args(args);
+    command.output().expect("run orbit with managed identity")
 }

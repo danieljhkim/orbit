@@ -2,7 +2,7 @@ use clap::{ArgAction, Args};
 use orbit_cmd::TaskTemplateCommands;
 use orbit_core::command::task::TaskAddParams;
 use orbit_core::{
-    ExternalRef, OrbitError, OrbitRuntime, TaskComplexity, TaskPriority, TaskStatus, TaskType,
+    ExternalRef, OrbitError, OrbitRuntime, TaskComplexity, TaskCreateStatus, TaskPriority, TaskType,
 };
 
 use crate::command::Execute;
@@ -20,31 +20,28 @@ pub struct TaskAddArgs {
     /// Task description (overrides template if --template is also given)
     #[arg(long, default_value = "")]
     pub description: String,
-    /// Acceptance criteria. Repeat the flag for multiple criteria.
-    #[arg(long = "acceptance-criteria")]
+    /// Acceptance criteria. Repeat or comma-separate for multiple criteria.
+    #[arg(long = "acceptance-criteria", action = ArgAction::Append, value_delimiter = ',')]
     pub acceptance_criteria: Vec<String>,
-    /// Comma-separated dependency task IDs
-    #[arg(long, alias = "dependency", default_value = "")]
-    pub dependencies: String,
+    /// Dependency task IDs. Repeat or comma-separate for multiple dependencies.
+    #[arg(long, alias = "dependency", action = ArgAction::Append, value_delimiter = ',')]
+    pub dependencies: Vec<String>,
     /// Task tags. Repeat or comma-separate for multiple tags.
     #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',')]
     pub tags: Vec<String>,
     /// Optional task plan payload. Leave blank for the executing agent or planning activity to author later.
-    #[arg(long, alias = "instructions", default_value = "")]
+    #[arg(long, default_value = "")]
     pub plan: String,
     /// Pre-populate description, plan, and instructions from a named template
     #[arg(long)]
     pub template: Option<String>,
-    /// Append an initial task comment
-    #[arg(long)]
-    pub comment: Option<String>,
     /// External tracker reference in `system:id` form. Repeat for multiple refs.
     #[arg(long = "ref", action = ArgAction::Append)]
     pub external_refs: Vec<String>,
-    /// Comma-separated task context selectors. Prefer `file:`, `dir:`, or
-    /// `symbol:` forms; legacy raw paths are accepted and upgraded.
-    #[arg(long, default_value = "")]
-    pub context: String,
+    /// Task context selectors. Repeat or comma-separate for multiple selectors.
+    /// Prefer `file:`, `dir:`, or `symbol:` forms; legacy raw paths are accepted and upgraded.
+    #[arg(long, action = ArgAction::Append, value_delimiter = ',')]
+    pub context: Vec<String>,
     /// Workspace path for the task
     #[arg(long)]
     pub workspace: Option<String>,
@@ -59,16 +56,13 @@ pub struct TaskAddArgs {
     pub task_type: Option<TaskType>,
     /// Initial task status
     #[arg(long, value_enum)]
-    pub status: Option<TaskStatus>,
+    pub status: Option<TaskCreateStatus>,
     /// For bug tasks: the originating task whose implementation introduced the defect
     #[arg(long = "source-task")]
     pub source_task: Option<String>,
     /// Named crew to use when running this task
     #[arg(long)]
     pub crew: Option<String>,
-    /// Explicit agent name to persist on the task artifact
-    #[arg(long)]
-    pub agent: Option<String>,
     /// Explicit agent model to persist on the task artifact
     #[arg(long)]
     pub model: Option<String>,
@@ -79,6 +73,7 @@ pub struct TaskAddArgs {
 
 impl Execute for TaskAddArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let (agent, model) = super::mutation_identity(self.model);
         if let Some(parent_id) = self.parent_id.as_deref()
             && runtime.get_task(parent_id).is_err()
         {
@@ -118,17 +113,17 @@ impl Execute for TaskAddArgs {
                 title: self.title,
                 description,
                 acceptance_criteria: self.acceptance_criteria,
-                dependencies: crate::parse::csv_to_vec(&self.dependencies),
+                dependencies: self.dependencies,
                 relations: Vec::new(),
                 tags: self.tags,
                 plan,
-                comment: self.comment,
-                context_files: crate::parse::csv_to_vec(&self.context),
+                comment: None,
+                context_files: self.context,
                 workspace_path: self.workspace,
                 priority,
                 complexity: self.complexity,
                 task_type,
-                status: self.status,
+                status: self.status.map(Into::into),
                 system_created: false,
                 external_refs: self
                     .external_refs
@@ -138,8 +133,8 @@ impl Execute for TaskAddArgs {
                 source_task_id: self.source_task.clone(),
                 crew: self.crew,
             },
-            self.agent,
-            self.model,
+            agent,
+            model,
         )?;
 
         if self.json {

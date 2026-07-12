@@ -68,7 +68,6 @@ fn artifact_put_reads_relative_source_and_delegates_to_task_update() {
                 "id": "ORB-00001",
                 "source_path": "summary.md",
                 "path": "reports/summary.md",
-                "agent": "codex",
                 "model": "gpt-5"
             }),
         )
@@ -86,4 +85,21 @@ fn artifact_put_reads_relative_source_and_delegates_to_task_update() {
         json!([100, 111, 110, 101, 10])
     );
     assert!(call.input.get("source_path").is_none());
+}
+
+#[test]
+fn artifact_put_rejects_agent_identity_field() {
+    let ctx = ToolContext::default();
+    let error = OrbitTaskArtifactPutTool
+        .execute(
+            &ctx,
+            json!({
+                "id": "ORB-00001",
+                "source_path": "summary.md",
+                "agent": "codex",
+            }),
+        )
+        .expect_err("agent must be rejected before reading the source file");
+
+    assert!(error.to_string().contains("use `model`"));
 }
