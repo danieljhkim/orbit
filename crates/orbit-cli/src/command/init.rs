@@ -2,7 +2,9 @@ use clap::Args;
 use orbit_core::command::init::{InitOptions, init_global};
 use orbit_core::config::RawAgentRoleConfig;
 use orbit_core::config::agent_detect::{DetectedAgents, RealAgentEnvProbe, detect};
-use orbit_core::config::agent_prompt::{StdinPrompter, collect_role_settings};
+use orbit_core::config::agent_prompt::{
+    StdinPrompter, collect_qa_crew_setting, collect_role_settings,
+};
 use orbit_core::workspace_registry::global_orbit_dir;
 use orbit_core::{OrbitError, OrbitRuntime};
 use std::collections::BTreeMap;
@@ -112,8 +114,11 @@ pub(crate) fn collect_role_settings_for_init(
     }
 
     let mut prompter = StdinPrompter;
-    let collected = collect_role_settings(detected, &mut prompter)
+    let mut collected = collect_role_settings(detected, &mut prompter)
         .map_err(|err| OrbitError::Io(format!("agent prompts failed: {err}")))?;
+    let qa = collect_qa_crew_setting(detected, &mut prompter)
+        .map_err(|err| OrbitError::Io(format!("QA crew prompt failed: {err}")))?;
+    collected.insert("qa".to_string(), qa);
     Ok(Some(collected))
 }
 

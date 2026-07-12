@@ -10,7 +10,7 @@ summary: ADR log for the auto-task primitive.
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ADR-0218]
+related_artifacts: [ADR-0218, ADR-0219]
 ---
 
 # Auto-tasks — Decisions
@@ -23,9 +23,8 @@ this file is the long-form narrative keyed on that same ID.
 
 **Status:** Accepted · 2026-07 · [ORB-10149]
 
-**Context.** Every periodic need in orbit was bespoke code (qa-sweep, ship-sweep,
-future chores), so the marginal cost of a new recurring chore was a code change,
-review, and release.
+**Context.** Every periodic need in orbit was bespoke code, so the marginal cost
+of a new recurring chore was a code change, review, and release.
 
 **Decision.** Introduce auto-tasks: a git-versioned YAML record
 (`.orbit/auto_tasks/<name>.yaml`, modeled on the file-backed routine convention,
@@ -52,8 +51,31 @@ Full CRUD via CLI and MCP; disabling is a toggle, not a delete.
   SQLite-indexed one; the two must be kept mentally distinct, and auto-task
   definitions are not full-text searchable via the learning/ADR index.
 
+## ADR-0219 — No-diff-expected tasks bypass repository change gates
+
+**Status:** Accepted · 2026-07 · [ORB-10148]
+
+**Context.** QA validation creates durable findings through Orbit tasks and may
+correctly leave the repository unchanged. The normal empty-diff gate must still
+fail closed for implementation tasks.
+
+**Decision.** Make `no-diff-expected` a first-class task tag. Commit and PR
+handoff skip their empty-stage and zero-commits-ahead failures only for an
+explicitly tagged task (or a bundle in which every task is tagged). Such tasks
+still require a meaningful execution summary and follow the normal lifecycle;
+Orbit creates neither an empty commit nor an empty PR.
+
+**Consequences.**
+
+- Side-effect-only validation tasks flow through normal orchestrator dispatch.
+- Ordinary implementation tasks retain fail-closed empty-diff checks.
+- The QA auto-task definition carries the exemption visibly in its template.
+- Cost: a mistakenly tagged task can reach review without repository changes,
+  so the tag is a privileged workflow exemption.
+
 ## Task References
 
 - [ORB-10149] — Shipped the auto-task primitive (record, scheduler, CRUD, assets).
+- [ORB-10148] — Added the QA definition and no-diff workflow exemption.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

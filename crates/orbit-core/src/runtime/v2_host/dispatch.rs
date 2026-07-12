@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
-use crate::qa::{QaSweepOptions, run_qa_sweep};
 use orbit_common::types::{
     OrbitError, Role, build_task_status_index, optional_string_list_alias, unmet_task_dependencies,
 };
@@ -178,57 +177,6 @@ pub(super) fn run_deterministic(
             std::thread::sleep(Duration::from_secs_f64(seconds));
             Ok(serde_json::json!({
                 "slept_seconds": started_at.elapsed().as_secs_f64(),
-            }))
-        }
-        "qa_sweep" => {
-            let workspace = input
-                .get("workspace")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|workspace| !workspace.is_empty())
-                .ok_or_else(|| DispatchError::DeterministicActionFailed {
-                    action: action.to_string(),
-                    message: "missing non-empty `workspace`".to_string(),
-                })?;
-            let outcome = run_qa_sweep(QaSweepOptions {
-                dry_run: false,
-                workspace: Some(workspace.to_string()),
-            })
-            .map_err(|error| DispatchError::DeterministicActionFailed {
-                action: action.to_string(),
-                message: error.to_string(),
-            })?;
-            let errors = outcome
-                .reports
-                .iter()
-                .filter(|report| report.action == "error")
-                .count();
-            if errors > 0 {
-                return Err(DispatchError::DeterministicActionFailed {
-                    action: action.to_string(),
-                    message: format!("qa-sweep: {errors} workspace(s) errored"),
-                });
-            }
-            let reports = outcome
-                .reports
-                .iter()
-                .map(|report| {
-                    serde_json::json!({
-                        "workspace": report.workspace,
-                        "action": report.action,
-                        "reason": report.reason,
-                        "branch": report.branch,
-                        "head": report.head,
-                        "baseline": report.baseline,
-                        "watermark_reset": report.watermark_reset,
-                        "run_id": report.run_id,
-                    })
-                })
-                .collect::<Vec<_>>();
-            Ok(serde_json::json!({
-                "lock_busy": outcome.lock_busy,
-                "workspaces": reports.len(),
-                "reports": reports,
             }))
         }
         // Fire every due, enabled auto-task definition and mint a task from

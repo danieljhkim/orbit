@@ -139,3 +139,39 @@ fn custom_provider_reprompts_for_blank_unknown_model() {
             .contains("Model is required for crew role assignments.")
     );
 }
+
+#[test]
+fn qa_crew_prompt_offers_only_detected_claude_and_codex_defaults() {
+    let detected = DetectedAgents {
+        claude_cli: true,
+        codex_cli: true,
+        gemini_cli: true,
+        ..DetectedAgents::default()
+    };
+    let mut prompter = CannedPrompter::new(["2"]);
+    let qa = collect_qa_crew_setting(&detected, &mut prompter).expect("qa choice");
+
+    assert_eq!(qa.provider.as_deref(), Some("claude"));
+    assert_eq!(
+        qa.model.as_deref(),
+        Some(orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK)
+    );
+    let transcript = prompter.transcript();
+    assert!(transcript.contains("Codex  terra"));
+    assert!(transcript.contains("Claude sonnet"));
+    assert!(!transcript.contains("Gemini"));
+}
+
+#[test]
+fn qa_crew_noninteractive_default_prefers_detected_codex() {
+    let detected = DetectedAgents {
+        claude_cli: true,
+        codex_cli: true,
+        ..DetectedAgents::default()
+    };
+    let mut prompter = CannedPrompter::new([""]);
+    let qa = collect_qa_crew_setting(&detected, &mut prompter).expect("qa default");
+
+    assert_eq!(qa.provider.as_deref(), Some("codex"));
+    assert_eq!(qa.model.as_deref(), Some(CODEX_DEFAULT_MODEL));
+}

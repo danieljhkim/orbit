@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use chrono::Utc;
-use orbit_common::types::{ExternalRef, OrbitError, Role, Task, TaskComment, TaskStatus};
+use orbit_common::types::{
+    ExternalRef, NO_DIFF_EXPECTED_TAG, OrbitError, Role, Task, TaskComment, TaskStatus,
+};
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
@@ -113,6 +115,33 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         .collect();
 
     if freshness.commits_ahead == 0 {
+        // ADR-0219: only wholly exempt bundles may finish without a PR.
+        if completed_tasks
+            .iter()
+            .all(|task| task.tags.iter().any(|tag| tag == NO_DIFF_EXPECTED_TAG))
+        {
+            for task in &completed_tasks {
+                let model = pr_review_attribution(host, task, batch_id)?;
+                host.apply_task_automation_update(
+                    &task.id,
+                    TaskAutomationUpdate {
+                        status: Some(TaskStatus::Review),
+                        model,
+                        ..TaskAutomationUpdate::default()
+                    },
+                )?;
+            }
+            return Ok(json!({
+                "pr_created": false,
+                "skipped_no_diff_expected": true,
+                "base": base,
+                "head": head,
+                "base_ref": freshness.base_ref,
+                "head_ref": freshness.head_ref,
+                "commits_behind": freshness.commits_behind,
+                "commits_ahead": freshness.commits_ahead,
+            }));
+        }
         // An empty head branch after the implement step is a bug, not an
         // outcome: promoting the tasks to review and skipping the PR would
         // strand the work (branch pushed at base HEAD, no PR, no signal). Fail

@@ -6,7 +6,7 @@ mod scope;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
+use orbit_common::types::{NO_DIFF_EXPECTED_TAG, OrbitError};
 use serde_json::{Value, json};
 
 use crate::context::{RuntimeHost, TaskHost};
@@ -186,6 +186,14 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
     let changed_files = staged_changed_files(&workspace_path)?;
     if changed_files.is_empty() {
         git_success(&workspace_path, &["reset", "HEAD"])?;
+        // ADR-0219: explicit side-effect-only tasks bypass the empty-diff gate.
+        if task.tags.iter().any(|tag| tag == NO_DIFF_EXPECTED_TAG) {
+            return Ok(json!({
+                "committed": false,
+                "skipped_no_diff_expected": true,
+                "task_id": task.id,
+            }));
+        }
         return Err(OrbitError::Execution(format!(
             "commit_batch_changes: no staged changes to commit for task '{}' in worktree '{}'; \
              the implement step produced an empty diff",

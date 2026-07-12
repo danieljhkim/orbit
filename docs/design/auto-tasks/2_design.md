@@ -50,7 +50,7 @@ collapses to **one** fire, never one per missed slot.
 
 `state.rs` stores one cursor per definition in
 `<orbit_dir>/state/auto-tasks.json` (`{ baseline_at, last_slot, last_fired_at,
-last_task_id }`), file-locked read-modify-write like the qa-sweep watermark.
+last_task_id }`), using a file-locked read-modify-write.
 This is workspace-local, gitignored runtime state (the scoreboard precedent,
 L-0041), so a scheduler fire never rewrites the git-versioned definition and a
 definition edit never races the scheduler.
@@ -80,6 +80,12 @@ rejects duplicate names; update patches present fields; toggle flips `enabled`
 persisted.
 
 ## 6. Concerns & Honest Limitations
+
+The checked-in `qa-sweep` definition is the first concrete consumer. It files a
+backlog task for crew `qa` every six hours, dedupes while one remains open, and
+asks the executor to validate recent changes hands-on and file real findings
+through Orbit. Its `no-diff-expected` tag lets workflow handoff succeed when the
+validation correctly produces only task-side effects.
 
 - **Definitions are not full-text indexed.** Unlike learnings/ADRs, auto-task
   YAML is not in a SQLite/search index; discovery is a directory scan. Acceptable

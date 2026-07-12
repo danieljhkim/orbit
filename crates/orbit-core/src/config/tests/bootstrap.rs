@@ -57,6 +57,11 @@ fn seed_with_claude_detection_writes_all_crews_and_claude_default() {
 
     assert_all_base_crews_present(&contents);
     assert!(contents.contains("default_crew = \"claude\""));
+    assert_qa_crew(
+        &contents,
+        "claude",
+        orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK,
+    );
     assert!(!contents.contains("[duel"));
 }
 
@@ -67,6 +72,11 @@ fn seed_with_empty_detection_defaults_codex_and_omits_duel() {
 
     assert_all_base_crews_present(&contents);
     assert!(contents.contains("default_crew = \"codex\""));
+    assert_qa_crew(
+        &contents,
+        "codex",
+        orbit_common::model_defaults::CODEX_DEFAULT_MODEL,
+    );
     assert!(!contents.contains("[duel"));
 }
 
@@ -216,6 +226,20 @@ fn assert_all_base_crews_present(contents: &str) {
     assert!(contents.contains("[crews.codex]"));
     assert!(contents.contains("[crews.gemini]"));
     assert!(contents.contains("[crews.grok]"));
+    assert!(contents.contains("[crews.qa]"));
+}
+
+fn assert_qa_crew(contents: &str, provider: &str, model: &str) {
+    let parsed: toml::Value = toml::from_str(contents).expect("parse seeded config");
+    let qa = parsed
+        .get("crews")
+        .and_then(|crews| crews.get("qa"))
+        .expect("qa crew");
+    assert_eq!(
+        qa.get("provider").and_then(toml::Value::as_str),
+        Some(provider)
+    );
+    assert_eq!(qa.get("model").and_then(toml::Value::as_str), Some(model));
 }
 
 fn no_active_role_section(contents: &str) -> bool {

@@ -135,19 +135,6 @@ fn main() {
             }
             return;
         }
-        // `orbit run qa-sweep` likewise resolves everything from the global
-        // registry, global config, and host-local watermark state
-        // [ORB-10039]; it must never bootstrap a `.orbit/` where the
-        // scheduler happens to run it.
-        Commands::Run(RunCommand {
-            command: RunSubcommand::QaSweep(args),
-        }) => {
-            if let Err(err) = args.execute_without_runtime() {
-                print_error(&err, tool_run_json_output);
-                std::process::exit(1);
-            }
-            return;
-        }
         // `orbit sweep` and `orbit routine` resolve everything from the
         // global registry and host-local scheduler state; like ship-sweep
         // they must never bootstrap a `.orbit/` in the scheduler's cwd.

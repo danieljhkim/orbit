@@ -3,7 +3,7 @@
 //! `GET /api/routines` surfaces every routine visible from the global registry
 //! with its last recorded fire (timestamp, outcome, duration) so a consumer can
 //! tell — without box ssh — whether the scheduled sweeps (`ship-sweep`,
-//! `qa-sweep`) actually fired and succeeded. A stopped scheduler is visible as a
+//! `auto-task-scheduler`) actually fired and succeeded. A stopped scheduler is visible as a
 //! stale `last_fire` relative to the routine's `cron` cadence.
 //!
 //! Named "routines", not "sweeps": in orbit's model the sweeps are routines and
