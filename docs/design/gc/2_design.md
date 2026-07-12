@@ -10,7 +10,7 @@ summary: Specifies GC grammar, collector ownership, retention clocks, safety inv
 tags: [gc, retention, safety]
 paths: ["crates/orbit-cli/src/command/gc/**", "crates/orbit-core/src/command/gc/**", "crates/orbit-core/src/config/**"]
 related_features: [gc, activity-job, auditability, task-artifacts, worktree-artifacts]
-related_artifacts: [ORB-10178, ADR-0220]
+related_artifacts: [ORB-10178, ORB-10180, ADR-0220]
 ---
 
 # Garbage Collection — Design
@@ -19,6 +19,11 @@ This document is the normative v1 contract for planning and applying retention
 to Orbit-owned global and workspace state. Collector implementation details may
 vary, but they may not weaken the mutation gate, ownership rules, protection
 invariants, revalidation, lock, or report semantics defined here.
+
+The shared protocol is implemented in
+`crates/orbit-core/src/command/gc.rs`; the command grammar and report rendering
+live in `crates/orbit-cli/src/command/gc.rs`. Domain collectors plug into that
+protocol in the dependent tasks listed below.
 
 ## 1. Command Grammar and Mutation Gate
 

@@ -10,7 +10,7 @@ summary: Records the durable choice of one explicit, safety-first Orbit garbage-
 tags: [gc, retention, safety]
 paths: ["docs/design/gc/**", "crates/orbit-cli/src/command/gc/**", "crates/orbit-core/src/command/gc/**"]
 related_features: [gc]
-related_artifacts: [ADR-0220, ORB-10178]
+related_artifacts: [ADR-0220, ORB-10178, ORB-10180]
 ---
 
 # Garbage Collection — Decisions
@@ -47,8 +47,10 @@ non-bypassable containment, symlink, current-owner, and ambiguity protections;
   overrides highest.
 - Partial failure preserves successful mutations, reports every skip/error, and
   returns non-zero; reruns are idempotent.
-- No single code anchor yet; the convention will be enforced by the shared GC
-  framework and collector review.
+- Code anchors: `execute_gc` freezes and consumes plans under the host lock;
+  `validate_candidate_path` enforces containment and no-follow path checks.
+  Both cite ADR-0220 at the enforcement point; collector review covers the
+  remaining domain-specific invariants.
 - Cost: All apply passes serialize behind one host-wide lock and pay
   per-candidate revalidation, and workspace owners must repeat any global GC
   settings they want in a complete workspace policy instead of inheriting a
@@ -57,5 +59,6 @@ non-bypassable containment, symlink, current-owner, and ambiguity protections;
 ## Task References
 
 - [ORB-10178] — selected and specified the shared GC contract.
+- [ORB-10180] — implemented the shared framework and top-level command grammar.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

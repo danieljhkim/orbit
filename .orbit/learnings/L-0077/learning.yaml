@@ -10,7 +10,7 @@ scope:
   - workflow-admission
   - tooling
 summary: Verify the executor Orbit binary can read the admitted worktree config and store schema before dispatch
-body: 'Workflow admission can succeed while the subsequently dispatched agent resolves an older installed `orbit` binary. The agent then cannot call required lifecycle tools if the task store schema is newer, and config validation can fail under a legacy schema before any command dispatch. Admission should validate the exact executor binary against every effective config layer and the workspace store, or pass the compatible checked-out binary explicitly. Error messages for layered config failures should include the source path. ORB-10178 reproduced the config-schema variant: the installed binary rejected the admitted worktree crew schema before `orbit.task.show`, while a workspace-built binary from the admitted revision worked.'
+body: 'Workflow admission can succeed while the subsequently dispatched agent resolves an older installed `orbit` binary. The agent then cannot call required lifecycle tools if the task store schema is newer, and config validation can fail under a legacy schema before any command dispatch. Admission should validate the exact executor binary against every effective config layer and the workspace store, or pass the compatible checked-out binary explicitly. Error messages for layered config failures should include the source path. ORB-10178 and ORB-10180 both reproduced the config-schema variant: the installed binary rejected the admitted worktree crew schema before required lifecycle/tool discovery, while the worktree-compatible MCP surface remained usable.'
 evidence:
 - kind: task
   reference: ORB-10148
@@ -20,6 +20,10 @@ evidence:
   reference: ORB-10178
 - kind: external
   reference: F2026-07-020
+- kind: task
+  reference: ORB-10180
+- kind: external
+  reference: F2026-07-022
 created_at: 2026-07-12T03:37:58.785982787Z
-updated_at: 2026-07-12T21:26:29.732641246Z
+updated_at: 2026-07-12T21:45:50.017174828Z
 created_by: codex
