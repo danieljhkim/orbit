@@ -32,6 +32,7 @@ pub mod search;
 pub mod semantic;
 pub mod skill;
 pub mod task;
+pub mod task_gc;
 pub mod task_migration;
 pub mod tool;
 pub mod workflow;

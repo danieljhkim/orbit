@@ -4,6 +4,7 @@ use clap::{Args, ValueEnum};
 use orbit_core::command::gc::{
     EmptyGcCollector, GcRequest, GcScope, GcTarget, SystemGcClock, execute_gc,
 };
+use orbit_core::command::task_gc::TaskGcCollector;
 use orbit_core::{OrbitError, OrbitRuntime};
 
 use super::Execute;
@@ -75,16 +76,36 @@ impl Execute for GcCommand {
             resolve_workspace_scope(self.workspace.as_deref(), runtime)?
         };
         let clock = SystemGcClock;
-        let report = execute_gc(
-            &EmptyGcCollector::new(target),
-            GcRequest {
-                apply: self.apply,
-                scope,
-                retention_override: self.retention.as_deref(),
-                global_state_dir: &runtime.paths().global_dir.join("state"),
-                clock: &clock,
-            },
-        )?;
+        let state_dir = runtime.paths().global_dir.join("state");
+        let report = match target {
+            // Task archival delegates to the task lifecycle, so its collector
+            // borrows the workspace runtime rather than scanning a filesystem
+            // root. Cross-workspace/global selection is out of scope for v1.
+            GcTarget::Tasks => {
+                let scope = ensure_current_workspace_scope(scope, runtime)?;
+                let collector = TaskGcCollector::new(runtime);
+                execute_gc(
+                    &collector,
+                    GcRequest {
+                        apply: self.apply,
+                        scope,
+                        retention_override: self.retention.as_deref(),
+                        global_state_dir: &state_dir,
+                        clock: &clock,
+                    },
+                )?
+            }
+            _ => execute_gc(
+                &EmptyGcCollector::new(target),
+                GcRequest {
+                    apply: self.apply,
+                    scope,
+                    retention_override: self.retention.as_deref(),
+                    global_state_dir: &state_dir,
+                    clock: &clock,
+                },
+            )?,
+        };
         if self.json {
             println!(
                 "{}",
@@ -101,6 +122,39 @@ impl Execute for GcCommand {
             )));
         }
         Ok(())
+    }
+}
+
+/// Task GC runs against the active workspace runtime, so its scope must be the
+/// current workspace. Reject `--global` and any `--workspace` that resolves to
+/// a different registered workspace (cross-workspace collection is reserved for
+/// a future aggregate operator surface per the GC design contract).
+fn ensure_current_workspace_scope(
+    scope: GcScope,
+    runtime: &OrbitRuntime,
+) -> Result<GcScope, OrbitError> {
+    match &scope {
+        GcScope::Global { .. } => Err(OrbitError::InvalidInput(
+            "task GC is workspace-scoped; drop --global and run it against a workspace".to_string(),
+        )),
+        GcScope::Workspace { root, .. } => {
+            let current = &runtime.paths().orbit_dir;
+            if paths_identical(root, current) {
+                Ok(scope)
+            } else {
+                Err(OrbitError::InvalidInput(format!(
+                    "task GC only collects the active workspace ({}); cross-workspace selection is not supported in v1",
+                    current.display()
+                )))
+            }
+        }
+    }
+}
+
+fn paths_identical(left: &std::path::Path, right: &std::path::Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
     }
 }
 

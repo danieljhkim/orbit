@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Age-based task archival**: `orbit gc tasks` archives terminal tasks (`done`, opt-in `rejected`) older than retention using the persisted terminal-transition clock; keep-tagged tasks, open review threads, and active dependents are retained. Archive-only and reversible — no bundle deletion. ([ORB-10188])
 - **Shared garbage-collection framework**: `orbit gc` now exposes every retention target with plan-first/apply, scope, retention, locking, immutable candidate, safety revalidation, manifest, and equivalent human/JSON report contracts for domain collectors. ([ORB-10180])
 - **Safety-first garbage collection contract**: the `orbit gc` design standardizes explicit apply, retention clocks, ownership/revalidation invariants, locking, and equivalent human/JSON reports across global and workspace collectors. ([ORB-10178])
 - **Systemd routine workers survive sweep exit**: the user sweep service now limits shutdown to its main oneshot process, allowing detached pipeline workers to claim and complete clock-dispatched runs. ([ORB-10153])

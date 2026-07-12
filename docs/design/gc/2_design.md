@@ -10,7 +10,7 @@ summary: Specifies GC grammar, collector ownership, retention clocks, safety inv
 tags: [gc, retention, safety]
 paths: ["crates/orbit-cli/src/command/gc/**", "crates/orbit-core/src/command/gc/**", "crates/orbit-core/src/config/**"]
 related_features: [gc, activity-job, auditability, task-artifacts, worktree-artifacts]
-related_artifacts: [ORB-10178, ORB-10180, ADR-0220]
+related_artifacts: [ORB-10178, ORB-10180, ORB-10188, ADR-0220]
 ---
 
 # Garbage Collection — Design
@@ -159,6 +159,28 @@ lifecycle holds are protected. Apply delegates to the ordinary task lifecycle
 mutation so history, audit, projections, relations, and search indexes remain
 consistent. A future purge requires a separate export/restore, tombstone, and
 referential-integrity decision.
+
+Implemented in `crates/orbit-core/src/command/task_gc.rs` (`TaskGcCollector`),
+routed from `orbit gc tasks` [ORB-10188]. Concrete v1 choices:
+
+- **Terminal set.** `done` is always eligible; `rejected` is opt-in
+  (`TaskGcCollector::include_rejected`). No other status is age-selected.
+- **Retention clock.** The transition timestamp is read from task history
+  (`to_status == <terminal>`, most recent), never `created_at`, `updated_at`,
+  or mtime. Eligibility is strict: `terminal_at < now - retention`, so a task
+  exactly at the boundary is retained. Retention defaults to 90 days and honors
+  the shared `--retention` override.
+- **Protections (retained with a skip reason).** The `gc-keep` tag
+  (`GC_KEEP_TAG`), any open review thread, and unresolved lifecycle coupling —
+  an active (non-`done`/`rejected`/`archived`) task that still declares a
+  dependency or parent edge onto the candidate — each hold the task back. A
+  terminal task lacking a recorded terminal transition is treated as ambiguous
+  and retained.
+- **Apply and idempotency.** Apply calls `OrbitRuntime::archive_task`; the task
+  becomes `archived` (no longer a terminal candidate), so a second pass selects
+  nothing. Restoration stays `orbit task update <id> --status backlog`.
+- **Scope.** Workspace-only; `--global` and cross-workspace selection are
+  rejected because the collector operates on the active workspace runtime.
 
 ### 3.8 All
 
@@ -373,7 +395,7 @@ limited to non-destructive setup and active-file rotation.
 - [ORB-10185] — will implement diagnostics retention.
 - [ORB-10186] — will implement audit and blob collection.
 - [ORB-10187] — will implement generated-skill collection.
-- [ORB-10188] — will implement task archival.
+- [ORB-10188] — implemented task archival (`TaskGcCollector`, `orbit gc tasks`).
 - [ORB-10189] — will implement aggregate and automatic collection.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
