@@ -5,11 +5,12 @@ status: accepted
 owner: codex
 created_at: 2026-07-12T21:22:27.975299792Z
 accepted_at: 2026-07-12T21:25:28.062180793Z
-last_updated: 2026-07-12T21:25:28.062180793Z
+last_updated: 2026-07-12T21:38:23.158139268Z
 related_features:
 - gc
 related_tasks:
 - ORB-10178
+- ORB-10180
 tags:
 - gc
 - retention

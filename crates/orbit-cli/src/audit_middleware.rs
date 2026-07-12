@@ -452,6 +452,23 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 job_run_id: None,
             }
         }
+        Commands::Gc(cmd) => CommandMeta {
+            command: "gc".to_string(),
+            subcommand: Some(format!("{:?}", cmd.target).to_lowercase()),
+            tool_name: None,
+            target_type: Some("gc_target".to_string()),
+            target_id: Some(format!("{:?}", cmd.target).to_lowercase()),
+            role: "admin".to_string(),
+            arguments_json: serde_json::to_string(&serde_json::json!({
+                "apply": cmd.apply,
+                "global": cmd.global,
+                "json": cmd.json,
+                "retention": cmd.retention,
+                "workspace": cmd.workspace,
+            }))
+            .ok(),
+            job_run_id: None,
+        },
         Commands::AutoTask(cmd) => {
             use crate::command::auto_task::AutoTaskSubcommand;
             let (sub, target_id): (&str, Option<&str>) = match &cmd.command {

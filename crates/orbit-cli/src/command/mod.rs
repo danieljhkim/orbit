@@ -7,6 +7,7 @@ pub mod docs;
 pub mod doctor;
 pub mod executor;
 pub mod friction;
+pub mod gc;
 pub mod graph;
 pub mod hook;
 pub mod init;
@@ -70,6 +71,7 @@ Operate:
   adr         List and inspect Architecture Decision Records
   friction    Report, list, and triage friction records
   learning    Create, search, and curate project learnings
+  gc          Plan or apply garbage collection for Orbit-owned state
 
 Observe:
   search      Search tasks, docs, learnings, and ADRs
@@ -123,6 +125,7 @@ pub enum Commands {
     Adr(adr::AdrCommand),
     Friction(friction::FrictionCommand),
     Learning(learning::LearningCommand),
+    Gc(gc::GcCommand),
 
     // ── Observe ──
     Graph(graph::GraphCommand),
@@ -174,6 +177,7 @@ impl Execute for Commands {
             Commands::Adr(cmd) => cmd.execute(runtime),
             Commands::Friction(cmd) => cmd.execute(runtime),
             Commands::Learning(cmd) => cmd.execute(runtime),
+            Commands::Gc(cmd) => cmd.execute(runtime),
             Commands::Graph(cmd) => cmd.execute(runtime),
             Commands::Audit(cmd) => cmd.execute(runtime),
             Commands::Log(cmd) => cmd.execute(runtime),
