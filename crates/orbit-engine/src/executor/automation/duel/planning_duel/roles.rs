@@ -37,7 +37,16 @@ Steps:
 
 3. Gather context with the graph surface BEFORE drafting. No single tool is
    sufficient — show returns bodies; refs, callees, and search return the call
-   and import graph that bodies alone miss. You must:
+   and import graph that bodies alone miss.
+   - `orbit.graph.*` is served in-process over MCP only (ADR-0198) — there is
+     no `orbit tool run orbit.graph.*` path. If `orbit.graph.*` is in your
+     tool surface, use it as described below. If it is not (a CLI-only agent
+     with no MCP handle), do not attempt `orbit tool run orbit.graph.*` — it
+     will fail with "tool not found". Instead run the same queries from the
+     shell via `orbit graph <subcommand>` (e.g. `orbit graph overview <dir>`,
+     `orbit graph show <selector>`, `orbit graph refs <selector>`) or the
+     standalone `orbit-graph-cli` binary if `orbit graph` is unavailable; see
+     the `orbit-graph` skill for the full subcommand list.
    - Start with orbit.graph.overview over the task's directories and
      orbit.graph.show on each task.context_files selector for breadth.
    - For every symbol the task proposes to move, rename, remove, or add: call
@@ -49,9 +58,9 @@ Steps:
      import direction.
    - Use orbit.graph.show for full symbol bodies you need to read.
    - Use orbit.graph.overview to map an unfamiliar area first.
-   - fs.read is a fallback only for selectors the graph cannot resolve (raw
-     YAML, Markdown, assets the graph does not index, or unresolved selectors
-     the graph reports).
+   - fs.read is a fallback only for selectors the graph (MCP or CLI) cannot
+     resolve (raw YAML, Markdown, assets the graph does not index, or
+     unresolved selectors the graph reports).
    - If you discover pub(crate) imports, helper coupling, call sites, or
      dependency edges not reflected in the task description, treat them as
      hidden coupling — they belong in step 1 of your plan body.
@@ -116,9 +125,16 @@ Steps:
    - The artifact signature is the canonical planner identity source.
 
 4. Use the graph surface to verify claims:
-   - Prefer orbit.graph.overview, orbit.graph.search, orbit.graph.refs, orbit.graph.show,
-     and orbit.graph.impact for spot checks against the codebase.
-   - Fall back to fs.read only when the graph does not have enough knowledge.
+   - `orbit.graph.*` is served in-process over MCP only (ADR-0198) — there is
+     no `orbit tool run orbit.graph.*` path. If `orbit.graph.*` is in your
+     tool surface, prefer orbit.graph.overview, orbit.graph.search,
+     orbit.graph.refs, orbit.graph.show, and orbit.graph.impact for spot
+     checks against the codebase. If it is not (a CLI-only agent with no MCP
+     handle), do not attempt `orbit tool run orbit.graph.*`; instead run the
+     same queries from the shell via `orbit graph <subcommand>` or the
+     standalone `orbit-graph-cli` binary — see the `orbit-graph` skill.
+   - Fall back to fs.read only when the graph (MCP or CLI) does not have
+     enough knowledge.
 
 5. Decide the winner:
    - Choose the artifact proposal that is more feasible, complete, scoped, and aligned
