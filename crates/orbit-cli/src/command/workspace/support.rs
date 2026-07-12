@@ -2,20 +2,6 @@ use std::path::Path;
 
 use orbit_core::OrbitError;
 
-/// Remove all symlinks in a directory (non-recursive).
-pub(super) fn remove_symlinks_in(dir: &Path) -> Result<(), OrbitError> {
-    let entries = std::fs::read_dir(dir).map_err(|e| OrbitError::Io(e.to_string()))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| OrbitError::Io(e.to_string()))?;
-        let meta =
-            std::fs::symlink_metadata(entry.path()).map_err(|e| OrbitError::Io(e.to_string()))?;
-        if meta.file_type().is_symlink() {
-            std::fs::remove_file(entry.path()).map_err(|e| OrbitError::Io(e.to_string()))?;
-        }
-    }
-    Ok(())
-}
-
 /// Check if a directory is empty.
 pub(super) fn is_dir_empty(dir: &Path) -> bool {
     std::fs::read_dir(dir)

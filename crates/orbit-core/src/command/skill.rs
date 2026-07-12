@@ -7,7 +7,12 @@ use orbit_common::types::OrbitError;
 use orbit_common::utility::fs::write_text_with_parent;
 
 use crate::OrbitRuntime;
+use crate::command::skill_ownership::{self, GeneratedSkill};
 use crate::skill_catalog::{LoadedSkill, SkillCatalogDoctorStatus};
+
+/// Version stamped on managed-skill ownership records. Bump when the generated
+/// default skill catalog changes in a way ownership tooling should notice.
+pub(crate) const SKILL_CATALOG_VERSION: &str = "1";
 
 const DEFAULT_SKILL_FILES: [(&str, &str); 5] = [
     ("orbit", include_str!("../../assets/skills/orbit/SKILL.md")),
@@ -100,6 +105,30 @@ pub(crate) fn seed_default_skills(
         count += 1;
     }
     Ok(count)
+}
+
+/// Record ownership + retirement metadata for the managed default skills.
+///
+/// Records the generated-content hash, version, and owned root for every skill
+/// currently in the default catalog, and tombstones any previously-managed
+/// skill that has since left it. Call after seeding the global skills root so a
+/// later unlink/teardown/gc can prove ownership even after a skill is retired.
+pub(crate) fn record_default_skill_ownership(
+    skills_root: &Path,
+    orbit_root: &Path,
+) -> Result<(), OrbitError> {
+    let generated: Vec<GeneratedSkill> = DEFAULT_SKILL_FILES
+        .iter()
+        .map(|(id, content)| {
+            let rendered = inject_skill_template_tokens(content, orbit_root);
+            GeneratedSkill {
+                skill_id: (*id).to_string(),
+                content_hash: skill_ownership::content_hash(rendered.as_bytes()),
+                version: Some(SKILL_CATALOG_VERSION.to_string()),
+            }
+        })
+        .collect();
+    skill_ownership::reconcile_managed_skills(skills_root, &generated)
 }
 
 fn seed_default_skill_resources(
