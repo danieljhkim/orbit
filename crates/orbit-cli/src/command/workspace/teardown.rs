@@ -1,10 +1,11 @@
 use clap::Args;
+use orbit_core::command::skill_ownership;
 use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
 
 use crate::command::Execute;
 
-use super::support::{is_dir_empty, remove_symlinks_in};
+use super::support::is_dir_empty;
 
 #[derive(Args)]
 pub struct WorkspaceTeardownArgs {
@@ -69,12 +70,25 @@ impl Execute for WorkspaceTeardownArgs {
             }
         }
 
-        // 2. Remove legacy repo-local skill symlinks from .agents/skills/ and .claude/skills/
+        // 2. Remove legacy repo-local skill symlinks from .agents/skills/ and
+        //    .claude/skills/ — but only the ones Orbit provably owns. Owned
+        //    roots come from the global ownership manifest plus this
+        //    workspace's own (legacy) seed roots; user symlinks that target
+        //    outside every Orbit root are left intact.
+        let global_skills = global_dir.join("skills");
+        let manifest = skill_ownership::load_manifest(&global_skills)?;
+        let mut owned_roots = skill_ownership::owned_roots(&global_skills, &manifest);
+        owned_roots.push(orbit_dir.join("skills"));
+        owned_roots.push(orbit_dir.join("resources").join("skills"));
         for dir_name in &[".agents", ".claude"] {
             let skills_dir = repo_root.join(dir_name).join("skills");
             if skills_dir.is_dir() {
-                remove_symlinks_in(&skills_dir)?;
-                removed.push(format!("removed symlinks from {}/skills/", dir_name));
+                let removed_links =
+                    skill_ownership::remove_owned_skill_links(&skills_dir, &owned_roots)?;
+                removed.push(format!(
+                    "removed {removed_links} Orbit-owned symlink(s) from {}/skills/",
+                    dir_name
+                ));
 
                 // Remove skills dir if empty
                 if is_dir_empty(&skills_dir) {

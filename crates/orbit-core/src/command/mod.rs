@@ -32,6 +32,7 @@ pub mod routine;
 pub mod search;
 pub mod semantic;
 pub mod skill;
+pub mod skill_ownership;
 pub mod task;
 pub mod task_migration;
 pub mod tool;

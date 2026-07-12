@@ -20,6 +20,7 @@ pub(crate) mod orbit_tool_host;
 pub mod pipeline;
 mod resolve;
 pub mod run_audit;
+pub(crate) mod run_claim_guard;
 pub(crate) mod run_input;
 mod store_delegates;
 mod task_block_on_run_failure;
@@ -370,6 +371,14 @@ impl OrbitRuntime {
     /// definitions nobody registered explicitly.
     pub fn routines_source(&self) -> bool {
         self.context.routines_source()
+    }
+
+    pub fn worktree_gc_success_retention_days(&self) -> u64 {
+        self.context.worktree_gc_success_retention_days()
+    }
+
+    pub fn worktree_gc_failure_retention_days(&self) -> u64 {
+        self.context.worktree_gc_failure_retention_days()
     }
 
     /// Returns the configured `[duel] candidates` list (e.g. ["codex", "claude", "gemini", "grok"]).
