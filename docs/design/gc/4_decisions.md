@@ -10,7 +10,7 @@ summary: Records the durable choice of one explicit, safety-first Orbit garbage-
 tags: [gc, retention, safety]
 paths: ["docs/design/gc/**", "crates/orbit-cli/src/command/gc/**", "crates/orbit-core/src/command/gc/**"]
 related_features: [gc]
-related_artifacts: [ADR-0220, ORB-10178, ORB-10180]
+related_artifacts: [ADR-0220, ADR-0221, ORB-10178, ORB-10180, ORB-10184]
 ---
 
 # Garbage Collection — Decisions
@@ -56,9 +56,43 @@ non-bypassable containment, symlink, current-owner, and ambiguity protections;
   settings they want in a complete workspace policy instead of inheriting a
   merged fragment.
 
+## ADR-0221 — Startup log pruning retained through the shared GC classifier
+
+**Status:** Accepted · 2026-07 · [ORB-10184]
+
+**Context.** The design (§9–§10) aspires to have subscriber-init hooks stop
+deleting log archives once `orbit gc logs` owns retention, deferring all
+deletion to explicit apply. But Orbit has no resident daemon and automated
+`orbit gc logs` is a future task (ORB-10189); removing opportunistic startup
+pruning now would regress the ORB-00415 disk bound on always-on hosts until that
+automation lands. The alternative was rotate-only startup with archives
+accumulating until an operator runs `orbit gc logs --apply`.
+
+**Decision.** Keep opportunistic startup pruning, but route both it and
+`orbit gc logs` through one extracted classifier
+(`log_rotation::plan_prune`). Startup deletes best-effort as before; the CLI
+collector plans/applies the same age + total-size policy with reporting,
+locking, and revalidation. Neither path ever deletes or truncates the active
+inode (§5 invariant 3).
+
+**Consequences.**
+
+- One retention policy: startup pruning and `orbit gc logs` cannot disagree
+  because they share `plan_prune`; the CLI adds an inspectable, on-demand
+  surface over the same budgets.
+- v1 log GC does not require a scheduler to keep archives bounded; ORB-00415's
+  disk safety is preserved.
+- §3.3/§9/§10 are updated to describe shared-classifier pruning rather than
+  "startup hooks do not delete"; the §5 active-inode invariant is unchanged.
+- Cost: startup still performs a small delete pass on every subscriber init;
+  when automated `orbit gc logs` lands (ORB-10189) this should be revisited so
+  deletion can move fully behind the explicit apply gate.
+
 ## Task References
 
 - [ORB-10178] — selected and specified the shared GC contract.
 - [ORB-10180] — implemented the shared framework and top-level command grammar.
+- [ORB-10184] — implemented log GC and retained startup pruning via the shared
+  classifier (ADR-0221).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

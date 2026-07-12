@@ -110,6 +110,134 @@ impl LogRotationConfig {
     pub fn load_global_best_effort() -> Self {
         load_global().unwrap_or_default()
     }
+
+    /// The age budget expressed as a [`Duration`]. Saturates the multiply so an
+    /// absurd (but validated nonzero) `retention_days` cannot overflow.
+    pub fn retention_window(&self) -> Duration {
+        Duration::from_secs(self.retention_days.saturating_mul(SECONDS_PER_DAY))
+    }
+}
+
+/// Why the retention policy selected an archive for deletion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneReason {
+    /// The archive's mtime is older than the retention window.
+    Age,
+    /// The archive was selected oldest-first to bring the surviving set back
+    /// under the total-size budget.
+    Size,
+}
+
+/// One archive the retention policy would delete, with the size and mtime
+/// observed during the scan and the reason it was selected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PruneCandidate {
+    pub path: PathBuf,
+    pub bytes: u64,
+    pub modified: SystemTime,
+    pub reason: PruneReason,
+}
+
+/// The archives beside an active log file that the retention policy would
+/// delete, plus what was scanned. The active file is never included.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PrunePlan {
+    /// Number of archive files scanned (the active file is excluded).
+    pub scanned: u64,
+    /// Total bytes across all scanned archives.
+    pub scanned_bytes: u64,
+    /// Archives selected for deletion: age-selected first, then size-selected.
+    pub candidates: Vec<PruneCandidate>,
+}
+
+/// Classify the archives beside `active_path` for deletion under the `retention`
+/// age window and `max_total_bytes` total-size budget, relative to `now`.
+///
+/// Pure classification — performs no deletion. Age-selected archives come
+/// first, then, from the survivors, the oldest are size-selected until the set
+/// fits the budget. Only dated `<active_name>.<stamp>` archives are considered;
+/// the active file itself (exactly `active_name`) is never a candidate. This is
+/// the single classifier shared by subscriber-init pruning
+/// ([`prune_archives`]) and the `orbit gc logs` collector, so the two never
+/// disagree.
+pub fn plan_prune(
+    active_path: &Path,
+    retention: Duration,
+    max_total_bytes: u64,
+    now: SystemTime,
+) -> std::io::Result<PrunePlan> {
+    let Some(dir) = active_path.parent() else {
+        return Ok(PrunePlan::default());
+    };
+    let active_name = active_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("orbit.jsonl");
+    // Archives are `<active_name>.<stamp>`; never touch the active file itself.
+    let prefix = format!("{active_name}.");
+
+    let mut archives: Vec<(PathBuf, SystemTime, u64)> = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        let meta = entry.metadata()?;
+        if !meta.is_file() {
+            continue;
+        }
+        let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        archives.push((entry.path(), mtime, meta.len()));
+    }
+
+    let scanned = archives.len() as u64;
+    let scanned_bytes = archives.iter().map(|(_, _, size)| *size).sum();
+    let mut candidates = Vec::new();
+
+    // Age-based selection.
+    if let Some(cutoff) = now.checked_sub(retention) {
+        archives.retain(|(path, mtime, size)| {
+            if *mtime < cutoff {
+                candidates.push(PruneCandidate {
+                    path: path.clone(),
+                    bytes: *size,
+                    modified: *mtime,
+                    reason: PruneReason::Age,
+                });
+                false
+            } else {
+                true
+            }
+        });
+    }
+
+    // Size-based selection over the survivors: oldest first until under budget.
+    let mut total: u64 = archives.iter().map(|(_, _, size)| *size).sum();
+    if total > max_total_bytes {
+        archives.sort_by_key(|(_, mtime, _)| *mtime); // oldest first
+        for (path, mtime, size) in &archives {
+            if total <= max_total_bytes {
+                break;
+            }
+            candidates.push(PruneCandidate {
+                path: path.clone(),
+                bytes: *size,
+                modified: *mtime,
+                reason: PruneReason::Size,
+            });
+            total = total.saturating_sub(*size);
+        }
+    }
+
+    Ok(PrunePlan {
+        scanned,
+        scanned_bytes,
+        candidates,
+    })
 }
 
 fn load_global() -> Option<LogRotationConfig> {
@@ -179,66 +307,23 @@ fn archive_path(active_path: &Path) -> PathBuf {
 
 /// Delete archives older than the age budget, then, if the surviving archive
 /// set still exceeds the total-size budget, delete oldest-first until it fits.
+/// Delegates selection to [`plan_prune`] (the shared classifier) so startup
+/// pruning and `orbit gc logs` apply identical retention policy; deletion here
+/// is best-effort per file.
 pub(crate) fn prune_archives(
     active_path: &Path,
     config: &LogRotationConfig,
 ) -> std::io::Result<()> {
-    let Some(dir) = active_path.parent() else {
-        return Ok(());
-    };
-    let active_name = active_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("orbit.jsonl");
-    // Archives are `<active_name>.<stamp>`; never touch the active file itself.
-    let prefix = format!("{active_name}.");
-
-    let mut archives: Vec<(PathBuf, SystemTime, u64)> = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let file_name = entry.file_name();
-        let Some(name) = file_name.to_str() else {
-            continue;
-        };
-        if !name.starts_with(&prefix) {
-            continue;
-        }
-        let meta = entry.metadata()?;
-        if !meta.is_file() {
-            continue;
-        }
-        let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-        archives.push((entry.path(), mtime, meta.len()));
+    // ADR-0221: startup pruning is retained but routed through the shared
+    // `plan_prune` classifier so `orbit gc logs` cannot disagree with it.
+    let plan = plan_prune(
+        active_path,
+        config.retention_window(),
+        config.max_total_bytes,
+        SystemTime::now(),
+    )?;
+    for candidate in &plan.candidates {
+        let _ = std::fs::remove_file(&candidate.path);
     }
-
-    // Age-based pruning. Saturate the multiply so an absurd (but validated
-    // nonzero) retention_days cannot overflow into a tiny cutoff.
-    if let Some(cutoff) = SystemTime::now().checked_sub(Duration::from_secs(
-        config.retention_days.saturating_mul(SECONDS_PER_DAY),
-    )) {
-        archives.retain(|(path, mtime, _size)| {
-            if *mtime < cutoff {
-                let _ = std::fs::remove_file(path);
-                false
-            } else {
-                true
-            }
-        });
-    }
-
-    // Size-based pruning: delete oldest archives until under the total budget.
-    let mut total: u64 = archives.iter().map(|(_, _, size)| *size).sum();
-    if total > config.max_total_bytes {
-        archives.sort_by_key(|(_, mtime, _)| *mtime); // oldest first
-        for (path, _, size) in &archives {
-            if total <= config.max_total_bytes {
-                break;
-            }
-            if std::fs::remove_file(path).is_ok() {
-                total = total.saturating_sub(*size);
-            }
-        }
-    }
-
     Ok(())
 }

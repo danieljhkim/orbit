@@ -1,12 +1,15 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::{Args, ValueEnum};
 use orbit_core::command::gc::{
-    EmptyGcCollector, GcRequest, GcScope, GcTarget, SystemGcClock, execute_gc,
+    EmptyGcCollector, GcCollector, GcRequest, GcScope, GcTarget, SystemGcClock, execute_gc,
 };
+use orbit_core::command::gc_logs::LogsGcCollector;
 use orbit_core::{OrbitError, OrbitRuntime};
 
 use super::Execute;
+use crate::parse::parse_duration_seconds;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum GcTargetArg {
@@ -75,13 +78,30 @@ impl Execute for GcCommand {
             resolve_workspace_scope(self.workspace.as_deref(), runtime)?
         };
         let clock = SystemGcClock;
+        let global_state_dir = runtime.paths().global_dir.join("state");
+        // `logs` has a real collector; the remaining targets keep the framework
+        // placeholder until their domain collectors land.
+        let retention_window = self
+            .retention
+            .as_deref()
+            .map(parse_duration_seconds)
+            .transpose()?
+            .map(Duration::from_secs);
+        let logs_collector = matches!(target, GcTarget::Logs)
+            .then(|| LogsGcCollector::from_scope(&scope, retention_window));
+        let empty_collector = EmptyGcCollector::new(target);
+        let collector: &dyn GcCollector = logs_collector
+            .as_ref()
+            .map_or(&empty_collector as &dyn GcCollector, |collector| {
+                collector as &dyn GcCollector
+            });
         let report = execute_gc(
-            &EmptyGcCollector::new(target),
+            collector,
             GcRequest {
                 apply: self.apply,
                 scope,
                 retention_override: self.retention.as_deref(),
-                global_state_dir: &runtime.paths().global_dir.join("state"),
+                global_state_dir: &global_state_dir,
                 clock: &clock,
             },
         )?;

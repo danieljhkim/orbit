@@ -8,9 +8,9 @@ doc_role: design
 type: design
 summary: Specifies GC grammar, collector ownership, retention clocks, safety invariants, locking, and reports.
 tags: [gc, retention, safety]
-paths: ["crates/orbit-cli/src/command/gc/**", "crates/orbit-core/src/command/gc/**", "crates/orbit-core/src/config/**"]
+paths: ["crates/orbit-cli/src/command/gc.rs", "crates/orbit-core/src/command/gc.rs", "crates/orbit-core/src/command/gc_logs.rs", "crates/orbit-common/src/utility/log_rotation.rs", "crates/orbit-core/src/config/**"]
 related_features: [gc, activity-job, auditability, task-artifacts, worktree-artifacts]
-related_artifacts: [ORB-10178, ORB-10180, ADR-0220]
+related_artifacts: [ORB-10178, ORB-10180, ORB-10184, ADR-0220, ADR-0221]
 ---
 
 # Garbage Collection — Design
@@ -114,12 +114,18 @@ they remain the audit collector's responsibility.
 
 ### 3.3 Logs (global)
 
-The log collector owns Orbit-created operational JSONL archives in configured
-global log roots. The active inode and any file held by a known writer are
-protected. Age uses the managed archive timestamp written at rotation; malformed
-names are retained rather than aged by mtime. The existing age and total-byte
-budgets share one planner with startup pruning. Journald, system logs, and
-third-party logs are out of scope.
+The log collector owns Orbit-created operational log archives beneath the
+global state root: the JSONL tracing feed (`state/logs/orbit.jsonl`, overridable
+via `ORBIT_LOG_PATH`) and the macOS sweep log (`logs/sweep.log`). Only dated
+`<active>.<stamp>` archives are candidates; the active inode is never one, so a
+writer holding it open is unaffected. The existing age and total-byte budgets
+share one classifier — `log_rotation::plan_prune` — with startup pruning
+(ADR-0221), so the CLI surface and subscriber-init pruning can never disagree.
+Reports distinguish age-selected from size-selected files via the item `action`
+(`delete-age` / `delete-size`) and record reclaimed bytes and per-file errors. A
+custom `ORBIT_LOG_PATH` outside the resolved scope root is skipped
+(`out_of_scope`), never force-deleted. Journald, system logs, and third-party
+logs are out of scope. [ORB-10184]
 
 ### 3.4 Diagnostics (workspace)
 
@@ -319,8 +325,12 @@ Automatic collection is disabled by default. Opt-in automation must name its
 scope and targets, set the collector's explicit apply argument, and use the same
 budgets, lock, collectors, protections, and reports as an operator invocation.
 It may be a scheduled routine, but it cannot discover, create, or dispatch
-tasks. Startup hooks do not delete or perform lifecycle mutations; they are
-limited to non-destructive setup and active-file rotation.
+tasks. Startup hooks perform no lifecycle mutation beyond active-file rotation
+and best-effort log-archive pruning through the shared classifier
+(`log_rotation::plan_prune`); they never touch the active inode. Per ADR-0221
+this opportunistic startup pruning is retained in v1 (Orbit has no daemon) and
+should move fully behind the explicit `orbit gc logs --apply` gate once
+automated log GC (ORB-10189) lands.
 
 ## 10. Compatibility and Surface Ownership
 
@@ -329,12 +339,15 @@ limited to non-destructive setup and active-file rotation.
   new explicit `--apply`. `--older-than` maps to the legacy-event retention
   override, and both paths call the audit collector. There is no legacy bypass
   around blob reachability, holds, locking, reporting, or revalidation.
-- **Log startup pruning.** Extract the existing rotation/pruning classifier.
-  Startup may continue active-file rotation but stops deleting archives;
-  archive eligibility is visible in `orbit gc logs`, and deletion occurs only
-  through `orbit gc logs --apply` (whether invoked by an operator or explicitly
-  configured automation). There is no config-only substitute for the apply
-  argument.
+- **Log startup pruning.** The rotation/pruning classifier is extracted as
+  `log_rotation::plan_prune`. Startup continues active-file rotation and
+  best-effort archive pruning through that shared classifier; `orbit gc logs`
+  plans/applies the identical age + total-size policy with reporting, locking,
+  and revalidation. Deletion via the explicit surface still requires `--apply`
+  (there is no config-only substitute). Per ADR-0221 startup deletion is
+  retained in v1 rather than deferred entirely to the apply gate, because Orbit
+  has no daemon and automated log GC (ORB-10189) has not shipped; when it does,
+  this should be revisited.
 - **Skill unlink/init cleanup.** Explicit `orbit skill unlink` remains an
   operator-owned uninstall action, but generated-content retirement and init
   cleanup delegate to the skill ownership classifier. Existing `force` flags
@@ -369,7 +382,7 @@ limited to non-destructive setup and active-file rotation.
 - [ORB-10180] — will implement the shared GC framework.
 - [ORB-10182] — will implement managed worktree collection.
 - [ORB-10183] — will implement run retention.
-- [ORB-10184] — will unify log retention.
+- [ORB-10184] — unified log retention: `orbit gc logs` + shared `plan_prune` (ADR-0221).
 - [ORB-10185] — will implement diagnostics retention.
 - [ORB-10186] — will implement audit and blob collection.
 - [ORB-10187] — will implement generated-skill collection.
