@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Safety-first garbage collection contract**: the `orbit gc` design standardizes explicit apply, retention clocks, ownership/revalidation invariants, locking, and equivalent human/JSON reports across global and workspace collectors. ([ORB-10178])
 - **Task creation surface is narrower and consistent**: task creation now exposes only legal initial statuses, list flags share repeat/comma parsing, and redundant agent/comment/instructions inputs are removed while model and managed identity attribution remain intact. ([ORB-10155])
 
 ### Breaking Changes
