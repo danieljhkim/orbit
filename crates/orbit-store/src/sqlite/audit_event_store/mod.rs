@@ -92,6 +92,19 @@ pub struct AuditToolAggregate {
     pub avg_duration_ms: f64,
 }
 
+/// Minimal legacy audit row used by the unified audit collector.  Keeping the
+/// GC projection here lets the collector use the store's canonical timestamp
+/// parser without exposing SQLite details across the crate boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditGcLegacyRow {
+    pub id: i64,
+    pub timestamp: DateTime<Utc>,
+    pub working_directory: String,
+    pub arguments_json: Option<String>,
+    pub stdout_truncated: Option<String>,
+    pub stderr_truncated: Option<String>,
+}
+
 /// Per-role aggregate of audit events with MCP/CLI surface split. Backs
 /// the Role split and MCP-vs-CLI cards in the audit-summary side panel.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +116,71 @@ pub struct AuditRoleAggregate {
 }
 
 impl Store {
+    pub fn list_legacy_audit_rows_for_gc(&self) -> Result<Vec<AuditGcLegacyRow>, OrbitError> {
+        let conn = self.read()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, timestamp, working_directory, arguments_json, \
+                 stdout_truncated, stderr_truncated FROM audit_events ORDER BY id",
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| {
+                let timestamp: String = row.get(1)?;
+                Ok(AuditGcLegacyRow {
+                    id: row.get(0)?,
+                    timestamp: parse_timestamp(&timestamp)?,
+                    working_directory: row.get(2)?,
+                    arguments_json: row.get(3)?,
+                    stdout_truncated: row.get(4)?,
+                    stderr_truncated: row.get(5)?,
+                })
+            })
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| OrbitError::Store(e.to_string()))
+    }
+
+    /// Compare-and-delete one legacy row.  The timestamp guard makes a frozen
+    /// GC plan restart-safe even if a row id is unexpectedly reused.
+    pub fn delete_legacy_audit_row_for_gc(
+        &self,
+        id: i64,
+        expected_timestamp: &DateTime<Utc>,
+    ) -> Result<bool, OrbitError> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let current = tx
+            .query_row(
+                "SELECT timestamp FROM audit_events WHERE id = ?1",
+                [id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let Some(current) = current else {
+            tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
+            return Ok(false);
+        };
+        let current = DateTime::parse_from_rfc3339(&current)
+            .map_err(|e| OrbitError::Store(format!("invalid audit timestamp: {e}")))?
+            .with_timezone(&Utc);
+        if current != *expected_timestamp {
+            tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
+            return Ok(false);
+        }
+        let changed = tx
+            .execute("DELETE FROM audit_events WHERE id = ?1", [id])
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
+        Ok(changed == 1)
+    }
+
     pub fn insert_audit_event_record(
         &self,
         params: &AuditEventInsertParams,

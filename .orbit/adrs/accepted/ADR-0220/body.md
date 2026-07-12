@@ -8,5 +8,6 @@ Adopt one top-level `orbit gc [TARGET]` family whose default is a non-mutating p
 - Existing cleanup entry points delegate to the shared collectors or become non-mutating compatibility shims; `orbit run gc` is rejected because retention is storage lifecycle, not workflow execution.
 - Global targets take policy only from global config; workspace targets use the existing complete-document workspace-replaces-global rule, with CLI overrides highest.
 - Partial failure preserves successful mutations, reports every skip/error, and returns non-zero; reruns are idempotent.
-- No single code anchor yet; the convention will be enforced by the shared GC framework and collector review.
+- Audit collection deletes expired envelopes before sweeping blobs and recomputes reachability during blob revalidation; holds, exports, and retained job-run evidence participate in the mark set.
+- Code anchors are `execute_gc`, `validate_candidate_path`, and `AuditGcCollector`; the first two enforce the shared lock/manifest/path rules and collector review covers domain invariants.
 - Cost: All apply passes serialize behind one host-wide lock and pay per-candidate revalidation, and workspace owners must repeat any global GC settings they want in a complete workspace policy instead of inheriting a merged fragment.

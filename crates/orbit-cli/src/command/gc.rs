@@ -4,6 +4,7 @@ use clap::{Args, ValueEnum};
 use orbit_core::command::gc::{
     EmptyGcCollector, GcRequest, GcScope, GcTarget, SystemGcClock, execute_gc,
 };
+use orbit_core::command::gc_audit::AuditGcCollector;
 use orbit_core::{OrbitError, OrbitRuntime};
 
 use super::Execute;
@@ -75,16 +76,44 @@ impl Execute for GcCommand {
             resolve_workspace_scope(self.workspace.as_deref(), runtime)?
         };
         let clock = SystemGcClock;
-        let report = execute_gc(
-            &EmptyGcCollector::new(target),
-            GcRequest {
-                apply: self.apply,
-                scope,
-                retention_override: self.retention.as_deref(),
-                global_state_dir: &runtime.paths().global_dir.join("state"),
-                clock: &clock,
-            },
-        )?;
+        let report = if target == GcTarget::Audit {
+            if matches!(scope, GcScope::Global { .. }) {
+                return Err(OrbitError::InvalidInput(
+                    "audit GC requires a workspace; use --workspace <id-or-path>".to_string(),
+                ));
+            }
+            let workspace_id = match &scope {
+                GcScope::Workspace {
+                    workspace_id: Some(id),
+                    ..
+                } => id.clone(),
+                GcScope::Workspace { .. } => runtime.workspace_id()?,
+                GcScope::Global { .. } => unreachable!("global audit scope rejected above"),
+            };
+            let collector =
+                AuditGcCollector::new(runtime.sqlite_store()?, workspace_id, scope.root());
+            execute_gc(
+                &collector,
+                GcRequest {
+                    apply: self.apply,
+                    scope,
+                    retention_override: self.retention.as_deref(),
+                    global_state_dir: &runtime.paths().global_dir.join("state"),
+                    clock: &clock,
+                },
+            )?
+        } else {
+            execute_gc(
+                &EmptyGcCollector::new(target),
+                GcRequest {
+                    apply: self.apply,
+                    scope,
+                    retention_override: self.retention.as_deref(),
+                    global_state_dir: &runtime.paths().global_dir.join("state"),
+                    clock: &clock,
+                },
+            )?
+        };
         if self.json {
             println!(
                 "{}",
@@ -149,7 +178,7 @@ fn resolve_workspace_scope(
     })
 }
 
-fn print_human_report(report: &orbit_core::command::gc::GcReport) {
+pub(crate) fn print_human_report(report: &orbit_core::command::gc::GcReport) {
     println!(
         "GC {:?} {} ({:?})",
         report.mode, report.plan_id, report.outcome

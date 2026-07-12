@@ -21,6 +21,7 @@ pub mod backend_resolver;
 pub mod docs;
 pub mod executor;
 pub mod gc;
+pub mod gc_audit;
 pub mod init;
 pub mod job;
 pub mod learning;

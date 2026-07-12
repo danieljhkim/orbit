@@ -10,7 +10,7 @@ summary: Specifies GC grammar, collector ownership, retention clocks, safety inv
 tags: [gc, retention, safety]
 paths: ["crates/orbit-cli/src/command/gc/**", "crates/orbit-core/src/command/gc/**", "crates/orbit-core/src/config/**"]
 related_features: [gc, activity-job, auditability, task-artifacts, worktree-artifacts]
-related_artifacts: [ORB-10178, ORB-10180, ADR-0220]
+related_artifacts: [ORB-10178, ORB-10180, ORB-10186, ADR-0220]
 ---
 
 # Garbage Collection — Design
@@ -139,6 +139,23 @@ only unreachable blobs enter the sweep plan. Ordering must ensure a retained
 envelope never points at a deleted blob. The GC operation writes a deletion
 manifest or out-of-band audit event that the active plan cannot recursively
 collect.
+
+The workspace collector uses a 90-day built-in event retention (overridable by
+`--retention`). Legacy rows are attributed by their recorded working directory;
+v2 SQLite rows by workspace ID. A loop JSONL file is eligible only when every
+non-empty line parses, carries a timestamp older than the cutoff, and is not
+associated with a retained job-run bundle. Malformed or timestamp-free files
+are retained fail-closed.
+
+The mark set walks every retained legacy/v2/JSONL payload plus files beneath
+`state/audit/holds`, `state/audit/exports`, and `state/job-runs`. Blob-shaped
+SHA-256 references in any of those surfaces protect the content-addressed file.
+Apply orders database rows and JSONL envelopes before blob candidates; each
+blob is re-marked immediately before deletion, and changed files become
+`stale_plan` skips. Missing blobs referenced by retained evidence are reported
+as integrity errors rather than hidden or recreated. `orbit audit prune` is a
+deprecated compatibility projection of this same collector and requires its
+own explicit `--apply` mutation gate.
 
 ### 3.6 Skills (global)
 
