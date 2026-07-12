@@ -7,7 +7,7 @@ use orbit_common::types::OrbitError;
 use orbit_common::utility::fs::write_text_with_parent;
 
 use crate::OrbitRuntime;
-use crate::command::skill_ownership::{self, GeneratedSkill};
+use crate::command::skill_ownership::{self, GeneratedFile, GeneratedSkill};
 use crate::skill_catalog::{LoadedSkill, SkillCatalogDoctorStatus};
 
 /// Version stamped on managed-skill ownership records. Bump when the generated
@@ -119,16 +119,39 @@ pub(crate) fn record_default_skill_ownership(
 ) -> Result<(), OrbitError> {
     let generated: Vec<GeneratedSkill> = DEFAULT_SKILL_FILES
         .iter()
-        .map(|(id, content)| {
-            let rendered = inject_skill_template_tokens(content, orbit_root);
-            GeneratedSkill {
-                skill_id: (*id).to_string(),
-                content_hash: skill_ownership::content_hash(rendered.as_bytes()),
-                version: Some(SKILL_CATALOG_VERSION.to_string()),
-            }
+        .map(|(id, _)| {
+            GeneratedSkill::from_files(
+                (*id).to_string(),
+                Some(SKILL_CATALOG_VERSION.to_string()),
+                &generated_skill_files(id, orbit_root),
+            )
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
     skill_ownership::reconcile_managed_skills(skills_root, &generated)
+}
+
+/// The complete set of files Orbit generates for `skill_id`, rendered for
+/// `orbit_root` — its `SKILL.md` plus every matching resource file — as the
+/// fingerprint domain for that skill's ownership record. Keep this in lockstep
+/// with [`seed_default_skills`]/[`seed_default_skill_resources`], which write
+/// exactly these paths.
+fn generated_skill_files(skill_id: &str, orbit_root: &Path) -> Vec<GeneratedFile> {
+    let mut files = Vec::new();
+    if let Some((_, content)) = DEFAULT_SKILL_FILES.iter().find(|(id, _)| *id == skill_id) {
+        files.push(GeneratedFile {
+            relative_path: "SKILL.md".to_string(),
+            contents: inject_skill_template_tokens(content, orbit_root).into_bytes(),
+        });
+    }
+    for (resource_skill_id, relative_path, content) in DEFAULT_SKILL_RESOURCE_FILES {
+        if resource_skill_id == skill_id {
+            files.push(GeneratedFile {
+                relative_path: relative_path.to_string(),
+                contents: inject_skill_template_tokens(content, orbit_root).into_bytes(),
+            });
+        }
+    }
+    files
 }
 
 fn seed_default_skill_resources(

@@ -11,9 +11,14 @@
 //! The manifest lives next to the skills it describes at
 //! `<skills_root>/.ownership.json`. Two proofs establish Orbit ownership:
 //!
-//! 1. **Exact known hash** — the on-disk `SKILL.md` matches a generated-content
-//!    hash recorded here (either the currently-managed record or a retired
-//!    tombstone). Modified copies never match and stay [`SkillOwnership::Ambiguous`].
+//! 1. **Exact known tree fingerprint** — the on-disk skill directory
+//!    fingerprints to a value recorded here (either the currently-managed record
+//!    or a retired tombstone). The fingerprint is a deterministic, no-follow
+//!    digest of the *complete* generated skill tree — every file's relative
+//!    path, entry type, and contents, not just `SKILL.md` — so a modified
+//!    resource, a removed generated file, an added file, an embedded symlink, or
+//!    any unexpected entry type all change the fingerprint and fail closed to
+//!    [`SkillOwnership::Ambiguous`]. See `fingerprint` for the exact encoding.
 //! 2. **Orbit-targeting managed symlink** — a link whose resolved target lands
 //!    inside a known Orbit-owned root. Works even for broken links (the target
 //!    directory was already removed) via a lexical prefix fallback.
@@ -21,8 +26,14 @@
 //! Anything else — a same-named user directory, a modified generated skill, or
 //! a symlink pointing outside every Orbit root — is reported as ambiguous or
 //! unmanaged and is never auto-claimed or removed.
+//!
+//! The `.ownership.json` manifest is the only metadata excluded from the
+//! fingerprint, and it is excluded *structurally*: it lives at `<skills_root>`,
+//! a sibling of every `<skills_root>/<skill_id>/` tree the fingerprint covers,
+//! so the fingerprint never digests itself. No file *inside* a skill tree is
+//! excluded — every entry counts, which is what makes the check fail closed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::OrbitError;
@@ -68,8 +79,9 @@ impl Default for SkillOwnershipManifest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ManagedSkillRecord {
     pub skill_id: String,
-    /// sha256 (hex) of the generated `SKILL.md` as rendered for `owned_root`.
-    pub content_hash: String,
+    /// Whole-tree fingerprint (hex) of the complete generated skill tree as
+    /// rendered for `owned_root` — see `fingerprint` for the encoding.
+    pub tree_fingerprint: String,
     /// Catalog/content version at seed time, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
@@ -84,9 +96,10 @@ pub struct ManagedSkillRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SkillTombstone {
     pub skill_id: String,
-    /// Every generated-content hash this skill was ever recorded with.
+    /// Every whole-tree fingerprint this skill was ever recorded with, retained
+    /// so pre-retirement / pre-upgrade installs stay provably Orbit-owned.
     #[serde(default)]
-    pub content_hashes: Vec<String>,
+    pub tree_fingerprints: Vec<String>,
     /// The last version seen before retirement, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retired_version: Option<String>,
@@ -101,12 +114,12 @@ pub struct SkillTombstone {
 /// Outcome of classifying an on-disk skill install against the manifest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkillOwnership {
-    /// Proven Orbit-owned: an exact known hash or an Orbit-targeting symlink.
-    /// Safe for unlink/teardown/gc to remove.
+    /// Proven Orbit-owned: an exact known tree fingerprint or an Orbit-targeting
+    /// symlink. Safe for unlink/teardown/gc to remove.
     OrbitOwned,
-    /// A candidate (right skill id, or a symlink) that lacks ownership proof —
-    /// a modified generated copy or a symlink targeting outside Orbit roots.
-    /// Never auto-removed.
+    /// A candidate (right skill id, or a symlink) that lacks ownership proof — a
+    /// modified/added/removed generated file, an embedded symlink or unexpected
+    /// entry type, or a symlink targeting outside Orbit roots. Never auto-removed.
     Ambiguous,
     /// Nothing Orbit-related: an unknown skill id with no manifest record.
     Unmanaged,
@@ -154,23 +167,262 @@ pub fn save_manifest(
     write_text_with_parent(&path, &serialized).map_err(|e| OrbitError::Io(e.to_string()))
 }
 
-/// sha256 (hex) of arbitrary bytes — the canonical generated-content hash.
+/// sha256 (hex) of arbitrary bytes.
 pub fn content_hash(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut out = String::with_capacity(digest.len() * 2);
-    for byte in digest {
+    hex(&Sha256::digest(bytes))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
         out.push_str(&format!("{byte:02x}"));
     }
     out
 }
 
-/// One generated skill's identity as produced by the seeder.
+/// Domain-separation tag mixed into every tree fingerprint. Bumped if the
+/// fingerprint encoding (not the skill contents) ever changes.
+const TREE_FINGERPRINT_DOMAIN: &[u8] = b"orbit.skill-tree.v1\n";
+
+/// Entry type recorded for one node of a skill tree. Only [`EntryKind::File`]
+/// carries content; everything else contributes its type alone, so a directory,
+/// symlink, or exotic node where Orbit generated a regular file (or vice versa)
+/// changes the fingerprint and fails closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EntryKind {
+    Dir,
+    File,
+    Symlink,
+    Other,
+}
+
+impl EntryKind {
+    /// Stable single-byte tag folded into the fingerprint. Never reuse a value.
+    fn tag(self) -> u8 {
+        match self {
+            EntryKind::Dir => b'd',
+            EntryKind::File => b'f',
+            EntryKind::Symlink => b'l',
+            EntryKind::Other => b'o',
+        }
+    }
+}
+
+/// One node of a skill tree: its skill-root-relative path, entry type, and (for
+/// regular files) the sha256 of its contents.
+#[derive(Debug, Clone)]
+struct TreeEntry {
+    /// Path relative to the skill root, encoded with `/` separators (see
+    /// [`encode_relative`]). Never empty (the root itself is not an entry).
+    path: String,
+    kind: EntryKind,
+    /// sha256 of file contents for [`EntryKind::File`]; all-zero otherwise.
+    digest: [u8; 32],
+}
+
+/// Deterministic, no-follow fingerprint of a complete skill tree.
+///
+/// # Encoding
+///
+/// The fingerprint is `sha256` over, in order:
+///
+/// 1. the domain tag [`TREE_FINGERPRINT_DOMAIN`];
+/// 2. every entry, sorted by `(path, kind-tag)` (path bytes compared
+///    lexicographically), each contributing the little-endian `u64` length of
+///    its path, the path bytes, its one-byte kind tag, and its 32-byte content
+///    digest (all-zero for non-file entries).
+///
+/// **Path encoding.** Paths are relative to the skill root and joined with `/`
+/// on every platform (see [`encode_relative`]); the leading length prefix makes
+/// the concatenation injective, so no path can forge another entry's boundary.
+///
+/// **Ordering.** Entries are sorted by encoded path then kind tag, so the
+/// fingerprint is independent of directory-iteration order.
+///
+/// Directories are included as entries (so an added empty directory is
+/// detected); symlinks and other node types are recorded by type only and are
+/// never followed. The `.ownership.json` manifest is excluded structurally — it
+/// is never inside a skill tree (see the module docs), so it is not special-cased
+/// here.
+fn fingerprint(entries_source: impl FingerprintSource) -> Result<String, OrbitError> {
+    let mut entries = entries_source.collect_entries()?;
+    entries.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then_with(|| a.kind.tag().cmp(&b.kind.tag()))
+    });
+    let mut hasher = Sha256::new();
+    hasher.update(TREE_FINGERPRINT_DOMAIN);
+    for entry in &entries {
+        hasher.update((entry.path.len() as u64).to_le_bytes());
+        hasher.update(entry.path.as_bytes());
+        hasher.update([entry.kind.tag()]);
+        hasher.update(entry.digest);
+    }
+    Ok(hex(&hasher.finalize()))
+}
+
+/// A source of tree entries — either the compiled-in generated files (expected)
+/// or an on-disk directory walk (actual). Keeps [`fingerprint`] identical for
+/// both sides so seeding and classification cannot diverge.
+trait FingerprintSource {
+    fn collect_entries(self) -> Result<Vec<TreeEntry>, OrbitError>;
+}
+
+/// Encode a path relative to `base` with `/` separators on every platform. A
+/// path not under `base` is encoded verbatim (should not happen for entries
+/// produced by walking `base`).
+fn encode_relative(base: &Path, path: &Path) -> String {
+    let rel = path.strip_prefix(base).unwrap_or(path);
+    encode_components(rel)
+}
+
+/// Encode an already-relative path (from a `Path` or a `/`-style string) with
+/// `/` separators, dropping `.`/root components.
+fn encode_components(rel: &Path) -> String {
+    rel.components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(os) => Some(os.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Every ancestor directory of an encoded file path, from the shallowest to the
+/// file's immediate parent (the file itself excluded). `"a/b/c.md"` →
+/// `["a", "a/b"]`; `"SKILL.md"` → `[]`.
+fn ancestor_dirs(encoded_path: &str) -> Vec<String> {
+    let parts: Vec<&str> = encoded_path.split('/').collect();
+    (1..parts.len()).map(|i| parts[..i].join("/")).collect()
+}
+
+/// One Orbit-generated file within a skill's tree, as the seeder would write it.
+#[derive(Debug, Clone)]
+pub struct GeneratedFile {
+    /// Path relative to the skill's owned directory (e.g. `SKILL.md` or
+    /// `references/guide.md`); encoded canonically when fingerprinted.
+    pub relative_path: String,
+    pub contents: Vec<u8>,
+}
+
+/// Expected-side source: the compiled-in files Orbit generates for one skill.
+struct GeneratedFiles<'a>(&'a [GeneratedFile]);
+
+impl FingerprintSource for GeneratedFiles<'_> {
+    fn collect_entries(self) -> Result<Vec<TreeEntry>, OrbitError> {
+        let mut entries = Vec::new();
+        let mut dirs: BTreeSet<String> = BTreeSet::new();
+        for file in self.0 {
+            let path = encode_components(Path::new(&file.relative_path));
+            for dir in ancestor_dirs(&path) {
+                if dirs.insert(dir.clone()) {
+                    entries.push(TreeEntry {
+                        path: dir,
+                        kind: EntryKind::Dir,
+                        digest: [0u8; 32],
+                    });
+                }
+            }
+            entries.push(TreeEntry {
+                path,
+                kind: EntryKind::File,
+                digest: Sha256::digest(&file.contents).into(),
+            });
+        }
+        Ok(entries)
+    }
+}
+
+/// Actual-side source: a no-follow walk of an on-disk skill directory.
+struct OnDiskTree<'a>(&'a Path);
+
+impl FingerprintSource for OnDiskTree<'_> {
+    fn collect_entries(self) -> Result<Vec<TreeEntry>, OrbitError> {
+        let mut entries = Vec::new();
+        collect_on_disk(self.0, self.0, &mut entries)?;
+        Ok(entries)
+    }
+}
+
+/// Recursively collect tree entries under `dir` (rooted at `root`) without ever
+/// following a symlink: symlinks are recorded by type and never traversed, so a
+/// link cannot redirect the walk outside the skill root.
+fn collect_on_disk(
+    root: &Path,
+    dir: &Path,
+    entries: &mut Vec<TreeEntry>,
+) -> Result<(), OrbitError> {
+    let read = std::fs::read_dir(dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+    for entry in read {
+        let entry = entry.map_err(|e| OrbitError::Io(e.to_string()))?;
+        let path = entry.path();
+        let meta = std::fs::symlink_metadata(&path).map_err(|e| OrbitError::Io(e.to_string()))?;
+        let file_type = meta.file_type();
+        let encoded = encode_relative(root, &path);
+        if file_type.is_symlink() {
+            entries.push(TreeEntry {
+                path: encoded,
+                kind: EntryKind::Symlink,
+                digest: [0u8; 32],
+            });
+        } else if file_type.is_dir() {
+            entries.push(TreeEntry {
+                path: encoded,
+                kind: EntryKind::Dir,
+                digest: [0u8; 32],
+            });
+            collect_on_disk(root, &path, entries)?;
+        } else if file_type.is_file() {
+            let bytes = std::fs::read(&path).map_err(|e| OrbitError::Io(e.to_string()))?;
+            entries.push(TreeEntry {
+                path: encoded,
+                kind: EntryKind::File,
+                digest: Sha256::digest(&bytes).into(),
+            });
+        } else {
+            entries.push(TreeEntry {
+                path: encoded,
+                kind: EntryKind::Other,
+                digest: [0u8; 32],
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Fingerprint the complete set of files Orbit generates for one skill (the
+/// expected value stored in the manifest at seed time).
+pub fn fingerprint_generated(files: &[GeneratedFile]) -> Result<String, OrbitError> {
+    fingerprint(GeneratedFiles(files))
+}
+
+/// One generated skill's identity as produced by the seeder: its id, the
+/// whole-tree fingerprint of every file Orbit generates for it, and the catalog
+/// version.
 #[derive(Debug, Clone)]
 pub struct GeneratedSkill {
     pub skill_id: String,
-    /// sha256 of the rendered `SKILL.md` for the target root.
-    pub content_hash: String,
+    /// Whole-tree fingerprint of the complete generated skill tree.
+    pub tree_fingerprint: String,
     pub version: Option<String>,
+}
+
+impl GeneratedSkill {
+    /// Build a [`GeneratedSkill`] from the exact files Orbit generates for it,
+    /// fingerprinting the whole tree so the recorded value matches what
+    /// [`classify_install`] later computes from disk.
+    pub fn from_files(
+        skill_id: impl Into<String>,
+        version: Option<String>,
+        files: &[GeneratedFile],
+    ) -> Result<Self, OrbitError> {
+        Ok(Self {
+            skill_id: skill_id.into(),
+            tree_fingerprint: fingerprint_generated(files)?,
+            version,
+        })
+    }
 }
 
 /// Reconcile the manifest after seeding the current default skills into
@@ -212,29 +464,29 @@ pub fn reconcile_managed_skills(
             .entry(skill.skill_id.clone())
             .or_insert_with(|| ManagedSkillRecord {
                 skill_id: skill.skill_id.clone(),
-                content_hash: skill.content_hash.clone(),
+                tree_fingerprint: skill.tree_fingerprint.clone(),
                 version: skill.version.clone(),
                 owned_root: owned_root.clone(),
                 link_destinations: Vec::new(),
             });
-        // If the content hash changed (template update), retain the old hash as
-        // a known-generated hash on the tombstone so prior installs remain
-        // provably Orbit-owned.
-        if entry.content_hash != skill.content_hash {
-            let previous = entry.content_hash.clone();
+        // If the tree fingerprint changed (template/resource update), retain the
+        // old fingerprint as a known-generated one on the tombstone so prior
+        // installs remain provably Orbit-owned.
+        if entry.tree_fingerprint != skill.tree_fingerprint {
+            let previous = entry.tree_fingerprint.clone();
             let tombstone = manifest
                 .tombstones
                 .entry(skill.skill_id.clone())
                 .or_insert_with(|| SkillTombstone {
                     skill_id: skill.skill_id.clone(),
-                    content_hashes: Vec::new(),
+                    tree_fingerprints: Vec::new(),
                     retired_version: None,
                     owned_roots: Vec::new(),
                     link_destinations: Vec::new(),
                 });
-            push_unique(&mut tombstone.content_hashes, previous);
+            push_unique(&mut tombstone.tree_fingerprints, previous);
         }
-        entry.content_hash = skill.content_hash.clone();
+        entry.tree_fingerprint = skill.tree_fingerprint.clone();
         entry.version = skill.version.clone();
         entry.owned_root = owned_root.clone();
     }
@@ -276,12 +528,12 @@ fn retire_record(tombstones: &mut BTreeMap<String, SkillTombstone>, record: Mana
         .entry(record.skill_id.clone())
         .or_insert_with(|| SkillTombstone {
             skill_id: record.skill_id.clone(),
-            content_hashes: Vec::new(),
+            tree_fingerprints: Vec::new(),
             retired_version: None,
             owned_roots: Vec::new(),
             link_destinations: Vec::new(),
         });
-    push_unique(&mut tombstone.content_hashes, record.content_hash);
+    push_unique(&mut tombstone.tree_fingerprints, record.tree_fingerprint);
     push_unique(&mut tombstone.owned_roots, record.owned_root);
     for link in record.link_destinations {
         push_unique(&mut tombstone.link_destinations, link);
@@ -312,18 +564,18 @@ pub fn owned_roots(skills_root: &Path, manifest: &SkillOwnershipManifest) -> Vec
     roots
 }
 
-/// Known generated-content hashes recorded for `skill_id` (managed + tombstone).
-fn known_hashes(manifest: &SkillOwnershipManifest, skill_id: &str) -> Vec<String> {
-    let mut hashes = Vec::new();
+/// Known whole-tree fingerprints recorded for `skill_id` (managed + tombstone).
+fn known_fingerprints(manifest: &SkillOwnershipManifest, skill_id: &str) -> Vec<String> {
+    let mut fingerprints = Vec::new();
     if let Some(record) = manifest.managed.get(skill_id) {
-        push_unique(&mut hashes, record.content_hash.clone());
+        push_unique(&mut fingerprints, record.tree_fingerprint.clone());
     }
     if let Some(tombstone) = manifest.tombstones.get(skill_id) {
-        for hash in &tombstone.content_hashes {
-            push_unique(&mut hashes, hash.clone());
+        for fingerprint in &tombstone.tree_fingerprints {
+            push_unique(&mut fingerprints, fingerprint.clone());
         }
     }
-    hashes
+    fingerprints
 }
 
 /// Classify an on-disk skill install at `path` (a `<skills-dir>/<skill_id>`
@@ -332,8 +584,10 @@ fn known_hashes(manifest: &SkillOwnershipManifest, skill_id: &str) -> Vec<String
 /// - **Symlink** → [`SkillOwnership::OrbitOwned`] iff its resolved target lands
 ///   inside an owned root (broken links fall back to a lexical prefix check);
 ///   otherwise [`SkillOwnership::Ambiguous`].
-/// - **Directory** → [`SkillOwnership::OrbitOwned`] iff its `SKILL.md` hashes to
-///   a known generated hash for `skill_id`; a modified copy is
+/// - **Directory** → [`SkillOwnership::OrbitOwned`] iff its complete on-disk
+///   tree fingerprints (no-follow, see `fingerprint`) to a known generated
+///   value for `skill_id`; any modified/added/removed file, embedded symlink, or
+///   unexpected entry type yields a different fingerprint and is
 ///   [`SkillOwnership::Ambiguous`]; an id with no manifest record is
 ///   [`SkillOwnership::Unmanaged`].
 pub fn classify_install(
@@ -350,20 +604,25 @@ pub fn classify_install(
         return Ok(classify_symlink(path, owned_roots));
     }
 
-    // A recorded managed link destination that is somehow no longer a symlink is
-    // still ours only if it proves out by content; fall through to hash checks.
-    let known = known_hashes(manifest, skill_id);
+    let known = known_fingerprints(manifest, skill_id);
     if known.is_empty() {
         return Ok(SkillOwnership::Unmanaged);
     }
 
-    let skill_md = path.join("SKILL.md");
-    let Ok(bytes) = std::fs::read(&skill_md) else {
-        // A managed id whose content is unreadable/absent: not proven ours.
+    // A managed id that is not a directory can't be a generated skill tree: fail
+    // closed rather than claiming it.
+    if !meta.file_type().is_dir() {
         return Ok(SkillOwnership::Ambiguous);
+    }
+
+    // Fingerprint the whole tree with no symlink following. If the tree can't be
+    // read we cannot prove ownership, so fail closed to Ambiguous rather than
+    // erroring the classification.
+    let actual = match fingerprint(OnDiskTree(path)) {
+        Ok(fp) => fp,
+        Err(_) => return Ok(SkillOwnership::Ambiguous),
     };
-    let hash = content_hash(&bytes);
-    if known.contains(&hash) {
+    if known.contains(&actual) {
         Ok(SkillOwnership::OrbitOwned)
     } else {
         Ok(SkillOwnership::Ambiguous)
