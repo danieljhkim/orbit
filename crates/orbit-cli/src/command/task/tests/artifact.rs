@@ -59,7 +59,6 @@ fn artifact_put_writes_to_task_artifact_store() {
         id: task.id.clone(),
         source_path: source,
         artifact_path: Some("reports/summary.md".to_string()),
-        agent: Some("codex".to_string()),
         model: Some("gpt-5".to_string()),
         json: false,
     }

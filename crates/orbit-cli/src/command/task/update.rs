@@ -63,9 +63,6 @@ pub struct TaskUpdateArgs {
     /// Task artifact write in `path=content` form. Repeat for multiple artifacts.
     #[arg(long = "artifact")]
     pub artifacts: Vec<String>,
-    /// Explicit agent name to persist on the task artifact
-    #[arg(long)]
-    pub agent: Option<String>,
     /// Explicit agent model to persist on the task artifact
     #[arg(long)]
     pub model: Option<String>,
@@ -95,7 +92,6 @@ impl Execute for TaskUpdateArgs {
             crew,
             context_files,
             artifacts,
-            agent,
             model,
             json,
         } = self;
@@ -139,6 +135,7 @@ impl Execute for TaskUpdateArgs {
         let dependencies = dependencies.map(|value| crate::parse::csv_to_vec(&value));
         let tags = (!tags.is_empty()).then_some(tags);
         let upsert_artifacts = parse_artifact_args(&artifacts)?;
+        let (agent, model) = super::mutation_identity(model);
 
         let task = runtime.update_task_with_identity(
             &id,

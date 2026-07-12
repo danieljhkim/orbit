@@ -85,6 +85,29 @@ pub enum TaskStatus {
     Someday,
 }
 
+/// Lifecycle states that may be selected when a task is first created.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+#[serde(rename_all = "snake_case")]
+pub enum TaskCreateStatus {
+    /// Awaiting human approval before entering the backlog.
+    Proposed,
+    /// Approved and queued for work; not yet started.
+    Backlog,
+    /// Future-scoped — wanted but not yet actionable.
+    Someday,
+}
+
+impl From<TaskCreateStatus> for TaskStatus {
+    fn from(value: TaskCreateStatus) -> Self {
+        match value {
+            TaskCreateStatus::Proposed => Self::Proposed,
+            TaskCreateStatus::Backlog => Self::Backlog,
+            TaskCreateStatus::Someday => Self::Someday,
+        }
+    }
+}
+
 impl Display for TaskStatus {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.cli_name())

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Task creation surface is narrower and consistent**: task creation now exposes only legal initial statuses, list flags share repeat/comma parsing, and redundant agent/comment/instructions inputs are removed while model and managed identity attribution remain intact. ([ORB-10155])
+
 ### Breaking Changes
 
 - **Learning vote and comment surfaces removed**: `orbit.learning.upvote` and all `orbit.learning.comment.*` tools and CLI subcommands are gone — use `priority` + search rank for ranking, `update`/`supersede` for corrections, and `evidence` for provenance. ([ORB-10046])

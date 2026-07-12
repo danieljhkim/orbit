@@ -8,7 +8,8 @@ use axum::response::{IntoResponse, Json, Response};
 use orbit_common::types::validate_relative_artifact_path;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{
-    ExternalRef, OrbitRuntime, Task, TaskComplexity, TaskPriority, TaskStatus, TaskType,
+    ExternalRef, OrbitRuntime, Task, TaskComplexity, TaskCreateStatus, TaskPriority, TaskStatus,
+    TaskType,
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
@@ -60,8 +61,6 @@ pub(super) struct CreateTaskBody {
     #[serde(default)]
     plan: String,
     #[serde(default)]
-    comment: Option<String>,
-    #[serde(default)]
     context_files: Vec<String>,
     #[serde(default)]
     external_refs: Vec<ExternalRef>,
@@ -85,7 +84,7 @@ pub(super) struct CreateTaskBody {
     #[serde(default)]
     task_type: Option<TaskType>,
     #[serde(default)]
-    status: Option<TaskStatus>,
+    status: Option<TaskCreateStatus>,
     #[serde(default)]
     parent_id: Option<String>,
     #[serde(default)]
@@ -306,13 +305,13 @@ pub(super) async fn create_task_action(
         relations: Vec::new(),
         tags: body.tags,
         plan: body.plan,
-        comment: body.comment,
+        comment: None,
         context_files: body.context_files,
         workspace_path: body.workspace_path,
         priority: body.priority,
         complexity: body.complexity,
         task_type: body.task_type,
-        status: body.status,
+        status: body.status.map(Into::into),
         system_created: false,
         external_refs: body.external_refs,
         source_task_id: body.source_task_id,

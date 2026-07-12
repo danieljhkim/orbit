@@ -1224,16 +1224,12 @@
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
-        "agent": {
-          "description": "Deprecated compatibility field. Prefer `model` with the agent family (`codex`, `claude`, `gemini`, or `grok`).",
-          "type": "string"
-        },
         "id": {
           "description": "task ID",
           "type": "string"
         },
         "model": {
-          "description": "Preferred provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized.",
+          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
           "enum": [
             "codex",
             "claude",
@@ -1557,10 +1553,6 @@
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
-        "agent": {
-          "description": "Deprecated compatibility field. Prefer `model` with the agent family (`codex`, `claude`, `gemini`, or `grok`).",
-          "type": "string"
-        },
         "comment": {
           "description": "Optional task comment to append",
           "type": "string"
@@ -1574,7 +1566,7 @@
           "type": "string"
         },
         "model": {
-          "description": "Preferred provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized.",
+          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
           "enum": [
             "codex",
             "claude",

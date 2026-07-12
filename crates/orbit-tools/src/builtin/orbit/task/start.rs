@@ -28,7 +28,7 @@ impl Tool for OrbitTaskStartTool {
                 required: false,
             },
         ]);
-        parameters.extend(super::super::identity_params());
+        parameters.extend(super::super::model_identity_params());
 
         ToolSchema {
             name: "orbit.task.start".to_string(),
@@ -39,6 +39,7 @@ impl Tool for OrbitTaskStartTool {
     }
 
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
+        super::super::reject_agent_field(&input, "orbit.task.start")?;
         super::super::execute_host_action(ctx, input, OrbitBuiltinAction::TaskStart)
     }
 }

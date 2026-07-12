@@ -15,5 +15,18 @@ mod update;
 
 pub use command::{TaskCommand, TaskSubcommand};
 
+fn mutation_identity(model: Option<String>) -> (Option<String>, Option<String>) {
+    if model.is_some() {
+        return (None, model);
+    }
+    let agent = std::env::var("ORBIT_AGENT_NAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let model = std::env::var("ORBIT_AGENT_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    (agent, model)
+}
+
 #[cfg(test)]
 mod tests;

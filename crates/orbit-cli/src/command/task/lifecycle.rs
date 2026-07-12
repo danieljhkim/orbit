@@ -18,9 +18,6 @@ pub struct TaskStartArgs {
     /// Crew override for this start
     #[arg(long)]
     pub crew: Option<String>,
-    /// Explicit agent name to persist on the task artifact
-    #[arg(long)]
-    pub agent: Option<String>,
     /// Explicit agent model to persist on the task artifact
     #[arg(long)]
     pub model: Option<String>,
@@ -31,12 +28,13 @@ pub struct TaskStartArgs {
 
 impl Execute for TaskStartArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let (agent, model) = super::mutation_identity(self.model);
         let task = runtime.start_task_with_identity_and_crew(
             &self.id,
             self.note,
             self.comment,
-            self.agent,
-            self.model,
+            agent,
+            model,
             self.crew,
         )?;
         if self.json {

@@ -26,7 +26,7 @@ impl Tool for OrbitTaskArtifactPutTool {
                 required: false,
             },
         ]);
-        parameters.extend(super::super::identity_params());
+        parameters.extend(super::super::model_identity_params());
 
         ToolSchema {
             name: "orbit.task.artifact.put".to_string(),
@@ -37,6 +37,7 @@ impl Tool for OrbitTaskArtifactPutTool {
     }
 
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
+        super::super::reject_agent_field(&input, "orbit.task.artifact.put")?;
         let id = super::super::required_string(&input, &["id"], "id")?;
         let source_path = super::super::required_string(
             &input,
