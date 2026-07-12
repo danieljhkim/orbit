@@ -36,7 +36,41 @@ Claude Code plugin (skips the install script, downloads the binary on first MCP 
 /plugin install orbit
 ```
 
-The plugin registers Orbit's MCP server, skills, and orchestration subagents in Claude Code, and pulls the matching native `orbit` binary through the [`@orbit-tools/cli`](https://www.npmjs.com/package/@orbit-tools/cli) npm proxy on first invocation. Requires Node 18+ on `PATH`. To get the `orbit` CLI on your shell as well: `npm install -g @orbit-tools/cli`.
+Codex plugin (also skips the install script):
+
+```bash
+codex plugin marketplace add danieljhkim/orbit --ref main
+codex plugin add orbit@orbit
+```
+
+Both plugins register Orbit's MCP server and shared skills automatically. The
+Claude package also includes its Claude-specific hooks and subagents. On the
+first MCP call, either package pulls the matching native `orbit` binary through
+the [`@orbit-tools/cli`](https://www.npmjs.com/package/@orbit-tools/cli) npm
+proxy. Node 18+ must be on `PATH`. To get the `orbit` CLI on your shell as well,
+run `npm install -g @orbit-tools/cli`.
+
+Refresh an existing plugin installation after an Orbit release:
+
+```text
+# Claude Code
+/plugin update orbit
+
+# Codex CLI
+codex plugin marketplace upgrade orbit
+codex plugin add orbit@orbit
+```
+
+Start a fresh agent task from your repository and make a read-only MCP call to
+confirm the installed package is active:
+
+```bash
+# Claude Code
+claude -p 'Use the read-only orbit.task.list MCP tool to list up to three tasks, then report how many were returned.'
+
+# Codex CLI
+codex -C <repo> 'Use the read-only orbit.task.list MCP tool to list up to three tasks, then report how many were returned.'
+```
 
 From source (requires Rust toolchain):
 
@@ -101,3 +135,5 @@ For a complete re-index — needed for full `trace` coverage, since incremental 
 ```bash
 orbit graph sync --full
 ```
+
+<!-- ORB-10117 -->

@@ -5,16 +5,56 @@ sidebar:
   order: 5
 ---
 
-## Claude Code (plugin path)
+## Agent plugins
 
-For Claude Code, the simplest setup is the official plugin — it registers the MCP server, skills, and subagents in one step and pulls the native binary via the `@orbit-tools/cli` npm proxy:
+The official Claude Code and Codex plugins register the MCP server and shared
+Orbit skills automatically. They pull the native binary through the
+`@orbit-tools/cli` npm proxy on the first MCP call, so the `orbit` CLI does not
+need to be installed separately.
+
+### Claude Code
 
 ```text
 /plugin marketplace add danieljhkim/orbit
 /plugin install orbit
 ```
 
-Requires Node 18+ on `PATH`. Skip the rest of this page if you go this route; the plugin handles registration. Use the manual flow below for Codex, Gemini, Grok Build, or a Claude Code install you want to wire by hand.
+To update later, run `/plugin update orbit` and restart Claude Code.
+
+### Codex
+
+```bash
+codex plugin marketplace add danieljhkim/orbit --ref main
+codex plugin add orbit@orbit
+```
+
+To update later, refresh the Git marketplace snapshot and reinstall the plugin:
+
+```bash
+codex plugin marketplace upgrade orbit
+codex plugin add orbit@orbit
+```
+
+Both plugin paths require Node 18+ on `PATH`. Skip the manual registration flow
+below when you use a plugin.
+
+### Verify a plugin installation
+
+Start a fresh task from an initialized Orbit workspace. These prompts ask the
+agent to discover the bundled Orbit skill and invoke the read-only
+`orbit.task.list` MCP tool:
+
+```bash
+# Claude Code
+claude -p 'Use the read-only orbit.task.list MCP tool to list up to three tasks, then report how many were returned.'
+
+# Codex CLI
+codex -C <repo> 'Use the read-only orbit.task.list MCP tool to list up to three tasks, then report how many were returned.'
+```
+
+For Codex, `codex mcp list` should also show an `orbit` server whose command is
+the canonical `npx -y @orbit-tools/cli@latest mcp serve` transport declared by
+the plugin manifest.
 
 ## Initialize (manual)
 
@@ -50,3 +90,5 @@ The surface includes task tools and graph read tools. Graph write tools are not 
 ```bash
 orbit mcp remove --all
 ```
+
+<!-- ORB-10117 -->

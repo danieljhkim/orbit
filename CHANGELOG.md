@@ -9,6 +9,7 @@
 
 ### Highlights
 
+- **Codex plugin documentation parity**: Website install/MCP guides now cover Codex plugin installation, upgrades, fresh-task discovery, and read-only MCP smoke checks alongside Claude; the npm proxy README clarifies how both supported plugins consume the binary without manual asset copying. ([ORB-10117])
 - **Routine scheduler health over HTTP**: `GET /api/routines` on the dashboard exposes each routine's last fire (timestamp, ok/error outcome, duration) and next-due slot, so a stopped `ship-sweep`/`qa-sweep` is visible remotely as a stale `last_fire` without box ssh. ([ORB-10138])
 - **ADR create over HTTP**: `POST /api/adrs` records a Proposed ADR (mirroring `orbit.adr.add`), so remote orchestrators can author decisions without an on-box run; malformed payloads get a structured 400. Friction/learning create routes stay absent. ([ORB-10141])
 - **Learning + ADR update routes on the HTTP API**: `PATCH /learnings/:id` (summary/scope/tags/body/evidence/priority) and `PATCH /adrs/:id` (status/tags and mutable metadata) delegate to the CLI tools, preserving supersede-don't-delete and invalid-transition rejection; no create routes added. ([ORB-10143])
