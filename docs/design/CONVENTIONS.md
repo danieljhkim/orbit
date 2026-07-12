@@ -1,7 +1,7 @@
 ---
 title: Design Doc Conventions
 owner: daniel
-last_updated: 2026-06-20
+last_updated: 2026-07-12
 status: Accepted
 ---
 
@@ -191,6 +191,7 @@ Retired features stay listed with their `_archive/` path as a historical record.
 | Agent Families | [docs/design/agent-families/](./agent-families/) | grok |
 | Auditability | [docs/design/auditability/](./auditability/) | codex |
 | Executors | [docs/design/executors/](./executors/) | claude |
+| Garbage Collection | [docs/design/gc/](./gc/) | codex |
 | Global Store Consolidation | [docs/design/_archive/global-store-consolidation/](./_archive/global-store-consolidation/) | codex |
 | Groundhog | [docs/design/groundhog/](./groundhog/) | codex |
 | Knowledge graph | [docs/design/_archive/knowledge-graph/](./_archive/knowledge-graph/) | claude |

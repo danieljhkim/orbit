@@ -9,13 +9,17 @@ scope:
   tags:
   - workflow-admission
   - tooling
-summary: Verify the executor Orbit binary can read the admitted worktree's config and store schema before dispatch
-body: Workflow admission can succeed while the subsequently dispatched agent resolves an older installed `orbit` binary. The agent then cannot call required lifecycle tools if the task store schema is newer, and config validation can fail under a legacy schema before any command dispatch. Admission should validate the exact executor binary against every effective config layer and the workspace store, or pass the compatible checked-out binary explicitly. Error messages for layered config failures should include the source path.
+summary: Verify the executor Orbit binary can read the admitted worktree config and store schema before dispatch
+body: 'Workflow admission can succeed while the subsequently dispatched agent resolves an older installed `orbit` binary. The agent then cannot call required lifecycle tools if the task store schema is newer, and config validation can fail under a legacy schema before any command dispatch. Admission should validate the exact executor binary against every effective config layer and the workspace store, or pass the compatible checked-out binary explicitly. Error messages for layered config failures should include the source path. ORB-10178 reproduced the config-schema variant: the installed binary rejected the admitted worktree crew schema before `orbit.task.show`, while a workspace-built binary from the admitted revision worked.'
 evidence:
 - kind: task
   reference: ORB-10148
 - kind: external
   reference: F2026-07-015
+- kind: task
+  reference: ORB-10178
+- kind: external
+  reference: F2026-07-020
 created_at: 2026-07-12T03:37:58.785982787Z
-updated_at: 2026-07-12T03:37:58.785982787Z
+updated_at: 2026-07-12T21:26:29.732641246Z
 created_by: codex

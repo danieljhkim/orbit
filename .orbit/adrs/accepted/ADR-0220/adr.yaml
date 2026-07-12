@@ -1,0 +1,25 @@
+schema_version: 2
+id: ADR-0220
+title: One safety contract for explicit Orbit garbage collection
+status: accepted
+owner: codex
+created_at: 2026-07-12T21:22:27.975299792Z
+accepted_at: 2026-07-12T21:25:28.062180793Z
+last_updated: 2026-07-12T21:25:28.062180793Z
+related_features:
+- gc
+related_tasks:
+- ORB-10178
+tags:
+- gc
+- retention
+- safety
+paths:
+- docs/design/gc/**
+- crates/orbit-cli/src/command/gc/**
+- crates/orbit-core/src/command/gc/**
+- crates/orbit-core/src/config/**
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none
