@@ -186,7 +186,12 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
     let changed_files = staged_changed_files(&workspace_path)?;
     if changed_files.is_empty() {
         git_success(&workspace_path, &["reset", "HEAD"])?;
-        return Ok(json!({}));
+        return Err(OrbitError::Execution(format!(
+            "commit_batch_changes: no staged changes to commit for task '{}' in worktree '{}'; \
+             the implement step produced an empty diff",
+            task.id,
+            workspace_path.display()
+        )));
     }
 
     let message = batch_commit_message(task);

@@ -9,6 +9,7 @@
 
 ### Highlights
 
+- **Ship `--mode pr` fails loudly on an empty diff**: an implement step that writes nothing no longer reports success — an empty commit and a `0 commits ahead` branch now hard-fail (no empty branch pushed, no PR, no promote-to-review), the premature pre-commit `push` is removed, and the agent envelope gets `repo_root` plus a fail-closed `workspace_path`. ([ORB-10134])
 - **Codex plugin documentation parity**: Website install/MCP guides now cover Codex plugin installation, upgrades, fresh-task discovery, and read-only MCP smoke checks alongside Claude; the npm proxy README clarifies how both supported plugins consume the binary without manual asset copying. ([ORB-10117])
 - **Routine scheduler health over HTTP**: `GET /api/routines` on the dashboard exposes each routine's last fire (timestamp, ok/error outcome, duration) and next-due slot, so a stopped `ship-sweep`/`qa-sweep` is visible remotely as a stale `last_fire` without box ssh. ([ORB-10138])
 - **ADR create over HTTP**: `POST /api/adrs` records a Proposed ADR (mirroring `orbit.adr.add`), so remote orchestrators can author decisions without an on-box run; malformed payloads get a structured 400. Friction/learning create routes stay absent. ([ORB-10141])

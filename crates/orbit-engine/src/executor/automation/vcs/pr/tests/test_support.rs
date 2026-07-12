@@ -479,6 +479,29 @@ pub fn pr_workspace() -> PrWorkspace {
     PrWorkspace { _temp: temp, repo }
 }
 
+/// Like `pr_workspace`, but the branch's change is left UNCOMMITTED in the
+/// working tree — mirroring the real PR pipeline, where the implement step
+/// writes changes into the worktree and `pr_open`'s commit step creates the
+/// commit. Used to exercise `pr_open` end-to-end (commit + open).
+pub fn pr_workspace_uncommitted() -> PrWorkspace {
+    let temp = tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    fs::create_dir_all(&repo).expect("create repo dir");
+    git(&repo, &["init"]);
+    git(&repo, &["checkout", "-b", "agent-main"]);
+    git(&repo, &["config", "user.name", "Orbit Test"]);
+    git(&repo, &["config", "user.email", "orbit-test@example.com"]);
+    fs::write(repo.join("README.md"), "base\n").expect("write readme");
+    git(&repo, &["add", "README.md"]);
+    git(&repo, &["commit", "-m", "base"]);
+    git(&repo, &["checkout", "-b", "orbit/test-batch"]);
+    fs::create_dir_all(repo.join("src")).expect("create src dir");
+    // Intentionally left uncommitted: pr_open's commit step must create it.
+    fs::write(repo.join("src/lib.rs"), "pub fn changed() {}\n").expect("write lib");
+
+    PrWorkspace { _temp: temp, repo }
+}
+
 pub fn no_diff_pr_workspace() -> PrWorkspace {
     let temp = tempdir().expect("tempdir");
     let repo = temp.path().join("repo");

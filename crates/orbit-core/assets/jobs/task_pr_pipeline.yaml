@@ -60,6 +60,7 @@ spec:
             default_input:
               task_id: "{{ item }}"
               workspace_path: "{{ steps.worktree.output.workspace_path }}"
+              repo_root: "{{ steps.worktree.output.workspace_path }}"
 
     - id: review_bundle
       when: "{{ input.review }} == true"
@@ -69,12 +70,6 @@ spec:
         task_ids: "{{ input.task_ids }}"
         workspace_path: "{{ steps.worktree.output.workspace_path }}"
         base_branch: "{{ input.base_branch }}"
-
-    - id: push
-      recovery_activity: step_failure_recovery
-      target: activity:git_push
-      default_input:
-        workspace_path: "{{ steps.worktree.output.workspace_path }}"
 
     - id: pr_open
       recovery_activity: step_failure_recovery

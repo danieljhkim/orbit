@@ -113,32 +113,30 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         .collect();
 
     if freshness.commits_ahead == 0 {
-        for task in &completed_tasks {
-            let model = pr_review_attribution(host, task, batch_id)?;
-            host.apply_task_automation_update(
-                &task.id,
-                TaskAutomationUpdate {
-                    status: if task.status == TaskStatus::InProgress {
-                        Some(TaskStatus::Review)
-                    } else {
-                        None
-                    },
-                    model,
-                    ..TaskAutomationUpdate::default()
-                },
-            )?;
-        }
-
-        return Ok(json!({
-            "pr_created": false,
-            "reason": "no repository commits between base and head; completed tasks moved to review without a GitHub PR",
-            "base": base,
-            "head": head,
-            "base_ref": freshness.base_ref,
-            "head_ref": freshness.head_ref,
-            "commits_behind": freshness.commits_behind,
-            "commits_ahead": freshness.commits_ahead,
-        }));
+        // An empty head branch after the implement step is a bug, not an
+        // outcome: promoting the tasks to review and skipping the PR would
+        // strand the work (branch pushed at base HEAD, no PR, no signal). Fail
+        // loudly so the run terminalizes and the coupled tasks are blocked for
+        // a human/orchestrator to inspect. See ORB-10134.
+        let error = OrbitError::Execution(format!(
+            "open_batch_pr: head '{head}' has 0 commits ahead of base '{base}' (base_ref '{}'); \
+             the implement step produced an empty branch — refusing to open a PR or promote tasks to review",
+            freshness.base_ref
+        ));
+        record_failed_handoff(
+            host,
+            &completed_tasks,
+            FailedHandoff {
+                batch_id,
+                workspace_path: &workspace_path,
+                head: &head,
+                base: &base,
+                base_ref: Some(&freshness.base_ref),
+                op: FailedHandoffOp::EmptyBranch,
+                error: &error,
+            },
+        )?;
+        return Err(error);
     }
 
     let title = input_string_field(input, "title")
@@ -366,6 +364,7 @@ pub(super) enum FailedHandoffOp {
     Push,
     PrCreate,
     PrView,
+    EmptyBranch,
 }
 
 impl FailedHandoffOp {
@@ -375,6 +374,7 @@ impl FailedHandoffOp {
             Self::Push => "push",
             Self::PrCreate => "github.pr.create",
             Self::PrView => "github.pr.view",
+            Self::EmptyBranch => "empty-branch",
         }
     }
 }
@@ -415,6 +415,9 @@ fn failed_handoff_recovery(
         ),
         FailedHandoffOp::PrCreate => format!("{cd}\n  gh pr create --base {base} --head {head}"),
         FailedHandoffOp::PrView => format!("{cd}\n  gh pr view {head} --json url,number"),
+        FailedHandoffOp::EmptyBranch => format!(
+            "{cd}\n  # {head} carries no commits ahead of {base}; re-run the task so the implement step writes changes into the worktree before shipping"
+        ),
     }
 }
 
