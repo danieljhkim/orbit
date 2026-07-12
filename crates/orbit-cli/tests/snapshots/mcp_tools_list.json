@@ -287,6 +287,153 @@
     "name": "orbit_adr_update"
   },
   {
+    "description": "Create a recurring auto-task definition. The generic scheduler mints a task from its template on each due slot.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "dedupe": {
+          "description": "Dedupe policy: `skip_if_open` (default) or `always`.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Human description of the recurring chore.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Unique definition name (lowercase alphanumeric, `-`/`_`, starts alphanumeric). Required.",
+          "type": "string"
+        },
+        "schedule": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Schedule object: exactly one of `{ cron: string }` (5-field cron) or `{ every_minutes: number }`. Required."
+        },
+        "template": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Task template: `{ title, description?, acceptance_criteria?, task_type?, tags?, priority?, crew?, status? }`. Provider-neutral — no turn knobs. Required."
+        }
+      },
+      "required": [
+        "name",
+        "schedule",
+        "template"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_auto_task_add"
+  },
+  {
+    "description": "Show a single auto-task definition by name.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "description": "Definition name. Required.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_auto_task_show"
+  },
+  {
+    "description": "Enable or disable an auto-task definition without deleting it.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "description": "Whether to enable (`true`) or disable (`false`) the definition. Disabling is the kill-switch, not a delete. Required.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Definition name. Required.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_auto_task_toggle"
+  },
+  {
+    "description": "Update an existing auto-task definition (present fields only).",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "dedupe": {
+          "description": "New dedupe policy: `skip_if_open` or `always`.",
+          "type": "string"
+        },
+        "description": {
+          "description": "New description.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Definition name. Required.",
+          "type": "string"
+        },
+        "schedule": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "New schedule object: `{ cron: string }` or `{ every_minutes: number }`."
+        },
+        "template": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Replacement task template object."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_auto_task_update"
+  },
+  {
     "description": "Append an Orbit friction report under .orbit/frictions/",
     "inputSchema": {
       "additionalProperties": true,
@@ -406,12 +553,12 @@
     "name": "orbit_graph_callees"
   },
   {
-    "description": "List outbound module/import edges for a file: or dir: selector.",
+    "description": "List outbound module/import edges for a file: or dir: selector. Use this for crate/module dependency questions.",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
         "selector": {
-          "description": "File or directory selector whose outbound imports to list.",
+          "description": "File or directory selector, e.g. `file:<path>` or `dir:<path>`.",
           "type": "string"
         },
         "workspace": {
@@ -431,7 +578,7 @@
     "name": "orbit_graph_deps"
   },
   {
-    "description": "Return a bounded orbit-graph blast-radius traversal.",
+    "description": "Return a bounded orbit-graph blast-radius traversal. Use before an edit to bound what a change can affect.",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
@@ -444,7 +591,7 @@
           "type": "number"
         },
         "selector": {
-          "description": "Origin selector.",
+          "description": "Origin selector, e.g. `symbol:<path>#<name>:<kind>`.",
           "type": "string"
         },
         "workspace": {
@@ -469,7 +616,7 @@
       "additionalProperties": true,
       "properties": {
         "selector": {
-          "description": "Trait selector to resolve implementors for.",
+          "description": "Trait selector, e.g. `symbol:<path>#<name>:trait`.",
           "type": "string"
         },
         "workspace": {
@@ -515,12 +662,12 @@
     "name": "orbit_graph_overview"
   },
   {
-    "description": "Find inbound references and relations for an orbit-graph symbol selector.",
+    "description": "Find inbound references and relations for an orbit-graph symbol selector. Use this for caller-chain questions too — there is no separate callers tool.",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
         "confidence": {
-          "description": "Minimum confidence floor.",
+          "description": "Minimum confidence floor: exact, import, same_module (default), or fuzzy. Lower to fuzzy to recover trait-dispatch and dynamic calls.",
           "enum": [
             "exact",
             "import",
@@ -543,7 +690,7 @@
           "type": "string"
         },
         "symbol": {
-          "description": "Symbol selector to query.",
+          "description": "Symbol selector to query, e.g. `symbol:<path>#<name>:<kind>`.",
           "type": "string"
         },
         "workspace": {
@@ -605,7 +752,7 @@
     "name": "orbit_graph_search"
   },
   {
-    "description": "Show source and metadata for an orbit-graph selector.",
+    "description": "Show source and metadata for an orbit-graph selector. Selector forms: `symbol:<path>#<name>:<kind>` (kind is one of function, method, struct, trait, impl, field, module), `file:<path>`, or `dir:<path>`.",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
@@ -614,7 +761,7 @@
           "type": "number"
         },
         "selector": {
-          "description": "Selector to show.",
+          "description": "Selector to show, e.g. `symbol:src/lib.rs#hello:function`.",
           "type": "string"
         },
         "workspace": {
@@ -656,7 +803,7 @@
     "name": "orbit_graph_sync"
   },
   {
-    "description": "Trace a command handler call tree from orbit-graph command metadata.",
+    "description": "Trace a command handler call tree from orbit-graph command metadata. Run a full sync (`orbit.graph.sync` with `full: true`) first for complete coverage.",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {

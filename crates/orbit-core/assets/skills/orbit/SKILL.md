@@ -1,6 +1,6 @@
 ---
 name: orbit
-description: Entry point for Orbit. Once a workspace is initialized (`.orbit/` present), routes to workflow siblings (`orbit-task`, `orbit-workflow`, `orbit-search`, `orbit-knowledge`, `orbit-graph`) and covers tool invocation surfaces and task lifecycle. When `.orbit/` is absent, or for first-time setup/install ("set up orbit", "install orbit", "wire orbit into this repo", "I'm new to orbit") or feature-tour requests ("what is orbit", "give me a tour"), see references/guide.md.
+description: Entry point for Orbit. Once a workspace is initialized (`.orbit/` present), routes to workflow siblings (`orbit-task`, `orbit-workflow`, `orbit-search`, `orbit-knowledge`) and covers tool invocation surfaces and task lifecycle. When `.orbit/` is absent, or for first-time setup/install ("set up orbit", "install orbit", "wire orbit into this repo", "I'm new to orbit") or feature-tour requests ("what is orbit", "give me a tour"), see references/guide.md.
 ---
 
 # Orbit
@@ -31,7 +31,7 @@ Orbit tools are reachable via two surfaces. Both accept identical JSON arguments
 **Surface coverage:**
 
 - Task lifecycle (`orbit.task.*`), ADR artifacts (`orbit.adr.*`), learnings (`orbit.learning.*`), unified search (`orbit.search`): both surfaces.
-- Graph tools (`sync`, `search`, `show`, `refs`, `callees`, `impact`, `trace`, `overview`, `implementors`, `deps`): **MCP only** — served in-process by orbit-graph (v2). There is no `orbit tool run orbit.graph.*` path and no `orbit graph` subcommand; for direct human/CLI use run the standalone `orbit-graph-cli` binary. Task-to-commit lookup is not a graph tool; use `git log --grep '[T<task-id>]'`.
+- Graph tools (`sync`, `search`, `show`, `refs`, `callees`, `impact`, `trace`, `overview`, `implementors`, `deps`): **MCP only** — served in-process by orbit-graph (v2). When present in your tool surface they are self-describing; no prompt-side instruction is needed. Task-to-commit lookup is not a graph tool; use `git log --grep '[T<task-id>]'`.
 - Semantic lifecycle (`orbit semantic install|stats|index|uninstall`) and state handoff (`orbit.state.*`), routine/sweep/job commands: **CLI only** — used inside activity steps or from a shell where the agent has direct process access.
 
 **Always include `model` in the JSON** so Orbit can attribute the call to the right agent family: `codex`, `claude`, `gemini`, or `grok`. Full model strings are accepted and auto-normalized, but the family is the persisted identity.
@@ -89,7 +89,6 @@ Use `blocked` when execution cannot safely continue. Command surface determines 
 - `orbit-workflow`: Jobs, activities, routines, `orbit sweep`, and `orbit run`; diagnosing failed/stuck/cancelled job runs.
 - `orbit-search`: Find tasks, docs, learnings, and ADRs by topic; docs-corpus admin (list/show/add root/index/migrate).
 - `orbit-knowledge`: Author, update, and supersede learnings and ADRs.
-- `orbit-graph`: Navigate or inspect the codebase via the orbit-graph code index.
 
 ## Voice Your Opinion
 

@@ -35,23 +35,16 @@ Steps:
    - Your active planning-duel slot is in input.planning_duel_slot.
    - Your plan artifact path must be `planning-duel/<slot>.md`.
 
-3. Gather context with the graph surface BEFORE drafting. No single tool is
-   sufficient — show returns bodies; refs, callees, and search return the call
-   and import graph that bodies alone miss. You must:
-   - Start with orbit.graph.overview over the task's directories and
-     orbit.graph.show on each task.context_files selector for breadth.
-   - For every symbol the task proposes to move, rename, remove, or add: call
-     orbit.graph.refs on it to enumerate callers and consumers BY NAME, and
-     orbit.graph.impact to bound the blast radius.
+3. Gather context BEFORE drafting. Reading symbol bodies alone is not enough —
+   you must also map the call and import graph around every change. Establish
+   breadth over the task's directories and each task.context_files entry, then:
+   - For every symbol the task proposes to move, rename, remove, or add:
+     enumerate its callers and consumers BY NAME and bound the blast radius.
    - For every module boundary you are drawing (new crate, new module, extracted
-     file, renamed type): call orbit.graph.search to find call sites of moved
-     types and helpers across the workspace, and orbit.graph.deps to confirm the
-     import direction.
-   - Use orbit.graph.show for full symbol bodies you need to read.
-   - Use orbit.graph.overview to map an unfamiliar area first.
-   - fs.read is a fallback only for selectors the graph cannot resolve (raw
-     YAML, Markdown, assets the graph does not index, or unresolved selectors
-     the graph reports).
+     file, renamed type): find the call sites of the moved types and helpers
+     across the workspace, and confirm the import direction.
+   - Read the full body of every symbol you intend to change.
+   - Map an unfamiliar area before you draft against it.
    - If you discover pub(crate) imports, helper coupling, call sites, or
      dependency edges not reflected in the task description, treat them as
      hidden coupling — they belong in step 1 of your plan body.
@@ -66,8 +59,7 @@ Steps:
    - The plan MUST:
      - Name every symbol being moved, renamed, removed, or added (functions,
        types, modules, constants) BY IDENTIFIER, not by category.
-     - Enumerate the consumers and call sites discovered via orbit.graph.refs
-       and orbit.graph.search BY NAME.
+     - Enumerate the consumers and call sites you discovered BY NAME.
      - Specify exact verification commands the implementer should run — e.g.
        `cargo build -p <crate>`, `cargo test -p <crate> <test_name>`,
        `make ci-fast`, `rg '<symbol>' <path>`, or
@@ -79,7 +71,7 @@ Steps:
        it continues to compile", "we must verify", "this just works", or
        similar. Replace each with the exact command above that proves it.
      - Defer evidence to the implementer ("the implementer will discover X")
-       when orbit.graph.* could have surfaced X now.
+       when inspecting the code now could have surfaced X.
    - Length is not the goal. Named identifiers, enumerated consumers, and exact
      verification commands are.
 
@@ -115,10 +107,9 @@ Steps:
    - Parse those lines to recover each planner's family and slot.
    - The artifact signature is the canonical planner identity source.
 
-4. Use the graph surface to verify claims:
-   - Prefer orbit.graph.overview, orbit.graph.search, orbit.graph.refs, orbit.graph.show,
-     and orbit.graph.impact for spot checks against the codebase.
-   - Fall back to fs.read only when the graph does not have enough knowledge.
+4. Verify claims against the codebase:
+   - Spot-check the winning proposal's named symbols, call sites, and
+     blast-radius claims against the actual code before deciding.
 
 5. Decide the winner:
    - Choose the artifact proposal that is more feasible, complete, scoped, and aligned
@@ -232,7 +223,7 @@ fn planning_duel_agent_activity(
         output_schema_json: json!({}),
         spec_config: json!({
             "instruction": instruction,
-            "skill_refs": ["orbit", "orbit-graph"],
+            "skill_refs": ["orbit"],
         }),
         tools: tools.iter().map(|tool| (*tool).to_string()).collect(),
         proc_allowed_programs: Vec::new(),
@@ -248,7 +239,7 @@ fn planning_duel_agent_activity(
 pub(super) fn planner_activity() -> Activity {
     planning_duel_agent_activity(
         PLANNER_ACTIVITY_ID,
-        "Draft one planning-duel proposal, then persist it as a task artifact using the graph surface.",
+        "Draft one planning-duel proposal, then persist it as a task artifact.",
         PLANNING_DUEL_INSTRUCTION,
         &[
             "orbit.task.show",
