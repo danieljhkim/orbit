@@ -15,11 +15,15 @@ WorkingDirectory=%h
 # tools the configured checks shell out to (git, make, python3, ...).
 Environment=PATH=%h/.local/bin:%h/.orbit/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/.orbit/bin/orbit run qa-sweep --json
-# Unlike ship-sweep (which spawns detached pipeline workers and needs
-# KillMode=process [ORB-10038]), qa-sweep runs its checks *inline* and only
-# exits after finalizing the ledger run, so the default KillMode=control-group
-# is correct here — anything still alive at exit is a leaked check process
-# that should be reaped.
+# KillMode is left at the default control-group. qa-sweep v2 [ORB-10146] runs
+# the QA work as a *remote* worker-daemon run, not an inline child: the sweep
+# process only submits, polls, and finalizes its ledger run before exiting, so
+# nothing in its own cgroup needs reaping. Control-group kill therefore does
+# NOT reap the QA agent run — on timeout the sweep best-effort cancels it
+# (DELETE /runs/<id>); a sweep killed mid-poll leaves the worker run to finish
+# on its own budget, and the next pass's watermark check picks up where it left
+# off. (Unlike ship-sweep, which spawns detached pipeline workers and needs
+# KillMode=process [ORB-10038] to avoid reaping them.)
 # Retry a failed sweep after a pause instead of waiting a full timer interval.
 # Restart= on a Type=oneshot unit requires systemd >= 254; on older systemd
 # drop these two lines (the timer's OnUnitActiveSec still retries every 6h).

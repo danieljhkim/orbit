@@ -8,22 +8,29 @@
 //! - [`config`] — the `[qa]` section of the **global** `~/.orbit/config.toml`.
 //! - [`state`] — per-workspace watermarks + the single-flight pass lock,
 //!   both under the global orbit dir.
-//! - [`fingerprint`] — failure signatures for open-task dedupe.
+//! - [`fingerprint`] — finding signatures for open-task dedupe.
+//! - [`prompt`] — composition of the QA agent prompt.
+//! - [`report`] — parsing the agent's structured findings report.
+//! - [`worker`] — the loopback client for the worker invoke daemon.
 //! - [`sweep`] — the pass itself, including run-ledger recording.
 
 pub mod config;
 pub mod fingerprint;
 mod git;
+pub mod prompt;
+pub mod report;
 pub mod state;
 pub mod sweep;
+pub mod worker;
 
 #[cfg(test)]
 mod tests;
 
-pub use config::{QaCheck, QaSweepConfig, QaWorkspaceConfig};
-pub use fingerprint::{QA_SWEEP_TAG, failure_fingerprint, fingerprint_tag};
+pub use config::{DEFAULT_WORKER_BASE_URL, QaSweepConfig, QaWorkspaceConfig};
+pub use fingerprint::{QA_SWEEP_TAG, finding_fingerprint, fingerprint_tag};
+pub use report::{Finding, QaReport, Severity, parse_report};
 pub use state::{QaSweepState, QaWorkspaceWatermark};
 pub use sweep::{
-    QA_SWEEP_JOB, QaCheckReport, QaSweepOptions, QaSweepOutcome, QaWorkspaceReport, run_qa_sweep,
+    QA_SWEEP_JOB, QaFindingReport, QaSweepOptions, QaSweepOutcome, QaWorkspaceReport, run_qa_sweep,
     run_qa_sweep_at,
 };

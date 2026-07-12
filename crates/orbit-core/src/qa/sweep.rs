@@ -1,68 +1,69 @@
 //! `orbit run qa-sweep` — the trailing QA pass over direct-push workspaces
-//! [ORB-10039], sibling of `orbit run ship-sweep` (design D4).
+//! [ORB-10039], reworked to a worker-invoked QA agent pass [ORB-10146].
 //!
-//! Direct pushes to `agent-main` stay fast at write time; this sweep enforces
-//! correctness on a lag. Per configured workspace it diffs the live checkout's
-//! HEAD against a per-workspace last-validated watermark, runs the configured
-//! checks when new commits exist, files fingerprint-deduped orbit tasks for
-//! failures, and advances the watermark only on a fully green pass.
+//! Direct pushes to `agent-main` stay fast at write time; this sweep validates
+//! them on a lag. Per configured workspace it diffs the live checkout's HEAD
+//! against a per-workspace last-validated watermark and, when new commits
+//! exist, submits a **QA agent run** to the worker invoke daemon: the agent
+//! reads the new commits, exercises the new features/behaviour changes
+//! hands-on, and emits a structured findings report. The sweep parses that
+//! report, files fingerprint-deduped orbit tasks for the findings, and advances
+//! the watermark whenever the run completed and the report parsed (findings are
+//! captured as tasks, so re-validating the same range adds nothing). A failed,
+//! timed-out, or unparseable run leaves the watermark and is reported as an
+//! `error` row — never a silent green.
 //!
 //! **Ledger integration.** Every validating pass records a first-class v2 job
 //! run (job id [`QA_SWEEP_JOB`]) in the swept workspace's jobs store — one run
-//! per workspace per pass, one run step per executed check — via the same
-//! store the pipeline worker uses (`insert_run` → `mark_run_running` → per-
-//! check `complete_run_step` → `finalize_run`, plus the `JobRunStarted` /
-//! `JobRunCompleted` events). Checks execute inline in the sweep process
-//! (they are host-trusted shell commands, not agent activities), so no
-//! worker is spawned and no v2 job YAML asset exists; `orbit run history`
-//! intentionally serves run history for asset-less job ids, so
-//! `orbit run history -j qa_sweep` and `orbit run show <run_id>` surface the
-//! sweeps and their per-check steps honestly — the run record is written by
-//! the code that did the work, not a decorative side channel.
+//! per workspace per pass, with a single run step whose payload links the
+//! worker `run_id` for the agent run — so `orbit run history -j qa_sweep` and
+//! `orbit run show <run_id>` surface the sweeps honestly.
 //!
 //! Like ship-sweep, this never bootstraps a `.orbit/` in the scheduler's cwd:
 //! everything resolves from the global registry and global config, and
 //! per-workspace failures are isolated into report rows.
 
-use std::path::Path;
-use std::process::{Command, Stdio};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use orbit_common::types::{
-    JobRunState, JobTargetType, OrbitError, OrbitEvent, Task, TaskStatus, TaskType, Workspace,
-    WorkspaceStatus,
+    Crew, JobRunState, JobTargetType, OrbitError, OrbitEvent, Task, TaskStatus, TaskType,
+    Workspace, WorkspaceStatus,
 };
 use orbit_store::JobRunStepParams;
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::OrbitRuntime;
 use crate::command::task::TaskAddParams;
 use crate::config::RuntimeConfig;
 use crate::workspace_registry;
 
-use super::config::{QaCheck, QaSweepConfig, QaWorkspaceConfig};
-use super::fingerprint::{QA_SWEEP_TAG, failure_fingerprint, fingerprint_tag};
+use super::config::{QaSweepConfig, QaWorkspaceConfig};
+use super::fingerprint::{QA_SWEEP_TAG, finding_fingerprint, fingerprint_tag};
 use super::git;
+use super::prompt::{PromptInputs, compose_prompt};
+use super::report::{QaReport, parse_report, resolve_priority};
 use super::state::{QaWorkspaceWatermark, advance_watermark, load_state, state_path};
+use super::worker::{STATUS_OK, WorkerClient, WorkerError, WorkerRunRequest};
 
 /// Job id qa-sweep runs are recorded under in each workspace's run ledger.
 pub const QA_SWEEP_JOB: &str = "qa_sweep";
 
-/// Commits listed as evidence per finding (range summaries are capped; the
-/// range endpoints are always recorded in full).
-const EVIDENCE_COMMIT_LIMIT: usize = 20;
-/// Head of the combined check output quoted as evidence in filed tasks.
-const EVIDENCE_OUTPUT_LINES: usize = 40;
-const EVIDENCE_OUTPUT_BYTES: usize = 4000;
-/// Poll interval while waiting on a running check.
-const CHECK_POLL_INTERVAL: Duration = Duration::from_millis(50);
+/// Commits listed in the QA prompt / as evidence, when a per-workspace
+/// `max_commits` cap is not set.
+const EVIDENCE_COMMIT_LIMIT: usize = 30;
+/// Evidence text quoted per filed task.
+const EVIDENCE_TEXT_LINES: usize = 60;
+const EVIDENCE_TEXT_BYTES: usize = 6000;
+/// Turn budget for a QA agent run (providers that support the control).
+const QA_MAX_TURNS: u32 = 150;
 
 /// Options for one qa-sweep pass.
 #[derive(Debug, Clone, Default)]
 pub struct QaSweepOptions {
-    /// Report what would be validated without running checks, recording runs,
-    /// filing tasks, or advancing watermarks.
+    /// Report what would be validated without invoking the agent, recording
+    /// runs, filing tasks, or advancing watermarks.
     pub dry_run: bool,
     /// Restrict the pass to one configured workspace. `None` preserves the
     /// host-wide behavior used by the transitional systemd entry point.
@@ -83,25 +84,29 @@ pub struct QaSweepOutcome {
 pub struct QaWorkspaceReport {
     /// Configured workspace name.
     pub workspace: String,
-    /// One of: `validated`, `failed`, `would_validate`, `skipped`, `error`.
+    /// One of: `validated`, `error`, `would_validate`, `skipped`.
     pub action: &'static str,
     /// Why, for `skipped` / `error` rows.
     pub reason: Option<String>,
     /// Branch the checkout was validated on.
     pub branch: Option<String>,
-    /// HEAD sha the checks ran against.
+    /// Resolved crew name for the QA agent run.
+    pub crew: Option<String>,
+    /// HEAD sha the agent validated against.
     pub head: Option<String>,
     /// Watermark sha the diff was computed from (`None` = first validation).
     pub baseline: Option<String>,
-    /// Commits in `baseline..head`, capped at [`EVIDENCE_COMMIT_LIMIT`].
-    /// `None` when the baseline no longer resolves (history rewrite).
+    /// Commits in `baseline..head`, capped. `None` when the baseline no longer
+    /// resolves (history rewrite).
     pub new_commits: Option<Vec<String>>,
     /// True when the watermark existed but no longer resolves in the repo.
     pub watermark_reset: bool,
     /// Ledger run id, when a run was recorded.
     pub run_id: Option<String>,
-    /// Per-check outcomes for validating passes.
-    pub checks: Vec<QaCheckReport>,
+    /// Worker agent run id, when one was created.
+    pub agent_run_id: Option<String>,
+    /// Findings filed/deduped for a validating pass.
+    pub findings: Vec<QaFindingReport>,
 }
 
 impl QaWorkspaceReport {
@@ -118,33 +123,120 @@ impl QaWorkspaceReport {
             action,
             reason: None,
             branch: None,
+            crew: None,
             head: None,
             baseline: None,
             new_commits: None,
             watermark_reset: false,
             run_id: None,
-            checks: Vec::new(),
+            agent_run_id: None,
+            findings: Vec::new(),
         }
     }
 }
 
-/// One check's outcome within a validating pass.
+/// One finding's disposition within a validating pass.
 #[derive(Debug)]
-pub struct QaCheckReport {
-    /// Configured check name.
+pub struct QaFindingReport {
+    /// Finding name as reported by the agent.
     pub name: String,
-    /// One of: `passed`, `failed`, `timeout`, `muted`, `would_run`.
-    pub outcome: &'static str,
-    /// Exit code, when the check ran to completion.
-    pub exit_code: Option<i32>,
-    /// Wall-clock duration of the check.
-    pub duration_ms: u64,
-    /// Failure fingerprint, for failing checks.
-    pub fingerprint: Option<String>,
-    /// Task id filed for this failure, when one was created this pass.
+    /// Reported severity (lowercase).
+    pub severity: String,
+    /// Dedupe fingerprint.
+    pub fingerprint: String,
+    /// Task id filed for this finding, when one was created this pass.
     pub filed_task: Option<String>,
-    /// Open task id the failure deduped against, when one already existed.
+    /// Open task id the finding deduped against, when one already existed.
     pub deduped_task: Option<String>,
+}
+
+/// The QA agent invocation seam. Production submits to the worker daemon; tests
+/// inject a fake to exercise report parsing, dedupe, watermark rules, and
+/// worker-client failure paths without a live daemon.
+pub(crate) trait QaAgent {
+    fn run(&self, request: QaAgentRequest) -> Result<QaAgentRun, QaAgentError>;
+}
+
+/// A QA agent run request, resolved from a workspace's config + checkout.
+#[derive(Debug, Clone)]
+pub(crate) struct QaAgentRequest {
+    pub workspace: String,
+    pub repo_root: PathBuf,
+    pub provider: String,
+    pub model: String,
+    pub prompt: String,
+    pub timeout: Duration,
+}
+
+/// A QA agent run that reached a terminal state.
+#[derive(Debug, Clone)]
+pub(crate) struct QaAgentRun {
+    /// Worker run id.
+    pub agent_run_id: String,
+    /// Terminal status string.
+    pub status: String,
+    /// Final agent output text.
+    pub report_text: Option<String>,
+}
+
+/// A QA agent run that could not be completed. Carries the worker run id when
+/// one was created (e.g. a timeout) so the ledger step can still link it.
+#[derive(Debug, Clone)]
+pub(crate) struct QaAgentError {
+    pub agent_run_id: Option<String>,
+    pub message: String,
+}
+
+/// Production [`QaAgent`] backed by the loopback worker invoke daemon.
+pub(crate) struct WorkerQaAgent {
+    base_url: String,
+}
+
+impl WorkerQaAgent {
+    pub(crate) fn new(base_url: &str) -> Self {
+        Self {
+            base_url: base_url.to_string(),
+        }
+    }
+}
+
+impl QaAgent for WorkerQaAgent {
+    fn run(&self, request: QaAgentRequest) -> Result<QaAgentRun, QaAgentError> {
+        let client = WorkerClient::new(&self.base_url).map_err(|error| QaAgentError {
+            agent_run_id: None,
+            message: error.to_string(),
+        })?;
+        // Only providers with a turn control get `max_turns`; others (Codex
+        // rejects the control outright) rely on the wall-clock budget.
+        let max_turns = (request.provider == "claude").then_some(QA_MAX_TURNS);
+        let worker_request = WorkerRunRequest {
+            prompt: request.prompt,
+            provider: request.provider,
+            model: request.model,
+            cwd: request.repo_root.display().to_string(),
+            wall_clock_secs: request.timeout.as_secs().max(1),
+            max_turns,
+            serialization_key: Some(format!("qa-sweep:{}", request.workspace)),
+        };
+        match client.run_to_terminal(&worker_request, request.timeout) {
+            Ok((run_id, terminal)) => Ok(QaAgentRun {
+                agent_run_id: run_id,
+                status: terminal.status,
+                report_text: terminal.report_text,
+            }),
+            Err(WorkerError::Timeout {
+                run_id,
+                waited_secs,
+            }) => Err(QaAgentError {
+                agent_run_id: Some(run_id),
+                message: format!("agent run timed out after {waited_secs}s"),
+            }),
+            Err(other) => Err(QaAgentError {
+                agent_run_id: None,
+                message: other.to_string(),
+            }),
+        }
+    }
 }
 
 /// Run one qa-sweep pass against the default global root (`~/.orbit`).
@@ -153,10 +245,25 @@ pub fn run_qa_sweep(options: QaSweepOptions) -> Result<QaSweepOutcome, OrbitErro
     run_qa_sweep_at(&global_root, options)
 }
 
-/// Run one qa-sweep pass against an explicit global root (test seam).
+/// Run one qa-sweep pass against an explicit global root, invoking the real
+/// worker daemon.
 pub fn run_qa_sweep_at(
     global_root: &Path,
     options: QaSweepOptions,
+) -> Result<QaSweepOutcome, OrbitError> {
+    // The worker base URL is read from the same host-level `[qa]` config the
+    // rest of the pass uses; build the agent up front so a bad URL fails once.
+    let config = RuntimeConfig::load_layered(global_root, global_root)?;
+    let base_url = config.qa_sweep().worker_base_url.clone();
+    let agent = WorkerQaAgent::new(&base_url);
+    run_qa_sweep_with(global_root, options, &agent)
+}
+
+/// Run one qa-sweep pass with an injected [`QaAgent`] (test seam).
+pub(crate) fn run_qa_sweep_with(
+    global_root: &Path,
+    options: QaSweepOptions,
+    agent: &dyn QaAgent,
 ) -> Result<QaSweepOutcome, OrbitError> {
     // Host-level config only: workspace config.toml files are rewritten by
     // task-mutation commands and must never own scheduler enablement.
@@ -210,6 +317,7 @@ pub fn run_qa_sweep_at(
                 workspace,
                 baseline,
                 options.dry_run,
+                agent,
             )
             .unwrap_or_else(|error| QaWorkspaceReport {
                 reason: Some(error.to_string()),
@@ -224,6 +332,7 @@ pub fn run_qa_sweep_at(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sweep_workspace(
     global_root: &Path,
     qa: &QaSweepConfig,
@@ -231,6 +340,7 @@ fn sweep_workspace(
     workspace: &Workspace,
     baseline: Option<String>,
     dry_run: bool,
+    agent: &dyn QaAgent,
 ) -> Result<QaWorkspaceReport, OrbitError> {
     if workspace.status != WorkspaceStatus::Active || !workspace.orbit_dir.exists() {
         return Ok(QaWorkspaceReport::skipped(
@@ -271,9 +381,10 @@ fn sweep_workspace(
 
     // `Some(None)` = the watermark commit no longer resolves (history
     // rewrite): treat the range as unknown and re-validate HEAD.
+    let commit_limit = ws_config.max_commits.unwrap_or(EVIDENCE_COMMIT_LIMIT);
     let ranged = baseline
         .as_deref()
-        .map(|from| git::commit_range(repo_root, from, &head, EVIDENCE_COMMIT_LIMIT))
+        .map(|from| git::commit_range(repo_root, from, &head, commit_limit))
         .transpose()?;
     let watermark_reset = matches!(ranged, Some(None));
     let new_commits = ranged.flatten();
@@ -287,21 +398,30 @@ fn sweep_workspace(
         ..QaWorkspaceReport::bare(&ws_config.name, "validated")
     };
 
+    // Resolve the crew for the QA run: the per-workspace `crew` override, else
+    // the workspace's default crew resolution [ORB-10133]. Done against the
+    // workspace's own runtime so its crew registry / default apply.
+    let runtime = OrbitRuntime::from_roots(global_root, &workspace.orbit_dir)?;
+    let crew = runtime.resolve_crew_for_task(ws_config.crew.as_deref(), None)?;
+    report.crew = Some(crew.name.clone());
+
     if dry_run {
         report.action = "would_validate";
-        report.checks = ws_config
-            .checks
-            .iter()
-            .map(|check| check_report(check, if check.mute { "muted" } else { "would_run" }, 0))
-            .collect();
         return Ok(report);
     }
 
-    let runtime = OrbitRuntime::from_roots(global_root, &workspace.orbit_dir)?;
-    let dirty = git::is_dirty(repo_root)?;
+    let prompt = compose_prompt(&PromptInputs {
+        workspace: &ws_config.name,
+        repo_root: &repo_root.display().to_string(),
+        branch: &branch,
+        baseline: baseline.as_deref(),
+        head: &head,
+        watermark_reset,
+        commits: report.new_commits.as_deref().unwrap_or_default(),
+    });
+
     let started_at = Utc::now();
     let started = Instant::now();
-
     let input = json!({
         "trigger": "qa-sweep",
         "workspace": ws_config.name,
@@ -310,11 +430,9 @@ fn sweep_workspace(
         "head": head,
         "new_commits": report.new_commits.as_ref().map(Vec::len),
         "watermark_reset": watermark_reset,
-        "dirty_working_tree": dirty,
-        "checks": ws_config.checks.iter().map(|check| json!({
-            "name": check.name,
-            "muted": check.mute,
-        })).collect::<Vec<_>>(),
+        "crew": crew.name,
+        "provider": crew.assignment.provider,
+        "model": crew.assignment.model,
     });
 
     let run = runtime
@@ -332,29 +450,66 @@ fn sweep_workspace(
     })?;
     report.run_id = Some(run.run_id.clone());
 
-    let all_green = match run_workspace_checks(&runtime, qa, ws_config, &run.run_id, &mut report) {
-        Ok(all_green) => all_green,
-        Err(error) => {
-            // Don't leave the run record dangling in `running` when the pass
-            // itself broke (spawn failure, store error): finalize it as
-            // failed, best-effort, then surface the error as this
-            // workspace's report row.
-            let _ = runtime.stores().jobs().finalize_run(
-                &run.run_id,
-                JobRunState::Failed,
-                Utc::now(),
-                Some(elapsed_ms(started)),
-            );
-            let _ = runtime.record_event(OrbitEvent::JobRunCompleted {
-                job_id: QA_SWEEP_JOB.to_string(),
-                run_id: run.run_id.clone(),
-                state: JobRunState::Failed.to_string(),
-            });
-            return Err(error);
-        }
+    // Invoke the QA agent. Errors here are pass outcomes, not sweep aborts: the
+    // ledger run is always finalized so no run dangles in `running`.
+    let outcome = agent.run(QaAgentRequest {
+        workspace: ws_config.name.clone(),
+        repo_root: repo_root.clone(),
+        provider: crew.assignment.provider.clone(),
+        model: crew.assignment.model.clone(),
+        prompt,
+        timeout: ws_config.timeout,
+    });
+    report.agent_run_id = match &outcome {
+        Ok(run) => Some(run.agent_run_id.clone()),
+        Err(error) => error.agent_run_id.clone(),
+    };
+    let terminal_status = match &outcome {
+        Ok(run) => run.status.clone(),
+        Err(_) => "no_run".to_string(),
     };
 
-    let final_state = if all_green {
+    let finalize_failed = |error: OrbitError| -> OrbitError {
+        let _ = runtime.stores().jobs().finalize_run(
+            &run.run_id,
+            JobRunState::Failed,
+            Utc::now(),
+            Some(elapsed_ms(started)),
+        );
+        let _ = runtime.record_event(OrbitEvent::JobRunCompleted {
+            job_id: QA_SWEEP_JOB.to_string(),
+            run_id: run.run_id.clone(),
+            state: JobRunState::Failed.to_string(),
+        });
+        error
+    };
+
+    let classified = classify_outcome(&outcome);
+    let (success, reason) = match &classified {
+        Ok(qa_report) => {
+            // A store error while filing is a genuine sweep failure: finalize the
+            // run failed and surface it as this workspace's error row.
+            let findings = file_findings(&runtime, qa, ws_config, &report, qa_report)
+                .map_err(finalize_failed)?;
+            report.findings = findings;
+            (true, None)
+        }
+        Err(reason) => (false, Some(reason.clone())),
+    };
+
+    record_agent_step(
+        &runtime,
+        &run.run_id,
+        started_at,
+        started,
+        &crew,
+        &report,
+        &terminal_status,
+        success,
+        reason.as_deref(),
+    )?;
+
+    let final_state = if success {
         JobRunState::Success
     } else {
         JobRunState::Failed
@@ -372,8 +527,9 @@ fn sweep_workspace(
         state: final_state.to_string(),
     })?;
 
-    if all_green {
-        // Advance to the sha the checks actually ran against; commits landing
+    if success {
+        // Findings are captured as tasks, so re-validating this range adds
+        // nothing: advance to the sha the agent ran against. Commits landing
         // mid-pass are picked up by the next sweep.
         advance_watermark(
             &state_path(global_root),
@@ -384,186 +540,144 @@ fn sweep_workspace(
                 run_id: Some(run.run_id),
             },
         )?;
+        report.action = "validated";
     } else {
-        report.action = "failed";
+        report.action = "error";
+        report.reason = reason;
     }
 
     Ok(report)
 }
 
-/// Execute the workspace's checks against the checkout, recording one ledger
-/// step per executed check and filing/deduping tasks for failures. Returns
-/// whether every executed (non-muted) check passed.
-fn run_workspace_checks(
+/// Classify the agent outcome into a parsed report (advance the watermark) or a
+/// failure reason (hold it). Only an `ok` terminal run whose output carries a
+/// parseable `findings` report counts as a completed validation.
+fn classify_outcome(outcome: &Result<QaAgentRun, QaAgentError>) -> Result<QaReport, String> {
+    match outcome {
+        Ok(run) if run.status == STATUS_OK => {
+            let text = run.report_text.as_deref().unwrap_or("");
+            parse_report(text).map_err(|error| format!("unparseable findings report: {error}"))
+        }
+        Ok(run) => Err(format!(
+            "agent run ended in non-success state '{}'",
+            run.status
+        )),
+        Err(error) => Err(error.message.clone()),
+    }
+}
+
+/// File a fingerprint-deduped task per finding, returning the per-finding
+/// disposition (filed vs deduped against an existing open task).
+fn file_findings(
     runtime: &OrbitRuntime,
     qa: &QaSweepConfig,
     ws_config: &QaWorkspaceConfig,
-    run_id: &str,
-    report: &mut QaWorkspaceReport,
-) -> Result<bool, OrbitError> {
-    let repo_root = runtime.paths().repo_root.clone();
-    let mut all_green = true;
-    let mut step_index = 0usize;
-    for check in &ws_config.checks {
-        if check.mute {
-            report.checks.push(check_report(check, "muted", 0));
+    report: &QaWorkspaceReport,
+    qa_report: &QaReport,
+) -> Result<Vec<QaFindingReport>, OrbitError> {
+    let mut filed = Vec::new();
+    for finding in &qa_report.findings {
+        let fingerprint = finding_fingerprint(&ws_config.name, &finding.name);
+        let tags = vec![QA_SWEEP_TAG.to_string(), fingerprint_tag(&fingerprint)];
+
+        let open_task = runtime
+            .list_tasks_by_tags(&tags)?
+            .into_iter()
+            .find(task_is_open);
+        if let Some(task) = open_task {
+            filed.push(QaFindingReport {
+                name: finding.name.clone(),
+                severity: finding.severity.as_str().to_string(),
+                fingerprint,
+                filed_task: None,
+                deduped_task: Some(task.id),
+            });
             continue;
         }
 
-        let step_started_at = Utc::now();
-        let execution = execute_check(&repo_root, &check.command, check.timeout)?;
-        let step_finished_at = Utc::now();
+        let priority = resolve_priority(finding.severity, qa.default_priority);
+        let task = runtime.add_task(TaskAddParams {
+            title: finding_title(ws_config, &finding.name),
+            description: finding_description(ws_config, report, finding),
+            acceptance_criteria: vec![format!(
+                "The qa-sweep finding '{}' in {} on `{}` is resolved — the new behaviour works as \
+                 intended (verified hands-on, not just a green test suite).",
+                finding.name,
+                ws_config.name,
+                report.branch.as_deref().unwrap_or("agent-main"),
+            )],
+            tags,
+            priority,
+            task_type: Some(TaskType::Bug),
+            status: Some(qa.task_status),
+            system_created: true,
+            ..TaskAddParams::default()
+        })?;
 
-        let mut entry = check_report(
-            check,
-            match (execution.timed_out, execution.exit_code) {
-                (true, _) => "timeout",
-                (false, Some(0)) => "passed",
-                (false, _) => "failed",
-            },
-            execution.duration_ms,
-        );
-        entry.exit_code = execution.exit_code;
-        let passed = entry.outcome == "passed";
-        all_green &= passed;
-
-        if !passed {
-            let finding = handle_failure(runtime, qa, ws_config, check, report, &execution)?;
-            entry.fingerprint = Some(finding.fingerprint);
-            entry.filed_task = finding.filed_task;
-            entry.deduped_task = finding.deduped_task;
-        }
-
-        runtime.stores().jobs().complete_run_step(
-            run_id,
-            &JobRunStepParams {
-                step_index,
-                target_type: JobTargetType::Job,
-                target_id: format!("{QA_SWEEP_JOB}:{}", check.name),
-                started_at: step_started_at,
-                finished_at: step_finished_at,
-                duration_ms: Some(execution.duration_ms),
-                exit_code: execution.exit_code,
-                agent_response_json: Some(step_summary_json(&entry)),
-                state: if passed {
-                    JobRunState::Success
-                } else {
-                    JobRunState::Failed
-                },
-                error_code: None,
-                error_message: (!passed).then(|| {
-                    format!(
-                        "check '{}' {}: {}",
-                        check.name,
-                        entry.outcome,
-                        evidence_excerpt(&execution.output)
-                    )
-                }),
-            },
-        )?;
-        step_index += 1;
-        report.checks.push(entry);
+        filed.push(QaFindingReport {
+            name: finding.name.clone(),
+            severity: finding.severity.as_str().to_string(),
+            fingerprint,
+            filed_task: Some(task.id),
+            deduped_task: None,
+        });
     }
-    Ok(all_green)
+    Ok(filed)
+}
+
+/// Record the single agent run step in the ledger, linking the worker run id.
+#[allow(clippy::too_many_arguments)]
+fn record_agent_step(
+    runtime: &OrbitRuntime,
+    run_id: &str,
+    started_at: chrono::DateTime<Utc>,
+    started: Instant,
+    crew: &Crew,
+    report: &QaWorkspaceReport,
+    terminal_status: &str,
+    success: bool,
+    reason: Option<&str>,
+) -> Result<(), OrbitError> {
+    let payload = json!({
+        "agent_run_id": report.agent_run_id,
+        "worker_status": terminal_status,
+        "crew": crew.name,
+        "provider": crew.assignment.provider,
+        "model": crew.assignment.model,
+        "findings": report.findings.len(),
+        "filed": report.findings.iter().filter(|f| f.filed_task.is_some()).count(),
+        "deduped": report.findings.iter().filter(|f| f.deduped_task.is_some()).count(),
+    });
+    runtime.stores().jobs().complete_run_step(
+        run_id,
+        &JobRunStepParams {
+            step_index: 0,
+            target_type: JobTargetType::Job,
+            target_id: format!("{QA_SWEEP_JOB}:agent"),
+            started_at,
+            finished_at: Utc::now(),
+            duration_ms: Some(elapsed_ms(started)),
+            exit_code: None,
+            agent_response_json: Some(payload),
+            state: if success {
+                JobRunState::Success
+            } else {
+                JobRunState::Failed
+            },
+            error_code: None,
+            error_message: reason.map(|reason| {
+                format!(
+                    "qa agent run for {} did not validate: {reason}",
+                    report.workspace
+                )
+            }),
+        },
+    )?;
+    Ok(())
 }
 
 fn elapsed_ms(started: Instant) -> u64 {
     started.elapsed().as_millis().min(u64::MAX as u128) as u64
-}
-
-fn check_report(check: &QaCheck, outcome: &'static str, duration_ms: u64) -> QaCheckReport {
-    QaCheckReport {
-        name: check.name.clone(),
-        outcome,
-        exit_code: None,
-        duration_ms,
-        fingerprint: None,
-        filed_task: None,
-        deduped_task: None,
-    }
-}
-
-fn step_summary_json(entry: &QaCheckReport) -> Value {
-    json!({
-        "check": entry.name,
-        "outcome": entry.outcome,
-        "fingerprint": entry.fingerprint,
-        "filed_task": entry.filed_task,
-        "deduped_task": entry.deduped_task,
-    })
-}
-
-struct FailureFinding {
-    fingerprint: String,
-    filed_task: Option<String>,
-    deduped_task: Option<String>,
-}
-
-/// Fingerprint a failing check, dedupe against open qa-sweep tasks carrying
-/// the same fingerprint tag, and file a task when none exists.
-fn handle_failure(
-    runtime: &OrbitRuntime,
-    qa: &QaSweepConfig,
-    ws_config: &QaWorkspaceConfig,
-    check: &QaCheck,
-    report: &QaWorkspaceReport,
-    execution: &CheckExecution,
-) -> Result<FailureFinding, OrbitError> {
-    let exit_summary = if execution.timed_out {
-        format!("timeout after {}s", check.timeout.as_secs())
-    } else {
-        match execution.exit_code {
-            Some(code) => format!("exit {code}"),
-            None => "killed by signal".to_string(),
-        }
-    };
-    let repo_root = runtime.paths().repo_root.display().to_string();
-    let fingerprint = failure_fingerprint(
-        &ws_config.name,
-        &check.name,
-        &repo_root,
-        &execution.output,
-        &exit_summary,
-    );
-    let tags = vec![QA_SWEEP_TAG.to_string(), fingerprint_tag(&fingerprint)];
-
-    let open_task = runtime
-        .list_tasks_by_tags(&tags)?
-        .into_iter()
-        .find(task_is_open);
-    if let Some(task) = open_task {
-        return Ok(FailureFinding {
-            fingerprint,
-            filed_task: None,
-            deduped_task: Some(task.id),
-        });
-    }
-
-    let task = runtime.add_task(TaskAddParams {
-        title: format!(
-            "qa-sweep: check '{}' failing in {}",
-            check.name, ws_config.name
-        ),
-        description: failure_description(ws_config, check, report, execution, &exit_summary),
-        acceptance_criteria: vec![format!(
-            "`{}` exits 0 from the {} workspace root on `{}`",
-            check.command,
-            ws_config.name,
-            report.branch.as_deref().unwrap_or("agent-main"),
-        )],
-        tags,
-        priority: check.priority.unwrap_or(qa.default_priority),
-        task_type: Some(TaskType::Bug),
-        status: Some(qa.task_status),
-        system_created: true,
-        ..TaskAddParams::default()
-    })?;
-
-    Ok(FailureFinding {
-        fingerprint,
-        filed_task: Some(task.id),
-        deduped_task: None,
-    })
 }
 
 fn task_is_open(task: &Task) -> bool {
@@ -573,12 +687,30 @@ fn task_is_open(task: &Task) -> bool {
     )
 }
 
-fn failure_description(
+/// A concise task title from a finding name (bounded, single line).
+fn finding_title(ws_config: &QaWorkspaceConfig, name: &str) -> String {
+    let clean = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let clean = if clean.is_empty() {
+        "unnamed QA finding".to_string()
+    } else {
+        clean
+    };
+    let mut title = format!("qa-sweep: {clean} ({})", ws_config.name);
+    if title.len() > 120 {
+        let mut cut = 117;
+        while !title.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        title.truncate(cut);
+        title.push_str("...");
+    }
+    title
+}
+
+fn finding_description(
     ws_config: &QaWorkspaceConfig,
-    check: &QaCheck,
     report: &QaWorkspaceReport,
-    execution: &CheckExecution,
-    exit_summary: &str,
+    finding: &super::report::Finding,
 ) -> String {
     let range = match (&report.baseline, report.watermark_reset) {
         (Some(baseline), false) => format!(
@@ -602,158 +734,64 @@ fn failure_description(
         .filter(|commits| !commits.is_empty())
         .map(|commits| format!("\nCommits since last green:\n{}\n", commits.join("\n")))
         .unwrap_or_default();
+    let finding_commits = if finding.commits.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\nAttributed commits:\n{}\n",
+            finding
+                .commits
+                .iter()
+                .map(|commit| format!("- {commit}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
 
     format!(
-        "Automated qa-sweep finding.\n\n\
+        "Automated qa-sweep finding (QA agent pass).\n\n\
+         - finding: {name}\n\
          - workspace: {workspace}\n\
-         - check: {check_name} (`sh -c {command}`)\n\
          - branch: {branch}\n\
-         - result: {exit_summary}\n\
+         - severity: {severity}\n\
          - commit range since last green: {range}\n\
          - ledger run: {run} (`orbit run show <run_id>` in the workspace)\n\
-         {commits}\n\
-         Output (head):\n```text\n{output}\n```\n",
+         - worker agent run: {agent_run}\n\
+         {commits}{finding_commits}\n\
+         Summary: {summary}\n\n\
+         Evidence:\n```text\n{evidence}\n```\n",
+        name = finding.name,
         workspace = ws_config.name,
-        check_name = check.name,
-        command = check.command,
         branch = report.branch.as_deref().unwrap_or("agent-main"),
+        severity = finding.severity.as_str(),
         run = report.run_id.as_deref().unwrap_or("not recorded"),
-        output = evidence_excerpt(&execution.output),
+        agent_run = report.agent_run_id.as_deref().unwrap_or("not recorded"),
+        summary = if finding.summary.is_empty() {
+            "(none provided)"
+        } else {
+            finding.summary.as_str()
+        },
+        evidence = evidence_excerpt(&finding.evidence),
     )
 }
 
-/// Head of the combined output, bounded in lines and bytes.
-fn evidence_excerpt(output: &str) -> String {
-    let mut excerpt = output
+/// Head of the evidence text, bounded in lines and bytes.
+fn evidence_excerpt(evidence: &str) -> String {
+    let mut excerpt = evidence
         .lines()
-        .take(EVIDENCE_OUTPUT_LINES)
+        .take(EVIDENCE_TEXT_LINES)
         .collect::<Vec<_>>()
         .join("\n");
-    if excerpt.len() > EVIDENCE_OUTPUT_BYTES {
-        let mut cut = EVIDENCE_OUTPUT_BYTES;
+    if excerpt.len() > EVIDENCE_TEXT_BYTES {
+        let mut cut = EVIDENCE_TEXT_BYTES;
         while !excerpt.is_char_boundary(cut) {
             cut -= 1;
         }
         excerpt.truncate(cut);
     }
     if excerpt.trim().is_empty() {
-        "(no output)".to_string()
+        "(no evidence provided)".to_string()
     } else {
         excerpt
     }
-}
-
-pub(super) struct CheckExecution {
-    pub(super) exit_code: Option<i32>,
-    pub(super) timed_out: bool,
-    pub(super) output: String,
-    pub(super) duration_ms: u64,
-}
-
-/// Run one check via `sh -c` from the workspace root, killing it once the
-/// configured timeout elapses. stdout and stderr are captured off-thread (so
-/// a chatty check cannot deadlock on a full pipe) and concatenated
-/// stdout-then-stderr for evidence and fingerprinting.
-///
-/// On Unix the check runs in its own session/process group and a timeout
-/// kills the whole group — otherwise grandchildren (a `make` fanning out to
-/// compilers, a shell forking `sleep`) would survive the kill and keep the
-/// output pipes open, wedging the sweep until they exit on their own.
-pub(super) fn execute_check(
-    repo_root: &Path,
-    command: &str,
-    timeout: Duration,
-) -> Result<CheckExecution, OrbitError> {
-    let started = Instant::now();
-    let mut builder = Command::new("sh");
-    builder
-        .arg("-c")
-        .arg(command)
-        .current_dir(repo_root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(unix)]
-    unsafe {
-        use std::os::unix::process::CommandExt;
-        builder.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let mut child = builder.spawn().map_err(|error| {
-        OrbitError::Execution(format!("spawn check `sh -c {command}`: {error}"))
-    })?;
-
-    let stdout = drain_off_thread(child.stdout.take());
-    let stderr = drain_off_thread(child.stderr.take());
-
-    let mut timed_out = false;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) => {
-                if started.elapsed() >= timeout {
-                    timed_out = true;
-                    kill_check_group(&mut child);
-                    break child.wait().ok();
-                }
-                std::thread::sleep(CHECK_POLL_INTERVAL);
-            }
-            Err(error) => {
-                return Err(OrbitError::Execution(format!(
-                    "wait on check `{command}`: {error}"
-                )));
-            }
-        }
-    };
-
-    let mut output = stdout.join().unwrap_or_default();
-    let err_output = stderr.join().unwrap_or_default();
-    if !err_output.is_empty() {
-        if !output.is_empty() && !output.ends_with('\n') {
-            output.push('\n');
-        }
-        output.push_str(&err_output);
-    }
-
-    Ok(CheckExecution {
-        exit_code: if timed_out {
-            None
-        } else {
-            status.and_then(|status| status.code())
-        },
-        timed_out,
-        output,
-        duration_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-    })
-}
-
-/// Kill a timed-out check together with its process group (Unix) so orphaned
-/// grandchildren cannot hold the captured pipes open.
-fn kill_check_group(child: &mut std::process::Child) {
-    #[cfg(unix)]
-    {
-        let pid = child.id() as libc::pid_t;
-        // The check was made its own session leader in `pre_exec`, so its pid
-        // is the process-group id; negative pid targets the whole group.
-        unsafe {
-            libc::kill(-pid, libc::SIGKILL);
-        }
-    }
-    let _ = child.kill();
-}
-
-fn drain_off_thread<R: std::io::Read + Send + 'static>(
-    source: Option<R>,
-) -> std::thread::JoinHandle<String> {
-    std::thread::spawn(move || {
-        let mut buffer = Vec::new();
-        if let Some(mut source) = source {
-            let _ = std::io::Read::read_to_end(&mut source, &mut buffer);
-        }
-        String::from_utf8_lossy(&buffer).into_owned()
-    })
 }

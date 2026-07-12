@@ -31,9 +31,14 @@ default `KillMode=control-group` kills the whole cgroup when the oneshot
 deactivates — reaping the just-spawned workers (observed as
 `task_auto_pipeline` runs flipping to `interrupted` with
 `process_not_found` seconds after "Finished orbit-ship-sweep.service").
-`orbit-qa-sweep.service` deliberately keeps the default: qa-sweep runs its
-checks inline and finishes its ledger run before exiting, so cgroup cleanup
-is correct there.
+`orbit-qa-sweep.service` also keeps the default `KillMode=control-group`, but
+the reasoning changed with qa-sweep v2 [ORB-10146]: the QA work now runs as a
+**remote** worker-daemon run, not an inline child, so cgroup kill on unit exit
+no longer reaps it — the sweep process only submits, polls, and finalizes its
+ledger run before exiting. On a timeout the sweep best-effort cancels the
+worker run (`DELETE /runs/<id>`); a sweep killed mid-poll leaves the worker run
+to finish on its own budget and be picked up by the next pass's watermark
+check. Nothing survives in the sweep's own cgroup that needs reaping.
 
 ### Install (per host, e.g. dk-server-1)
 
@@ -63,49 +68,69 @@ auto_ship = true
 
 ## orbit-qa-sweep (systemd user timer)
 
-Periodically runs `orbit run qa-sweep` [ORB-10039]: the trailing QA pass over
-direct-push workspaces (design D4 — writes to `agent-main` stay fast;
-validation happens on a lag). Per workspace listed in the `[qa]` section of
-the **global** `~/.orbit/config.toml`:
+Periodically runs `orbit run qa-sweep` [ORB-10039, reworked ORB-10146]: the
+trailing QA pass over direct-push workspaces (design D4 — writes to `agent-main`
+stay fast; validation happens on a lag). Per workspace listed in the `[qa]`
+section of the **global** `~/.orbit/config.toml`:
 
 1. skip unless the live checkout is on the expected branch and its HEAD moved
    past the per-workspace last-validated watermark
    (`~/.orbit/state/qa-sweep.json`);
-2. run the configured checks (`sh -c`, from the workspace root; per-check
-   timeout, muted checks skipped);
-3. file a fingerprint-deduped orbit task per distinct failure (tags
-   `qa-sweep` + `fp-<hash>`; an open task with the same fingerprint suppresses
-   refiling);
-4. advance the watermark only when every non-muted check passed.
+2. resolve the QA crew (per-workspace `crew`, else the workspace's default crew),
+   compose a QA prompt carrying the `baseline..head` range + commit list, and
+   submit a **QA agent run** to the loopback worker invoke daemon (`qa.base_url`,
+   default `http://127.0.0.1:7879`); poll it to a terminal state (per-workspace
+   `timeout_minutes`);
+3. parse the agent's structured findings JSON and file a fingerprint-deduped
+   orbit task per finding (tags `qa-sweep` + `fp-<hash>`; an open task with the
+   same fingerprint suppresses refiling; priority from finding severity clamped
+   by `qa.default_priority`);
+4. advance the watermark whenever the run completed and its report parsed —
+   findings are captured as tasks, so re-validating adds nothing. A failed,
+   timed-out, or unparseable run holds the watermark and is an `error` row.
 
 Each validating pass is recorded in the workspace's run ledger under job id
-`qa_sweep` (`orbit run history -j qa_sweep`, `orbit run show <run_id>`). The
-unit exits non-zero only on workspace *errors* (misconfig, git/probe
-failures) — a red check files a task and exits 0, so `--failed` means the
-sweep itself is broken, not the code it checks.
+`qa_sweep`, with one step linking the worker `run_id` (`orbit run history -j
+qa_sweep`, `orbit run show <run_id>`). The unit exits non-zero only on workspace
+*errors* (misconfig, unreachable/failed/timed-out agent run) — findings filed
+from a completed run exit 0, so `--failed` means the sweep itself is broken, not
+the code it validated.
 
 Config lives in the **global** config.toml only (workspace `config.toml`
-files are rewritten by task-mutation commands and are replace-not-merge):
+files are rewritten by task-mutation commands and are replace-not-merge).
+Legacy `[[qa.workspace.check]]` shell-check tables are removed — a leftover one
+now fails config load with a migration error:
 
 ```toml
 # ~/.orbit/config.toml
 [qa]
-default_priority = "medium"    # priority of auto-filed QA tasks
+default_priority = "medium"    # ceiling priority for auto-filed QA tasks
 task_status = "backlog"        # or "proposed" to require human approval
+base_url = "http://127.0.0.1:7879"  # worker invoke daemon (default shown)
 
 [[qa.workspace]]
 name = "polaris"               # registry name (orbit workspace list)
 branch = "agent-main"          # defaults to the registered base_branch
+crew = "opus"                  # optional; defaults to the workspace's crew
+timeout_minutes = 120          # agent-run wall-clock budget (default 120)
+max_commits = 40               # optional cap on commits listed in the prompt
+```
 
-[[qa.workspace.check]]
-name = "frontmatter"
-command = "python3 scripts/check_frontmatter.py"
+### Install (per host, e.g. dk-server-1)
 
-[[qa.workspace.check]]
-name = "lint"
-command = "make lint"
-mute = true                    # flaky: keep the definition, skip the check
-timeout_minutes = 10           # default 30
+```sh
+mkdir -p ~/.config/systemd/user
+cp deploy/orbit-qa-sweep.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now orbit-qa-sweep.timer
+```
+
+### Verify
+
+```sh
+orbit run qa-sweep --dry-run --json     # what would be validated, runs nothing
+systemctl --user list-timers orbit-qa-sweep.timer
+journalctl --user -u orbit-qa-sweep -n 50
 ```
 
 ## orbit-web-upgrade (systemd user timer)
@@ -142,7 +167,6 @@ the thing that's broken.
 ### Install (per host, e.g. dk-server-1)
 
 ```sh
-<<<<<<< HEAD
 cp deploy/orbit-web-upgrade.{service,timer} ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now orbit-web-upgrade.timer
@@ -160,20 +184,6 @@ systemctl --user list-timers orbit-web-upgrade.timer     # next/last fire
 journalctl --user -t orbit-web-upgrade -n 50             # last run's output
 systemctl --user start orbit-web-upgrade.service         # run once now
 systemctl --user disable --now orbit-web-upgrade.timer   # stop the schedule
-=======
-mkdir -p ~/.config/systemd/user
-cp deploy/orbit-qa-sweep.{service,timer} ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now orbit-qa-sweep.timer
-```
-
-### Verify
-
-```sh
-orbit run qa-sweep --dry-run --json     # what would be validated, runs nothing
-systemctl --user list-timers orbit-qa-sweep.timer
-journalctl --user -u orbit-qa-sweep -n 50
->>>>>>> 1ec6d2d3 (feat(qa-sweep): scheduled QA routine trailing agent-main)
 ```
 
 ## orbit-web (systemd user service)

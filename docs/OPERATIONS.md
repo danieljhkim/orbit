@@ -414,17 +414,22 @@ User units, installed to `~/.config/systemd/user/` (see
 - **`orbit-ship-sweep.service` + `.timer`** — every 20 min, dispatch ship runs in
   workspaces opted in via `[workflow] auto_ship = true`.
 - **`orbit-qa-sweep.service` + `.timer`** — every 6 h, run `orbit run qa-sweep`
-  [ORB-10039]: the trailing QA pass over direct-push workspaces (design D4). Per
-  workspace listed under `[qa]` in the **global** `~/.orbit/config.toml`, it diffs the
-  live checkout's HEAD against the last-validated watermark
-  (`~/.orbit/state/qa-sweep.json`), runs the configured `sh -c` checks when new commits
-  exist (per-check timeout; `mute = true` skips a flaky check without deleting it), files
-  one fingerprint-deduped orbit task per distinct failure (tags `qa-sweep` +
-  `fp-<hash>`; an open task with the same fingerprint suppresses refiling), and advances
-  the watermark only on a fully green pass. Every validating pass is a ledger run under
-  job id `qa_sweep` (`orbit run history -j qa_sweep` in the workspace). The unit fails
-  only on sweep *errors* — a red check files a task and exits 0. Config schema and
-  install steps: [deploy/README.md](../deploy/README.md).
+  [ORB-10039, reworked ORB-10146]: the trailing QA pass over direct-push workspaces
+  (design D4). Per workspace listed under `[qa]` in the **global** `~/.orbit/config.toml`,
+  it diffs the live checkout's HEAD against the last-validated watermark
+  (`~/.orbit/state/qa-sweep.json`) and, when new commits exist, submits a **QA agent run**
+  to the loopback worker invoke daemon (`qa.base_url`, default `http://127.0.0.1:7879`):
+  the agent reads the new commits, exercises the new features/behaviour changes hands-on,
+  and reports a structured findings JSON. The sweep files one fingerprint-deduped orbit
+  task per finding (tags `qa-sweep` + `fp-<hash>`; an open task with the same fingerprint
+  suppresses refiling; priority from finding severity clamped by `qa.default_priority`)
+  and advances the watermark whenever the run completed and its report parsed. A failed,
+  timed-out, or unparseable run holds the watermark and is an `error` row. Every validating
+  pass is a ledger run under job id `qa_sweep`, with one step linking the worker `run_id`
+  (`orbit run history -j qa_sweep` in the workspace). The unit fails only on sweep
+  *errors*. Per-workspace `crew` / `timeout_minutes` / `max_commits` tune the agent run;
+  legacy `[[qa.workspace.check]]` tables now fail config load. Config schema and install
+  steps: [deploy/README.md](../deploy/README.md).
 
 ```sh
 systemctl --user status orbit-web

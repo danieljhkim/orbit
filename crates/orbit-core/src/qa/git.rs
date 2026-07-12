@@ -46,12 +46,6 @@ pub(crate) fn current_branch(repo: &Path) -> Result<String, OrbitError> {
     git(repo, &["rev-parse", "--abbrev-ref", "HEAD"])
 }
 
-/// Whether the working tree has uncommitted changes (staged, unstaged, or
-/// untracked). Informational only — the sweep still validates HEAD.
-pub(crate) fn is_dirty(repo: &Path) -> Result<bool, OrbitError> {
-    Ok(!git(repo, &["status", "--porcelain"])?.is_empty())
-}
-
 /// `--oneline` summaries for `from..to`, newest first, capped at `limit`.
 ///
 /// `Ok(None)` means the range could not be resolved (e.g. the watermark

@@ -43,20 +43,23 @@ pub(super) struct RawWorkflowConfig {
 }
 
 /// `[qa]` — configuration for the trailing QA validation sweep
-/// (`orbit run qa-sweep`) [ORB-10039]. Host-level: the sweep reads this from
-/// the **global** `~/.orbit/config.toml` only (like the workspace registry it
-/// iterates), so a workspace-level `config.toml` — which task-mutation
-/// commands rewrite — can never strip or override it.
+/// (`orbit run qa-sweep`) [ORB-10039, reworked ORB-10146]. Host-level: the
+/// sweep reads this from the **global** `~/.orbit/config.toml` only (like the
+/// workspace registry it iterates), so a workspace-level `config.toml` — which
+/// task-mutation commands rewrite — can never strip or override it.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct RawQaConfig {
-    /// `qa.default_priority` — priority for auto-filed QA tasks when a check
-    /// does not override it. One of `low`, `medium`, `high`, `critical`;
-    /// defaults to `medium`.
+    /// `qa.default_priority` — ceiling priority for auto-filed QA tasks; a
+    /// finding's severity-mapped priority is clamped to at most this. One of
+    /// `low`, `medium`, `high`, `critical`; defaults to `medium`.
     pub(crate) default_priority: Option<String>,
     /// `qa.task_status` — status auto-filed QA tasks are created with. One of
     /// `backlog` (default; lets `ship-sweep` dispatch the fix unattended, per
     /// design D4) or `proposed` (require human approval first).
     pub(crate) task_status: Option<String>,
+    /// `qa.base_url` — base URL of the loopback worker invoke daemon the sweep
+    /// submits QA agent runs to. Defaults to `http://127.0.0.1:7879`.
+    pub(crate) base_url: Option<String>,
     /// `[[qa.workspace]]` — one entry per direct-push workspace to validate.
     pub(crate) workspace: Option<Vec<RawQaWorkspaceConfig>>,
 }
@@ -69,25 +72,20 @@ pub(crate) struct RawQaWorkspaceConfig {
     /// Branch the sweep expects the checkout to be on. Defaults to the
     /// workspace's registered `base_branch` when absent.
     pub(crate) branch: Option<String>,
-    /// `[[qa.workspace.check]]` — the checks run against the checkout.
-    pub(crate) check: Option<Vec<RawQaCheckConfig>>,
-}
-
-/// One `[[qa.workspace.check]]` entry.
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct RawQaCheckConfig {
-    /// Stable check name; part of the failure fingerprint.
-    pub(crate) name: Option<String>,
-    /// Shell command run from the workspace root (`sh -c <command>`).
-    pub(crate) command: Option<String>,
-    /// Muted checks are skipped (not executed) without deleting their
-    /// definition — the escape hatch for flaky checks. Defaults to `false`.
-    pub(crate) mute: Option<bool>,
-    /// Per-check priority override for auto-filed QA tasks.
-    pub(crate) priority: Option<String>,
-    /// Kill the check and record a failure after this many minutes.
-    /// Defaults to 30.
+    /// Named crew for the QA agent run. Falls back to the workspace's default
+    /// crew resolution [ORB-10133] when absent.
+    pub(crate) crew: Option<String>,
+    /// Agent-run wall-clock timeout in minutes (default 120). Maps to the
+    /// worker's `limits.wall_clock_secs`.
     pub(crate) timeout_minutes: Option<u64>,
+    /// Cap on the number of commits listed in the QA prompt. Absent = the
+    /// built-in evidence cap.
+    pub(crate) max_commits: Option<usize>,
+    /// Removed in ORB-10146 (qa-sweep v2 invokes a QA agent instead of running
+    /// inline shell checks). Retained only so a leftover `[[qa.workspace.check]]`
+    /// table is rejected at config load with a migration error instead of being
+    /// silently ignored.
+    pub(crate) check: Option<toml::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

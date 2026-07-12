@@ -1,33 +1,34 @@
 //! `orbit run qa-sweep` — trailing QA validation over direct-push workspaces
-//! [ORB-10039], sibling of `orbit run ship-sweep`. Designed for unattended
-//! schedulers: it never bootstraps a workspace from the caller's cwd,
-//! isolates per-workspace failures, and exits non-zero only when a workspace
-//! errored (a red check is the sweep working — it files a task — not a sweep
-//! failure).
+//! [ORB-10039], reworked to a worker-invoked QA agent pass [ORB-10146].
+//! Sibling of `orbit run ship-sweep`. Designed for unattended schedulers: it
+//! never bootstraps a workspace from the caller's cwd, isolates per-workspace
+//! failures, and exits non-zero only when a workspace errored (findings filed
+//! from a completed agent run are the sweep working, not a sweep failure).
 
 use clap::Args;
 use orbit_core::OrbitError;
-use orbit_core::qa::{QaCheckReport, QaSweepOptions, QaWorkspaceReport, run_qa_sweep};
+use orbit_core::qa::{QaFindingReport, QaSweepOptions, QaWorkspaceReport, run_qa_sweep};
 use serde_json::{Value, json};
 
 #[derive(Args)]
 #[command(
     name = "qa-sweep",
     about = "Validate new agent-main commits in configured direct-push workspaces",
-    after_help = "Workspaces and their checks come from the [qa] section of the GLOBAL\n\
-                  ~/.orbit/config.toml (never workspace config, which task-mutation\n\
-                  commands rewrite). Per workspace: diff the live checkout's HEAD against\n\
-                  the last-validated watermark; when new commits exist, run the checks,\n\
-                  file fingerprint-deduped orbit tasks for failures, and advance the\n\
-                  watermark only on a fully green pass. Intended to run from a scheduler\n\
+    after_help = "Workspaces come from the [qa] section of the GLOBAL ~/.orbit/config.toml\n\
+                  (never workspace config, which task-mutation commands rewrite). Per\n\
+                  workspace: diff the live checkout's HEAD against the last-validated\n\
+                  watermark; when new commits exist, submit a QA agent run to the worker\n\
+                  invoke daemon, poll it to a terminal state, file fingerprint-deduped\n\
+                  orbit tasks for its findings, and advance the watermark when the run\n\
+                  completed and its report parsed. Intended to run from a scheduler\n\
                   (systemd timer / cron), e.g.:\n  orbit run qa-sweep --json\n\n\
                   Sweeps are recorded in each workspace's run ledger under job id\n\
                   'qa_sweep': inspect with `orbit run history -j qa_sweep` and\n\
                   `orbit run show <run_id>` from the workspace."
 )]
 pub struct QaSweepCommand {
-    /// Report what would be validated without running checks, recording runs,
-    /// filing tasks, or advancing watermarks.
+    /// Report what would be validated without invoking the agent, recording
+    /// runs, filing tasks, or advancing watermarks.
     #[arg(long)]
     pub dry_run: bool,
     /// Output as JSON.
@@ -57,10 +58,15 @@ impl QaSweepCommand {
                 "lock_busy": outcome.lock_busy,
                 "workspaces": outcome.reports.len(),
                 "validated": count_actions(&outcome.reports, "validated"),
-                "failed_checks": count_actions(&outcome.reports, "failed"),
                 "would_validate": count_actions(&outcome.reports, "would_validate"),
                 "skipped": count_actions(&outcome.reports, "skipped"),
                 "errors": failed,
+                "findings_filed": outcome
+                    .reports
+                    .iter()
+                    .flat_map(|report| report.findings.iter())
+                    .filter(|finding| finding.filed_task.is_some())
+                    .count(),
                 "reports": outcome.reports.iter().map(report_json).collect::<Vec<_>>(),
             }))?;
         } else if outcome.lock_busy {
@@ -93,19 +99,19 @@ pub(crate) fn report_json(report: &QaWorkspaceReport) -> Value {
         "action": report.action,
         "reason": report.reason,
         "branch": report.branch,
+        "crew": report.crew,
         "head": report.head,
         "baseline": report.baseline,
         "new_commits": report.new_commits.as_ref().map(Vec::len),
         "watermark_reset": report.watermark_reset,
         "run_id": report.run_id,
-        "checks": report.checks.iter().map(|check| json!({
-            "name": check.name,
-            "outcome": check.outcome,
-            "exit_code": check.exit_code,
-            "duration_ms": check.duration_ms,
-            "fingerprint": check.fingerprint,
-            "filed_task": check.filed_task,
-            "deduped_task": check.deduped_task,
+        "agent_run_id": report.agent_run_id,
+        "findings": report.findings.iter().map(|finding| json!({
+            "name": finding.name,
+            "severity": finding.severity,
+            "fingerprint": finding.fingerprint,
+            "filed_task": finding.filed_task,
+            "deduped_task": finding.deduped_task,
         })).collect::<Vec<_>>(),
     })
 }
@@ -124,14 +130,21 @@ pub(crate) fn report_line(report: &QaWorkspaceReport) -> String {
     {
         line.push_str(&format!(" — HEAD {}", short_sha(head)));
     }
-    if !report.checks.is_empty() {
-        let checks = report
-            .checks
+    if let Some(crew) = &report.crew
+        && report.action != "skipped"
+    {
+        line.push_str(&format!(" — crew {crew}"));
+    }
+    if !report.findings.is_empty() {
+        let findings = report
+            .findings
             .iter()
-            .map(check_summary)
+            .map(finding_summary)
             .collect::<Vec<_>>()
             .join(", ");
-        line.push_str(&format!(" [{checks}]"));
+        line.push_str(&format!(" [{findings}]"));
+    } else if report.action == "validated" {
+        line.push_str(" [clean]");
     }
     if let Some(run_id) = &report.run_id {
         line.push_str(&format!(" — run {run_id}"));
@@ -139,12 +152,12 @@ pub(crate) fn report_line(report: &QaWorkspaceReport) -> String {
     line
 }
 
-fn check_summary(check: &QaCheckReport) -> String {
-    let mut summary = format!("{}: {}", check.name, check.outcome);
-    if let Some(task) = &check.filed_task {
+fn finding_summary(finding: &QaFindingReport) -> String {
+    let mut summary = format!("{}: {}", finding.name, finding.severity);
+    if let Some(task) = &finding.filed_task {
         summary.push_str(&format!(" (filed {task})"));
     }
-    if let Some(task) = &check.deduped_task {
+    if let Some(task) = &finding.deduped_task {
         summary.push_str(&format!(" (open {task})"));
     }
     summary

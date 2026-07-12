@@ -1,21 +1,19 @@
-//! Failure fingerprints for qa-sweep task dedupe [ORB-10039].
+//! Failure fingerprints for qa-sweep task dedupe [ORB-10039, reworked
+//! ORB-10146].
 //!
-//! A fingerprint identifies *one distinct way a check fails* so the sweep
-//! files one task per broken check, not one per pass (design D4). It is
-//! `sha256(workspace \n check \n normalized-output-head)` truncated to 12 hex
-//! chars and carried on the filed task as a `fp-<hash>` tag; the next sweep
-//! searches open tasks for that tag before filing again.
+//! A fingerprint identifies *one distinct finding* so the sweep files one task
+//! per open issue, not one per pass (design D4). It is
+//! `sha256(workspace \n normalized-finding-name)` truncated to 12 hex chars and
+//! carried on the filed task as a `fp-<hash>` tag; the next sweep searches open
+//! tasks for that tag before filing again.
 //!
-//! Normalization aims for *stability across reruns of the same failure*
-//! without collapsing genuinely different failures: ANSI escapes and the
-//! absolute repo root are scrubbed (they vary per host/terminal), whitespace
-//! runs are collapsed, and only the head of the output is hashed (tails often
-//! carry timing summaries and counters that churn per run).
+//! qa-sweep v2 fingerprints over the *finding name* the QA agent reports (a
+//! stable signature for the issue) rather than a shell check's output head, so
+//! the same feature regression surfaced across reruns dedupes to one task even
+//! as the agent's prose evidence varies.
 
 use sha2::{Digest, Sha256};
 
-/// Lines of normalized output that participate in the fingerprint.
-const FINGERPRINT_HEAD_LINES: usize = 20;
 /// Truncated hex length of the fingerprint hash.
 const FINGERPRINT_HEX_LEN: usize = 12;
 
@@ -27,40 +25,30 @@ pub fn fingerprint_tag(fingerprint: &str) -> String {
     format!("fp-{fingerprint}")
 }
 
-/// Compute the dedupe fingerprint for one failing check.
+/// Compute the dedupe fingerprint for one reported finding.
 ///
-/// `output` is the check's combined stdout+stderr; `exit_summary` is a stable
-/// textual fallback (e.g. `"exit 2"` or `"timeout"`) that keeps silent
-/// failures distinguishable by exit mode.
-pub fn failure_fingerprint(
-    workspace: &str,
-    check: &str,
-    repo_root: &str,
-    output: &str,
-    exit_summary: &str,
-) -> String {
-    let head = normalized_output_head(output, repo_root);
-    let signature = if head.is_empty() {
-        exit_summary.to_string()
+/// The signature is the workspace plus the finding's normalized name, so the
+/// same issue reported on later sweeps (possibly with different evidence prose)
+/// dedupes to the same open task. A blank name falls back to a stable literal
+/// so nameless findings still fingerprint deterministically per workspace.
+pub fn finding_fingerprint(workspace: &str, finding_name: &str) -> String {
+    let signature = normalize_signature(finding_name);
+    let signature = if signature.is_empty() {
+        "<unnamed-finding>"
     } else {
-        head
+        signature.as_str()
     };
-    let digest = Sha256::digest(format!("{workspace}\n{check}\n{signature}").as_bytes());
+    let digest = Sha256::digest(format!("{workspace}\n{signature}").as_bytes());
     let mut hex = format!("{digest:x}");
     hex.truncate(FINGERPRINT_HEX_LEN);
     hex
 }
 
-/// Normalize check output down to the stable head used as failure signature.
-pub(crate) fn normalized_output_head(output: &str, repo_root: &str) -> String {
-    strip_ansi(output)
-        .replace(repo_root, "<repo>")
-        .lines()
-        .map(collapse_whitespace)
-        .filter(|line| !line.is_empty())
-        .take(FINGERPRINT_HEAD_LINES)
-        .collect::<Vec<_>>()
-        .join("\n")
+/// Normalize a finding name to a stable signature: ANSI escapes stripped,
+/// lowercased, and internal whitespace collapsed so trivial formatting
+/// differences do not split one finding into two fingerprints.
+pub(crate) fn normalize_signature(name: &str) -> String {
+    collapse_whitespace(&strip_ansi(name)).to_ascii_lowercase()
 }
 
 /// Drop ANSI CSI/OSC escape sequences (colors, cursor moves, titles).
@@ -105,7 +93,7 @@ fn strip_ansi(input: &str) -> String {
     out
 }
 
-/// Trim the line and collapse internal whitespace runs to single spaces.
+/// Trim and collapse internal whitespace runs to single spaces.
 fn collapse_whitespace(line: &str) -> String {
     line.split_whitespace().collect::<Vec<_>>().join(" ")
 }

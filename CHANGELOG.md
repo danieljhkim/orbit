@@ -4,6 +4,8 @@
 
 ### Breaking Changes
 
+- **qa-sweep runs a QA agent, not inline shell checks**: `[[qa.workspace.check]]` tables are removed and now fail config load with a migration error. Configure per-workspace `crew`/`timeout_minutes`/`max_commits` and `qa.base_url` instead; the sweep submits a worker QA-agent run and files tasks from its findings. ([ORB-10146])
+
 - **Learning vote and comment surfaces removed**: `orbit.learning.upvote` and all `orbit.learning.comment.*` tools and CLI subcommands are gone — use `priority` + search rank for ranking, `update`/`supersede` for corrections, and `evidence` for provenance. ([ORB-10046])
 - **`orbit task` trimmed from 19 to 12 subcommands**: seven state-transition and read-projection verbs removed. `approve`/`reject`/`unarchive`/`delete` → `orbit task update --status …`; `locks` → `orbit locks`; `prune-context` → `orbit task lint --fix`; `templates` dropped. MCP tool surface unchanged. ([ORB-10000])
 
