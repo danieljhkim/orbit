@@ -5,4 +5,5 @@ Description=Orbit routine sweep (fires due routines on this host)
 
 [Service]
 Type=oneshot
+KillMode=process
 ExecStart={{ORBIT_BIN}} sweep
