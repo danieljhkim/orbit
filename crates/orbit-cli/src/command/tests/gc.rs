@@ -24,10 +24,32 @@ fn gc_help_lists_every_target_and_uniform_flags() {
         "--apply",
         "--json",
         "--retention",
+        "--success-retention-days",
+        "--failure-retention-days",
         "--workspace",
         "--global",
     ] {
         assert!(help.contains(value), "missing `{value}` from help:\n{help}");
+    }
+}
+
+#[test]
+fn gc_parses_qualified_worktree_retention_overrides() {
+    let cli = Cli::parse_from([
+        "orbit",
+        "gc",
+        "worktrees",
+        "--success-retention-days",
+        "2",
+        "--failure-retention-days",
+        "30",
+    ]);
+    match cli.command {
+        Commands::Gc(command) => {
+            assert_eq!(command.success_retention_days, Some(2));
+            assert_eq!(command.failure_retention_days, Some(30));
+        }
+        _ => panic!("expected gc command"),
     }
 }
 

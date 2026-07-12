@@ -372,6 +372,14 @@ impl OrbitRuntime {
         self.context.routines_source()
     }
 
+    pub fn worktree_gc_success_retention_days(&self) -> u64 {
+        self.context.worktree_gc_success_retention_days()
+    }
+
+    pub fn worktree_gc_failure_retention_days(&self) -> u64 {
+        self.context.worktree_gc_failure_retention_days()
+    }
+
     /// Returns the configured `[duel] candidates` list (e.g. ["codex", "claude", "gemini", "grok"]).
     /// Used by `orbit run duel-plan --planner-a ...` overrides to validate explicit families.
     pub fn duel_candidate_families(&self) -> Vec<String> {

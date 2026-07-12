@@ -186,6 +186,8 @@ pub(crate) struct OrbitRuntimeSettings {
     /// Whether this workspace is a routine source
     /// (`[routines] role = "source"` in `config.toml`, default `false`).
     routines_source: bool,
+    worktree_gc_success_retention_days: u64,
+    worktree_gc_failure_retention_days: u64,
     crews: std::collections::BTreeMap<String, Crew>,
     default_crew: Option<String>,
     duel: DuelConfig,
@@ -205,6 +207,8 @@ impl OrbitRuntimeSettings {
         workflow_base_branch: String,
         workflow_auto_ship: bool,
         routines_source: bool,
+        worktree_gc_success_retention_days: u64,
+        worktree_gc_failure_retention_days: u64,
         crews: std::collections::BTreeMap<String, Crew>,
         default_crew: Option<String>,
         duel: DuelConfig,
@@ -221,6 +225,8 @@ impl OrbitRuntimeSettings {
             workflow_base_branch,
             workflow_auto_ship,
             routines_source,
+            worktree_gc_success_retention_days,
+            worktree_gc_failure_retention_days,
             crews,
             default_crew,
             duel,
@@ -245,6 +251,14 @@ impl OrbitRuntimeSettings {
 
     pub(crate) fn routines_source(&self) -> bool {
         self.routines_source
+    }
+
+    pub(crate) fn worktree_gc_success_retention_days(&self) -> u64 {
+        self.worktree_gc_success_retention_days
+    }
+
+    pub(crate) fn worktree_gc_failure_retention_days(&self) -> u64 {
+        self.worktree_gc_failure_retention_days
     }
 
     pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {
@@ -383,6 +397,14 @@ impl OrbitContext {
     /// (`[routines] role = "source"` in `config.toml`, default `false`).
     pub(crate) fn routines_source(&self) -> bool {
         self.runtime.routines_source()
+    }
+
+    pub(crate) fn worktree_gc_success_retention_days(&self) -> u64 {
+        self.runtime.worktree_gc_success_retention_days()
+    }
+
+    pub(crate) fn worktree_gc_failure_retention_days(&self) -> u64 {
+        self.runtime.worktree_gc_failure_retention_days()
     }
 
     pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {

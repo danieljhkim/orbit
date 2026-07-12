@@ -51,6 +51,9 @@ impl OrbitRuntime {
             {
                 self.best_effort_block_tasks_for_failed_run(run_id, state);
             }
+            if !was_terminal_before {
+                self.best_effort_collect_terminal_worktree(run_id);
+            }
         }
         Ok(changed)
     }

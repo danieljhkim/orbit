@@ -173,8 +173,11 @@ prerequisite failed is reported as dependency-blocked.
 ## 4. Configuration and Precedence
 
 GC uses typed `[gc]` configuration with per-target subsections and conservative
-built-in defaults. Exact key names and defaults land with their collector, but
-every key identifies its unit and retention class; zero means immediate
+built-in defaults. Worktree collection uses
+`gc.worktrees.success_retention_days` (default `0`) and
+`gc.worktrees.failure_retention_days` (default `7`); resumable interrupted
+worktrees remain protected regardless of age. Every key identifies its unit and
+retention class; zero means immediate
 eligibility only where the key explicitly permits it. Invalid values fail plan
 construction before mutation.
 
@@ -367,7 +370,7 @@ limited to non-destructive setup and active-file rotation.
 
 - [ORB-10178] — defined this retention and safety contract.
 - [ORB-10180] — will implement the shared GC framework.
-- [ORB-10182] — will implement managed worktree collection.
+- [ORB-10182] — implemented managed worktree collection and terminal cleanup reuse.
 - [ORB-10183] — will implement run retention.
 - [ORB-10184] — will unify log retention.
 - [ORB-10185] — will implement diagnostics retention.

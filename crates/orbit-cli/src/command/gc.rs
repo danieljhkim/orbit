@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
 use orbit_core::command::gc::{
-    EmptyGcCollector, GcRequest, GcScope, GcTarget, SystemGcClock, execute_gc,
+    EmptyGcCollector, GcCollector, GcRequest, GcScope, GcTarget, SystemGcClock,
+    WorktreeGcCollector, WorktreeGcPolicy, execute_gc,
 };
 use orbit_core::{OrbitError, OrbitRuntime};
 
@@ -54,6 +55,14 @@ pub struct GcCommand {
     #[arg(long, value_name = "DURATION")]
     pub retention: Option<String>,
 
+    /// Override successful/cancelled worktree retention in days
+    #[arg(long, value_name = "DAYS")]
+    pub success_retention_days: Option<u64>,
+
+    /// Override failed/timeout/interrupted worktree retention in days
+    #[arg(long, value_name = "DAYS")]
+    pub failure_retention_days: Option<u64>,
+
     /// Select the current registered workspace by ID or path
     #[arg(long, value_name = "ID_OR_PATH", conflicts_with = "global")]
     pub workspace: Option<String>,
@@ -66,6 +75,13 @@ pub struct GcCommand {
 impl Execute for GcCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let target = GcTarget::from(self.target);
+        if target != GcTarget::Worktrees
+            && (self.success_retention_days.is_some() || self.failure_retention_days.is_some())
+        {
+            return Err(OrbitError::InvalidInput(
+                "worktree retention overrides require the `worktrees` target".to_string(),
+            ));
+        }
         let defaults_global = matches!(target, GcTarget::Logs | GcTarget::Skills);
         let scope = if self.global || (self.workspace.is_none() && defaults_global) {
             GcScope::Global {
@@ -74,9 +90,34 @@ impl Execute for GcCommand {
         } else {
             resolve_workspace_scope(self.workspace.as_deref(), runtime)?
         };
+        let selected_runtime =
+            if target == GcTarget::Worktrees && scope.root() != runtime.paths().orbit_dir {
+                Some(OrbitRuntime::from_roots(
+                    &runtime.paths().global_dir,
+                    scope.root(),
+                )?)
+            } else {
+                None
+            };
+        let collector_runtime = selected_runtime.as_ref().unwrap_or(runtime);
         let clock = SystemGcClock;
+        let worktree_policy = WorktreeGcPolicy {
+            success_retention_days: self
+                .success_retention_days
+                .unwrap_or_else(|| collector_runtime.worktree_gc_success_retention_days()),
+            failure_retention_days: self
+                .failure_retention_days
+                .unwrap_or_else(|| collector_runtime.worktree_gc_failure_retention_days()),
+        };
+        let worktrees = WorktreeGcCollector::new(collector_runtime, worktree_policy);
+        let empty = EmptyGcCollector::new(target);
+        let collector: &dyn GcCollector = if target == GcTarget::Worktrees {
+            &worktrees
+        } else {
+            &empty
+        };
         let report = execute_gc(
-            &EmptyGcCollector::new(target),
+            collector,
             GcRequest {
                 apply: self.apply,
                 scope,
