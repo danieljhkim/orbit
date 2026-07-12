@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Pipeline worktree GC**: `orbit run gc` reconciles `.orbit/state/worktrees/*` against the run table — reclaiming worktrees with no live run, cancelling orphaned non-terminal records, keeping failed/timeout/interrupted trees for a configurable window (`[worktree] gc_failed_retention_days`, default 7) — and terminal successes reap on completion. Language-agnostic; never touches a live run's worktree. ([ORB-10173])
 - **Task creation surface is narrower and consistent**: task creation now exposes only legal initial statuses, list flags share repeat/comma parsing, and redundant agent/comment/instructions inputs are removed while model and managed identity attribution remain intact. ([ORB-10155])
 
 ### Breaking Changes

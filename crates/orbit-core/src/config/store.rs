@@ -283,6 +283,9 @@ pub struct ConfigSnapshot {
     pub workflow_default_crew: Option<String>,
     pub workflow_auto_ship: bool,
     pub routines_source: bool,
+    /// Retention window (days) for failed/timeout/interrupted run worktrees
+    /// before worktree GC reclaims them (`[worktree] gc_failed_retention_days`).
+    pub worktree_gc_failed_retention_days: i64,
     pub tasks_id_start: Option<u32>,
     pub duel_candidates: Vec<String>,
     pub duel_models: std::collections::BTreeMap<String, String>,
@@ -317,6 +320,7 @@ impl From<&RuntimeConfig> for ConfigSnapshot {
             workflow_default_crew: config.default_crew.clone(),
             workflow_auto_ship: config.workflow_auto_ship(),
             routines_source: config.routines_source(),
+            worktree_gc_failed_retention_days: config.worktree_gc_failed_retention_days(),
             tasks_id_start: config.tasks_id_start(),
             duel_candidates: config.duel_config().candidates.clone(),
             duel_models: config.duel_config().models.clone(),
@@ -354,6 +358,7 @@ impl ConfigSnapshot {
             "workflow.auto_ship" => json!(self.workflow_auto_ship),
             "workflow.base_branch" => json!(self.workflow_base_branch),
             "workflow.default_crew" => json!(self.workflow_default_crew),
+            "worktree.gc_failed_retention_days" => json!(self.worktree_gc_failed_retention_days),
             _ => return None,
         })
     }

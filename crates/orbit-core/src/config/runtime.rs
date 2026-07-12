@@ -20,7 +20,7 @@ use super::persistence::PersistenceConfig;
 use super::raw::{
     RawAgentRoleConfig, RawCodexExecutionConfig, RawCrewEntry, RawDuelSection,
     RawExecutionEnvConfig, RawPrSection, RawRoutinesConfig, RawRuntimeConfig, RawRuntimeSection,
-    RawTaskSection, RawWorkflowConfig,
+    RawTaskSection, RawWorkflowConfig, RawWorktreeConfig,
 };
 
 const DEFAULT_ENV_INHERIT: bool = false;
@@ -32,6 +32,12 @@ const DEFAULT_SCORING_ENABLED: bool = true;
 const DEFAULT_GRAPH_EDITING: bool = false;
 const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
 const DEFAULT_WORKFLOW_CREW: &str = "claude";
+/// Default retention window (days) for failed / timeout / interrupted run
+/// worktrees before worktree GC reclaims them (`[worktree]
+/// gc_failed_retention_days`). Mirrors
+/// [`crate::command::DEFAULT_FAILED_RETENTION_DAYS`]; kept as a local const so
+/// config defaulting has no dependency on the command layer.
+pub(crate) const DEFAULT_WORKTREE_GC_FAILED_RETENTION_DAYS: i64 = 7;
 const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
 
 #[derive(Debug, Clone)]
@@ -58,6 +64,10 @@ pub(crate) struct RuntimeConfig {
     /// "source"` in `config.toml`; defaults to `false`). Consulted by
     /// `orbit sweep` before loading `.orbit/routines/*.yaml`.
     pub(crate) routines_source: bool,
+    /// Retention window (days) for failed / timeout / interrupted run worktrees
+    /// before worktree GC reclaims them (`[worktree] gc_failed_retention_days`;
+    /// defaults to [`DEFAULT_WORKTREE_GC_FAILED_RETENTION_DAYS`]).
+    pub(crate) worktree_gc_failed_retention_days: i64,
     /// Named provider-model assignments from `[crews.<name>]`.
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
@@ -111,6 +121,7 @@ impl RuntimeConfig {
             workflow_base_branch: DEFAULT_WORKFLOW_BASE_BRANCH.to_string(),
             workflow_auto_ship: false,
             routines_source: false,
+            worktree_gc_failed_retention_days: DEFAULT_WORKTREE_GC_FAILED_RETENTION_DAYS,
             crews: default_crews(),
             default_crew: Some(DEFAULT_WORKFLOW_CREW.to_string()),
             duel: DuelConfig::default(),
@@ -220,6 +231,8 @@ impl RuntimeConfig {
             .and_then(|workflow| workflow.auto_ship)
             .unwrap_or(false);
         let routines_source = routines_source_from_raw(parsed.routines.as_ref())?;
+        let worktree_gc_failed_retention_days =
+            worktree_gc_failed_retention_days_from_raw(parsed.worktree.as_ref())?;
         let crews = crews_from_raw(parsed.crews.as_ref())?;
         let default_crew = workflow_default_crew_from_raw(parsed.workflow.as_ref(), &crews)?;
         let duel = duel_from_raw(parsed.duel.as_ref())?;
@@ -251,6 +264,7 @@ impl RuntimeConfig {
             workflow_base_branch,
             workflow_auto_ship,
             routines_source,
+            worktree_gc_failed_retention_days,
             crews,
             default_crew,
             duel,
@@ -279,6 +293,10 @@ impl RuntimeConfig {
 
     pub(crate) fn routines_source(&self) -> bool {
         self.routines_source
+    }
+
+    pub(crate) fn worktree_gc_failed_retention_days(&self) -> i64 {
+        self.worktree_gc_failed_retention_days
     }
 
     pub(crate) fn pr_config(&self) -> &PrConfig {
@@ -646,6 +664,20 @@ fn routines_source_from_raw(raw: Option<&RawRoutinesConfig>) -> Result<bool, Orb
             "[routines] role has invalid value '{other}'; the only supported value is 'source'"
         ))),
     }
+}
+
+fn worktree_gc_failed_retention_days_from_raw(
+    raw: Option<&RawWorktreeConfig>,
+) -> Result<i64, OrbitError> {
+    let Some(value) = raw.and_then(|section| section.gc_failed_retention_days) else {
+        return Ok(DEFAULT_WORKTREE_GC_FAILED_RETENTION_DAYS);
+    };
+    if value < 0 {
+        return Err(OrbitError::InvalidInput(format!(
+            "[worktree] gc_failed_retention_days must be >= 0, got {value}"
+        )));
+    }
+    Ok(value)
 }
 
 fn workflow_base_branch_from_raw(raw: Option<&RawWorkflowConfig>) -> Result<String, OrbitError> {

@@ -6,6 +6,7 @@ use crate::command::Execute;
 use super::cancel::RunCancelArgs;
 use super::duel;
 use super::events::RunEventsArgs;
+use super::gc::RunGcArgs;
 use super::history::RunHistoryArgs;
 use super::job::JobRunArgs;
 use super::logs::RunLogsArgs;
@@ -33,6 +34,7 @@ Run history:
 
 Maintenance:
   orbit run cancel <run_id>
+  orbit run gc [--dry-run] [--json]
 ";
 
 #[derive(Args)]
@@ -63,6 +65,7 @@ Audits:
 
 Maintenance:
   cancel     Cancel a pending or running job run
+  gc         Reclaim orphaned pipeline worktrees under the retention policy
 
 Options:
 {options}
@@ -106,6 +109,8 @@ pub enum RunSubcommand {
     Trace(RunTraceArgs),
     /// Cancel a pending or running job run
     Cancel(RunCancelArgs),
+    /// Reclaim orphaned pipeline worktrees under the retention policy
+    Gc(RunGcArgs),
     /// Run an arbitrary job by ID
     Job(JobRunArgs),
 }
@@ -126,6 +131,7 @@ impl Execute for RunSubcommand {
             RunSubcommand::Events(command) => command.execute(runtime),
             RunSubcommand::Trace(command) => command.execute(runtime),
             RunSubcommand::Cancel(command) => command.execute(runtime),
+            RunSubcommand::Gc(command) => command.execute(runtime),
             RunSubcommand::Job(command) => command.execute(runtime),
         }
     }

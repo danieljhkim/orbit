@@ -15,6 +15,7 @@ pub(super) struct RawRuntimeConfig {
     pub(super) watch: Option<toml::Value>,
     pub(super) runtime: Option<RawRuntimeSection>,
     pub(super) workflow: Option<RawWorkflowConfig>,
+    pub(super) worktree: Option<RawWorktreeConfig>,
     pub(super) routines: Option<RawRoutinesConfig>,
     pub(super) duel: Option<RawDuelSection>,
     /// Removed in ORB-00058. Kept only so config loading can reject stale
@@ -39,6 +40,16 @@ pub(super) struct RawWorkflowConfig {
     /// Named crew used when a task does not declare `crew` and no CLI
     /// override is provided.
     pub(super) default_crew: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub(super) struct RawWorktreeConfig {
+    /// `worktree.gc_failed_retention_days` — how long a failed / timeout /
+    /// interrupted run's worktree is kept for debugging (and resume) before
+    /// worktree GC reclaims it. When absent, defaults to
+    /// [`DEFAULT_WORKTREE_GC_FAILED_RETENTION_DAYS`](super::runtime::DEFAULT_WORKTREE_GC_FAILED_RETENTION_DAYS).
+    /// Success / cancelled runs are always reaped immediately.
+    pub(super) gc_failed_retention_days: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

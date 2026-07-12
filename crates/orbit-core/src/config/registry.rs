@@ -122,6 +122,11 @@ pub const CONFIG_KEY_REGISTRY: &[ConfigKeyDescriptor] = &[
         value_type: "string",
         description: "Named crew used when a task does not declare `crew` and no CLI override is given.",
     },
+    ConfigKeyDescriptor {
+        key: "worktree.gc_failed_retention_days",
+        value_type: "integer",
+        description: "Days a failed/timeout/interrupted run's worktree is kept for debugging before `orbit run gc` reclaims it (must be >= 0); success/cancelled reap immediately.",
+    },
 ];
 
 /// Look up a key's descriptor, or `None` if it isn't in the registry.

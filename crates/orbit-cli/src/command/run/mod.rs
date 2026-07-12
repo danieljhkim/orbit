@@ -3,6 +3,7 @@ mod command;
 pub mod duel;
 mod events;
 mod format;
+mod gc;
 mod history;
 pub mod job;
 pub mod legacy_logs;

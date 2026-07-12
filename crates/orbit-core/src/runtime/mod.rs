@@ -360,6 +360,14 @@ impl OrbitRuntime {
     /// (`[workflow] auto_ship` in the active `config.toml`; defaults to
     /// `false`). Consulted by `orbit run ship-sweep` and other schedulers
     /// before dispatching ship runs nobody explicitly asked for.
+    /// Configured retention window (days) for failed/timeout/interrupted run
+    /// worktrees before worktree GC reclaims them (`[worktree]
+    /// gc_failed_retention_days`, default
+    /// [`crate::command::DEFAULT_FAILED_RETENTION_DAYS`]).
+    pub fn worktree_gc_failed_retention_days(&self) -> i64 {
+        self.context.worktree_gc_failed_retention_days()
+    }
+
     pub fn workflow_auto_ship(&self) -> bool {
         self.context.workflow_auto_ship()
     }

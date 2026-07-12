@@ -1,0 +1,32 @@
+schema_version: 1
+id: L-0078
+status: active
+scope:
+  paths:
+  - crates/orbit-core/src/command/job/run/**
+  - crates/orbit-engine/src/executor/automation/vcs/worktree/**
+  tags:
+  - pipeline
+  - worktree
+  - gc
+  - disk
+summary: 'Pipeline job-run worktrees leaked disk unboundedly (~116G on dk-server-1): a git worktree was created per run and never reclaimed. Fixed by worktree GC (ORB-10173).'
+body: |-
+  Orbit creates a git worktree per pipeline run under .orbit/state/worktrees/<prefix>-<run_id>/ and historically never reclaimed it, so disk grew by the full build-artifact footprint every run.
+
+  GC (`orbit run gc`, + on-completion reap in finalize) maps each worktree dir to its run_id via the `jrun-` token, reconciles against the run table, reaps terminal successes immediately and failed/timeout/interrupted after a configurable retention window ([worktree] gc_failed_retention_days, default 7), and cancels orphaned non-terminal records before reclaiming.
+
+  Key design points for future work:
+  - Concurrency-safety is the run-table LIVENESS CHECK (running_run_owner_is_stale / pending_run_stale_reason), NOT a filesystem lock — the pipeline holds no worktree-wide lock. `git worktree remove --force` takes git's own lock; resume reuses only retained interrupted runs; retries mint a new run id + new worktree, so no reuse race.
+  - Reclaim is language-agnostic: `git worktree remove --force` with a raw remove_dir_all fallback, then prune + branch -D. No Cargo/target special-casing.
+  - GC never reclaims the caller's own cwd worktree.
+
+  See crates/orbit-core/src/command/job/run/gc.rs. Resolves F2026-07-019 (overlaps F2026-07-016/ORB-10153).
+evidence:
+- kind: task
+  reference: ORB-10173
+- kind: external
+  reference: crates/orbit-core/src/command/job/run/gc.rs
+created_at: 2026-07-12T20:52:11.547775239Z
+updated_at: 2026-07-12T20:52:11.547775239Z
+created_by: claude

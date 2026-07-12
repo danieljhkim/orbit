@@ -186,6 +186,9 @@ pub(crate) struct OrbitRuntimeSettings {
     /// Whether this workspace is a routine source
     /// (`[routines] role = "source"` in `config.toml`, default `false`).
     routines_source: bool,
+    /// Retention window (days) for failed/timeout/interrupted run worktrees
+    /// before worktree GC reclaims them (`[worktree] gc_failed_retention_days`).
+    worktree_gc_failed_retention_days: i64,
     crews: std::collections::BTreeMap<String, Crew>,
     default_crew: Option<String>,
     duel: DuelConfig,
@@ -205,6 +208,7 @@ impl OrbitRuntimeSettings {
         workflow_base_branch: String,
         workflow_auto_ship: bool,
         routines_source: bool,
+        worktree_gc_failed_retention_days: i64,
         crews: std::collections::BTreeMap<String, Crew>,
         default_crew: Option<String>,
         duel: DuelConfig,
@@ -221,6 +225,7 @@ impl OrbitRuntimeSettings {
             workflow_base_branch,
             workflow_auto_ship,
             routines_source,
+            worktree_gc_failed_retention_days,
             crews,
             default_crew,
             duel,
@@ -245,6 +250,10 @@ impl OrbitRuntimeSettings {
 
     pub(crate) fn routines_source(&self) -> bool {
         self.routines_source
+    }
+
+    pub(crate) fn worktree_gc_failed_retention_days(&self) -> i64 {
+        self.worktree_gc_failed_retention_days
     }
 
     pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {
@@ -377,6 +386,12 @@ impl OrbitContext {
     /// (`[workflow] auto_ship` in `config.toml`, default `false`).
     pub(crate) fn workflow_auto_ship(&self) -> bool {
         self.runtime.workflow_auto_ship()
+    }
+
+    /// Retention window (days) for failed/timeout/interrupted run worktrees
+    /// before worktree GC reclaims them (`[worktree] gc_failed_retention_days`).
+    pub(crate) fn worktree_gc_failed_retention_days(&self) -> i64 {
+        self.runtime.worktree_gc_failed_retention_days()
     }
 
     /// Whether this workspace is a routine source

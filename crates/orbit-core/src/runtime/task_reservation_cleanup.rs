@@ -51,6 +51,15 @@ impl OrbitRuntime {
             {
                 self.best_effort_block_tasks_for_failed_run(run_id, state);
             }
+            // [ORB-10173] Reap the run's worktree on the terminalizing write.
+            // Only immediately reap-eligible states (success/cancelled/skipped)
+            // are removed here; failed/timeout/interrupted worktrees ride the
+            // retention window and are reclaimed later by `orbit run gc`.
+            // Gated on `!was_terminal_before` so a replayed terminalization is a
+            // no-op. Best-effort: a reap failure never blocks finalization.
+            if !was_terminal_before {
+                self.best_effort_reap_finalized_worktree(run_id, state);
+            }
         }
         Ok(changed)
     }
