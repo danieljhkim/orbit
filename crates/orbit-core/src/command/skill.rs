@@ -7,7 +7,12 @@ use orbit_common::types::OrbitError;
 use orbit_common::utility::fs::write_text_with_parent;
 
 use crate::OrbitRuntime;
+use crate::command::skill_ownership::{self, GeneratedFile, GeneratedSkill};
 use crate::skill_catalog::{LoadedSkill, SkillCatalogDoctorStatus};
+
+/// Version stamped on managed-skill ownership records. Bump when the generated
+/// default skill catalog changes in a way ownership tooling should notice.
+pub(crate) const SKILL_CATALOG_VERSION: &str = "1";
 
 const DEFAULT_SKILL_FILES: [(&str, &str); 5] = [
     ("orbit", include_str!("../../assets/skills/orbit/SKILL.md")),
@@ -100,6 +105,53 @@ pub(crate) fn seed_default_skills(
         count += 1;
     }
     Ok(count)
+}
+
+/// Record ownership + retirement metadata for the managed default skills.
+///
+/// Records the generated-content hash, version, and owned root for every skill
+/// currently in the default catalog, and tombstones any previously-managed
+/// skill that has since left it. Call after seeding the global skills root so a
+/// later unlink/teardown/gc can prove ownership even after a skill is retired.
+pub(crate) fn record_default_skill_ownership(
+    skills_root: &Path,
+    orbit_root: &Path,
+) -> Result<(), OrbitError> {
+    let generated: Vec<GeneratedSkill> = DEFAULT_SKILL_FILES
+        .iter()
+        .map(|(id, _)| {
+            GeneratedSkill::from_files(
+                (*id).to_string(),
+                Some(SKILL_CATALOG_VERSION.to_string()),
+                &generated_skill_files(id, orbit_root),
+            )
+        })
+        .collect::<Result<_, _>>()?;
+    skill_ownership::reconcile_managed_skills(skills_root, &generated)
+}
+
+/// The complete set of files Orbit generates for `skill_id`, rendered for
+/// `orbit_root` — its `SKILL.md` plus every matching resource file — as the
+/// fingerprint domain for that skill's ownership record. Keep this in lockstep
+/// with [`seed_default_skills`]/[`seed_default_skill_resources`], which write
+/// exactly these paths.
+fn generated_skill_files(skill_id: &str, orbit_root: &Path) -> Vec<GeneratedFile> {
+    let mut files = Vec::new();
+    if let Some((_, content)) = DEFAULT_SKILL_FILES.iter().find(|(id, _)| *id == skill_id) {
+        files.push(GeneratedFile {
+            relative_path: "SKILL.md".to_string(),
+            contents: inject_skill_template_tokens(content, orbit_root).into_bytes(),
+        });
+    }
+    for (resource_skill_id, relative_path, content) in DEFAULT_SKILL_RESOURCE_FILES {
+        if resource_skill_id == skill_id {
+            files.push(GeneratedFile {
+                relative_path: relative_path.to_string(),
+                contents: inject_skill_template_tokens(content, orbit_root).into_bytes(),
+            });
+        }
+    }
+    files
 }
 
 fn seed_default_skill_resources(
