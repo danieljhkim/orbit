@@ -2,8 +2,10 @@ use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
 use orbit_core::command::gc::{
-    EmptyGcCollector, GcRequest, GcScope, GcTarget, SystemGcClock, execute_gc,
+    EmptyGcCollector, GcCollector, GcReport, GcRequest, GcScope, GcTarget, SystemGcClock,
+    execute_gc,
 };
+use orbit_core::command::skill_gc::SkillsGcCollector;
 use orbit_core::{OrbitError, OrbitRuntime};
 
 use super::Execute;
@@ -66,7 +68,16 @@ pub struct GcCommand {
 impl Execute for GcCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let target = GcTarget::from(self.target);
-        let defaults_global = matches!(target, GcTarget::Logs | GcTarget::Skills);
+        // Skills is a global-only collector whose owned state spans the global
+        // generated-skill root and the per-agent link roots; it resolves its own
+        // scope rather than following the generic workspace/global split.
+        if target == GcTarget::Skills {
+            let collector = SkillsGcCollector::for_global_root(&runtime.paths().global_dir);
+            let scope = collector.scope();
+            let report = self.run(&collector, scope, runtime)?;
+            return self.finish(report);
+        }
+        let defaults_global = matches!(target, GcTarget::Logs);
         let scope = if self.global || (self.workspace.is_none() && defaults_global) {
             GcScope::Global {
                 root: runtime.paths().global_dir.clone(),
@@ -74,9 +85,21 @@ impl Execute for GcCommand {
         } else {
             resolve_workspace_scope(self.workspace.as_deref(), runtime)?
         };
+        let report = self.run(&EmptyGcCollector::new(target), scope, runtime)?;
+        self.finish(report)
+    }
+}
+
+impl GcCommand {
+    fn run(
+        &self,
+        collector: &dyn GcCollector,
+        scope: GcScope,
+        runtime: &OrbitRuntime,
+    ) -> Result<GcReport, OrbitError> {
         let clock = SystemGcClock;
-        let report = execute_gc(
-            &EmptyGcCollector::new(target),
+        execute_gc(
+            collector,
             GcRequest {
                 apply: self.apply,
                 scope,
@@ -84,7 +107,10 @@ impl Execute for GcCommand {
                 global_state_dir: &runtime.paths().global_dir.join("state"),
                 clock: &clock,
             },
-        )?;
+        )
+    }
+
+    fn finish(&self, report: GcReport) -> Result<(), OrbitError> {
         if self.json {
             println!(
                 "{}",

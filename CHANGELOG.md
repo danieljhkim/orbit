@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Stale managed-skill GC**: `orbit gc skills` reclaims retired Orbit-generated skill directories (tombstoned + fingerprint-proven) and stale/broken Orbit-owned agent-root links, using ORB-10181 ownership metadata. Modified generated content, same-named user skills, foreign links, and current-skill link repairs are retained/reported separately, never deleted. ([ORB-10187])
 - **Shared garbage-collection framework**: `orbit gc` now exposes every retention target with plan-first/apply, scope, retention, locking, immutable candidate, safety revalidation, manifest, and equivalent human/JSON report contracts for domain collectors. ([ORB-10180])
 - **Managed-skill ownership + retirement metadata**: skill seed/link records skill id, a no-follow whole-tree fingerprint (paths, entry types, contents of every generated file), version, owned root, and managed link destinations in a `.ownership.json` manifest, with tombstones preserving retired fingerprints. Modified/added/removed files and embedded symlinks fail closed; unlink/teardown remove only proven Orbit-owned links. ([ORB-10181])
 - **Safety-first garbage collection contract**: the `orbit gc` design standardizes explicit apply, retention clocks, ownership/revalidation invariants, locking, and equivalent human/JSON reports across global and workspace collectors. ([ORB-10178])
