@@ -3,8 +3,7 @@ name: qa-sweep
 description: Hands-on validation of recent workspace changes
 enabled: true
 schedule:
-  every_minutes: 360
-dedupe: skip_if_open
+  cron: 13 4 * * *
 template:
   title: Perform QA validation
   description: |
@@ -21,16 +20,17 @@ template:
     its description. Skip duplicates. Your narrative output is advisory; the
     tasks you create are the durable side-effect channel.
   acceptance_criteria:
-    - Recent changes were exercised through their real user-facing paths.
-    - Real, non-duplicate issues were filed as Orbit tasks with evidence and reproduction steps.
+  - Recent changes were exercised through their real user-facing paths.
+  - Real, non-duplicate issues were filed as Orbit tasks with evidence and reproduction steps.
   task_type: chore
   tags:
-    - qa-sweep
-    - no-diff-expected
+  - qa-sweep
+  - no-diff-expected
   priority: medium
   crew: qa
   status: backlog
+dedupe: skip_if_open
 created_by: system
-created_at: "2026-07-12T00:00:00Z"
-updated_by: system
-updated_at: "2026-07-12T00:00:00Z"
+created_at: 2026-07-12T00:00:00Z
+updated_by: human
+updated_at: 2026-07-12T04:04:08.440649171+00:00
