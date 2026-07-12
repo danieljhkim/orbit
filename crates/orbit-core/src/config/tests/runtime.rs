@@ -501,3 +501,16 @@ fn runtime_log_rotation_accepts_valid_values() {
     RuntimeConfig::load_layered(global.path(), workspace.path())
         .expect("valid log rotation config should load");
 }
+
+#[test]
+fn worktree_gc_retention_classes_are_independently_configurable() {
+    let defaults = load_config("").expect("default config loads");
+    assert_eq!(defaults.worktree_gc_success_retention_days(), 0);
+    assert_eq!(defaults.worktree_gc_failure_retention_days(), 7);
+
+    let configured =
+        load_config("[gc.worktrees]\nsuccess_retention_days = 2\nfailure_retention_days = 30\n")
+            .expect("worktree retention config loads");
+    assert_eq!(configured.worktree_gc_success_retention_days(), 2);
+    assert_eq!(configured.worktree_gc_failure_retention_days(), 30);
+}
