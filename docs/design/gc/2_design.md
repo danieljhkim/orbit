@@ -10,7 +10,7 @@ summary: Specifies GC grammar, collector ownership, retention clocks, safety inv
 tags: [gc, retention, safety]
 paths: ["crates/orbit-cli/src/command/gc/**", "crates/orbit-core/src/command/gc/**", "crates/orbit-core/src/config/**"]
 related_features: [gc, activity-job, auditability, task-artifacts, worktree-artifacts]
-related_artifacts: [ORB-10178, ORB-10180, ORB-10188, ADR-0220]
+related_artifacts: [ORB-10178, ORB-10180, ORB-10181, ORB-10188, ADR-0220]
 ---
 
 # Garbage Collection — Design
