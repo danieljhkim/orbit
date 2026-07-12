@@ -9,6 +9,7 @@
 
 ### Highlights
 
+- **Graph-tool guidance lives only in the MCP surface**: removed graph-tool invocation instructions from activity prompts and deleted the `orbit-graph` skill; graph tools self-describe when present, and essential selector/usage knowledge now lives in the `orbit.graph.*` tool descriptions. ([ORB-10151])
 - **CI green again — MCP `tools/list` snapshot synced**: ORB-10149's four `orbit_auto_task_*` tools reached the MCP surface without a snapshot refresh, failing `mcp_serve_tools_list_matches_production_snapshot` on every push; the round-trip snapshot now includes them (additive — no tools removed). ([ORB-10152])
 - **QA sweep is an auto-task**: the checked-in six-hour definition routes hands-on validation to `crews.qa`, dedupes open runs, and files findings through Orbit; `no-diff-expected` exempts side-effect-only tasks from workflow diff gates. Legacy QA code, config, CLI, routines, and deployment units are removed. ([ORB-10148])
 - **Auto-task primitive**: recurring chores are data, not code. `orbit auto-task add/list/show/update/toggle` (+ `orbit.auto_task.*` tools) define `.orbit/auto_tasks/*.yaml` templates with a cron/interval schedule and dedupe policy; one seeded scheduler routine mints tasks from the due ones with catch-up collapse and `skip_if_open` dedupe. Provider-neutral (ADR-0217). ([ORB-10149])

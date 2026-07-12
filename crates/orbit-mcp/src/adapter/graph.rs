@@ -152,9 +152,14 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
         ),
         schema(
             GRAPH_SHOW_TOOL,
-            "Show source and metadata for an orbit-graph selector.",
+            "Show source and metadata for an orbit-graph selector. Selector forms: `symbol:<path>#<name>:<kind>` (kind is one of function, method, struct, trait, impl, field, module), `file:<path>`, or `dir:<path>`.",
             vec![
-                param("selector", "Selector to show.", "string", true),
+                param(
+                    "selector",
+                    "Selector to show, e.g. `symbol:src/lib.rs#hello:function`.",
+                    "string",
+                    true,
+                ),
                 param(
                     "max_bytes",
                     "Maximum source bytes returned.",
@@ -165,10 +170,20 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
         ),
         schema(
             GRAPH_REFS_TOOL,
-            "Find inbound references and relations for an orbit-graph symbol selector.",
+            "Find inbound references and relations for an orbit-graph symbol selector. Use this for caller-chain questions too — there is no separate callers tool.",
             vec![
-                param("symbol", "Symbol selector to query.", "string", true),
-                param("confidence", "Minimum confidence floor.", "string", false),
+                param(
+                    "symbol",
+                    "Symbol selector to query, e.g. `symbol:<path>#<name>:<kind>`.",
+                    "string",
+                    true,
+                ),
+                param(
+                    "confidence",
+                    "Minimum confidence floor: exact, import, same_module (default), or fuzzy. Lower to fuzzy to recover trait-dispatch and dynamic calls.",
+                    "string",
+                    false,
+                ),
                 param(
                     "kind",
                     "Optional reference or relation kind filter.",
@@ -184,9 +199,14 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
         ),
         schema(
             GRAPH_IMPACT_TOOL,
-            "Return a bounded orbit-graph blast-radius traversal.",
+            "Return a bounded orbit-graph blast-radius traversal. Use before an edit to bound what a change can affect.",
             vec![
-                param("selector", "Origin selector.", "string", true),
+                param(
+                    "selector",
+                    "Origin selector, e.g. `symbol:<path>#<name>:<kind>`.",
+                    "string",
+                    true,
+                ),
                 param("depth", "Maximum traversal depth.", "number", false),
                 param(
                     "confidence",
@@ -198,7 +218,7 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
         ),
         schema(
             GRAPH_TRACE_TOOL,
-            "Trace a command handler call tree from orbit-graph command metadata.",
+            "Trace a command handler call tree from orbit-graph command metadata. Run a full sync (`orbit.graph.sync` with `full: true`) first for complete coverage.",
             vec![
                 param("command_name", "Command name to trace.", "string", true),
                 param("depth", "Maximum call-tree depth.", "number", false),
@@ -233,17 +253,17 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
             "List the concrete types implementing the trait addressed by a selector.",
             vec![param(
                 "selector",
-                "Trait selector to resolve implementors for.",
+                "Trait selector, e.g. `symbol:<path>#<name>:trait`.",
                 "string",
                 true,
             )],
         ),
         schema(
             GRAPH_DEPS_TOOL,
-            "List outbound module/import edges for a file: or dir: selector.",
+            "List outbound module/import edges for a file: or dir: selector. Use this for crate/module dependency questions.",
             vec![param(
                 "selector",
-                "File or directory selector whose outbound imports to list.",
+                "File or directory selector, e.g. `file:<path>` or `dir:<path>`.",
                 "string",
                 true,
             )],

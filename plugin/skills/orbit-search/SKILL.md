@@ -96,6 +96,5 @@ Recommended (not enforced) layout: `docs/design/<feature>/`, `docs/design-patter
 
 ## Cross-References
 
-- `orbit-graph` — code-structure queries.
 - `orbit-task` — pre-create dedup check, pre-execute related-task lookup.
 - `orbit-knowledge` — learnings and ADRs this skill retrieves but does not author.
