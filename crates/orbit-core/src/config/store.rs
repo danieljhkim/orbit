@@ -289,6 +289,8 @@ pub struct ConfigSnapshot {
     pub run_gc_purge_after_days: u64,
     pub run_gc_failure_archive_after_days: u64,
     pub run_gc_failure_purge_after_days: u64,
+    pub diagnostics_gc_metrics_retention_days: u64,
+    pub diagnostics_gc_friction_retention_days: u64,
     pub tasks_id_start: Option<u32>,
     pub duel_candidates: Vec<String>,
     pub duel_models: std::collections::BTreeMap<String, String>,
@@ -305,6 +307,7 @@ impl From<&RuntimeConfig> for ConfigSnapshot {
         let log_rotation = config.log_rotation();
         let (run_archive, run_purge, run_failure_archive, run_failure_purge) =
             config.run_gc_retention_days();
+        let (diagnostics_metrics, diagnostics_friction) = config.diagnostics_gc_retention_days();
         Self {
             execution_env_inherit: config.execution_env.inherit(),
             execution_env_pass: config.execution_env.pass().to_vec(),
@@ -331,6 +334,8 @@ impl From<&RuntimeConfig> for ConfigSnapshot {
             run_gc_purge_after_days: run_purge,
             run_gc_failure_archive_after_days: run_failure_archive,
             run_gc_failure_purge_after_days: run_failure_purge,
+            diagnostics_gc_metrics_retention_days: diagnostics_metrics,
+            diagnostics_gc_friction_retention_days: diagnostics_friction,
             tasks_id_start: config.tasks_id_start(),
             duel_candidates: config.duel_config().candidates.clone(),
             duel_models: config.duel_config().models.clone(),
@@ -351,6 +356,12 @@ impl ConfigSnapshot {
             "execution.codex.sandbox" => json!(self.codex_sandbox),
             "execution.env.pass" => json!(self.execution_env_pass),
             "graph.editing" => json!(self.graph_editing),
+            "gc.diagnostics.friction_retention_days" => {
+                json!(self.diagnostics_gc_friction_retention_days)
+            }
+            "gc.diagnostics.metrics_retention_days" => {
+                json!(self.diagnostics_gc_metrics_retention_days)
+            }
             "gc.runs.archive_after_days" => json!(self.run_gc_archive_after_days),
             "gc.runs.purge_after_days" => json!(self.run_gc_purge_after_days),
             "gc.runs.failure_archive_after_days" => {

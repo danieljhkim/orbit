@@ -53,6 +53,16 @@ pub const CONFIG_KEY_REGISTRY: &[ConfigKeyDescriptor] = &[
         description: "Environment variable names allow-listed for passthrough into agent subprocesses.",
     },
     ConfigKeyDescriptor {
+        key: "gc.diagnostics.friction_retention_days",
+        value_type: "integer",
+        description: "Days to retain closed diagnostic-friction telemetry day-partitions under state/diagnostics/friction (canonical .orbit/frictions records are never affected).",
+    },
+    ConfigKeyDescriptor {
+        key: "gc.diagnostics.metrics_retention_days",
+        value_type: "integer",
+        description: "Days to retain closed metrics telemetry day-partitions under state/diagnostics/metrics.",
+    },
+    ConfigKeyDescriptor {
         key: "gc.runs.archive_after_days",
         value_type: "integer",
         description: "Days after a successful/cancelled terminal transition before a job run is archived.",

@@ -195,6 +195,7 @@ pub(crate) struct OrbitRuntimeSettings {
     worktree_gc_success_retention_days: u64,
     worktree_gc_failure_retention_days: u64,
     run_gc_retention_days: (u64, u64, u64, u64),
+    diagnostics_gc_retention_days: (u64, u64),
     crews: std::collections::BTreeMap<String, Crew>,
     default_crew: Option<String>,
     duel: DuelConfig,
@@ -217,6 +218,7 @@ impl OrbitRuntimeSettings {
         worktree_gc_success_retention_days: u64,
         worktree_gc_failure_retention_days: u64,
         run_gc_retention_days: (u64, u64, u64, u64),
+        diagnostics_gc_retention_days: (u64, u64),
         crews: std::collections::BTreeMap<String, Crew>,
         default_crew: Option<String>,
         duel: DuelConfig,
@@ -236,6 +238,7 @@ impl OrbitRuntimeSettings {
             worktree_gc_success_retention_days,
             worktree_gc_failure_retention_days,
             run_gc_retention_days,
+            diagnostics_gc_retention_days,
             crews,
             default_crew,
             duel,
@@ -272,6 +275,10 @@ impl OrbitRuntimeSettings {
 
     pub(crate) fn run_gc_retention_days(&self) -> (u64, u64, u64, u64) {
         self.run_gc_retention_days
+    }
+
+    pub(crate) fn diagnostics_gc_retention_days(&self) -> (u64, u64) {
+        self.diagnostics_gc_retention_days
     }
 
     pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {
@@ -422,6 +429,10 @@ impl OrbitContext {
 
     pub(crate) fn run_gc_retention_days(&self) -> (u64, u64, u64, u64) {
         self.runtime.run_gc_retention_days()
+    }
+
+    pub(crate) fn diagnostics_gc_retention_days(&self) -> (u64, u64) {
+        self.runtime.diagnostics_gc_retention_days()
     }
 
     pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {

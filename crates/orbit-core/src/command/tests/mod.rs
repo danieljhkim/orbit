@@ -1,6 +1,7 @@
 mod executor;
 mod gc;
 mod gc_audit;
+mod gc_diagnostics;
 mod gc_logs;
 mod review_thread_hook;
 mod skill_gc;

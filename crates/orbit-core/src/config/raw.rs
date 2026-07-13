@@ -30,6 +30,18 @@ pub(super) struct RawRuntimeConfig {
 pub(super) struct RawGcConfig {
     pub(super) worktrees: Option<RawWorktreeGcConfig>,
     pub(super) runs: Option<RawRunGcConfig>,
+    pub(super) diagnostics: Option<RawDiagnosticsGcConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub(super) struct RawDiagnosticsGcConfig {
+    /// Days to retain closed metrics day-partitions before they are eligible
+    /// for collection. Zero collects every closed (non-current-day) partition.
+    pub(super) metrics_retention_days: Option<u64>,
+    /// Days to retain closed diagnostic-friction day-partitions. Canonical
+    /// `.orbit/frictions` records are never affected by this — only the
+    /// append-only telemetry under `state/diagnostics/friction`.
+    pub(super) friction_retention_days: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

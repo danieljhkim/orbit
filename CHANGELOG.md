@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Diagnostics stream GC**: `orbit gc diagnostics` reclaims closed metrics/diagnostic-friction JSONL day-partitions under `state/diagnostics` past category-specific retention (`[gc.diagnostics]`, default 90d). The current-day writer target and any malformed/ambiguous file are retained and reported; canonical `.orbit/frictions`, tasks, and audit evidence are never candidates. ([ORB-10185])
 - **Age-based task archival**: `orbit gc tasks` archives terminal tasks (`done`, opt-in `rejected` via `--include-rejected`) older than retention using the persisted terminal-transition clock; keep-tagged tasks, open review threads, and active dependents are retained. Archive-only and reversible — no bundle deletion. ([ORB-10188])
 - **Unified audit retention**: `orbit gc audit` plans/applies workspace-scoped legacy/v2 envelope retention plus reference-safe blob sweeping; deprecated `orbit audit prune` routes to the same collector. An audit writer/GC guard and a durable per-blob pending-publication root span blob creation through reference publication, so concurrent writers never strand a reference, publish one to a swept blob, or lose an append. ([ORB-10186])
 - **Terminal job-run retention**: `orbit gc runs` archives then purges conclusively terminal runs with independent success/failure ages, while retaining active, resumable, live, task/reservation/scoreboard-linked runs (rowless legacy bundles included) and refusing `--global`; audit evidence stays with `orbit gc audit`. ([ORB-10183])

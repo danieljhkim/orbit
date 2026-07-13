@@ -530,3 +530,15 @@ fn run_gc_archive_and_purge_ages_are_independently_configurable_and_ordered() {
         .expect_err("purge before archive must fail");
     assert!(error.to_string().contains("purge ages"), "{error}");
 }
+
+#[test]
+fn diagnostics_gc_retention_classes_are_independently_configurable() {
+    let defaults = load_config("").expect("default config loads");
+    assert_eq!(defaults.diagnostics_gc_retention_days(), (90, 90));
+
+    let configured = load_config(
+        "[gc.diagnostics]\nmetrics_retention_days = 30\nfriction_retention_days = 180\n",
+    )
+    .expect("diagnostics retention config loads");
+    assert_eq!(configured.diagnostics_gc_retention_days(), (30, 180));
+}

@@ -34,6 +34,11 @@ const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
 const DEFAULT_WORKFLOW_CREW: &str = "claude";
 pub(crate) const DEFAULT_WORKTREE_SUCCESS_RETENTION_DAYS: u64 = 0;
 pub(crate) const DEFAULT_WORKTREE_FAILURE_RETENTION_DAYS: u64 = 7;
+/// Default retention (in days) for closed diagnostics telemetry day-partitions.
+/// Diagnostic streams are unbounded append-only JSONL; ninety days keeps the
+/// dashboard's rolling history intact while bounding disk growth.
+pub(crate) const DEFAULT_DIAGNOSTICS_METRICS_RETENTION_DAYS: u64 = 90;
+pub(crate) const DEFAULT_DIAGNOSTICS_FRICTION_RETENTION_DAYS: u64 = 90;
 const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
 
 #[derive(Debug, Clone)]
@@ -66,6 +71,10 @@ pub(crate) struct RuntimeConfig {
     pub(crate) run_gc_purge_after_days: u64,
     pub(crate) run_gc_failure_archive_after_days: u64,
     pub(crate) run_gc_failure_purge_after_days: u64,
+    /// Days to retain closed diagnostics metrics/friction day-partitions
+    /// (`[gc.diagnostics]`). See `orbit gc diagnostics`.
+    pub(crate) diagnostics_gc_metrics_retention_days: u64,
+    pub(crate) diagnostics_gc_friction_retention_days: u64,
     /// Named provider-model assignments from `[crews.<name>]`.
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
@@ -125,6 +134,8 @@ impl RuntimeConfig {
             run_gc_purge_after_days: 30,
             run_gc_failure_archive_after_days: 30,
             run_gc_failure_purge_after_days: 90,
+            diagnostics_gc_metrics_retention_days: DEFAULT_DIAGNOSTICS_METRICS_RETENTION_DAYS,
+            diagnostics_gc_friction_retention_days: DEFAULT_DIAGNOSTICS_FRICTION_RETENTION_DAYS,
             crews: default_crews(),
             default_crew: Some(DEFAULT_WORKFLOW_CREW.to_string()),
             duel: DuelConfig::default(),
@@ -242,6 +253,8 @@ impl RuntimeConfig {
             run_gc_failure_archive_after_days,
             run_gc_failure_purge_after_days,
         ) = run_gc_retention_from_raw(parsed.gc.as_ref())?;
+        let (diagnostics_gc_metrics_retention_days, diagnostics_gc_friction_retention_days) =
+            diagnostics_gc_retention_from_raw(parsed.gc.as_ref());
         let crews = crews_from_raw(parsed.crews.as_ref())?;
         let default_crew = workflow_default_crew_from_raw(parsed.workflow.as_ref(), &crews)?;
         let duel = duel_from_raw(parsed.duel.as_ref())?;
@@ -279,6 +292,8 @@ impl RuntimeConfig {
             run_gc_purge_after_days,
             run_gc_failure_archive_after_days,
             run_gc_failure_purge_after_days,
+            diagnostics_gc_metrics_retention_days,
+            diagnostics_gc_friction_retention_days,
             crews,
             default_crew,
             duel,
@@ -323,6 +338,15 @@ impl RuntimeConfig {
             self.run_gc_purge_after_days,
             self.run_gc_failure_archive_after_days,
             self.run_gc_failure_purge_after_days,
+        )
+    }
+
+    /// Closed diagnostics day-partition retention in days, as
+    /// `(metrics, friction)`.
+    pub(crate) fn diagnostics_gc_retention_days(&self) -> (u64, u64) {
+        (
+            self.diagnostics_gc_metrics_retention_days,
+            self.diagnostics_gc_friction_retention_days,
         )
     }
 
@@ -728,6 +752,18 @@ fn run_gc_retention_from_raw(
         ));
     }
     Ok((archive, purge, failure_archive, failure_purge))
+}
+
+fn diagnostics_gc_retention_from_raw(raw: Option<&RawGcConfig>) -> (u64, u64) {
+    let diagnostics = raw.and_then(|gc| gc.diagnostics.as_ref());
+    (
+        diagnostics
+            .and_then(|diagnostics| diagnostics.metrics_retention_days)
+            .unwrap_or(DEFAULT_DIAGNOSTICS_METRICS_RETENTION_DAYS),
+        diagnostics
+            .and_then(|diagnostics| diagnostics.friction_retention_days)
+            .unwrap_or(DEFAULT_DIAGNOSTICS_FRICTION_RETENTION_DAYS),
+    )
 }
 
 fn workflow_base_branch_from_raw(raw: Option<&RawWorkflowConfig>) -> Result<String, OrbitError> {

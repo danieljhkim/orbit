@@ -169,10 +169,18 @@ not skipped. Journald, system logs, and third-party logs are out of scope.
 ### 3.4 Diagnostics (workspace)
 
 This collector owns closed metrics and diagnostic-friction JSONL partitions
-under the workspace diagnostics root. Its clock is the partition boundary plus
-persisted record/closure timestamps. The current partition, writer-owned files,
-malformed partitions, canonical friction records, tasks, learnings, and audit
-evidence are protected.
+under the workspace diagnostics root (`state/diagnostics/{metrics,friction}`).
+Each stream is day-partitioned (`<category>/YYYY-MM/DD.jsonl`) and the writer
+only ever appends to the current-day partition, so the clock is the partition's
+calendar day: a partition is *closed* once its day is strictly in the past. A
+closed partition is eligible only when its age exceeds the category-specific
+retention window — `[gc.diagnostics] metrics_retention_days` /
+`friction_retention_days`, default 90 days each, uniformly overridable by
+`--retention`. The current-day (and any future-dated) partition, malformed or
+ambiguously named files, canonical `.orbit/frictions` records, tasks, learnings,
+and audit evidence are never candidates; malformed files are reported as skips
+and retained. The partition-closure rule protects the live writer without any
+cross-process file lock. [ORB-10185]
 
 ### 3.5 Audit (workspace and global)
 
@@ -502,7 +510,7 @@ that same gate on a schedule.
 - [ORB-10182] — implemented managed worktree collection and terminal cleanup reuse.
 - [ORB-10183] — implemented staged terminal run archival and purge (rowless legacy bundles share the persisted-row protections; `runs` refuses `--global`).
 - [ORB-10184] — unified log retention: `orbit gc logs` + shared `plan_prune` (ADR-0221).
-- [ORB-10185] — will implement diagnostics retention.
+- [ORB-10185] — implemented diagnostics retention (`gc_diagnostics::DiagnosticsGcCollector`, `orbit gc diagnostics`; category-specific `[gc.diagnostics]` windows).
 - [ORB-10186] — will implement audit and blob collection.
 - [ORB-10187] — implemented generated-skill collection (`skill_gc::SkillsGcCollector`).
 - [ORB-10188] — implemented task archival (`TaskGcCollector`, `orbit gc tasks`).

@@ -68,7 +68,7 @@ Cargo, Gradle, Python, or Node caches outside one are not GC candidates.
 - [ORB-10182] — will implement managed worktree collection.
 - [ORB-10183] — implemented staged terminal run archival and purge.
 - [ORB-10184] — will implement operational log collection.
-- [ORB-10185] — will implement diagnostics collection.
+- [ORB-10185] — implemented diagnostics stream collection.
 - [ORB-10186] — will implement audit retention and blob reachability.
 - [ORB-10187] — will implement generated-skill collection.
 - [ORB-10188] — will implement terminal task archival.

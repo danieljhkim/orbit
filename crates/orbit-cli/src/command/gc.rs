@@ -7,6 +7,7 @@ use orbit_core::command::gc::{
     RunGcPolicy, SystemGcClock, WorktreeGcCollector, WorktreeGcPolicy, execute_gc,
 };
 use orbit_core::command::gc_audit::AuditGcCollector;
+use orbit_core::command::gc_diagnostics::{DiagnosticsGcCollector, DiagnosticsGcPolicy};
 use orbit_core::command::gc_logs::LogsGcCollector;
 use orbit_core::command::skill_gc::SkillsGcCollector;
 use orbit_core::command::task_gc::TaskGcCollector;
@@ -199,8 +200,10 @@ impl Execute for GcCommand {
             let report = self.run(&collector, scope, runtime)?;
             return self.finish(report);
         }
-        let selected_runtime = if matches!(target, GcTarget::Worktrees | GcTarget::Runs)
-            && scope.root() != runtime.paths().orbit_dir
+        let selected_runtime = if matches!(
+            target,
+            GcTarget::Worktrees | GcTarget::Runs | GcTarget::Diagnostics
+        ) && scope.root() != runtime.paths().orbit_dir
         {
             Some(OrbitRuntime::from_roots(
                 &runtime.paths().global_dir,
@@ -242,6 +245,18 @@ impl Execute for GcCommand {
             .map(Duration::from_secs);
         let logs = matches!(target, GcTarget::Logs)
             .then(|| LogsGcCollector::from_scope(&scope, retention_window));
+        let diagnostics = matches!(target, GcTarget::Diagnostics).then(|| {
+            let (metrics_retention_days, friction_retention_days) =
+                collector_runtime.diagnostics_gc_retention_days();
+            DiagnosticsGcCollector::from_scope(
+                &scope,
+                DiagnosticsGcPolicy {
+                    metrics_retention_days,
+                    friction_retention_days,
+                },
+                retention_window,
+            )
+        });
         let empty = EmptyGcCollector::new(target);
         let collector: &dyn GcCollector = if target == GcTarget::Worktrees {
             &worktrees
@@ -249,6 +264,8 @@ impl Execute for GcCommand {
             &runs
         } else if let Some(logs) = logs.as_ref() {
             logs
+        } else if let Some(diagnostics) = diagnostics.as_ref() {
+            diagnostics
         } else {
             &empty
         };
