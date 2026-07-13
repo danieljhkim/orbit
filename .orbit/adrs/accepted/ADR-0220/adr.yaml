@@ -5,12 +5,13 @@ status: accepted
 owner: codex
 created_at: 2026-07-12T21:22:27.975299792Z
 accepted_at: 2026-07-12T21:25:28.062180793Z
-last_updated: 2026-07-12T21:38:23.158139268Z
+last_updated: 2026-07-12T22:43:50.675692355Z
 related_features:
 - gc
 related_tasks:
 - ORB-10178
 - ORB-10180
+- ORB-10186
 tags:
 - gc
 - retention
@@ -19,6 +20,9 @@ paths:
 - docs/design/gc/**
 - crates/orbit-cli/src/command/gc/**
 - crates/orbit-core/src/command/gc/**
+- crates/orbit-core/src/command/gc_audit.rs
+- crates/orbit-store/src/sqlite/audit_event_store/**
+- crates/orbit-store/src/sqlite/v2_audit_store/**
 - crates/orbit-core/src/config/**
 supersedes: []
 legacy_ids: []

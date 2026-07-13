@@ -10,7 +10,7 @@ summary: Records the durable choice of one explicit, safety-first Orbit garbage-
 tags: [gc, retention, safety]
 paths: ["docs/design/gc/**", "crates/orbit-cli/src/command/gc/**", "crates/orbit-core/src/command/gc/**"]
 related_features: [gc]
-related_artifacts: [ADR-0220, ADR-0221, ORB-10178, ORB-10180, ORB-10184]
+related_artifacts: [ADR-0220, ADR-0221, ORB-10178, ORB-10180, ORB-10184, ORB-10186]
 ---
 
 # Garbage Collection — Decisions
@@ -47,6 +47,20 @@ non-bypassable containment, symlink, current-owner, and ambiguity protections;
   overrides highest.
 - Partial failure preserves successful mutations, reports every skip/error, and
   returns non-zero; reruns are idempotent.
+- Audit collection implements the same contract by deleting expired envelopes
+  before sweeping blobs and recomputing reachability at blob revalidation;
+  holds, exports, and retained job-run bundles participate in the mark set. Its
+  domain writer protocol is a workspace audit writer/GC guard (ORB-10186): an
+  advisory lock every v2/loop/blob publication path shares with the collector,
+  held under the host GC lock from the final mark/fingerprint validation through
+  the envelope/blob unlink so a concurrent writer can neither strand a retained
+  reference nor lose an append. Because a blob and the reference that names it
+  are published by two separate guarded calls, a durable per-blob
+  pending-publication marker (`state/audit/pending/<hash>`) bridges the gap: the
+  collector treats a fresh marker as a live reference (fail closed) and reclaims
+  only markers whose retention window has closed, so no published reference can
+  point at a swept blob and a never-published blob leaks no longer than the
+  retention window.
 - Code anchors: `execute_gc` freezes and consumes plans under the host lock;
   `validate_candidate_path` enforces containment and no-follow path checks.
   Both cite ADR-0220 at the enforcement point; collector review covers the
@@ -101,5 +115,6 @@ manifest, report). The active inode is never deleted or truncated on any path
 - [ORB-10180] — implemented the shared framework and top-level command grammar.
 - [ORB-10184] — implemented log GC; made startup rotation non-destructive with
   all deletion behind the explicit apply gate (ADR-0221).
+- [ORB-10186] — implemented unified audit retention and blob mark-and-sweep.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

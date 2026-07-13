@@ -1,3 +1,4 @@
+mod audit_pending;
 mod blob_store;
 mod glob;
 mod jitter;

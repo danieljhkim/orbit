@@ -230,6 +230,14 @@ fn gc_scope_flags_conflict() {
     assert!(error.to_string().contains("cannot be used with"));
 }
 
+#[test]
+fn deprecated_audit_prune_is_plan_only_without_apply() {
+    assert!(Cli::try_parse_from(["orbit", "audit", "prune", "--older-than", "30d"]).is_ok());
+    assert!(
+        Cli::try_parse_from(["orbit", "audit", "prune", "--older-than", "30d", "--apply",]).is_ok()
+    );
+}
+
 // ORB-10188 P1: the rejected-task opt-in must be reachable from the operator
 // surface, not just an internal builder. The tasks-only `--include-rejected`
 // flag parses onto the command.

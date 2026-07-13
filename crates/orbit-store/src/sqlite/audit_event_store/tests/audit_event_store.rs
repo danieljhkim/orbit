@@ -512,3 +512,27 @@ fn audit_event_aggregates_by_role_splits_subcommand_surface() {
     assert_eq!(human.mcp, 0);
     assert_eq!(human.cli, 1);
 }
+
+#[test]
+fn audit_gc_projection_and_compare_delete_are_restart_safe() {
+    let store = Store::open_in_memory().expect("open store");
+    store
+        .insert_audit_event_record(&sample_params_with(
+            "gc-row",
+            "codex",
+            AuditEventStatus::Success,
+        ))
+        .expect("insert");
+    let rows = store.list_legacy_audit_rows_for_gc().expect("gc rows");
+    assert_eq!(rows.len(), 1);
+    assert!(
+        store
+            .delete_legacy_audit_row_for_gc(rows[0].id, &rows[0].timestamp)
+            .expect("delete")
+    );
+    assert!(
+        !store
+            .delete_legacy_audit_row_for_gc(rows[0].id, &rows[0].timestamp)
+            .expect("idempotent delete")
+    );
+}
