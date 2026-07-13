@@ -96,68 +96,8 @@ impl<'a> RunGcCollector<'a> {
                 "terminal transition timestamp is absent",
             ));
         };
-        if std::env::var("ORBIT_RUN_ID").ok().as_deref() == Some(run.run_id.as_str()) {
-            return Ok(Classified::skip(
-                &run.run_id,
-                "current_run",
-                "the current process owns this run",
-            ));
-        }
-        if !gc_owner_permits_reclaim(run) {
-            return Ok(Classified::skip(
-                &run.run_id,
-                "live_or_inconclusive",
-                "recorded owner is alive or its liveness is inconclusive",
-            ));
-        }
-        if self.is_resumable(run)? {
-            return Ok(Classified::skip(
-                &run.run_id,
-                "resumable",
-                "run has persisted recovery checkpoints",
-            ));
-        }
-        if !self
-            .runtime
-            .list_tasks_filtered(None, None, None, Some(&run.run_id), None, None)?
-            .is_empty()
-        {
-            return Ok(Classified::skip(
-                &run.run_id,
-                "task_linked",
-                "a retained task still references this run",
-            ));
-        }
-        if self.has_active_reservation(&run.run_id, context)? {
-            return Ok(Classified::skip(
-                &run.run_id,
-                "reservation_held",
-                "an active task reservation still belongs to this run",
-            ));
-        }
-        if self
-            .runtime
-            .stores()
-            .jobs()
-            .list_runs_for_gc()?
-            .iter()
-            .any(|other| {
-                other.run.run_id != run.run_id
-                    && other.run.retry_source_run_id.as_deref() == Some(run.run_id.as_str())
-            })
-        {
-            return Ok(Classified::skip(
-                &run.run_id,
-                "retry_linked",
-                "a retained retry run still references this source run",
-            ));
-        }
-        if scoreboard_references(&self.runtime.paths().scoreboard_dir, &run.run_id)? {
-            return Ok(Classified::skip(
-                &run.run_id,
-                "scoreboard_linked",
-                "a retained aggregate scoreboard still references this run",
-            ));
+        if let Some(hold) = self.protection_hold(run, context)? {
+            return Ok(Classified::Skip(hold));
         }
 
         let policy = self.policy.validate()?;
@@ -202,6 +142,78 @@ impl<'a> RunGcCollector<'a> {
                 .map_err(|error| OrbitError::Execution(error.to_string()))?,
             allow_owned_symlink: false,
         }))
+    }
+
+    /// Live ownership, liveness, and reference protections shared by persisted
+    /// rows and rowless legacy bundles. Returns the first hold that trips so both
+    /// candidate kinds fail closed on the *same* conditions — owner liveness/PID
+    /// identity, resumable recovery checkpoints, retained task/retry links, active
+    /// reservations, and aggregate scoreboard references (criteria 2 and 5). A
+    /// legacy bundle must clear every one of these before it is eligible, exactly
+    /// as an authoritative row must.
+    fn protection_hold(
+        &self,
+        run: &JobRun,
+        context: &GcContext<'_>,
+    ) -> Result<Option<GcSkip>, OrbitError> {
+        let hold = |code: &str, reason: &str| {
+            Some(GcSkip {
+                id: run.run_id.clone(),
+                code: code.to_string(),
+                reason: reason.to_string(),
+            })
+        };
+        if std::env::var("ORBIT_RUN_ID").ok().as_deref() == Some(run.run_id.as_str()) {
+            return Ok(hold("current_run", "the current process owns this run"));
+        }
+        if !gc_owner_permits_reclaim(run) {
+            return Ok(hold(
+                "live_or_inconclusive",
+                "recorded owner is alive or its liveness is inconclusive",
+            ));
+        }
+        if self.is_resumable(run)? {
+            return Ok(hold("resumable", "run has persisted recovery checkpoints"));
+        }
+        if !self
+            .runtime
+            .list_tasks_filtered(None, None, None, Some(&run.run_id), None, None)?
+            .is_empty()
+        {
+            return Ok(hold(
+                "task_linked",
+                "a retained task still references this run",
+            ));
+        }
+        if self.has_active_reservation(&run.run_id, context)? {
+            return Ok(hold(
+                "reservation_held",
+                "an active task reservation still belongs to this run",
+            ));
+        }
+        if self
+            .runtime
+            .stores()
+            .jobs()
+            .list_runs_for_gc()?
+            .iter()
+            .any(|other| {
+                other.run.run_id != run.run_id
+                    && other.run.retry_source_run_id.as_deref() == Some(run.run_id.as_str())
+            })
+        {
+            return Ok(hold(
+                "retry_linked",
+                "a retained retry run still references this source run",
+            ));
+        }
+        if scoreboard_references(&self.runtime.paths().scoreboard_dir, &run.run_id)? {
+            return Ok(hold(
+                "scoreboard_linked",
+                "a retained aggregate scoreboard still references this run",
+            ));
+        }
+        Ok(None)
     }
 
     fn is_resumable(&self, run: &JobRun) -> Result<bool, OrbitError> {
@@ -340,7 +352,7 @@ impl GcCollector for RunGcCollector<'_> {
         let expected: ExpectedState = serde_json::from_str(&candidate.expected_state)
             .map_err(|error| OrbitError::Execution(format!("invalid frozen run state: {error}")))?;
         if !expected.persisted {
-            return revalidate_stale_bundle(candidate, &expected, context);
+            return self.revalidate_stale_bundle(candidate, &expected, context);
         }
         self.reclassify(&expected, context)
     }
@@ -353,6 +365,22 @@ impl GcCollector for RunGcCollector<'_> {
         let expected: ExpectedState = serde_json::from_str(&candidate.expected_state)
             .map_err(|error| OrbitError::Execution(format!("invalid frozen run state: {error}")))?;
         if !expected.persisted {
+            // Rowless legacy bundles take the *same* per-run claim guard as the
+            // persisted path and hold it across the final no-row/protection
+            // revalidation and the filesystem mutation, so a live or resumable
+            // owner claiming the run — or an authoritative row materializing —
+            // between plan and apply cannot race the archive/purge (criteria 2
+            // and 5).
+            let _guard =
+                run_claim_guard::acquire(&self.runtime.paths().state_dir, &expected.run_id)?;
+            if !matches!(
+                self.revalidate_stale_bundle(candidate, &expected, context)?,
+                GcRevalidation::Ready
+            ) {
+                return Err(OrbitError::Execution(
+                    "legacy bundle eligibility changed while acquiring its claim guard".to_string(),
+                ));
+            }
             if let Some(path) = candidate.path.as_deref() {
                 mutate_legacy_path(path, context.scope.root(), &expected, &candidate.action)?;
             }
@@ -385,6 +413,74 @@ impl GcCollector for RunGcCollector<'_> {
 }
 
 impl RunGcCollector<'_> {
+    /// Revalidate a rowless legacy bundle before mutation. Beyond confirming the
+    /// bundle's identity/terminal state and age are unchanged, this fails closed
+    /// when an authoritative row has since appeared (the persisted collector owns
+    /// it then) and re-runs the shared ownership/liveness/reference protections on
+    /// the freshly-read bundle, so a live/resumable owner or a retained reference
+    /// blocks the archive/purge (criteria 2 and 5). The legacy `apply` path holds
+    /// the per-run claim guard across this check and the mutation.
+    fn revalidate_stale_bundle(
+        &self,
+        candidate: &GcCandidate,
+        expected: &ExpectedState,
+        context: &GcContext<'_>,
+    ) -> Result<GcRevalidation, OrbitError> {
+        let Some(path) = candidate.path.as_deref() else {
+            return Ok(GcRevalidation::Skip {
+                code: "missing_path".to_string(),
+                reason: "legacy bundle path is absent".to_string(),
+            });
+        };
+        let run = match read_legacy_run(path) {
+            Ok(run) => run,
+            Err(_) => {
+                return Ok(GcRevalidation::Skip {
+                    code: "bundle_changed".to_string(),
+                    reason: "legacy bundle disappeared or became unreadable".to_string(),
+                });
+            }
+        };
+        if run.run_id != expected.run_id
+            || run.job_id != expected.job_id
+            || run.state != expected.state
+            || run.finished_at != Some(expected.finished_at)
+        {
+            return Ok(GcRevalidation::Skip {
+                code: "bundle_changed".to_string(),
+                reason: "legacy bundle identity or terminal state changed".to_string(),
+            });
+        }
+        if context.clock.now() < expected.eligible_at {
+            return Ok(GcRevalidation::Skip {
+                code: "retention_changed".to_string(),
+                reason: "terminal timestamp is now in the future".to_string(),
+            });
+        }
+        if self
+            .runtime
+            .stores()
+            .jobs()
+            .list_runs_for_gc()?
+            .iter()
+            .any(|record| record.run.run_id == expected.run_id)
+        {
+            return Ok(GcRevalidation::Skip {
+                code: "row_appeared".to_string(),
+                reason:
+                    "an authoritative run row now exists; the persisted collector owns this run"
+                        .to_string(),
+            });
+        }
+        if let Some(hold) = self.protection_hold(&run, context)? {
+            return Ok(GcRevalidation::Skip {
+                code: hold.code,
+                reason: hold.reason,
+            });
+        }
+        Ok(GcRevalidation::Ready)
+    }
+
     fn inventory_stale_legacy(
         &self,
         context: &GcContext<'_>,
@@ -439,6 +535,14 @@ impl RunGcCollector<'_> {
                         });
                         continue;
                     };
+                    // Fail closed on the same ownership/liveness/reference holds
+                    // the persisted path enforces, so a rowless legacy bundle is
+                    // never eligible while a live/resumable owner or a retained
+                    // task/retry/reservation/scoreboard reference still uses it.
+                    if let Some(hold) = self.protection_hold(&run, context)? {
+                        plan.skipped.push(hold);
+                        continue;
+                    }
                     let (archive_days, purge_days) = self.policy.validate()?.ages_for(run.state);
                     let (action, required_days) = if archived {
                         ("purge", purge_days)
@@ -571,45 +675,6 @@ fn mutate_legacy_path(
         }
     }
     Ok(())
-}
-
-fn revalidate_stale_bundle(
-    candidate: &GcCandidate,
-    expected: &ExpectedState,
-    context: &GcContext<'_>,
-) -> Result<GcRevalidation, OrbitError> {
-    let Some(path) = candidate.path.as_deref() else {
-        return Ok(GcRevalidation::Skip {
-            code: "missing_path".to_string(),
-            reason: "legacy bundle path is absent".to_string(),
-        });
-    };
-    let run = match read_legacy_run(path) {
-        Ok(run) => run,
-        Err(_) => {
-            return Ok(GcRevalidation::Skip {
-                code: "bundle_changed".to_string(),
-                reason: "legacy bundle disappeared or became unreadable".to_string(),
-            });
-        }
-    };
-    if run.run_id != expected.run_id
-        || run.job_id != expected.job_id
-        || run.state != expected.state
-        || run.finished_at != Some(expected.finished_at)
-    {
-        return Ok(GcRevalidation::Skip {
-            code: "bundle_changed".to_string(),
-            reason: "legacy bundle identity or terminal state changed".to_string(),
-        });
-    }
-    if context.clock.now() < expected.eligible_at {
-        return Ok(GcRevalidation::Skip {
-            code: "retention_changed".to_string(),
-            reason: "terminal timestamp is now in the future".to_string(),
-        });
-    }
-    Ok(GcRevalidation::Ready)
 }
 
 fn scoreboard_references(root: &Path, run_id: &str) -> Result<bool, OrbitError> {

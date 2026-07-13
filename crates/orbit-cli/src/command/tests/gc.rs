@@ -112,6 +112,51 @@ fn gc_is_plan_only_by_default_and_parses_target() {
     }
 }
 
+// ORB-10183 P1: run GC is workspace-only; `--global` must be refused before a
+// runtime is built or any state is scanned/mutated.
+#[test]
+fn gc_runs_rejects_global_scope_before_any_mutation() {
+    use super::super::Execute;
+    use super::super::gc::GcCommand;
+    use orbit_core::{OrbitError, OrbitRuntime};
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let global = temp.path().join("global");
+    let orbit = temp.path().join("repo/.orbit");
+    std::fs::create_dir_all(&global).expect("global root");
+    std::fs::create_dir_all(&orbit).expect("workspace root");
+    std::fs::write(orbit.join("config.toml"), "").expect("config");
+    let runtime = OrbitRuntime::from_roots(&global, &orbit).expect("runtime");
+
+    let command = GcCommand {
+        target: GcTargetArg::Runs,
+        apply: true,
+        json: false,
+        retention: None,
+        success_retention_days: None,
+        failure_retention_days: None,
+        archive_after_days: None,
+        purge_after_days: None,
+        failure_archive_after_days: None,
+        failure_purge_after_days: None,
+        workspace: None,
+        global: true,
+    };
+    let error = command
+        .execute(&runtime)
+        .expect_err("runs --global must be rejected");
+    assert!(
+        matches!(error, OrbitError::InvalidInput(_)),
+        "expected InvalidInput, got {error:?}"
+    );
+    // Refused before constructing a collector runtime, acquiring the GC lock, or
+    // writing a manifest: no GC state is created under the global root.
+    assert!(
+        !global.join("state/gc").exists(),
+        "no GC manifest/lock state must be created on rejection"
+    );
+}
+
 #[test]
 fn gc_scope_flags_conflict() {
     let error =

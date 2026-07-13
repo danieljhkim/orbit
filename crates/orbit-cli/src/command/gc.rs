@@ -91,6 +91,16 @@ pub struct GcCommand {
 impl Execute for GcCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let target = GcTarget::from(self.target);
+        // Runs retention is workspace-only per the normative GC design (§3.2):
+        // reject `--global` before constructing a runtime or planning so an
+        // unsupported scope refuses rather than scanning/mutating the wrong
+        // (global) state tree.
+        if self.global && target == GcTarget::Runs {
+            return Err(OrbitError::InvalidInput(
+                "run garbage collection is workspace-only; `--global` is not a supported scope"
+                    .to_string(),
+            ));
+        }
         if target != GcTarget::Worktrees
             && (self.success_retention_days.is_some() || self.failure_retention_days.is_some())
         {
