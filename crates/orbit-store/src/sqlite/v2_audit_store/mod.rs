@@ -47,6 +47,47 @@ pub struct V2AuditEventRow {
 }
 
 impl Store {
+    /// Unbounded, workspace-scoped projection for audit GC.  User-facing list
+    /// APIs remain paginated; collection must see every retained reference.
+    pub fn list_v2_audit_events_for_gc(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<V2AuditEventRow>, OrbitError> {
+        let conn = self.read()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, workspace_id, event_id, source, schema_version, event_type, ts, \
+                 run_id, agent_identity, parent_event_id, workspace_path, payload_json \
+                 FROM v2_audit_events WHERE workspace_id = ?1 ORDER BY id",
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let rows = stmt
+            .query_map([workspace_id], row_to_v2_audit_event)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        collect_rows(rows)
+    }
+
+    /// Compare-and-delete one v2 envelope from a frozen GC plan.
+    pub fn delete_v2_audit_event_for_gc(
+        &self,
+        workspace_id: &str,
+        id: i64,
+        expected_event_id: &str,
+    ) -> Result<bool, OrbitError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let changed = conn
+            .execute(
+                "DELETE FROM v2_audit_events \
+                 WHERE workspace_id = ?1 AND id = ?2 AND event_id = ?3",
+                rusqlite::params![workspace_id, id, expected_event_id],
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        Ok(changed == 1)
+    }
+
     pub fn insert_v2_audit_event(
         &self,
         params: &V2AuditEventInsertParams,
@@ -226,5 +267,47 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].event_id, "evt-ws_a");
         assert_eq!(store.count_v2_audit_events(&filter).expect("count"), 1);
+    }
+
+    #[test]
+    fn gc_projection_and_compare_delete_are_workspace_scoped_and_idempotent() {
+        let store = Store::open_in_memory().expect("store");
+        let ts = Utc::now();
+        for workspace_id in ["ws_a", "ws_b"] {
+            store
+                .insert_v2_audit_event(&V2AuditEventInsertParams {
+                    workspace_id: workspace_id.to_string(),
+                    event_id: format!("evt-{workspace_id}"),
+                    source: "v2_envelope".to_string(),
+                    schema_version: 1,
+                    event_type: "test".to_string(),
+                    ts,
+                    run_id: "run".to_string(),
+                    agent_identity: "codex".to_string(),
+                    parent_event_id: None,
+                    workspace_path: None,
+                    payload_json: "{}".to_string(),
+                })
+                .expect("insert");
+        }
+        let rows = store.list_v2_audit_events_for_gc("ws_a").expect("list");
+        assert_eq!(rows.len(), 1);
+        assert!(
+            store
+                .delete_v2_audit_event_for_gc("ws_a", rows[0].id, &rows[0].event_id)
+                .expect("delete")
+        );
+        assert!(
+            !store
+                .delete_v2_audit_event_for_gc("ws_a", rows[0].id, &rows[0].event_id)
+                .expect("idempotent delete")
+        );
+        assert_eq!(
+            store
+                .list_v2_audit_events_for_gc("ws_b")
+                .expect("other")
+                .len(),
+            1
+        );
     }
 }

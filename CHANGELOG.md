@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Unified audit retention**: `orbit gc audit` plans/applies workspace-scoped legacy/v2 envelope retention plus reference-safe blob sweeping; deprecated `orbit audit prune` routes to the same collector. An audit writer/GC guard and a durable per-blob pending-publication root span blob creation through reference publication, so concurrent writers never strand a reference, publish one to a swept blob, or lose an append. ([ORB-10186])
 - **Terminal job-run retention**: `orbit gc runs` archives then purges conclusively terminal runs with independent success/failure ages, while retaining active, resumable, live, task/reservation/scoreboard-linked runs (rowless legacy bundles included) and refusing `--global`; audit evidence stays with `orbit gc audit`. ([ORB-10183])
 - **Explicit operational log GC**: `orbit gc logs` plans/applies the configured age + total-size retention for Orbit-owned log archives, including an `ORBIT_LOG_PATH` outside the default root via allowlisted owned-root containment. Startup rotation is non-destructive (rolls + reports only); archive deletion goes solely through the explicit apply gate, never the active inode. ([ORB-10184])
 - **Stale managed-skill GC**: `orbit gc skills` reclaims retired Orbit-generated skill directories (tombstoned + fingerprint-proven) and stale/broken Orbit-owned agent-root links, using ORB-10181 ownership metadata. Modified generated content, same-named user skills, foreign links, and current-skill link repairs are retained/reported separately, never deleted. ([ORB-10187])

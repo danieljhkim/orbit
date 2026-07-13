@@ -6,6 +6,7 @@ use orbit_core::command::gc::{
     EmptyGcCollector, GcCollector, GcReport, GcRequest, GcScope, GcTarget, RunGcCollector,
     RunGcPolicy, SystemGcClock, WorktreeGcCollector, WorktreeGcPolicy, execute_gc,
 };
+use orbit_core::command::gc_audit::AuditGcCollector;
 use orbit_core::command::gc_logs::LogsGcCollector;
 use orbit_core::command::skill_gc::SkillsGcCollector;
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -148,6 +149,29 @@ impl Execute for GcCommand {
         } else {
             resolve_workspace_scope(self.workspace.as_deref(), runtime)?
         };
+        // Audit is a workspace-scoped collector; it resolves the concrete
+        // workspace id under its scope and runs the AuditGcCollector, which
+        // holds the workspace audit writer/GC guard across mark→delete
+        // (ORB-10186). A global scope has no audit root to collect, so reject it.
+        if target == GcTarget::Audit {
+            if matches!(scope, GcScope::Global { .. }) {
+                return Err(OrbitError::InvalidInput(
+                    "audit GC requires a workspace; use --workspace <id-or-path>".to_string(),
+                ));
+            }
+            let workspace_id = match &scope {
+                GcScope::Workspace {
+                    workspace_id: Some(id),
+                    ..
+                } => id.clone(),
+                GcScope::Workspace { .. } => runtime.workspace_id()?,
+                GcScope::Global { .. } => unreachable!("global audit scope rejected above"),
+            };
+            let collector =
+                AuditGcCollector::new(runtime.sqlite_store()?, workspace_id, scope.root());
+            let report = self.run(&collector, scope, runtime)?;
+            return self.finish(report);
+        }
         let selected_runtime = if matches!(target, GcTarget::Worktrees | GcTarget::Runs)
             && scope.root() != runtime.paths().orbit_dir
         {
@@ -291,7 +315,7 @@ fn resolve_workspace_scope(
     })
 }
 
-fn print_human_report(report: &orbit_core::command::gc::GcReport) {
+pub(crate) fn print_human_report(report: &orbit_core::command::gc::GcReport) {
     println!(
         "GC {:?} {} ({:?})",
         report.mode, report.plan_id, report.outcome

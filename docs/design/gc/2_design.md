@@ -10,7 +10,7 @@ summary: Specifies GC grammar, collector ownership, retention clocks, safety inv
 tags: [gc, retention, safety]
 paths: ["crates/orbit-cli/src/command/gc.rs", "crates/orbit-core/src/command/gc.rs", "crates/orbit-core/src/command/gc_logs.rs", "crates/orbit-common/src/utility/log_rotation.rs", "crates/orbit-core/src/config/**"]
 related_features: [gc, activity-job, auditability, task-artifacts, worktree-artifacts]
-related_artifacts: [ORB-10178, ORB-10180, ORB-10181, ORB-10183, ORB-10184, ADR-0220, ADR-0221]
+related_artifacts: [ORB-10178, ORB-10180, ORB-10181, ORB-10183, ORB-10184, ORB-10186, ADR-0220, ADR-0221]
 ---
 
 # Garbage Collection — Design
@@ -184,6 +184,58 @@ only unreachable blobs enter the sweep plan. Ordering must ensure a retained
 envelope never points at a deleted blob. The GC operation writes a deletion
 manifest or out-of-band audit event that the active plan cannot recursively
 collect.
+
+The workspace collector uses a 90-day built-in event retention (overridable by
+`--retention`). Legacy rows are attributed by their recorded working directory;
+v2 SQLite rows by workspace ID. A loop JSONL file is eligible only when every
+non-empty line parses, carries a timestamp older than the cutoff, and is not
+associated with a retained job-run bundle. Malformed or timestamp-free files
+are retained fail-closed.
+
+The mark set walks every retained legacy/v2/JSONL payload plus files beneath
+`state/audit/holds`, `state/audit/exports`, and `state/job-runs`. Blob-shaped
+SHA-256 references in any of those surfaces protect the content-addressed file.
+Apply orders database rows and JSONL envelopes before blob candidates; each
+blob is re-marked immediately before deletion, and changed files become
+`stale_plan` skips. Missing blobs referenced by retained evidence are reported
+as integrity errors rather than hidden or recreated. `orbit audit prune` is a
+deprecated compatibility projection of this same collector and requires its
+own explicit `--apply` mutation gate.
+
+The host GC lock serializes GC processes but not audit *writers*, so the final
+re-mark/fingerprint validation and the envelope/blob deletion must be atomic
+against a concurrent writer that could publish a retained reference (or append
+a live loop envelope) in that window. The collector therefore takes a
+**workspace audit writer/GC guard** (ORB-10186) — one advisory file lock at the
+audit root (`state/audit/.gc-writer.lock`) — and holds it continuously across
+`[final mark/fingerprint validation .. envelope/blob deletion]`. Every audit
+writer path acquires the *same* guard across its publication: workspace v2
+event publication, loop event/JSONL append, and content-addressed blob
+publication. Lock ordering is fixed — **host GC lock → audit writer guard →
+filesystem mutation** — and the guard is a filesystem advisory lock, never the
+SQLite write lock, so no database lock is held across a blob/JSONL unlink. A
+writer that wins the guard publishes its reference before the re-mark observes
+it (the blob is retained); a collector that wins deletes only genuinely
+unreachable evidence while the writer blocks and then republishes (its
+content-addressed write recreates the blob) — a retained envelope never points
+at a swept blob, and no append is lost.
+
+The guard makes each *individual* audit write atomic against the collector, but
+a content-addressed blob and the envelope/loop event that references it are
+published by two *separate* guarded calls (`write_blob`, then
+`write_envelope`/`emit`), with the guard released in between. Without more, the
+collector could sweep the just-written—but not-yet-referenced—blob in that gap
+and strand the later reference. A durable **pending-publication root** closes
+that split transaction: `write_blob` records a marker `state/audit/pending/<hash>`
+(atomic with the blob, under the guard) stamped with the write time, and the
+publication path clears it once the referencing row is durable (again under the
+guard, after the row commits) — so at no guarded instant is a blob both unmarked
+and unreferenced. The collector treats a marker inside the retention window as a
+live reference (the blob is never a sweep candidate, and `apply` fails closed on
+it); a marker older than the cutoff has outlived any publication window and is
+reclaimed as an ordinary candidate together with its orphaned blob, bounding a
+never-published blob to the retention window rather than leaking it. Markers are
+plain files written atomically, so a crash mid-publish is restart-safe.
 
 ### 3.6 Skills (global)
 
