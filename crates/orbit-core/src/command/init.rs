@@ -361,6 +361,18 @@ pub(crate) fn skill_link_roots(base_root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Roots inspected by `orbit gc skills` for `global_root`: the global
+/// generated-skill directory plus the per-agent skill-link roots init seeds
+/// symlinks into. Shares link-root resolution with init so GC scans exactly
+/// the locations init writes.
+pub(crate) fn skill_gc_roots(global_root: &Path) -> (PathBuf, Vec<PathBuf>) {
+    let target = resolve_init_target_from_root(global_root);
+    (
+        global_skills_dir(&target.orbit_root),
+        target.skills_links_roots,
+    )
+}
+
 fn find_git_repo_root(start: &Path) -> Option<PathBuf> {
     crate::paths::find_git_repo_root(start)
 }
