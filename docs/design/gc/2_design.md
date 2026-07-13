@@ -434,7 +434,7 @@ limited to non-destructive setup and active-file rotation.
 - [ORB-10184] — will unify log retention.
 - [ORB-10185] — will implement diagnostics retention.
 - [ORB-10186] — will implement audit and blob collection.
-- [ORB-10187] — will implement generated-skill collection.
+- [ORB-10187] — implemented generated-skill collection (`skill_gc::SkillsGcCollector`).
 - [ORB-10188] — will implement task archival.
 - [ORB-10189] — will implement aggregate and automatic collection.
 

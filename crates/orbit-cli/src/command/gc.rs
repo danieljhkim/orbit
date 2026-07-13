@@ -2,10 +2,11 @@ use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
 use orbit_core::command::gc::{
-    EmptyGcCollector, GcCollector, GcRequest, GcScope, GcTarget, SystemGcClock,
+    EmptyGcCollector, GcCollector, GcReport, GcRequest, GcScope, GcTarget, SystemGcClock,
     WorktreeGcCollector, WorktreeGcPolicy, execute_gc,
 };
 use orbit_core::command::gc_audit::AuditGcCollector;
+use orbit_core::command::skill_gc::SkillsGcCollector;
 use orbit_core::{OrbitError, OrbitRuntime};
 
 use super::Execute;
@@ -83,7 +84,26 @@ impl Execute for GcCommand {
                 "worktree retention overrides require the `worktrees` target".to_string(),
             ));
         }
-        let defaults_global = matches!(target, GcTarget::Logs | GcTarget::Skills);
+        // Skills is a global-only collector whose owned state spans the global
+        // generated-skill root and the per-agent link roots; it resolves its own
+        // scope rather than following the generic workspace/global split. An
+        // explicit `--workspace` selector has no meaning here, so reject it up
+        // front rather than silently performing a global GC. The default and an
+        // explicit `--global` both continue to select this collector.
+        if target == GcTarget::Skills {
+            if self.workspace.is_some() {
+                return Err(OrbitError::InvalidInput(
+                    "`gc skills` operates on global Orbit-owned state; the `--workspace` \
+                     selector is not supported"
+                        .to_string(),
+                ));
+            }
+            let collector = SkillsGcCollector::for_global_root(&runtime.paths().global_dir);
+            let scope = collector.scope();
+            let report = self.run(&collector, scope, runtime)?;
+            return self.finish(report);
+        }
+        let defaults_global = matches!(target, GcTarget::Logs);
         let scope = if self.global || (self.workspace.is_none() && defaults_global) {
             GcScope::Global {
                 root: runtime.paths().global_dir.clone(),
@@ -91,18 +111,11 @@ impl Execute for GcCommand {
         } else {
             resolve_workspace_scope(self.workspace.as_deref(), runtime)?
         };
-        let selected_runtime =
-            if target == GcTarget::Worktrees && scope.root() != runtime.paths().orbit_dir {
-                Some(OrbitRuntime::from_roots(
-                    &runtime.paths().global_dir,
-                    scope.root(),
-                )?)
-            } else {
-                None
-            };
-        let collector_runtime = selected_runtime.as_ref().unwrap_or(runtime);
-        let clock = SystemGcClock;
-        let report = if target == GcTarget::Audit {
+        // Audit is a workspace-scoped collector; it resolves the concrete
+        // workspace id under its scope and runs the AuditGcCollector, which
+        // holds the workspace audit writer/GC guard across mark→delete
+        // (ORB-10186). A global scope has no audit root to collect, so reject it.
+        if target == GcTarget::Audit {
             if matches!(scope, GcScope::Global { .. }) {
                 return Err(OrbitError::InvalidInput(
                     "audit GC requires a workspace; use --workspace <id-or-path>".to_string(),
@@ -118,43 +131,60 @@ impl Execute for GcCommand {
             };
             let collector =
                 AuditGcCollector::new(runtime.sqlite_store()?, workspace_id, scope.root());
-            execute_gc(
-                &collector,
-                GcRequest {
-                    apply: self.apply,
-                    scope,
-                    retention_override: self.retention.as_deref(),
-                    global_state_dir: &runtime.paths().global_dir.join("state"),
-                    clock: &clock,
-                },
-            )?
-        } else {
-            let worktree_policy = WorktreeGcPolicy {
-                success_retention_days: self
-                    .success_retention_days
-                    .unwrap_or_else(|| collector_runtime.worktree_gc_success_retention_days()),
-                failure_retention_days: self
-                    .failure_retention_days
-                    .unwrap_or_else(|| collector_runtime.worktree_gc_failure_retention_days()),
-            };
-            let worktrees = WorktreeGcCollector::new(collector_runtime, worktree_policy);
-            let empty = EmptyGcCollector::new(target);
-            let collector: &dyn GcCollector = if target == GcTarget::Worktrees {
-                &worktrees
+            let report = self.run(&collector, scope, runtime)?;
+            return self.finish(report);
+        }
+        let selected_runtime =
+            if target == GcTarget::Worktrees && scope.root() != runtime.paths().orbit_dir {
+                Some(OrbitRuntime::from_roots(
+                    &runtime.paths().global_dir,
+                    scope.root(),
+                )?)
             } else {
-                &empty
+                None
             };
-            execute_gc(
-                collector,
-                GcRequest {
-                    apply: self.apply,
-                    scope,
-                    retention_override: self.retention.as_deref(),
-                    global_state_dir: &runtime.paths().global_dir.join("state"),
-                    clock: &clock,
-                },
-            )?
+        let collector_runtime = selected_runtime.as_ref().unwrap_or(runtime);
+        let worktree_policy = WorktreeGcPolicy {
+            success_retention_days: self
+                .success_retention_days
+                .unwrap_or_else(|| collector_runtime.worktree_gc_success_retention_days()),
+            failure_retention_days: self
+                .failure_retention_days
+                .unwrap_or_else(|| collector_runtime.worktree_gc_failure_retention_days()),
         };
+        let worktrees = WorktreeGcCollector::new(collector_runtime, worktree_policy);
+        let empty = EmptyGcCollector::new(target);
+        let collector: &dyn GcCollector = if target == GcTarget::Worktrees {
+            &worktrees
+        } else {
+            &empty
+        };
+        let report = self.run(collector, scope, runtime)?;
+        self.finish(report)
+    }
+}
+
+impl GcCommand {
+    fn run(
+        &self,
+        collector: &dyn GcCollector,
+        scope: GcScope,
+        runtime: &OrbitRuntime,
+    ) -> Result<GcReport, OrbitError> {
+        let clock = SystemGcClock;
+        execute_gc(
+            collector,
+            GcRequest {
+                apply: self.apply,
+                scope,
+                retention_override: self.retention.as_deref(),
+                global_state_dir: &runtime.paths().global_dir.join("state"),
+                clock: &clock,
+            },
+        )
+    }
+
+    fn finish(&self, report: GcReport) -> Result<(), OrbitError> {
         if self.json {
             println!(
                 "{}",
