@@ -9,6 +9,7 @@ use orbit_core::command::gc::{
 use orbit_core::command::gc_audit::AuditGcCollector;
 use orbit_core::command::gc_logs::LogsGcCollector;
 use orbit_core::command::skill_gc::SkillsGcCollector;
+use orbit_core::command::task_gc::TaskGcCollector;
 use orbit_core::{OrbitError, OrbitRuntime};
 
 use super::Execute;
@@ -59,6 +60,11 @@ pub struct GcCommand {
     /// Override the target's retention for this invocation
     #[arg(long, value_name = "DURATION")]
     pub retention: Option<String>,
+
+    /// Also archive `rejected` tasks (the `tasks` target only; `done` is always
+    /// eligible). Rejected by every other target.
+    #[arg(long)]
+    pub include_rejected: bool,
 
     /// Override successful/cancelled worktree retention in days
     #[arg(long, value_name = "DAYS")]
@@ -122,6 +128,15 @@ impl Execute for GcCommand {
                 "run retention overrides require the `runs` target".to_string(),
             ));
         }
+        // `--include-rejected` toggles the optional terminal status for task
+        // archival and has no meaning elsewhere. Reject it for every other
+        // target up front, before any runtime construction or mutation, so an
+        // operator mistake refuses rather than silently no-ops.
+        if target != GcTarget::Tasks && self.include_rejected {
+            return Err(OrbitError::InvalidInput(
+                "the `--include-rejected` flag requires the `tasks` target".to_string(),
+            ));
+        }
         // Skills is a global-only collector whose owned state spans the global
         // generated-skill root and the per-agent link roots; it resolves its own
         // scope rather than following the generic workspace/global split. An
@@ -169,6 +184,18 @@ impl Execute for GcCommand {
             };
             let collector =
                 AuditGcCollector::new(runtime.sqlite_store()?, workspace_id, scope.root());
+            let report = self.run(&collector, scope, runtime)?;
+            return self.finish(report);
+        }
+        // Task archival delegates to the ordinary task lifecycle, so its
+        // collector borrows the workspace runtime rather than scanning a
+        // filesystem root. It is workspace-scoped only (cross-workspace/global
+        // selection is reserved for a future aggregate operator surface), and
+        // `--include-rejected` widens the terminal set from `done`-only to also
+        // include `rejected`. Handle it here as a self-contained collector.
+        if target == GcTarget::Tasks {
+            let scope = ensure_current_workspace_scope(scope, runtime)?;
+            let collector = TaskGcCollector::new(runtime).include_rejected(self.include_rejected);
             let report = self.run(&collector, scope, runtime)?;
             return self.finish(report);
         }
@@ -267,6 +294,39 @@ impl GcCommand {
             )));
         }
         Ok(())
+    }
+}
+
+/// Task GC runs against the active workspace runtime, so its scope must be the
+/// current workspace. Reject `--global` and any `--workspace` that resolves to
+/// a different registered workspace (cross-workspace collection is reserved for
+/// a future aggregate operator surface per the GC design contract).
+fn ensure_current_workspace_scope(
+    scope: GcScope,
+    runtime: &OrbitRuntime,
+) -> Result<GcScope, OrbitError> {
+    match &scope {
+        GcScope::Global { .. } => Err(OrbitError::InvalidInput(
+            "task GC is workspace-scoped; drop --global and run it against a workspace".to_string(),
+        )),
+        GcScope::Workspace { root, .. } => {
+            let current = &runtime.paths().orbit_dir;
+            if paths_identical(root, current) {
+                Ok(scope)
+            } else {
+                Err(OrbitError::InvalidInput(format!(
+                    "task GC only collects the active workspace ({}); cross-workspace selection is not supported in v1",
+                    current.display()
+                )))
+            }
+        }
+    }
+}
+
+fn paths_identical(left: &std::path::Path, right: &std::path::Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
     }
 }
 
