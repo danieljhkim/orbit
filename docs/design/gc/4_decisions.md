@@ -1,7 +1,7 @@
 ---
 title: Garbage Collection — Decisions
 owner: codex
-last_updated: 2026-07-12
+last_updated: 2026-07-13
 status: Draft
 feature: gc
 doc_role: decisions
@@ -10,7 +10,7 @@ summary: Records the durable choice of one explicit, safety-first Orbit garbage-
 tags: [gc, retention, safety]
 paths: ["docs/design/gc/**", "crates/orbit-cli/src/command/gc/**", "crates/orbit-core/src/command/gc/**"]
 related_features: [gc]
-related_artifacts: [ADR-0220, ORB-10178, ORB-10180]
+related_artifacts: [ADR-0220, ADR-0221, ORB-10178, ORB-10180, ORB-10184]
 ---
 
 # Garbage Collection — Decisions
@@ -56,9 +56,50 @@ non-bypassable containment, symlink, current-owner, and ambiguity protections;
   settings they want in a complete workspace policy instead of inheriting a
   merged fragment.
 
+## ADR-0221 — Startup log rotation is non-destructive; deletion goes through explicit GC
+
+**Status:** Accepted · 2026-07 · [ORB-10184]
+
+**Context.** ADR-0220 makes explicit `--apply` the single mutation gate for
+Orbit GC: the shared host lock, candidate revalidation, deletion manifest, and
+error report all hang off it. An earlier revision of this ADR kept opportunistic
+subscriber-init *deletion* of log archives (routed through the shared
+`plan_prune` classifier) to preserve the ORB-00415 disk bound until automated
+`orbit gc logs` (ORB-10189) lands. But that startup delete pass performed raw
+best-effort `remove_file` calls *outside* the host lock, revalidation, manifest,
+and `--apply` gate — a second, weaker retention mutation path that contradicts
+the ADR-0220 contract. The alternatives were to keep that branch-local exception
+or to make startup non-destructive and defer all deletion to explicit apply.
+
+**Decision.** Startup is **non-destructive**. Subscriber-init and the sweep hook
+roll an oversized active file (rename — non-destructive) and only *report* the
+archives that `orbit gc logs --apply` would reclaim (`rotate_and_report` /
+`report_prunable`), computed via the shared `plan_prune` classifier. No startup
+path unlinks an archive. Every archive deletion goes through
+`orbit gc logs --apply` and its ADR-0220 machinery (host lock, revalidation,
+manifest, report). The active inode is never deleted or truncated on any path
+(§5 invariant 3).
+
+**Consequences.**
+
+- One mutation gate, no bypass: the subscriber-init hook can no longer delete
+  outside the ADR-0220 contract, so the parent safety contract is not weakened.
+- One retention policy still: startup reporting and `orbit gc logs` share
+  `plan_prune`, so the plan the operator sees at startup matches exactly what
+  apply reclaims.
+- Trade-off: until automated `orbit gc logs` lands (ORB-10189), archives
+  accumulate between explicit `orbit gc logs --apply` runs rather than being
+  trimmed at every startup. The active file stays bounded by rotation; total
+  archive bytes are bounded only when GC is run. This is the accepted cost of
+  routing all deletion through the explicit gate.
+- §3.3/§9/§10 describe non-destructive startup (rotate + report) rather than
+  startup deletion; the §5 active-inode invariant is unchanged.
+
 ## Task References
 
 - [ORB-10178] — selected and specified the shared GC contract.
 - [ORB-10180] — implemented the shared framework and top-level command grammar.
+- [ORB-10184] — implemented log GC; made startup rotation non-destructive with
+  all deletion behind the explicit apply gate (ADR-0221).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

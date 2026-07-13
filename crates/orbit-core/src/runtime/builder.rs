@@ -146,6 +146,7 @@ pub(crate) fn build_context_from_roots(
     let routines_source = runtime_config.routines_source();
     let worktree_gc_success_retention_days = runtime_config.worktree_gc_success_retention_days();
     let worktree_gc_failure_retention_days = runtime_config.worktree_gc_failure_retention_days();
+    let run_gc_retention_days = runtime_config.run_gc_retention_days();
     let crews = runtime_config.crews.clone();
     let default_crew = runtime_config.default_crew.clone();
     let duel = runtime_config.duel_config().clone();
@@ -191,6 +192,7 @@ pub(crate) fn build_context_from_roots(
             routines_source,
             worktree_gc_success_retention_days,
             worktree_gc_failure_retention_days,
+            run_gc_retention_days,
             crews,
             default_crew,
             duel,

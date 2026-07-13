@@ -649,6 +649,7 @@ fn ensure_v2_state_consolidation_schema(conn: &Connection) -> Result<(), OrbitEr
                 implementer_model TEXT,
                 reviewer_model TEXT,
                 pipeline_state_json TEXT,
+                archived_at TEXT,
                 PRIMARY KEY(workspace_id, run_id)
             );
 
@@ -703,6 +704,10 @@ fn apply_flat_crew_model(conn: &Connection) -> Result<(), OrbitError> {
     // ADR-0213: keep the legacy role columns nullable for existing databases;
     // new reads fall back to implementer_model when crew_model is not populated.
     add_column_if_missing(conn, "ALTER TABLE job_runs ADD COLUMN crew_model TEXT")
+}
+
+fn apply_job_run_archive_stage(conn: &Connection) -> Result<(), OrbitError> {
+    add_column_if_missing(conn, "ALTER TABLE job_runs ADD COLUMN archived_at TEXT")
 }
 
 fn ensure_task_reservations_schema(conn: &Connection) -> Result<(), OrbitError> {

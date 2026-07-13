@@ -361,11 +361,12 @@ pub fn init_default_subscriber(default_filter: &str) {
         .map_err(|err| err.to_string())
         .and_then(|path| {
             // [ORB-00415] Opportunistically roll the active feed if it has grown
-            // past the per-file budget and prune old archives, before reopening
-            // the (fixed-path) active file for appending. Config is read
-            // leniently from the global config here; orbit-core validates the
-            // same keys strictly at config load.
-            super::log_rotation::rotate_and_prune(
+            // past the per-file budget, before reopening the (fixed-path) active
+            // file for appending. Startup is non-destructive: it never deletes
+            // archives, only reports what `orbit gc logs --apply` would reclaim
+            // (ADR-0221). Config is read leniently from the global config here;
+            // orbit-core validates the same keys strictly at config load.
+            super::log_rotation::rotate_and_report(
                 &path,
                 &super::log_rotation::LogRotationConfig::load_global_best_effort(),
             );

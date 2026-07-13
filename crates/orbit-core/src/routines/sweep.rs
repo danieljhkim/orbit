@@ -115,12 +115,14 @@ pub struct SweepOutcome {
 pub fn run_sweep(options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
     let global_root = workspace_registry::global_orbit_dir()?;
     // The OS clock invokes this every minute forever; on macOS launchd
-    // redirects stdout/stderr into `logs/sweep.log`. Opportunistically roll +
-    // prune it here (rename-based, best-effort) so an always-on host cannot
-    // grow it without bound [ORB-00423]. No-op until the file exceeds the
-    // configured per-file budget. `run_sweep_at` (the test seam) is left
-    // untouched so tests never rotate real logs.
-    log_rotation::rotate_and_prune(
+    // redirects stdout/stderr into `logs/sweep.log`. Opportunistically roll it
+    // here (rename-based, best-effort) so an always-on host cannot grow the
+    // active file without bound [ORB-00423]. Non-destructive: archive deletion
+    // is deferred to `orbit gc logs --apply` (ADR-0221), so this only rolls and
+    // reports. No-op until the file exceeds the configured per-file budget.
+    // `run_sweep_at` (the test seam) is left untouched so tests never rotate
+    // real logs.
+    log_rotation::rotate_and_report(
         &super::clock::sweep_log_path(&global_root),
         &LogRotationConfig::load_global_best_effort(),
     );
