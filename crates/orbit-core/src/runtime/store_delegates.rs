@@ -22,6 +22,7 @@ use orbit_store::{
 };
 
 use crate::context::OrbitStores;
+use crate::runtime::run_claim_guard;
 
 #[derive(Default, Clone)]
 pub(crate) struct TaskRecordUpdateParams {
@@ -131,6 +132,7 @@ impl OrbitStores {
     pub(crate) fn jobs(&self) -> JobRecords<'_> {
         JobRecords {
             run: self.job_run.as_ref(),
+            run_guard_state_dir: self.run_guard_state_dir.as_path(),
         }
     }
 
@@ -403,6 +405,11 @@ impl TaskReservationRecords<'_> {
 
 pub(crate) struct JobRecords<'a> {
     run: &'a dyn JobRunStoreBackend,
+    /// Workspace `state` dir backing the per-run claim guard (ORB-10182). The
+    /// run claim/start transitions below hold the guard across their store
+    /// mutation so the worktree collector cannot revalidate-then-remove a tree
+    /// whose run is being claimed concurrently.
+    run_guard_state_dir: &'a std::path::Path,
 }
 
 impl JobRecords<'_> {
@@ -439,6 +446,10 @@ impl JobRecords<'_> {
         started_at: chrono::DateTime<chrono::Utc>,
         pid: u32,
     ) -> Result<bool, OrbitError> {
+        // Hold the per-run claim guard across the ownership transition so the
+        // worktree collector cannot interleave its final revalidation and
+        // `git worktree remove` with this claim (ORB-10182).
+        let _guard = run_claim_guard::acquire(self.run_guard_state_dir, run_id)?;
         self.run.mark_job_run_running(run_id, started_at, pid)
     }
 
@@ -447,6 +458,7 @@ impl JobRecords<'_> {
         run_id: &str,
         pid: u32,
     ) -> Result<bool, OrbitError> {
+        let _guard = run_claim_guard::acquire(self.run_guard_state_dir, run_id)?;
         self.run.claim_pending_job_run_owner(run_id, pid)
     }
 
@@ -458,6 +470,7 @@ impl JobRecords<'_> {
         started_at: chrono::DateTime<chrono::Utc>,
         pid: u32,
     ) -> Result<bool, OrbitError> {
+        let _guard = run_claim_guard::acquire(self.run_guard_state_dir, run_id)?;
         self.run.take_over_running_job_run(
             run_id,
             expected_pid,

@@ -15,6 +15,7 @@ pub(super) struct RawRuntimeConfig {
     pub(super) watch: Option<toml::Value>,
     pub(super) runtime: Option<RawRuntimeSection>,
     pub(super) workflow: Option<RawWorkflowConfig>,
+    pub(super) gc: Option<RawGcConfig>,
     pub(super) routines: Option<RawRoutinesConfig>,
     pub(super) duel: Option<RawDuelSection>,
     /// Removed in ORB-00058. Kept only so config loading can reject stale
@@ -23,6 +24,21 @@ pub(super) struct RawRuntimeConfig {
     /// `[crews.<name>]` registry. Each table supplies one assignment Orbit
     /// resolves for every activity role at task run start.
     pub(super) crews: Option<BTreeMap<String, RawCrewEntry>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub(super) struct RawGcConfig {
+    pub(super) worktrees: Option<RawWorktreeGcConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub(super) struct RawWorktreeGcConfig {
+    /// Days to retain successful/cancelled worktrees after the persisted
+    /// terminal transition. Zero permits immediate collection.
+    pub(super) success_retention_days: Option<u64>,
+    /// Days to retain failed/timeout/interrupted worktrees after the persisted
+    /// terminal transition. Resumable interrupted worktrees remain protected.
+    pub(super) failure_retention_days: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

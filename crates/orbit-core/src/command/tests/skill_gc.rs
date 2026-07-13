@@ -347,6 +347,78 @@ fn second_apply_is_idempotent() {
 }
 
 #[test]
+fn absent_managed_root_reports_repair_for_every_current_skill() {
+    let fx = Fixture::new();
+    reconcile_managed_skills(
+        &fx.skills_root,
+        &[generated("orbit"), generated("orbit-mod")],
+    )
+    .expect("seed");
+    write_generated(&fx.skills_root, "orbit");
+    write_generated(&fx.skills_root, "orbit-mod");
+    // Neither managed link root exists on disk. A fully-absent root must not read
+    // as healthy: it is an empty present set, so every current managed skill is a
+    // missing link there and reported as link_repair.
+    assert!(!fx.agents.exists());
+    assert!(!fx.claude.exists());
+
+    let report = execute_gc(&fx.collector(), fx.request(false)).expect("plan");
+    assert!(
+        item_ids(&report, GcItemStatus::Eligible).is_empty(),
+        "an absent root has nothing owned to reclaim"
+    );
+
+    let codes = skip_codes(&report);
+    for root in [&fx.agents, &fx.claude] {
+        for skill in ["orbit", "orbit-mod"] {
+            assert_eq!(
+                codes
+                    .get(&format!("link:{}", root.join(skill).display()))
+                    .map(String::as_str),
+                Some("link_repair"),
+                "expected link_repair for `{skill}` under absent root {}",
+                root.display()
+            );
+        }
+    }
+
+    // An absent root drives no mutation on apply and stays absent.
+    let apply = execute_gc(&fx.collector(), fx.request(true)).expect("apply");
+    assert_eq!(apply.targets[0].counts.reclaimed, 0);
+    assert!(!fx.agents.exists());
+    assert!(!fx.claude.exists());
+}
+
+#[test]
+fn non_directory_managed_root_is_retained_fail_closed() {
+    let fx = Fixture::new();
+    reconcile_managed_skills(&fx.skills_root, &[generated("orbit")]).expect("seed");
+    write_generated(&fx.skills_root, "orbit");
+    // `.agents/skills` exists but is a plain file, not a directory. Fail closed:
+    // report the root, never traverse it, and never repair-report through it.
+    fs::create_dir_all(fx.agents.parent().expect("parent")).expect("mkdir parent");
+    fs::write(&fx.agents, "not a directory\n").expect("write file root");
+
+    let report = execute_gc(&fx.collector(), fx.request(true)).expect("apply");
+    assert!(item_ids(&report, GcItemStatus::Eligible).is_empty());
+
+    let codes = skip_codes(&report);
+    assert_eq!(
+        codes
+            .get(&format!("root:{}", fx.agents.display()))
+            .map(String::as_str),
+        Some("foreign_root"),
+        "a non-directory managed root is reported fail-closed"
+    );
+    assert!(
+        !codes.contains_key(&format!("link:{}", fx.agents.join("orbit").display())),
+        "must not repair-report through a non-directory root"
+    );
+    // The file root is left intact and never removed.
+    assert!(fx.agents.is_file());
+}
+
+#[test]
 fn apply_prunes_emptied_owned_link_dirs() {
     let fx = Fixture::new();
     reconcile_managed_skills(&fx.skills_root, &[generated("orbit")]).expect("seed");

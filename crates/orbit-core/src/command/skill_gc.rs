@@ -302,58 +302,85 @@ impl GcCollector for SkillsGcCollector {
 
         // 2. Stale/broken owned links + current-skill repair reporting.
         for link_root in &self.link_roots {
-            if !link_root.is_dir() {
-                continue;
-            }
+            // An entirely absent managed root is an empty present set: every
+            // current managed skill is a missing link there and is reported as a
+            // repair below (so a fully-absent root is not mistaken for healthy).
+            // A root that exists but is not a real directory (a file, or a
+            // symlink we must not follow) is ambiguous — fail closed: report it
+            // and neither traverse nor repair-report through it.
             let mut present: BTreeSet<String> = BTreeSet::new();
-            for entry in read_dir_sorted(link_root)? {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                present.insert(name.clone());
-                let path = entry.path();
-                scanned += 1;
-                let size = fs::symlink_metadata(&path).map(|m| m.len()).unwrap_or(0);
-                scanned_bytes = scanned_bytes.saturating_add(size);
-                match self.classify_link(&owned_roots, &current, &tombstoned, &name, &path)? {
-                    LinkVerdict::Remove => {
-                        let id = format!("link:{}", path.display());
-                        planned.insert(
-                            id.clone(),
-                            PlannedItem::Link {
-                                path: path.clone(),
-                                link_root: link_root.clone(),
-                            },
-                        );
-                        plan.candidates.push(GcCandidate {
-                            id,
-                            action: "unlink".to_string(),
-                            // Agent link roots are siblings of the global root
-                            // (outside the reported scope root); the collector
-                            // validates and unlinks the link object itself.
-                            path: None,
-                            bytes: Some(size),
-                            ownership_evidence: "Orbit-owned symlink (target within an owned root)"
-                                .to_string(),
-                            retention_evidence: "retired skill or broken target".to_string(),
-                            expected_state: "stale-owned-link".to_string(),
-                            allow_owned_symlink: true,
-                        });
+            match fs::symlink_metadata(link_root) {
+                Ok(meta) if meta.file_type().is_dir() => {
+                    for entry in read_dir_sorted(link_root)? {
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        present.insert(name.clone());
+                        let path = entry.path();
+                        scanned += 1;
+                        let size = fs::symlink_metadata(&path).map(|m| m.len()).unwrap_or(0);
+                        scanned_bytes = scanned_bytes.saturating_add(size);
+                        match self.classify_link(
+                            &owned_roots,
+                            &current,
+                            &tombstoned,
+                            &name,
+                            &path,
+                        )? {
+                            LinkVerdict::Remove => {
+                                let id = format!("link:{}", path.display());
+                                planned.insert(
+                                    id.clone(),
+                                    PlannedItem::Link {
+                                        path: path.clone(),
+                                        link_root: link_root.clone(),
+                                    },
+                                );
+                                plan.candidates.push(GcCandidate {
+                                    id,
+                                    action: "unlink".to_string(),
+                                    // Agent link roots are siblings of the global root
+                                    // (outside the reported scope root); the collector
+                                    // validates and unlinks the link object itself.
+                                    path: None,
+                                    bytes: Some(size),
+                                    ownership_evidence:
+                                        "Orbit-owned symlink (target within an owned root)"
+                                            .to_string(),
+                                    retention_evidence: "retired skill or broken target"
+                                        .to_string(),
+                                    expected_state: "stale-owned-link".to_string(),
+                                    allow_owned_symlink: true,
+                                });
+                            }
+                            LinkVerdict::Healthy => {}
+                            LinkVerdict::Repair { reason } => plan.skipped.push(GcSkip {
+                                id: format!("link:{}", path.display()),
+                                code: "link_repair".to_string(),
+                                reason,
+                            }),
+                            LinkVerdict::Retain { code, reason } => plan.skipped.push(GcSkip {
+                                id: format!("link:{}", path.display()),
+                                code: code.to_string(),
+                                reason,
+                            }),
+                        }
                     }
-                    LinkVerdict::Healthy => {}
-                    LinkVerdict::Repair { reason } => plan.skipped.push(GcSkip {
-                        id: format!("link:{}", path.display()),
-                        code: "link_repair".to_string(),
-                        reason,
-                    }),
-                    LinkVerdict::Retain { code, reason } => plan.skipped.push(GcSkip {
-                        id: format!("link:{}", path.display()),
-                        code: code.to_string(),
-                        reason,
-                    }),
                 }
+                Ok(_) => {
+                    plan.skipped.push(GcSkip {
+                        id: format!("root:{}", link_root.display()),
+                        code: "foreign_root".to_string(),
+                        reason: "managed link root exists but is not a directory; left intact"
+                            .to_string(),
+                    });
+                    continue;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(OrbitError::Io(error.to_string())),
             }
 
             // Currently managed skills with no link at all in this managed root
-            // are a repair concern, reported separately from stale retirement.
+            // (including an entirely absent root) are a repair concern, reported
+            // separately from stale retirement.
             for skill_id in &current {
                 if !present.contains(skill_id) {
                     plan.skipped.push(GcSkip {

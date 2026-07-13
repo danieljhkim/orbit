@@ -13,6 +13,43 @@ use std::thread;
 #[cfg(unix)]
 use std::time::{Duration, Instant};
 
+/// Whether the persisted owner of `run` permits reclaiming its worktree.
+///
+/// Fail-closed for GC: returns `true` only when the recorded owner process is
+/// conclusively no longer using the tree —
+/// - it is this very process (terminal cleanup runs inside the worker that just
+///   finalized its own run; the caller's cwd guard covers the still-in-use
+///   case), or
+/// - no owner PID was ever recorded, or
+/// - the PID + process-start-identity probe proves the original owner is gone
+///   (`Missing`) or that the PID is now held by an unrelated process
+///   (`Mismatch`).
+///
+/// A verified-live owner, an unverifiable-but-live legacy owner, or any
+/// inconclusive probe returns `false`, so the worktree is retained — including
+/// for terminal rows whose worker process is still winding down after writing
+/// its terminal state. This reuses the exact identity probe that run
+/// reconciliation uses, so GC and reconciliation agree on liveness.
+pub(crate) fn gc_owner_permits_reclaim(run: &JobRun) -> bool {
+    if run.pid == Some(std::process::id()) {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        matches!(
+            classify_run_owner(run),
+            OwnerIdentity::Missing | OwnerIdentity::Mismatch
+        )
+    }
+    #[cfg(not(unix))]
+    {
+        // No owner-liveness probe is available off Unix; fall back to the
+        // pre-liveness collector behavior and rely on the terminal-state, cwd,
+        // dirty, and branch gates. A recorded PID cannot be proven gone here.
+        run.pid.is_none()
+    }
+}
+
 #[cfg(unix)]
 pub(super) const RUN_OWNER_TERMINATION_GRACE: Duration = Duration::from_secs(2);
 #[cfg(unix)]
