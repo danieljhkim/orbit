@@ -8,12 +8,12 @@ use orbit_search::{EmbedWorker, VectorStore};
 use orbit_store::{
     AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter, AdrStoreBackend,
     AuditEventFilter, AuditEventInsertParams, AuditEventStoreBackend, ExecutorDefStoreBackend,
-    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCreateParams, LearningListEntry,
-    LearningSearchParams, LearningSearchResult, LearningStoreBackend, LearningUpdateParams,
-    PolicyDefStoreBackend, RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams,
-    TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
-    TaskHistoryUpdateParams, TaskReservationCheckParams, TaskReservationCheckResult,
-    TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    JobRunGcRecord, JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCreateParams,
+    LearningListEntry, LearningSearchParams, LearningSearchResult, LearningStoreBackend,
+    LearningUpdateParams, PolicyDefStoreBackend, RemoteArtifactStub, TaskArtifactStoreBackend,
+    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
+    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskReservationCheckParams,
+    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
     TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
     TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
     TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
@@ -413,6 +413,10 @@ pub(crate) struct JobRecords<'a> {
 }
 
 impl JobRecords<'_> {
+    pub(crate) fn list_runs_for_gc(&self) -> Result<Vec<JobRunGcRecord>, OrbitError> {
+        self.run.list_job_runs_for_gc()
+    }
+
     pub(crate) fn list_runs_filtered(
         &self,
         query: &JobRunQuery,

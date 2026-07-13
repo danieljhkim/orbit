@@ -5,13 +5,16 @@ use std::sync::Mutex;
 
 use chrono::{DateTime, TimeZone, Utc};
 use fs2::FileExt;
-use orbit_common::types::OrbitError;
+use orbit_common::types::{JobRun, JobRunState, OrbitError, PipelineState};
 use tempfile::TempDir;
 
+use crate::OrbitRuntime;
 use crate::command::gc::{
     EmptyGcCollector, GcCandidate, GcClock, GcCollector, GcContext, GcMode, GcMutation, GcOutcome,
-    GcPlan, GcRequest, GcRevalidation, GcScope, GcTarget, execute_gc, validate_candidate_path,
+    GcPlan, GcRequest, GcRevalidation, GcScope, GcTarget, RunGcCollector, RunGcPolicy, execute_gc,
+    validate_candidate_path, validate_candidate_path_any,
 };
+use crate::command::task::{TaskAddParams, TaskUpdateParams};
 
 struct FakeClock(DateTime<Utc>);
 
@@ -236,6 +239,31 @@ fn containment_rejects_escape_root_and_parent_traversal() {
 }
 
 #[test]
+fn multi_root_containment_accepts_any_owned_root_and_rejects_the_rest() {
+    // [ORB-10184] A collector owning locations under more than one root (e.g.
+    // an ORBIT_LOG_PATH outside the default state root) validates a candidate
+    // against every owned root; it passes iff some root safely contains it.
+    let fixture = Fixture::new();
+    fixture.write("safe", "data");
+    let other_root = fixture.temp.path().join("other");
+    fs::create_dir_all(&other_root).expect("other root");
+    let other_file = other_root.join("archive");
+    fs::write(&other_file, "data").expect("other file");
+    let roots = vec![fixture.root.clone(), other_root.clone()];
+
+    // Contained by the first (scope) root.
+    assert!(validate_candidate_path_any(&roots, &fixture.root.join("safe"), false).is_ok());
+    // Contained only by the second (external) owned root.
+    assert!(validate_candidate_path_any(&roots, &other_file, false).is_ok());
+    // Contained by neither owned root -> rejected (fail-closed).
+    assert!(
+        validate_candidate_path_any(&roots, &fixture.temp.path().join("loose"), false).is_err()
+    );
+    // An empty allowlist rejects everything.
+    assert!(validate_candidate_path_any(&[], &fixture.root.join("safe"), false).is_err());
+}
+
+#[test]
 fn apply_fails_without_planning_when_host_gc_lock_is_contended() {
     let fixture = Fixture::new();
     fs::create_dir_all(&fixture.state).expect("global state");
@@ -273,4 +301,477 @@ fn containment_rejects_symlink_escape_and_can_unlink_owned_final_symlink() {
     );
     assert!(validate_candidate_path(&fixture.root, &fixture.root.join("escape"), false).is_err());
     assert!(validate_candidate_path(&fixture.root, &fixture.root.join("escape"), true).is_ok());
+}
+
+#[test]
+fn run_gc_stages_archive_then_purge_and_protects_active_failed_and_task_linked_runs() {
+    let temp = TempDir::new().expect("tempdir");
+    let global = temp.path().join("global");
+    let orbit = temp.path().join("repo/.orbit");
+    fs::create_dir_all(&global).expect("global root");
+    fs::create_dir_all(&orbit).expect("workspace root");
+    fs::write(
+        orbit.join("config.toml"),
+        "[gc.runs]\narchive_after_days = 0\npurge_after_days = 0\nfailure_archive_after_days = 30\nfailure_purge_after_days = 90\n",
+    )
+    .expect("config");
+    let runtime = OrbitRuntime::from_roots(&global, &orbit).expect("runtime");
+    let terminal_at = Utc
+        .with_ymd_and_hms(2026, 6, 1, 0, 0, 0)
+        .single()
+        .expect("terminal time");
+    let clock = FakeClock(
+        Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0)
+            .single()
+            .expect("collection time"),
+    );
+    let insert = |state: JobRunState| {
+        let run = runtime
+            .stores()
+            .jobs()
+            .insert_run("job", 1, terminal_at, None, None)
+            .expect("insert run");
+        if state != JobRunState::Pending {
+            runtime
+                .stores()
+                .jobs()
+                .mark_run_running(&run.run_id, terminal_at, std::process::id())
+                .expect("start run");
+        }
+        if state.is_terminal() {
+            runtime
+                .stores()
+                .jobs()
+                .finalize_run(&run.run_id, state, terminal_at, Some(0))
+                .expect("finalize run");
+        }
+        runtime
+            .stores()
+            .jobs()
+            .get_run(&run.run_id)
+            .expect("read run")
+            .expect("stored run")
+    };
+    let success = insert(JobRunState::Success);
+    let failed = insert(JobRunState::Failed);
+    let active = insert(JobRunState::Pending);
+    let resumable = insert(JobRunState::Interrupted);
+    let mut checkpoint = PipelineState::new(
+        resumable.run_id.clone(),
+        resumable.job_id.clone(),
+        serde_json::json!({}),
+    );
+    checkpoint.record_step(
+        0,
+        JobRunState::Success,
+        Some(serde_json::json!({"ok": true})),
+        None,
+    );
+    runtime
+        .stores()
+        .jobs()
+        .write_run_state(&resumable.run_id, &checkpoint)
+        .expect("write resumable checkpoint");
+    let mut live_owner = std::process::Command::new("sh")
+        .args(["-c", "sleep 30"])
+        .spawn()
+        .expect("spawn live owner");
+    let live_terminal = runtime
+        .stores()
+        .jobs()
+        .insert_run("job", 1, terminal_at, None, None)
+        .expect("insert live terminal run");
+    runtime
+        .stores()
+        .jobs()
+        .mark_run_running(&live_terminal.run_id, terminal_at, live_owner.id())
+        .expect("mark live-owned run running");
+    runtime
+        .stores()
+        .jobs()
+        .finalize_run(
+            &live_terminal.run_id,
+            JobRunState::Success,
+            terminal_at,
+            Some(0),
+        )
+        .expect("finalize live-owned run");
+    let linked = insert(JobRunState::Success);
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "linked".to_string(),
+            description: "linked".to_string(),
+            ..Default::default()
+        })
+        .expect("add task");
+    runtime
+        .update_task(
+            task.id.as_str(),
+            TaskUpdateParams {
+                job_run_id: Some(Some(linked.run_id.clone())),
+                ..Default::default()
+            },
+        )
+        .expect("link task");
+
+    let collector = RunGcCollector::new(&runtime, RunGcPolicy::from_runtime(&runtime));
+    let global_state = global.join("state");
+    let request = |apply| GcRequest {
+        apply,
+        scope: GcScope::Workspace {
+            workspace_id: None,
+            root: orbit.clone(),
+        },
+        retention_override: None,
+        global_state_dir: &global_state,
+        clock: &clock,
+    };
+    let plan = execute_gc(&collector, request(false)).expect("plan");
+    assert_eq!(plan.targets[0].counts.eligible, 1);
+    assert_eq!(plan.targets[0].items[0].id, success.run_id);
+    for code in [
+        "retained",
+        "active_run",
+        "resumable",
+        "live_or_inconclusive",
+        "task_linked",
+    ] {
+        assert!(
+            plan.targets[0].skipped.iter().any(|skip| skip.code == code),
+            "missing skip {code}: {:?}",
+            plan.targets[0].skipped
+        );
+    }
+
+    let archive = execute_gc(&collector, request(true)).expect("archive");
+    assert_eq!(archive.targets[0].counts.reclaimed, 1);
+    assert!(runtime.show_job_run(&success.run_id).is_err());
+    let purge = execute_gc(&collector, request(true)).expect("purge");
+    assert_eq!(purge.targets[0].counts.reclaimed, 1);
+    assert!(
+        runtime
+            .stores()
+            .jobs()
+            .list_runs_for_gc()
+            .expect("inventory")
+            .iter()
+            .all(|record| record.run.run_id != success.run_id)
+    );
+    let idempotent = execute_gc(&collector, request(true)).expect("idempotent");
+    assert_eq!(idempotent.targets[0].counts.reclaimed, 0);
+
+    let legacy = orbit
+        .join("state/job-runs")
+        .join(&success.job_id)
+        .join(&success.run_id);
+    fs::create_dir_all(&legacy).expect("legacy bundle");
+    fs::write(
+        legacy.join("jrun.yaml"),
+        serde_yaml::to_string(&serde_json::json!({
+            "schema_version": 1,
+            "run": success,
+        }))
+        .expect("legacy yaml"),
+    )
+    .expect("legacy run document");
+    let corrupt = orbit.join("state/job-runs/job/jrun-corrupt");
+    fs::create_dir_all(&corrupt).expect("corrupt legacy bundle");
+    fs::write(corrupt.join("jrun.yaml"), "not: [valid").expect("corrupt document");
+    let stale_archive = execute_gc(&collector, request(true)).expect("archive stale bundle");
+    assert_eq!(stale_archive.targets[0].counts.reclaimed, 1);
+    assert_eq!(stale_archive.outcome, GcOutcome::Partial);
+    assert!(stale_archive.has_errors());
+    let stale_purge = execute_gc(&collector, request(true)).expect("purge stale bundle");
+    assert_eq!(stale_purge.targets[0].counts.reclaimed, 1);
+    assert!(!legacy.exists());
+    assert!(
+        runtime
+            .stores()
+            .jobs()
+            .get_run(&failed.run_id)
+            .expect("failed retained")
+            .is_some()
+    );
+    assert!(
+        runtime
+            .stores()
+            .jobs()
+            .get_run(&active.run_id)
+            .expect("active retained")
+            .is_some()
+    );
+    live_owner.kill().expect("stop live owner");
+    live_owner.wait().expect("wait for live owner");
+}
+
+/// Build a runtime whose run GC ages are all zero (every terminal run is
+/// immediately eligible) so tests exercise protection holds, not the clock.
+fn run_gc_runtime(temp: &TempDir) -> (OrbitRuntime, PathBuf) {
+    let global = temp.path().join("global");
+    let orbit = temp.path().join("repo/.orbit");
+    fs::create_dir_all(&global).expect("global root");
+    fs::create_dir_all(&orbit).expect("workspace root");
+    fs::write(
+        orbit.join("config.toml"),
+        "[gc.runs]\narchive_after_days = 0\npurge_after_days = 0\nfailure_archive_after_days = 0\nfailure_purge_after_days = 0\n",
+    )
+    .expect("config");
+    let runtime = OrbitRuntime::from_roots(&global, &orbit).expect("runtime");
+    (runtime, orbit)
+}
+
+/// Write a rowless legacy job-run bundle (`state/job-runs/<job>/<run>/jrun.yaml`)
+/// describing `run`, mirroring the on-disk layout the collector inventories.
+fn write_legacy_bundle(orbit: &Path, run: &JobRun) -> PathBuf {
+    let dir = orbit
+        .join("state/job-runs")
+        .join(&run.job_id)
+        .join(&run.run_id);
+    fs::create_dir_all(&dir).expect("legacy bundle dir");
+    fs::write(
+        dir.join("jrun.yaml"),
+        serde_yaml::to_string(&serde_json::json!({ "schema_version": 1, "run": run }))
+            .expect("legacy yaml"),
+    )
+    .expect("legacy run document");
+    dir
+}
+
+/// Insert a terminal (`Success`) run owned by `pid` and return the captured
+/// `JobRun` with its recorded owner identity intact. The row is left in place so
+/// that a batch of runs can be inserted with distinct ids before any are deleted
+/// (deleting between inserts would let `next_run_id` reuse a just-freed id).
+fn insert_terminal(runtime: &OrbitRuntime, terminal_at: DateTime<Utc>, pid: u32) -> JobRun {
+    let run = runtime
+        .stores()
+        .jobs()
+        .insert_run("job", 1, terminal_at, None, None)
+        .expect("insert run");
+    runtime
+        .stores()
+        .jobs()
+        .mark_run_running(&run.run_id, terminal_at, pid)
+        .expect("start run");
+    runtime
+        .stores()
+        .jobs()
+        .finalize_run(&run.run_id, JobRunState::Success, terminal_at, Some(0))
+        .expect("finalize run");
+    runtime
+        .stores()
+        .jobs()
+        .get_run(&run.run_id)
+        .expect("read run")
+        .expect("stored run")
+}
+
+/// Delete a run's authoritative row so only a rowless legacy bundle can remain.
+fn delete_row(runtime: &OrbitRuntime, run: &JobRun) {
+    runtime
+        .delete_job_run(&run.run_id)
+        .expect("delete authoritative row");
+}
+
+// ORB-10183 P1: a rowless legacy bundle must fail closed on the SAME
+// ownership/liveness/reference protections as an authoritative row — never
+// eligible from terminal state and age alone.
+#[test]
+fn run_gc_rowless_legacy_bundle_fails_closed_on_live_owner_task_and_retry_references() {
+    let temp = TempDir::new().expect("tempdir");
+    let (runtime, orbit) = run_gc_runtime(&temp);
+    let terminal_at = Utc
+        .with_ymd_and_hms(2026, 6, 1, 0, 0, 0)
+        .single()
+        .expect("terminal time");
+    let clock = FakeClock(
+        Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0)
+            .single()
+            .expect("collection time"),
+    );
+
+    // Insert every terminal run while they coexist so each gets a distinct id,
+    // then delete the four that must become rowless legacy bundles.
+    let mut live_owner = std::process::Command::new("sh")
+        .args(["-c", "sleep 30"])
+        .spawn()
+        .expect("spawn live owner");
+    // Recorded owner is still alive: liveness is proven, so the bundle is held.
+    let live = insert_terminal(&runtime, terminal_at, live_owner.id());
+    // Owner permits reclaim (it is this process): only the task link can hold it.
+    let task_owned = insert_terminal(&runtime, terminal_at, std::process::id());
+    // Owner permits reclaim: only a retained retry run pointing here can hold it.
+    let retry_source = insert_terminal(&runtime, terminal_at, std::process::id());
+    // Reclaimable owner, no references: stays eligible, proving the protections
+    // gate rather than blanket-skip the legacy path.
+    let clean = insert_terminal(&runtime, terminal_at, std::process::id());
+
+    // A retained retry run still points back to `retry_source` as its source.
+    runtime
+        .stores()
+        .jobs()
+        .insert_run(
+            "job",
+            2,
+            terminal_at,
+            None,
+            Some(retry_source.run_id.clone()),
+        )
+        .expect("insert retry run");
+    // A retained task still references `task_owned`.
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "linked".to_string(),
+            description: "linked".to_string(),
+            ..Default::default()
+        })
+        .expect("add task");
+    runtime
+        .update_task(
+            task.id.as_str(),
+            TaskUpdateParams {
+                job_run_id: Some(Some(task_owned.run_id.clone())),
+                ..Default::default()
+            },
+        )
+        .expect("link task");
+
+    for run in [&live, &task_owned, &retry_source, &clean] {
+        delete_row(&runtime, run);
+        write_legacy_bundle(&orbit, run);
+    }
+
+    let collector = RunGcCollector::new(&runtime, RunGcPolicy::from_runtime(&runtime));
+    let scope = GcScope::Workspace {
+        workspace_id: None,
+        root: orbit.clone(),
+    };
+    let context = GcContext {
+        scope: &scope,
+        retention_override: None,
+        clock: &clock,
+    };
+    let plan = collector.plan(&context).expect("plan");
+
+    let candidate_ids: Vec<&str> = plan
+        .candidates
+        .iter()
+        .map(|candidate| candidate.id.as_str())
+        .collect();
+    assert!(
+        candidate_ids.contains(&clean.run_id.as_str()),
+        "reclaimable rowless bundle must be eligible: {candidate_ids:?}"
+    );
+    for held in [&live.run_id, &task_owned.run_id, &retry_source.run_id] {
+        assert!(
+            !candidate_ids.contains(&held.as_str()),
+            "protected rowless bundle {held} must not be a candidate: {candidate_ids:?}"
+        );
+    }
+    for (run_id, code) in [
+        (&live.run_id, "live_or_inconclusive"),
+        (&task_owned.run_id, "task_linked"),
+        (&retry_source.run_id, "retry_linked"),
+    ] {
+        assert!(
+            plan.skipped
+                .iter()
+                .any(|skip| &skip.id == run_id && skip.code == code),
+            "missing {code} hold for {run_id}: {:?}",
+            plan.skipped
+        );
+    }
+
+    live_owner.kill().expect("stop live owner");
+    live_owner.wait().expect("wait for live owner");
+}
+
+// ORB-10183 P1: if an authoritative row materializes between plan and apply, the
+// rowless legacy path must fail closed — the persisted collector owns the run —
+// holding the per-run claim guard across revalidation and refusing to mutate.
+#[test]
+fn run_gc_rowless_legacy_bundle_skips_and_holds_guard_when_row_appears_before_apply() {
+    let temp = TempDir::new().expect("tempdir");
+    let (runtime, orbit) = run_gc_runtime(&temp);
+    let terminal_at = Utc
+        .with_ymd_and_hms(2026, 6, 1, 0, 0, 0)
+        .single()
+        .expect("terminal time");
+    let clock = FakeClock(
+        Utc.with_ymd_and_hms(2026, 6, 11, 0, 0, 0)
+            .single()
+            .expect("collection time"),
+    );
+
+    // Freeze a legacy candidate while the run is rowless and reclaimable.
+    let stored = insert_terminal(&runtime, terminal_at, std::process::id());
+    delete_row(&runtime, &stored);
+    let bundle_dir = write_legacy_bundle(&orbit, &stored);
+    let collector = RunGcCollector::new(&runtime, RunGcPolicy::from_runtime(&runtime));
+    let scope = GcScope::Workspace {
+        workspace_id: None,
+        root: orbit.clone(),
+    };
+    let context = GcContext {
+        scope: &scope,
+        retention_override: None,
+        clock: &clock,
+    };
+    let plan = collector.plan(&context).expect("plan");
+    let candidate = plan
+        .candidates
+        .iter()
+        .find(|candidate| candidate.id == stored.run_id)
+        .expect("rowless legacy candidate")
+        .clone();
+
+    // The authoritative row reappears with the same id, a resumable checkpoint,
+    // and an interrupted (recoverable) state — as if a worker reclaimed the run.
+    let mut appeared = stored.clone();
+    appeared.state = JobRunState::Interrupted;
+    let mut checkpoint = PipelineState::new(
+        appeared.run_id.clone(),
+        appeared.job_id.clone(),
+        serde_json::json!({}),
+    );
+    checkpoint.record_step(
+        0,
+        JobRunState::Success,
+        Some(serde_json::json!({"ok": true})),
+        None,
+    );
+    let store = runtime.sqlite_store().expect("store");
+    let workspace_id = runtime.workspace_id().expect("workspace id");
+    store
+        .upsert_job_run_for_workspace(&workspace_id, &appeared, Some(&checkpoint))
+        .expect("plant reappeared row");
+
+    // Revalidation fails closed: the persisted collector now owns this run.
+    match collector
+        .revalidate(&candidate, &context)
+        .expect("revalidate")
+    {
+        GcRevalidation::Skip { code, .. } => assert_eq!(code, "row_appeared"),
+        other => panic!("expected row_appeared skip, got {other:?}"),
+    }
+
+    // Apply holds the per-run claim guard across the recheck and refuses to
+    // mutate — nothing purged, nothing stranded, the reappeared row survives.
+    let error = collector
+        .apply(&candidate, &context)
+        .expect_err("apply must fail closed once a row appears");
+    assert!(
+        matches!(error, OrbitError::Execution(_)),
+        "unexpected apply error: {error:?}"
+    );
+    assert!(bundle_dir.exists(), "legacy bundle must not be mutated");
+    assert!(bundle_dir.join("jrun.yaml").exists());
+    assert!(
+        runtime
+            .stores()
+            .jobs()
+            .get_run(&appeared.run_id)
+            .expect("read reappeared run")
+            .is_some(),
+        "reappeared authoritative row must survive"
+    );
 }

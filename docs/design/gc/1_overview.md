@@ -10,7 +10,7 @@ summary: Defines Orbit's explainable, explicitly applied retention family across
 tags: [gc, retention, safety]
 paths: ["crates/orbit-cli/src/command/gc/**", "crates/orbit-core/src/command/gc/**", "crates/orbit-core/src/config/**"]
 related_features: [gc, activity-job, auditability, task-artifacts, worktree-artifacts]
-related_artifacts: [ORB-10178, ORB-10181, ADR-0220]
+related_artifacts: [ORB-10178, ORB-10181, ORB-10183, ADR-0220]
 ---
 
 # Garbage Collection — Overview
@@ -66,7 +66,7 @@ Cargo, Gradle, Python, or Node caches outside one are not GC candidates.
 - [ORB-10178] — defined the GC retention and safety contract.
 - [ORB-10180] — will implement the shared top-level GC framework.
 - [ORB-10182] — will implement managed worktree collection.
-- [ORB-10183] — will implement terminal run collection.
+- [ORB-10183] — implemented staged terminal run archival and purge.
 - [ORB-10184] — will implement operational log collection.
 - [ORB-10185] — will implement diagnostics collection.
 - [ORB-10186] — will implement audit retention and blob reachability.

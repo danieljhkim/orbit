@@ -1,16 +1,16 @@
 ---
 title: Garbage Collection — Design
 owner: codex
-last_updated: 2026-07-12
+last_updated: 2026-07-13
 status: Draft
 feature: gc
 doc_role: design
 type: design
 summary: Specifies GC grammar, collector ownership, retention clocks, safety invariants, locking, and reports.
 tags: [gc, retention, safety]
-paths: ["crates/orbit-cli/src/command/gc/**", "crates/orbit-core/src/command/gc/**", "crates/orbit-core/src/config/**"]
+paths: ["crates/orbit-cli/src/command/gc.rs", "crates/orbit-core/src/command/gc.rs", "crates/orbit-core/src/command/gc_logs.rs", "crates/orbit-common/src/utility/log_rotation.rs", "crates/orbit-core/src/config/**"]
 related_features: [gc, activity-job, auditability, task-artifacts, worktree-artifacts]
-related_artifacts: [ORB-10178, ORB-10180, ORB-10181, ORB-10186, ADR-0220]
+related_artifacts: [ORB-10178, ORB-10180, ORB-10181, ORB-10183, ORB-10184, ORB-10186, ADR-0220, ADR-0221]
 ---
 
 # Garbage Collection — Design
@@ -136,14 +136,35 @@ retention. Active, resumable, task-held, or liveness-inconclusive runs are
 protected. Audit envelopes and blobs are not run-owned deletion side effects;
 they remain the audit collector's responsibility.
 
+After [ORB-10183], archive is represented durably on the authoritative run row;
+ordinary run queries hide archived rows while GC inventory retains them until
+purge. Purge transactionally removes the row, cascading steps and checkpoint
+state and deleting released owner reservations, while active reservations,
+task/retry references, and aggregate scoreboard references remain hard holds.
+Legacy bundles move beneath `state/job-runs/archived/` before the row stage is
+committed, making interruption and retry idempotent. The four policy keys are
+`gc.runs.archive_after_days`, `purge_after_days`,
+`failure_archive_after_days`, and `failure_purge_after_days`; purge ages may
+not be shorter than their archive ages.
+
 ### 3.3 Logs (global)
 
-The log collector owns Orbit-created operational JSONL archives in configured
-global log roots. The active inode and any file held by a known writer are
-protected. Age uses the managed archive timestamp written at rotation; malformed
-names are retained rather than aged by mtime. The existing age and total-byte
-budgets share one planner with startup pruning. Journald, system logs, and
-third-party logs are out of scope.
+The log collector owns Orbit-created operational log archives beneath the
+global state root: the JSONL tracing feed (`state/logs/orbit.jsonl`, overridable
+via `ORBIT_LOG_PATH`) and the macOS sweep log (`logs/sweep.log`). Only dated
+`<active>.<stamp>` archives are candidates; the active inode is never one, so a
+writer holding it open is unaffected. The existing age and total-byte budgets
+share one classifier — `log_rotation::plan_prune` — with non-destructive startup
+rotation (ADR-0221), so the plan the CLI surface applies matches exactly what
+subscriber-init reporting observes. Reports distinguish age-selected from
+size-selected files via the item `action` (`delete-age` / `delete-size`) and
+record reclaimed bytes and per-file errors. An explicitly configured
+`ORBIT_LOG_PATH` is an owned active log even when it resolves outside the default
+scope root: its parent directory is surfaced as an allowlisted owned root (the
+collector's `owned_roots`), so its archives are planned and reclaimed while every
+deletion still passes the canonical no-follow containment gate — it is honored,
+not skipped. Journald, system logs, and third-party logs are out of scope.
+[ORB-10184]
 
 ### 3.4 Diagnostics (workspace)
 
@@ -381,8 +402,13 @@ Automatic collection is disabled by default. Opt-in automation must name its
 scope and targets, set the collector's explicit apply argument, and use the same
 budgets, lock, collectors, protections, and reports as an operator invocation.
 It may be a scheduled routine, but it cannot discover, create, or dispatch
-tasks. Startup hooks do not delete or perform lifecycle mutations; they are
-limited to non-destructive setup and active-file rotation.
+tasks. Startup hooks perform no lifecycle mutation beyond non-destructive
+active-file rotation; they never delete an archive and never touch the active
+inode. They only *report* — via the shared classifier
+(`log_rotation::plan_prune`) — the archives that `orbit gc logs --apply` would
+reclaim. Per ADR-0221 all archive deletion is owned exclusively by the explicit
+`orbit gc logs --apply` gate; the future automated log GC (ORB-10189) will drive
+that same gate on a schedule.
 
 ## 10. Compatibility and Surface Ownership
 
@@ -391,12 +417,15 @@ limited to non-destructive setup and active-file rotation.
   new explicit `--apply`. `--older-than` maps to the legacy-event retention
   override, and both paths call the audit collector. There is no legacy bypass
   around blob reachability, holds, locking, reporting, or revalidation.
-- **Log startup pruning.** Extract the existing rotation/pruning classifier.
-  Startup may continue active-file rotation but stops deleting archives;
-  archive eligibility is visible in `orbit gc logs`, and deletion occurs only
-  through `orbit gc logs --apply` (whether invoked by an operator or explicitly
-  configured automation). There is no config-only substitute for the apply
-  argument.
+- **Log startup rotation.** The retention classifier is extracted as
+  `log_rotation::plan_prune`. Startup continues non-destructive active-file
+  rotation and only *reports* reclaimable archives through that shared
+  classifier (`rotate_and_report`); it never unlinks an archive. `orbit gc logs`
+  plans/applies the identical age + total-size policy with reporting, locking,
+  and revalidation, and deletion requires `--apply` (there is no config-only
+  substitute). Per ADR-0221 all archive deletion is behind that explicit gate,
+  keeping the ADR-0220 single-mutation-gate contract intact; automated log GC
+  (ORB-10189) will drive the same gate on a schedule.
 - **Skill unlink/init cleanup.** Explicit `orbit skill unlink` remains an
   operator-owned uninstall action, but generated-content retirement and init
   cleanup delegate to the skill ownership classifier. Existing `force` flags
@@ -430,8 +459,8 @@ limited to non-destructive setup and active-file rotation.
 - [ORB-10178] — defined this retention and safety contract.
 - [ORB-10180] — will implement the shared GC framework.
 - [ORB-10182] — implemented managed worktree collection and terminal cleanup reuse.
-- [ORB-10183] — will implement run retention.
-- [ORB-10184] — will unify log retention.
+- [ORB-10183] — implemented staged terminal run archival and purge (rowless legacy bundles share the persisted-row protections; `runs` refuses `--global`).
+- [ORB-10184] — unified log retention: `orbit gc logs` + shared `plan_prune` (ADR-0221).
 - [ORB-10185] — will implement diagnostics retention.
 - [ORB-10186] — will implement audit and blob collection.
 - [ORB-10187] — implemented generated-skill collection (`skill_gc::SkillsGcCollector`).

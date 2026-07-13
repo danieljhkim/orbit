@@ -29,6 +29,15 @@ pub(super) struct RawRuntimeConfig {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub(super) struct RawGcConfig {
     pub(super) worktrees: Option<RawWorktreeGcConfig>,
+    pub(super) runs: Option<RawRunGcConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub(super) struct RawRunGcConfig {
+    pub(super) archive_after_days: Option<u64>,
+    pub(super) purge_after_days: Option<u64>,
+    pub(super) failure_archive_after_days: Option<u64>,
+    pub(super) failure_purge_after_days: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
