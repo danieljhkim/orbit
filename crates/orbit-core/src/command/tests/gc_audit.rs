@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use chrono::{DateTime, TimeZone, Utc};
 use orbit_common::types::AuditEventStatus;
+use orbit_common::utility::audit_pending;
 use orbit_common::utility::audit_writer_guard;
 use orbit_store::{AuditEventInsertParams, Store, V2AuditEventInsertParams};
 
@@ -521,6 +522,132 @@ fn active_jsonl_writer_append_under_guard_blocks_partition_sweep() {
         contents.contains("2026-07-11"),
         "the live envelope appended under the guard must not be lost"
     );
+}
+
+// The next block covers the ORB-10186 second-round fix: the durable
+// pending-publication root that spans the *split* blob→reference transaction.
+// `V2SqliteSink::write_blob` records a `pending/<hash>` marker (the same
+// `audit_pending::mark` call these tests use) atomically with the blob under the
+// guard, and `write_envelope`/`emit` clears it (via `audit_pending::clear_published`)
+// once the referencing row is durable. So GC cannot sweep a just-written blob
+// between the two real sink calls, and no published reference can point at a
+// swept blob.
+
+const FRESH: fn() -> DateTime<Utc> = || Utc.with_ymd_and_hms(2026, 7, 12, 0, 0, 0).unwrap();
+const STALE: fn() -> DateTime<Utc> = || Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+
+#[test]
+fn fresh_pending_marker_protects_blob_and_apply_fails_closed() {
+    // Models the exact interleaving the reviewer flagged: a blob written by
+    // `write_blob` (marker present) whose reference has not yet been published,
+    // with GC trying to sweep it in between. `apply` must fail closed.
+    let fixture = Fixture::new();
+    let blob = fixture.blob(ORPHAN);
+    let collector = fixture.collector();
+    let scope = fixture.scope();
+    let audit_root = fixture.audit_root();
+
+    // Seed a *stale* marker first so the blob still plans as an ordinary sweep
+    // candidate we can capture (a fresh marker would keep it out of the plan
+    // entirely — see the lifecycle test below).
+    audit_pending::mark(&audit_root, ORPHAN, STALE()).expect("stale marker");
+    let candidate = fixture.frozen_candidate(&collector, &scope, &format!("blob:{ORPHAN}"));
+
+    // A real `write_blob` now runs: the marker is refreshed into the retention
+    // window, exactly as the sink stamps it.
+    audit_pending::mark(&audit_root, ORPHAN, FRESH()).expect("fresh marker");
+
+    let context = GcContext {
+        scope: &scope,
+        retention_override: Some("30d"),
+        clock: &fixture.clock,
+    };
+    let applied = collector.apply(&candidate, &context);
+    assert!(
+        applied.is_err(),
+        "apply must fail closed while the blob is pending publication, got {applied:?}"
+    );
+    assert!(
+        blob.exists(),
+        "a blob inside its pending-publication window must survive the sweep"
+    );
+}
+
+#[test]
+fn pending_publish_gc_lifecycle_never_strands_reference() {
+    // End-to-end over the real sink primitives: write_blob (mark) → GC →
+    // write_envelope (persist row + clear marker) → GC. At no step is the blob
+    // both sweepable and about-to-be-referenced.
+    let fixture = Fixture::new();
+    let blob = fixture.blob(ORPHAN);
+    let audit_root = fixture.audit_root();
+
+    // 1. write_blob: durable pending marker, blob not yet referenced.
+    audit_pending::mark(&audit_root, ORPHAN, FRESH()).expect("mark");
+
+    // GC while the reference is in flight: the blob is skipped, never swept.
+    let plan = fixture.report(false);
+    let ids: Vec<&str> = plan.targets[0]
+        .items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect();
+    assert!(
+        !ids.contains(&format!("blob:{ORPHAN}").as_str()),
+        "a pending blob must not be a sweep candidate"
+    );
+    assert!(
+        plan.targets[0]
+            .skipped
+            .iter()
+            .any(|skip| skip.code == "pending_publication"),
+        "the pending blob must be skipped as pending_publication"
+    );
+
+    // 2. write_envelope: persist the referencing row, then clear the marker
+    //    (row commits before the marker is retired, both under the guard).
+    let payload = format!(r#"{{"blob":"{ORPHAN}"}}"#);
+    fixture.insert_v2("published", "live", "2026-07-10T00:00:00Z", &payload);
+    audit_pending::clear_published(&audit_root, &payload);
+
+    // GC after publication: the blob is now protected by its retained reference.
+    let after = fixture.report(false);
+    assert!(
+        after.targets[0]
+            .skipped
+            .iter()
+            .any(|skip| skip.id == format!("blob:{ORPHAN}") && skip.code == "referenced"),
+        "after publication the blob is reachable from retained evidence"
+    );
+    assert!(
+        blob.exists(),
+        "the published reference must not point at a swept blob"
+    );
+}
+
+#[test]
+fn stale_pending_marker_is_swept_with_its_orphaned_blob() {
+    // A blob written but never published (e.g. a discarded `write_blob`) keeps a
+    // marker forever unless reclaimed. Once the marker predates the cutoff its
+    // window has closed, so both it and the orphan blob are swept — the leak is
+    // bounded by the retention window, not unbounded.
+    let fixture = Fixture::new();
+    let blob = fixture.blob(ORPHAN);
+    let audit_root = fixture.audit_root();
+    audit_pending::mark(&audit_root, ORPHAN, STALE()).expect("stale marker");
+    let marker = audit_pending::pending_dir(&audit_root).join(ORPHAN);
+    assert!(marker.exists(), "precondition: stale marker present");
+
+    let apply = fixture.report(true);
+    assert!(
+        apply.targets[0]
+            .items
+            .iter()
+            .any(|item| item.id == format!("pending:{ORPHAN}")),
+        "a stale pending marker must be a reclamation candidate"
+    );
+    assert!(!marker.exists(), "the stale pending marker is reclaimed");
+    assert!(!blob.exists(), "the orphaned blob it protected is swept");
 }
 
 #[test]

@@ -9,11 +9,11 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use chrono::Utc;
-use orbit_agent::loop_engine::audit::AuditSink;
+use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
 use orbit_common::types::activity_job::{
     AUDIT_ENVELOPE_SCHEMA_VERSION, V2AuditEnvelope, V2AuditEvent, V2AuditEventKind,
 };
-use orbit_common::utility::audit_writer_guard;
+use orbit_common::utility::{audit_pending, audit_writer_guard};
 use orbit_store::Store;
 
 use crate::activity_job::sqlite_sink::V2SqliteSink;
@@ -37,6 +37,119 @@ fn run_started_event() -> V2AuditEvent {
             schema_version: AUDIT_ENVELOPE_SCHEMA_VERSION,
             event_type: kind.event_type().to_string(),
             event_id: "v2evt-test-00000001".to_string(),
+            ts: Utc::now(),
+            run_id: "jrun-test".to_string(),
+            agent_identity: "codex".to_string(),
+            parent_event_id: None,
+            workspace_path: None,
+        },
+        kind,
+    }
+}
+
+fn is_pending(audit_root: &std::path::Path, hash: &str) -> bool {
+    audit_pending::list(audit_root)
+        .expect("list pending markers")
+        .iter()
+        .any(|marker| marker.hash == hash)
+}
+
+/// The whole point of ORB-10186's second round: the *real* production sink
+/// sequence is `write_blob` (guard acquired then released) followed later by
+/// `write_envelope` (guard re-acquired). The pending-publication marker bridges
+/// that gap. Drive the actual sink API — no manual guard, no manual row insert —
+/// and prove the marker appears at `write_blob` and is retired only once the
+/// referencing envelope is durably persisted, so the collector (which treats a
+/// fresh marker as a live reference) can never sweep the blob mid-publication.
+#[test]
+fn real_write_blob_then_write_envelope_marks_then_clears_pending() {
+    let temp = tempfile::tempdir().expect("temp");
+    let audit_root = temp.path().join("state/audit");
+    std::fs::create_dir_all(audit_root.join("blobs")).expect("blob root");
+    let sink = sink(&audit_root);
+
+    // Real production call #1: publish the content-addressed blob.
+    let hash = sink.write_blob(b"tool input payload");
+    assert!(
+        !hash.starts_with("error:"),
+        "blob write should succeed: {hash}"
+    );
+    let blob_path = audit_root.join("blobs").join(&hash[..2]).join(&hash);
+    assert!(blob_path.exists(), "blob must be published");
+    // Between the two calls the blob is written but unreferenced: only the
+    // pending marker keeps GC from sweeping it.
+    assert!(
+        is_pending(&audit_root, &hash),
+        "write_blob must record a pending-publication marker for the new blob"
+    );
+
+    // Real production call #2: publish an envelope that references the blob.
+    let event = cli_started_event(&hash);
+    sink.write_envelope(&event).expect("envelope persists");
+
+    // The reference is now durable, so the marker is retired — the blob is
+    // henceforth protected by reachability, not by the pending root.
+    assert!(
+        !is_pending(&audit_root, &hash),
+        "publishing the referencing envelope must clear the pending marker"
+    );
+    assert!(blob_path.exists(), "the referenced blob must still exist");
+    assert_eq!(
+        sink.persisted_event_count().expect("count"),
+        1,
+        "the referencing envelope must be persisted"
+    );
+}
+
+/// The loop-event path (`emit` → `write_loop_event`) publishes blob references
+/// too (e.g. `body_sha256`); it must retire the marker exactly like the envelope
+/// path.
+#[test]
+fn real_write_blob_then_emit_loop_event_clears_pending() {
+    let temp = tempfile::tempdir().expect("temp");
+    let audit_root = temp.path().join("state/audit");
+    std::fs::create_dir_all(audit_root.join("blobs")).expect("blob root");
+    let sink = sink(&audit_root);
+
+    let hash = sink.write_blob(b"http request preview");
+    assert!(
+        is_pending(&audit_root, &hash),
+        "marker recorded on write_blob"
+    );
+
+    sink.emit(&LoopAuditEvent::HttpRequest {
+        ts: Utc::now(),
+        run_id: "jrun-test".to_string(),
+        session_id: "sess".to_string(),
+        iteration: 0,
+        provider: "codex".to_string(),
+        model: "gpt".to_string(),
+        endpoint: String::new(),
+        body_sha256: hash.clone(),
+    });
+
+    assert!(
+        !is_pending(&audit_root, &hash),
+        "emitting the loop event that references the blob must clear its marker"
+    );
+    let blob_path = audit_root.join("blobs").join(&hash[..2]).join(&hash);
+    assert!(blob_path.exists(), "the referenced blob survives");
+}
+
+fn cli_started_event(stdin_blob_ref: &str) -> V2AuditEvent {
+    let kind = V2AuditEventKind::CliInvocationStarted {
+        provider: "codex".to_string(),
+        argv_redacted: vec!["codex".to_string()],
+        stdin_blob_ref: Some(stdin_blob_ref.to_string()),
+        model: None,
+        cwd: None,
+        wall_clock_timeout_ms: 1000,
+    };
+    V2AuditEvent {
+        envelope: V2AuditEnvelope {
+            schema_version: AUDIT_ENVELOPE_SCHEMA_VERSION,
+            event_type: kind.event_type().to_string(),
+            event_id: "v2evt-test-00000002".to_string(),
             ts: Utc::now(),
             run_id: "jrun-test".to_string(),
             agent_identity: "codex".to_string(),

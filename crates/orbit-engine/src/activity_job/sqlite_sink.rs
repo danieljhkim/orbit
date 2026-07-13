@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use orbit_agent::loop_engine::audit::{AuditSink, BlobStore, LoopAuditEvent};
 use orbit_common::types::OrbitError;
 use orbit_common::types::activity_job::V2AuditEvent;
+use orbit_common::utility::audit_pending;
 use orbit_common::utility::audit_writer_guard::{self, AuditWriterGuard};
 use orbit_store::{Store, V2AuditEventFilter, V2AuditEventInsertParams};
 
@@ -82,19 +83,26 @@ impl V2SqliteSink {
         let _guard = self.writer_guard()?;
         let payload_json = serde_json::to_string(event)
             .map_err(|err| OrbitError::Store(format!("serialize v2 audit event: {err}")))?;
-        self.store.insert_v2_audit_event(&V2AuditEventInsertParams {
-            workspace_id: self.workspace_id.clone(),
-            event_id: event.envelope.event_id.clone(),
-            source: "v2_envelope".to_string(),
-            schema_version: event.envelope.schema_version,
-            event_type: event.envelope.event_type.clone(),
-            ts: event.envelope.ts,
-            run_id: event.envelope.run_id.clone(),
-            agent_identity: event.envelope.agent_identity.clone(),
-            parent_event_id: event.envelope.parent_event_id.clone(),
-            workspace_path: event.envelope.workspace_path.clone(),
-            payload_json,
-        })
+        self.store
+            .insert_v2_audit_event(&V2AuditEventInsertParams {
+                workspace_id: self.workspace_id.clone(),
+                event_id: event.envelope.event_id.clone(),
+                source: "v2_envelope".to_string(),
+                schema_version: event.envelope.schema_version,
+                event_type: event.envelope.event_type.clone(),
+                ts: event.envelope.ts,
+                run_id: event.envelope.run_id.clone(),
+                agent_identity: event.envelope.agent_identity.clone(),
+                parent_event_id: event.envelope.parent_event_id.clone(),
+                workspace_path: event.envelope.workspace_path.clone(),
+                payload_json: payload_json.clone(),
+            })?;
+        // The reference is now durable. Retire the pending-publication markers of
+        // the blobs this envelope publishes — under the same guard, after the row
+        // commits — so each blob stays continuously protected (pending marker →
+        // retained reference) with no unguarded gap (ORB-10186).
+        audit_pending::clear_published(&self.audit_root, &payload_json);
+        Ok(())
     }
 
     pub fn persisted_event_count(&self) -> Result<i64, OrbitError> {
@@ -114,19 +122,26 @@ impl V2SqliteSink {
         let event_id = self.next_loop_event_id()?;
         let payload_json = serde_json::to_string(event)
             .map_err(|err| OrbitError::Store(format!("serialize loop audit event: {err}")))?;
-        self.store.insert_v2_audit_event(&V2AuditEventInsertParams {
-            workspace_id: self.workspace_id.clone(),
-            event_id,
-            source: "loop_event".to_string(),
-            schema_version: 1,
-            event_type: loop_event_type(event).to_string(),
-            ts: loop_event_ts(event),
-            run_id: loop_event_run_id(event).unwrap_or(&self.run_id).to_string(),
-            agent_identity: self.agent_identity.clone(),
-            parent_event_id: None,
-            workspace_path: self.workspace_path.clone(),
-            payload_json,
-        })
+        self.store
+            .insert_v2_audit_event(&V2AuditEventInsertParams {
+                workspace_id: self.workspace_id.clone(),
+                event_id,
+                source: "loop_event".to_string(),
+                schema_version: 1,
+                event_type: loop_event_type(event).to_string(),
+                ts: loop_event_ts(event),
+                run_id: loop_event_run_id(event).unwrap_or(&self.run_id).to_string(),
+                agent_identity: self.agent_identity.clone(),
+                parent_event_id: None,
+                workspace_path: self.workspace_path.clone(),
+                payload_json: payload_json.clone(),
+            })?;
+        // Retire the pending-publication markers of the blobs this loop event
+        // (e.g. `input_sha256` / `body_sha256`) publishes — under the guard,
+        // after the row commits — closing the blob→reference transaction with no
+        // unguarded gap (ORB-10186).
+        audit_pending::clear_published(&self.audit_root, &payload_json);
+        Ok(())
     }
 
     fn next_loop_event_id(&self) -> Result<String, OrbitError> {
@@ -148,15 +163,28 @@ impl AuditSink for V2SqliteSink {
 
     fn write_blob(&self, content: &[u8]) -> String {
         // Publish the content-addressed blob under the audit writer/GC guard so
-        // it cannot be swept between the collector's re-mark and its unlink
-        // (ORB-10186). A guard timeout degrades exactly like a write failure.
+        // it cannot be swept between the collector's re-mark and its unlink, then
+        // record a durable pending-publication marker — atomic with the blob
+        // under the same guard — so the collector protects it until the
+        // envelope/loop event that names it is published and clears the marker
+        // (ORB-10186). This spans the otherwise-split blob→reference transaction:
+        // GC can no longer delete a just-written blob before its reference lands.
+        // A guard timeout, a blob-write failure, or a marker-write failure all
+        // degrade identically to an audit-write failure — we return an `error:`
+        // sentinel rather than a usable hash, so a reference to an unprotected
+        // blob is never published.
         let _guard = match self.writer_guard() {
             Ok(guard) => guard,
             Err(err) => return format!("error:{err}"),
         };
-        self.blob_store
-            .write(content)
-            .unwrap_or_else(|err| format!("error:{err}"))
+        let hash = match self.blob_store.write(content) {
+            Ok(hash) => hash,
+            Err(err) => return format!("error:{err}"),
+        };
+        if let Err(err) = audit_pending::mark(&self.audit_root, &hash, Utc::now()) {
+            return format!("error:{err}");
+        }
+        hash
     }
 }
 

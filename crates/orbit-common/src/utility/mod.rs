@@ -1,3 +1,4 @@
+pub mod audit_pending;
 pub mod audit_writer_guard;
 pub mod blob_store;
 pub mod fs;

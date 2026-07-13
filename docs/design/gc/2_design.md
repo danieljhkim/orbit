@@ -220,6 +220,23 @@ unreachable evidence while the writer blocks and then republishes (its
 content-addressed write recreates the blob) — a retained envelope never points
 at a swept blob, and no append is lost.
 
+The guard makes each *individual* audit write atomic against the collector, but
+a content-addressed blob and the envelope/loop event that references it are
+published by two *separate* guarded calls (`write_blob`, then
+`write_envelope`/`emit`), with the guard released in between. Without more, the
+collector could sweep the just-written—but not-yet-referenced—blob in that gap
+and strand the later reference. A durable **pending-publication root** closes
+that split transaction: `write_blob` records a marker `state/audit/pending/<hash>`
+(atomic with the blob, under the guard) stamped with the write time, and the
+publication path clears it once the referencing row is durable (again under the
+guard, after the row commits) — so at no guarded instant is a blob both unmarked
+and unreferenced. The collector treats a marker inside the retention window as a
+live reference (the blob is never a sweep candidate, and `apply` fails closed on
+it); a marker older than the cutoff has outlived any publication window and is
+reclaimed as an ordinary candidate together with its orphaned blob, bounding a
+never-published blob to the retention window rather than leaking it. Markers are
+plain files written atomically, so a crash mid-publish is restart-safe.
+
 ### 3.6 Skills (global)
 
 Skill collection covers generated directories and supported agent-root links

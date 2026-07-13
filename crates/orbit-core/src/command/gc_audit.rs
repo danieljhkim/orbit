@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::OrbitError;
+use orbit_common::utility::audit_pending::{self, PendingMarker};
 use orbit_common::utility::audit_writer_guard;
 use orbit_store::{AuditGcLegacyRow, Store, V2AuditEventRow};
 use serde_json::Value;
@@ -75,6 +76,27 @@ impl AuditGcCollector {
                 retained_refs.extend(file.blob_refs.iter().cloned());
             }
         }
+        // Pending-publication root (ORB-10186): a blob whose marker is still
+        // inside the retention window is being published right now — its
+        // referencing envelope/loop event has not landed yet — so it counts as
+        // referenced and must never be swept. A marker older than the cutoff has
+        // outlived any publication window (orphaned, or crashed mid-publish); it
+        // no longer protects the blob and is itself reclaimed as a stale
+        // candidate. A malformed marker fails closed: it protects the blob but is
+        // not swept.
+        let mut pending_refs = HashSet::new();
+        let mut stale_pending = Vec::new();
+        for marker in audit_pending::list(&self.audit_root)? {
+            match marker.created {
+                Some(ts) if ts >= cutoff => {
+                    pending_refs.insert(marker.hash);
+                }
+                Some(_) => stale_pending.push(marker),
+                None => {
+                    pending_refs.insert(marker.hash);
+                }
+            }
+        }
         Ok(AuditSnapshot {
             cutoff,
             repo_root: repo_root.to_path_buf(),
@@ -82,12 +104,15 @@ impl AuditGcCollector {
             v2,
             jsonl,
             retained_refs,
+            pending_refs,
+            stale_pending,
             protected_run_ids: protected.run_ids,
         })
     }
 
     fn blob_is_referenced(&self, hash: &str, context: &GcContext<'_>) -> Result<bool, OrbitError> {
-        Ok(self.snapshot(context)?.retained_refs.contains(hash))
+        let snapshot = self.snapshot(context)?;
+        Ok(snapshot.retained_refs.contains(hash) || snapshot.pending_refs.contains(hash))
     }
 }
 
@@ -173,6 +198,12 @@ impl GcCollector for AuditGcCollector {
             let bytes = fs::symlink_metadata(&blob).ok().map(|meta| meta.len());
             if snapshot.retained_refs.contains(&hash) {
                 plan.skipped.push(skip(format!("blob:{hash}"), "referenced", "blob is reachable from retained audit, a hold/export, or retained run evidence"));
+            } else if snapshot.pending_refs.contains(&hash) {
+                plan.skipped.push(skip(
+                    format!("blob:{hash}"),
+                    "pending_publication",
+                    "blob was written under the audit writer guard and its reference publication is still in flight",
+                ));
             } else {
                 let expected = file_fingerprint(&blob)?;
                 plan.candidates.push(GcCandidate {
@@ -188,6 +219,30 @@ impl GcCollector for AuditGcCollector {
                     allow_owned_symlink: false,
                 });
             }
+        }
+        // Reclaim pending-publication markers whose window has closed. The
+        // generic file candidate path revalidates each under the writer guard
+        // (fail closed if a fresh write refreshed it) before unlinking, so a
+        // marker actively protecting a blob is never removed (ORB-10186).
+        for marker in &snapshot.stale_pending {
+            plan.scanned += 1;
+            let bytes = fs::symlink_metadata(&marker.path)
+                .ok()
+                .map(|meta| meta.len());
+            let expected = file_fingerprint(&marker.path)?;
+            plan.candidates.push(GcCandidate {
+                id: format!("pending:{}", marker.hash),
+                action: "sweep_stale_pending_marker".to_string(),
+                path: Some(marker.path.clone()),
+                bytes,
+                ownership_evidence:
+                    "pending-publication marker beneath workspace audit pending root".to_string(),
+                retention_evidence:
+                    "marker predates the retention cutoff; its publication window has closed"
+                        .to_string(),
+                expected_state: expected,
+                allow_owned_symlink: false,
+            });
         }
         for hash in &snapshot.retained_refs {
             let path = self.audit_root.join("blobs").join(&hash[..2]).join(hash);
@@ -348,6 +403,12 @@ struct AuditSnapshot {
     v2: Vec<V2AuditEventRow>,
     jsonl: Vec<JsonlFile>,
     retained_refs: HashSet<String>,
+    /// Blobs with a fresh pending-publication marker — reference publication is
+    /// in flight, so they are protected exactly like a retained reference.
+    pending_refs: HashSet<String>,
+    /// Pending markers whose publication window has closed; reclaimed as
+    /// candidates so an orphaned/crashed-mid-publish marker cannot leak.
+    stale_pending: Vec<PendingMarker>,
     protected_run_ids: HashSet<String>,
 }
 
@@ -506,11 +567,11 @@ fn collect_legacy_refs(row: &AuditGcLegacyRow, refs: &mut HashSet<String>) {
 }
 
 fn collect_blob_refs(text: &str, refs: &mut HashSet<String>) {
-    for token in text.split(|ch: char| !ch.is_ascii_hexdigit()) {
-        if is_blob_hash(token) {
-            refs.insert(token.to_ascii_lowercase());
-        }
-    }
+    // Delegate to the shared tokenizer so the collector's reference-marking and
+    // the writer's marker-clearing can never diverge on what a blob ref is.
+    audit_pending::for_each_blob_hash(text, |hash| {
+        refs.insert(hash);
+    });
 }
 
 fn collect_run_ids(text: &str, runs: &mut HashSet<String>) {
@@ -522,7 +583,7 @@ fn collect_run_ids(text: &str, runs: &mut HashSet<String>) {
 }
 
 fn is_blob_hash(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    audit_pending::is_blob_hash(value)
 }
 
 fn event_timestamp(value: &Value) -> Option<DateTime<Utc>> {

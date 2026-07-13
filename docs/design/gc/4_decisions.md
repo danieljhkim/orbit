@@ -54,7 +54,13 @@ non-bypassable containment, symlink, current-owner, and ambiguity protections;
   advisory lock every v2/loop/blob publication path shares with the collector,
   held under the host GC lock from the final mark/fingerprint validation through
   the envelope/blob unlink so a concurrent writer can neither strand a retained
-  reference nor lose an append.
+  reference nor lose an append. Because a blob and the reference that names it
+  are published by two separate guarded calls, a durable per-blob
+  pending-publication marker (`state/audit/pending/<hash>`) bridges the gap: the
+  collector treats a fresh marker as a live reference (fail closed) and reclaims
+  only markers whose retention window has closed, so no published reference can
+  point at a swept blob and a never-published blob leaks no longer than the
+  retention window.
 - Code anchors: `execute_gc` freezes and consumes plans under the host lock;
   `validate_candidate_path` enforces containment and no-follow path checks.
   Both cite ADR-0220 at the enforcement point; collector review covers the
