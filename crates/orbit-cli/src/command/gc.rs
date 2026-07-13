@@ -1,14 +1,17 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::{Args, ValueEnum};
 use orbit_core::command::gc::{
     EmptyGcCollector, GcCollector, GcReport, GcRequest, GcScope, GcTarget, SystemGcClock,
     WorktreeGcCollector, WorktreeGcPolicy, execute_gc,
 };
+use orbit_core::command::gc_logs::LogsGcCollector;
 use orbit_core::command::skill_gc::SkillsGcCollector;
 use orbit_core::{OrbitError, OrbitRuntime};
 
 use super::Execute;
+use crate::parse::parse_duration_seconds;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum GcTargetArg {
@@ -129,9 +132,21 @@ impl Execute for GcCommand {
                 .unwrap_or_else(|| collector_runtime.worktree_gc_failure_retention_days()),
         };
         let worktrees = WorktreeGcCollector::new(collector_runtime, worktree_policy);
+        // `logs` has a real collector too; remaining targets keep the framework
+        // placeholder until their domain collectors land.
+        let retention_window = self
+            .retention
+            .as_deref()
+            .map(parse_duration_seconds)
+            .transpose()?
+            .map(Duration::from_secs);
+        let logs = matches!(target, GcTarget::Logs)
+            .then(|| LogsGcCollector::from_scope(&scope, retention_window));
         let empty = EmptyGcCollector::new(target);
         let collector: &dyn GcCollector = if target == GcTarget::Worktrees {
             &worktrees
+        } else if let Some(logs) = logs.as_ref() {
+            logs
         } else {
             &empty
         };

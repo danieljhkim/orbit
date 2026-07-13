@@ -3,17 +3,26 @@
 //!
 //! On an always-on host the JSONL feed would otherwise grow unbounded until the
 //! disk fills — which then cascades into SQLite write failures across every
-//! store. This module bounds it with an opportunistic, rename-based roll plus a
-//! retention sweep, both run once at subscriber init (cheap, no daemon).
+//! store. This module bounds the *active* file with an opportunistic,
+//! rename-based roll run once at subscriber init (cheap, no daemon).
+//!
+//! Startup is **non-destructive**: it rolls the oversized active file and only
+//! *reports* (never deletes) the dated archives that would be reclaimable.
+//! Archive deletion is owned exclusively by `orbit gc logs --apply`, which
+//! applies the same age + total-size retention under the shared host GC lock,
+//! candidate revalidation, deletion manifest, and error report (ADR-0220). This
+//! keeps a single explicit mutation gate — the subscriber-init hook can no
+//! longer unlink an archive out from under that contract (ADR-0221).
 //!
 //! The active file stays at the fixed path `orbit.jsonl` — readers
 //! (`orbit log tail`, the dashboard) open that exact path, so we do NOT adopt
 //! `tracing-appender`'s dated active filenames. Instead, when the active file
 //! exceeds the per-file budget it is renamed to a dated archive
 //! (`orbit.jsonl.<UTC-timestamp>`) and the subscriber reopens a fresh active
-//! file. Retention then prunes archives older than the age budget or beyond the
-//! total-size budget (delete-only; no compression, to avoid pulling a
-//! compression codec into `orbit-common`).
+//! file. The retention classifier ([`plan_prune`]) selects archives older than
+//! the age budget or beyond the total-size budget; `orbit gc logs` deletes them
+//! (delete-only; no compression, to avoid pulling a compression codec into
+//! `orbit-common`).
 //!
 //! Concurrency: rolls are rare (size-triggered) and rename is atomic. A
 //! long-running process that keeps its fd open after another process rolls the
@@ -110,81 +119,64 @@ impl LogRotationConfig {
     pub fn load_global_best_effort() -> Self {
         load_global().unwrap_or_default()
     }
-}
 
-fn load_global() -> Option<LogRotationConfig> {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .filter(|value| !value.is_empty())?;
-    let path = Path::new(&home).join(".orbit").join("config.toml");
-    let raw = std::fs::read_to_string(&path).ok()?;
-    let value: toml::Value = toml::from_str(&raw).ok()?;
-    let runtime = value.get("runtime")?;
-    let read_u64 = |key: &str| {
-        runtime
-            .get(key)
-            .and_then(toml::Value::as_integer)
-            .and_then(|integer| u64::try_from(integer).ok())
-    };
-    LogRotationConfig::from_parts(
-        read_u64("log_retention_days"),
-        read_u64("log_max_total_mb"),
-        read_u64("log_max_file_mb"),
-    )
-    .ok()
-}
-
-/// Opportunistically roll the active log if oversized, then prune archives by
-/// age and total-size budget. Best-effort: logs a warning on failure but never
-/// panics or fails the caller. Intended to run once at subscriber init.
-pub fn rotate_and_prune(active_path: &Path, config: &LogRotationConfig) {
-    if let Err(error) = maybe_roll(active_path, config) {
-        tracing::warn!(
-            target: "orbit.logging.rotation",
-            path = %active_path.display(),
-            error = %error,
-            "failed to roll oversized JSONL log",
-        );
-    }
-    if let Err(error) = prune_archives(active_path, config) {
-        tracing::warn!(
-            target: "orbit.logging.rotation",
-            error = %error,
-            "failed to prune JSONL log archives",
-        );
+    /// The age budget expressed as a [`Duration`]. Saturates the multiply so an
+    /// absurd (but validated nonzero) `retention_days` cannot overflow.
+    pub fn retention_window(&self) -> Duration {
+        Duration::from_secs(self.retention_days.saturating_mul(SECONDS_PER_DAY))
     }
 }
 
-/// Rename the active file to a dated archive when it exceeds the per-file
-/// budget. Returns `Ok(())` (no-op) when the file is absent or within budget.
-pub(crate) fn maybe_roll(active_path: &Path, config: &LogRotationConfig) -> std::io::Result<()> {
-    let size = match std::fs::metadata(active_path) {
-        Ok(meta) => meta.len(),
-        Err(_) => return Ok(()), // no active file yet
-    };
-    if size <= config.max_file_bytes {
-        return Ok(());
-    }
-    std::fs::rename(active_path, archive_path(active_path))
+/// Why the retention policy selected an archive for deletion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneReason {
+    /// The archive's mtime is older than the retention window.
+    Age,
+    /// The archive was selected oldest-first to bring the surviving set back
+    /// under the total-size budget.
+    Size,
 }
 
-fn archive_path(active_path: &Path) -> PathBuf {
-    let stamp = Utc::now().format("%Y%m%dT%H%M%S%3fZ");
-    let name = active_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("orbit.jsonl");
-    active_path.with_file_name(format!("{name}.{stamp}"))
+/// One archive the retention policy would delete, with the size and mtime
+/// observed during the scan and the reason it was selected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PruneCandidate {
+    pub path: PathBuf,
+    pub bytes: u64,
+    pub modified: SystemTime,
+    pub reason: PruneReason,
 }
 
-/// Delete archives older than the age budget, then, if the surviving archive
-/// set still exceeds the total-size budget, delete oldest-first until it fits.
-pub(crate) fn prune_archives(
+/// The archives beside an active log file that the retention policy would
+/// delete, plus what was scanned. The active file is never included.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PrunePlan {
+    /// Number of archive files scanned (the active file is excluded).
+    pub scanned: u64,
+    /// Total bytes across all scanned archives.
+    pub scanned_bytes: u64,
+    /// Archives selected for deletion: age-selected first, then size-selected.
+    pub candidates: Vec<PruneCandidate>,
+}
+
+/// Classify the archives beside `active_path` for deletion under the `retention`
+/// age window and `max_total_bytes` total-size budget, relative to `now`.
+///
+/// Pure classification — performs no deletion. Age-selected archives come
+/// first, then, from the survivors, the oldest are size-selected until the set
+/// fits the budget. Only dated `<active_name>.<stamp>` archives are considered;
+/// the active file itself (exactly `active_name`) is never a candidate. This is
+/// the single classifier shared by subscriber-init reporting
+/// ([`report_prunable`]) and the `orbit gc logs` collector, so the plan the two
+/// see never disagrees — only `orbit gc logs --apply` acts on it.
+pub fn plan_prune(
     active_path: &Path,
-    config: &LogRotationConfig,
-) -> std::io::Result<()> {
+    retention: Duration,
+    max_total_bytes: u64,
+    now: SystemTime,
+) -> std::io::Result<PrunePlan> {
     let Some(dir) = active_path.parent() else {
-        return Ok(());
+        return Ok(PrunePlan::default());
     };
     let active_name = active_path
         .file_name()
@@ -211,14 +203,20 @@ pub(crate) fn prune_archives(
         archives.push((entry.path(), mtime, meta.len()));
     }
 
-    // Age-based pruning. Saturate the multiply so an absurd (but validated
-    // nonzero) retention_days cannot overflow into a tiny cutoff.
-    if let Some(cutoff) = SystemTime::now().checked_sub(Duration::from_secs(
-        config.retention_days.saturating_mul(SECONDS_PER_DAY),
-    )) {
-        archives.retain(|(path, mtime, _size)| {
+    let scanned = archives.len() as u64;
+    let scanned_bytes = archives.iter().map(|(_, _, size)| *size).sum();
+    let mut candidates = Vec::new();
+
+    // Age-based selection.
+    if let Some(cutoff) = now.checked_sub(retention) {
+        archives.retain(|(path, mtime, size)| {
             if *mtime < cutoff {
-                let _ = std::fs::remove_file(path);
+                candidates.push(PruneCandidate {
+                    path: path.clone(),
+                    bytes: *size,
+                    modified: *mtime,
+                    reason: PruneReason::Age,
+                });
                 false
             } else {
                 true
@@ -226,19 +224,136 @@ pub(crate) fn prune_archives(
         });
     }
 
-    // Size-based pruning: delete oldest archives until under the total budget.
+    // Size-based selection over the survivors: oldest first until under budget.
     let mut total: u64 = archives.iter().map(|(_, _, size)| *size).sum();
-    if total > config.max_total_bytes {
+    if total > max_total_bytes {
         archives.sort_by_key(|(_, mtime, _)| *mtime); // oldest first
-        for (path, _, size) in &archives {
-            if total <= config.max_total_bytes {
+        for (path, mtime, size) in &archives {
+            if total <= max_total_bytes {
                 break;
             }
-            if std::fs::remove_file(path).is_ok() {
-                total = total.saturating_sub(*size);
-            }
+            candidates.push(PruneCandidate {
+                path: path.clone(),
+                bytes: *size,
+                modified: *mtime,
+                reason: PruneReason::Size,
+            });
+            total = total.saturating_sub(*size);
         }
     }
 
+    Ok(PrunePlan {
+        scanned,
+        scanned_bytes,
+        candidates,
+    })
+}
+
+fn load_global() -> Option<LogRotationConfig> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|value| !value.is_empty())?;
+    let path = Path::new(&home).join(".orbit").join("config.toml");
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let value: toml::Value = toml::from_str(&raw).ok()?;
+    let runtime = value.get("runtime")?;
+    let read_u64 = |key: &str| {
+        runtime
+            .get(key)
+            .and_then(toml::Value::as_integer)
+            .and_then(|integer| u64::try_from(integer).ok())
+    };
+    LogRotationConfig::from_parts(
+        read_u64("log_retention_days"),
+        read_u64("log_max_total_mb"),
+        read_u64("log_max_file_mb"),
+    )
+    .ok()
+}
+
+/// Opportunistically roll the active log if oversized, then *report* (never
+/// delete) the archives that `orbit gc logs --apply` would reclaim under the
+/// configured age and total-size budgets. Non-destructive and best-effort: logs
+/// a warning on failure but never panics, deletes, or fails the caller.
+/// Intended to run once at subscriber init.
+///
+/// Archive deletion is deliberately not performed here: it belongs to the
+/// explicit `orbit gc logs --apply` gate (shared host lock, revalidation,
+/// manifest, report) so startup can never unlink outside that contract
+/// (ADR-0220 / ADR-0221).
+pub fn rotate_and_report(active_path: &Path, config: &LogRotationConfig) {
+    if let Err(error) = maybe_roll(active_path, config) {
+        tracing::warn!(
+            target: "orbit.logging.rotation",
+            path = %active_path.display(),
+            error = %error,
+            "failed to roll oversized JSONL log",
+        );
+    }
+    if let Err(error) = report_prunable(active_path, config) {
+        tracing::warn!(
+            target: "orbit.logging.rotation",
+            error = %error,
+            "failed to scan JSONL log archives for retention reporting",
+        );
+    }
+}
+
+/// Rename the active file to a dated archive when it exceeds the per-file
+/// budget. Returns `Ok(())` (no-op) when the file is absent or within budget.
+pub(crate) fn maybe_roll(active_path: &Path, config: &LogRotationConfig) -> std::io::Result<()> {
+    let size = match std::fs::metadata(active_path) {
+        Ok(meta) => meta.len(),
+        Err(_) => return Ok(()), // no active file yet
+    };
+    if size <= config.max_file_bytes {
+        return Ok(());
+    }
+    std::fs::rename(active_path, archive_path(active_path))
+}
+
+fn archive_path(active_path: &Path) -> PathBuf {
+    let stamp = Utc::now().format("%Y%m%dT%H%M%S%3fZ");
+    let name = active_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("orbit.jsonl");
+    active_path.with_file_name(format!("{name}.{stamp}"))
+}
+
+/// Scan the archives beside `active_path` and *report* — without deleting — how
+/// many, and how many bytes, `orbit gc logs --apply` would reclaim under the age
+/// and total-size budgets. Delegates selection to [`plan_prune`] (the shared
+/// classifier) so the plan startup observes matches exactly what the explicit
+/// GC surface applies.
+///
+/// ADR-0221: startup is non-destructive. It never unlinks an archive; every
+/// deletion goes through the explicit `orbit gc logs --apply` gate (shared host
+/// lock, revalidation, manifest, error report) so the subscriber-init hook
+/// cannot bypass the single mutation contract (ADR-0220).
+pub(crate) fn report_prunable(
+    active_path: &Path,
+    config: &LogRotationConfig,
+) -> std::io::Result<()> {
+    let plan = plan_prune(
+        active_path,
+        config.retention_window(),
+        config.max_total_bytes,
+        SystemTime::now(),
+    )?;
+    if !plan.candidates.is_empty() {
+        let reclaimable_bytes: u64 = plan
+            .candidates
+            .iter()
+            .map(|candidate| candidate.bytes)
+            .sum();
+        tracing::debug!(
+            target: "orbit.logging.rotation",
+            path = %active_path.display(),
+            eligible = plan.candidates.len(),
+            reclaimable_bytes,
+            "log archives are eligible for reclamation; run `orbit gc logs --apply`",
+        );
+    }
     Ok(())
 }

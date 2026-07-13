@@ -1,0 +1,23 @@
+schema_version: 2
+id: ADR-0221
+title: Startup log pruning retained through the shared GC classifier
+status: accepted
+owner: claude
+created_at: 2026-07-12T22:25:59.430640454Z
+accepted_at: 2026-07-12T22:26:04.672058662Z
+last_updated: 2026-07-12T22:26:04.672058662Z
+related_features:
+- gc
+related_tasks:
+- ORB-10184
+tags:
+- gc
+- logs
+- retention
+paths:
+- crates/orbit-common/src/utility/log_rotation.rs
+- crates/orbit-core/src/command/gc_logs.rs
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none

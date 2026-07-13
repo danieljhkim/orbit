@@ -7,8 +7,33 @@ use tempfile::TempDir;
 
 use crate::utility::fs::append_private_file;
 use crate::utility::log_rotation::{
-    LogRotationConfig, maybe_roll, prune_archives, rotate_and_prune,
+    LogRotationConfig, PruneReason, maybe_roll, plan_prune, rotate_and_report,
 };
+
+/// The archive file names the retention classifier would select, paired with
+/// the reason, for readable assertions.
+fn planned(
+    active: &std::path::Path,
+    retention: Duration,
+    max_total_bytes: u64,
+) -> Vec<(String, PruneReason)> {
+    plan_prune(active, retention, max_total_bytes, SystemTime::now())
+        .expect("plan")
+        .candidates
+        .into_iter()
+        .map(|candidate| {
+            (
+                candidate
+                    .path
+                    .file_name()
+                    .expect("file name")
+                    .to_string_lossy()
+                    .into_owned(),
+                candidate.reason,
+            )
+        })
+        .collect()
+}
 
 fn archive_names(dir: &std::path::Path) -> Vec<String> {
     std::fs::read_dir(dir)
@@ -87,7 +112,7 @@ fn within_budget_active_file_is_not_rolled() {
 }
 
 #[test]
-fn retention_deletes_archives_older_than_age_budget() {
+fn classifier_selects_archives_older_than_age_budget() {
     let dir = TempDir::new().expect("tempdir");
     let active = dir.path().join("orbit.jsonl");
     let old = dir.path().join("orbit.jsonl.OLD");
@@ -96,22 +121,19 @@ fn retention_deletes_archives_older_than_age_budget() {
     std::fs::write(&recent, "recent").expect("write recent");
     backdate(&old, Duration::from_secs(10 * 86_400)); // 10 days old
 
-    let config = LogRotationConfig {
-        retention_days: 7,
-        max_total_bytes: 10_000_000,
-        max_file_bytes: 10_000_000,
-    };
-    prune_archives(&active, &config).expect("prune");
-
-    assert!(
-        !old.exists(),
-        "archive older than the age budget must be deleted"
+    let selected = planned(&active, Duration::from_secs(7 * 86_400), 10_000_000);
+    assert_eq!(
+        selected,
+        vec![("orbit.jsonl.OLD".to_string(), PruneReason::Age)],
+        "only the over-age archive is selected, by age"
     );
-    assert!(recent.exists(), "recent archive must be kept");
+    // Classification is pure: nothing is deleted.
+    assert!(old.exists(), "the classifier must not delete anything");
+    assert!(recent.exists(), "recent archive is untouched");
 }
 
 #[test]
-fn retention_deletes_oldest_archives_beyond_total_size_budget() {
+fn classifier_selects_oldest_archives_beyond_total_size_budget() {
     let dir = TempDir::new().expect("tempdir");
     let active = dir.path().join("orbit.jsonl");
     let a = dir.path().join("orbit.jsonl.A");
@@ -122,28 +144,71 @@ fn retention_deletes_oldest_archives_beyond_total_size_budget() {
         backdate(path, Duration::from_secs(secs_ago));
     }
 
-    // 300 bytes total, budget 150: delete oldest (A) -> 200, then B -> 100.
-    let config = LogRotationConfig {
-        retention_days: 3_650,
-        max_total_bytes: 150,
-        max_file_bytes: 10_000_000,
-    };
-    prune_archives(&active, &config).expect("prune");
-
-    assert!(!a.exists(), "oldest archive should be deleted first");
-    assert!(!b.exists(), "second-oldest deleted to fit the budget");
-    assert!(c.exists(), "newest archive kept within budget");
+    // 300 bytes total, budget 150: select oldest (A) -> 200, then B -> 100.
+    let selected = planned(&active, Duration::from_secs(3_650 * 86_400), 150);
+    assert_eq!(
+        selected,
+        vec![
+            ("orbit.jsonl.A".to_string(), PruneReason::Size),
+            ("orbit.jsonl.B".to_string(), PruneReason::Size),
+        ],
+        "the two oldest archives are size-selected, oldest first"
+    );
+    // Pure classification: every archive survives the plan.
+    assert!(a.exists() && b.exists() && c.exists());
 }
 
 #[test]
-fn rotate_and_prune_is_a_noop_when_nothing_to_do() {
+fn rotate_and_report_is_a_noop_when_nothing_to_do() {
     let dir = TempDir::new().expect("tempdir");
     let active = dir.path().join("orbit.jsonl");
     std::fs::write(&active, "line\n").expect("write");
-    // Generous budgets -> no roll, no prune, no panic even with no archives.
-    rotate_and_prune(&active, &LogRotationConfig::default());
+    // Generous budgets -> no roll, no report action, no panic even with no
+    // archives.
+    rotate_and_report(&active, &LogRotationConfig::default());
     assert!(active.exists());
     assert!(archive_names(dir.path()).is_empty());
+}
+
+#[test]
+fn startup_rotation_never_deletes_archives() {
+    // [ORB-10184] Regression: subscriber-init rotation is non-destructive. It
+    // may roll an oversized active file (rename, non-destructive) but must
+    // never unlink an archive — deletion belongs to `orbit gc logs --apply`.
+    let dir = TempDir::new().expect("tempdir");
+    let active = dir.path().join("orbit.jsonl");
+    // An oversized active file so the roll path is exercised too.
+    std::fs::write(&active, "x".repeat(500)).expect("write active");
+    // Archives that BOTH the age and size budgets would otherwise reclaim.
+    let over_age = dir.path().join("orbit.jsonl.OVERAGE");
+    let over_size = dir.path().join("orbit.jsonl.OVERSIZE");
+    std::fs::write(&over_age, "x".repeat(100)).expect("write over-age");
+    std::fs::write(&over_size, "x".repeat(100)).expect("write over-size");
+    backdate(&over_age, Duration::from_secs(30 * 86_400));
+
+    let config = LogRotationConfig {
+        retention_days: 7,
+        max_total_bytes: 50, // far below the archive footprint
+        max_file_bytes: 100, // active (500 bytes) is oversized -> rolls
+    };
+    rotate_and_report(&active, &config);
+
+    // The roll happened (non-destructive rename), but no pre-existing archive
+    // was deleted.
+    assert!(
+        over_age.exists(),
+        "an over-age archive must survive startup rotation"
+    );
+    assert!(
+        over_size.exists(),
+        "an over-size archive must survive startup rotation"
+    );
+    // Sanity: the classifier would indeed have flagged these, proving the
+    // no-delete guarantee is not vacuous.
+    assert!(
+        !planned(&active, config.retention_window(), config.max_total_bytes).is_empty(),
+        "the archives were genuinely reclaim-eligible"
+    );
 }
 
 #[test]

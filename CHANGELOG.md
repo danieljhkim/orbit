@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Explicit operational log GC**: `orbit gc logs` plans/applies the configured age + total-size retention for Orbit-owned log archives, including an `ORBIT_LOG_PATH` outside the default root via allowlisted owned-root containment. Startup rotation is non-destructive (rolls + reports only); archive deletion goes solely through the explicit apply gate, never the active inode. ([ORB-10184])
 - **Stale managed-skill GC**: `orbit gc skills` reclaims retired Orbit-generated skill directories (tombstoned + fingerprint-proven) and stale/broken Orbit-owned agent-root links, using ORB-10181 ownership metadata. Modified generated content, same-named user skills, foreign links, and current-skill link repairs are retained/reported separately, never deleted. ([ORB-10187])
 - **Managed worktree collection**: `orbit gc worktrees` plans or applies retention while protecting live, dirty, resumable, unmerged, and unpushed work. A per-run claim guard shared with the run claim/start path is held across revalidation and `git worktree remove`, so a concurrent claim blocks GC (fail closed) or forces re-evaluation. Terminal cleanup shares the classifier. ([ORB-10182])
 - **Shared garbage-collection framework**: `orbit gc` now exposes every retention target with plan-first/apply, scope, retention, locking, immutable candidate, safety revalidation, manifest, and equivalent human/JSON report contracts for domain collectors. ([ORB-10180])

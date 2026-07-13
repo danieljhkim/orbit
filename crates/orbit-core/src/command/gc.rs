@@ -153,6 +153,17 @@ pub struct GcMutation {
 pub trait GcCollector {
     fn target(&self) -> GcTarget;
     fn plan(&self, context: &GcContext<'_>) -> Result<GcPlan, OrbitError>;
+    /// Allowlisted roots that candidates from this collector may reside under.
+    ///
+    /// Defaults to just the scope root. A collector that owns explicitly
+    /// configured locations outside the scope root (e.g. an `ORBIT_LOG_PATH`
+    /// pointed outside `~/.orbit`) widens this to include those owned parents.
+    /// Every returned root is still subject to the same non-bypassable
+    /// canonical containment and no-follow symlink checks at apply time
+    /// (ADR-0220); widening the allowlist never weakens the per-candidate gate.
+    fn owned_roots(&self, scope: &GcScope) -> Vec<PathBuf> {
+        vec![scope.root().to_path_buf()]
+    }
     fn revalidate(
         &self,
         candidate: &GcCandidate,
@@ -421,8 +432,11 @@ fn apply_candidate(
         Err(error) => return Err(item_error(candidate, "revalidate", error)),
     }
     if let Some(path) = &candidate.path
-        && let Err(error) =
-            validate_candidate_path(context.scope.root(), path, candidate.allow_owned_symlink)
+        && let Err(error) = validate_candidate_path_any(
+            &collector.owned_roots(context.scope),
+            path,
+            candidate.allow_owned_symlink,
+        )
     {
         return Err(item_error(candidate, "revalidate", error));
     }
@@ -578,6 +592,33 @@ fn process_start_identity() -> Option<String> {
 #[cfg(not(target_os = "linux"))]
 fn process_start_identity() -> Option<String> {
     None
+}
+
+/// Validate `candidate` against an allowlist of owned roots, succeeding when it
+/// passes the full canonical containment + no-follow symlink check under *any*
+/// one of them. Used when a collector legitimately owns locations under more
+/// than one root (e.g. the default state root plus an explicitly configured
+/// external log directory). Each root is validated independently, so a
+/// candidate is accepted only if it is safely contained by a genuine owned
+/// root — widening the allowlist never bypasses the per-root gate (ADR-0220).
+pub fn validate_candidate_path_any(
+    owned_roots: &[PathBuf],
+    candidate: &Path,
+    allow_final_symlink: bool,
+) -> Result<(), OrbitError> {
+    let mut last_error = None;
+    for root in owned_roots {
+        match validate_candidate_path(root, candidate, allow_final_symlink) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        OrbitError::PolicyDenied(format!(
+            "no owned root is configured for GC candidate: {}",
+            candidate.display()
+        ))
+    }))
 }
 
 pub fn validate_candidate_path(
