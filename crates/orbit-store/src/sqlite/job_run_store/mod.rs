@@ -8,7 +8,7 @@ use orbit_common::types::{
 use orbit_common::utility::process_identity::process_start_identity_token;
 use rusqlite::TransactionBehavior;
 
-use crate::backend::{JobRunQuery, JobRunStepParams, JobRunStoreBackend};
+use crate::backend::{JobRunGcRecord, JobRunQuery, JobRunStepParams, JobRunStoreBackend};
 use crate::file::layout::validate_path_stem;
 use crate::{Store, parse_timestamp};
 
@@ -70,6 +70,11 @@ impl SqliteJobRunStore {
 }
 
 impl JobRunStoreBackend for SqliteJobRunStore {
+    fn list_job_runs_for_gc(&self) -> Result<Vec<JobRunGcRecord>, OrbitError> {
+        self.store
+            .list_job_runs_for_gc_in_workspace(&self.workspace_id)
+    }
+
     fn list_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
         validate_path_stem(job_id, "job")?;
         self.list_job_runs_filtered(&JobRunQuery {
@@ -337,13 +342,15 @@ impl JobRunStoreBackend for SqliteJobRunStore {
             .read_run(run_id)?
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::JobRun, run_id.to_string()))?;
         self.store
-            .delete_job_run_for_workspace(&self.workspace_id, run_id)?;
+            .archive_job_run_for_workspace(&self.workspace_id, run_id, Utc::now())?;
         Ok(run.job_id)
     }
 
     fn delete_job_run(&self, run_id: &str) -> Result<String, OrbitError> {
         let run = self
-            .read_run(run_id)?
+            .store
+            .get_job_run_for_gc_in_workspace(&self.workspace_id, run_id)?
+            .map(|record| record.run)
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::JobRun, run_id.to_string()))?;
         self.store
             .delete_job_run_for_workspace(&self.workspace_id, run_id)?;
@@ -437,7 +444,10 @@ impl Store {
         workspace_id: &str,
         query: &JobRunQuery,
     ) -> Result<Vec<JobRun>, OrbitError> {
-        let mut conditions = vec!["workspace_id = ?1".to_string()];
+        let mut conditions = vec![
+            "workspace_id = ?1".to_string(),
+            "archived_at IS NULL".to_string(),
+        ];
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
             vec![Box::new(workspace_id.to_string())];
         if let Some(job_id) = &query.job_id {
@@ -479,6 +489,69 @@ impl Store {
             run.steps = read_steps(&conn, workspace_id, &run.run_id)?;
         }
         Ok(runs)
+    }
+
+    pub fn list_job_runs_for_gc_in_workspace(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<JobRunGcRecord>, OrbitError> {
+        let conn = self.read()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT run_id, job_id, attempt, state, scheduled_at, started_at, finished_at, \
+                 duration_ms, created_at, pid, pid_start_time, input_json, retry_source_run_id, \
+                 knowledge_metrics_json, resolved_crew, COALESCE(crew_model, implementer_model), archived_at \
+                 FROM job_runs WHERE workspace_id = ?1 ORDER BY created_at DESC, run_id ASC",
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let rows = stmt
+            .query_map([workspace_id], |row| {
+                let run = row_to_job_run(row)?;
+                let archived_raw: Option<String> = row.get(16)?;
+                Ok((run, archived_raw))
+            })
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let mut records = Vec::new();
+        for row in rows {
+            let (mut run, archived_raw) = row.map_err(|e| OrbitError::Store(e.to_string()))?;
+            run.steps = read_steps(&conn, workspace_id, &run.run_id)?;
+            records.push(JobRunGcRecord {
+                run,
+                archived_at: parse_optional_timestamp(archived_raw)
+                    .map_err(|e| OrbitError::Store(e.to_string()))?,
+            });
+        }
+        Ok(records)
+    }
+
+    pub fn get_job_run_for_gc_in_workspace(
+        &self,
+        workspace_id: &str,
+        run_id: &str,
+    ) -> Result<Option<JobRunGcRecord>, OrbitError> {
+        Ok(self
+            .list_job_runs_for_gc_in_workspace(workspace_id)?
+            .into_iter()
+            .find(|record| record.run.run_id == run_id))
+    }
+
+    pub fn archive_job_run_for_workspace(
+        &self,
+        workspace_id: &str,
+        run_id: &str,
+        archived_at: DateTime<Utc>,
+    ) -> Result<bool, OrbitError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        conn.execute(
+            "UPDATE job_runs SET archived_at = ?3 \
+             WHERE workspace_id = ?1 AND run_id = ?2 AND archived_at IS NULL",
+            rusqlite::params![workspace_id, run_id, archived_at.to_rfc3339()],
+        )
+        .map(|count| count > 0)
+        .map_err(|e| OrbitError::Store(e.to_string()))
     }
 
     pub fn read_job_run_state_for_workspace(
@@ -535,16 +608,39 @@ impl Store {
         workspace_id: &str,
         run_id: &str,
     ) -> Result<bool, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
-        conn.execute(
-            "DELETE FROM job_runs WHERE workspace_id = ?1 AND run_id = ?2",
-            rusqlite::params![workspace_id, run_id],
-        )
-        .map(|count| count > 0)
-        .map_err(|e| OrbitError::Store(e.to_string()))
+        self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+            let active_reservations: i64 = tx
+                .tx
+                .query_row(
+                    "SELECT COUNT(*) FROM task_reservations \
+                     WHERE workspace_id = ?1 AND owner_run_id = ?2 AND released_at IS NULL",
+                    rusqlite::params![workspace_id, run_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| OrbitError::Store(e.to_string()))?;
+            if active_reservations > 0 {
+                return Err(OrbitError::Store(format!(
+                    "job run '{run_id}' still owns active task reservations"
+                )));
+            }
+            tx.tx
+                .execute(
+                    "DELETE FROM task_reservations \
+                     WHERE workspace_id = ?1 AND owner_run_id = ?2 AND released_at IS NOT NULL",
+                    rusqlite::params![workspace_id, run_id],
+                )
+                .map_err(|e| OrbitError::Store(e.to_string()))?;
+            tx.tx
+                .execute("DELETE FROM invocations WHERE job_run_id = ?1", [run_id])
+                .map_err(|e| OrbitError::Store(e.to_string()))?;
+            tx.tx
+                .execute(
+                    "DELETE FROM job_runs WHERE workspace_id = ?1 AND run_id = ?2",
+                    rusqlite::params![workspace_id, run_id],
+                )
+                .map(|count| count > 0)
+                .map_err(|e| OrbitError::Store(e.to_string()))
+        })
     }
 }
 
@@ -617,7 +713,7 @@ fn get_job_run_for_workspace_conn(
             "SELECT run_id, job_id, attempt, state, scheduled_at, started_at, finished_at, \
              duration_ms, created_at, pid, pid_start_time, input_json, retry_source_run_id, \
              knowledge_metrics_json, resolved_crew, COALESCE(crew_model, implementer_model) \
-             FROM job_runs WHERE workspace_id = ?1 AND run_id = ?2",
+             FROM job_runs WHERE workspace_id = ?1 AND run_id = ?2 AND archived_at IS NULL",
         )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
     let mut run = match stmt.query_row(rusqlite::params![workspace_id, run_id], row_to_job_run) {
@@ -814,6 +910,82 @@ mod tests {
             .expect("some");
         assert_eq!(loaded.state, JobRunState::Success);
         assert_eq!(loaded.steps.len(), 1);
+    }
+
+    #[test]
+    fn archive_hides_run_until_purge_and_purge_cascades_steps_and_checkpoint() {
+        let store = Store::open_in_memory().expect("store");
+        let backend = SqliteJobRunStore::new(store.clone(), "ws_a");
+        let now = Utc::now();
+        let run = backend
+            .insert_job_run("job-gc", 1, now, None, None)
+            .expect("insert");
+        backend
+            .mark_job_run_running(&run.run_id, now, 42)
+            .expect("running");
+        backend
+            .complete_job_run_step(
+                &run.run_id,
+                &JobRunStepParams {
+                    step_index: 0,
+                    target_type: JobTargetType::Activity,
+                    target_id: "step".to_string(),
+                    started_at: now,
+                    finished_at: now,
+                    duration_ms: Some(1),
+                    exit_code: Some(0),
+                    agent_response_json: None,
+                    state: JobRunState::Success,
+                    error_code: None,
+                    error_message: None,
+                },
+            )
+            .expect("step");
+        backend
+            .write_run_state(
+                &run.run_id,
+                &PipelineState::new(
+                    run.run_id.clone(),
+                    run.job_id.clone(),
+                    serde_json::json!({}),
+                ),
+            )
+            .expect("checkpoint");
+        backend
+            .finalize_job_run(&run.run_id, JobRunState::Success, now, Some(1))
+            .expect("finalize");
+
+        backend.archive_job_run(&run.run_id).expect("archive");
+        assert!(
+            backend
+                .get_job_run(&run.run_id)
+                .expect("ordinary read")
+                .is_none()
+        );
+        let inventory = backend.list_job_runs_for_gc().expect("GC inventory");
+        assert_eq!(inventory.len(), 1);
+        assert!(inventory[0].archived_at.is_some());
+        assert_eq!(inventory[0].run.steps.len(), 1);
+        assert!(
+            backend
+                .read_run_state(&run.run_id)
+                .expect("checkpoint read")
+                .is_some()
+        );
+
+        backend.delete_job_run(&run.run_id).expect("purge");
+        assert!(
+            backend
+                .list_job_runs_for_gc()
+                .expect("empty inventory")
+                .is_empty()
+        );
+        let conn = store.connection();
+        let conn = conn.lock().expect("connection");
+        let steps: i64 = conn
+            .query_row("SELECT COUNT(*) FROM job_run_steps", [], |row| row.get(0))
+            .expect("step count");
+        assert_eq!(steps, 0);
     }
 
     /// [ORB-10070] A pending run accepts an owner claim (pid recorded); once

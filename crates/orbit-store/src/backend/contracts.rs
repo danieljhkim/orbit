@@ -497,6 +497,9 @@ pub trait TaskReservationStoreBackend: Send + Sync {
 }
 
 pub trait JobRunStoreBackend: Send + Sync {
+    /// Inventory surface for staged run retention. Archived rows are hidden
+    /// from ordinary run queries but remain here until the purge stage.
+    fn list_job_runs_for_gc(&self) -> Result<Vec<JobRunGcRecord>, OrbitError>;
     fn list_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError>;
     fn list_job_runs_filtered(&self, query: &JobRunQuery) -> Result<Vec<JobRun>, OrbitError>;
     fn get_job_run(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError>;
@@ -559,6 +562,12 @@ pub trait JobRunStoreBackend: Send + Sync {
     fn delete_job_run(&self, run_id: &str) -> Result<String, OrbitError>;
     fn read_run_state(&self, run_id: &str) -> Result<Option<PipelineState>, OrbitError>;
     fn write_run_state(&self, run_id: &str, state: &PipelineState) -> Result<(), OrbitError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct JobRunGcRecord {
+    pub run: JobRun,
+    pub archived_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]

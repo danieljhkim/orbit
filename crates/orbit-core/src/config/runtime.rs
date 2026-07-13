@@ -62,6 +62,10 @@ pub(crate) struct RuntimeConfig {
     pub(crate) routines_source: bool,
     pub(crate) worktree_gc_success_retention_days: u64,
     pub(crate) worktree_gc_failure_retention_days: u64,
+    pub(crate) run_gc_archive_after_days: u64,
+    pub(crate) run_gc_purge_after_days: u64,
+    pub(crate) run_gc_failure_archive_after_days: u64,
+    pub(crate) run_gc_failure_purge_after_days: u64,
     /// Named provider-model assignments from `[crews.<name>]`.
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
@@ -117,6 +121,10 @@ impl RuntimeConfig {
             routines_source: false,
             worktree_gc_success_retention_days: DEFAULT_WORKTREE_SUCCESS_RETENTION_DAYS,
             worktree_gc_failure_retention_days: DEFAULT_WORKTREE_FAILURE_RETENTION_DAYS,
+            run_gc_archive_after_days: 7,
+            run_gc_purge_after_days: 30,
+            run_gc_failure_archive_after_days: 30,
+            run_gc_failure_purge_after_days: 90,
             crews: default_crews(),
             default_crew: Some(DEFAULT_WORKFLOW_CREW.to_string()),
             duel: DuelConfig::default(),
@@ -228,6 +236,12 @@ impl RuntimeConfig {
         let routines_source = routines_source_from_raw(parsed.routines.as_ref())?;
         let (worktree_gc_success_retention_days, worktree_gc_failure_retention_days) =
             worktree_gc_retention_from_raw(parsed.gc.as_ref());
+        let (
+            run_gc_archive_after_days,
+            run_gc_purge_after_days,
+            run_gc_failure_archive_after_days,
+            run_gc_failure_purge_after_days,
+        ) = run_gc_retention_from_raw(parsed.gc.as_ref())?;
         let crews = crews_from_raw(parsed.crews.as_ref())?;
         let default_crew = workflow_default_crew_from_raw(parsed.workflow.as_ref(), &crews)?;
         let duel = duel_from_raw(parsed.duel.as_ref())?;
@@ -261,6 +275,10 @@ impl RuntimeConfig {
             routines_source,
             worktree_gc_success_retention_days,
             worktree_gc_failure_retention_days,
+            run_gc_archive_after_days,
+            run_gc_purge_after_days,
+            run_gc_failure_archive_after_days,
+            run_gc_failure_purge_after_days,
             crews,
             default_crew,
             duel,
@@ -297,6 +315,15 @@ impl RuntimeConfig {
 
     pub(crate) fn worktree_gc_failure_retention_days(&self) -> u64 {
         self.worktree_gc_failure_retention_days
+    }
+
+    pub(crate) fn run_gc_retention_days(&self) -> (u64, u64, u64, u64) {
+        (
+            self.run_gc_archive_after_days,
+            self.run_gc_purge_after_days,
+            self.run_gc_failure_archive_after_days,
+            self.run_gc_failure_purge_after_days,
+        )
     }
 
     pub(crate) fn pr_config(&self) -> &PrConfig {
@@ -676,6 +703,31 @@ fn worktree_gc_retention_from_raw(raw: Option<&RawGcConfig>) -> (u64, u64) {
             .and_then(|worktrees| worktrees.failure_retention_days)
             .unwrap_or(DEFAULT_WORKTREE_FAILURE_RETENTION_DAYS),
     )
+}
+
+fn run_gc_retention_from_raw(
+    raw: Option<&RawGcConfig>,
+) -> Result<(u64, u64, u64, u64), OrbitError> {
+    let runs = raw.and_then(|gc| gc.runs.as_ref());
+    let archive = runs.and_then(|runs| runs.archive_after_days).unwrap_or(7);
+    let purge = runs.and_then(|runs| runs.purge_after_days).unwrap_or(30);
+    let failure_archive = runs
+        .and_then(|runs| runs.failure_archive_after_days)
+        .unwrap_or(30);
+    let failure_purge = runs
+        .and_then(|runs| runs.failure_purge_after_days)
+        .unwrap_or(90);
+    if purge < archive
+        || failure_purge < failure_archive
+        || failure_archive < archive
+        || failure_purge < purge
+    {
+        return Err(OrbitError::InvalidInput(
+            "gc.runs purge ages must follow archive ages and failure ages must not be shorter than success ages"
+                .to_string(),
+        ));
+    }
+    Ok((archive, purge, failure_archive, failure_purge))
 }
 
 fn workflow_base_branch_from_raw(raw: Option<&RawWorkflowConfig>) -> Result<String, OrbitError> {

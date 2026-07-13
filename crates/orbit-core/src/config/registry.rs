@@ -53,6 +53,26 @@ pub const CONFIG_KEY_REGISTRY: &[ConfigKeyDescriptor] = &[
         description: "Environment variable names allow-listed for passthrough into agent subprocesses.",
     },
     ConfigKeyDescriptor {
+        key: "gc.runs.archive_after_days",
+        value_type: "integer",
+        description: "Days after a successful/cancelled terminal transition before a job run is archived.",
+    },
+    ConfigKeyDescriptor {
+        key: "gc.runs.failure_archive_after_days",
+        value_type: "integer",
+        description: "Days after a failed/timeout/interrupted terminal transition before a job run is archived.",
+    },
+    ConfigKeyDescriptor {
+        key: "gc.runs.failure_purge_after_days",
+        value_type: "integer",
+        description: "Days after a failed/timeout/interrupted terminal transition before an archived job run is purged.",
+    },
+    ConfigKeyDescriptor {
+        key: "gc.runs.purge_after_days",
+        value_type: "integer",
+        description: "Days after a successful/cancelled terminal transition before an archived job run is purged.",
+    },
+    ConfigKeyDescriptor {
         key: "gc.worktrees.failure_retention_days",
         value_type: "integer",
         description: "Days to retain failed/timeout/interrupted managed worktrees; resumable interrupted worktrees remain protected.",

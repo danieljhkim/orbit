@@ -26,10 +26,40 @@ fn gc_help_lists_every_target_and_uniform_flags() {
         "--retention",
         "--success-retention-days",
         "--failure-retention-days",
+        "--archive-after-days",
+        "--purge-after-days",
+        "--failure-archive-after-days",
+        "--failure-purge-after-days",
         "--workspace",
         "--global",
     ] {
         assert!(help.contains(value), "missing `{value}` from help:\n{help}");
+    }
+}
+
+#[test]
+fn gc_parses_qualified_run_retention_overrides() {
+    let cli = Cli::parse_from([
+        "orbit",
+        "gc",
+        "runs",
+        "--archive-after-days",
+        "7",
+        "--purge-after-days",
+        "30",
+        "--failure-archive-after-days",
+        "14",
+        "--failure-purge-after-days",
+        "90",
+    ]);
+    match cli.command {
+        Commands::Gc(command) => {
+            assert_eq!(command.archive_after_days, Some(7));
+            assert_eq!(command.purge_after_days, Some(30));
+            assert_eq!(command.failure_archive_after_days, Some(14));
+            assert_eq!(command.failure_purge_after_days, Some(90));
+        }
+        _ => panic!("expected gc command"),
     }
 }
 
@@ -80,6 +110,50 @@ fn gc_is_plan_only_by_default_and_parses_target() {
         }
         _ => panic!("expected gc command"),
     }
+}
+
+// ORB-10183 P1: run GC is workspace-only; `--global` must be refused before a
+// runtime is built or any state is scanned/mutated.
+#[test]
+fn gc_runs_rejects_global_scope_before_any_mutation() {
+    use super::super::gc::GcCommand;
+    use orbit_core::{OrbitError, OrbitRuntime};
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let global = temp.path().join("global");
+    let orbit = temp.path().join("repo/.orbit");
+    std::fs::create_dir_all(&global).expect("global root");
+    std::fs::create_dir_all(&orbit).expect("workspace root");
+    std::fs::write(orbit.join("config.toml"), "").expect("config");
+    let runtime = OrbitRuntime::from_roots(&global, &orbit).expect("runtime");
+
+    let command = GcCommand {
+        target: GcTargetArg::Runs,
+        apply: true,
+        json: false,
+        retention: None,
+        success_retention_days: None,
+        failure_retention_days: None,
+        archive_after_days: None,
+        purge_after_days: None,
+        failure_archive_after_days: None,
+        failure_purge_after_days: None,
+        workspace: None,
+        global: true,
+    };
+    let error = command
+        .execute(&runtime)
+        .expect_err("runs --global must be rejected");
+    assert!(
+        matches!(error, OrbitError::InvalidInput(_)),
+        "expected InvalidInput, got {error:?}"
+    );
+    // Refused before constructing a collector runtime, acquiring the GC lock, or
+    // writing a manifest: no GC state is created under the global root.
+    assert!(
+        !global.join("state/gc").exists(),
+        "no GC manifest/lock state must be created on rejection"
+    );
 }
 
 #[test]
