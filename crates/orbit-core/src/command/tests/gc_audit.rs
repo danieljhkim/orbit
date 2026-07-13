@@ -1,11 +1,15 @@
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 
 use chrono::{DateTime, TimeZone, Utc};
 use orbit_common::types::AuditEventStatus;
+use orbit_common::utility::audit_writer_guard;
 use orbit_store::{AuditEventInsertParams, Store, V2AuditEventInsertParams};
 
-use crate::command::gc::{GcClock, GcCollector, GcRequest, GcScope, execute_gc};
+use crate::command::gc::{
+    GcCandidate, GcClock, GcCollector, GcContext, GcRequest, GcRevalidation, GcScope, execute_gc,
+};
 use crate::command::gc_audit::AuditGcCollector;
 
 const SHARED: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -129,6 +133,41 @@ impl Fixture {
             },
         )
         .expect("gc report")
+    }
+
+    fn audit_root(&self) -> PathBuf {
+        self.orbit.join("state/audit")
+    }
+
+    fn collector(&self) -> AuditGcCollector {
+        AuditGcCollector::new(self.store.clone(), "ws-a", &self.orbit)
+    }
+
+    fn scope(&self) -> GcScope {
+        GcScope::Workspace {
+            workspace_id: Some("ws-a".to_string()),
+            root: self.orbit.clone(),
+        }
+    }
+
+    fn frozen_candidate(
+        &self,
+        collector: &AuditGcCollector,
+        scope: &GcScope,
+        id: &str,
+    ) -> GcCandidate {
+        let context = GcContext {
+            scope,
+            retention_override: Some("30d"),
+            clock: &self.clock,
+        };
+        collector
+            .plan(&context)
+            .expect("plan")
+            .candidates
+            .into_iter()
+            .find(|item| item.id == id)
+            .unwrap_or_else(|| panic!("expected candidate `{id}`"))
     }
 }
 
@@ -286,4 +325,250 @@ fn changed_file_is_skipped_like_an_interrupted_or_concurrent_writer() {
         crate::command::gc::GcRevalidation::Skip { .. }
     ));
     assert!(path.exists());
+}
+
+// The next three tests exercise the ORB-10186 audit writer/GC guard by
+// contending on the *same* `audit_writer_guard` advisory lock that every
+// V2SqliteSink writer path holds across its publication. `collector.apply`
+// acquires that guard, re-marks/re-fingerprints under it, and only then
+// deletes — so a writer that publishes a retained reference (or appends a
+// live JSONL envelope) while holding the guard is never lost, and a blob GC
+// sweeps is never one a retained envelope points at. Lock ordering mirrors the
+// worktree collector: host GC lock → audit writer guard → filesystem mutation.
+
+#[test]
+fn writer_wins_published_reference_under_guard_survives_blob_sweep() {
+    let fixture = Fixture::new();
+    let orphan = fixture.blob(ORPHAN);
+    let collector = fixture.collector();
+    let scope = fixture.scope();
+    // Freeze ORPHAN as an unreferenced sweep candidate.
+    let frozen = fixture.frozen_candidate(&collector, &scope, &format!("blob:{ORPHAN}"));
+
+    let audit_root = fixture.audit_root();
+    let context = GcContext {
+        scope: &scope,
+        retention_override: Some("30d"),
+        clock: &fixture.clock,
+    };
+    let fixture_ref = &fixture;
+    let audit_root_ref = &audit_root;
+    let collector_ref = &collector;
+    let context_ref = &context;
+    let frozen_ref = &frozen;
+
+    std::thread::scope(|threads| {
+        // The writer holds the guard first, exactly as V2SqliteSink::write_envelope does.
+        let guard = audit_writer_guard::acquire(audit_root_ref).expect("writer acquires guard");
+
+        let (started_tx, started_rx) = std::sync::mpsc::channel::<()>();
+        let apply_handle = threads.spawn(move || {
+            // Only start the sweep once the writer holds the guard, so `apply`
+            // must block on it rather than racing ahead.
+            started_rx.recv().expect("gc start signal");
+            collector_ref.apply(frozen_ref, context_ref)
+        });
+        started_tx.send(()).expect("signal gc");
+
+        // Publish a retained v2 envelope referencing ORPHAN while holding the guard.
+        fixture_ref.insert_v2(
+            "published-under-guard",
+            "live",
+            "2026-07-10T00:00:00Z",
+            &format!(r#"{{"blob":"{ORPHAN}"}}"#),
+        );
+
+        drop(guard); // release; the blocked apply now re-marks under the guard
+
+        let applied = apply_handle.join().expect("gc apply thread");
+        assert!(
+            applied.is_err(),
+            "apply must fail closed once ORPHAN became referenced, got {applied:?}"
+        );
+    });
+
+    assert!(
+        orphan.exists(),
+        "a blob referenced by an envelope published under the guard must survive the sweep"
+    );
+}
+
+#[test]
+fn gc_wins_holds_guard_through_deletion_and_blocked_writer_is_not_lost() {
+    let fixture = Fixture::new();
+    let orphan = fixture.blob(ORPHAN);
+    let audit_root = fixture.audit_root();
+    let held_path = fixture
+        .orbit
+        .join("state/audit/blobs")
+        .join(&HELD[..2])
+        .join(HELD);
+    assert!(orphan.exists());
+
+    let fixture_ref = &fixture;
+    let audit_root_ref = &audit_root;
+    let orphan_ref = &orphan;
+
+    std::thread::scope(|threads| {
+        // GC holds the guard for the whole deletion, as `apply` does.
+        let guard = audit_writer_guard::acquire(audit_root_ref).expect("gc acquires guard");
+
+        let (started_tx, started_rx) = std::sync::mpsc::channel::<()>();
+        let writer = threads.spawn(move || {
+            started_rx.recv().expect("writer start signal");
+            // Contend for the same guard, then republish under it — models
+            // V2SqliteSink::write_blob + write_envelope resuming after GC releases.
+            let _held = audit_writer_guard::acquire(audit_root_ref)
+                .expect("writer eventually acquires guard");
+            fixture_ref.blob(HELD);
+            fixture_ref.insert_v2(
+                "republished",
+                "live",
+                "2026-07-10T00:00:00Z",
+                &format!(r#"{{"blob":"{HELD}"}}"#),
+            );
+        });
+        started_tx.send(()).expect("signal writer");
+
+        // Delete the genuine orphan under the guard, mimicking `apply`'s unlink.
+        fs::remove_file(orphan_ref).expect("gc removes orphan under guard");
+
+        drop(guard); // release; the blocked writer now republishes
+
+        writer.join().expect("writer thread");
+    });
+
+    assert!(
+        !orphan.exists(),
+        "GC removed the genuinely-orphaned blob while holding the guard"
+    );
+    assert!(
+        held_path.exists(),
+        "the blocked writer republished its blob after GC released and was not lost"
+    );
+}
+
+#[test]
+fn active_jsonl_writer_append_under_guard_blocks_partition_sweep() {
+    let fixture = Fixture::new();
+    let loop_root = fixture.orbit.join("state/audit/v2_loop");
+    fs::create_dir_all(&loop_root).expect("loop root");
+    let partition = loop_root.join("run-live.jsonl");
+    // Every seeded envelope predates the cutoff, so the partition plans as an
+    // eligible sweep candidate.
+    fs::write(
+        &partition,
+        "{\"ts\":\"2026-01-01T00:00:00Z\"}\n{\"ts\":\"2026-01-02T00:00:00Z\"}\n",
+    )
+    .expect("seed jsonl");
+
+    let collector = fixture.collector();
+    let scope = fixture.scope();
+    let frozen = fixture.frozen_candidate(
+        &collector,
+        &scope,
+        &format!("jsonl:{}", partition.display()),
+    );
+
+    let audit_root = fixture.audit_root();
+    let context = GcContext {
+        scope: &scope,
+        retention_override: Some("30d"),
+        clock: &fixture.clock,
+    };
+    let audit_root_ref = &audit_root;
+    let partition_ref = &partition;
+    let collector_ref = &collector;
+    let context_ref = &context;
+    let frozen_ref = &frozen;
+
+    std::thread::scope(|threads| {
+        // The JSONL writer holds the guard and appends a live envelope.
+        let guard =
+            audit_writer_guard::acquire(audit_root_ref).expect("jsonl writer acquires guard");
+
+        let (started_tx, started_rx) = std::sync::mpsc::channel::<()>();
+        let apply_handle = threads.spawn(move || {
+            started_rx.recv().expect("gc start signal");
+            collector_ref.apply(frozen_ref, context_ref)
+        });
+        started_tx.send(()).expect("signal gc");
+
+        // Append a fresh, in-retention envelope while holding the guard.
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(partition_ref)
+            .expect("open partition for append");
+        writeln!(file, "{{\"ts\":\"2026-07-11T00:00:00Z\"}}").expect("append live envelope");
+        file.sync_all().ok();
+        drop(file);
+
+        drop(guard); // release; the blocked apply now re-fingerprints under the guard
+
+        let applied = apply_handle.join().expect("gc apply thread");
+        assert!(
+            applied.is_err(),
+            "apply must refuse a partition an active writer appended to, got {applied:?}"
+        );
+    });
+
+    assert!(
+        partition.exists(),
+        "the active JSONL partition must survive"
+    );
+    let contents = fs::read_to_string(&partition).expect("read partition");
+    assert!(
+        contents.contains("2026-07-11"),
+        "the live envelope appended under the guard must not be lost"
+    );
+}
+
+#[test]
+fn apply_re_marks_reference_added_after_planning_even_without_contention() {
+    // The non-threaded core of the fix: a reference published between planning
+    // and apply is caught by the in-apply re-mark under the guard, so the blob
+    // is never swept even when no writer is actively contending.
+    let fixture = Fixture::new();
+    let orphan = fixture.blob(ORPHAN);
+    let collector = fixture.collector();
+    let scope = fixture.scope();
+    let frozen = fixture.frozen_candidate(&collector, &scope, &format!("blob:{ORPHAN}"));
+
+    // A writer publishes a retained reference after the plan froze the candidate.
+    fixture.insert_v2(
+        "late-reference",
+        "live",
+        "2026-07-10T00:00:00Z",
+        &format!(r#"{{"blob":"{ORPHAN}"}}"#),
+    );
+
+    let context = GcContext {
+        scope: &scope,
+        retention_override: Some("30d"),
+        clock: &fixture.clock,
+    };
+    let applied = collector.apply(&frozen, &context);
+    assert!(applied.is_err(), "apply must fail closed, got {applied:?}");
+    assert!(orphan.exists(), "the newly-referenced blob must survive");
+    // Guard against a false positive: without the late reference the same blob
+    // is swept.
+    let clean = Fixture::new();
+    let clean_orphan = clean.blob(ORPHAN);
+    let clean_collector = clean.collector();
+    let clean_scope = clean.scope();
+    let clean_frozen =
+        clean.frozen_candidate(&clean_collector, &clean_scope, &format!("blob:{ORPHAN}"));
+    let clean_context = GcContext {
+        scope: &clean_scope,
+        retention_override: Some("30d"),
+        clock: &clean.clock,
+    };
+    assert!(matches!(
+        clean_collector
+            .revalidate(&clean_frozen, &clean_context)
+            .expect("revalidate clean"),
+        GcRevalidation::Ready
+    ));
+    let _ = clean_collector.apply(&clean_frozen, &clean_context);
+    assert!(!clean_orphan.exists(), "a truly-orphan blob is still swept");
 }

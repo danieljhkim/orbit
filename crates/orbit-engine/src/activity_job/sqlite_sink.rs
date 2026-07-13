@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use orbit_agent::loop_engine::audit::{AuditSink, BlobStore, LoopAuditEvent};
 use orbit_common::types::OrbitError;
 use orbit_common::types::activity_job::V2AuditEvent;
+use orbit_common::utility::audit_writer_guard::{self, AuditWriterGuard};
 use orbit_store::{Store, V2AuditEventFilter, V2AuditEventInsertParams};
 
 pub struct V2SqliteSink {
@@ -14,6 +15,11 @@ pub struct V2SqliteSink {
     agent_identity: String,
     workspace_path: Option<String>,
     blob_store: BlobStore,
+    /// Workspace audit root (`state/audit`) — the rendezvous point for the
+    /// audit writer/GC guard (ORB-10186). Every write path below holds the
+    /// guard while publishing, so the audit collector cannot delete an envelope
+    /// or blob between its final mark/fingerprint validation and the unlink.
+    audit_root: PathBuf,
     loop_event_counter: Mutex<u64>,
 }
 
@@ -26,6 +32,13 @@ impl V2SqliteSink {
         workspace_path: Option<String>,
         blob_root: impl Into<PathBuf>,
     ) -> Self {
+        let blob_root = blob_root.into();
+        // The blob root is `<audit_root>/blobs`; recover the audit root so the
+        // guard rendezvouses on the same path the collector derives.
+        let audit_root = blob_root
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| blob_root.clone());
         Self {
             store,
             workspace_id: workspace_id.into(),
@@ -33,6 +46,7 @@ impl V2SqliteSink {
             agent_identity: agent_identity.into(),
             workspace_path,
             blob_store: BlobStore::new(blob_root),
+            audit_root,
             loop_event_counter: Mutex::new(0),
         }
     }
@@ -55,7 +69,17 @@ impl V2SqliteSink {
         )
     }
 
+    /// Acquire the workspace audit writer/GC guard for the duration of one
+    /// publication. Held so the audit collector cannot delete an envelope or a
+    /// referenced blob between its final mark/fingerprint validation and the
+    /// unlink (ORB-10186). Lock ordering under the host GC lock is documented on
+    /// the guard module.
+    fn writer_guard(&self) -> Result<AuditWriterGuard, OrbitError> {
+        audit_writer_guard::acquire(&self.audit_root)
+    }
+
     pub fn write_envelope(&self, event: &V2AuditEvent) -> Result<(), OrbitError> {
+        let _guard = self.writer_guard()?;
         let payload_json = serde_json::to_string(event)
             .map_err(|err| OrbitError::Store(format!("serialize v2 audit event: {err}")))?;
         self.store.insert_v2_audit_event(&V2AuditEventInsertParams {
@@ -86,6 +110,7 @@ impl V2SqliteSink {
     }
 
     fn write_loop_event(&self, event: &LoopAuditEvent) -> Result<(), OrbitError> {
+        let _guard = self.writer_guard()?;
         let event_id = self.next_loop_event_id()?;
         let payload_json = serde_json::to_string(event)
             .map_err(|err| OrbitError::Store(format!("serialize loop audit event: {err}")))?;
@@ -122,6 +147,13 @@ impl AuditSink for V2SqliteSink {
     }
 
     fn write_blob(&self, content: &[u8]) -> String {
+        // Publish the content-addressed blob under the audit writer/GC guard so
+        // it cannot be swept between the collector's re-mark and its unlink
+        // (ORB-10186). A guard timeout degrades exactly like a write failure.
+        let _guard = match self.writer_guard() {
+            Ok(guard) => guard,
+            Err(err) => return format!("error:{err}"),
+        };
         self.blob_store
             .write(content)
             .unwrap_or_else(|err| format!("error:{err}"))

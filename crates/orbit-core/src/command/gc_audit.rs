@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::OrbitError;
+use orbit_common::utility::audit_writer_guard;
 use orbit_store::{AuditGcLegacyRow, Store, V2AuditEventRow};
 use serde_json::Value;
 
@@ -272,8 +273,33 @@ impl GcCollector for AuditGcCollector {
     fn apply(
         &self,
         candidate: &GcCandidate,
-        _context: &GcContext<'_>,
+        context: &GcContext<'_>,
     ) -> Result<GcMutation, OrbitError> {
+        // Audit writer/GC synchronization (ORB-10186). Acquire the
+        // workspace-scoped audit writer guard — the *same* advisory lock every
+        // audit writer path holds across its publication (workspace v2 event
+        // publication, loop event/JSONL append, and content-addressed blob
+        // publication) — and keep holding it while we (1) re-run the final
+        // mark/fingerprint validation and (2) delete the envelope or blob. No
+        // writer can slip a retained reference (or a JSONL append) between the
+        // re-mark and the unlink. Lock ordering: `execute_gc` already holds the
+        // host-global GC lock (ADR-0220); we take the audit guard beneath it,
+        // then mutate the filesystem — GC host lock → audit writer guard →
+        // filesystem. A concurrent writer contends on this same guard: if it
+        // published first, the re-mark observes the new reference / changed
+        // fingerprint and we skip (fail closed); if we hold first, the writer
+        // blocks until deletion completes and then republishes (its blob write
+        // recreates the content-addressed object) rather than stranding a
+        // reference to a swept blob.
+        let _writer_guard = audit_writer_guard::acquire(&self.audit_root)?;
+        match self.revalidate(candidate, context)? {
+            GcRevalidation::Ready => {}
+            GcRevalidation::Skip { code, reason } => {
+                return Err(OrbitError::Execution(format!(
+                    "audit evidence changed between planning and deletion ({code}): {reason}"
+                )));
+            }
+        }
         if let Some(raw) = candidate.id.strip_prefix("legacy:") {
             let timestamp = DateTime::parse_from_rfc3339(&candidate.expected_state)
                 .map_err(|error| {

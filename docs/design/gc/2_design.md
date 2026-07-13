@@ -181,6 +181,24 @@ as integrity errors rather than hidden or recreated. `orbit audit prune` is a
 deprecated compatibility projection of this same collector and requires its
 own explicit `--apply` mutation gate.
 
+The host GC lock serializes GC processes but not audit *writers*, so the final
+re-mark/fingerprint validation and the envelope/blob deletion must be atomic
+against a concurrent writer that could publish a retained reference (or append
+a live loop envelope) in that window. The collector therefore takes a
+**workspace audit writer/GC guard** (ORB-10186) — one advisory file lock at the
+audit root (`state/audit/.gc-writer.lock`) — and holds it continuously across
+`[final mark/fingerprint validation .. envelope/blob deletion]`. Every audit
+writer path acquires the *same* guard across its publication: workspace v2
+event publication, loop event/JSONL append, and content-addressed blob
+publication. Lock ordering is fixed — **host GC lock → audit writer guard →
+filesystem mutation** — and the guard is a filesystem advisory lock, never the
+SQLite write lock, so no database lock is held across a blob/JSONL unlink. A
+writer that wins the guard publishes its reference before the re-mark observes
+it (the blob is retained); a collector that wins deletes only genuinely
+unreachable evidence while the writer blocks and then republishes (its
+content-addressed write recreates the blob) — a retained envelope never points
+at a swept blob, and no append is lost.
+
 ### 3.6 Skills (global)
 
 Skill collection covers generated directories and supported agent-root links

@@ -49,7 +49,12 @@ non-bypassable containment, symlink, current-owner, and ambiguity protections;
   returns non-zero; reruns are idempotent.
 - Audit collection implements the same contract by deleting expired envelopes
   before sweeping blobs and recomputing reachability at blob revalidation;
-  holds, exports, and retained job-run bundles participate in the mark set.
+  holds, exports, and retained job-run bundles participate in the mark set. Its
+  domain writer protocol is a workspace audit writer/GC guard (ORB-10186): an
+  advisory lock every v2/loop/blob publication path shares with the collector,
+  held under the host GC lock from the final mark/fingerprint validation through
+  the envelope/blob unlink so a concurrent writer can neither strand a retained
+  reference nor lose an append.
 - Code anchors: `execute_gc` freezes and consumes plans under the host lock;
   `validate_candidate_path` enforces containment and no-follow path checks.
   Both cite ADR-0220 at the enforcement point; collector review covers the
