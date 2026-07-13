@@ -283,6 +283,8 @@ pub struct ConfigSnapshot {
     pub workflow_default_crew: Option<String>,
     pub workflow_auto_ship: bool,
     pub routines_source: bool,
+    pub worktree_gc_success_retention_days: u64,
+    pub worktree_gc_failure_retention_days: u64,
     pub tasks_id_start: Option<u32>,
     pub duel_candidates: Vec<String>,
     pub duel_models: std::collections::BTreeMap<String, String>,
@@ -317,6 +319,8 @@ impl From<&RuntimeConfig> for ConfigSnapshot {
             workflow_default_crew: config.default_crew.clone(),
             workflow_auto_ship: config.workflow_auto_ship(),
             routines_source: config.routines_source(),
+            worktree_gc_success_retention_days: config.worktree_gc_success_retention_days(),
+            worktree_gc_failure_retention_days: config.worktree_gc_failure_retention_days(),
             tasks_id_start: config.tasks_id_start(),
             duel_candidates: config.duel_config().candidates.clone(),
             duel_models: config.duel_config().models.clone(),
@@ -337,6 +341,12 @@ impl ConfigSnapshot {
             "execution.codex.sandbox" => json!(self.codex_sandbox),
             "execution.env.pass" => json!(self.execution_env_pass),
             "graph.editing" => json!(self.graph_editing),
+            "gc.worktrees.failure_retention_days" => {
+                json!(self.worktree_gc_failure_retention_days)
+            }
+            "gc.worktrees.success_retention_days" => {
+                json!(self.worktree_gc_success_retention_days)
+            }
             "pr.task_url_template" => json!(self.pr_task_url_template),
             "routines.role" => json!(if self.routines_source {
                 Some("source")

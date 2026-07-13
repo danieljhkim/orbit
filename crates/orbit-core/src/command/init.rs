@@ -12,8 +12,10 @@ use crate::command::job::seed_default_jobs;
 use crate::command::policy::seed_default_policies;
 use crate::command::routine::seed_default_routines;
 use crate::command::skill::{
-    default_skill_ids, is_default_skill_file_for_root, seed_default_skills,
+    default_skill_ids, is_default_skill_file_for_root, record_default_skill_ownership,
+    seed_default_skills,
 };
+use crate::command::skill_ownership;
 use orbit_common::utility::fs::{atomic_write_text, create_dir_symlink, remove_path_if_exists};
 
 use crate::config::{
@@ -158,6 +160,12 @@ pub fn init_workspace_at_root(
     } else {
         0
     };
+    if options.global_only {
+        // Record ownership + retirement metadata for the managed default
+        // skills regardless of whether any file was rewritten, so existing
+        // installs upgrade into the manifest and retired skills get tombstoned.
+        record_default_skill_ownership(&skills_root, &orbit_root)?;
+    }
     let created_config = if options.global_only {
         let config_path = orbit_root.join("config.toml");
         let detected = options
@@ -175,6 +183,11 @@ pub fn init_workspace_at_root(
         for skills_links_root in &init_target.skills_links_roots {
             created_skills_symlink |=
                 ensure_skill_links(&skills_root, &skill_ids, skills_links_root, options.force)?;
+            let links: Vec<(String, PathBuf)> = skill_ids
+                .iter()
+                .map(|id| ((*id).to_string(), skills_links_root.join(id)))
+                .collect();
+            skill_ownership::record_link_destinations(&skills_root, &links)?;
         }
     }
 
@@ -346,6 +359,18 @@ pub(crate) fn skill_link_roots(base_root: &Path) -> Vec<PathBuf> {
         .into_iter()
         .map(|dir| base_root.join(dir).join("skills"))
         .collect()
+}
+
+/// Roots inspected by `orbit gc skills` for `global_root`: the global
+/// generated-skill directory plus the per-agent skill-link roots init seeds
+/// symlinks into. Shares link-root resolution with init so GC scans exactly
+/// the locations init writes.
+pub(crate) fn skill_gc_roots(global_root: &Path) -> (PathBuf, Vec<PathBuf>) {
+    let target = resolve_init_target_from_root(global_root);
+    (
+        global_skills_dir(&target.orbit_root),
+        target.skills_links_roots,
+    )
 }
 
 fn find_git_repo_root(start: &Path) -> Option<PathBuf> {
@@ -591,6 +616,11 @@ pub fn link_skills(global_root: &Path) -> Result<LinkResult, OrbitError> {
         if changed {
             linked_count += skill_ids.len();
         }
+        let links: Vec<(String, PathBuf)> = skill_ids
+            .iter()
+            .map(|id| ((*id).to_string(), skills_links_root.join(id)))
+            .collect();
+        skill_ownership::record_link_destinations(&skills_root, &links)?;
         roots.push(skills_links_root.clone());
     }
 
@@ -601,9 +631,16 @@ pub fn link_skills(global_root: &Path) -> Result<LinkResult, OrbitError> {
 }
 
 /// Remove skill symlinks from `~/.agents/skills/` and `~/.claude/skills/`.
-/// Only removes symlinks — regular files and directories are left intact.
+///
+/// Only removes symlinks Orbit provably owns — those resolving into a known
+/// Orbit-owned root (per the ownership manifest). User symlinks that target
+/// outside every Orbit root, and regular files/directories, are left intact.
 pub fn unlink_skills(global_root: &Path) -> Result<UnlinkResult, OrbitError> {
     let init_target = resolve_init_target_from_root(global_root);
+    let skills_root = global_skills_dir(&init_target.orbit_root);
+    let manifest = skill_ownership::load_manifest(&skills_root)?;
+    let owned_roots = skill_ownership::owned_roots(&skills_root, &manifest);
+
     let mut removed_count = 0usize;
     let mut cleaned_dirs = Vec::new();
 
@@ -612,19 +649,10 @@ pub fn unlink_skills(global_root: &Path) -> Result<UnlinkResult, OrbitError> {
             continue;
         }
 
-        let entries = fs::read_dir(skills_links_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+        removed_count += skill_ownership::remove_owned_skill_links(skills_links_dir, &owned_roots)?;
 
-        for entry in entries {
-            let entry = entry.map_err(|e| OrbitError::Io(e.to_string()))?;
-            let meta =
-                fs::symlink_metadata(entry.path()).map_err(|e| OrbitError::Io(e.to_string()))?;
-            if meta.file_type().is_symlink() {
-                fs::remove_file(entry.path()).map_err(|e| OrbitError::Io(e.to_string()))?;
-                removed_count += 1;
-            }
-        }
-
-        // Clean up empty skills dir, then empty parent (.agents/ or .claude/)
+        // Clean up empty skills dir, then empty parent (.agents/ or .claude/).
+        // A directory left non-empty by unremoved user content stays put.
         if skills_links_dir.exists() && dir_is_empty(skills_links_dir)? {
             fs::remove_dir(skills_links_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
             cleaned_dirs.push(skills_links_dir.clone());

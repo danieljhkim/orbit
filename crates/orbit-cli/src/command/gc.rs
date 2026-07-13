@@ -3,9 +3,11 @@ use std::time::Duration;
 
 use clap::{Args, ValueEnum};
 use orbit_core::command::gc::{
-    EmptyGcCollector, GcCollector, GcRequest, GcScope, GcTarget, SystemGcClock, execute_gc,
+    EmptyGcCollector, GcCollector, GcReport, GcRequest, GcScope, GcTarget, SystemGcClock,
+    WorktreeGcCollector, WorktreeGcPolicy, execute_gc,
 };
 use orbit_core::command::gc_logs::LogsGcCollector;
+use orbit_core::command::skill_gc::SkillsGcCollector;
 use orbit_core::{OrbitError, OrbitRuntime};
 
 use super::Execute;
@@ -57,6 +59,14 @@ pub struct GcCommand {
     #[arg(long, value_name = "DURATION")]
     pub retention: Option<String>,
 
+    /// Override successful/cancelled worktree retention in days
+    #[arg(long, value_name = "DAYS")]
+    pub success_retention_days: Option<u64>,
+
+    /// Override failed/timeout/interrupted worktree retention in days
+    #[arg(long, value_name = "DAYS")]
+    pub failure_retention_days: Option<u64>,
+
     /// Select the current registered workspace by ID or path
     #[arg(long, value_name = "ID_OR_PATH", conflicts_with = "global")]
     pub workspace: Option<String>,
@@ -69,7 +79,33 @@ pub struct GcCommand {
 impl Execute for GcCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let target = GcTarget::from(self.target);
-        let defaults_global = matches!(target, GcTarget::Logs | GcTarget::Skills);
+        if target != GcTarget::Worktrees
+            && (self.success_retention_days.is_some() || self.failure_retention_days.is_some())
+        {
+            return Err(OrbitError::InvalidInput(
+                "worktree retention overrides require the `worktrees` target".to_string(),
+            ));
+        }
+        // Skills is a global-only collector whose owned state spans the global
+        // generated-skill root and the per-agent link roots; it resolves its own
+        // scope rather than following the generic workspace/global split. An
+        // explicit `--workspace` selector has no meaning here, so reject it up
+        // front rather than silently performing a global GC. The default and an
+        // explicit `--global` both continue to select this collector.
+        if target == GcTarget::Skills {
+            if self.workspace.is_some() {
+                return Err(OrbitError::InvalidInput(
+                    "`gc skills` operates on global Orbit-owned state; the `--workspace` \
+                     selector is not supported"
+                        .to_string(),
+                ));
+            }
+            let collector = SkillsGcCollector::for_global_root(&runtime.paths().global_dir);
+            let scope = collector.scope();
+            let report = self.run(&collector, scope, runtime)?;
+            return self.finish(report);
+        }
+        let defaults_global = matches!(target, GcTarget::Logs);
         let scope = if self.global || (self.workspace.is_none() && defaults_global) {
             GcScope::Global {
                 root: runtime.paths().global_dir.clone(),
@@ -77,9 +113,26 @@ impl Execute for GcCommand {
         } else {
             resolve_workspace_scope(self.workspace.as_deref(), runtime)?
         };
-        let clock = SystemGcClock;
-        let global_state_dir = runtime.paths().global_dir.join("state");
-        // `logs` has a real collector; the remaining targets keep the framework
+        let selected_runtime =
+            if target == GcTarget::Worktrees && scope.root() != runtime.paths().orbit_dir {
+                Some(OrbitRuntime::from_roots(
+                    &runtime.paths().global_dir,
+                    scope.root(),
+                )?)
+            } else {
+                None
+            };
+        let collector_runtime = selected_runtime.as_ref().unwrap_or(runtime);
+        let worktree_policy = WorktreeGcPolicy {
+            success_retention_days: self
+                .success_retention_days
+                .unwrap_or_else(|| collector_runtime.worktree_gc_success_retention_days()),
+            failure_retention_days: self
+                .failure_retention_days
+                .unwrap_or_else(|| collector_runtime.worktree_gc_failure_retention_days()),
+        };
+        let worktrees = WorktreeGcCollector::new(collector_runtime, worktree_policy);
+        // `logs` has a real collector too; remaining targets keep the framework
         // placeholder until their domain collectors land.
         let retention_window = self
             .retention
@@ -87,24 +140,42 @@ impl Execute for GcCommand {
             .map(parse_duration_seconds)
             .transpose()?
             .map(Duration::from_secs);
-        let logs_collector = matches!(target, GcTarget::Logs)
+        let logs = matches!(target, GcTarget::Logs)
             .then(|| LogsGcCollector::from_scope(&scope, retention_window));
-        let empty_collector = EmptyGcCollector::new(target);
-        let collector: &dyn GcCollector = logs_collector
-            .as_ref()
-            .map_or(&empty_collector as &dyn GcCollector, |collector| {
-                collector as &dyn GcCollector
-            });
-        let report = execute_gc(
+        let empty = EmptyGcCollector::new(target);
+        let collector: &dyn GcCollector = if target == GcTarget::Worktrees {
+            &worktrees
+        } else if let Some(logs) = logs.as_ref() {
+            logs
+        } else {
+            &empty
+        };
+        let report = self.run(collector, scope, runtime)?;
+        self.finish(report)
+    }
+}
+
+impl GcCommand {
+    fn run(
+        &self,
+        collector: &dyn GcCollector,
+        scope: GcScope,
+        runtime: &OrbitRuntime,
+    ) -> Result<GcReport, OrbitError> {
+        let clock = SystemGcClock;
+        execute_gc(
             collector,
             GcRequest {
                 apply: self.apply,
                 scope,
                 retention_override: self.retention.as_deref(),
-                global_state_dir: &global_state_dir,
+                global_state_dir: &runtime.paths().global_dir.join("state"),
                 clock: &clock,
             },
-        )?;
+        )
+    }
+
+    fn finish(&self, report: GcReport) -> Result<(), OrbitError> {
         if self.json {
             println!(
                 "{}",

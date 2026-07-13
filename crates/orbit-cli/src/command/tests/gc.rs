@@ -1,6 +1,6 @@
 use clap::{CommandFactory, Parser};
 
-use super::super::{Cli, Commands, gc::GcTargetArg};
+use super::super::{Cli, Commands, Execute, gc::GcTargetArg};
 
 #[test]
 fn gc_help_lists_every_target_and_uniform_flags() {
@@ -24,10 +24,32 @@ fn gc_help_lists_every_target_and_uniform_flags() {
         "--apply",
         "--json",
         "--retention",
+        "--success-retention-days",
+        "--failure-retention-days",
         "--workspace",
         "--global",
     ] {
         assert!(help.contains(value), "missing `{value}` from help:\n{help}");
+    }
+}
+
+#[test]
+fn gc_parses_qualified_worktree_retention_overrides() {
+    let cli = Cli::parse_from([
+        "orbit",
+        "gc",
+        "worktrees",
+        "--success-retention-days",
+        "2",
+        "--failure-retention-days",
+        "30",
+    ]);
+    match cli.command {
+        Commands::Gc(command) => {
+            assert_eq!(command.success_retention_days, Some(2));
+            assert_eq!(command.failure_retention_days, Some(30));
+        }
+        _ => panic!("expected gc command"),
     }
 }
 
@@ -58,6 +80,62 @@ fn gc_is_plan_only_by_default_and_parses_target() {
         }
         _ => panic!("expected gc command"),
     }
+}
+
+#[test]
+fn gc_skills_rejects_workspace_selection_without_mutation() {
+    use std::fs;
+
+    use orbit_core::OrbitRuntime;
+    use orbit_core::command::skill_ownership::{
+        GeneratedFile, GeneratedSkill, reconcile_managed_skills,
+    };
+
+    let runtime = OrbitRuntime::in_memory().expect("runtime");
+    let skills_root = runtime.paths().global_dir.join("skills");
+    fs::create_dir_all(&skills_root).expect("skills root");
+
+    // Seed then retire `orbit`, and materialize its generated tree, so a genuine
+    // retirement-removal candidate exists on disk before we invoke GC.
+    let contents = b"---\nname: orbit\ndescription: d\n---\n".to_vec();
+    let files = vec![GeneratedFile {
+        relative_path: "SKILL.md".to_string(),
+        contents: contents.clone(),
+    }];
+    let seeded =
+        GeneratedSkill::from_files("orbit", Some("1".to_string()), &files).expect("fingerprint");
+    reconcile_managed_skills(&skills_root, &[seeded]).expect("seed");
+    fs::create_dir_all(skills_root.join("orbit")).expect("dir");
+    fs::write(skills_root.join("orbit").join("SKILL.md"), &contents).expect("file");
+    reconcile_managed_skills(&skills_root, &[]).expect("retire");
+
+    // `gc skills` is global-only; an explicit `--workspace` selector must be
+    // rejected with InvalidInput before any planning or mutation runs.
+    let cli = Cli::parse_from([
+        "orbit",
+        "gc",
+        "skills",
+        "--workspace",
+        "ws_example",
+        "--apply",
+    ]);
+    let Commands::Gc(command) = cli.command else {
+        panic!("expected gc command");
+    };
+    let error = command
+        .execute(&runtime)
+        .expect_err("workspace selection must be rejected");
+    assert!(
+        matches!(error, orbit_core::OrbitError::InvalidInput(_)),
+        "expected InvalidInput, got {error:?}"
+    );
+
+    // No planning or mutation occurred: the retired generated directory that a
+    // global GC apply would have reclaimed is untouched.
+    assert!(
+        skills_root.join("orbit").join("SKILL.md").exists(),
+        "gc skills --workspace must not mutate global state"
+    );
 }
 
 #[test]

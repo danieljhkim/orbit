@@ -10,7 +10,7 @@ summary: Specifies GC grammar, collector ownership, retention clocks, safety inv
 tags: [gc, retention, safety]
 paths: ["crates/orbit-cli/src/command/gc.rs", "crates/orbit-core/src/command/gc.rs", "crates/orbit-core/src/command/gc_logs.rs", "crates/orbit-common/src/utility/log_rotation.rs", "crates/orbit-core/src/config/**"]
 related_features: [gc, activity-job, auditability, task-artifacts, worktree-artifacts]
-related_artifacts: [ORB-10178, ORB-10180, ORB-10184, ADR-0220, ADR-0221]
+related_artifacts: [ORB-10178, ORB-10180, ORB-10181, ORB-10184, ADR-0220, ADR-0221]
 ---
 
 # Garbage Collection — Design
@@ -102,6 +102,30 @@ protected. Unknown directories are inventory entries, not candidates. Removal
 uses Git worktree operations and is language-neutral. On-terminal cleanup calls
 the same classifier and apply primitive as manual GC.
 
+Owner liveness is proven, not assumed: the collector reuses run
+reconciliation's PID + process-start-identity probe, so a row that reads
+terminal while its worker process is still alive (e.g. a zero-day success still
+winding down after finalizing) is retained. Only a conclusively dead owner
+(missing PID, or a PID now held by an unrelated process) — or this same
+collecting process, whose cwd guard covers the in-use case — permits removal;
+verified-live, unverifiable-live, and inconclusive probes all fail closed. Per
+§5.6, this owner state/identity/liveness plus Git revalidation is re-run as the
+immediately preceding operation to `git worktree remove`. It is not enough for
+that revalidation to be adjacent to the removal: the host GC lock serializes GC
+against other GC processes, not against a worker claiming or reclaiming a run,
+so revalidate-then-remove was not atomic against a concurrent claim. The
+collector therefore takes a **per-run claim guard** — one advisory file lock
+keyed by run id under `state/run-guards/` — and holds it continuously across
+revalidation and removal. The run claim/start path (`mark_run_running`,
+`claim_pending_run_owner`, `take_over_running_run`) acquires the *same* guard
+around its ownership transition, so the two paths are mutually exclusive: a
+claim that commits first is observed by revalidation (GC fails closed); a GC
+removal that wins first forces the blocked claimant to re-evaluate (its worktree
+setup recreates the tree) rather than enter a removed worktree. Lock ordering is
+fixed — **host GC lock → per-run guard → filesystem** — and the guard is a
+filesystem advisory lock, never the global SQLite write lock, so no unrelated
+database lock is held across the git operation.
+
 ### 3.2 Runs (workspace)
 
 The run collector coordinates authoritative rows, steps, reservations,
@@ -183,8 +207,11 @@ prerequisite failed is reported as dependency-blocked.
 ## 4. Configuration and Precedence
 
 GC uses typed `[gc]` configuration with per-target subsections and conservative
-built-in defaults. Exact key names and defaults land with their collector, but
-every key identifies its unit and retention class; zero means immediate
+built-in defaults. Worktree collection uses
+`gc.worktrees.success_retention_days` (default `0`) and
+`gc.worktrees.failure_retention_days` (default `7`); resumable interrupted
+worktrees remain protected regardless of age. Every key identifies its unit and
+retention class; zero means immediate
 eligibility only where the key explicitly permits it. Invalid values fail plan
 construction before mutation.
 
@@ -385,12 +412,12 @@ that same gate on a schedule.
 
 - [ORB-10178] — defined this retention and safety contract.
 - [ORB-10180] — will implement the shared GC framework.
-- [ORB-10182] — will implement managed worktree collection.
+- [ORB-10182] — implemented managed worktree collection and terminal cleanup reuse.
 - [ORB-10183] — will implement run retention.
 - [ORB-10184] — unified log retention: `orbit gc logs` + shared `plan_prune` (ADR-0221).
 - [ORB-10185] — will implement diagnostics retention.
 - [ORB-10186] — will implement audit and blob collection.
-- [ORB-10187] — will implement generated-skill collection.
+- [ORB-10187] — implemented generated-skill collection (`skill_gc::SkillsGcCollector`).
 - [ORB-10188] — will implement task archival.
 - [ORB-10189] — will implement aggregate and automatic collection.
 

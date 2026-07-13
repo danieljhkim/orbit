@@ -144,10 +144,13 @@ pub(crate) fn build_context_from_roots(
     let workflow_base_branch = runtime_config.workflow_base_branch().to_string();
     let workflow_auto_ship = runtime_config.workflow_auto_ship();
     let routines_source = runtime_config.routines_source();
+    let worktree_gc_success_retention_days = runtime_config.worktree_gc_success_retention_days();
+    let worktree_gc_failure_retention_days = runtime_config.worktree_gc_failure_retention_days();
     let crews = runtime_config.crews.clone();
     let default_crew = runtime_config.default_crew.clone();
     let duel = runtime_config.duel_config().clone();
 
+    let run_guard_state_dir = paths.state_dir.clone();
     Ok(OrbitContext::new(
         paths,
         OrbitStores::new(
@@ -166,6 +169,7 @@ pub(crate) fn build_context_from_roots(
             audit_event_store,
             executor_def_store,
             policy_def_store,
+            run_guard_state_dir,
         ),
         OrbitExecutionAssets::new(Arc::new(registry), skill_catalog),
         OrbitPolicyContext::new(
@@ -185,6 +189,8 @@ pub(crate) fn build_context_from_roots(
             workflow_base_branch,
             workflow_auto_ship,
             routines_source,
+            worktree_gc_success_retention_days,
+            worktree_gc_failure_retention_days,
             crews,
             default_crew,
             duel,
