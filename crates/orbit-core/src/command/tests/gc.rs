@@ -11,6 +11,7 @@ use tempfile::TempDir;
 use crate::command::gc::{
     EmptyGcCollector, GcCandidate, GcClock, GcCollector, GcContext, GcMode, GcMutation, GcOutcome,
     GcPlan, GcRequest, GcRevalidation, GcScope, GcTarget, execute_gc, validate_candidate_path,
+    validate_candidate_path_any,
 };
 
 struct FakeClock(DateTime<Utc>);
@@ -233,6 +234,31 @@ fn containment_rejects_escape_root_and_parent_traversal() {
     assert!(validate_candidate_path(&fixture.root, &fixture.root.join("safe"), false).is_ok());
     assert!(validate_candidate_path(&fixture.root, fixture.temp.path(), false).is_err());
     assert!(validate_candidate_path(&fixture.root, Path::new("../outside"), false).is_err());
+}
+
+#[test]
+fn multi_root_containment_accepts_any_owned_root_and_rejects_the_rest() {
+    // [ORB-10184] A collector owning locations under more than one root (e.g.
+    // an ORBIT_LOG_PATH outside the default state root) validates a candidate
+    // against every owned root; it passes iff some root safely contains it.
+    let fixture = Fixture::new();
+    fixture.write("safe", "data");
+    let other_root = fixture.temp.path().join("other");
+    fs::create_dir_all(&other_root).expect("other root");
+    let other_file = other_root.join("archive");
+    fs::write(&other_file, "data").expect("other file");
+    let roots = vec![fixture.root.clone(), other_root.clone()];
+
+    // Contained by the first (scope) root.
+    assert!(validate_candidate_path_any(&roots, &fixture.root.join("safe"), false).is_ok());
+    // Contained only by the second (external) owned root.
+    assert!(validate_candidate_path_any(&roots, &other_file, false).is_ok());
+    // Contained by neither owned root -> rejected (fail-closed).
+    assert!(
+        validate_candidate_path_any(&roots, &fixture.temp.path().join("loose"), false).is_err()
+    );
+    // An empty allowlist rejects everything.
+    assert!(validate_candidate_path_any(&[], &fixture.root.join("safe"), false).is_err());
 }
 
 #[test]

@@ -11,6 +11,12 @@
 //! logs are explicitly out of scope. The active file is never a candidate:
 //! only dated `<active>.<stamp>` archives are collected, so a writer holding
 //! the active inode open is unaffected.
+//!
+//! An explicitly configured `ORBIT_LOG_PATH` is an owned active log even when
+//! it resolves outside the default state root: its parent directory is
+//! surfaced as an allowlisted owned root (see [`LogsGcCollector::owned_roots`])
+//! so its archives are planned and reclaimed, while every deletion still passes
+//! the framework's canonical no-follow containment gate (ADR-0220).
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -23,7 +29,7 @@ use orbit_common::utility::log_rotation::{
 
 use super::gc::{
     GcCandidate, GcCollector, GcContext, GcItemError, GcMutation, GcPlan, GcRevalidation, GcScope,
-    GcSkip, GcTarget,
+    GcTarget,
 };
 
 /// Environment override for the active JSONL tracing feed path. Producers and
@@ -147,34 +153,42 @@ impl GcCollector for LogsGcCollector {
         GcTarget::Logs
     }
 
+    fn owned_roots(&self, scope: &GcScope) -> Vec<PathBuf> {
+        // Each managed active log's parent directory is an allowlisted owned
+        // root: dated archives always sit beside their active file, so the
+        // parent is the tightest containment boundary. For an explicitly
+        // configured `ORBIT_LOG_PATH` outside the default state root this is
+        // what lets its archives be planned and reclaimed while every deletion
+        // still passes the canonical no-follow containment gate (ADR-0220).
+        let mut roots = vec![scope.root().to_path_buf()];
+        for active in &self.active_paths {
+            if let Some(parent) = active.parent() {
+                let parent = parent.to_path_buf();
+                if !roots.contains(&parent) {
+                    roots.push(parent);
+                }
+            }
+        }
+        roots
+    }
+
     fn plan(&self, context: &GcContext<'_>) -> Result<GcPlan, OrbitError> {
         let now = SystemTime::from(context.clock.now());
         let retention = self.retention_window();
-        let root = context.scope.root();
 
         let mut scanned: u64 = 0;
         let mut scanned_bytes: u64 = 0;
         let mut candidates = Vec::new();
-        let mut skipped = Vec::new();
         let mut errors = Vec::new();
 
         for active in &self.active_paths {
             let label = active_label(active);
-            // Mutation is gated on containment within the owned scope root
-            // (ADR-0220). Skip — never force-delete — a custom log path that
-            // resolves outside it, keeping plan/apply parity (L-0080).
-            if !active.starts_with(root) {
-                skipped.push(GcSkip {
-                    id: label,
-                    code: "out_of_scope".to_string(),
-                    reason: format!(
-                        "active log `{}` is outside the GC scope root `{}`",
-                        active.display(),
-                        root.display()
-                    ),
-                });
-                continue;
-            }
+            // Archives sit beside their active file, whose parent is an
+            // allowlisted owned root (see `owned_roots`); an explicitly
+            // configured `ORBIT_LOG_PATH` outside the default state root is
+            // therefore honored, not skipped. Deletion is still gated by the
+            // framework's canonical no-follow containment check at apply
+            // (ADR-0220), so an untrusted path can never be force-deleted here.
             match plan_prune(active, retention, self.config.max_total_bytes, now) {
                 Ok(prune) => {
                     scanned = scanned.saturating_add(prune.scanned);
@@ -200,7 +214,7 @@ impl GcCollector for LogsGcCollector {
             scanned,
             scanned_bytes: Some(scanned_bytes),
             candidates,
-            skipped,
+            skipped: Vec::new(),
             errors,
         })
     }

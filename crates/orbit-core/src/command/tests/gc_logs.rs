@@ -11,7 +11,7 @@ use orbit_common::utility::log_rotation::LogRotationConfig;
 use tempfile::TempDir;
 
 use crate::command::gc::{
-    GcClock, GcItemStatus, GcMode, GcOutcome, GcRequest, GcScope, GcTarget, execute_gc,
+    GcClock, GcItemStatus, GcMode, GcOutcome, GcRequest, GcScope, execute_gc,
 };
 use crate::command::gc_logs::LogsGcCollector;
 
@@ -327,32 +327,66 @@ fn custom_path_via_orbit_log_path_is_honored() {
 }
 
 #[test]
-fn custom_path_outside_scope_root_is_skipped_not_deleted() {
+fn custom_path_outside_default_root_is_honored() {
+    // [ORB-10184] An explicitly configured ORBIT_LOG_PATH outside the default
+    // global root is an owned active log: its archives must be planned and
+    // reclaimed (with canonical no-follow containment against the configured
+    // parent as an allowlisted owned root), not skipped.
     let fixture = Fixture::new();
-    // An owned root distinct from the log location.
-    let outside = fixture.root.join("outside-feed.jsonl");
-    let collector =
-        LogsGcCollector::with_config(vec![outside.clone()], config(7, 10_000_000), None);
-    let scope_root = fixture.logs_dir.clone();
+    // A directory OUTSIDE the scope root entirely (sibling of `global`).
+    let base = fixture.root.parent().expect("base dir");
+    let external_dir = base.join("external-logs");
+    fs::create_dir_all(&external_dir).expect("external dir");
+    let external_active = external_dir.join("feed.jsonl");
+    fs::write(&external_active, "active\n").expect("external active");
+    let external_old = write_archive_in(
+        &external_dir,
+        "feed.jsonl.OLD",
+        "old",
+        Duration::from_secs(10 * 86_400),
+    );
 
-    let plan = execute_gc(
-        &collector,
-        GcRequest {
-            apply: false,
-            scope: GcScope::Global { root: scope_root },
-            retention_override: None,
-            global_state_dir: &fixture.state,
-            clock: &fixture.clock,
+    let _guard = EnvVarGuard::set("ORBIT_LOG_PATH", external_active.clone().into_os_string());
+    let collector = LogsGcCollector::from_scope(
+        &GcScope::Global {
+            root: fixture.root.clone(),
         },
-    )
-    .expect("plan");
-    assert_eq!(plan.targets[0].target, GcTarget::Logs);
+        Some(Duration::from_secs(86_400)), // --retention 1d
+    );
+
+    // Plan: the external archive is eligible and nothing is deleted.
+    let plan = execute_gc(&collector, fixture.request(false)).expect("plan");
+    assert_eq!(plan.mode, GcMode::Plan);
     assert!(
-        plan.targets[0].items.is_empty(),
-        "no candidates outside the scope root"
+        eligible_ids(&plan).contains("feed.jsonl.OLD"),
+        "an outside-root configured log's archive must be planned, not skipped"
     );
-    assert_eq!(
-        plan.targets[0].skipped[0].code, "out_of_scope",
-        "an out-of-root custom path is skipped, never force-deleted"
+    assert!(
+        plan.targets[0].skipped.is_empty(),
+        "the configured external path is honored, not skipped as out_of_scope"
     );
+    assert!(external_old.exists(), "plan must not delete anything");
+
+    // Apply: the external archive is reclaimed; both active files survive.
+    let apply = execute_gc(&collector, fixture.request(true)).expect("apply");
+    assert_eq!(apply.outcome, GcOutcome::Clean);
+    assert!(
+        reclaimed_ids(&apply).contains("feed.jsonl.OLD"),
+        "the external archive is reclaimed under canonical containment"
+    );
+    assert!(!external_old.exists(), "the external archive is deleted");
+    assert!(
+        external_active.exists(),
+        "the configured external active file is never deleted"
+    );
+    assert!(
+        fixture.active.exists(),
+        "the default feed is not managed when overridden"
+    );
+
+    // Idempotent: a second apply reclaims nothing.
+    let second = execute_gc(&collector, fixture.request(true)).expect("second apply");
+    assert_eq!(second.targets[0].counts.eligible, 0);
+    assert_eq!(second.targets[0].counts.reclaimed, 0);
+    assert_eq!(second.outcome, GcOutcome::Clean);
 }
