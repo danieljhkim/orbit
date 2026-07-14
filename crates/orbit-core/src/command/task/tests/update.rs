@@ -6,6 +6,7 @@ use orbit_common::types::{Task, TaskStatus};
 use super::test_runtime;
 use crate::OrbitRuntime;
 use crate::command::task::{TaskAddParams, TaskUpdateParams};
+use crate::runtime::TaskRecordUpdateParams;
 
 fn add_proposed_task(runtime: &OrbitRuntime, title: &str) -> Task {
     runtime
@@ -115,6 +116,34 @@ fn update_status_covers_approve_transitions() {
     // review -> done (the former review approval).
     let done = drive_to_done(&runtime, &task.id);
     assert_eq!(done.status, TaskStatus::Done);
+}
+
+#[test]
+fn update_status_rejects_friction_reentry_with_history_context() {
+    let (_root, runtime) = test_runtime();
+    let task = add_proposed_task(&runtime, "Friction cannot be re-entered");
+    runtime
+        .stores()
+        .tasks()
+        .update(
+            &task.id,
+            TaskRecordUpdateParams {
+                actor: "system".to_string(),
+                status: Some(TaskStatus::Friction),
+                ..Default::default()
+            },
+        )
+        .expect("seed legacy friction task");
+    update_status(&runtime, &task.id, TaskStatus::Backlog)
+        .expect("transition legacy friction to backlog");
+
+    let err = update_status(&runtime, &task.id, TaskStatus::Friction)
+        .expect_err("friction reentry must fail");
+    assert!(
+        err.to_string()
+            .contains("previously transitioned out of friction (friction -> backlog)"),
+        "{err}"
+    );
 }
 
 /// Walks a task through backlog -> in-progress -> review -> done using only

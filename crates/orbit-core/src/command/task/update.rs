@@ -8,7 +8,7 @@ use crate::OrbitRuntime;
 use crate::runtime::TaskRecordUpdateParams;
 
 use super::helpers::{
-    SYSTEM_ACTOR_LABEL, build_task_comments, effective_actor_label, implementation_label,
+    SYSTEM_ACTOR_LABEL, TaskAttributionInput, assemble_task_attribution, build_task_comments,
     task_comment_history_entries,
 };
 use super::params::TaskUpdateParams;
@@ -17,7 +17,10 @@ use super::paths::{
     context_workspace_root, emit_graph_unavailable_warning_if_needed,
     normalize_context_files_for_write,
 };
-use super::transitions::{ensure_task_has_execution_plan, in_progress_transition_requires_plan};
+use super::transitions::{
+    ensure_friction_reentry_allowed, ensure_task_has_execution_plan,
+    in_progress_transition_requires_plan,
+};
 
 impl OrbitRuntime {
     pub fn update_task(&self, id: &str, params: TaskUpdateParams) -> Result<Task, OrbitError> {
@@ -129,14 +132,7 @@ impl OrbitRuntime {
                         .to_string(),
                 ));
             }
-            if target_status == TaskStatus::Friction && task.status != TaskStatus::Friction {
-                let history = self.get_task_history(id)?;
-                return Err(OrbitError::InvalidInput(friction_reentry_error(
-                    id,
-                    task.status,
-                    &history,
-                )));
-            }
+            ensure_friction_reentry_allowed(self, &task, Some(target_status))?;
             task.status
                 .validate_transition(target_status)
                 .map_err(OrbitError::TaskStatusTransition)?;
@@ -162,11 +158,21 @@ impl OrbitRuntime {
         }
 
         let actor = self.actor().clone();
-        let effective_label = effective_actor_label(
-            &actor.label,
-            canonical_agent.as_deref(),
-            canonical_model.as_deref(),
+        let attribution = assemble_task_attribution(
+            &task,
+            TaskAttributionInput {
+                default_actor_label: &actor.label,
+                actor_override: None,
+                agent: canonical_agent.as_deref(),
+                model: canonical_model.as_deref(),
+                runtime_model_identity: None,
+                plan_changed: params.plan.is_some(),
+                target_status: params.status,
+                explicit_planned_by: params.planned_by.as_ref(),
+                explicit_implemented_by: params.implemented_by.as_ref(),
+            },
         );
+        let effective_label = attribution.actor;
         let status_note = status_note
             .as_deref()
             .map(str::trim)
@@ -174,21 +180,6 @@ impl OrbitRuntime {
             .map(ToOwned::to_owned);
         let append_comments =
             build_task_comments(params.comment.clone(), effective_label.as_str())?;
-        let planned_by = params
-            .planned_by
-            .clone()
-            .or_else(|| params.plan.as_ref().map(|_| Some(effective_label.clone())));
-        let implementation_label =
-            implementation_label(&task, effective_label.as_str(), canonical_model.as_deref());
-        let implemented_by = params.implemented_by.clone().or_else(|| {
-            params.status.and_then(|status| {
-                if matches!(status, TaskStatus::Review | TaskStatus::Done) {
-                    implementation_label.clone().map(Some)
-                } else {
-                    None
-                }
-            })
-        });
         let source_task_id_changed = params
             .source_task_id
             .as_ref()
@@ -218,8 +209,8 @@ impl OrbitRuntime {
                 id,
                 TaskRecordUpdateParams {
                     actor: effective_label.clone(),
-                    planned_by,
-                    implemented_by,
+                    planned_by: attribution.planned_by.clone(),
+                    implemented_by: attribution.implemented_by.clone(),
                     status_note,
                     append_comments: append_comments.clone(),
                     append_history: append_history.clone(),
@@ -239,29 +230,4 @@ impl OrbitRuntime {
 
         Ok(updated)
     }
-}
-
-fn friction_reentry_error(
-    id: &str,
-    current_status: TaskStatus,
-    history: &[TaskHistoryEntry],
-) -> String {
-    if let Some(entry) = history
-        .iter()
-        .rev()
-        .find(|entry| entry.from_status == Some(TaskStatus::Friction))
-    {
-        let to_status = entry
-            .to_status
-            .map(|status| status.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
-        return format!(
-            "status 'friction' can only be set at creation; task '{id}' previously transitioned out of friction (friction -> {to_status})"
-        );
-    }
-
-    format!(
-        "status 'friction' can only be set at creation; task '{id}' is currently '{}'",
-        current_status
-    )
 }

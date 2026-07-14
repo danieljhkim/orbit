@@ -16,6 +16,7 @@ use tempfile::tempdir;
 
 use crate::OrbitRuntime;
 use crate::command::task::{SYSTEM_ACTOR_LABEL, TaskAddParams, TaskUpdateParams};
+use crate::runtime::TaskRecordUpdateParams;
 
 fn test_runtime() -> (tempfile::TempDir, OrbitRuntime) {
     let root = tempdir().expect("create tempdir");
@@ -108,6 +109,29 @@ fn approve_for_execution(runtime: &OrbitRuntime, task: &Task) -> Task {
             None,
         )
         .expect("approve task")
+}
+
+fn seed_legacy_friction_task(runtime: &OrbitRuntime, title: &str) -> Task {
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: title.to_string(),
+            description: "Exercise a legacy task with friction status.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("create friction candidate");
+    runtime
+        .stores()
+        .tasks()
+        .update(
+            &task.id,
+            TaskRecordUpdateParams {
+                actor: SYSTEM_ACTOR_LABEL.to_string(),
+                status: Some(TaskStatus::Friction),
+                ..Default::default()
+            },
+        )
+        .expect("seed legacy friction task")
 }
 
 fn init_git_repo(repo: &Path) {
@@ -316,12 +340,14 @@ fn worktree_setup_admits_unplanned_workflow_statuses() {
         })
         .expect("create archived candidate");
     runtime.archive_task(&archived.id).expect("archive task");
+    let friction = seed_legacy_friction_task(&runtime, "Friction workflow task");
 
     let task_ids = vec![
         proposed.id.clone(),
         backlog.id.clone(),
         rejected.id.clone(),
         archived.id.clone(),
+        friction.id.clone(),
     ];
     let output = run_worktree_setup(&runtime, &task_ids, "jrun-admit");
     let workspace_path = output["workspace_path"]
@@ -340,6 +366,36 @@ fn worktree_setup_admits_unplanned_workflow_statuses() {
         .admit_task_for_workflow_as_system(&proposed.id, "worktree_setup")
         .expect("idempotent workflow admission");
     assert_eq!(admitted_again.status, TaskStatus::InProgress);
+}
+
+#[test]
+fn automation_rejects_friction_reentry_with_history_context() {
+    let (_root, runtime) = test_runtime();
+    let task = seed_legacy_friction_task(&runtime, "Automation friction reentry");
+    runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                status: Some(TaskStatus::Backlog),
+                ..Default::default()
+            },
+        )
+        .expect("transition legacy friction to backlog");
+
+    let err = runtime
+        .apply_task_automation_update(
+            &task.id,
+            TaskAutomationUpdate {
+                status: Some(TaskStatus::Friction),
+                ..TaskAutomationUpdate::default()
+            },
+        )
+        .expect_err("automation friction reentry must fail");
+    assert!(
+        err.to_string()
+            .contains("previously transitioned out of friction (friction -> backlog)"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -363,6 +419,28 @@ fn direct_update_to_in_progress_still_requires_plan_for_unapproved_statuses() {
             },
         )
         .expect_err("direct update should still require a plan");
+    assert!(
+        err.to_string()
+            .contains("requires a non-empty execution plan"),
+        "{err}"
+    );
+}
+
+#[test]
+fn direct_start_from_proposed_still_requires_plan() {
+    let (_root, runtime) = test_runtime();
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Direct start remains gated".to_string(),
+            description: "A human start is not workflow admission.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("create proposed task");
+
+    let err = runtime
+        .start_task(&task.id, Some("attempt direct start".to_string()), None)
+        .expect_err("direct start should still require a plan");
     assert!(
         err.to_string()
             .contains("requires a non-empty execution plan"),
@@ -850,6 +928,58 @@ fn direct_update_task_keeps_default_human_attribution() {
         .find(|entry| entry.event == "commented")
         .expect("comment history");
     assert_eq!(comment_history.by, "human");
+}
+
+#[test]
+fn direct_update_identity_prefers_model_for_authored_roles() {
+    let (_root, runtime) = test_runtime();
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Human update identity precedence".to_string(),
+            description: "Exercise direct update authored-role precedence.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("add task");
+
+    let planned = runtime
+        .update_task_with_identity(
+            &task.id,
+            TaskUpdateParams {
+                plan: Some("Implement and validate the task.".to_string()),
+                ..Default::default()
+            },
+            Some("codex".to_string()),
+            Some("gpt-explicit".to_string()),
+        )
+        .expect("author plan with explicit identity");
+    assert_eq!(planned.planned_by.as_deref(), Some("gpt-explicit"));
+
+    runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                status: Some(TaskStatus::Backlog),
+                ..Default::default()
+            },
+        )
+        .expect("approve task");
+    runtime
+        .start_task(&task.id, Some("start task".to_string()), None)
+        .expect("start task");
+    let reviewed = runtime
+        .update_task_with_identity(
+            &task.id,
+            TaskUpdateParams {
+                status: Some(TaskStatus::Review),
+                execution_summary: Some("Implemented and validated.".to_string()),
+                ..Default::default()
+            },
+            Some("codex".to_string()),
+            Some("gpt-explicit".to_string()),
+        )
+        .expect("review task with explicit identity");
+    assert_eq!(reviewed.implemented_by.as_deref(), Some("gpt-explicit"));
 }
 
 #[test]

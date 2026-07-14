@@ -11,6 +11,7 @@ use crate::runtime::TaskRecordUpdateParams as StoreTaskUpdateParams;
 use super::helpers::{
     SYSTEM_ACTOR_LABEL, build_task_comments, effective_actor_label, implementation_label,
 };
+use super::params::TaskUpdateParams;
 
 const UNAUTHORED_TASK_PLAN_PLACEHOLDER: &str = "To be authored by executing agent at start time.";
 const RELATION_RESOLVES: &str = "resolves";
@@ -67,11 +68,13 @@ impl OrbitRuntime {
                     id,
                     StoreTaskUpdateParams {
                         actor: effective_label.clone(),
-                        status: Some(TaskStatus::Backlog),
                         status_event: Some(status_event.to_string()),
                         status_note: note.clone(),
                         append_comments: append_comments.clone(),
-                        ..Default::default()
+                        ..StoreTaskUpdateParams::from(TaskUpdateParams {
+                            status: Some(TaskStatus::Backlog),
+                            ..Default::default()
+                        })
                     },
                 )?;
                 Ok((
@@ -87,12 +90,14 @@ impl OrbitRuntime {
                     id,
                     StoreTaskUpdateParams {
                         actor: effective_label.clone(),
-                        status: Some(TaskStatus::Done),
                         status_event: Some("review_approved".to_string()),
                         status_note: note.clone(),
                         implemented_by: implemented_by.clone().map(Some),
                         append_comments: append_comments.clone(),
-                        ..Default::default()
+                        ..StoreTaskUpdateParams::from(TaskUpdateParams {
+                            status: Some(TaskStatus::Done),
+                            ..Default::default()
+                        })
                     },
                 )?;
                 Ok((
@@ -314,7 +319,6 @@ impl OrbitRuntime {
                         id,
                         StoreTaskUpdateParams {
                             actor: effective_label.clone(),
-                            status: Some(TaskStatus::InProgress),
                             status_event: Some("started".to_string()),
                             append_history: vec![TaskHistoryEntry {
                                 at,
@@ -325,7 +329,10 @@ impl OrbitRuntime {
                                 to_status: Some(TaskStatus::Backlog),
                             }],
                             append_comments: append_comments.clone(),
-                            ..Default::default()
+                            ..StoreTaskUpdateParams::from(TaskUpdateParams {
+                                status: Some(TaskStatus::InProgress),
+                                ..Default::default()
+                            })
                         },
                     )?;
                     Ok((
@@ -346,11 +353,13 @@ impl OrbitRuntime {
                         id,
                         StoreTaskUpdateParams {
                             actor: effective_label.clone(),
-                            status: Some(TaskStatus::InProgress),
                             status_event: Some("started".to_string()),
                             status_note: note.clone(),
                             append_comments: append_comments.clone(),
-                            ..Default::default()
+                            ..StoreTaskUpdateParams::from(TaskUpdateParams {
+                                status: Some(TaskStatus::InProgress),
+                                ..Default::default()
+                            })
                         },
                     )?;
                     Ok((
@@ -429,11 +438,13 @@ impl OrbitRuntime {
                 id,
                 StoreTaskUpdateParams {
                     actor: SYSTEM_ACTOR_LABEL.to_string(),
-                    status: Some(TaskStatus::InProgress),
                     status_event: Some("started".to_string()),
                     status_note: note.clone(),
                     append_history: append_history.clone(),
-                    ..Default::default()
+                    ..StoreTaskUpdateParams::from(TaskUpdateParams {
+                        status: Some(TaskStatus::InProgress),
+                        ..Default::default()
+                    })
                 },
             )?;
             Ok((
@@ -617,6 +628,37 @@ impl OrbitRuntime {
         ensure_task_delete_allowed(&task.id, task.status, force)?;
         self.delete_task(id)
     }
+}
+
+pub(crate) fn ensure_friction_reentry_allowed(
+    runtime: &OrbitRuntime,
+    task: &Task,
+    target_status: Option<TaskStatus>,
+) -> Result<(), OrbitError> {
+    if target_status != Some(TaskStatus::Friction) || task.status == TaskStatus::Friction {
+        return Ok(());
+    }
+
+    let history = runtime.get_task_history(&task.id)?;
+    if let Some(entry) = history
+        .iter()
+        .rev()
+        .find(|entry| entry.from_status == Some(TaskStatus::Friction))
+    {
+        let to_status = entry
+            .to_status
+            .map(|status| status.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        return Err(OrbitError::InvalidInput(format!(
+            "status 'friction' can only be set at creation; task '{}' previously transitioned out of friction (friction -> {to_status})",
+            task.id
+        )));
+    }
+
+    Err(OrbitError::InvalidInput(format!(
+        "status 'friction' can only be set at creation; task '{}' is currently '{}'",
+        task.id, task.status
+    )))
 }
 
 fn ensure_task_delete_allowed(id: &str, status: TaskStatus, force: bool) -> Result<(), OrbitError> {
