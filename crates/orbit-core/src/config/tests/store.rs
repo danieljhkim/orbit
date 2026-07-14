@@ -393,6 +393,27 @@ fn keys_registry_lists_all_runtime_log_keys() {
 }
 
 #[test]
+fn admission_registry_snapshot_and_lookup_are_complete() {
+    use super::super::registry::{CONFIG_KEY_REGISTRY, ConfigSnapshot};
+
+    let snapshot = ConfigSnapshot::default();
+    let values = snapshot.all_values();
+    assert_eq!(values.len(), CONFIG_KEY_REGISTRY.len());
+    for (descriptor, (key, value)) in CONFIG_KEY_REGISTRY.iter().zip(values) {
+        assert_eq!(descriptor.key, key);
+        assert_eq!(snapshot.value_for(key), Some(value), "key: {key}");
+        assert!(!descriptor.value_type.is_empty(), "key: {key}");
+        assert!(!descriptor.description.is_empty(), "key: {key}");
+    }
+    assert!(
+        CONFIG_KEY_REGISTRY
+            .windows(2)
+            .all(|pair| pair[0].key < pair[1].key),
+        "registry order drives stable config keys/show output"
+    );
+}
+
+#[test]
 fn open_for_workspace_set_fresh_starts_empty() {
     let dir = tempdir().expect("tempdir");
     let workspace_path = config_path(dir.path());
