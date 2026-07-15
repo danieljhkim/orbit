@@ -122,7 +122,7 @@ Exit: all findings filed with `model` attribution; no status transitions/resolut
 
 File **agent-discovered Orbit tooling, workflow, or seeded-instruction friction** as an append-only report instead of silently working around it — unclear command behavior, missing CLI functionality, confusing schema/config, doc gaps, unclear errors, unexpected runtime behavior, confusing seed instructions, or insufficient/vague activity-asset or `SKILL.md` prompts. **Not** for task content issues, ordinary user-requested work, or generic bugs.
 
-Stored under `.orbit/frictions/` as append-only markdown+frontmatter — no lifecycle, triage state, or scoreboard.
+Friction bodies are append-only markdown reports under `.orbit/frictions/`; their triage metadata is mutable. New records start `open` and may be `triaged` or `resolved`. Human/orchestrator triage uses `orbit friction update <ID> --status triaged` (and optional replacement tags), while `orbit friction resolve <ID>` closes a report. When a task fixes the underlying cause, add `relations: [{"type":"resolves","target":"F<YYYY>-<MM>-<NNN>"}]`: that task auto-resolves an existing friction and records `resolved_by_task` when it reaches `done`; a dangling target is audit-visible but does not block task completion.
 
 | Tag | Use for |
 | --- | --- |

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Skill guidance reflects friction triage**: shipped skills use positional learning-show IDs and document mutable friction statuses, direct triage commands, and task-driven resolution. ([ORB-10210])
 - **Store schema v4 compatibility restored**: the append-only `job_run_archive_stage` migration remains supported after an `agent-main` history rewrite dropped its registry entry, so current CLIs reopen already-upgraded stores without a destructive downgrade. ([ORB-10209])
 - **Legacy task friction status removed**: tasks no longer deserialize, list, update, admit, or render `status: friction`; standalone friction artifacts are the only supported surface. Task attribution and record-parameter construction now share implementations without changing admission or triage behavior. ([ORB-10202])
 - **Activity and job catalogs share layered loading**: typed adapters now share recursive discovery, directory deduplication, first-wins layering, and duplicate detection while preserving their distinct precedence and validation policies. ([ORB-10201])

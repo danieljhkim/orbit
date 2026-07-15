@@ -24,7 +24,7 @@ Both surfaces (MCP `orbit_learning_*`/`orbit_adr_*`, CLI `orbit tool run orbit.l
 |------|-----|-----|
 | Add | `orbit_learning_add({...})` | `orbit learning add --summary "..." --path "crates/orbit-core/**/*.rs" --tag rust --body-file note.md` |
 | Search | `orbit_search({...})` | `orbit search --kind learning <text>` (add `--hybrid` after `orbit semantic index --kind learnings`) |
-| Show / update / supersede | `orbit_learning_show/update/supersede({...})` | `orbit learning show --id L-0001` / `update --id L-0001 --priority 200` / `supersede --id L-0001 --with L-0007` |
+| Show / update / supersede | `orbit_learning_show/update/supersede({...})` | `orbit learning show L-0001` / `update --id L-0001 --priority 200` / `supersede --id L-0001 --with L-0007` |
 | List/audit, prune, sync | CLI-only | `orbit learning list --status active --tag rust [--path <glob>]`, `orbit learning prune --stale-only [--delete]`, `orbit learning sync` |
 
 **Workflow:** (1) search first — `orbit learning list --path/--tag` or `orbit search --kind learning` — prefer `update`/`supersede` over a duplicate. (2) Add with tight `scope: { paths?, tags? }` (OR semantics — fires on *any* path glob OR *any* tag; split concerns into separate learnings rather than over-broadening one). Include `evidence: [{kind: "task"|"commit"|"external", ref: "..."}]` whenever it came from a real incident/PR/task — a learning you can't cite a source for is a hunch. `priority` (0–255) is a secondary search-ranking key, not an importance badge. Keep `summary` ≤280 chars, written as a directive ("Always X before Y in `<crate>`"), since push-injection surfaces it first. (3) `prune --stale-only` periodically to surface learnings whose `scope.paths` no longer resolve; read before `--delete`. (4) `sync` (CLI-only) re-syncs the SQLite envelope index if YAML was touched out-of-band (merge, branch switch) — YAML is the source of truth.
@@ -39,7 +39,7 @@ orbit learning add --summary "Always run \`make fmt\` before committing under cr
 
 Common mistakes: hand-writing YAML (skips envelope+attribution — use the tools); creating a duplicate without checking first (two overlapping-scope records inject twice and contradict); `update` to "fix" a fundamental change in advice (loses the supersede chain — `supersede` instead); `scope` with no `paths` and no `tags` (never injects).
 
-Exit: the learning exists/updates through `orbit.learning.*`, has a directive `summary`, ≥1 `paths`/`tags` entry, evidence when it exists, and is retrievable via `orbit learning show --id <ID>`. A code-anchored learning ships its citation in the same change.
+Exit: the learning exists/updates through `orbit.learning.*`, has a directive `summary`, ≥1 `paths`/`tags` entry, evidence when it exists, and is retrievable via `orbit learning show <ID>`. A code-anchored learning ships its citation in the same change.
 
 ## ADRs
 
