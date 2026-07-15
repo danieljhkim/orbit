@@ -2,11 +2,12 @@
 Friction reports are operational signal, not planned work. Storing them as task records cluttered task lists and forced accept/reject triage decisions that were more about duplicate handling than report validity.
 
 ## Decision
-Store friction reports under `.orbit/frictions/{yyyy}-{mm}/F{nnn}.md` with YAML frontmatter and markdown body. Expose only `orbit.friction.add/list/show/stats`; reject new `orbit.task.add` calls that request legacy friction task routing or `status: friction`; compute rates on demand from friction records plus task completion attribution.
+Store friction reports under `.orbit/frictions/{yyyy}-{mm}/F{nnn}.md` with YAML frontmatter and markdown body. Expose only `orbit.friction.*` artifact operations; exclude `friction` from the task status taxonomy and reject it during task parsing; compute rates on demand from friction records plus task completion attribution.
 
 ## Consequences
 - The backlog contains work items rather than self-report signal, and friction reports remain append-only.
-- Cost: legacy friction tasks remain readable artifacts and need a one-shot migration command to copy them into the new corpus.
+- The migration window is closed; task CLI, MCP, dashboard, and workflow surfaces no longer expose a friction status.
+- Cost: workspaces with unmigrated legacy friction tasks must migrate them before upgrading because task deserialization no longer accepts `status: friction`.
 
 ---
 
@@ -40,5 +41,6 @@ Store friction reports under `.orbit/frictions/{yyyy}-{mm}/F{nnn}.md` with YAML 
 - **[T20260508-22]** — Use `task.implemented_by` to set git commit authors for automated task commits.
 - **[T20260509-12]** — Scope workflow git author and committer identity to the spawned commit process without writing repo-local Git config.
 - **[T20260510-13]** — Move friction reports from task lifecycle state to append-only `.orbit/frictions/` records.
+- **[ORB-10202]** — Remove legacy friction from the task status taxonomy.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
