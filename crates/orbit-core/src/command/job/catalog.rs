@@ -51,6 +51,10 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         "task_triage_pipeline",
         include_str!("../../../assets/jobs/task_triage_pipeline.yaml"),
     ),
+    (
+        "workspace_ship_pipeline",
+        include_str!("../../../assets/jobs/workspace_ship_pipeline.yaml"),
+    ),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -673,6 +677,49 @@ spec:
     }
 
     #[test]
+    fn workspace_ship_pipeline_resolves_then_waits_for_normal_auto_ship() {
+        let yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(name, yaml)| (*name == "workspace_ship_pipeline").then_some(*yaml))
+            .expect("workspace ship pipeline default exists");
+        let asset = load_job_asset(yaml).expect("parse workspace ship pipeline");
+        assert_eq!(asset.spec.max_active_runs, 1);
+        assert_eq!(asset.spec.steps.len(), 3);
+        assert_eq!(asset.spec.steps[0].id, "resolve_ship_input");
+        assert_eq!(asset.spec.steps[1].id, "ship");
+        assert_eq!(asset.spec.steps[2].id, "require_ship_success");
+
+        match &asset.spec.steps[0].body {
+            JobV2StepBody::TargetRef(target) => {
+                assert_eq!(target.target, "activity:resolve_workspace_ship_input");
+            }
+            other => panic!("expected resolver target ref, got {other:?}"),
+        }
+        match &asset.spec.steps[1].body {
+            JobV2StepBody::TargetRef(target) => {
+                assert_eq!(target.target, "activity:invoke_and_wait");
+                let input = target.default_input.as_ref().expect("ship input");
+                assert_eq!(input["job_name"], "task_auto_pipeline");
+                assert_eq!(
+                    input["run_input"],
+                    Value::String("{{ steps.resolve_ship_input.output }}".to_string())
+                );
+                assert!(input.get("task_ids").is_none());
+            }
+            other => panic!("expected invoke-and-wait target ref, got {other:?}"),
+        }
+        match &asset.spec.steps[2].body {
+            JobV2StepBody::TargetRef(target) => {
+                assert_eq!(target.target, "activity:pipeline_success_guard");
+            }
+            other => panic!("expected success guard target ref, got {other:?}"),
+        }
+        assert!(!yaml.contains("auto_ship"));
+        assert!(!yaml.contains("ship-sweep"));
+        assert!(!yaml.contains("type: shell"));
+    }
+
+    #[test]
     fn default_jobs_template_only_declared_agent_loop_handoffs() {
         let agent_activity_names = DEFAULT_ACTIVITY_FILES
             .iter()
@@ -789,6 +836,7 @@ spec:
             "task_epic_pipeline",
             "task_gate_pipeline",
             "task_triage_pipeline",
+            "workspace_ship_pipeline",
         ] {
             let yaml = DEFAULT_JOB_FILES
                 .iter()

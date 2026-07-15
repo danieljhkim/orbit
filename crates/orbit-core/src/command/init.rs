@@ -229,7 +229,11 @@ pub fn init_workspace_at_root(
                     &orbit_root.join("routines"),
                     &host_id,
                     workspace_slug_from_orbit_root(&orbit_root).as_deref(),
-                    overwrite,
+                    // Routine definitions become workspace-authored after
+                    // seeding. Refresh global defaults without overwriting
+                    // cadence, host pins, policy, or enabled choices here;
+                    // destructive `force` already recreated the root.
+                    options.force,
                 )?;
             }
             Err(error) => {

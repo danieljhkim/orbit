@@ -85,6 +85,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/release_locks.yaml"),
     ),
     (
+        "resolve_workspace_ship_input",
+        include_str!("../../assets/activities/resolve_workspace_ship_input.yaml"),
+    ),
+    (
         "run_auto_task_scheduler",
         include_str!("../../assets/activities/run_auto_task_scheduler.yaml"),
     ),

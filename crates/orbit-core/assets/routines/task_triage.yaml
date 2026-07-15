@@ -2,8 +2,9 @@
 # `.orbit/routines/` on `orbit init` with the routine name and host pin
 # resolved at seed time (see `seed_default_routines` in
 # `crates/orbit-core/src/command/routine.rs`). It only fires from workspaces
-# whose config declares `[routines] role = "source"` — in every other
-# workspace the file is inert until that role is enabled.
+# whose config declares `[routines] role = "source"`. The versioned
+# `enabled` switch is deliberately false when seeded; opt in by reviewing
+# this definition and changing it to true.
 #
 # Cadence is deliberately sparser than the ~20-minute ship sweep: triage is
 # cleanup, not a hot path. `overlap: forbid` plus the job's
@@ -14,7 +15,7 @@ description: >
   Hourly triage of tasks blocked by failed job runs: diagnose the failure,
   re-backlog environmental casualties, and leave everything else blocked
   with a diagnosis attached.
-enabled: true
+enabled: false
 hosts:
   - __ORBIT_HOST_ID__
 trigger:
