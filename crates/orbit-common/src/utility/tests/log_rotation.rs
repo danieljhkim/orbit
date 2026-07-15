@@ -147,6 +147,40 @@ fn rotate_and_prune_is_a_noop_when_nothing_to_do() {
 }
 
 #[test]
+fn missing_archive_directory_is_a_noop() {
+    let dir = TempDir::new().expect("tempdir");
+    let missing_dir = dir.path().join("missing");
+    let active = missing_dir.join("orbit.jsonl");
+
+    prune_archives(&active, &LogRotationConfig::default())
+        .expect("a missing archive directory is an empty archive set");
+
+    assert!(
+        !missing_dir.exists(),
+        "pruning must not create the missing directory"
+    );
+}
+
+#[test]
+fn genuine_archive_directory_errors_include_path_context() {
+    let dir = TempDir::new().expect("tempdir");
+    let not_a_directory = dir.path().join("not-a-directory");
+    std::fs::write(&not_a_directory, "file").expect("write blocking file");
+    let active = not_a_directory.join("orbit.jsonl");
+
+    let error = prune_archives(&active, &LogRotationConfig::default())
+        .expect_err("a non-directory archive parent must remain visible");
+
+    assert_ne!(error.kind(), std::io::ErrorKind::NotFound);
+    assert!(
+        error
+            .to_string()
+            .contains(&not_a_directory.display().to_string()),
+        "error should identify the archive directory: {error}"
+    );
+}
+
+#[test]
 fn concurrent_writers_do_not_corrupt_jsonl_lines() {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().join("orbit.jsonl");

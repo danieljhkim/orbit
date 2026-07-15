@@ -193,9 +193,28 @@ pub(crate) fn prune_archives(
     // Archives are `<active_name>.<stamp>`; never touch the active file itself.
     let prefix = format!("{active_name}.");
 
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(std::io::Error::new(
+                error.kind(),
+                format!("read log archive directory `{}`: {error}", dir.display()),
+            ));
+        }
+    };
+
     let mut archives: Vec<(PathBuf, SystemTime, u64)> = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!(
+                    "read entry from log archive directory `{}`: {error}",
+                    dir.display()
+                ),
+            )
+        })?;
         let file_name = entry.file_name();
         let Some(name) = file_name.to_str() else {
             continue;

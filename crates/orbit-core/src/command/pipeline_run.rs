@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -475,7 +475,7 @@ impl OrbitRuntime {
         let current_exe = std::env::current_exe().map_err(|error| {
             OrbitError::Execution(format!("resolve current orbit executable: {error}"))
         })?;
-        let mut command = Command::new(current_exe);
+        let mut command = Command::new(resolve_pipeline_worker_executable(current_exe));
         command
             .arg("--root")
             .arg(self.data_root())
@@ -580,6 +580,36 @@ impl OrbitRuntime {
             step_index: None,
         })
     }
+}
+
+/// Return a stable path suitable for launching a fresh worker process.
+///
+/// Linux exposes a process whose executable inode was unlinked as
+/// `/installed/path (deleted)`. That pseudo-path cannot be executed, but after
+/// an atomic upgrade the original installed path names the replacement binary.
+/// Preserve ordinary paths, including real filenames ending in ` (deleted)`.
+pub(crate) fn resolve_pipeline_worker_executable(current_exe: PathBuf) -> PathBuf {
+    // L-0084: deleted Linux executable paths must resolve through the installed replacement.
+    #[cfg(target_os = "linux")]
+    {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+        let current_path_is_missing = matches!(
+            std::fs::metadata(&current_exe),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+        );
+        if current_path_is_missing
+            && let Some(installed_path) = current_exe
+                .as_os_str()
+                .as_bytes()
+                .strip_suffix(b" (deleted)")
+        {
+            return PathBuf::from(OsString::from_vec(installed_path.to_vec()));
+        }
+    }
+
+    current_exe
 }
 
 fn pipeline_run_is_runnable(runs: &[JobRun], run_id: &str, max_active_runs: u32) -> bool {
