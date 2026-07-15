@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Log rotation and pipeline spawning tolerate replaced paths**: missing log archive directories are silent no-ops, while long-lived Orbit processes resolve Linux deleted-inode executable paths back to the installed binary before spawning workers. ([ORB-10213])
 - **Skill guidance reflects friction triage**: shipped skills use positional learning-show IDs and document mutable friction statuses, direct triage commands, and task-driven resolution. ([ORB-10210])
 - **Store schema v4 compatibility restored**: the append-only `job_run_archive_stage` migration remains supported after an `agent-main` history rewrite dropped its registry entry, so current CLIs reopen already-upgraded stores without a destructive downgrade. ([ORB-10209])
 - **Workspace routines are opt-in**: init seeds disabled auto-task, triage, and workspace-local ship-sweep definitions, preserves authored routines on re-init, and delegates shipment synchronously to the normal backlog pipeline. ([ORB-10207])
