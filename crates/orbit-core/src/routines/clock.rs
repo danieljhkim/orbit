@@ -108,11 +108,7 @@ fn install_systemd(orbit_bin: &str) -> Result<ClockInstallReport, OrbitError> {
 
     let service_path = unit_dir.join(format!("{SYSTEMD_UNIT}.service"));
     let timer_path = unit_dir.join(format!("{SYSTEMD_UNIT}.timer"));
-    fs::write(
-        &service_path,
-        SYSTEMD_SERVICE_TEMPLATE.replace("{{ORBIT_BIN}}", orbit_bin),
-    )
-    .map_err(|error| {
+    fs::write(&service_path, render_systemd_service(orbit_bin)).map_err(|error| {
         OrbitError::Io(format!(
             "failed to write '{}': {error}",
             service_path.display()
@@ -155,6 +151,11 @@ fn install_systemd(orbit_bin: &str) -> Result<ClockInstallReport, OrbitError> {
         activated,
         manual_steps,
     })
+}
+
+/// Render the systemd service independently of the user manager environment.
+pub(super) fn render_systemd_service(orbit_bin: &str) -> String {
+    SYSTEMD_SERVICE_TEMPLATE.replace("{{ORBIT_BIN}}", orbit_bin)
 }
 
 fn home_dir() -> Result<PathBuf, OrbitError> {

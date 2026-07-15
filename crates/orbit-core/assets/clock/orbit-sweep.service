@@ -6,4 +6,8 @@ Description=Orbit routine sweep (fires due routines on this host)
 [Service]
 Type=oneshot
 KillMode=process
+# User managers do not inherit an interactive shell PATH. `%h` is expanded by
+# systemd for the service user, keeping provider and Rust tool launchers
+# discoverable without embedding a host-specific home directory.
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart={{ORBIT_BIN}} sweep
