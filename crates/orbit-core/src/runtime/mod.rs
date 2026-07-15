@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
+use orbit_common::types::activity_job::{CatalogDirectory, CatalogDirectoryList};
 use orbit_common::types::{Audit, LearningInjectionState, OrbitError, OrbitEvent, WorkspacePaths};
 use orbit_engine::ActivityExecutorRegistry;
 use orbit_store::{Store, V2AuditEventFilter, V2AuditEventRow, workspace_id_for_orbit_dir};
@@ -412,35 +413,26 @@ impl OrbitRuntime {
 
         let mut catalog = V2ActivityCatalog::new();
         for dir in self.v2_activity_catalog_dirs() {
-            if !dir.path.is_dir() {
+            if !dir.path().is_dir() {
                 continue;
             }
-            // L-0060: Name-based execution keeps shipped defaults authoritative over workspace catalogs.
-            match dir.kind {
+            // L-0060 / ORB-00356: name-based execution keeps shipped defaults
+            // authoritative over workspace catalogs.
+            match dir.kind() {
                 V2ActivityCatalogDirKind::Explicit | V2ActivityCatalogDirKind::Global => {
                     warn_skipped_retired_activity_assets(
-                        &dir.path,
-                        catalog.load_dir_skipping_retired_prefer_existing(&dir.path)?,
+                        dir.path(),
+                        catalog.load_dir_skipping_retired_prefer_existing(dir.path())?,
                     );
                 }
                 V2ActivityCatalogDirKind::WorkspaceLocal => {
-                    let mut workspace_catalog = V2ActivityCatalog::new();
                     warn_skipped_retired_activity_assets(
-                        &dir.path,
-                        workspace_catalog.load_dir_skipping_retired(&dir.path)?,
+                        dir.path(),
+                        catalog.load_dir_skipping_retired_prefer_existing_where(
+                            dir.path(),
+                            |name| !is_default_activity_name(name),
+                        )?,
                     );
-                    let names = workspace_catalog
-                        .names()
-                        .map(ToOwned::to_owned)
-                        .collect::<Vec<_>>();
-                    for name in names {
-                        if is_default_activity_name(&name) || catalog.get(&name).is_some() {
-                            continue;
-                        }
-                        if let Some(activity) = workspace_catalog.get(&name).cloned() {
-                            catalog.insert(name, activity);
-                        }
-                    }
                 }
             }
         }
@@ -473,37 +465,30 @@ impl OrbitRuntime {
         names
     }
 
-    fn v2_activity_catalog_dirs(&self) -> Vec<V2ActivityCatalogDir> {
-        let mut dirs = Vec::new();
-        let mut seen = std::collections::BTreeSet::new();
+    fn v2_activity_catalog_dirs(&self) -> Vec<CatalogDirectory<V2ActivityCatalogDirKind>> {
+        let mut dirs = CatalogDirectoryList::default();
 
         let env_dirs = std::env::var("ORBIT_ACTIVITY_DIR")
             .ok()
             .or_else(|| std::env::var("ORBIT_V2_CATALOG_DIR").ok());
         if let Some(raw) = env_dirs {
             for entry in raw.split(':').filter(|value| !value.is_empty()) {
-                push_unique_activity_dir(
-                    &mut dirs,
-                    &mut seen,
+                dirs.push(
                     std::path::PathBuf::from(entry),
                     V2ActivityCatalogDirKind::Explicit,
                 );
             }
         }
 
-        push_unique_activity_dir(
-            &mut dirs,
-            &mut seen,
+        dirs.push(
             self.context.paths().global_dir.join("resources/activities"),
             V2ActivityCatalogDirKind::Global,
         );
-        push_unique_activity_dir(
-            &mut dirs,
-            &mut seen,
+        dirs.push(
             self.context.paths().activities_dir.clone(),
             V2ActivityCatalogDirKind::WorkspaceLocal,
         );
-        dirs
+        dirs.into_vec()
     }
 
     pub(crate) fn actor(&self) -> &ActorIdentity {
@@ -619,28 +604,11 @@ fn warn_skipped_retired_activity_assets(dir: &Path, skipped: Vec<PathBuf>) {
     );
 }
 
-struct V2ActivityCatalogDir {
-    path: PathBuf,
-    kind: V2ActivityCatalogDirKind,
-}
-
 #[derive(Clone, Copy)]
 enum V2ActivityCatalogDirKind {
     Explicit,
     Global,
     WorkspaceLocal,
-}
-
-fn push_unique_activity_dir(
-    dirs: &mut Vec<V2ActivityCatalogDir>,
-    seen: &mut std::collections::BTreeSet<PathBuf>,
-    path: PathBuf,
-    kind: V2ActivityCatalogDirKind,
-) {
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-    if seen.insert(canonical) {
-        dirs.push(V2ActivityCatalogDir { path, kind });
-    }
 }
 
 fn is_default_activity_name(name: &str) -> bool {

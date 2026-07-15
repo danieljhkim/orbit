@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Activity and job catalogs share layered loading**: typed adapters now share recursive discovery, directory deduplication, first-wins layering, and duplicate detection while preserving their distinct precedence and validation policies. ([ORB-10201])
 - **Systemd routine workers survive sweep exit**: the user sweep service now limits shutdown to its main oneshot process, allowing detached pipeline workers to claim and complete clock-dispatched runs. ([ORB-10153])
 - **Task creation surface is narrower and consistent**: task creation now exposes only legal initial statuses, list flags share repeat/comma parsing, and redundant agent/comment/instructions inputs are removed while model and managed identity attribution remain intact. ([ORB-10155])
 

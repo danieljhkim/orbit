@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{
-    JobKind, JobRun, JobScheduleState, JobV2, NotFoundKind, OrbitError, load_job_asset,
+use orbit_common::types::activity_job::{
+    CatalogDirectory, CatalogDirectoryList, V2JobCatalog, catalog_error_to_orbit,
 };
+use orbit_common::types::{JobKind, JobRun, JobScheduleState, JobV2, NotFoundKind, OrbitError};
 use orbit_common::utility::fs::write_text_with_parent;
 use serde_json::Value;
 
@@ -85,12 +85,6 @@ impl JobCatalogEntry {
     }
 }
 
-#[derive(Debug, Clone)]
-struct V2JobAssetEntry {
-    path: PathBuf,
-    spec: JobV2,
-}
-
 impl OrbitRuntime {
     pub fn list_job_catalog_with_last_run(
         &self,
@@ -102,18 +96,18 @@ impl OrbitRuntime {
         let v2_jobs = self.load_v2_job_assets()?;
         let mut result = Vec::new();
 
-        for (job_id, asset) in &v2_jobs {
-            if !include_disabled && asset.spec.state == JobScheduleState::Disabled {
+        for (job_id, path, spec) in v2_jobs.iter() {
+            if !include_disabled && spec.state == JobScheduleState::Disabled {
                 continue;
             }
-            if !matches_job_filter(asset.spec.kind, filter) {
+            if !matches_job_filter(spec.kind, filter) {
                 continue;
             }
             let last_run = self
                 .stores()
                 .jobs()
                 .list_runs_filtered(&JobRunQuery {
-                    job_id: Some(job_id.clone()),
+                    job_id: Some(job_id.to_string()),
                     state: None,
                     created_since: None,
                     limit: Some(1),
@@ -122,9 +116,9 @@ impl OrbitRuntime {
                 .and_then(|runs| runs.into_iter().next());
             result.push((
                 JobCatalogEntry {
-                    job_id: job_id.clone(),
-                    path: asset.path.clone(),
-                    spec: asset.spec.clone(),
+                    job_id: job_id.to_string(),
+                    path: path.to_path_buf(),
+                    spec: spec.clone(),
                 },
                 last_run,
             ));
@@ -138,92 +132,119 @@ impl OrbitRuntime {
         let v2_jobs = self.load_v2_job_assets()?;
         v2_jobs
             .get(job_id)
-            .map(|asset| JobCatalogEntry {
+            .map(|(path, spec)| JobCatalogEntry {
                 job_id: job_id.to_string(),
-                path: asset.path.clone(),
-                spec: asset.spec.clone(),
+                path: path.to_path_buf(),
+                spec: spec.clone(),
             })
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Job, job_id.to_string()))
     }
 
-    fn load_v2_job_assets(&self) -> Result<BTreeMap<String, V2JobAssetEntry>, OrbitError> {
-        let mut entries = BTreeMap::new();
-        for dir in self.v2_job_asset_dirs() {
-            if dir.is_dir() {
-                load_v2_job_assets_from_dir(&dir, &mut entries)?;
-            }
-        }
-        Ok(entries)
+    fn load_v2_job_assets(&self) -> Result<V2JobCatalog, OrbitError> {
+        self.load_v2_job_catalog(self.v2_job_asset_dirs())
     }
 
-    fn v2_job_asset_dirs(&self) -> Vec<PathBuf> {
-        let mut dirs = Vec::new();
-        let mut seen = std::collections::BTreeSet::new();
+    fn load_v2_job_catalog(
+        &self,
+        dirs: Vec<CatalogDirectory<V2JobCatalogDirKind>>,
+    ) -> Result<V2JobCatalog, OrbitError> {
+        let mut catalog = V2JobCatalog::new();
+        for dir in dirs {
+            if dir.path().is_dir() {
+                catalog
+                    .load_dir_prefer_existing(dir.path())
+                    .map_err(catalog_error_to_orbit)?;
+            }
+        }
+        Ok(catalog)
+    }
 
-        push_v2_job_env_dirs(&mut dirs, &mut seen);
-        push_unique_path(&mut dirs, &mut seen, self.paths().jobs_dir.clone());
-        push_unique_path(
-            &mut dirs,
-            &mut seen,
-            self.paths().global_dir.join("resources/jobs"),
+    fn v2_job_asset_dirs(&self) -> Vec<CatalogDirectory<V2JobCatalogDirKind>> {
+        self.v2_job_asset_dirs_with_env(v2_job_env_dirs().as_deref())
+    }
+
+    fn v2_job_asset_dirs_with_env(
+        &self,
+        env_dirs: Option<&str>,
+    ) -> Vec<CatalogDirectory<V2JobCatalogDirKind>> {
+        let mut dirs = CatalogDirectoryList::default();
+
+        push_v2_job_env_dirs(&mut dirs, env_dirs);
+        dirs.push(
+            self.paths().jobs_dir.clone(),
+            V2JobCatalogDirKind::Workspace,
         );
-        dirs
+        dirs.push(
+            self.paths().global_dir.join("resources/jobs"),
+            V2JobCatalogDirKind::Global,
+        );
+        dirs.into_vec()
     }
 
     pub(crate) fn load_v2_job_asset_by_name(
         &self,
         job_id: &str,
     ) -> Result<(PathBuf, JobV2), OrbitError> {
-        let mut selected = None;
-        for dir in self.v2_job_asset_dirs_for_execution(job_id) {
-            if dir.is_dir()
-                && let Some(found) = find_v2_job_asset_in_dir(&dir, job_id)?
-                && selected.is_none()
-            {
-                selected = Some(found);
-            }
-        }
-        selected.ok_or_else(|| OrbitError::not_found(NotFoundKind::Job, job_id.to_string()))
+        let catalog = self.load_v2_job_catalog(self.v2_job_asset_dirs_for_execution(job_id))?;
+        catalog
+            .get(job_id)
+            .map(|(path, spec)| (path.to_path_buf(), spec.clone()))
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Job, job_id.to_string()))
     }
 
-    fn v2_job_asset_dirs_for_execution(&self, job_id: &str) -> Vec<PathBuf> {
-        let mut dirs = Vec::new();
-        let mut seen = std::collections::BTreeSet::new();
+    fn v2_job_asset_dirs_for_execution(
+        &self,
+        job_id: &str,
+    ) -> Vec<CatalogDirectory<V2JobCatalogDirKind>> {
+        self.v2_job_asset_dirs_for_execution_with_env(job_id, v2_job_env_dirs().as_deref())
+    }
 
-        // L-0060: Name-based execution keeps shipped defaults authoritative over workspace catalogs.
-        push_v2_job_env_dirs(&mut dirs, &mut seen);
-        push_unique_path(
-            &mut dirs,
-            &mut seen,
+    fn v2_job_asset_dirs_for_execution_with_env(
+        &self,
+        job_id: &str,
+        env_dirs: Option<&str>,
+    ) -> Vec<CatalogDirectory<V2JobCatalogDirKind>> {
+        let mut dirs = CatalogDirectoryList::default();
+
+        // L-0060 / ORB-00356: name-based execution keeps shipped defaults
+        // authoritative over workspace catalogs.
+        push_v2_job_env_dirs(&mut dirs, env_dirs);
+        dirs.push(
             self.paths().global_dir.join("resources/jobs"),
+            V2JobCatalogDirKind::Global,
         );
         if !is_default_job_name(job_id) {
-            push_unique_path(&mut dirs, &mut seen, self.paths().jobs_dir.clone());
+            dirs.push(
+                self.paths().jobs_dir.clone(),
+                V2JobCatalogDirKind::Workspace,
+            );
         }
-        dirs
+        dirs.into_vec()
     }
 }
 
-fn push_v2_job_env_dirs(dirs: &mut Vec<PathBuf>, seen: &mut std::collections::BTreeSet<PathBuf>) {
-    let env_dirs = std::env::var("ORBIT_JOB_DIR")
+fn v2_job_env_dirs() -> Option<String> {
+    std::env::var("ORBIT_JOB_DIR")
         .ok()
-        .or_else(|| std::env::var("ORBIT_V2_JOB_DIR").ok());
+        .or_else(|| std::env::var("ORBIT_V2_JOB_DIR").ok())
+}
+
+fn push_v2_job_env_dirs(
+    dirs: &mut CatalogDirectoryList<V2JobCatalogDirKind>,
+    env_dirs: Option<&str>,
+) {
     if let Some(raw) = env_dirs {
         for entry in raw.split(':').filter(|value| !value.is_empty()) {
-            push_unique_path(dirs, seen, PathBuf::from(entry));
+            dirs.push(PathBuf::from(entry), V2JobCatalogDirKind::Explicit);
         }
     }
 }
 
-fn push_unique_path(
-    dirs: &mut Vec<PathBuf>,
-    seen: &mut std::collections::BTreeSet<PathBuf>,
-    path: PathBuf,
-) {
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-    if seen.insert(canonical) {
-        dirs.push(path);
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V2JobCatalogDirKind {
+    Explicit,
+    Workspace,
+    Global,
 }
 
 fn is_default_job_name(job_id: &str) -> bool {
@@ -238,129 +259,6 @@ fn matches_job_filter(kind: JobKind, filter: JobCatalogFilter) -> bool {
         JobCatalogFilter::All => true,
         JobCatalogFilter::Kind(expected) => kind == expected,
     }
-}
-
-fn load_v2_job_assets_from_dir(
-    dir: &Path,
-    entries: &mut BTreeMap<String, V2JobAssetEntry>,
-) -> Result<(), OrbitError> {
-    let mut local_entries = BTreeMap::new();
-    let mut local_sources = BTreeMap::new();
-    collect_v2_job_assets_from_dir(dir, &mut local_entries, &mut local_sources)?;
-
-    // v2_job_asset_dirs() is ordered from highest to lowest precedence.
-    // Keep the first entry for each name, while still rejecting duplicates
-    // inside an individual directory tree above.
-    for (name, asset) in local_entries {
-        entries.entry(name).or_insert(asset);
-    }
-
-    Ok(())
-}
-
-fn collect_v2_job_assets_from_dir(
-    dir: &Path,
-    entries: &mut BTreeMap<String, V2JobAssetEntry>,
-    sources: &mut BTreeMap<String, PathBuf>,
-) -> Result<(), OrbitError> {
-    let iter = std::fs::read_dir(dir)
-        .map_err(|err| OrbitError::InvalidInput(format!("read dir {}: {err}", dir.display())))?;
-    for entry in iter {
-        let entry = entry.map_err(|err| {
-            OrbitError::InvalidInput(format!("read dir {}: {err}", dir.display()))
-        })?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_v2_job_assets_from_dir(&path, entries, sources)?;
-            continue;
-        }
-        let is_yaml = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext == "yaml" || ext == "yml");
-        if !is_yaml {
-            continue;
-        }
-        let yaml = std::fs::read_to_string(&path).map_err(|err| {
-            OrbitError::InvalidInput(format!("read file {}: {err}", path.display()))
-        })?;
-        let asset = load_job_asset(&yaml)
-            .map_err(|err| OrbitError::InvalidInput(format!("parse {}: {err}", path.display())))?;
-        if let Some(first) = sources.get(&asset.name) {
-            return Err(OrbitError::InvalidInput(format!(
-                "duplicate v2 job name '{}' — defined in both {} and {}",
-                asset.name,
-                first.display(),
-                path.display()
-            )));
-        }
-        sources.insert(asset.name.clone(), path.clone());
-        entries.insert(
-            asset.name,
-            V2JobAssetEntry {
-                path,
-                spec: asset.spec,
-            },
-        );
-    }
-    Ok(())
-}
-
-fn find_v2_job_asset_in_dir(
-    dir: &Path,
-    expected_job_id: &str,
-) -> Result<Option<(PathBuf, JobV2)>, OrbitError> {
-    let mut found = None;
-    find_v2_job_asset_in_dir_inner(dir, expected_job_id, &mut found)?;
-    Ok(found)
-}
-
-fn find_v2_job_asset_in_dir_inner(
-    dir: &Path,
-    expected_job_id: &str,
-    found: &mut Option<(PathBuf, JobV2)>,
-) -> Result<(), OrbitError> {
-    let iter = std::fs::read_dir(dir)
-        .map_err(|err| OrbitError::InvalidInput(format!("read dir {}: {err}", dir.display())))?;
-    for entry in iter {
-        let entry = entry.map_err(|err| {
-            OrbitError::InvalidInput(format!("read dir {}: {err}", dir.display()))
-        })?;
-        let path = entry.path();
-        if path.is_dir() {
-            find_v2_job_asset_in_dir_inner(&path, expected_job_id, found)?;
-            continue;
-        }
-        let is_yaml = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext == "yaml" || ext == "yml");
-        if !is_yaml {
-            continue;
-        }
-
-        let yaml = match std::fs::read_to_string(&path) {
-            Ok(yaml) => yaml,
-            Err(_) => continue,
-        };
-        let asset = match load_job_asset(&yaml) {
-            Ok(asset) => asset,
-            Err(_) => continue,
-        };
-        if asset.name != expected_job_id {
-            continue;
-        }
-        if let Some((first_path, _)) = found {
-            return Err(OrbitError::InvalidInput(format!(
-                "duplicate v2 job name '{}' — defined in both {} and {}",
-                expected_job_id,
-                first_path.display(),
-                path.display()
-            )));
-        }
-        *found = Some((path, asset.spec));
-    }
-    Ok(())
 }
 
 /// Seed every entry in [`DEFAULT_JOB_FILES`] as a YAML file under
@@ -389,7 +287,9 @@ mod tests {
     use super::*;
 
     use orbit_common::types::activity_job::{V2ActivityCatalog, resolve_job_target_refs};
-    use orbit_common::types::{ActivityV2Spec, JobV2Step, JobV2StepBody, load_activity_asset};
+    use orbit_common::types::{
+        ActivityV2Spec, JobV2Step, JobV2StepBody, load_activity_asset, load_job_asset,
+    };
     use serde_json::Value;
     use std::collections::BTreeSet;
     use tempfile::tempdir;
@@ -1049,6 +949,115 @@ spec:
     }
 
     #[test]
+    fn job_listing_directory_order_is_env_then_workspace_then_global() {
+        let (root, runtime, global_root, workspace_root) = test_runtime();
+        let env_dir = root.path().join("env-jobs");
+        let workspace_dir = workspace_root.join("resources/jobs");
+        let global_dir = global_root.join("resources/jobs");
+        write_job(&env_dir.join("layered.yaml"), "layered", "env", 9);
+        write_job(
+            &workspace_dir.join("layered.yaml"),
+            "layered",
+            "workspace",
+            7,
+        );
+        write_job(&global_dir.join("layered.yaml"), "layered", "global", 1);
+
+        let dirs = runtime.v2_job_asset_dirs_with_env(Some(env_dir.to_str().expect("utf-8 path")));
+        let actual = dirs
+            .iter()
+            .map(|dir| (dir.path().to_path_buf(), *dir.kind()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            [
+                (env_dir.clone(), V2JobCatalogDirKind::Explicit),
+                (workspace_dir, V2JobCatalogDirKind::Workspace),
+                (global_dir, V2JobCatalogDirKind::Global),
+            ]
+        );
+
+        let catalog = runtime.load_v2_job_catalog(dirs).expect("load catalog");
+        let (path, job) = catalog.get("layered").expect("layered job");
+        assert_eq!(path, env_dir.join("layered.yaml"));
+        assert_eq!(job.max_active_runs, 9);
+    }
+
+    #[test]
+    fn job_execution_directory_order_is_env_then_global_then_non_default_workspace() {
+        let (root, runtime, global_root, workspace_root) = test_runtime();
+        let env_dir = root.path().join("env-jobs");
+        let workspace_dir = workspace_root.join("resources/jobs");
+        let global_dir = global_root.join("resources/jobs");
+        write_job(&env_dir.join("custom.yaml"), "custom", "env", 9);
+        write_job(
+            &env_dir.join("task_auto_pipeline.yaml"),
+            "task_auto_pipeline",
+            "env",
+            9,
+        );
+        write_job(&workspace_dir.join("custom.yaml"), "custom", "workspace", 7);
+        write_job(&global_dir.join("custom.yaml"), "custom", "global", 1);
+        write_job(
+            &workspace_dir.join("task_auto_pipeline.yaml"),
+            "task_auto_pipeline",
+            "workspace",
+            7,
+        );
+        write_job(
+            &global_dir.join("task_auto_pipeline.yaml"),
+            "task_auto_pipeline",
+            "global",
+            1,
+        );
+        let env = env_dir.to_str().expect("utf-8 path");
+
+        let custom_dirs = runtime.v2_job_asset_dirs_for_execution_with_env("custom", Some(env));
+        let actual = custom_dirs
+            .iter()
+            .map(|dir| (dir.path().to_path_buf(), *dir.kind()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            [
+                (env_dir.clone(), V2JobCatalogDirKind::Explicit),
+                (global_dir.clone(), V2JobCatalogDirKind::Global),
+                (workspace_dir.clone(), V2JobCatalogDirKind::Workspace),
+            ]
+        );
+        let custom_catalog = runtime
+            .load_v2_job_catalog(custom_dirs)
+            .expect("load custom catalog");
+        assert_eq!(
+            custom_catalog.get("custom").map(|(path, _)| path),
+            Some(env_dir.join("custom.yaml").as_path())
+        );
+
+        let default_dirs =
+            runtime.v2_job_asset_dirs_for_execution_with_env("task_auto_pipeline", Some(env));
+        let actual = default_dirs
+            .iter()
+            .map(|dir| (dir.path().to_path_buf(), *dir.kind()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            [
+                (env_dir.clone(), V2JobCatalogDirKind::Explicit),
+                (global_dir.clone(), V2JobCatalogDirKind::Global),
+            ]
+        );
+        let default_catalog = runtime
+            .load_v2_job_catalog(default_dirs)
+            .expect("load default catalog");
+        assert_eq!(
+            default_catalog
+                .get("task_auto_pipeline")
+                .map(|(path, _)| path),
+            Some(env_dir.join("task_auto_pipeline.yaml").as_path())
+        );
+    }
+
+    #[test]
     fn workspace_job_overrides_global_default_in_catalog_lookup_but_not_execution_lookup() {
         let (_root, runtime, global_root, workspace_root) = test_runtime();
         let global_job = global_root.join("resources/jobs/task_auto_pipeline.yaml");
@@ -1089,5 +1098,21 @@ spec:
                 .contains("duplicate v2 job name 'duplicate_job'"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn malformed_job_assets_remain_hard_catalog_errors() {
+        let (_root, runtime, _global_root, workspace_root) = test_runtime();
+        let malformed = workspace_root.join("resources/jobs/malformed.yaml");
+        std::fs::create_dir_all(malformed.parent().expect("job path has parent"))
+            .expect("create jobs dir");
+        std::fs::write(&malformed, "schemaVersion: 2\nkind: Job\nspec: [")
+            .expect("write malformed job");
+
+        let err = runtime
+            .list_job_catalog_with_last_run(true, JobCatalogFilter::All)
+            .expect_err("malformed job should fail catalog loading");
+        assert!(err.to_string().contains("malformed.yaml"), "{err}");
+        assert!(err.to_string().contains("parse"), "{err}");
     }
 }

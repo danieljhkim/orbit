@@ -28,7 +28,8 @@ pub use backend::{
     validate_job_loop_session_backends,
 };
 pub use catalog::{
-    ACTIVITY_REF_PREFIX, CatalogError, ResolveError, V2ActivityCatalog, resolve_job_target_refs,
+    ACTIVITY_REF_PREFIX, CatalogDirectory, CatalogDirectoryList, CatalogError, ResolveError,
+    V2ActivityCatalog, V2JobCatalog, catalog_error_to_orbit, resolve_job_target_refs,
 };
 pub use job_v2::{
     BackoffStrategy, FanInSpec, FanOutBlock, JobKind, JobV2, JobV2Step, JobV2StepBody, JoinMode,
