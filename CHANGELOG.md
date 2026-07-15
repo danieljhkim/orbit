@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Legacy task friction status removed**: tasks no longer deserialize, list, update, admit, or render `status: friction`; standalone friction artifacts are the only supported surface. Task attribution and record-parameter construction now share implementations without changing admission or triage behavior. ([ORB-10202])
 - **Activity and job catalogs share layered loading**: typed adapters now share recursive discovery, directory deduplication, first-wins layering, and duplicate detection while preserving their distinct precedence and validation policies. ([ORB-10201])
 - **Configuration admission is table-driven**: fixed settings now declare parsing, defaults, validation metadata, and CLI projection once, with generated registry/snapshot lookup completeness checks. ([ORB-10199])
 - **Activity/job precedence docs match execution trust rules**: the design now distinguishes workspace-preferred job listings from default-authoritative named job and activity execution. ([ORB-10203])

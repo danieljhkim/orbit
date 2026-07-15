@@ -316,7 +316,6 @@ fn worktree_setup_admits_unplanned_workflow_statuses() {
         })
         .expect("create archived candidate");
     runtime.archive_task(&archived.id).expect("archive task");
-
     let task_ids = vec![
         proposed.id.clone(),
         backlog.id.clone(),
@@ -363,6 +362,28 @@ fn direct_update_to_in_progress_still_requires_plan_for_unapproved_statuses() {
             },
         )
         .expect_err("direct update should still require a plan");
+    assert!(
+        err.to_string()
+            .contains("requires a non-empty execution plan"),
+        "{err}"
+    );
+}
+
+#[test]
+fn direct_start_from_proposed_still_requires_plan() {
+    let (_root, runtime) = test_runtime();
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Direct start remains gated".to_string(),
+            description: "A human start is not workflow admission.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("create proposed task");
+
+    let err = runtime
+        .start_task(&task.id, Some("attempt direct start".to_string()), None)
+        .expect_err("direct start should still require a plan");
     assert!(
         err.to_string()
             .contains("requires a non-empty execution plan"),
@@ -850,6 +871,58 @@ fn direct_update_task_keeps_default_human_attribution() {
         .find(|entry| entry.event == "commented")
         .expect("comment history");
     assert_eq!(comment_history.by, "human");
+}
+
+#[test]
+fn direct_update_identity_prefers_model_for_authored_roles() {
+    let (_root, runtime) = test_runtime();
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Human update identity precedence".to_string(),
+            description: "Exercise direct update authored-role precedence.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("add task");
+
+    let planned = runtime
+        .update_task_with_identity(
+            &task.id,
+            TaskUpdateParams {
+                plan: Some("Implement and validate the task.".to_string()),
+                ..Default::default()
+            },
+            Some("codex".to_string()),
+            Some("gpt-explicit".to_string()),
+        )
+        .expect("author plan with explicit identity");
+    assert_eq!(planned.planned_by.as_deref(), Some("gpt-explicit"));
+
+    runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                status: Some(TaskStatus::Backlog),
+                ..Default::default()
+            },
+        )
+        .expect("approve task");
+    runtime
+        .start_task(&task.id, Some("start task".to_string()), None)
+        .expect("start task");
+    let reviewed = runtime
+        .update_task_with_identity(
+            &task.id,
+            TaskUpdateParams {
+                status: Some(TaskStatus::Review),
+                execution_summary: Some("Implemented and validated.".to_string()),
+                ..Default::default()
+            },
+            Some("codex".to_string()),
+            Some("gpt-explicit".to_string()),
+        )
+        .expect("review task with explicit identity");
+    assert_eq!(reviewed.implemented_by.as_deref(), Some("gpt-explicit"));
 }
 
 #[test]

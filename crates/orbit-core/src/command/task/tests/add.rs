@@ -30,45 +30,6 @@ fn task_add_enters_proposed_and_requires_approval_before_backlog() {
     assert_eq!(started.status, TaskStatus::InProgress);
 }
 
-#[test]
-fn task_add_rejects_legacy_friction_status() {
-    let (_root, runtime) = test_runtime();
-
-    let err = runtime
-        .add_task(TaskAddParams {
-            title: "Friction type".to_string(),
-            description: "Legacy friction path.".to_string(),
-            task_type: Some(TaskType::Chore),
-            status: Some(TaskStatus::Friction),
-            workspace_path: Some(".".to_string()),
-            ..Default::default()
-        })
-        .expect_err("status friction should fail");
-    assert!(err.to_string().contains("use orbit.friction.add"), "{err}");
-
-    let task = runtime
-        .add_task(TaskAddParams {
-            title: "Chore type".to_string(),
-            description: "Modern task type path.".to_string(),
-            task_type: Some(TaskType::Chore),
-            workspace_path: Some(".".to_string()),
-            ..Default::default()
-        })
-        .expect("chore type still succeeds");
-    assert_eq!(task.task_type, TaskType::Chore);
-
-    let err = runtime
-        .add_task(TaskAddParams {
-            title: "Friction status".to_string(),
-            description: "Legacy friction path.".to_string(),
-            status: Some(TaskStatus::Friction),
-            workspace_path: Some(".".to_string()),
-            ..Default::default()
-        })
-        .expect_err("status friction should fail");
-    assert!(err.to_string().contains("use orbit.friction.add"), "{err}");
-}
-
 // --- ORB-00251: context_files omission / over-inclusion warning helper tests ---
 
 #[test]

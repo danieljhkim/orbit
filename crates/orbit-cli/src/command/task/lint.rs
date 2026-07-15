@@ -13,7 +13,6 @@ use crate::command::Execute;
 /// nobody is going to execute again.
 const SWEEP_ACTIVE_STATUSES: &[TaskStatus] = &[
     TaskStatus::Proposed,
-    TaskStatus::Friction,
     TaskStatus::Backlog,
     TaskStatus::Someday,
     TaskStatus::InProgress,

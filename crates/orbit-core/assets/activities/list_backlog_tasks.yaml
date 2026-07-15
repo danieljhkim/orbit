@@ -6,9 +6,8 @@ spec:
   type: deterministic
   description: >
     Materialize the current workspace backlog as an ordered task list for
-    the auto-pipeline. In automatic mode it
-    filters to `status: backlog` with all task dependencies satisfied while leaving legacy untriaged
-    `status: friction` reports out, and
+    the auto-pipeline. In automatic mode it filters to `status: backlog` with
+    all task dependencies satisfied and
     drops any backlog parent/subtask group whose `context_files` overlap the
     active task-lock surface from `in-progress` or `review` tasks. Automatic
     mode includes an `excluded` array that attributes those pre-gate lock

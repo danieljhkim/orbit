@@ -251,9 +251,9 @@ Folded into ADR-007's rollup for durable run state and operator inspection.
 
 **Status:** Accepted · 2026-05 · [T20260427-33], [T20260425-2010], [T20260427-45], [T20260430-9], [T20260430-12], [T20260430-14], [T20260421-0542-2], [T20260430-27], [T20260430-30], [T20260430-26], [T20260427-34], [T20260427-36], [T20260505-2], [T20260505-10], [T20260506-18], [T20260509-14]
 
-**Context.** The seeded task workflows added many small ADRs as shipment behavior grew: run aliases, deterministic auto-dispatch, remote base selection, recovery hooks, backlog exclusions, operator status, friction admission, and lock cleanup. They are one decision family: task shipment is an explicit durable workflow, not an advisory agent step or hidden side effect.
+**Context.** The seeded task workflows added many small ADRs as shipment behavior grew: run aliases, deterministic auto-dispatch, remote base selection, recovery hooks, backlog exclusions, operator status, and lock cleanup. They are one decision family: task shipment is an explicit durable workflow, not an advisory agent step or hidden side effect.
 
-**Decision.** Keep `orbit run` workflow aliases focused on execution, make automatic task shipment deterministic from backlog listing through gate fan-out, default shipping worktrees to fetched remote base refs, admit tasks through status-aware workflow gates, and protect overlapping work with durable task-lock reservations whose seeded TTL covers the child wait budget. Recovery is bounded, step-scoped on direct shipment workflows, and assigned through the configured reviewer role; child pipeline joins are followed by deterministic success guards after required cleanup, operator status is derived from persisted pipeline state, accepted friction reports enter auto-backlog by `status: backlog`, and run-owned reservations clean up when their owner run reaches a terminal state.
+**Decision.** Keep `orbit run` workflow aliases focused on execution, make automatic task shipment deterministic from backlog listing through gate fan-out, default shipping worktrees to fetched remote base refs, admit tasks through status-aware workflow gates, and protect overlapping work with durable task-lock reservations whose seeded TTL covers the child wait budget. Recovery is bounded, step-scoped on direct shipment workflows, and assigned through the configured reviewer role; child pipeline joins are followed by deterministic success guards after required cleanup, operator status is derived from persisted pipeline state, and run-owned reservations clean up when their owner run reaches a terminal state.
 
 Folded instances:
 
@@ -267,7 +267,7 @@ Folded instances:
 | ADR-033 | Auto-backlog lock exclusions are structured output. |
 | ADR-034 | Auto shipment reports operator workflow status from durable pipeline state. |
 | ADR-035 | Gate reservations release after terminal child waits. |
-| ADR-037 | Accepted friction reports enter auto-backlog by status. |
+| ADR-037 | Historical friction-task admission rule; retired by [ORB-10202]. |
 | ADR-039 | Run-owned task-lock reservations clean up at owner terminal. |
 
 **Consequences.**
@@ -287,7 +287,6 @@ Folded instances:
 - Cost: `task_gate_pipeline` now relies on the dynamic `task_{{ input.mode }}_pipeline` job-name convention, so future gate modes must either follow that naming convention or refactor the dispatch selector.
 - Cost: child dispatch status remains data until explicit guard steps run, so seeded workflow authors must preserve guard placement after cleanup when they fork task-shipment YAML.
 - Cost: longer default gate reservations can block overlapping work for up to two hours if both explicit release and run-owned cleanup fail.
-- Cost: reviewers must read friction eligibility as a status rule, not a task-type rule.
 - Cost: job-run finalization and reservation reserve paths are more coupled, so new terminal run paths must route through the cleanup helper rather than writing directly to the job-run store.
 
 ## ADR-024 — Shipping worktrees default to fetched remote base refs
@@ -370,9 +369,9 @@ Folded into ADR-007's rollup for durable run state and operator inspection.
 
 ## ADR-037 — Accepted friction reports enter auto-backlog by status
 
-**Status:** Superseded by ADR-023 (folded) · 2026-05 · [T20260505-2]
+**Status:** Superseded by ADR-023 (folded; rule retired by [ORB-10202]) · 2026-05 · [T20260505-2]
 
-Folded into ADR-023's rollup for seeded task-shipment workflow automation.
+The historical rule was folded into ADR-023, then retired when [ORB-10202] removed `friction` from the task status taxonomy.
 
 ## ADR-038 — Dashboard cancellation is a durable job-run transition
 
@@ -662,5 +661,6 @@ Rejected alternatives: reconciling by parent linkage (no parent run id is persis
 - **[T20260509-40]** — Run CLI subprocesses in killable process groups and bound timeout-path output reader joins.
 - **[ORB-00363]** — Security bug: `run_shell` spawned unsandboxed subprocesses behind a tautological allowlist.
 - **[ORB-00374]** — Remove the `shell` activity variant and `run_shell` dispatch (fail-closed resolution of [ORB-00363]).
+- **[ORB-10202]** — Remove the retired friction task status while preserving workflow admission and triage behavior.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

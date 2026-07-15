@@ -293,10 +293,10 @@ fn task_add_tool_rejects_dropped_task_types_and_ignores_retired_status() {
         .execute_tool_command(
             "orbit.task.add",
             json!({
-                "title": "Legacy friction status",
+                "title": "Retired task-add status",
                 "description": "Should ignore retired task-add status.",
                 "workspace": ".",
-                "status": "friction",
+                "status": "done",
             }),
             Some("codex".to_string()),
             Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
@@ -398,7 +398,7 @@ fn task_delete_tool_rejects_unforced_protected_statuses() {
     assert_eq!(
         message,
         format!(
-            "task '{}' is in status 'backlog'; use --force to delete tasks not in proposed, friction, or rejected status",
+            "task '{}' is in status 'backlog'; use --force to delete tasks not in proposed or rejected status",
             task.id
         )
     );
@@ -408,14 +408,10 @@ fn task_delete_tool_rejects_unforced_protected_statuses() {
 }
 
 #[test]
-fn task_delete_tool_allows_unforced_proposed_friction_and_rejected_tasks() {
+fn task_delete_tool_allows_unforced_proposed_and_rejected_tasks() {
     let (_root, runtime, repo_root) = test_runtime();
 
-    for status in [
-        TaskStatus::Proposed,
-        TaskStatus::Friction,
-        TaskStatus::Rejected,
-    ] {
+    for status in [TaskStatus::Proposed, TaskStatus::Rejected] {
         let task = create_task(
             &runtime,
             &repo_root,

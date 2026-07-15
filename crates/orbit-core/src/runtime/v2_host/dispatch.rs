@@ -189,9 +189,8 @@ pub(super) fn run_deterministic(
                 message: error.to_string(),
             }),
         // Materialize the workspace backlog for auto-dispatch.
-        // Filters by `status: backlog`; legacy untriaged
-        // `status: friction` reports remain absent. In automatic
-        // mode, drops any backlog task group whose context overlaps files
+        // Filters by `status: backlog`. In automatic mode, drops any backlog
+        // task group whose context overlaps files
         // already held by `in-progress`/`review` tasks. Sorts critical →
         // high → medium → low then by `created_at` ascending so older
         // high-priority work ships first. Caps at `max_tasks` (default 50).

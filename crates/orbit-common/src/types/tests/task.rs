@@ -226,4 +226,10 @@ updated_at: 2026-01-01T00:00:00Z
             "\"in_progress\""
         );
     }
+
+    #[test]
+    fn task_status_rejects_removed_friction_variant() {
+        assert!(serde_json::from_str::<TaskStatus>("\"friction\"").is_err());
+        assert!("friction".parse::<TaskStatus>().is_err());
+    }
 }

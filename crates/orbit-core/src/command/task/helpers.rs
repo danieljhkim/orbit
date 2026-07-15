@@ -1,10 +1,71 @@
 use chrono::Utc;
 use orbit_common::types::{
-    OrbitError, Task, TaskComment, TaskHistoryEntry, normalize_attribution_label,
+    OrbitError, Task, TaskComment, TaskHistoryEntry, TaskStatus, normalize_attribution_label,
     normalize_optional_attribution_label,
 };
 
 pub(crate) const SYSTEM_ACTOR_LABEL: &str = "system";
+
+pub(crate) struct TaskAttributionInput<'a> {
+    pub(crate) default_actor_label: &'a str,
+    pub(crate) actor_override: Option<&'a str>,
+    pub(crate) agent: Option<&'a str>,
+    pub(crate) model: Option<&'a str>,
+    pub(crate) runtime_model_identity: Option<&'a str>,
+    pub(crate) plan_changed: bool,
+    pub(crate) target_status: Option<TaskStatus>,
+    pub(crate) explicit_planned_by: Option<&'a Option<String>>,
+    pub(crate) explicit_implemented_by: Option<&'a Option<String>>,
+}
+
+pub(crate) struct TaskAttribution {
+    pub(crate) actor: String,
+    pub(crate) planned_by: Option<Option<String>>,
+    pub(crate) implemented_by: Option<Option<String>>,
+}
+
+/// Assemble mutation and authored-role attribution for human and automation updates.
+///
+/// The mutation actor is an explicit override (automation uses `system`) or,
+/// otherwise, model > agent > runtime actor. Explicit authored-role mutations
+/// win; inferred role labels use model > agent > runtime model identity >
+/// mutation actor, while inferred `implemented_by` preserves an existing value.
+/// `implemented_by` inference is applied only while entering review or done.
+pub(crate) fn assemble_task_attribution(
+    task: &Task,
+    input: TaskAttributionInput<'_>,
+) -> TaskAttribution {
+    let actor = input
+        .actor_override
+        .map(|label| normalize_attribution_label(label, None))
+        .unwrap_or_else(|| {
+            effective_actor_label(input.default_actor_label, input.agent, input.model)
+        });
+    let authored_role_label = normalize_optional_attribution_label(input.model, input.model)
+        .or_else(|| normalize_optional_attribution_label(input.agent, input.model))
+        .or_else(|| normalize_optional_attribution_label(input.runtime_model_identity, None))
+        .unwrap_or_else(|| actor.clone());
+    let planned_by = input.explicit_planned_by.cloned().or_else(|| {
+        input
+            .plan_changed
+            .then(|| Some(authored_role_label.clone()))
+    });
+    let implemented_by = input.explicit_implemented_by.cloned().or_else(|| {
+        input.target_status.and_then(|status| {
+            if matches!(status, TaskStatus::Review | TaskStatus::Done) {
+                implementation_label(task, authored_role_label.as_str(), input.model).map(Some)
+            } else {
+                None
+            }
+        })
+    });
+
+    TaskAttribution {
+        actor,
+        planned_by,
+        implemented_by,
+    }
+}
 
 pub(super) fn build_task_comments(
     message: Option<String>,

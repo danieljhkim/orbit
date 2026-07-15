@@ -175,7 +175,6 @@ impl Execute for TaskUpdateArgs {
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum TaskUpdateStatusArg {
     Proposed,
-    Friction,
     Backlog,
     Someday,
     #[value(name = "in-progress", alias = "in_progress")]
@@ -190,7 +189,6 @@ impl From<TaskUpdateStatusArg> for TaskStatus {
     fn from(value: TaskUpdateStatusArg) -> Self {
         match value {
             TaskUpdateStatusArg::Proposed => TaskStatus::Proposed,
-            TaskUpdateStatusArg::Friction => TaskStatus::Friction,
             TaskUpdateStatusArg::Backlog => TaskStatus::Backlog,
             TaskUpdateStatusArg::Someday => TaskStatus::Someday,
             TaskUpdateStatusArg::InProgress => TaskStatus::InProgress,

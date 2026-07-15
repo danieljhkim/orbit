@@ -72,9 +72,7 @@ fn feature_child_state_for_task_status(status: TaskStatus) -> &'static str {
         TaskStatus::Done | TaskStatus::Archived | TaskStatus::Review => "done",
         TaskStatus::Blocked | TaskStatus::Rejected => "blocked",
         TaskStatus::InProgress => "in_flight",
-        TaskStatus::Proposed | TaskStatus::Friction | TaskStatus::Backlog | TaskStatus::Someday => {
-            "pending"
-        }
+        TaskStatus::Proposed | TaskStatus::Backlog | TaskStatus::Someday => "pending",
     }
 }
 
