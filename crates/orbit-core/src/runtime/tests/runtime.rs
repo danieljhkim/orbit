@@ -198,6 +198,45 @@ fn global_default_activity_wins_over_workspace_shadow_in_execution_catalog() {
 }
 
 #[test]
+fn workspace_default_activity_cannot_claim_missing_global_default_name() {
+    let (_root, runtime, _global_root, workspace_root) = test_runtime();
+    write_activity(
+        &workspace_root.join("resources/activities/pr_open.yaml"),
+        "pr_open",
+        "workspace description",
+    );
+
+    let catalog = runtime.v2_activity_catalog().expect("activity catalog");
+
+    assert!(
+        catalog.get("pr_open").is_none(),
+        "workspace assets must never claim shipped default activity names"
+    );
+}
+
+#[test]
+fn activity_catalog_still_skips_retired_assets() {
+    let (_root, runtime, _global_root, workspace_root) = test_runtime();
+    let activities_dir = workspace_root.join("resources/activities");
+    std::fs::create_dir_all(&activities_dir).expect("create activities dir");
+    std::fs::write(
+        activities_dir.join("retired.yaml"),
+        "schemaVersion: 1\nkind: Activity\nmetadata:\n  name: retired\nspec: {}\n",
+    )
+    .expect("write retired activity");
+    write_activity(
+        &activities_dir.join("current.yaml"),
+        "current",
+        "current description",
+    );
+
+    let catalog = runtime.v2_activity_catalog().expect("activity catalog");
+
+    assert!(catalog.get("retired").is_none());
+    assert!(catalog.get("current").is_some());
+}
+
+#[test]
 fn duplicate_activities_within_one_catalog_directory_remain_invalid() {
     let (_root, runtime, _global_root, workspace_root) = test_runtime();
     let activities_dir = workspace_root.join("resources/activities");

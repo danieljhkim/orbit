@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Activity and job catalogs share layered loading**: typed adapters now share recursive discovery, directory deduplication, first-wins layering, and duplicate detection while preserving their distinct precedence and validation policies. ([ORB-10201])
 - **Configuration admission is table-driven**: fixed settings now declare parsing, defaults, validation metadata, and CLI projection once, with generated registry/snapshot lookup completeness checks. ([ORB-10199])
 - **Activity/job precedence docs match execution trust rules**: the design now distinguishes workspace-preferred job listings from default-authoritative named job and activity execution. ([ORB-10203])
 - **Systemd routine workers survive sweep exit**: the user sweep service now limits shutdown to its main oneshot process, allowing detached pipeline workers to claim and complete clock-dispatched runs. ([ORB-10153])
