@@ -64,7 +64,11 @@ When you add a new top-level command:
    that matches its template section. The variant order also determines
    where a missing-from-template command would appear by default.
 2. Add the row to the matching section in the `help_template` string.
-3. Add the dispatch arm to `impl Execute for Commands`.
+3. Add exactly one exhaustive operation arm in
+   [`command/operation.rs`](src/command/operation.rs). That arm declares the
+   command's dispatch, runtime need, audit metadata, JSON error preference,
+   and hook error policy together; do not add a default arm or recreate any
+   of those policy matches in `main.rs` or `audit_middleware.rs`.
 
 The source tree stays flat — never create a grouping subdirectory under
 `command/` to mirror the visual grouping. Past attempts (`definitions/`,

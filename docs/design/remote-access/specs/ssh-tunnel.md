@@ -26,7 +26,7 @@ The dashboard binds loopback-only ([ORB-00360]) because it is unauthenticated. V
 
 ## Migration / Compatibility
 
-- `connect` dispatches in `main.rs` **before** eager workspace init, so it runs from any directory (its workspace is remote). Adding a `web` subcommand that needs no local runtime must extend that early-dispatch arm, not rely on the post-init path.
+- `connect` is declared `RuntimeNeed::Forbidden` in the exhaustive command-operation registry, so `main.rs` dispatches it before eager workspace init and it runs from any directory (its workspace is remote). Any new runtime-free `web` subcommand must declare that policy in the same `Commands::operation` arm; do not recreate an early-dispatch match in `main.rs`.
 
 ## Agent Signature
 
