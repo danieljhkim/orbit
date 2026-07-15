@@ -7,6 +7,7 @@
 - **Activity/job precedence docs match execution trust rules**: the design now distinguishes workspace-preferred job listings from default-authoritative named job and activity execution. ([ORB-10203])
 - **Systemd routine workers survive sweep exit**: the user sweep service now limits shutdown to its main oneshot process, allowing detached pipeline workers to claim and complete clock-dispatched runs. ([ORB-10153])
 - **Task creation surface is narrower and consistent**: task creation now exposes only legal initial statuses, list flags share repeat/comma parsing, and redundant agent/comment/instructions inputs are removed while model and managed identity attribution remain intact. ([ORB-10155])
+- **CLI command meaning has one compiler-enforced registry**: dispatch, runtime bootstrap, audit metadata, JSON error formatting, and hook suppression now derive from one exhaustive command-operation declaration, eliminating wildcard policy defaults without changing CLI behavior. ([ORB-10200])
 
 ### Breaking Changes
 

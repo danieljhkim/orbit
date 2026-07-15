@@ -2,6 +2,7 @@
 // tests/mod.rs can directly contain tests for the declaring parent module (exempt from orphan rules).
 
 mod init;
+mod operation;
 mod sweep;
 
 use clap::{Parser, error::ErrorKind};
