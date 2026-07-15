@@ -1,4 +1,5 @@
 use clap::Args;
+use orbit_common::types::Workspace;
 use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
 
@@ -24,17 +25,7 @@ impl Execute for WorkspaceShowArgs {
 
         match ws {
             Some(ws) => {
-                println!("name:        {}", ws.name);
-                println!("id:          {}", ws.id);
-                println!("root:        {}", ws.root.display());
-                println!("orbit_dir:   {}", ws.orbit_dir.display());
-                println!("base_branch: {}", ws.base_branch);
-                println!("status:      {}", ws.status);
-                if let Some(ref remote) = ws.git_remote {
-                    println!("git_remote:  {}", remote);
-                }
-                println!("created_at:  {}", ws.created_at);
-                println!("updated_at:  {}", ws.updated_at);
+                print!("{}", format_workspace_show(ws));
             }
             None => {
                 println!("current orbit root: {}", data_root.display());
@@ -43,4 +34,25 @@ impl Execute for WorkspaceShowArgs {
         }
         Ok(())
     }
+}
+
+pub(super) fn format_workspace_show(workspace: &Workspace) -> String {
+    let mut output = format!(
+        "name:        {}\nid:          {}\nroot:        {}\norbit_dir:   {}\nbase_branch: {}\nship_mode:   {}\nstatus:      {}\n",
+        workspace.name,
+        workspace.id,
+        workspace.root.display(),
+        workspace.orbit_dir.display(),
+        workspace.base_branch,
+        orbit_core::resolved_ship_mode(workspace).as_input_value(),
+        workspace.status,
+    );
+    if let Some(remote) = &workspace.git_remote {
+        output.push_str(&format!("git_remote:  {remote}\n"));
+    }
+    output.push_str(&format!(
+        "created_at:  {}\nupdated_at:  {}\n",
+        workspace.created_at, workspace.updated_at
+    ));
+    output
 }
