@@ -39,7 +39,7 @@ fn rendered_systemd_service_discovers_local_provider_launchers() {
         finds_launcher(&effective_path, "codex"),
         "the service PATH finds a provider launcher from the user's .local/bin"
     );
-    assert!(rendered_path.starts_with("%h/.local/bin:%h/.cargo/bin:"));
+    assert!(rendered_path.starts_with("%h/.local/bin:%h/.orbit/bin:%h/.cargo/bin:"));
     for directory in [
         "/usr/local/sbin",
         "/usr/local/bin",
