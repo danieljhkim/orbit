@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-07-11
+last_updated: 2026-07-14
 status: Draft
 feature: activity-job
 doc_role: design
@@ -101,9 +101,13 @@ Step-level `default_input` is still recursively template-rendered before dispatc
 
 orbit-core normalizes raw YAML before dispatch.
 
-Catalog-discovered v2 jobs use `MergeByKey` precedence after [T20260425-0204]: `ORBIT_JOB_DIR` / `ORBIT_V2_JOB_DIR` entries first, then workspace jobs, then global seeded jobs. The first valid `metadata.name` wins, so a workspace `task_auto_pipeline` overrides the global default without making `orbit run ship` fail. Duplicate names inside one directory tree remain invalid because that single layer would otherwise be ambiguous.
+Job catalog listing uses `MergeByKey` precedence after [T20260425-0204]: `ORBIT_JOB_DIR` / `ORBIT_V2_JOB_DIR` entries first, then workspace jobs, then global seeded jobs. The first valid `metadata.name` wins, so listing can show a workspace `task_auto_pipeline` in place of the global default without making the catalog ambiguous. Duplicate names inside one directory tree remain invalid because that single layer would otherwise be ambiguous.
 
-Activity catalogs follow the same first-wins rule after [T20260426-0047]: `ORBIT_ACTIVITY_DIR` / `ORBIT_V2_CATALOG_DIR` entries first, then workspace activities, then global seeded activities. This lets a workspace carry an override such as `pr_open` without `orbit activity list --ops` failing on the duplicate global default. Duplicate names inside one activity directory tree remain invalid.
+Job execution deliberately has a different order: explicit `ORBIT_JOB_DIR` / `ORBIT_V2_JOB_DIR` entries, then global seeded jobs, then workspace jobs only for names that are not shipped defaults. Thus an explicit environment catalog can opt in to a replacement for testing or smoke runs, but a workspace-local file cannot shadow a shipped job when Orbit resolves that job by name for execution.
+
+Activity resolution is likewise execution-oriented, but its directory order is explicit `ORBIT_ACTIVITY_DIR` / `ORBIT_V2_CATALOG_DIR`, then global seeded activities, then workspace activities. Explicit and global directories use first-wins loading. Workspace activities may add names that are absent from the catalog, but any workspace name matching a shipped default is skipped even if the global file is missing; a workspace activity also cannot replace an earlier explicit or global entry. Duplicate names inside one activity directory tree remain invalid.
+
+This is an intentional default-shadowing asymmetry: job *listing* is workspace-preferred, while named job execution and activity resolution keep shipped defaults authoritative over workspace resources. The split follows [L-0060] and its originating security fix [ORB-00356]: display/catalog override semantics must not make checked-in workspace YAML executable in place of a trusted shipped default. That learning is the rationale; the runtime and job catalog code are authoritative for the exact loading behavior.
 
 Direct single-activity runtime helpers:
 
