@@ -357,30 +357,31 @@ backend = "cli"
 
 #[test]
 fn workflow_default_crew_no_crews_defined_is_noop() {
+    use super::super::registry::resolve_default_crew;
     let crews = BTreeMap::new();
 
-    let default_crew =
-        workflow_default_crew_from_raw(None, &crews).expect("empty registry is allowed");
+    let default_crew = resolve_default_crew(None, &crews, None).expect("empty registry is allowed");
 
     assert_eq!(default_crew, None);
 }
 
 #[test]
 fn workflow_default_crew_uses_environment_then_claude_system_default() {
+    use super::super::registry::resolve_default_crew;
     let crews = BTreeMap::from([
         ("claude".to_string(), single_family_crew("claude")),
         ("gemini".to_string(), single_family_crew("gemini")),
     ]);
 
-    let env = workflow_default_crew_from_raw_with_env(None, &crews, Some("google"))
+    let env = resolve_default_crew(None, &crews, Some("google"))
         .expect("deprecated environment alias resolves");
     assert_eq!(env.as_deref(), Some("gemini"));
 
-    let system = workflow_default_crew_from_raw_with_env(None, &crews, None)
-        .expect("canonical system default resolves");
+    let system =
+        resolve_default_crew(None, &crews, None).expect("canonical system default resolves");
     assert_eq!(system.as_deref(), Some("claude"));
 
-    let error = workflow_default_crew_from_raw_with_env(None, &crews, Some("bogus"))
+    let error = resolve_default_crew(None, &crews, Some("bogus"))
         .expect_err("selected invalid environment value must not fall back");
     assert!(error.to_string().contains("CONSTELLATION_DEFAULT_PROVIDER"));
 }
@@ -461,6 +462,24 @@ auto_ship = true
     let config =
         RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
     assert!(config.workflow_auto_ship());
+}
+
+#[test]
+fn workspace_config_replaces_global_instead_of_merging() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        global.path(),
+        "[workflow]\nbase_branch = \"global-branch\"\n[scoring]\nenabled = false\n",
+    );
+    write_config(workspace.path(), "[workflow]\nauto_ship = true\n");
+
+    let config = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("workspace config loads");
+
+    assert!(config.workflow_auto_ship());
+    assert_eq!(config.workflow_base_branch(), "main");
+    assert!(config.scoring_enabled);
 }
 
 #[test]

@@ -1,144 +1,484 @@
-//! Static registry of settable `config.toml` keys.
+//! Admission registry for fixed `config.toml` settings.
 //!
-//! This is the single source of truth for which dotted TOML paths `orbit
-//! config get`/`set` accept. It powers three things: `orbit config keys`,
-//! rejecting unknown keys on `get`/`set` with a "did you mean" hint, and the
-//! `settings:` section of `orbit config show`.
-//!
-//! Deliberately **not** included here: derived/read-only values
-//! (`global_root`, persistence paths, the resolved config path itself — see
-//! `ConfigSnapshot`'s `derived` fields, which are surfaced by `show` but are
-//! never settable) and dynamically-named tables (`[crews.<name>]`,
-//! `[duel.models]` per-entry overrides) whose key space isn't a fixed set of
-//! dotted paths. Those remain hand-editable in `config.toml` directly; only
-//! the fixed, well-known scalar/array leaves get a registry entry.
+//! Each setting is declared once in [`define_config_settings!`]. That row
+//! drives TOML extraction, defaulting/validation, `orbit config keys`
+//! metadata, the resolved snapshot, and JSON lookup used by `get`/`show`.
+//! Runtime consumers read the admitted snapshot instead of re-parsing raw
+//! section structs. Dynamically named tables (`crews.*`) and removed-key
+//! migration guards remain in `raw`/`runtime` because they are not fixed
+//! settings addressable by `orbit config set`.
 
-/// One entry in the static key registry: a dotted `config.toml` path plus
-/// the metadata `orbit config keys` and error messages need.
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+
+use orbit_common::types::{
+    Crew, CrewRoleAssignment, ORB_TASK_ID_MAX, OrbitError, activity_job::Provider,
+    all_agent_families, resolve_crew,
+};
+use orbit_common::utility::log_rotation::LogRotationConfig;
+use orbit_common::utility::redaction::redact_home_dir;
+use serde::de::DeserializeOwned;
+use serde_json::{Value as JsonValue, json};
+
+const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
+const DEFAULT_WORKFLOW_CREW: &str = "claude";
+const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConfigKeyDescriptor {
-    /// Dotted TOML path, e.g. `"workflow.base_branch"`.
     pub key: &'static str,
-    /// Human-readable type, e.g. `"bool"`, `"string"`, `"array<string>"`.
     pub value_type: &'static str,
-    /// One-line description shown by `orbit config keys`.
     pub description: &'static str,
 }
 
-/// All settable keys, sorted by dotted path.
-pub const CONFIG_KEY_REGISTRY: &[ConfigKeyDescriptor] = &[
-    ConfigKeyDescriptor {
-        key: "duel.candidates",
-        value_type: "array<string>",
-        description: "Agent families eligible as planning-duel candidates (at least 3, from the known agent family set).",
-    },
-    ConfigKeyDescriptor {
-        key: "duel.models",
-        value_type: "table<string, string>",
-        description: "Per-family model override for planning-duel candidates, e.g. { codex = \"<model-id>\" }.",
-    },
-    ConfigKeyDescriptor {
-        key: "execution.codex.approval_policy",
-        value_type: "string",
-        description: "Codex approval policy: one of untrusted, on-request, never.",
-    },
-    ConfigKeyDescriptor {
-        key: "execution.codex.sandbox",
-        value_type: "string",
-        description: "Codex sandbox mode: one of read-only, workspace-write, danger-full-access.",
-    },
-    ConfigKeyDescriptor {
-        key: "execution.env.pass",
-        value_type: "array<string>",
-        description: "Environment variable names allow-listed for passthrough into agent subprocesses.",
-    },
-    ConfigKeyDescriptor {
-        key: "graph.editing",
-        value_type: "bool",
-        description: "Whether the code graph editing surface is enabled.",
-    },
-    ConfigKeyDescriptor {
-        key: "pr.task_url_template",
-        value_type: "string",
-        description: "URL template used to link a task ID in PR descriptions.",
-    },
-    ConfigKeyDescriptor {
-        key: "routines.role",
-        value_type: "string",
-        description: "Opt-in for the routine scheduler; the only supported value is 'source' (marks this workspace as a routine source for `orbit sweep`).",
-    },
-    ConfigKeyDescriptor {
-        key: "runtime.backend",
-        value_type: "string",
-        description: "Default v2 agent_loop execution backend: one of http, cli, auto.",
-    },
-    ConfigKeyDescriptor {
-        key: "runtime.log_max_file_mb",
-        value_type: "integer",
-        description: "Roll the active JSONL log once it grows past this many MiB (must be >= 1 and <= runtime.log_max_total_mb).",
-    },
-    ConfigKeyDescriptor {
-        key: "runtime.log_max_total_mb",
-        value_type: "integer",
-        description: "Total size budget (MiB) across JSONL log archives; oldest are pruned first when exceeded (must be >= 1).",
-    },
-    ConfigKeyDescriptor {
-        key: "runtime.log_retention_days",
-        value_type: "integer",
-        description: "Delete JSONL log archives whose mtime is older than this many days (must be >= 1).",
-    },
-    ConfigKeyDescriptor {
-        key: "scoring.enabled",
-        value_type: "bool",
-        description: "Whether scoreboard metrics are recorded for task runs.",
-    },
-    ConfigKeyDescriptor {
-        key: "task.approval.delegate_approval",
-        value_type: "bool",
-        description: "Whether task approval can be delegated to another agent.",
-    },
-    ConfigKeyDescriptor {
-        key: "task.approval.required_for_agent",
-        value_type: "bool",
-        description: "Whether agent-initiated tasks require human approval before running.",
-    },
-    ConfigKeyDescriptor {
-        key: "tasks.id_start",
-        value_type: "integer",
-        description: "Floor for the local task-id allocator on this machine (forward-only; lets machines hold disjoint id ranges). Capped by ORB_TASK_ID_MAX.",
-    },
-    ConfigKeyDescriptor {
-        key: "workflow.auto_ship",
-        value_type: "bool",
-        description: "Opt-in for unattended ship dispatch via the routine/sweep scheduler.",
-    },
-    ConfigKeyDescriptor {
-        key: "workflow.base_branch",
-        value_type: "string",
-        description: "Default base branch for ship and duel-plan workflows.",
-    },
-    ConfigKeyDescriptor {
-        key: "workflow.default_crew",
-        value_type: "string",
-        description: "Named crew used when a task does not declare `crew` and no CLI override is given.",
-    },
-];
+macro_rules! define_config_settings {
+    ($(
+        $field:ident : $resolved:ty => $raw:ty {
+            key: $key:literal,
+            value_type: $value_type:literal,
+            description: $description:literal,
+            resolve: $resolve:expr $(,)?
+        }
+    ),+ $(,)?) => {
+        /// Fully admitted, defaulted view of every fixed configuration key.
+        #[derive(Debug, Clone)]
+        pub struct ConfigSnapshot {
+            /// Derived security invariant, shown by `config show` but not settable.
+            pub execution_env_inherit: bool,
+            $(pub $field: $resolved,)+
+        }
 
-/// Look up a key's descriptor, or `None` if it isn't in the registry.
+        pub const CONFIG_KEY_REGISTRY: &[ConfigKeyDescriptor] = &[
+            $(ConfigKeyDescriptor {
+                key: $key,
+                value_type: $value_type,
+                description: $description,
+            },)+
+        ];
+
+        impl ConfigSnapshot {
+            pub(crate) fn admit(
+                document: &toml::Value,
+                config_path: &Path,
+                crews: &BTreeMap<String, Crew>,
+            ) -> Result<Self, OrbitError> {
+                let env_default = std::env::var(CONSTELLATION_DEFAULT_PROVIDER_ENV).ok();
+                Self::admit_with_env(document, config_path, crews, env_default.as_deref())
+            }
+
+            fn admit_with_env(
+                document: &toml::Value,
+                config_path: &Path,
+                crews: &BTreeMap<String, Crew>,
+                env_default: Option<&str>,
+            ) -> Result<Self, OrbitError> {
+                $(let $field: $resolved = {
+                    let raw_value: Option<$raw> = read_optional(document, $key, config_path)?;
+                    ($resolve)(raw_value)?
+                };)+
+                let mut snapshot = Self {
+                    execution_env_inherit: false,
+                    $($field,)+
+                };
+                snapshot.finish_admission(crews, env_default)?;
+                Ok(snapshot)
+            }
+
+            pub fn value_for(&self, key: &str) -> Option<JsonValue> {
+                match key {
+                    $($key => Some(json!(self.$field)),)+
+                    _ => None,
+                }
+            }
+
+            pub fn all_values(&self) -> Vec<(&'static str, JsonValue)> {
+                CONFIG_KEY_REGISTRY
+                    .iter()
+                    .map(|entry| {
+                        // Both match arms are emitted by this macro, so every
+                        // registry row has a projection by construction.
+                        (entry.key, self.value_for(entry.key).unwrap_or(JsonValue::Null))
+                    })
+                    .collect()
+            }
+        }
+    };
+}
+
+define_config_settings! {
+    duel_candidates: Vec<String> => Vec<String> {
+        key: "duel.candidates", value_type: "array<string>",
+        description: "Agent families eligible as planning-duel candidates (at least 3, from the known agent family set).",
+        resolve: |raw: Option<Vec<String>>| resolve_duel_candidates(raw.as_deref()),
+    },
+    duel_models: BTreeMap<String, String> => BTreeMap<String, String> {
+        key: "duel.models", value_type: "table<string, string>",
+        description: "Per-family model override for planning-duel candidates, e.g. { codex = \"<model-id>\" }.",
+        resolve: |raw: Option<BTreeMap<String, String>>| resolve_duel_models(raw),
+    },
+    codex_approval_policy: Option<String> => String {
+        key: "execution.codex.approval_policy", value_type: "string",
+        description: "Codex approval policy: one of untrusted, on-request, never.",
+        resolve: |raw: Option<String>| resolve_optional_choice(raw, "execution.codex.approval_policy", &["untrusted", "on-request", "never"]),
+    },
+    codex_sandbox: String => String {
+        key: "execution.codex.sandbox", value_type: "string",
+        description: "Codex sandbox mode: one of read-only, workspace-write, danger-full-access.",
+        resolve: |raw: Option<String>| resolve_choice(raw, "workspace-write", "execution.codex.sandbox", &["read-only", "workspace-write", "danger-full-access"]),
+    },
+    execution_env_pass: Vec<String> => Vec<String> {
+        key: "execution.env.pass", value_type: "array<string>",
+        description: "Environment variable names allow-listed for passthrough into agent subprocesses.",
+        resolve: |raw: Option<Vec<String>>| raw.map(normalize_pass_list).unwrap_or_else(|| Ok(default_pass_list())),
+    },
+    graph_editing: bool => bool {
+        key: "graph.editing", value_type: "bool",
+        description: "Whether the code graph editing surface is enabled.",
+        resolve: |raw: Option<bool>| Ok::<_, OrbitError>(raw.unwrap_or(false)),
+    },
+    pr_task_url_template: Option<String> => String {
+        key: "pr.task_url_template", value_type: "string",
+        description: "URL template used to link a task ID in PR descriptions.",
+        resolve: |raw: Option<String>| Ok::<_, OrbitError>(raw),
+    },
+    routines_role: Option<String> => String {
+        key: "routines.role", value_type: "string",
+        description: "Opt-in for the routine scheduler; the only supported value is 'source' (marks this workspace as a routine source for `orbit sweep`).",
+        resolve: |raw: Option<String>| resolve_optional_choice(raw, "routines.role", &["source"]),
+    },
+    runtime_backend: Option<String> => String {
+        key: "runtime.backend", value_type: "string",
+        description: "Default v2 agent_loop execution backend: one of http, cli, auto.",
+        resolve: |raw: Option<String>| resolve_optional_choice(raw, "[runtime] backend", &["http", "cli", "auto"]),
+    },
+    runtime_log_max_file_mb: u64 => u64 {
+        key: "runtime.log_max_file_mb", value_type: "integer",
+        description: "Roll the active JSONL log once it grows past this many MiB (must be >= 1 and <= runtime.log_max_total_mb).",
+        resolve: |raw: Option<u64>| Ok::<_, OrbitError>(raw.unwrap_or_else(|| default_log_rotation().max_file_bytes / (1024 * 1024))),
+    },
+    runtime_log_max_total_mb: u64 => u64 {
+        key: "runtime.log_max_total_mb", value_type: "integer",
+        description: "Total size budget (MiB) across JSONL log archives; oldest are pruned first when exceeded (must be >= 1).",
+        resolve: |raw: Option<u64>| Ok::<_, OrbitError>(raw.unwrap_or_else(|| default_log_rotation().max_total_bytes / (1024 * 1024))),
+    },
+    runtime_log_retention_days: u64 => u64 {
+        key: "runtime.log_retention_days", value_type: "integer",
+        description: "Delete JSONL log archives whose mtime is older than this many days (must be >= 1).",
+        resolve: |raw: Option<u64>| Ok::<_, OrbitError>(raw.unwrap_or_else(|| default_log_rotation().retention_days)),
+    },
+    scoring_enabled: bool => bool {
+        key: "scoring.enabled", value_type: "bool",
+        description: "Whether scoreboard metrics are recorded for task runs.",
+        resolve: |raw: Option<bool>| Ok::<_, OrbitError>(raw.unwrap_or(true)),
+    },
+    task_delegate_approval: bool => bool {
+        key: "task.approval.delegate_approval", value_type: "bool",
+        description: "Whether task approval can be delegated to another agent.",
+        resolve: |raw: Option<bool>| Ok::<_, OrbitError>(raw.unwrap_or(false)),
+    },
+    task_approval_required_for_agent: bool => bool {
+        key: "task.approval.required_for_agent", value_type: "bool",
+        description: "Whether agent-initiated tasks require human approval before running.",
+        resolve: |raw: Option<bool>| Ok::<_, OrbitError>(raw.unwrap_or(false)),
+    },
+    tasks_id_start: Option<u32> => u32 {
+        key: "tasks.id_start", value_type: "integer",
+        description: "Floor for the local task-id allocator on this machine (forward-only; lets machines hold disjoint id ranges). Capped by ORB_TASK_ID_MAX.",
+        resolve: |raw: Option<u32>| resolve_tasks_id_start(raw),
+    },
+    workflow_auto_ship: bool => bool {
+        key: "workflow.auto_ship", value_type: "bool",
+        description: "Opt-in for unattended ship dispatch via the routine/sweep scheduler.",
+        resolve: |raw: Option<bool>| Ok::<_, OrbitError>(raw.unwrap_or(false)),
+    },
+    workflow_base_branch: String => String {
+        key: "workflow.base_branch", value_type: "string",
+        description: "Default base branch for ship and duel-plan workflows.",
+        resolve: |raw: Option<String>| resolve_non_empty(raw, DEFAULT_WORKFLOW_BASE_BRANCH, "workflow.base_branch"),
+    },
+    workflow_default_crew: Option<String> => String {
+        key: "workflow.default_crew", value_type: "string",
+        description: "Named crew used when a task does not declare `crew` and no CLI override is given.",
+        resolve: |raw: Option<String>| resolve_optional_non_empty(raw, "workflow.default_crew"),
+    },
+}
+
+impl ConfigSnapshot {
+    fn finish_admission(
+        &mut self,
+        crews: &BTreeMap<String, Crew>,
+        env_default: Option<&str>,
+    ) -> Result<(), OrbitError> {
+        validate_duel_models(&self.duel_models, &self.duel_candidates)?;
+        LogRotationConfig::from_parts(
+            Some(self.runtime_log_retention_days),
+            Some(self.runtime_log_max_total_mb),
+            Some(self.runtime_log_max_file_mb),
+        )?;
+        self.workflow_default_crew =
+            resolve_default_crew(self.workflow_default_crew.take(), crews, env_default)?;
+        Ok(())
+    }
+}
+
+impl Default for ConfigSnapshot {
+    fn default() -> Self {
+        let document = toml::Value::Table(toml::map::Map::new());
+        ConfigSnapshot::admit_with_env(
+            &document,
+            Path::new("<built-in defaults>"),
+            &default_admission_crews(),
+            None,
+        )
+        .unwrap_or_else(|error| panic!("built-in configuration defaults must admit: {error}"))
+    }
+}
+
+fn default_admission_crews() -> BTreeMap<String, Crew> {
+    BTreeMap::from([(
+        DEFAULT_WORKFLOW_CREW.to_string(),
+        Crew {
+            name: DEFAULT_WORKFLOW_CREW.to_string(),
+            assignment: CrewRoleAssignment {
+                model: String::new(),
+                provider: DEFAULT_WORKFLOW_CREW.to_string(),
+                backend: String::new(),
+            },
+        },
+    )])
+}
+
 pub fn describe(key: &str) -> Option<&'static ConfigKeyDescriptor> {
     CONFIG_KEY_REGISTRY.iter().find(|entry| entry.key == key)
 }
 
-/// All registered dotted key paths, sorted. Used both for `orbit config
-/// keys` and as the "did you mean" candidate list on an unknown key,
-/// following the `resolve_crew` convention in
-/// `orbit_common::types::agent_pair`: the full valid set is passed as
-/// candidates rather than a fuzzy-matched subset (this workspace has no
-/// fuzzy-matching dependency, and this registry is small enough that the
-/// full list is itself a useful hint).
 pub fn all_key_names() -> Vec<String> {
     CONFIG_KEY_REGISTRY
         .iter()
         .map(|entry| entry.key.to_string())
         .collect()
+}
+
+fn read_optional<T: DeserializeOwned>(
+    document: &toml::Value,
+    key: &str,
+    config_path: &Path,
+) -> Result<Option<T>, OrbitError> {
+    let mut value = document;
+    for segment in key.split('.') {
+        let table = value.as_table().ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "invalid runtime config '{}': table path for '{key}' contains a non-table value",
+                redact_home_dir(&config_path.display().to_string())
+            ))
+        })?;
+        let Some(next) = table.get(segment) else {
+            return Ok(None);
+        };
+        value = next;
+    }
+    value.clone().try_into().map(Some).map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "invalid runtime config '{}': invalid value for '{key}': {error}",
+            redact_home_dir(&config_path.display().to_string())
+        ))
+    })
+}
+
+fn resolve_choice(
+    raw: Option<String>,
+    default: &str,
+    key: &str,
+    choices: &[&str],
+) -> Result<String, OrbitError> {
+    let value = raw.as_deref().unwrap_or(default).trim();
+    if choices.contains(&value) {
+        Ok(value.to_string())
+    } else {
+        Err(OrbitError::InvalidInput(format!(
+            "{key} has invalid value '{value}'; expected one of: {}",
+            choices.join(", ")
+        )))
+    }
+}
+
+fn resolve_optional_choice(
+    raw: Option<String>,
+    key: &str,
+    choices: &[&str],
+) -> Result<Option<String>, OrbitError> {
+    raw.map(|value| resolve_choice(Some(value), "", key, choices))
+        .transpose()
+}
+
+fn resolve_non_empty(raw: Option<String>, default: &str, key: &str) -> Result<String, OrbitError> {
+    let value = raw.as_deref().unwrap_or(default).trim();
+    if value.is_empty() {
+        Err(OrbitError::InvalidInput(format!("{key} must not be empty")))
+    } else {
+        Ok(value.to_string())
+    }
+}
+
+fn resolve_optional_non_empty(
+    raw: Option<String>,
+    key: &str,
+) -> Result<Option<String>, OrbitError> {
+    raw.map(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            Err(OrbitError::InvalidInput(format!("{key} must not be empty")))
+        } else {
+            Ok(trimmed.to_string())
+        }
+    })
+    .transpose()
+}
+
+fn resolve_tasks_id_start(raw: Option<u32>) -> Result<Option<u32>, OrbitError> {
+    if raw.is_some_and(|start| start > ORB_TASK_ID_MAX) {
+        return Err(OrbitError::InvalidInput(format!(
+            "tasks.id_start {} exceeds maximum task id {ORB_TASK_ID_MAX}",
+            raw.unwrap_or_default()
+        )));
+    }
+    Ok(raw)
+}
+
+fn resolve_duel_candidates(raw: Option<&[String]>) -> Result<Vec<String>, OrbitError> {
+    let Some(raw) = raw else {
+        return Ok(all_agent_families()
+            .iter()
+            .map(|v| (*v).to_string())
+            .collect());
+    };
+    let valid: BTreeSet<&str> = all_agent_families().into_iter().collect();
+    let mut seen = BTreeSet::new();
+    let mut candidates = Vec::new();
+    for candidate in raw {
+        let normalized = candidate.trim().to_ascii_lowercase();
+        if !seen.insert(normalized.clone()) {
+            return Err(OrbitError::InvalidInput(format!(
+                "[duel] candidates contains duplicate '{normalized}' after normalization; valid candidates: {}",
+                all_agent_families().join(", ")
+            )));
+        }
+        if !valid.contains(normalized.as_str()) {
+            return Err(OrbitError::InvalidInput(format!(
+                "[duel] candidates contains unknown entry '{normalized}'; valid candidates: {}",
+                all_agent_families().join(", ")
+            )));
+        }
+        candidates.push(normalized);
+    }
+    if candidates.len() < 3 {
+        return Err(OrbitError::InvalidInput(format!(
+            "[duel] candidates must contain at least 3 distinct entries after normalization (got {}: {}); valid candidates: {}",
+            candidates.len(),
+            candidates.join(", "),
+            all_agent_families().join(", ")
+        )));
+    }
+    Ok(candidates)
+}
+
+fn resolve_duel_models(
+    raw: Option<BTreeMap<String, String>>,
+) -> Result<BTreeMap<String, String>, OrbitError> {
+    let mut models = BTreeMap::new();
+    for (family, model) in raw.unwrap_or_default() {
+        let family = family.trim().to_ascii_lowercase();
+        let trimmed_model = model.trim();
+        if trimmed_model.is_empty() {
+            return Err(OrbitError::InvalidInput(format!(
+                "[duel.models].{family} must not be empty (found '{model}')"
+            )));
+        }
+        models.insert(family, trimmed_model.to_string());
+    }
+    Ok(models)
+}
+
+fn validate_duel_models(
+    models: &BTreeMap<String, String>,
+    candidates: &[String],
+) -> Result<(), OrbitError> {
+    for family in models.keys() {
+        if !candidates.contains(family) {
+            return Err(OrbitError::InvalidInput(format!(
+                "[duel.models] contains key '{family}' that is not in resolved [duel].candidates ({}); valid candidates: {}",
+                candidates.join(", "),
+                all_agent_families().join(", ")
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn resolve_default_crew(
+    configured: Option<String>,
+    crews: &BTreeMap<String, Crew>,
+    env_default: Option<&str>,
+) -> Result<Option<String>, OrbitError> {
+    let selected = if let Some(configured) = configured.filter(|value| !value.trim().is_empty()) {
+        Some(configured)
+    } else if let Some(raw_env) = env_default.filter(|value| !value.trim().is_empty()) {
+        Some(
+            Provider::parse(raw_env)
+                .map_err(|error| {
+                    OrbitError::InvalidInput(format!(
+                        "{CONSTELLATION_DEFAULT_PROVIDER_ENV} has invalid value: {error}"
+                    ))
+                })?
+                .as_str()
+                .to_string(),
+        )
+    } else {
+        None
+    };
+    if let Some(selected) = selected {
+        resolve_crew(&selected, crews)?;
+        return Ok(Some(selected));
+    }
+    if crews.contains_key(DEFAULT_WORKFLOW_CREW) {
+        return Ok(Some(DEFAULT_WORKFLOW_CREW.to_string()));
+    }
+    if crews.is_empty() {
+        return Ok(None);
+    }
+    Err(OrbitError::InvalidInput(format!(
+        "[workflow].default_crew must be set when defining [crews.*]; choose one of: {}",
+        crews.keys().cloned().collect::<Vec<_>>().join(", ")
+    )))
+}
+
+fn default_log_rotation() -> LogRotationConfig {
+    LogRotationConfig::default()
+}
+
+fn default_pass_list() -> Vec<String> {
+    #[allow(unused_mut)]
+    let mut vars = vec!["HOME", "PATH", "CODEX_HOME", "TMPDIR", "USER"];
+    #[cfg(target_os = "macos")]
+    vars.push("__CF_USER_TEXT_ENCODING");
+    vars.into_iter().map(ToString::to_string).collect()
+}
+
+fn normalize_pass_list(pass: Vec<String>) -> Result<Vec<String>, OrbitError> {
+    let mut normalized = BTreeSet::new();
+    for entry in pass {
+        let value = entry.trim();
+        let mut chars = value.chars();
+        let valid = chars
+            .next()
+            .is_some_and(|first| first == '_' || first.is_ascii_alphabetic())
+            && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric());
+        if !valid {
+            return Err(OrbitError::InvalidInput(format!(
+                "execution.env.pass contains invalid variable name '{value}'"
+            )));
+        }
+        normalized.insert(value.to_string());
+    }
+    Ok(normalized.into_iter().collect())
 }
