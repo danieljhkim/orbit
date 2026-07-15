@@ -1714,7 +1714,6 @@
           "description": "New task status",
           "enum": [
             "proposed",
-            "friction",
             "backlog",
             "someday",
             "in-progress",
