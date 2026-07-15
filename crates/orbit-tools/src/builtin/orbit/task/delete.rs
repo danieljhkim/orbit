@@ -10,9 +10,8 @@ impl Tool for OrbitTaskDeleteTool {
         let mut parameters = super::super::orbit_id_params("task");
         parameters.push(ToolParam {
             name: "force".to_string(),
-            description:
-                "When true, allow permanent deletion outside proposed, friction, or rejected status"
-                    .to_string(),
+            description: "When true, allow permanent deletion outside proposed or rejected status"
+                .to_string(),
             param_type: "boolean".to_string(),
             required: false,
         });

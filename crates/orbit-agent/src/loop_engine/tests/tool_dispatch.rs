@@ -50,7 +50,7 @@ mod schema {
     }
 
     #[test]
-    fn task_update_schema_preserves_legacy_friction_status_enum() {
+    fn task_update_schema_excludes_friction_status_enum() {
         let update_schema = ToolSchema {
             name: "orbit.task.update".to_string(),
             description: String::new(),
@@ -59,7 +59,7 @@ mod schema {
         };
         let update_spec = schema_to_tool_spec(&update_schema);
         assert!(
-            update_spec.input_schema["properties"]["status"]["enum"]
+            !update_spec.input_schema["properties"]["status"]["enum"]
                 .as_array()
                 .expect("update status enum")
                 .iter()

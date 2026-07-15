@@ -16,6 +16,7 @@ pub mod locks;
 pub mod log;
 pub mod mcp;
 pub mod migrate;
+pub mod operation;
 pub mod policy;
 pub mod routine;
 pub mod run;
@@ -151,47 +152,6 @@ pub enum Commands {
     Logs(run::legacy_logs::LogsCommand),
     #[command(hide = true)]
     Artifacts(task::artifacts::ArtifactsCommand),
-}
-
-impl Execute for Commands {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        match self {
-            Commands::Init(cmd) => cmd.execute(runtime),
-            Commands::Workspace(cmd) => cmd.execute(runtime),
-            Commands::Config(cmd) => cmd.execute(runtime),
-            Commands::Semantic(cmd) => cmd.execute(runtime),
-            Commands::Migrate(cmd) => cmd.execute(runtime),
-            Commands::Run(cmd) => cmd.execute(runtime),
-            // Sweep and routine resolve everything from the global registry;
-            // they normally dispatch before runtime init (see main.rs) and
-            // never use the runtime even when reached through this path.
-            Commands::Sweep(cmd) => cmd.execute_without_runtime(),
-            Commands::Routine(cmd) => cmd.execute_without_runtime(),
-            Commands::Task(cmd) => (*cmd).execute(runtime),
-            Commands::Locks(cmd) => cmd.execute(runtime),
-            Commands::Search(cmd) => cmd.execute(runtime),
-            Commands::Docs(cmd) => cmd.execute(runtime),
-            Commands::Adr(cmd) => cmd.execute(runtime),
-            Commands::Friction(cmd) => cmd.execute(runtime),
-            Commands::Learning(cmd) => cmd.execute(runtime),
-            Commands::Graph(cmd) => cmd.execute(runtime),
-            Commands::Audit(cmd) => cmd.execute(runtime),
-            Commands::Log(cmd) => cmd.execute(runtime),
-            Commands::Doctor(cmd) => cmd.execute(runtime),
-            Commands::AutoTask(cmd) => cmd.execute(runtime),
-            Commands::Activity(cmd) => cmd.execute(runtime),
-            Commands::Job(cmd) => cmd.execute(runtime),
-            Commands::Tool(cmd) => cmd.execute(runtime),
-            Commands::Policy(cmd) => cmd.execute(runtime),
-            Commands::Executor(cmd) => cmd.execute(runtime),
-            Commands::Mcp(cmd) => cmd.execute(runtime),
-            Commands::Hook(cmd) => cmd.execute(runtime),
-            Commands::Web(cmd) => cmd.execute(runtime),
-            Commands::Skill(cmd) => cmd.execute(runtime),
-            Commands::Logs(cmd) => cmd.execute(runtime),
-            Commands::Artifacts(cmd) => cmd.execute(runtime),
-        }
-    }
 }
 
 #[cfg(test)]

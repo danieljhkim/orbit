@@ -58,17 +58,12 @@ impl OrbitRuntime {
         let append_comments = build_task_comments(comment, effective_label.as_str())?;
 
         let result = match task.status {
-            TaskStatus::Proposed | TaskStatus::Friction => self.with_mutation(|| {
-                let status_event = if task.status == TaskStatus::Friction {
-                    "friction_accepted"
-                } else {
-                    "proposal_approved"
-                };
+            TaskStatus::Proposed => self.with_mutation(|| {
                 let task = self.stores().tasks().update(
                     id,
                     StoreTaskUpdateParams {
                         actor: effective_label.clone(),
-                        status_event: Some(status_event.to_string()),
+                        status_event: Some("proposal_approved".to_string()),
                         status_note: note.clone(),
                         append_comments: append_comments.clone(),
                         ..StoreTaskUpdateParams::from(TaskUpdateParams {
@@ -109,7 +104,7 @@ impl OrbitRuntime {
                 ))
             }),
             other => Err(OrbitError::InvalidInput(format!(
-                "task '{id}' is in status '{other}'; approve requires 'proposed', 'friction', or 'review'"
+                "task '{id}' is in status '{other}'; approve requires 'proposed' or 'review'"
             ))),
         }?;
 
@@ -256,7 +251,6 @@ impl OrbitRuntime {
         // (e.g. trying to restart a task that's already in-progress).
         match task.status {
             TaskStatus::Proposed
-            | TaskStatus::Friction
             | TaskStatus::Backlog
             | TaskStatus::Someday
             | TaskStatus::Blocked => {}
@@ -267,7 +261,7 @@ impl OrbitRuntime {
             }
             other => {
                 return Err(OrbitError::InvalidInput(format!(
-                    "task '{id}' is in status '{other}'; start requires 'proposed', 'friction', 'backlog', 'someday', or 'blocked'"
+                    "task '{id}' is in status '{other}'; start requires 'proposed', 'backlog', 'someday', or 'blocked'"
                 )));
             }
         }
@@ -306,15 +300,10 @@ impl OrbitRuntime {
         };
 
         match task.status {
-            TaskStatus::Proposed | TaskStatus::Friction => {
+            TaskStatus::Proposed => {
                 warn_unmet_dependencies();
                 let result = self.with_mutation(|| {
                     let at = chrono::Utc::now();
-                    let acceptance_event = if task.status == TaskStatus::Friction {
-                        "friction_accepted"
-                    } else {
-                        "proposal_approved"
-                    };
                     let task = self.stores().tasks().update(
                         id,
                         StoreTaskUpdateParams {
@@ -323,7 +312,7 @@ impl OrbitRuntime {
                             append_history: vec![TaskHistoryEntry {
                                 at,
                                 by: effective_label.clone(),
-                                event: acceptance_event.to_string(),
+                                event: "proposal_approved".to_string(),
                                 note: note.clone(),
                                 from_status: Some(task.status),
                                 to_status: Some(TaskStatus::Backlog),
@@ -377,7 +366,7 @@ impl OrbitRuntime {
                 "task '{id}' is already in-progress"
             ))),
             other => Err(OrbitError::InvalidInput(format!(
-                "task '{id}' is in status '{other}'; start requires 'proposed', 'friction', 'backlog', 'someday', or 'blocked'"
+                "task '{id}' is in status '{other}'; start requires 'proposed', 'backlog', 'someday', or 'blocked'"
             ))),
         }
     }
@@ -402,28 +391,22 @@ impl OrbitRuntime {
         if !matches!(
             task.status,
             TaskStatus::Proposed
-                | TaskStatus::Friction
                 | TaskStatus::Backlog
                 | TaskStatus::Rejected
                 | TaskStatus::Archived
         ) {
             return Err(OrbitError::InvalidInput(format!(
-                "task '{id}' is in status '{}'; workflow admission for '{workflow}' requires 'proposed', 'friction', 'backlog', 'rejected', 'archived', or 'in-progress'",
+                "task '{id}' is in status '{}'; workflow admission for '{workflow}' requires 'proposed', 'backlog', 'rejected', 'archived', or 'in-progress'",
                 task.status
             )));
         }
 
         let note = Some(format!("workflow admission: {workflow}"));
-        let append_history = if matches!(task.status, TaskStatus::Proposed | TaskStatus::Friction) {
-            let acceptance_event = if task.status == TaskStatus::Friction {
-                "friction_accepted"
-            } else {
-                "proposal_approved"
-            };
+        let append_history = if task.status == TaskStatus::Proposed {
             vec![TaskHistoryEntry {
                 at: chrono::Utc::now(),
                 by: SYSTEM_ACTOR_LABEL.to_string(),
-                event: acceptance_event.to_string(),
+                event: "proposal_approved".to_string(),
                 note: note.clone(),
                 from_status: Some(task.status),
                 to_status: Some(TaskStatus::Backlog),
@@ -496,18 +479,13 @@ impl OrbitRuntime {
         let append_comments = build_task_comments(comment, effective_label.as_str())?;
 
         let result = match task.status {
-            TaskStatus::Proposed | TaskStatus::Friction => self.with_mutation(|| {
-                let status_event = if task.status == TaskStatus::Friction {
-                    "friction_rejected"
-                } else {
-                    "proposal_rejected"
-                };
+            TaskStatus::Proposed => self.with_mutation(|| {
                 let task = self.stores().tasks().update(
                     id,
                     StoreTaskUpdateParams {
                         actor: effective_label.clone(),
                         status: Some(TaskStatus::Rejected),
-                        status_event: Some(status_event.to_string()),
+                        status_event: Some("proposal_rejected".to_string()),
                         status_note: Some(reason.clone()),
                         append_comments: append_comments.clone(),
                         ..Default::default()
@@ -582,7 +560,7 @@ impl OrbitRuntime {
                 ))
             }),
             other => Err(OrbitError::InvalidInput(format!(
-                "task '{id}' is in status '{other}'; reject requires 'proposed', 'friction', 'review', 'backlog', or 'in-progress'"
+                "task '{id}' is in status '{other}'; reject requires 'proposed', 'review', 'backlog', or 'in-progress'"
             ))),
         }?;
 
@@ -630,49 +608,13 @@ impl OrbitRuntime {
     }
 }
 
-pub(crate) fn ensure_friction_reentry_allowed(
-    runtime: &OrbitRuntime,
-    task: &Task,
-    target_status: Option<TaskStatus>,
-) -> Result<(), OrbitError> {
-    if target_status != Some(TaskStatus::Friction) || task.status == TaskStatus::Friction {
-        return Ok(());
-    }
-
-    let history = runtime.get_task_history(&task.id)?;
-    if let Some(entry) = history
-        .iter()
-        .rev()
-        .find(|entry| entry.from_status == Some(TaskStatus::Friction))
-    {
-        let to_status = entry
-            .to_status
-            .map(|status| status.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
-        return Err(OrbitError::InvalidInput(format!(
-            "status 'friction' can only be set at creation; task '{}' previously transitioned out of friction (friction -> {to_status})",
-            task.id
-        )));
-    }
-
-    Err(OrbitError::InvalidInput(format!(
-        "status 'friction' can only be set at creation; task '{}' is currently '{}'",
-        task.id, task.status
-    )))
-}
-
 fn ensure_task_delete_allowed(id: &str, status: TaskStatus, force: bool) -> Result<(), OrbitError> {
-    if force
-        || matches!(
-            status,
-            TaskStatus::Proposed | TaskStatus::Friction | TaskStatus::Rejected
-        )
-    {
+    if force || matches!(status, TaskStatus::Proposed | TaskStatus::Rejected) {
         return Ok(());
     }
 
     Err(OrbitError::InvalidInput(format!(
-        "task '{id}' is in status '{status}'; use --force to delete tasks not in proposed, friction, or rejected status"
+        "task '{id}' is in status '{status}'; use --force to delete tasks not in proposed or rejected status"
     )))
 }
 

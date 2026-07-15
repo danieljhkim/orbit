@@ -1,41 +1,23 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
 use orbit_common::model_defaults::{
     CLAUDE_DEFAULT_WEAK, CODEX_DEFAULT_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
 };
-use orbit_common::types::{
-    Crew, CrewRoleAssignment, OrbitError,
-    activity_job::{Backend, Provider},
-    all_agent_families, resolve_crew,
-};
-use orbit_common::utility::log_rotation::LogRotationConfig;
+use orbit_common::types::{Crew, CrewRoleAssignment, OrbitError, all_agent_families};
 use orbit_common::utility::redaction::redact_home_dir;
 use orbit_engine::PrConfig;
 
 use crate::paths;
 
 use super::persistence::PersistenceConfig;
-use super::raw::{
-    RawAgentRoleConfig, RawCodexExecutionConfig, RawCrewEntry, RawDuelSection,
-    RawExecutionEnvConfig, RawPrSection, RawRoutinesConfig, RawRuntimeConfig, RawRuntimeSection,
-    RawTaskSection, RawWorkflowConfig,
-};
-
-const DEFAULT_ENV_INHERIT: bool = false;
-const DEFAULT_TASK_APPROVAL_REQUIRED_FOR_AGENT: bool = false;
-const DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL: bool = false;
-// Canonical system fallback from the Constellation provider contract. A seeded
-// or explicit workspace default remains a higher-precedence configured choice.
-const DEFAULT_SCORING_ENABLED: bool = true;
-const DEFAULT_GRAPH_EDITING: bool = false;
-const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
-const DEFAULT_WORKFLOW_CREW: &str = "claude";
-const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
+use super::raw::{RawAgentRoleConfig, RawCrewEntry, RawRuntimeConfig, RawTaskSection};
+use super::registry::ConfigSnapshot;
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
+    pub(crate) snapshot: ConfigSnapshot,
     pub(crate) execution_env: ExecutionEnvPolicy,
     pub(crate) codex_execution: CodexExecutionPolicy,
     pub(crate) persistence: PersistenceConfig,
@@ -66,11 +48,6 @@ pub(crate) struct RuntimeConfig {
     /// Applied forward-only on runtime build so machines can hold disjoint id
     /// ranges. `None` leaves the allocator untouched.
     pub(crate) tasks_id_start: Option<u32>,
-    /// Resolved JSONL log rotation/retention budgets [ORB-00415]. Sourced from
-    /// `[runtime] log_retention_days` / `log_max_total_mb` / `log_max_file_mb`;
-    /// defaults come from [`LogRotationConfig::default`]. Retained here so
-    /// `orbit config get`/`show` can report the effective values.
-    pub(crate) log_rotation: LogRotationConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,23 +76,29 @@ impl Default for RuntimeConfig {
 
 impl RuntimeConfig {
     pub(crate) fn default_for_data_root(data_root: &Path) -> Self {
+        let snapshot = ConfigSnapshot::default();
         Self {
-            execution_env: ExecutionEnvPolicy::default(),
-            codex_execution: CodexExecutionPolicy::default(),
+            execution_env: ExecutionEnvPolicy::from_snapshot(&snapshot),
+            codex_execution: CodexExecutionPolicy::from_snapshot(&snapshot),
             persistence: PersistenceConfig::default_for_data_root(data_root),
-            task_approval: TaskApprovalConfig::default(),
-            pr: PrConfig::default(),
-            scoring_enabled: DEFAULT_SCORING_ENABLED,
-            graph_editing: DEFAULT_GRAPH_EDITING,
-            v2_backend: None,
-            workflow_base_branch: DEFAULT_WORKFLOW_BASE_BRANCH.to_string(),
-            workflow_auto_ship: false,
-            routines_source: false,
+            task_approval: TaskApprovalConfig::from_snapshot(&snapshot),
+            pr: PrConfig {
+                task_url_template: snapshot.pr_task_url_template.clone(),
+            },
+            scoring_enabled: snapshot.scoring_enabled,
+            graph_editing: snapshot.graph_editing,
+            v2_backend: snapshot.runtime_backend.clone(),
+            workflow_base_branch: snapshot.workflow_base_branch.clone(),
+            workflow_auto_ship: snapshot.workflow_auto_ship,
+            routines_source: snapshot.routines_role.as_deref() == Some("source"),
             crews: default_crews(),
-            default_crew: Some(DEFAULT_WORKFLOW_CREW.to_string()),
-            duel: DuelConfig::default(),
-            tasks_id_start: None,
-            log_rotation: LogRotationConfig::default(),
+            default_crew: snapshot.workflow_default_crew.clone(),
+            duel: DuelConfig {
+                candidates: snapshot.duel_candidates.clone(),
+                models: snapshot.duel_models.clone(),
+            },
+            tasks_id_start: snapshot.tasks_id_start,
+            snapshot,
         }
     }
 
@@ -182,6 +165,12 @@ impl RuntimeConfig {
                 redact_home_dir(&config_path.display().to_string())
             ))
         })?;
+        let document = toml::from_str::<toml::Value>(raw).map_err(|err| {
+            OrbitError::InvalidInput(format!(
+                "invalid runtime config '{}': {err}",
+                redact_home_dir(&config_path.display().to_string())
+            ))
+        })?;
 
         if parsed.watch.is_some() {
             return Err(OrbitError::InvalidInput(
@@ -190,41 +179,10 @@ impl RuntimeConfig {
             ));
         }
 
-        let scoring_enabled = parsed
-            .scoring
-            .as_ref()
-            .and_then(|s| s.enabled)
-            .unwrap_or(DEFAULT_SCORING_ENABLED);
-
-        let graph_editing = parsed
-            .graph
-            .as_ref()
-            .and_then(|g| g.editing)
-            .unwrap_or(DEFAULT_GRAPH_EDITING);
-
         validate_task_artifact_store_from_raw(parsed.task.as_ref())?;
-        let v2_backend = runtime_backend_from_raw(parsed.runtime.as_ref())?;
-        // [ORB-00415] Strict gate for the JSONL log rotation/retention knobs so
-        // a malformed `[runtime]` value fails `orbit` startup with a clear
-        // error. The subscriber itself reads these keys leniently at init
-        // (before config load); this validates the same values and retains the
-        // resolved budgets so `orbit config get`/`show` can report them.
-        let log_rotation = log_rotation_from_raw(parsed.runtime.as_ref())?;
-
         reject_stale_agent_role_tables(parsed.agent.as_ref())?;
-
-        let workflow_base_branch = workflow_base_branch_from_raw(parsed.workflow.as_ref())?;
-        let workflow_auto_ship = parsed
-            .workflow
-            .as_ref()
-            .and_then(|workflow| workflow.auto_ship)
-            .unwrap_or(false);
-        let routines_source = routines_source_from_raw(parsed.routines.as_ref())?;
         let crews = crews_from_raw(parsed.crews.as_ref())?;
-        let default_crew = workflow_default_crew_from_raw(parsed.workflow.as_ref(), &crews)?;
-        let duel = duel_from_raw(parsed.duel.as_ref())?;
-        let tasks_id_start = tasks_id_start_from_raw(parsed.tasks.as_ref())?;
-        let pr = pr_config_from_raw(parsed.pr.as_ref());
+        let snapshot = ConfigSnapshot::admit(&document, config_path, &crews)?;
 
         if parsed
             .knowledge
@@ -236,26 +194,27 @@ impl RuntimeConfig {
         }
 
         Ok(Self {
-            execution_env: ExecutionEnvPolicy::from_raw(
-                parsed.execution.clone().and_then(|v| v.env),
-            )?,
-            codex_execution: CodexExecutionPolicy::from_raw(
-                parsed.execution.clone().and_then(|v| v.codex),
-            )?,
+            execution_env: ExecutionEnvPolicy::from_snapshot(&snapshot),
+            codex_execution: CodexExecutionPolicy::from_snapshot(&snapshot),
             persistence,
-            task_approval: TaskApprovalConfig::from_raw(parsed.task.as_ref())?,
-            pr,
-            scoring_enabled,
-            graph_editing,
-            v2_backend,
-            workflow_base_branch,
-            workflow_auto_ship,
-            routines_source,
+            task_approval: TaskApprovalConfig::from_snapshot(&snapshot),
+            pr: PrConfig {
+                task_url_template: snapshot.pr_task_url_template.clone(),
+            },
+            scoring_enabled: snapshot.scoring_enabled,
+            graph_editing: snapshot.graph_editing,
+            v2_backend: snapshot.runtime_backend.clone(),
+            workflow_base_branch: snapshot.workflow_base_branch.clone(),
+            workflow_auto_ship: snapshot.workflow_auto_ship,
+            routines_source: snapshot.routines_role.as_deref() == Some("source"),
             crews,
-            default_crew,
-            duel,
-            tasks_id_start,
-            log_rotation,
+            default_crew: snapshot.workflow_default_crew.clone(),
+            duel: DuelConfig {
+                candidates: snapshot.duel_candidates.clone(),
+                models: snapshot.duel_models.clone(),
+            },
+            tasks_id_start: snapshot.tasks_id_start,
+            snapshot,
         })
     }
 
@@ -287,10 +246,6 @@ impl RuntimeConfig {
 
     pub(crate) fn duel_config(&self) -> &DuelConfig {
         &self.duel
-    }
-
-    pub(crate) fn log_rotation(&self) -> &LogRotationConfig {
-        &self.log_rotation
     }
 }
 
@@ -333,113 +288,6 @@ fn crew_role(model: &str, provider: &str, backend: &str) -> CrewRoleAssignment {
         provider: provider.to_string(),
         backend: backend.to_string(),
     }
-}
-
-fn pr_config_from_raw(raw: Option<&RawPrSection>) -> PrConfig {
-    PrConfig {
-        task_url_template: raw.and_then(|section| section.task_url_template.clone()),
-    }
-}
-
-fn tasks_id_start_from_raw(
-    raw: Option<&super::raw::RawTasksConfig>,
-) -> Result<Option<u32>, OrbitError> {
-    let Some(start) = raw.and_then(|section| section.id_start) else {
-        return Ok(None);
-    };
-    if start > orbit_common::types::ORB_TASK_ID_MAX {
-        return Err(OrbitError::InvalidInput(format!(
-            "tasks.id_start {start} exceeds maximum task id {}",
-            orbit_common::types::ORB_TASK_ID_MAX
-        )));
-    }
-    Ok(Some(start))
-}
-
-fn duel_from_raw(raw: Option<&RawDuelSection>) -> Result<DuelConfig, OrbitError> {
-    let Some(raw) = raw else {
-        return Ok(DuelConfig::default());
-    };
-
-    let candidates = duel_candidates_from_raw(raw.candidates.as_deref())?;
-    let models = duel_models_from_raw(raw.models.as_ref(), &candidates)?;
-    Ok(DuelConfig { candidates, models })
-}
-
-fn duel_candidates_from_raw(raw: Option<&[String]>) -> Result<Vec<String>, OrbitError> {
-    let Some(raw_candidates) = raw else {
-        return Ok(DuelConfig::default().candidates);
-    };
-    if raw_candidates.is_empty() {
-        return Err(OrbitError::InvalidInput(format!(
-            "[duel] candidates must contain at least 3 entries; valid candidates: {}",
-            valid_duel_candidates()
-        )));
-    }
-
-    let valid: BTreeSet<&str> = all_agent_families().into_iter().collect();
-    let mut seen = BTreeSet::new();
-    let mut candidates = Vec::new();
-    for candidate in raw_candidates {
-        let normalized = candidate.trim().to_ascii_lowercase();
-        if !seen.insert(normalized.clone()) {
-            return Err(OrbitError::InvalidInput(format!(
-                "[duel] candidates contains duplicate '{normalized}' after normalization; valid candidates: {}",
-                valid_duel_candidates()
-            )));
-        }
-        if !valid.contains(normalized.as_str()) {
-            return Err(OrbitError::InvalidInput(format!(
-                "[duel] candidates contains unknown entry '{normalized}'; valid candidates: {}",
-                valid_duel_candidates()
-            )));
-        }
-        candidates.push(normalized);
-    }
-
-    if candidates.len() < 3 {
-        return Err(OrbitError::InvalidInput(format!(
-            "[duel] candidates must contain at least 3 distinct entries after normalization (got {}: {}); valid candidates: {}",
-            candidates.len(),
-            candidates.join(", "),
-            valid_duel_candidates()
-        )));
-    }
-
-    Ok(candidates)
-}
-
-fn duel_models_from_raw(
-    raw: Option<&BTreeMap<String, String>>,
-    candidates: &[String],
-) -> Result<BTreeMap<String, String>, OrbitError> {
-    let Some(raw_models) = raw else {
-        return Ok(BTreeMap::new());
-    };
-    let candidate_set: BTreeSet<&str> = candidates.iter().map(String::as_str).collect();
-    let candidate_list = candidates.join(", ");
-    let mut models = BTreeMap::new();
-    for (family, model) in raw_models {
-        let normalized_family = family.trim().to_ascii_lowercase();
-        if !candidate_set.contains(normalized_family.as_str()) {
-            return Err(OrbitError::InvalidInput(format!(
-                "[duel.models] contains key '{normalized_family}' that is not in resolved [duel].candidates ({candidate_list}); valid candidates: {}",
-                valid_duel_candidates()
-            )));
-        }
-        let trimmed_model = model.trim();
-        if trimmed_model.is_empty() {
-            return Err(OrbitError::InvalidInput(format!(
-                "[duel.models].{normalized_family} must not be empty (found '{model}'); configured candidates: {candidate_list}"
-            )));
-        }
-        models.insert(normalized_family, trimmed_model.to_string());
-    }
-    Ok(models)
-}
-
-fn valid_duel_candidates() -> String {
-    all_agent_families().join(", ")
 }
 
 fn reject_stale_agent_role_tables(
@@ -549,83 +397,6 @@ fn required_crew_field(crew: &str, field: &str, value: Option<&str>) -> Result<S
     })
 }
 
-pub(super) fn workflow_default_crew_from_raw(
-    raw: Option<&RawWorkflowConfig>,
-    crews: &BTreeMap<String, Crew>,
-) -> Result<Option<String>, OrbitError> {
-    let env_default = std::env::var(CONSTELLATION_DEFAULT_PROVIDER_ENV).ok();
-    workflow_default_crew_from_raw_with_env(raw, crews, env_default.as_deref())
-}
-
-pub(super) fn workflow_default_crew_from_raw_with_env(
-    raw: Option<&RawWorkflowConfig>,
-    crews: &BTreeMap<String, Crew>,
-    env_default: Option<&str>,
-) -> Result<Option<String>, OrbitError> {
-    let value = raw.and_then(|workflow| workflow.default_crew.as_deref());
-    let Some(value) = value else {
-        // No explicit workspace default. Apply the environment tier before the
-        // canonical system default. A selected invalid value is a loud error,
-        // never a silent fall-through to a lower tier.
-        if let Some(raw_env) = env_default.filter(|value| !value.trim().is_empty()) {
-            let provider = Provider::parse(raw_env).map_err(|err| {
-                OrbitError::InvalidInput(format!(
-                    "{CONSTELLATION_DEFAULT_PROVIDER_ENV} has invalid value: {err}"
-                ))
-            })?;
-            let crew = provider.as_str();
-            resolve_crew(crew, crews)?;
-            return Ok(Some(crew.to_string()));
-        }
-
-        if crews.contains_key(DEFAULT_WORKFLOW_CREW) {
-            return Ok(Some(DEFAULT_WORKFLOW_CREW.to_string()));
-        }
-        if crews.is_empty() {
-            return Ok(None);
-        }
-        let mut names: Vec<&str> = crews.keys().map(String::as_str).collect();
-        names.sort();
-        return Err(OrbitError::InvalidInput(format!(
-            "[workflow].default_crew must be set when defining [crews.*]; choose one of: {}",
-            names.join(", ")
-        )));
-    };
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "workflow.default_crew must not be empty".to_string(),
-        ));
-    }
-    resolve_crew(trimmed, crews)?;
-    Ok(Some(trimmed.to_string()))
-}
-
-fn runtime_backend_from_raw(raw: Option<&RawRuntimeSection>) -> Result<Option<String>, OrbitError> {
-    let Some(value) = raw.and_then(|section| section.backend.as_deref()) else {
-        return Ok(None);
-    };
-    let trimmed = value.trim();
-    let Some(backend) = Backend::parse(trimmed) else {
-        return Err(OrbitError::InvalidInput(format!(
-            "[runtime] backend has invalid value '{trimmed}'; expected one of: http, cli, auto"
-        )));
-    };
-    Ok(Some(backend.as_str().to_string()))
-}
-
-fn log_rotation_from_raw(raw: Option<&RawRuntimeSection>) -> Result<LogRotationConfig, OrbitError> {
-    let (retention_days, max_total_mb, max_file_mb) = match raw {
-        Some(section) => (
-            section.log_retention_days,
-            section.log_max_total_mb,
-            section.log_max_file_mb,
-        ),
-        None => (None, None, None),
-    };
-    LogRotationConfig::from_parts(retention_days, max_total_mb, max_file_mb)
-}
-
 fn validate_task_artifact_store_from_raw(raw: Option<&RawTaskSection>) -> Result<(), OrbitError> {
     let Some(value) = raw.and_then(|section| section.artifact_store.as_deref()) else {
         return Ok(());
@@ -634,34 +405,6 @@ fn validate_task_artifact_store_from_raw(raw: Option<&RawTaskSection>) -> Result
     Err(OrbitError::InvalidInput(format!(
         "[task] artifact_store is no longer supported; remove the key because v2 task artifacts are always enabled (found '{trimmed}')"
     )))
-}
-
-fn routines_source_from_raw(raw: Option<&RawRoutinesConfig>) -> Result<bool, OrbitError> {
-    let Some(value) = raw.and_then(|section| section.role.as_deref()) else {
-        return Ok(false);
-    };
-    match value.trim() {
-        "source" => Ok(true),
-        other => Err(OrbitError::InvalidInput(format!(
-            "[routines] role has invalid value '{other}'; the only supported value is 'source'"
-        ))),
-    }
-}
-
-fn workflow_base_branch_from_raw(raw: Option<&RawWorkflowConfig>) -> Result<String, OrbitError> {
-    let Some(raw) = raw else {
-        return Ok(DEFAULT_WORKFLOW_BASE_BRANCH.to_string());
-    };
-    let Some(value) = raw.base_branch.as_deref() else {
-        return Ok(DEFAULT_WORKFLOW_BASE_BRANCH.to_string());
-    };
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "workflow.base_branch must not be empty".to_string(),
-        ));
-    }
-    Ok(trimmed.to_string())
 }
 
 fn warn_deprecated_task_id_pattern(config_path: &Path) {
@@ -674,135 +417,48 @@ fn warn_deprecated_task_id_pattern(config_path: &Path) {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CodexExecutionPolicy {
-    sandbox: CodexSandboxMode,
-    approval_policy: Option<CodexApprovalPolicy>,
+    sandbox: String,
+    approval_policy: Option<String>,
 }
 
 impl Default for CodexExecutionPolicy {
     fn default() -> Self {
         Self {
-            sandbox: CodexSandboxMode::WorkspaceWrite,
+            sandbox: "workspace-write".to_string(),
             approval_policy: None,
         }
     }
 }
 
 impl CodexExecutionPolicy {
-    fn from_raw(raw: Option<RawCodexExecutionConfig>) -> Result<Self, OrbitError> {
-        let Some(raw) = raw else {
-            return Ok(Self::default());
-        };
-
-        let sandbox = match raw.sandbox.as_deref() {
-            Some(value) => CodexSandboxMode::parse(value)?,
-            None => CodexSandboxMode::WorkspaceWrite,
-        };
-        let approval_policy = raw
-            .approval_policy
-            .as_deref()
-            .map(CodexApprovalPolicy::parse)
-            .transpose()?;
-
-        Ok(Self {
-            sandbox,
-            approval_policy,
-        })
+    fn from_snapshot(snapshot: &ConfigSnapshot) -> Self {
+        Self {
+            sandbox: snapshot.codex_sandbox.clone(),
+            approval_policy: snapshot.codex_approval_policy.clone(),
+        }
     }
 
     pub(crate) fn sandbox(&self) -> &str {
-        self.sandbox.as_str()
+        &self.sandbox
     }
 
     pub(crate) fn approval_policy(&self) -> Option<&str> {
-        self.approval_policy.map(CodexApprovalPolicy::as_str)
+        self.approval_policy.as_deref()
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CodexSandboxMode {
-    ReadOnly,
-    WorkspaceWrite,
-    DangerFullAccess,
-}
-
-impl CodexSandboxMode {
-    fn parse(value: &str) -> Result<Self, OrbitError> {
-        match value.trim() {
-            "read-only" => Ok(Self::ReadOnly),
-            "workspace-write" => Ok(Self::WorkspaceWrite),
-            "danger-full-access" => Ok(Self::DangerFullAccess),
-            other => Err(OrbitError::InvalidInput(format!(
-                "execution.codex.sandbox has invalid value '{other}'; expected one of: read-only, workspace-write, danger-full-access"
-            ))),
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::ReadOnly => "read-only",
-            Self::WorkspaceWrite => "workspace-write",
-            Self::DangerFullAccess => "danger-full-access",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CodexApprovalPolicy {
-    Untrusted,
-    OnRequest,
-    Never,
-}
-
-impl CodexApprovalPolicy {
-    fn parse(value: &str) -> Result<Self, OrbitError> {
-        match value.trim() {
-            "untrusted" => Ok(Self::Untrusted),
-            "on-request" => Ok(Self::OnRequest),
-            "never" => Ok(Self::Never),
-            other => Err(OrbitError::InvalidInput(format!(
-                "execution.codex.approval_policy has invalid value '{other}'; expected one of: untrusted, on-request, never"
-            ))),
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Untrusted => "untrusted",
-            Self::OnRequest => "on-request",
-            Self::Never => "never",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct TaskApprovalConfig {
     pub(crate) required_for_agent: bool,
     pub(crate) delegate_approval: bool,
 }
 
-impl Default for TaskApprovalConfig {
-    fn default() -> Self {
-        Self {
-            required_for_agent: DEFAULT_TASK_APPROVAL_REQUIRED_FOR_AGENT,
-            delegate_approval: DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL,
-        }
-    }
-}
-
 impl TaskApprovalConfig {
-    fn from_raw(raw: Option<&RawTaskSection>) -> Result<Self, OrbitError> {
-        let required_for_agent = raw
-            .and_then(|section| section.approval.as_ref())
-            .and_then(|approval| approval.required_for_agent)
-            .unwrap_or(DEFAULT_TASK_APPROVAL_REQUIRED_FOR_AGENT);
-        let delegate_approval = raw
-            .and_then(|section| section.approval.as_ref())
-            .and_then(|approval| approval.delegate_approval)
-            .unwrap_or(DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL);
-        Ok(Self {
-            required_for_agent,
-            delegate_approval,
-        })
+    fn from_snapshot(snapshot: &ConfigSnapshot) -> Self {
+        Self {
+            required_for_agent: snapshot.task_approval_required_for_agent,
+            delegate_approval: snapshot.task_delegate_approval,
+        }
     }
 }
 
@@ -815,28 +471,17 @@ pub(crate) struct ExecutionEnvPolicy {
 impl Default for ExecutionEnvPolicy {
     fn default() -> Self {
         Self {
-            inherit: DEFAULT_ENV_INHERIT,
+            inherit: false,
             pass: default_pass_list(),
         }
     }
 }
 
 impl ExecutionEnvPolicy {
-    fn from_raw(raw: Option<RawExecutionEnvConfig>) -> Result<Self, OrbitError> {
-        match raw {
-            Some(raw) => {
-                // Env inheritance is fixed at DEFAULT_ENV_INHERIT and cannot be
-                // overridden by config — an untrusted workspace config.toml must
-                // not be able to widen passthrough to the full host environment
-                // (secrets/tokens). Only the `pass` allowlist is configurable.
-                // See ORB-00365.
-                let pass = normalize_pass_list(raw.pass.unwrap_or_else(default_pass_list))?;
-                Ok(Self {
-                    inherit: DEFAULT_ENV_INHERIT,
-                    pass,
-                })
-            }
-            None => Ok(Self::default()),
+    fn from_snapshot(snapshot: &ConfigSnapshot) -> Self {
+        Self {
+            inherit: snapshot.execution_env_inherit,
+            pass: snapshot.execution_env_pass.clone(),
         }
     }
 
@@ -904,17 +549,7 @@ impl ExecutionEnvPolicy {
 }
 
 fn default_pass_list() -> Vec<String> {
-    // Cross-platform POSIX base: required by virtually all CLI tools.
-    #[allow(unused_mut)]
-    let mut vars: Vec<&str> = vec!["HOME", "PATH", "CODEX_HOME", "TMPDIR", "USER"];
-
-    // macOS: SCDynamicStore / CoreFoundation requires this encoding var.
-    // Without it, agent CLIs that link system-configuration panic with
-    // "Attempted to create a NULL object".
-    #[cfg(target_os = "macos")]
-    vars.push("__CF_USER_TEXT_ENCODING");
-
-    vars.iter().map(ToString::to_string).collect()
+    ConfigSnapshot::default().execution_env_pass
 }
 
 fn cli_command_baseline_pass_list() -> Vec<String> {
@@ -924,34 +559,4 @@ fn cli_command_baseline_pass_list() -> Vec<String> {
     vars.sort();
     vars.dedup();
     vars
-}
-
-pub(crate) fn normalize_pass_list(pass: Vec<String>) -> Result<Vec<String>, OrbitError> {
-    let mut normalized = BTreeSet::new();
-    for entry in pass {
-        let value = entry.trim();
-        if value.is_empty() {
-            return Err(OrbitError::InvalidInput(
-                "execution.env.pass must not contain empty variable names".to_string(),
-            ));
-        }
-        if !is_valid_env_var_name(value) {
-            return Err(OrbitError::InvalidInput(format!(
-                "execution.env.pass contains invalid variable name '{value}'"
-            )));
-        }
-        normalized.insert(value.to_string());
-    }
-    Ok(normalized.into_iter().collect())
-}
-
-fn is_valid_env_var_name(value: &str) -> bool {
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first == '_' || first.is_ascii_alphabetic()) {
-        return false;
-    }
-    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }

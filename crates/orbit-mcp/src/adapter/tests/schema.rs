@@ -31,7 +31,7 @@ fn task_add_schema_excludes_legacy_friction_and_status_enums() {
 }
 
 #[test]
-fn task_update_schema_advertises_friction_status_enum() {
+fn task_update_schema_excludes_friction_status_enum() {
     let schema = build_input_schema("orbit.task.update", &[param("status")]);
     let properties = schema
         .get("properties")
@@ -40,7 +40,7 @@ fn task_update_schema_advertises_friction_status_enum() {
     let status_enum = properties["status"]["enum"]
         .as_array()
         .expect("status enum");
-    assert!(status_enum.iter().any(|value| value == "friction"));
+    assert!(!status_enum.iter().any(|value| value == "friction"));
 }
 
 #[test]

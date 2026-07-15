@@ -17,10 +17,7 @@ use super::paths::{
     context_workspace_root, emit_graph_unavailable_warning_if_needed,
     normalize_context_files_for_write,
 };
-use super::transitions::{
-    ensure_friction_reentry_allowed, ensure_task_has_execution_plan,
-    in_progress_transition_requires_plan,
-};
+use super::transitions::{ensure_task_has_execution_plan, in_progress_transition_requires_plan};
 
 impl OrbitRuntime {
     pub fn update_task(&self, id: &str, params: TaskUpdateParams) -> Result<Task, OrbitError> {
@@ -132,7 +129,6 @@ impl OrbitRuntime {
                         .to_string(),
                 ));
             }
-            ensure_friction_reentry_allowed(self, &task, Some(target_status))?;
             task.status
                 .validate_transition(target_status)
                 .map_err(OrbitError::TaskStatusTransition)?;

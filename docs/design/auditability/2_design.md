@@ -3,7 +3,7 @@ summary: "Auditability — Design"
 type: design
 title: "Auditability — Design"
 owner: codex
-last_updated: 2026-05-17
+last_updated: 2026-07-15
 status: Draft
 feature: auditability
 doc_role: design
@@ -37,6 +37,8 @@ The split is deliberate: command rows stay compact and queryable; envelopes pres
 After [T20260505-6], command-audit producers use the shared `audit_execution_id` helper instead of timestamp-only ids. The id keeps a stable producer prefix and appends wall-clock nanoseconds, process id, and a per-process atomic sequence so same-workspace parallel `orbit tool run ...` calls do not collide on clocks with coarse effective resolution. The SQLite unique index on `execution_id` remains the enforcement boundary.
 
 The CLI RAII guard in `crates/orbit-cli/src/audit_middleware.rs` defaults to failure, marks success or denial explicitly, and writes one row in `Drop`, so early returns still audit when stack unwinding reaches the guard. Direct `orbit audit ...` commands are outside the guard today to avoid recursive audit noise.
+
+[ORB-10200] moved command and subcommand metadata selection out of the middleware into the exhaustive `Commands::operation` registry in `crates/orbit-cli/src/command/operation.rs`. The same operation declaration now owns dispatch, runtime bootstrap policy, audit metadata, JSON error preference, and hook error suppression, so a new top-level command cannot compile until all five concerns are declared; `audit_middleware.rs` owns only audit persistence.
 
 For `orbit tool run`, [T20260427-52] first collapsed duplicate `agent` + `model` inputs. [ORB-00080] later made the family the durable identity: agent-facing `model` inputs should be `codex`, `claude`, `gemini`, or `grok`, while full model strings remain accepted for compatibility and normalize to the family before persistence. Missing identity falls back to `agent` for tool dispatch, while direct non-tool CLI commands use `admin`.
 
@@ -118,7 +120,7 @@ After [T20260428-11], compact `summary.json` counts all audited tool-run attempt
 
 After [T20260428-17] and [T20260430-4], local task review and GitHub PR review are separate scoreboard inputs. Local review-thread creations record `task-review-threads` in `task_review.json`; successful GitHub sync records `pr-review-comments` in `pr.json`. `summary.json` schema version 2 exposes these as `task_review.threads` and `pr.review_comments`, and scoring accepts only exact configured model identities or built-in defaults, skipping `human`, `system`, and arbitrary bare labels.
 
-After [T20260510-13] and [ORB-00062], friction reporting is outside the task lifecycle: `orbit.friction.add` writes markdown records under `.orbit/frictions/`; `orbit.friction.list/show/tags/update/resolve` expose scan and triage helpers; and `orbit.friction.stats` computes `open`, `triaged`, `resolved_this_month`, total resolved count, and model/tag rates on demand from that corpus plus task completion attribution. The dashboard `Knowledge > Frictions` subtab delegates to the same tool helpers through `/api/frictions*`, so human triage and CLI/MCP reads share one vocabulary and stats shape.
+After [T20260510-13] and [ORB-00062], friction reporting is outside the task lifecycle: `orbit.friction.add` writes markdown records under `.orbit/frictions/`; `orbit.friction.list/show/tags/update/resolve` expose scan and triage helpers; and `orbit.friction.stats` computes `open`, `triaged`, `resolved_this_month`, total resolved count, and model/tag rates on demand from that corpus plus task completion attribution. After [ORB-10202], `friction` is no longer a `TaskStatus` variant or accepted persisted task value. The dashboard `Knowledge > Frictions` subtab delegates to the same tool helpers through `/api/frictions*`, so human triage and CLI/MCP reads share one vocabulary and stats shape.
 
 ---
 
@@ -173,5 +175,6 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[ORB-00062]** — Surface first-class friction artifacts in the dashboard Knowledge tab and add triage endpoints.
 - **[ORB-00090]** — Aligned agent-facing provenance wording with the family-as-identity convention.
 - **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
+- **[ORB-10200]** — Derive CLI audit metadata and the other cross-cutting command policies from one exhaustive command-operation registry.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

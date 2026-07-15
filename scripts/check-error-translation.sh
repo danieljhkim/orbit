@@ -40,6 +40,7 @@ fail=0
 registry=(
   "GraphError:orbit-graph:graph_error_to_orbit"
   "SelectorParseError:orbit-common:selector_error_to_orbit"
+  "CatalogError:orbit-common:catalog_error_to_orbit"
   "RpcError:orbit-search:rpc_error_to_orbit"
   "DispatchError:orbit-engine:dispatch_error_to_orbit"
 )

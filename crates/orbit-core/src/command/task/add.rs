@@ -139,12 +139,6 @@ fn infer_task_create_type_and_status(
         ));
     }
 
-    if requested_status == Some(TaskStatus::Friction) {
-        return Err(OrbitError::InvalidInput(
-            "friction reports are no longer tasks; use orbit.friction.add".to_string(),
-        ));
-    }
-
     Ok((
         requested_type.unwrap_or(TaskType::Chore),
         requested_status.unwrap_or(default_status),

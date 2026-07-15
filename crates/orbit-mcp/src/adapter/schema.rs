@@ -61,7 +61,6 @@ const TASK_TYPE_ENUM: &[&str] = &["feature", "bug", "refactor", "chore"];
 
 const TASK_UPDATE_STATUS_ENUM: &[&str] = &[
     "proposed",
-    "friction",
     "backlog",
     "someday",
     "in-progress",

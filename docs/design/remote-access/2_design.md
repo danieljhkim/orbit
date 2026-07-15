@@ -1,16 +1,16 @@
 ---
 title: "Remote Access — Design"
 owner: claude
-last_updated: 2026-07-05
+last_updated: 2026-07-15
 status: Accepted
 feature: remote-access
 doc_role: design
 type: design
 summary: "The two shipped surfaces — global multi-workspace serve (the only mode since ORB-10029) and SSH-tunnel connect — their state model, and how they compose."
 tags: [remote-access]
-paths: ["crates/orbit-dashboard/**", "crates/orbit-cli/src/command/web.rs"]
+paths: ["crates/orbit-dashboard/**", "crates/orbit-cli/src/command/web.rs", "crates/orbit-cli/src/command/operation.rs"]
 related_features: [remote-access, user-interface]
-related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ADR-0200, ADR-0201]
+related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ORB-10200, ADR-0200, ADR-0201]
 ---
 
 # Remote Access — Design
@@ -54,7 +54,7 @@ The frontend adds a header workspace selector and an "All workspaces" aggregate 
 
 ## 4. CLI dispatch from anywhere
 
-Both surfaces must run outside a workspace, so [`main.rs`](../../../crates/orbit-cli/src/main.rs) dispatches the entire `Web` command *before* the CLI's eager `OrbitRuntime::initialize_with_root_override` (which fails when there is no current workspace): `serve` calls `serve_from_env`, `connect` calls `connect`. Missing either arm sends the command into eager init and breaks it outside a workspace — the failure mode [ORB-00029]'s follow-up fixed for `connect`.
+Both surfaces must run outside a workspace. The exhaustive [`Commands::operation`](../../../crates/orbit-cli/src/command/operation.rs) declaration therefore marks the entire `Web` command `RuntimeNeed::Forbidden` and dispatches `serve` to `serve_from_env` and `connect` to `connect`. [`main.rs`](../../../crates/orbit-cli/src/main.rs) derives its pre-bootstrap path from that operation data instead of re-enumerating web subcommands. Omitting or changing the operation arm sends the command into eager runtime initialization and breaks it outside a workspace — the failure mode [ORB-00029]'s follow-up fixed for `connect`; [ORB-10200] makes the policy compiler-enforced alongside audit and output concerns.
 
 ## 5. Security floor (inherited, unchanged)
 
@@ -78,5 +78,6 @@ Neither surface touches the loopback-only bind guard from [ORB-00360]: `check_bi
 - [ORB-00030] — Workspace-keyed state, `Ws` extractor, global serve, aggregate endpoints, frontend selector.
 - [ORB-00360] — Loopback-only bind guard and stored-XSS fix.
 - [ORB-10029] — Made global mode the only mode for `orbit web serve`; `--global` is now a deprecated no-op kept for `connect` passthrough compatibility.
+- [ORB-10200] — Moved runtime-free web dispatch into the exhaustive command-operation registry.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

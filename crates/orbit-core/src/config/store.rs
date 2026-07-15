@@ -10,7 +10,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value as JsonValue, json};
+use serde_json::Value as JsonValue;
 use toml_edit::{DocumentMut, Item, Table};
 
 use orbit_common::types::OrbitError;
@@ -18,7 +18,7 @@ use orbit_common::utility::fs::atomic_write_text;
 use orbit_common::utility::redaction::redact_home_dir;
 
 use super::persistence::PersistenceConfig;
-use super::registry;
+use super::registry::{self, ConfigSnapshot};
 use super::runtime::RuntimeConfig;
 
 /// Which physical `config.toml` file a [`ConfigStore`] is bound to.
@@ -139,7 +139,7 @@ impl ConfigStore {
             PersistenceConfig::default_for_data_root(self.path.parent().unwrap_or(&self.path));
         let raw = self.doc.to_string();
         let runtime = RuntimeConfig::from_raw_str(&raw, &self.path, persistence)?;
-        Ok(ConfigSnapshot::from(&runtime))
+        Ok(runtime.snapshot.clone())
     }
 
     /// Look up the effective value of a single registry key.
@@ -255,116 +255,4 @@ fn parse_value_literal(raw: &str) -> toml_edit::Value {
         .ok()
         .and_then(|doc| doc.get(SCRATCH_KEY).and_then(Item::as_value).cloned())
         .unwrap_or_else(|| toml_edit::Value::from(raw))
-}
-
-/// Fully resolved (defaulted) view of one `config.toml` file's settable
-/// keys, projected from [`RuntimeConfig`] so `orbit config show`/`get`
-/// report the same values the runtime itself would use.
-#[derive(Debug, Clone)]
-pub struct ConfigSnapshot {
-    pub execution_env_inherit: bool,
-    pub execution_env_pass: Vec<String>,
-    pub codex_sandbox: String,
-    pub codex_approval_policy: Option<String>,
-    pub task_approval_required_for_agent: bool,
-    pub task_delegate_approval: bool,
-    pub scoring_enabled: bool,
-    pub graph_editing: bool,
-    pub runtime_backend: Option<String>,
-    /// Effective JSONL log retention window in days [ORB-00415]. Always
-    /// populated: falls back to the `LogRotationConfig` default when the key
-    /// is not explicitly set.
-    pub runtime_log_retention_days: u64,
-    /// Effective total-size budget across JSONL log archives, in MiB.
-    pub runtime_log_max_total_mb: u64,
-    /// Effective per-file roll threshold for the active JSONL log, in MiB.
-    pub runtime_log_max_file_mb: u64,
-    pub workflow_base_branch: String,
-    pub workflow_default_crew: Option<String>,
-    pub workflow_auto_ship: bool,
-    pub routines_source: bool,
-    pub tasks_id_start: Option<u32>,
-    pub duel_candidates: Vec<String>,
-    pub duel_models: std::collections::BTreeMap<String, String>,
-    pub pr_task_url_template: Option<String>,
-}
-
-impl From<&RuntimeConfig> for ConfigSnapshot {
-    fn from(config: &RuntimeConfig) -> Self {
-        // The resolved `LogRotationConfig` stores byte budgets that were
-        // constructed by multiplying the raw MiB inputs by `BYTES_PER_MB`
-        // (or the analogous default constants), so integer division here
-        // recovers the exact MiB values the user set or would set.
-        const BYTES_PER_MB: u64 = 1024 * 1024;
-        let log_rotation = config.log_rotation();
-        Self {
-            execution_env_inherit: config.execution_env.inherit(),
-            execution_env_pass: config.execution_env.pass().to_vec(),
-            codex_sandbox: config.codex_execution.sandbox().to_string(),
-            codex_approval_policy: config
-                .codex_execution
-                .approval_policy()
-                .map(ToString::to_string),
-            task_approval_required_for_agent: config.task_approval.required_for_agent,
-            task_delegate_approval: config.task_approval.delegate_approval,
-            scoring_enabled: config.scoring_enabled,
-            graph_editing: config.graph_editing,
-            runtime_backend: config.v2_backend().map(ToString::to_string),
-            runtime_log_retention_days: log_rotation.retention_days,
-            runtime_log_max_total_mb: log_rotation.max_total_bytes / BYTES_PER_MB,
-            runtime_log_max_file_mb: log_rotation.max_file_bytes / BYTES_PER_MB,
-            workflow_base_branch: config.workflow_base_branch().to_string(),
-            workflow_default_crew: config.default_crew.clone(),
-            workflow_auto_ship: config.workflow_auto_ship(),
-            routines_source: config.routines_source(),
-            tasks_id_start: config.tasks_id_start(),
-            duel_candidates: config.duel_config().candidates.clone(),
-            duel_models: config.duel_config().models.clone(),
-            pr_task_url_template: config.pr_config().task_url_template.clone(),
-        }
-    }
-}
-
-impl ConfigSnapshot {
-    /// Look up the value for a registry key. Returns `None` for a key the
-    /// registry doesn't know about; callers validate the key against the
-    /// registry before calling this.
-    pub fn value_for(&self, key: &str) -> Option<JsonValue> {
-        Some(match key {
-            "duel.candidates" => json!(self.duel_candidates),
-            "duel.models" => json!(self.duel_models),
-            "execution.codex.approval_policy" => json!(self.codex_approval_policy),
-            "execution.codex.sandbox" => json!(self.codex_sandbox),
-            "execution.env.pass" => json!(self.execution_env_pass),
-            "graph.editing" => json!(self.graph_editing),
-            "pr.task_url_template" => json!(self.pr_task_url_template),
-            "routines.role" => json!(if self.routines_source {
-                Some("source")
-            } else {
-                None
-            }),
-            "runtime.backend" => json!(self.runtime_backend),
-            "runtime.log_max_file_mb" => json!(self.runtime_log_max_file_mb),
-            "runtime.log_max_total_mb" => json!(self.runtime_log_max_total_mb),
-            "runtime.log_retention_days" => json!(self.runtime_log_retention_days),
-            "scoring.enabled" => json!(self.scoring_enabled),
-            "task.approval.delegate_approval" => json!(self.task_delegate_approval),
-            "task.approval.required_for_agent" => json!(self.task_approval_required_for_agent),
-            "tasks.id_start" => json!(self.tasks_id_start),
-            "workflow.auto_ship" => json!(self.workflow_auto_ship),
-            "workflow.base_branch" => json!(self.workflow_base_branch),
-            "workflow.default_crew" => json!(self.workflow_default_crew),
-            _ => return None,
-        })
-    }
-
-    /// All registry keys paired with their resolved value, in registry
-    /// order (sorted by key) — the data behind `orbit config show`'s
-    /// `settings:` section.
-    pub fn all_values(&self) -> Vec<(&'static str, JsonValue)> {
-        registry::CONFIG_KEY_REGISTRY
-            .iter()
-            .filter_map(|entry| self.value_for(entry.key).map(|value| (entry.key, value)))
-            .collect()
-    }
 }

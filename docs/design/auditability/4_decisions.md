@@ -171,7 +171,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 **Decision.** Add `status: friction` as the creation status for self-reports, infer legacy friction routing at creation, and rebuild `friction_bounty.json` from task history.
 
 **Consequences.**
-- Friction inbox items are separated from human proposals while legacy friction task records remain readable.
+- Friction inbox items were separated from human proposals while legacy task records remained readable during migration.
 - Cost: legacy untriaged reports need migration, and already-triaged legacy histories depend on existing transition records.
 
 ## ADR-013 — Unified log feed exposes shared backend surfaces for dashboard UI
@@ -318,11 +318,12 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 **Context.** Friction reports are operational signal, not planned work. Storing them as task records cluttered task lists and forced accept/reject triage decisions that were more about duplicate handling than report validity.
 
-**Decision.** Store friction reports under `.orbit/frictions/{yyyy}-{mm}/F{nnn}.md` with YAML frontmatter and markdown body. Expose only `orbit.friction.add/list/show/stats`; reject new `orbit.task.add` calls that request legacy friction task routing or `status: friction`; compute rates on demand from friction records plus task completion attribution.
+**Decision.** Store friction reports under `.orbit/frictions/{yyyy}-{mm}/F{nnn}.md` with YAML frontmatter and markdown body. Expose only `orbit.friction.*` artifact operations; exclude `friction` from the task status taxonomy and reject it during task parsing; compute rates on demand from friction records plus task completion attribution.
 
 **Consequences.**
 - The backlog contains work items rather than self-report signal, and friction reports remain append-only.
-- Cost: legacy friction tasks remain readable artifacts and need a one-shot migration command to copy them into the new corpus.
+- The migration window is closed; task CLI, MCP, dashboard, and workflow surfaces no longer expose a friction status.
+- Cost: workspaces with unmigrated legacy friction tasks must migrate them before upgrading because task deserialization no longer accepts `status: friction`.
 
 ---
 
@@ -378,5 +379,6 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[ORB-00080]** — Collapse Orbit agent identity to family and isolate exact model strings to invocation/configuration surfaces.
 - **[ORB-00090]** — Align agent-facing docs and tool descriptions with the family-as-identity convention.
 - **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
+- **[ORB-10202]** — Remove the retired friction task status and consolidate task mutation attribution and record-parameter construction.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

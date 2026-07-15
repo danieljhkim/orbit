@@ -495,7 +495,7 @@ pub fn generate_summary_with_inputs(
         }
 
         // Created/Planned count *all* statuses — see [T20260508-16]: rejected
-        // and friction tasks still represent real work the agent produced.
+        // tasks still represent real work the agent produced.
         // Windowed views filter by `created_at` so an old task created
         // outside the window doesn't get re-counted today.
         if in_window(Some(task.created_at), since) {

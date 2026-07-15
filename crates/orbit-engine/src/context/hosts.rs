@@ -159,7 +159,6 @@ pub fn ensure_task_can_enter_workflow<H: TaskReadHost + ?Sized>(
     if matches!(
         task.status,
         TaskStatus::Proposed
-            | TaskStatus::Friction
             | TaskStatus::Backlog
             | TaskStatus::Rejected
             | TaskStatus::Archived
@@ -169,7 +168,7 @@ pub fn ensure_task_can_enter_workflow<H: TaskReadHost + ?Sized>(
     }
 
     Err(OrbitError::InvalidInput(format!(
-        "task '{}' is in status '{}'; workflow admission for '{workflow}' requires 'proposed', 'friction', 'backlog', 'rejected', 'archived', or 'in-progress'",
+        "task '{}' is in status '{}'; workflow admission for '{workflow}' requires 'proposed', 'backlog', 'rejected', 'archived', or 'in-progress'",
         task.id, task.status
     )))
 }

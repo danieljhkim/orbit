@@ -189,7 +189,7 @@ fn summary_counts_tasks_created_and_planned_across_all_statuses() {
         ),
         test_task(
             "T4",
-            TaskStatus::Friction,
+            TaskStatus::Someday,
             TEST_CODEX_MODEL,
             TEST_CODEX_MODEL,
         ),
@@ -205,7 +205,7 @@ fn summary_counts_tasks_created_and_planned_across_all_statuses() {
     assert_eq!(claude.tasks_planned, 2);
     // Only Done counts toward Completed (no `task.model` here, so it
     // attributes via `implemented_by`-equivalent — but we left model None;
-    // verify the attribution still ignores Backlog/Rejected/Friction).
+    // verify the attribution still ignores Backlog/Rejected/Someday).
     // T1 (Done) has implemented_by=None and model=None, so it does not
     // attribute to Completed.
     assert_eq!(claude.tasks_completed, 0);
@@ -611,7 +611,7 @@ fn summary_exposes_friction_reported_counts_from_records() {
     // Deterministic test per ORB-00143: seeds friction records for >=2 families
     // and asserts the generated scoreboard exposes nonzero `friction.reported`
     // (and zero for families with none). Uses the inputs path so it does not
-    // depend on disk state or legacy task.status=friction.
+    // depend on disk state.
     let temp = tempfile::tempdir().expect("create tempdir");
 
     let frictions: Vec<crate::friction_store::StoredFrictionRecord> = vec![

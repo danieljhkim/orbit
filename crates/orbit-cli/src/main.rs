@@ -39,146 +39,39 @@ mod parse;
 use clap::Parser;
 use orbit_core::{ActorIdentity, OrbitRuntime};
 
-use crate::command::docs::{DocsCommand, DocsSubcommand};
-use crate::command::friction::{FrictionCommand, FrictionSubcommand};
-use crate::command::hook::{HookCommand, HookSubcommand};
-use crate::command::learning::{LearningCommand, LearningSubcommand};
-use crate::command::mcp::{McpCommand, McpSubcommand};
-use crate::command::run::{RunCommand, RunSubcommand};
-use crate::command::search::SearchCommand;
-use crate::command::tool::{OutputFormat, ToolSubcommand};
-use crate::command::web::{WebCommand, WebSubcommand};
-use crate::command::workspace::{WorkspaceCommand, WorkspaceSubcommand};
-use crate::command::{Commands, Execute, init::InitCommand};
+#[cfg(test)]
+use crate::command::init::InitCommand;
+use crate::command::operation::{CommandOperation, DispatchContext, RuntimeNeed};
 
 fn main() {
     orbit_common::utility::logging::init_default_subscriber("warn");
 
     let cli = command::Cli::parse();
     let root_override = cli.root.clone();
-    let tool_run_json_output = json_error_output_preference(&cli.command);
-    let hook_pretooluse = is_hook_pretooluse_command(&cli.command);
+    let CommandOperation {
+        runtime_need,
+        audit_meta,
+        json_error_preference,
+        suppress_errors,
+        dispatch,
+    } = cli.command.operation();
 
-    // Commands that run without a pre-existing runtime
-    match cli.command {
-        Commands::Init(cmd) => {
-            if let Err(err) = execute_init_command(cmd, root_override.as_deref()) {
-                print_error(&err, tool_run_json_output);
-                std::process::exit(1);
-            }
-            return;
-        }
-        Commands::Workspace(WorkspaceCommand {
-            command: WorkspaceSubcommand::Init(args),
-        }) => {
-            if let Err(err) = args.execute_without_runtime(root_override.as_deref()) {
-                print_error(&err, tool_run_json_output);
-                std::process::exit(1);
-            }
-            return;
-        }
-        Commands::Mcp(McpCommand {
-            command: McpSubcommand::Init(args),
-        }) => {
-            if let Err(err) = args.execute_without_runtime(root_override.as_deref()) {
-                print_error(&err, tool_run_json_output);
-                std::process::exit(1);
-            }
-            return;
-        }
-        Commands::Mcp(McpCommand {
-            command: McpSubcommand::Remove(args),
-        }) => {
-            if let Err(err) = args.execute_without_runtime(root_override.as_deref()) {
-                print_error(&err, tool_run_json_output);
-                std::process::exit(1);
-            }
-            return;
-        }
-        Commands::Mcp(McpCommand {
-            command: McpSubcommand::Serve(args),
-        }) => {
-            if let Err(err) = args.execute_without_runtime(root_override.as_deref()) {
-                print_error(&err, tool_run_json_output);
-                std::process::exit(1);
-            }
-            return;
-        }
-        // `orbit migrate --dry-run` must not bootstrap a runtime: opening one
-        // auto-applies the very migrations the dry-run is listing. The apply
-        // form (no --dry-run) falls through to the normal audited path below.
-        Commands::Migrate(cmd) if cmd.dry_run => {
-            if let Err(err) = cmd.execute_without_runtime(root_override.as_deref()) {
-                print_error(&err, tool_run_json_output);
-                std::process::exit(1);
-            }
-            return;
-        }
-        Commands::Learning(LearningCommand {
-            command: LearningSubcommand::MigrateLayout(args),
-        }) => {
-            if let Err(err) = args.execute_without_runtime(root_override.as_deref()) {
-                print_error(&err, tool_run_json_output);
-                std::process::exit(1);
-            }
-            return;
-        }
-        // `orbit run ship-sweep` iterates the global workspace registry and
-        // must never bootstrap a `.orbit/` in the scheduler's cwd, so it
-        // dispatches before the eager workspace initialization below.
-        Commands::Run(RunCommand {
-            command: RunSubcommand::ShipSweep(args),
-        }) => {
-            if let Err(err) = args.execute_without_runtime() {
-                print_error(&err, tool_run_json_output);
-                std::process::exit(1);
-            }
-            return;
-        }
-        // `orbit sweep` and `orbit routine` resolve everything from the
-        // global registry and host-local scheduler state; like ship-sweep
-        // they must never bootstrap a `.orbit/` in the scheduler's cwd.
-        Commands::Sweep(cmd) => {
-            if let Err(err) = cmd.execute_without_runtime() {
-                print_error(&err, tool_run_json_output);
-                std::process::exit(1);
-            }
-            return;
-        }
-        Commands::Routine(cmd) => {
-            if let Err(err) = cmd.execute_without_runtime() {
-                print_error(&err, tool_run_json_output);
-                std::process::exit(1);
-            }
-            return;
-        }
-        // `orbit web` resolves its own workspace(s): `serve` can serve globally
-        // from any directory, and `connect` is a client-side SSH tunnel whose
-        // workspace lives on the remote. Both must dispatch before the eager
-        // workspace initialization below (which fails outside a workspace).
-        Commands::Web(WebCommand { command }) => {
-            let result = match command {
-                WebSubcommand::Serve(args) => {
-                    orbit_dashboard::serve_from_env(args, root_override.as_deref())
-                }
-                WebSubcommand::Connect(args) => orbit_dashboard::connect(args),
-            };
-            if let Err(err) = result {
-                print_error(&err, tool_run_json_output);
-                std::process::exit(1);
-            }
-            return;
-        }
-        _ => {}
+    if matches!(runtime_need, RuntimeNeed::Forbidden) {
+        let result = dispatch(
+            cli.command,
+            DispatchContext::without_runtime(root_override.as_deref()),
+        );
+        finish_command(result, suppress_errors, json_error_preference);
+        return;
     }
 
     let runtime = match OrbitRuntime::initialize_with_root_override(root_override.as_deref()) {
         Ok(runtime) => runtime,
         Err(err) => {
-            if hook_pretooluse {
+            if suppress_errors {
                 return;
             }
-            print_error(&err, tool_run_json_output);
+            print_error(&err, json_error_preference);
             std::process::exit(1);
         }
     }
@@ -186,12 +79,11 @@ fn main() {
     // reclassify themselves as agent-driven inside `execute_tool_command`.
     .with_actor(ActorIdentity::human("human"));
 
-    let result = match cli.command {
-        Commands::Audit(cmd) => cmd.execute(&runtime),
-        other => {
-            let meta = audit_middleware::extract_command_meta(&other);
+    let context = DispatchContext::with_runtime(&runtime, root_override.as_deref());
+    let result = match audit_meta {
+        Some(meta) => {
             let mut guard = audit_middleware::AuditGuard::new(&runtime, meta);
-            let result = other.execute(&runtime);
+            let result = dispatch(cli.command, context);
             match &result {
                 Ok(()) => guard.mark_success(),
                 Err(orbit_core::OrbitError::PolicyDenied(msg)) => guard.mark_denied(msg),
@@ -199,60 +91,24 @@ fn main() {
             }
             result
         }
+        None => dispatch(cli.command, context),
     };
 
+    finish_command(result, suppress_errors, json_error_preference);
+}
+
+fn finish_command(
+    result: Result<(), orbit_core::OrbitError>,
+    suppress_errors: bool,
+    json_error_preference: Option<bool>,
+) {
     if let Err(err) = result {
-        if hook_pretooluse {
+        if suppress_errors {
             return;
         }
-        print_error(&err, tool_run_json_output);
+        print_error(&err, json_error_preference);
         std::process::exit(1);
     }
-}
-
-fn execute_init_command(
-    cmd: InitCommand,
-    root_override: Option<&std::path::Path>,
-) -> Result<(), orbit_core::OrbitError> {
-    cmd.execute_without_runtime(root_override)
-}
-
-fn json_error_output_preference(command: &Commands) -> Option<bool> {
-    match command {
-        Commands::Tool(command) => match &command.command {
-            ToolSubcommand::Run(args) if matches!(args.output, OutputFormat::Json) => {
-                Some(args.pretty)
-            }
-            _ => None,
-        },
-        Commands::Docs(DocsCommand { command }) => match command {
-            DocsSubcommand::List(args) => args.json.then_some(true),
-            DocsSubcommand::Show(args) => args.json.then_some(true),
-            DocsSubcommand::Add(args) => args.json.then_some(true),
-            DocsSubcommand::Index(args) => args.json.then_some(true),
-            DocsSubcommand::Migrate(args) => args.json.then_some(true),
-        },
-        Commands::Friction(FrictionCommand { command }) => match command {
-            FrictionSubcommand::Add(args) => args.json.then_some(true),
-            FrictionSubcommand::List(args) => args.json.then_some(true),
-            FrictionSubcommand::Show(args) => args.json.then_some(true),
-            FrictionSubcommand::Stats(args) => args.json.then_some(true),
-            FrictionSubcommand::Tags(args) => args.json.then_some(true),
-            FrictionSubcommand::Update(args) => args.json.then_some(true),
-            FrictionSubcommand::Resolve(args) => args.json.then_some(true),
-        },
-        Commands::Search(SearchCommand { json: true, .. }) => Some(true),
-        _ => None,
-    }
-}
-
-fn is_hook_pretooluse_command(command: &Commands) -> bool {
-    matches!(
-        command,
-        Commands::Hook(HookCommand {
-            command: HookSubcommand::Pretooluse(_)
-        })
-    )
 }
 
 fn print_error(error: &orbit_core::OrbitError, tool_run_json_output: Option<bool>) {

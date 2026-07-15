@@ -95,7 +95,6 @@ const TASK_ADD_STATUS_ENUM: &[&str] = &[
 
 const TASK_UPDATE_STATUS_ENUM: &[&str] = &[
     "proposed",
-    "friction",
     "backlog",
     "someday",
     "in-progress",

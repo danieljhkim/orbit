@@ -5,7 +5,6 @@ pub fn status_color_cell(status: &str) -> Cell {
     let cell = Cell::new(status);
     match status {
         "proposed" => cell.fg(Color::Yellow),
-        "friction" => cell.fg(Color::Yellow),
         "in-progress" => cell.fg(Color::Cyan),
         "review" => cell.fg(Color::Magenta),
         "done" => cell.fg(Color::Green).add_attribute(Attribute::Bold),
@@ -53,7 +52,6 @@ pub fn doctor_status_color_cell(status: &str) -> Cell {
 pub fn status_color(status: &str) -> String {
     match status {
         "proposed" => status.yellow().to_string(),
-        "friction" => status.yellow().to_string(),
         "backlog" => status.to_string(),
         "in-progress" => status.cyan().to_string(),
         "review" => status.magenta().to_string(),

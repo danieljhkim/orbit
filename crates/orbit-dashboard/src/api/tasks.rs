@@ -22,7 +22,6 @@ const DASHBOARD_TASK_STATUSES: &[TaskStatus] = &[
     TaskStatus::Review,
     TaskStatus::Blocked,
     TaskStatus::Proposed,
-    TaskStatus::Friction,
     TaskStatus::Backlog,
     TaskStatus::Someday,
     TaskStatus::Rejected,

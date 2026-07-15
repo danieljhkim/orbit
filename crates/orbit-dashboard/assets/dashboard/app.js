@@ -47,7 +47,7 @@ const STATUS_ORDER = [
 
 const DEFAULT_INACTIVE_STATUSES = new Set(["someday"]);
 const STATUS_UPDATE_TARGETS = STATUS_ORDER
-  .filter((status) => !["friction", "rejected", "archived"].includes(status))
+  .filter((status) => !["rejected", "archived"].includes(status))
   .concat(["done"]);
 
 const JOB_RUN_LIMIT = positiveIntParam("runs", 25);

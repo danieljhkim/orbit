@@ -16,7 +16,6 @@ use tempfile::tempdir;
 
 use crate::OrbitRuntime;
 use crate::command::task::{SYSTEM_ACTOR_LABEL, TaskAddParams, TaskUpdateParams};
-use crate::runtime::TaskRecordUpdateParams;
 
 fn test_runtime() -> (tempfile::TempDir, OrbitRuntime) {
     let root = tempdir().expect("create tempdir");
@@ -109,29 +108,6 @@ fn approve_for_execution(runtime: &OrbitRuntime, task: &Task) -> Task {
             None,
         )
         .expect("approve task")
-}
-
-fn seed_legacy_friction_task(runtime: &OrbitRuntime, title: &str) -> Task {
-    let task = runtime
-        .add_task(TaskAddParams {
-            title: title.to_string(),
-            description: "Exercise a legacy task with friction status.".to_string(),
-            workspace_path: Some(".".to_string()),
-            ..Default::default()
-        })
-        .expect("create friction candidate");
-    runtime
-        .stores()
-        .tasks()
-        .update(
-            &task.id,
-            TaskRecordUpdateParams {
-                actor: SYSTEM_ACTOR_LABEL.to_string(),
-                status: Some(TaskStatus::Friction),
-                ..Default::default()
-            },
-        )
-        .expect("seed legacy friction task")
 }
 
 fn init_git_repo(repo: &Path) {
@@ -340,14 +316,11 @@ fn worktree_setup_admits_unplanned_workflow_statuses() {
         })
         .expect("create archived candidate");
     runtime.archive_task(&archived.id).expect("archive task");
-    let friction = seed_legacy_friction_task(&runtime, "Friction workflow task");
-
     let task_ids = vec![
         proposed.id.clone(),
         backlog.id.clone(),
         rejected.id.clone(),
         archived.id.clone(),
-        friction.id.clone(),
     ];
     let output = run_worktree_setup(&runtime, &task_ids, "jrun-admit");
     let workspace_path = output["workspace_path"]
@@ -366,36 +339,6 @@ fn worktree_setup_admits_unplanned_workflow_statuses() {
         .admit_task_for_workflow_as_system(&proposed.id, "worktree_setup")
         .expect("idempotent workflow admission");
     assert_eq!(admitted_again.status, TaskStatus::InProgress);
-}
-
-#[test]
-fn automation_rejects_friction_reentry_with_history_context() {
-    let (_root, runtime) = test_runtime();
-    let task = seed_legacy_friction_task(&runtime, "Automation friction reentry");
-    runtime
-        .update_task(
-            &task.id,
-            TaskUpdateParams {
-                status: Some(TaskStatus::Backlog),
-                ..Default::default()
-            },
-        )
-        .expect("transition legacy friction to backlog");
-
-    let err = runtime
-        .apply_task_automation_update(
-            &task.id,
-            TaskAutomationUpdate {
-                status: Some(TaskStatus::Friction),
-                ..TaskAutomationUpdate::default()
-            },
-        )
-        .expect_err("automation friction reentry must fail");
-    assert!(
-        err.to_string()
-            .contains("previously transitioned out of friction (friction -> backlog)"),
-        "{err}"
-    );
 }
 
 #[test]

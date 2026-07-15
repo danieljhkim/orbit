@@ -9,7 +9,6 @@ use orbit_engine::{
 use crate::OrbitRuntime;
 use crate::command::task::{
     SYSTEM_ACTOR_LABEL, TaskAttributionInput, TaskUpdateParams, assemble_task_attribution,
-    ensure_friction_reentry_allowed,
 };
 use crate::runtime::TaskRecordUpdateParams as StoreTaskUpdateParams;
 
@@ -86,7 +85,6 @@ impl TaskWriteHost for OrbitRuntime {
         update: TaskAutomationUpdate,
     ) -> Result<(), OrbitError> {
         let existing_task = self.get_task(task_id)?;
-        ensure_friction_reentry_allowed(self, &existing_task, update.status)?;
         if update.status == Some(TaskStatus::InProgress)
             && crate::command::task::in_progress_transition_requires_plan(existing_task.status)
         {
