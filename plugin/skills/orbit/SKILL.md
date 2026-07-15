@@ -55,7 +55,7 @@ orbit tool run orbit.search --input '{"query": "topic phrase", "hybrid": true, "
 orbit tool run orbit.task.add --input '{"title": "...", "description": "...", "acceptance_criteria": ["..."], "workspace": ".", "model": "<agent-family>"}'
 orbit tool run orbit.task.update --input '{"id": "<id>", "plan": "...", "model": "<agent-family>"}'
 orbit tool run orbit.task.start --input '{"id": "<id>", "note": "...", "model": "<agent-family>"}'            # backlog -> in-progress
-orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "...", "model": "<agent-family>"}'          # proposed/friction -> backlog, review -> done
+orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "...", "model": "<agent-family>"}'          # proposed -> backlog, review -> done
 orbit tool run orbit.task.review_thread.add --input '{"id": "<id>", "body": "...", "path": "<path>", "line": "<line>", "model": "<agent-family>"}'
 ```
 
@@ -70,8 +70,6 @@ orbit tool run orbit.task.review_thread.add --input '{"id": "<id>", "body": "...
 
 ```text
 proposed → backlog → in-progress → review → done
-         ↘ rejected
-friction → backlog | in-progress | done
          ↘ rejected
 
 someday → in-progress
