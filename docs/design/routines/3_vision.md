@@ -1,7 +1,7 @@
 ---
 title: Routines — Vision
 owner: claude
-last_updated: 2026-07-04
+last_updated: 2026-07-15
 status: Draft
 feature: routines
 doc_role: vision
@@ -10,7 +10,7 @@ summary: Open questions and prior art for the routines scheduler — leases, eve
 tags: [routines, scheduler]
 paths: ["crates/orbit-core/src/routines/**"]
 related_features: [routines, activity-job]
-related_artifacts: [ORB-10001, ORB-10021]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ADR-0223]
 ---
 
 # Routines — Vision
@@ -31,30 +31,33 @@ and an ADR, not by drifting in.
    mode needs a lease: the natural v2 shape is a lease table in one designated host's store,
    reached over SSH (port 22 is the only always-open channel between the current hosts).
    Worth doing only when a real routine needs failover, not before.
-2. **Folding `ship-sweep` into a routine.** `orbit run ship-sweep` predates routines and
-   hard-codes its own opt-in (`[workflow] auto_ship`). Once routines ship, ship-sweep is
-   expressible as a seeded routine targeting the backlog-dispatch job. Convergence would
-   retire one bespoke scheduler entrypoint — but only after routines have run unattended
-   long enough to be trusted with it.
-3. **Event triggers.** File-watch, webhook, or run-completion triggers ("reindex after any
+2. **Event triggers.** File-watch, webhook, or run-completion triggers ("reindex after any
    docs change") require a resident process — the thing v1 deliberately avoids. If bridge
    ever grows a long-lived daemon on the always-on box, it may be the natural event source,
    with routines subscribing rather than Orbit growing its own daemon.
-4. **Routine-emitted tasks.** A routine whose job files an Orbit task on findings (nightly
+3. **Routine-emitted tasks.** A routine whose job files an Orbit task on findings (nightly
    drift check → task per drift) works today via job semantics; what's open is whether
    routines should get first-class dedup support ("don't file a duplicate of an open task
    from a previous fire") or leave that to job logic.
-5. **Sub-minute and jitter.** Minute granularity is a v1 floor. Per-routine jitter matters
+4. **Sub-minute and jitter.** Minute granularity is a v1 floor. Per-routine jitter matters
    only if many routines land on the same slot and contend; revisit when there are enough
    routines for it to be observable.
-6. **Missed-run variants.** `catch_up_once | skip` covers current needs; a count-preserving
+5. **Missed-run variants.** `catch_up_once | skip` covers current needs; a count-preserving
    `catch_up_all` (anacron-style) is additive if a routine ever needs per-slot semantics.
-7. **Cross-host visibility.** Each host's state is local, so "did the nightly commit fire
+6. **Cross-host visibility.** Each host's state is local, so "did the nightly commit fire
    on the other box?" requires asking that box. The single-host half of this is now built:
    `GET /api/routines` projects this host's routine health (last fire, outcome, duration,
    next due) over the dashboard HTTP API [ORB-10138], so a stopped sweep is visible remotely
    without box ssh. True cross-host *aggregation* (one surface querying every box's store)
    remains open; state *sync* is still explicitly not the answer.
+
+### Graduated
+
+- **Workspace-local ship-sweep convergence ([ORB-10207], [ADR-0223]).** The default
+  `ship_sweep` routine delegates synchronously to the normal shipment pipeline for only
+  its source workspace. It is seeded disabled and enabled through the versioned
+  definition. The legacy global CLI entrypoint remains during burn-in; removing it is a
+  separate compatibility task.
 
 ---
 
@@ -117,5 +120,6 @@ External:
 
 - [ORB-10001] — authored this design-doc folder (proposal; no implementation).
 - [ORB-10021] — implemented routines v1.
+- [ORB-10207] — graduated workspace-local ship-sweep scheduling from this vision.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

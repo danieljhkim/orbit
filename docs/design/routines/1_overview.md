@@ -1,7 +1,7 @@
 ---
 title: Routines — Overview
 owner: claude
-last_updated: 2026-07-04
+last_updated: 2026-07-15
 status: Accepted
 feature: routines
 doc_role: overview
@@ -10,7 +10,7 @@ summary: Durable, git-versioned scheduler primitive that fires catalog jobs/acti
 tags: [routines, scheduler]
 paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**"]
 related_features: [routines, activity-job]
-related_artifacts: [ORB-10001, ORB-10021]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ADR-0223]
 ---
 
 # Routines — Overview
@@ -27,6 +27,13 @@ is host-local and never synced. [2_design.md](./2_design.md) is the v1 contract;
 > **Status.** v1 shipped in [ORB-10021]; the At a Glance table lists the actual home of
 > each concern. Targets are `job:<name>` in v1 — see [ADR-0206] for why `activity:` is
 > reserved.
+
+`orbit workspace init` creates the complete default set (`auto_task_scheduler`,
+`task_triage`, and `ship_sweep`) under `.orbit/routines/`. Every default is
+`enabled: false`: scheduled execution is an explicit, versioned opt-in made by changing
+the reviewed definition to `enabled: true`. Re-init creates newly introduced missing
+defaults but never rewrites existing routine files; those files belong to the workspace
+after seeding. A destructive force initialization recreates templates from defaults.
 
 ---
 
@@ -89,6 +96,7 @@ fragmentation this feature exists to end.
 | `orbit routine` CLI (`list/show/pause/resume/init`) | `crates/orbit-cli/src/command/routine/` | [ORB-10021] |
 | launchd/systemd unit templates + installer | `crates/orbit-core/assets/clock/` + `src/routines/clock.rs` | [ORB-10021] |
 | `[routines] role = "source"` config key | `crates/orbit-core/src/config/{raw,runtime}.rs` | [ORB-10021] |
+| Disabled default routine seeding + workspace ship wrapper | `crates/orbit-core/assets/{routines,jobs}/` | [ORB-10207] / [ADR-0223] |
 
 ---
 
@@ -96,6 +104,7 @@ fragmentation this feature exists to end.
 
 - [ORB-10001] — authored this design-doc folder (proposal; no implementation).
 - [ORB-10021] — implemented routines v1 (types, store, sweep, CLI, clock units).
+- [ORB-10207] — seeded opt-in defaults and the workspace-local ship-sweep wrapper.
 - [ORB-00374] — removed the `shell` activity variant and `run_shell` dispatch (fail-closed);
   routines inherit this constraint.
 

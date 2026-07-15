@@ -1,16 +1,16 @@
 ---
 title: Routines — Decisions
 owner: claude
-last_updated: 2026-07-11
+last_updated: 2026-07-15
 status: Accepted
 feature: routines
 doc_role: decisions
 type: design
-summary: ADR log for the routines scheduler — five decisions allocated and accepted with the v1 implementation.
+summary: ADR log for the routines scheduler, including default seeding and workspace-local shipment.
 tags: [routines, scheduler]
 paths: ["crates/orbit-core/src/routines/**"]
 related_features: [routines, activity-job]
-related_artifacts: [ORB-10001, ORB-10021]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ADR-0223]
 ---
 
 # Routines — Decisions
@@ -200,13 +200,14 @@ directory (a discovery-model change ADR-0205 deliberately avoided).
 `.orbit/routines/`, resolving `__ORBIT_HOST_ID__` via `resolve_host_id` and
 `__ORBIT_ROUTINE_NAME__` from a workspace-directory slug (`task-triage-<workspace>`),
 validating each rendered document fail-closed before writing. Plain re-init preserves
-user edits; `--refresh-defaults` / `--force` re-render. Seeded routines stay inert until
-the workspace opts into `[routines] role = "source"`.
+user edits while creating newly introduced missing defaults; destructive `--force`
+recreates templates. Every default is seeded with `enabled: false`, so a routine fires
+only after the workspace is a routine source and its versioned enable switch is set true.
 
 ### Consequences
 
-- A fresh workspace gets working periodic triage (hourly, `overlap: forbid`, deliberately
-  sparser than the ~20-minute ship sweep) the moment it becomes a routine source.
+- A fresh workspace gets reviewable definitions without silently granting scheduled
+  execution; each routine is enabled explicitly in version control.
 - Per-workspace names let multiple seeded source workspaces coexist on one host despite
   the global name-uniqueness rule.
 - The seeded file pins the initializing host; sharing the repo to another host needs a
@@ -217,11 +218,41 @@ the workspace opts into `[routines] role = "source"`.
 
 ---
 
+## ADR-0223 — Delegate workspace ship routines through a synchronous wrapper job
+
+**Status:** Accepted · 2026-07 · [ORB-10207]
+
+### Context
+
+A scheduled ship routine must dispatch only its source workspace, resolve that workspace's
+ship mode and base branch, and keep the parent run active until normal backlog shipment
+finishes. The alternatives were special-casing routine dispatch, spawning the legacy
+multi-workspace CLI sweep, or composing the existing job catalog.
+
+### Decision
+
+Seed a workspace-local `ship_sweep` routine targeting `workspace_ship_pipeline`. The
+wrapper deterministically resolves ship input for its active runtime, invokes and waits
+for `task_auto_pipeline` with no explicit task IDs, and guards child success. It does not
+consult `workflow.auto_ship` or the cross-workspace sweep path.
+
+### Consequences
+
+- Backlog discovery, readiness, locking, bundling, crew selection, and gates remain owned
+  by `task_auto_pipeline`; an empty backlog remains a clean no-op.
+- `overlap: forbid` covers child shipment because the wrapper remains active while waiting.
+- The legacy global ship-sweep remains compatible during burn-in but is not used by routines.
+- Cost: the catalog gains a wrapper job and deterministic resolver activity whose input
+  contract must stay aligned with the canonical ship workflow.
+
+---
+
 ## Task References
 
 - [ORB-10001] — authored this design-doc folder (proposal).
 - [ORB-10021] — implemented routines v1; allocated and accepted ADR-0204..ADR-0208.
 - [ORB-10129] — shipped the default triage routine; allocated and accepted ADR-0215.
+- [ORB-10207] — seeded disabled defaults and allocated/accepted ADR-0223 for workspace ship.
 - [ORB-10138] — exposed per-routine scheduler health over the dashboard HTTP API
   (`GET /api/routines`), realizing the single-host half of the §7 cross-host-visibility
   vision. Read-only projection of `routine_statuses`; no new ADR (no new architectural

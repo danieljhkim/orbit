@@ -1,7 +1,7 @@
 ---
 title: Routines — Design
 owner: claude
-last_updated: 2026-07-05
+last_updated: 2026-07-15
 status: Accepted
 feature: routines
 doc_role: design
@@ -10,7 +10,7 @@ summary: Proposed contract for routine definitions, sweep dispatch, host-local s
 tags: [routines, scheduler]
 paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**"]
 related_features: [routines, activity-job]
-related_artifacts: [ORB-10001, ORB-10021]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ADR-0223]
 ---
 
 # Routines — Design
@@ -74,6 +74,26 @@ Field semantics:
 
 Parsing is fail-closed: an invalid routine file is reported and *that routine* is treated
 as absent; it never degrades into "fire with defaults".
+
+### Seeded defaults and ownership
+
+`orbit workspace init` seeds `auto_task_scheduler.yaml`, `task_triage.yaml`, and
+`ship_sweep.yaml` with a workspace-unique name, the resolved host pin, and
+`enabled: false`. The definition's versioned `enabled` field is the opt-in: changing it
+to `true` deliberately grants that scheduled capability in the workspace.
+
+Seeded files become workspace-authored immediately. Plain re-init is create-if-missing:
+it adds a newly shipped default or recreates a deleted default, but byte-for-byte preserves
+existing definitions, including `enabled`, `hosts`, cron, and policy edits. Only destructive
+force initialization recreates the workspace and therefore restores template defaults.
+
+The seeded `ship_sweep` targets `job:workspace_ship_pipeline` with `missed_run: skip` and
+`overlap: forbid`. The wrapper resolves the source runtime's ship mode and configured base
+branch, invokes and waits for `task_auto_pipeline` without explicit task IDs, and guards
+its result. It never calls the legacy cross-workspace CLI sweep or consults
+`[workflow] auto_ship`; the child's existing empty-backlog path is a successful no-op.
+Waiting keeps the wrapper run active for the whole shipment, so routine overlap protection
+covers the child rather than only submission ([ADR-0223]).
 
 ---
 
@@ -142,9 +162,9 @@ Per pass:
 Fires are normal runs: they appear in run history, carry v2 audit envelopes, and are
 debuggable with the existing run tooling — there is no separate "scheduled run" ledger.
 
-Naming note: `orbit sweep` is the general scheduler pass; `orbit run ship-sweep` remains
-the shipped, single-purpose backlog sweep. Folding ship-sweep into a seeded routine is a
-vision item ([3_vision.md](./3_vision.md) §1), not a v1 goal.
+Naming note: `orbit sweep` is the general scheduler pass. The seeded `ship_sweep` routine
+is workspace-local; the legacy `orbit run ship-sweep` cross-workspace entrypoint remains
+compatible during routine burn-in and is a separate eventual-removal concern.
 
 ---
 
@@ -227,6 +247,7 @@ out of v1 scope for this reason.
 
 - [ORB-10001] — authored this design-doc folder (proposal; no implementation).
 - [ORB-10021] — implemented routines v1 (types, store, sweep, CLI, clock units).
+- [ORB-10207] — added disabled-by-default seeding and workspace-local ship sweep.
 - [ORB-00374] — removed the `shell` activity variant and `run_shell` dispatch (fail-closed);
   routines inherit this constraint.
 

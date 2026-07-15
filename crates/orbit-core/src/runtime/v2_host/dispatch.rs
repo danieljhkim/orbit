@@ -188,6 +188,10 @@ pub(super) fn run_deterministic(
                 action: action.to_string(),
                 message: error.to_string(),
             }),
+        // ADR-0223: scheduled shipment resolves only the active runtime's
+        // canonical ship input; cross-workspace enumeration stays in the
+        // legacy CLI sweep and `workflow.auto_ship` is deliberately ignored.
+        "resolve_workspace_ship_input" => resolve_workspace_ship_input(runtime, action),
         // Materialize the workspace backlog for auto-dispatch.
         // Filters by `status: backlog`. In automatic mode, drops any backlog
         // task group whose context overlaps files
@@ -301,6 +305,34 @@ pub(super) fn run_deterministic(
     }
 }
 
+fn resolve_workspace_ship_input(
+    runtime: &OrbitRuntime,
+    action: &str,
+) -> Result<Value, DispatchError> {
+    let registry_path = crate::workspace_registry::registry_path_for(&runtime.global_root());
+    let registry =
+        crate::workspace_registry::load_registry_from(&registry_path).map_err(|error| {
+            DispatchError::DeterministicActionFailed {
+                action: action.to_string(),
+                message: format!("load workspace registry: {error}"),
+            }
+        })?;
+    let source_orbit_dir = runtime.shared_root();
+    let mode = registry
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.orbit_dir == source_orbit_dir)
+        .map(crate::command::workflow::resolved_ship_mode)
+        .unwrap_or(crate::command::workflow::ShipMode::Local);
+
+    crate::command::workflow::build_ship_input(mode, runtime.workflow_base_branch(), &[]).map_err(
+        |error| DispatchError::DeterministicActionFailed {
+            action: action.to_string(),
+            message: format!("resolve workspace ship input: {error}"),
+        },
+    )
+}
+
 fn unmet_dependency_ids_for_input(
     runtime: &OrbitRuntime,
     input: &Value,
@@ -388,6 +420,9 @@ mod tests {
     use orbit_engine::V2RuntimeHost;
     use orbit_tools::ToolContext;
     use serde_json::json;
+    use tempfile::tempdir;
+
+    use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
 
     fn seed_task(
         runtime: &OrbitRuntime,
@@ -458,6 +493,68 @@ mod tests {
             }
             other => panic!("expected registered action failure, got {other}"),
         }
+    }
+
+    #[test]
+    fn workspace_ship_input_is_source_local_and_ignores_auto_ship() {
+        let root = tempdir().expect("tempdir");
+        let global = root.path().join("global");
+        let source_root = root.path().join("source");
+        let source_orbit = source_root.join(".orbit");
+        let other_root = root.path().join("other");
+        let other_orbit = other_root.join(".orbit");
+        std::fs::create_dir_all(&source_orbit).expect("source orbit");
+        std::fs::create_dir_all(&other_orbit).expect("other orbit");
+        std::fs::create_dir_all(&global).expect("global orbit");
+        std::fs::write(
+            source_orbit.join("config.toml"),
+            "[workflow]\nbase_branch = \"agent-main\"\nauto_ship = false\n",
+        )
+        .expect("source config");
+
+        let now = Utc::now();
+        let registry = WorkspaceRegistry {
+            workspaces: vec![
+                Workspace {
+                    id: "ws-other".to_string(),
+                    name: "other".to_string(),
+                    root: other_root,
+                    orbit_dir: other_orbit,
+                    git_remote: None,
+                    ship_mode: Some("local".to_string()),
+                    base_branch: "wrong-branch".to_string(),
+                    status: WorkspaceStatus::Active,
+                    created_at: now,
+                    updated_at: now,
+                },
+                Workspace {
+                    id: "ws-source".to_string(),
+                    name: "source".to_string(),
+                    root: source_root,
+                    orbit_dir: source_orbit.clone(),
+                    git_remote: None,
+                    ship_mode: Some("pr".to_string()),
+                    base_branch: "registry-branch".to_string(),
+                    status: WorkspaceStatus::Active,
+                    created_at: now,
+                    updated_at: now,
+                },
+            ],
+            ..WorkspaceRegistry::default()
+        };
+        crate::workspace_registry::save_registry_to(
+            &registry,
+            &crate::workspace_registry::registry_path_for(&global),
+        )
+        .expect("save registry");
+
+        let runtime = OrbitRuntime::from_roots(&global, &source_orbit).expect("source runtime");
+        assert!(!runtime.workflow_auto_ship());
+        let input = resolve_workspace_ship_input(&runtime, "resolve_workspace_ship_input")
+            .expect("resolve source ship input");
+
+        assert_eq!(input, json!({"mode": "pr", "base_branch": "agent-main"}));
+        assert!(input.get("task_ids").is_none());
     }
 
     #[test]

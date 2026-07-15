@@ -14,7 +14,7 @@
 //!
 //! Seeded routines are inert until the workspace opts into
 //! `[routines] role = "source"`; they exist so a fresh workspace gets
-//! working periodic triage the moment it becomes a routine source.
+//! reviewable, opt-in schedules without silently enabling unattended work.
 
 use std::path::Path;
 
@@ -35,6 +35,10 @@ pub(crate) const DEFAULT_ROUTINE_FILES: &[(&str, &str)] = &[
         "task_triage",
         include_str!("../../assets/routines/task_triage.yaml"),
     ),
+    (
+        "ship_sweep",
+        include_str!("../../assets/routines/ship_sweep.yaml"),
+    ),
 ];
 
 const HOST_ID_PLACEHOLDER: &str = "__ORBIT_HOST_ID__";
@@ -43,8 +47,8 @@ const ROUTINE_NAME_PLACEHOLDER: &str = "__ORBIT_ROUTINE_NAME__";
 /// Seed every entry in [`DEFAULT_ROUTINE_FILES`] under `routines_dir`,
 /// resolving the host and routine-name placeholders. Mirrors the activity /
 /// job seeding convention: when `overwrite` is false (plain re-init),
-/// existing files are preserved; `--refresh-defaults` / `--force` set
-/// `overwrite` and re-render them.
+/// existing files are preserved. Destructive initialization may set
+/// `overwrite`, though `--force` normally recreates the whole root first.
 // ADR-0215: default routines are seeded per workspace with host and name
 // resolved at seed time — routines have no global directory and v1 requires
 // explicit host pinning and host-unique names.
@@ -118,29 +122,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn seeded_triage_routine_is_valid_pinned_and_overlap_forbidden() {
+    fn seeded_routines_are_valid_disabled_pinned_and_workspace_unique() {
         let root = tempdir().expect("create tempdir");
         let routines_dir = root.path().join(".orbit/routines");
         let seeded = seed_default_routines(&routines_dir, "test-host", Some("My Repo!"), true)
             .expect("seed default routines");
         assert_eq!(seeded, DEFAULT_ROUTINE_FILES.len());
 
-        let yaml = std::fs::read_to_string(routines_dir.join("task_triage.yaml"))
-            .expect("read seeded triage routine");
-        let definition = parse_routine_yaml(&yaml).expect("seeded routine parses fail-closed");
-        assert_eq!(definition.name, "task-triage-my-repo");
-        assert_eq!(definition.hosts, vec!["test-host".to_string()]);
-        assert_eq!(
-            definition.target,
-            RoutineTarget::Job("task_triage_pipeline".to_string())
-        );
-        assert_eq!(definition.policy.overlap, OverlapPolicy::Forbid);
-        assert!(definition.enabled);
+        for (stem, target) in [
+            ("auto_task_scheduler", "auto_task_scheduler_pipeline"),
+            ("task_triage", "task_triage_pipeline"),
+            ("ship_sweep", "workspace_ship_pipeline"),
+        ] {
+            let yaml = std::fs::read_to_string(routines_dir.join(format!("{stem}.yaml")))
+                .expect("read seeded routine");
+            let definition = parse_routine_yaml(&yaml).expect("seeded routine parses fail-closed");
+            assert_eq!(
+                definition.name,
+                format!("{}-my-repo", stem.replace('_', "-"))
+            );
+            assert_eq!(definition.hosts, vec!["test-host".to_string()]);
+            assert_eq!(definition.target, RoutineTarget::Job(target.to_string()));
+            assert_eq!(definition.policy.overlap, OverlapPolicy::Forbid);
+            assert!(!definition.enabled);
+        }
 
         // Cadence: hourly — deliberately sparser than the ~20-minute ship
         // sweep, and parseable by the scheduler.
-        assert_eq!(definition.trigger.cron, "15 * * * *");
-        parse_cron(&definition.trigger.cron).expect("seeded cron parses");
+        let triage = std::fs::read_to_string(routines_dir.join("task_triage.yaml"))
+            .expect("read triage routine");
+        let triage = parse_routine_yaml(&triage).expect("triage routine parses");
+        assert_eq!(triage.trigger.cron, "15 * * * *");
+        parse_cron(&triage.trigger.cron).expect("seeded cron parses");
+
+        let ship = std::fs::read_to_string(routines_dir.join("ship_sweep.yaml"))
+            .expect("read ship routine");
+        let ship = parse_routine_yaml(&ship).expect("ship routine parses");
+        assert_eq!(
+            ship.trigger.missed_run,
+            orbit_common::types::MissedRunPolicy::Skip
+        );
+        assert_eq!(ship.trigger.cron, "*/20 * * * *");
+        parse_cron(&ship.trigger.cron).expect("ship cron parses");
     }
 
     #[test]

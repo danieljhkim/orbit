@@ -54,6 +54,18 @@ fn output_task_ids(output: &Value) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn list_backlog_tasks_empty_workspace_is_a_clean_noop() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+
+    let output = list_backlog_tasks(&runtime, json!({}));
+
+    assert_eq!(output["task_count"], json!(0));
+    assert_eq!(output["task_ids"], json!([]));
+    assert_eq!(output["bundles"], json!([]));
+    assert_eq!(output["excluded"], json!([]));
+}
+
 fn seed_task_with_dependencies(
     runtime: &OrbitRuntime,
     title: &str,
@@ -232,6 +244,41 @@ fn list_backlog_tasks_preserves_existing_fields_without_conflicts() {
         ])
     );
     assert_eq!(output["excluded"], json!([]));
+}
+
+#[test]
+fn list_backlog_tasks_does_not_filter_auto_task_provenance_tags() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let ordinary = runtime
+        .add_task(crate::command::task::TaskAddParams {
+            title: "Ordinary backlog".to_string(),
+            description: "ordinary".to_string(),
+            acceptance_criteria: vec!["selected".to_string()],
+            plan: "ship".to_string(),
+            status: Some(TaskStatus::Backlog),
+            task_type: Some(TaskType::Chore),
+            ..Default::default()
+        })
+        .expect("seed ordinary backlog");
+    let auto_task = runtime
+        .add_task(crate::command::task::TaskAddParams {
+            title: "Auto-task backlog".to_string(),
+            description: "minted by scheduler".to_string(),
+            acceptance_criteria: vec!["selected".to_string()],
+            tags: vec!["auto-task:nightly-maintenance".to_string()],
+            plan: "ship".to_string(),
+            status: Some(TaskStatus::Backlog),
+            task_type: Some(TaskType::Chore),
+            ..Default::default()
+        })
+        .expect("seed auto-task backlog");
+
+    let output = list_backlog_tasks(&runtime, json!({}));
+    let selected = output_task_ids(&output);
+
+    assert_eq!(selected.len(), 2);
+    assert!(selected.contains(&ordinary.id));
+    assert!(selected.contains(&auto_task.id));
 }
 
 #[test]

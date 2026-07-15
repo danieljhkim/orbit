@@ -2,12 +2,112 @@ use std::sync::Mutex;
 
 use tempfile::tempdir;
 
+use orbit_common::types::{OverlapPolicy, RoutineTarget, parse_routine_yaml};
 use orbit_core::command::init::default_orbitignore_template;
 use orbit_core::workspace_registry;
 
 use super::super::init::WorkspaceInitArgs;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+#[test]
+fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() {
+    let _guard = ENV_LOCK.lock().expect("lock env");
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(global.join("host.toml"), "host_id = \"init-host\"\n").expect("write host pin");
+
+    let previous_home = std::env::var_os("HOME");
+    let previous_cwd = std::env::current_dir().expect("capture cwd");
+    unsafe {
+        std::env::set_var("HOME", home.path());
+    }
+    std::env::set_current_dir(workspace.path()).expect("enter workspace");
+
+    let init = || WorkspaceInitArgs {
+        name: Some("routine-seed-test".to_string()),
+        base_branch: "agent-main".to_string(),
+        ship_mode: Some("pr".to_string()),
+        task_id_start: None,
+        mcp: false,
+        hooks: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+    };
+    init()
+        .execute_without_runtime(None)
+        .expect("first workspace init");
+
+    let routines_dir = workspace.path().join(".orbit/routines");
+    let workspace_slug = workspace
+        .path()
+        .file_name()
+        .expect("workspace directory name")
+        .to_string_lossy()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    for (stem, target) in [
+        ("auto_task_scheduler", "auto_task_scheduler_pipeline"),
+        ("task_triage", "task_triage_pipeline"),
+        ("ship_sweep", "workspace_ship_pipeline"),
+    ] {
+        let yaml = std::fs::read_to_string(routines_dir.join(format!("{stem}.yaml")))
+            .expect("read seeded routine");
+        let definition = parse_routine_yaml(&yaml).expect("parse seeded routine");
+        assert_eq!(
+            definition.name,
+            format!("{}-{workspace_slug}", stem.replace('_', "-"))
+        );
+        assert_eq!(definition.hosts, ["init-host"]);
+        assert_eq!(definition.target, RoutineTarget::Job(target.to_string()));
+        assert_eq!(definition.policy.overlap, OverlapPolicy::Forbid);
+        assert!(!definition.enabled);
+    }
+
+    let authored_ship = r#"schemaVersion: 1
+name: custom-ship-sweep
+description: authored values must survive re-init
+enabled: true
+hosts: [custom-host]
+trigger:
+  cron: "7 3 * * *"
+  missed_run: catch_up_once
+target: job:workspace_ship_pipeline
+policy:
+  timeout_minutes: 77
+  overlap: allow
+"#;
+    std::fs::write(routines_dir.join("ship_sweep.yaml"), authored_ship)
+        .expect("author ship routine");
+    std::fs::remove_file(routines_dir.join("task_triage.yaml"))
+        .expect("remove one default routine");
+
+    init()
+        .execute_without_runtime(None)
+        .expect("second workspace init");
+
+    assert_eq!(
+        std::fs::read_to_string(routines_dir.join("ship_sweep.yaml"))
+            .expect("read authored ship routine"),
+        authored_ship,
+        "plain re-init must preserve workspace-authored routine bytes"
+    );
+    let recreated = std::fs::read_to_string(routines_dir.join("task_triage.yaml"))
+        .expect("missing default recreated");
+    assert!(
+        !parse_routine_yaml(&recreated)
+            .expect("parse recreated routine")
+            .enabled
+    );
+
+    std::env::set_current_dir(previous_cwd).expect("restore cwd");
+    match previous_home {
+        Some(value) => unsafe { std::env::set_var("HOME", value) },
+        None => unsafe { std::env::remove_var("HOME") },
+    }
+}
 
 #[test]
 fn workspace_init_seeds_auto_detected_mcp_configs() {
