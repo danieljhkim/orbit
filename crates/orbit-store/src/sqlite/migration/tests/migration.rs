@@ -106,6 +106,13 @@ fn apply_schema_creates_adrs_table_and_indexes() {
 }
 
 #[test]
+fn run_archive_stage_migration_adds_archived_at() {
+    let conn = Connection::open_in_memory().expect("open in-memory connection");
+    apply_schema(&conn).expect("apply schema");
+    assert!(table_has_column(&conn, "job_runs", "archived_at").expect("archived_at column"));
+}
+
+#[test]
 fn learnings_index_migration_rekeys_by_workspace_and_discards_legacy_rows() {
     let conn = Connection::open_in_memory().expect("open in-memory connection");
     // Simulate a legacy database whose learning envelope index is keyed only

@@ -31,6 +31,7 @@ pub(crate) struct Migration {
 
 /// Stable ordered registry of store-database migrations. Append-only:
 /// never renumber or edit an entry that has shipped.
+// L-0083: Preserve every shipped migration entry across reverts and history rewrites.
 pub(crate) const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -47,12 +48,17 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "flat_crew_model",
         apply: super::apply_flat_crew_model,
     },
+    Migration {
+        version: 4,
+        name: "job_run_archive_stage",
+        apply: super::apply_job_run_archive_stage,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 3;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 4;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

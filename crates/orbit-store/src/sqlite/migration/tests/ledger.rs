@@ -30,7 +30,7 @@ fn fresh_db_applies_baseline_and_records_ledger() {
         SUPPORTED_SCHEMA_VERSION
     );
     let applied = applied_migrations(&conn).expect("applied migrations");
-    assert_eq!(applied.len(), 3);
+    assert_eq!(applied.len(), SUPPORTED_SCHEMA_VERSION as usize);
     assert_eq!(applied[0].version, 1);
     assert_eq!(applied[0].name, "baseline");
     assert!(!applied[0].applied_at.is_empty());
@@ -40,6 +40,9 @@ fn fresh_db_applies_baseline_and_records_ledger() {
     assert_eq!(applied[2].version, 3);
     assert_eq!(applied[2].name, "flat_crew_model");
     assert!(!applied[2].applied_at.is_empty());
+    assert_eq!(applied[3].version, 4);
+    assert_eq!(applied[3].name, "job_run_archive_stage");
+    assert!(!applied[3].applied_at.is_empty());
 }
 
 #[test]
@@ -152,6 +155,10 @@ fn legacy_db_adopts_versioned_ledger() {
                 "learnings_index_workspace_scope".to_string()
             ),
             ("migration.v0003".to_string(), "flat_crew_model".to_string()),
+            (
+                "migration.v0004".to_string(),
+                "job_run_archive_stage".to_string()
+            ),
         ]
     );
 }
@@ -163,7 +170,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0004', 'from-the-future', '2099-01-01T00:00:00Z')",
+         VALUES ('migration.v0005', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -175,6 +182,38 @@ fn refuses_db_from_a_newer_binary() {
     assert!(
         message.contains("upgrade orbit"),
         "unexpected message: {message}"
+    );
+}
+
+#[test]
+fn store_reopens_database_at_shipped_schema_v4() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("orbit.db");
+
+    // Start with whatever schema the current binary produces, then model the
+    // real incident: a previously shipped binary added the v4 column and
+    // ledger entry before this binary tried to reopen the shared store.
+    drop(crate::Store::open(&path).expect("create store"));
+    let conn = Connection::open(&path).expect("open raw store connection");
+    if !table_has_column(&conn, "job_runs", "archived_at").expect("inspect job_runs") {
+        conn.execute_batch("ALTER TABLE job_runs ADD COLUMN archived_at TEXT")
+            .expect("apply shipped v4 schema");
+    }
+    conn.execute(
+        "INSERT OR REPLACE INTO schema_meta(key, value, updated_at)
+         VALUES ('migration.v0004', 'job_run_archive_stage', '2026-07-15T22:11:59Z')",
+        [],
+    )
+    .expect("record shipped v4 migration");
+    drop(conn);
+
+    let store = crate::Store::open(&path).expect("reopen shipped v4 store");
+    assert_eq!(store.schema_version().expect("schema version"), 4);
+    let applied = store.applied_migrations().expect("applied migrations");
+    assert_eq!(applied.last().map(|migration| migration.version), Some(4));
+    assert_eq!(
+        applied.last().map(|migration| migration.name.as_str()),
+        Some("job_run_archive_stage")
     );
 }
 
