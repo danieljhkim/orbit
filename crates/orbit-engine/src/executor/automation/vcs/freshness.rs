@@ -1,8 +1,15 @@
 use std::path::Path;
 
 use orbit_common::types::OrbitError;
+use serde_json::{Value, json};
 
+use crate::context::{RuntimeHost, TaskHost};
+
+use super::super::input::{input_string_field, required_input_string};
 use super::git::{BaseSyncMode, git_command_success, git_output, resolve_worktree_start_point};
+use super::handoff::{
+    FailedHandoffPhase, HandoffContext, load_handoff_context, record_failed_handoff,
+};
 
 #[derive(Debug, Clone)]
 pub(super) struct BranchFreshness {
@@ -12,87 +19,189 @@ pub(super) struct BranchFreshness {
     pub(super) commits_ahead: u64,
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct RebaseOutcome {
-    pub(super) freshness: BranchFreshness,
-    pub(super) rebased: bool,
+pub(in crate::executor::automation) fn prepare_pr_handoff<H: RuntimeHost + TaskHost + ?Sized>(
+    host: &H,
+    input: &Value,
+) -> Result<Value, OrbitError> {
+    let context = load_handoff_context(host, input, "pr_prepare")?;
+    match prepare_pr_handoff_inner(input, &context) {
+        Ok(output) => Ok(output),
+        Err((phase, error)) => {
+            record_failed_handoff(host, &context, input, phase, &error)?;
+            Err(error)
+        }
+    }
 }
 
-/// Ensure `head` is not behind `base`, attempting a rebase onto `base` when it is.
-///
-/// Fast path: if `ensure_branch_fresh_against_base` returns `Ok`, we return
-/// the freshness unchanged with `rebased = false`.
-///
-/// Recovery path: if the freshness check fails, we recompute the divergence
-/// directly (NOT by parsing the error string) to determine whether the failure
-/// was caused by the branch being behind. If so, we attempt
-/// `git rebase <base_ref>`; on success, we re-check freshness and return
-/// `rebased = true`. On conflict, we run `git rebase --abort` best-effort and
-/// return the original error so the caller sees the semantically correct
-/// "behind by N" failure. If the recomputed divergence shows the branch is
-/// NOT actually behind, we propagate the original error unchanged because it
-/// means the freshness check failed for a different reason.
-pub(super) fn ensure_branch_rebased_onto_base(
-    repo_root: &Path,
-    head: &str,
-    base: &str,
-    sync_mode: BaseSyncMode,
-) -> Result<RebaseOutcome, OrbitError> {
-    let original_error = match ensure_branch_fresh_against_base(repo_root, head, base, sync_mode) {
-        Ok(freshness) => {
-            return Ok(RebaseOutcome {
-                freshness,
-                rebased: false,
-            });
+fn prepare_pr_handoff_inner(
+    input: &Value,
+    context: &HandoffContext,
+) -> Result<Value, (FailedHandoffPhase, OrbitError)> {
+    let head = git_output(
+        &context.workspace_path,
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+    )
+    .map_err(prepare_error)?
+    .trim()
+    .to_string();
+    if head == "HEAD" {
+        return Err((
+            FailedHandoffPhase::Prepare,
+            OrbitError::Execution("pr_prepare: workspace is in detached HEAD state".to_string()),
+        ));
+    }
+    let head_sha = commit_sha(&context.workspace_path, &head).map_err(prepare_error)?;
+    let base = input_string_field(input, "base").unwrap_or_else(|| "main".to_string());
+    let sync_mode = super::git::base_sync_mode_from_input(input).map_err(prepare_error)?;
+    let base_ref = resolve_worktree_start_point(&context.workspace_path, &base, sync_mode)
+        .map_err(prepare_error)?;
+    let base_sha = commit_sha(&context.workspace_path, &base_ref).map_err(prepare_error)?;
+    let freshness =
+        branch_freshness_against_ref(&context.workspace_path, &head, &base_ref, &base_sha)
+            .map_err(prepare_error)?;
+    if freshness.commits_ahead == 0 {
+        return Err((
+            FailedHandoffPhase::EmptyBranch,
+            OrbitError::Execution(format!(
+                "pr_prepare: head '{head}' has 0 commits ahead of base '{base}' (base checkpoint '{base_sha}'); refusing an empty PR handoff"
+            )),
+        ));
+    }
+    let remote_sha = remote_branch_sha(&context.workspace_path, &head).map_err(prepare_error)?;
+    let sync_required = freshness.commits_behind > 0;
+    Ok(json!({
+        "phase": "prepare",
+        "decision": if sync_required { "rebase_required" } else { "already_fresh" },
+        "head": head,
+        "head_sha": head_sha,
+        "base": base,
+        "base_ref": base_ref,
+        "base_sha": base_sha,
+        "remote_sha": remote_sha,
+        "commits_behind": freshness.commits_behind,
+        "commits_ahead": freshness.commits_ahead,
+        "sync_required": sync_required,
+    }))
+}
+
+fn prepare_error(error: OrbitError) -> (FailedHandoffPhase, OrbitError) {
+    (FailedHandoffPhase::Prepare, error)
+}
+
+pub(in crate::executor::automation) fn rebase_pr_branch<H: RuntimeHost + TaskHost + ?Sized>(
+    host: &H,
+    input: &Value,
+) -> Result<Value, OrbitError> {
+    let context = load_handoff_context(host, input, "git_rebase")?;
+    match rebase_pr_branch_inner(input, &context) {
+        Ok(output) => Ok(output),
+        Err(error) => {
+            record_failed_handoff(host, &context, input, FailedHandoffPhase::Rebase, &error)?;
+            Err(error)
         }
-        Err(error) => error,
-    };
+    }
+}
 
-    // Recompute divergence directly — do NOT parse the original error string.
-    let base_ref = match resolve_worktree_start_point(repo_root, base, sync_mode) {
-        Ok(value) => value,
-        Err(_) => return Err(original_error),
-    };
-    let divergence = match git_output(
-        repo_root,
-        &[
-            "rev-list",
-            "--left-right",
-            "--count",
-            &format!("{base_ref}...{head}"),
-        ],
-    ) {
-        Ok(value) => value,
-        Err(_) => return Err(original_error),
-    };
-    let commits_behind: u64 = divergence
-        .split_whitespace()
-        .next()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(0);
-
-    if commits_behind == 0 {
-        // Freshness check failed for a reason other than being behind base.
-        return Err(original_error);
+fn rebase_pr_branch_inner(input: &Value, context: &HandoffContext) -> Result<Value, OrbitError> {
+    let head = required_input_string(input, "head")?;
+    let head_sha_before = required_input_string(input, "head_sha")?;
+    let base = required_input_string(input, "base")?;
+    let base_ref = required_input_string(input, "base_ref")?;
+    let base_sha = required_input_string(input, "base_sha")?;
+    let sync_required = input
+        .get("sync_required")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            OrbitError::InvalidInput("missing required input.sync_required".to_string())
+        })?;
+    let prepared_behind = input
+        .get("commits_behind")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            OrbitError::InvalidInput("missing required input.commits_behind".to_string())
+        })?;
+    if sync_required != (prepared_behind > 0) {
+        return Err(OrbitError::InvalidInput(
+            "git_rebase: sync_required disagrees with the prepared divergence checkpoint"
+                .to_string(),
+        ));
+    }
+    let current_branch = git_output(
+        &context.workspace_path,
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+    )?;
+    if current_branch.trim() != head {
+        return Err(OrbitError::Execution(format!(
+            "git_rebase: prepared branch '{head}' is not checked out (found '{}')",
+            current_branch.trim()
+        )));
+    }
+    if !git_command_success(
+        &context.workspace_path,
+        &["diff", "--quiet", "--diff-filter=U"],
+    )? {
+        return Err(OrbitError::Execution(
+            "git_rebase: unresolved merge conflicts remain; recovery must resolve and continue the recorded rebase"
+                .to_string(),
+        ));
     }
 
-    // Attempt the rebase. `git_command_success` returns Ok(false) on non-zero
-    // exit rather than mapping it to an Err, which is exactly what we want so
-    // we can distinguish "rebase had conflicts" from the freshness-check error.
-    let rebase_ok = git_command_success(repo_root, &["rebase", &base_ref]).unwrap_or(false);
+    let current_sha = commit_sha(&context.workspace_path, head)?;
+    let current = branch_freshness_against_ref(&context.workspace_path, head, base_ref, base_sha)?;
+    let (decision, rewritten, head_sha) = if current.commits_behind == 0 {
+        if current_sha == head_sha_before {
+            if sync_required {
+                return Err(OrbitError::Execution(
+                    "git_rebase: branch is unexpectedly fresh without changing the recorded pre-rewrite HEAD"
+                        .to_string(),
+                ));
+            }
+            ("skipped_current", false, current_sha)
+        } else if sync_required {
+            ("reused_recovery", true, current_sha)
+        } else {
+            return Err(OrbitError::Execution(format!(
+                "git_rebase: branch HEAD changed from prepared checkpoint '{head_sha_before}' to '{current_sha}' without a recorded rewrite decision"
+            )));
+        }
+    } else {
+        if !sync_required || current_sha != head_sha_before {
+            return Err(OrbitError::Execution(
+                "git_rebase: branch state no longer matches the durable pre-rewrite checkpoint"
+                    .to_string(),
+            ));
+        }
+        if !git_command_success(&context.workspace_path, &["rebase", base_sha])? {
+            return Err(OrbitError::Execution(format!(
+                "git_rebase: rebase of '{head}' onto checkpoint '{base_sha}' stopped with conflicts; resolve them and continue the rebase before recovery retries this step"
+            )));
+        }
+        let after =
+            branch_freshness_against_ref(&context.workspace_path, head, base_ref, base_sha)?;
+        if after.commits_behind != 0 {
+            return Err(OrbitError::Execution(
+                "git_rebase: branch remains behind the recorded base after rebase".to_string(),
+            ));
+        }
+        (
+            "performed",
+            true,
+            commit_sha(&context.workspace_path, head)?,
+        )
+    };
 
-    if !rebase_ok {
-        // Best-effort abort to restore a clean worktree. Ignore errors from
-        // the abort itself — the goal is to leave no rebase in progress.
-        let _ = git_command_success(repo_root, &["rebase", "--abort"]);
-        return Err(original_error);
-    }
-
-    let freshness = ensure_branch_fresh_against_base(repo_root, head, base, sync_mode)?;
-    Ok(RebaseOutcome {
-        freshness,
-        rebased: true,
-    })
+    Ok(json!({
+        "phase": "rebase",
+        "decision": decision,
+        "head": head,
+        "head_sha": head_sha,
+        "head_sha_before": head_sha_before,
+        "base": base,
+        "base_ref": base_ref,
+        "base_sha": base_sha,
+        "remote_sha_before": input_string_field(input, "remote_sha"),
+        "rewritten": rewritten,
+    }))
 }
 
 pub(super) fn ensure_branch_fresh_against_base(
@@ -102,36 +211,73 @@ pub(super) fn ensure_branch_fresh_against_base(
     sync_mode: BaseSyncMode,
 ) -> Result<BranchFreshness, OrbitError> {
     let base_ref = resolve_worktree_start_point(repo_root, base, sync_mode)?;
+    let base_sha = commit_sha(repo_root, &base_ref)?;
+    let freshness = branch_freshness_against_ref(repo_root, head, &base_ref, &base_sha)?;
+
+    if freshness.commits_behind > 0 {
+        return Err(OrbitError::Execution(format!(
+            "task branch '{head}' is behind base '{base_ref}' by {} commit(s); refresh the task branch before opening or merging the PR",
+            freshness.commits_behind
+        )));
+    }
+    Ok(freshness)
+}
+
+pub(super) fn branch_freshness_against_ref(
+    repo_root: &Path,
+    head: &str,
+    base_ref: &str,
+    base_sha: &str,
+) -> Result<BranchFreshness, OrbitError> {
     let divergence = git_output(
         repo_root,
         &[
             "rev-list",
             "--left-right",
             "--count",
-            &format!("{base_ref}...{head}"),
+            &format!("{base_sha}...{head}"),
         ],
     )?;
     let mut parts = divergence.split_whitespace();
-    let commits_behind = parse_divergence_count(parts.next(), "behind", base, head)?;
-    let commits_ahead = parse_divergence_count(parts.next(), "ahead", base, head)?;
+    let commits_behind = parse_divergence_count(parts.next(), "behind", base_ref, head)?;
+    let commits_ahead = parse_divergence_count(parts.next(), "ahead", base_ref, head)?;
     if parts.next().is_some() {
         return Err(OrbitError::Execution(format!(
-            "unexpected git divergence output while comparing '{head}' to '{base_ref}': {divergence}"
+            "unexpected git divergence output while comparing '{head}' to '{base_sha}': {divergence}"
         )));
     }
-
-    if commits_behind > 0 {
-        return Err(OrbitError::Execution(format!(
-            "task branch '{head}' is behind base '{base_ref}' by {commits_behind} commit(s); refresh the task branch before opening or merging the PR"
-        )));
-    }
-
     Ok(BranchFreshness {
-        base_ref,
+        base_ref: base_ref.to_string(),
         head_ref: head.to_string(),
         commits_behind,
         commits_ahead,
     })
+}
+
+pub(super) fn commit_sha(repo_root: &Path, reference: &str) -> Result<String, OrbitError> {
+    Ok(git_output(
+        repo_root,
+        &["rev-parse", "--verify", &format!("{reference}^{{commit}}")],
+    )?
+    .trim()
+    .to_string())
+}
+
+pub(super) fn remote_branch_sha(
+    repo_root: &Path,
+    branch: &str,
+) -> Result<Option<String>, OrbitError> {
+    let output = git_output(
+        repo_root,
+        &[
+            "ls-remote",
+            "--heads",
+            "origin",
+            &format!("refs/heads/{branch}"),
+        ],
+    )?;
+    let sha = output.split_whitespace().next().map(ToOwned::to_owned);
+    Ok(sha.filter(|value| !value.is_empty()))
 }
 
 fn parse_divergence_count(

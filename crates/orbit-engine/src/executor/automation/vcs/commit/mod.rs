@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use crate::context::{RuntimeHost, TaskHost};
 
 use super::super::input::{canonicalize_existing_dir, input_string_field, required_job_run_id};
-use super::git::git_success;
+use super::git::{git_output, git_success};
 use author::{append_co_author_trailers, commit_author_for_tasks, git_author_for_task};
 use git_ops::{
     ensure_named_branch, ensure_no_unmerged_changes, git_commit_with_identity, stage_paths,
@@ -189,6 +189,8 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
         // ADR-0219: explicit side-effect-only tasks bypass the empty-diff gate.
         if task.tags.iter().any(|tag| tag == NO_DIFF_EXPECTED_TAG) {
             return Ok(json!({
+                "phase": "commit",
+                "decision": "skipped_no_diff_expected",
                 "committed": false,
                 "skipped_no_diff_expected": true,
                 "task_id": task.id,
@@ -206,7 +208,15 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
     let author = git_author_for_task(task);
 
     git_commit_with_identity(&workspace_path, &message, author.as_ref())?;
-    Ok(json!({}))
+    let commit_sha = git_output(&workspace_path, &["rev-parse", "HEAD"])?;
+    Ok(json!({
+        "phase": "commit",
+        "decision": "performed",
+        "committed": true,
+        "commit_sha": commit_sha.trim(),
+        "skipped_no_diff_expected": false,
+        "task_id": task.id,
+    }))
 }
 
 fn resolve_workspace_path<H: RuntimeHost + ?Sized>(

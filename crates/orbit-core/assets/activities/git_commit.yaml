@@ -22,6 +22,16 @@ spec:
   output_schema_json:
     type: object
     properties:
+      phase:
+        type: string
+      decision:
+        type: string
+      committed:
+        type: boolean
+      commit_sha:
+        type: string
+      skipped_no_diff_expected:
+        type: boolean
       committed_task_ids:
         type: array
         items:

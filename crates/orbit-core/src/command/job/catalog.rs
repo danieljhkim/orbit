@@ -443,6 +443,84 @@ spec:
     }
 
     #[test]
+    fn pr_pipeline_models_handoff_phases_as_ordered_activity_checkpoints() {
+        let yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(name, yaml)| (*name == "task_pr_pipeline").then_some(*yaml))
+            .expect("task pr pipeline default exists");
+        let asset = load_job_asset(yaml).expect("parse task pr pipeline");
+        let phases = asset
+            .spec
+            .steps
+            .iter()
+            .filter_map(|step| match &step.body {
+                JobV2StepBody::TargetRef(target) => Some((
+                    step.id.as_str(),
+                    target.target.as_str(),
+                    step.recovery_activity.as_deref(),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            phases,
+            vec![
+                ("worktree", "activity:worktree_setup", None),
+                (
+                    "review_bundle",
+                    "activity:agent_review",
+                    Some("step_failure_recovery")
+                ),
+                (
+                    "commit",
+                    "activity:git_commit",
+                    Some("step_failure_recovery")
+                ),
+                (
+                    "prepare_branch",
+                    "activity:pr_prepare",
+                    Some("step_failure_recovery")
+                ),
+                (
+                    "sync_base",
+                    "activity:git_rebase",
+                    Some("step_failure_recovery")
+                ),
+                ("push", "activity:git_push", Some("step_failure_recovery")),
+                ("pr_open", "activity:pr_open", Some("step_failure_recovery")),
+                (
+                    "promote_tasks",
+                    "activity:pr_promote",
+                    Some("step_failure_recovery")
+                ),
+                (
+                    "promote_no_diff",
+                    "activity:pr_promote",
+                    Some("step_failure_recovery")
+                ),
+            ]
+        );
+
+        let pr_open = asset
+            .spec
+            .steps
+            .iter()
+            .find(|step| step.id == "pr_open")
+            .expect("PR open phase");
+        let JobV2StepBody::TargetRef(target) = &pr_open.body else {
+            panic!("PR open must reference a focused activity");
+        };
+        let input = target.default_input.as_ref().expect("PR open input");
+        for hidden_phase in ["scope", "rewrite_performed", "expected_remote_sha"] {
+            assert!(
+                input.get(hidden_phase).is_none(),
+                "pr_open must not embed earlier {hidden_phase} phase input"
+            );
+        }
+    }
+
+    #[test]
     fn gate_pipeline_releases_reservation_before_child_success_guard() {
         let yaml = DEFAULT_JOB_FILES
             .iter()

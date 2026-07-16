@@ -33,10 +33,16 @@ impl Tool for GitPushTool {
                 },
                 ToolParam {
                     name: "force_with_lease".to_string(),
-                    description:
-                        "If true, push with --force-with-lease (safer force push that refuses to clobber unexpected remote changes)"
-                            .to_string(),
+                    description: "If true, push with an exact expected-SHA force-with-lease"
+                        .to_string(),
                     param_type: "boolean".to_string(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "expected_remote_sha".to_string(),
+                    description: "Exact remote branch SHA required when force_with_lease is true"
+                        .to_string(),
+                    param_type: "string".to_string(),
                     required: false,
                 },
             ],
@@ -62,6 +68,11 @@ impl Tool for GitPushTool {
             .get("force_with_lease")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let expected_remote_sha = input
+            .get("expected_remote_sha")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
 
         if remote.starts_with('-') {
             return Err(OrbitError::InvalidInput(
@@ -73,18 +84,19 @@ impl Tool for GitPushTool {
                 "branch name must not start with '-'".to_string(),
             ));
         }
-
-        let mut args = vec![
-            "-C".to_string(),
-            repo_root.to_string_lossy().to_string(),
-            "push".to_string(),
-        ];
-        if force_with_lease {
-            args.push("--force-with-lease".to_string());
+        if force_with_lease && !is_valid_expected_remote_sha(expected_remote_sha) {
+            return Err(OrbitError::InvalidInput(
+                "force_with_lease requires an exact 40- or 64-character expected_remote_sha"
+                    .to_string(),
+            ));
         }
-        args.push("--".to_string());
-        args.push(remote.to_string());
-        args.push(branch.to_string());
+
+        let args = push_args(
+            &repo_root,
+            remote,
+            branch,
+            force_with_lease.then_some(expected_remote_sha).flatten(),
+        );
 
         let result = run_process(
             &ExecRequest {
@@ -114,4 +126,32 @@ impl Tool for GitPushTool {
             "stderr": result.stderr,
         }))
     }
+}
+
+pub(super) fn push_args(
+    repo_root: &std::path::Path,
+    remote: &str,
+    branch: &str,
+    expected_remote_sha: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![
+        "-C".to_string(),
+        repo_root.to_string_lossy().to_string(),
+        "push".to_string(),
+    ];
+    if let Some(expected_remote_sha) = expected_remote_sha {
+        args.push(format!(
+            "--force-with-lease=refs/heads/{branch}:{expected_remote_sha}"
+        ));
+    }
+    args.push("--".to_string());
+    args.push(remote.to_string());
+    args.push(branch.to_string());
+    args
+}
+
+pub(super) fn is_valid_expected_remote_sha(value: Option<&str>) -> bool {
+    value.is_some_and(|sha| {
+        matches!(sha.len(), 40 | 64) && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
 }

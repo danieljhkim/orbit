@@ -49,6 +49,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/git_push.yaml"),
     ),
     (
+        "git_rebase",
+        include_str!("../../assets/activities/git_rebase.yaml"),
+    ),
+    (
         "invoke_and_wait",
         include_str!("../../assets/activities/invoke_and_wait.yaml"),
     ),
@@ -75,6 +79,14 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "pr_open",
         include_str!("../../assets/activities/pr_open.yaml"),
+    ),
+    (
+        "pr_prepare",
+        include_str!("../../assets/activities/pr_prepare.yaml"),
+    ),
+    (
+        "pr_promote",
+        include_str!("../../assets/activities/pr_promote.yaml"),
     ),
     (
         "reserve_locks",
@@ -164,6 +176,9 @@ mod tests {
         for (name, action) in [
             ("run_planning_duel", "run_planning_duel"),
             ("git_commit", "git_commit"),
+            ("git_rebase", "git_rebase"),
+            ("pr_prepare", "pr_prepare"),
+            ("pr_promote", "pr_promote"),
             ("release_locks", "release_locks"),
             ("pipeline_wait", "pipeline_wait"),
             ("list_triage_candidates", "list_triage_candidates"),
