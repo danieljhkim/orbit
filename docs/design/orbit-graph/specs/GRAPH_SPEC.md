@@ -1,7 +1,7 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
-**Last updated:** 2026-07-04 (ORB-10011 consolidated the `Selector` parser into `orbit-common::utility::selector`; previously ORB-00391 completed the v2 cutover and removed `orbit-knowledge`)
+**Last updated:** 2026-07-16 (ORB-10225 routed the MCP graph surface through the explicit allowlist and shared runtime audit boundary; previously ORB-10011 consolidated the `Selector` parser)
 **Relation to `orbit-knowledge`:** Decommissioned. `orbit-knowledge` (v1) was removed in ORB-00391; orbit-graph is the sole graph backend. The two no longer coexist. See §16 for the migration outcome.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../_archive/knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
@@ -381,7 +381,7 @@ The graph reflects what's on disk, not what's in git. Uncommitted changes are in
 
 ## 9. Query surface
 
-Seven commands. Each maps 1:1 to an MCP tool.
+Ten commands. Each maps 1:1 to an MCP tool.
 
 ```
 orbit graph sync [--full]
@@ -392,7 +392,12 @@ orbit graph refs <symbol> [--confidence exact|import|same_module|fuzzy]
 orbit graph callees <symbol>
 orbit graph impact <selector> [--depth N=3] [--confidence exact|import|same_module|fuzzy]
 orbit graph trace <command-name> [--depth N=5] [--confidence exact|import|same_module|fuzzy]
+orbit graph overview [dir:… | file:…] [--format summary|full]
+orbit graph implementors <trait-selector>
+orbit graph deps <file:… | dir:…>
 ```
+
+The agent-facing MCP surface uses these same ten canonical names as an explicit `orbit-cli` safe-surface allowlist. Although `orbit-mcp` executes the graph implementations in-process to retain watcher-backed handles, every call first crosses the host-owned policy/audit seam. The production host performs allowlist preflight inside OrbitRuntime's shared `ToolEntryPoint::Mcp` audit bracket, recording tool name, role, duration, and success/failure; a rejected name never invokes the graph handler. The MCP host asserts at startup that the adapter name set is a subset of the intended safe surface. If a host re-exposes a known graph schema, the adapter schema and policy/audit route remain authoritative rather than falling back based on schema presence. [ORB-10225]
 
 ### 9.1 `search`
 

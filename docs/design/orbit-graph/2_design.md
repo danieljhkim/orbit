@@ -3,7 +3,7 @@ summary: "Orbit Graph — Design"
 type: design
 title: "Orbit Graph — Design"
 owner: claude
-last_updated: 2026-06-13
+last_updated: 2026-07-16
 status: Draft
 feature: orbit-graph
 doc_role: design
@@ -176,7 +176,7 @@ The previous hardcoded "10ms stat budget, 500ms cache window" heuristic was an i
 
 ## 6. Query Surface
 
-Seven commands, each mapped 1:1 to an MCP tool. Specified in detail in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §9.
+Ten commands, each mapped 1:1 to an MCP tool. Specified in detail in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §9.
 
 ```
 orbit graph sync     [--full]
@@ -186,11 +186,16 @@ orbit graph refs     <symbol>  [--confidence ...] [--kind ...]
 orbit graph callees  <symbol>
 orbit graph impact   <selector> [--depth N=3] [--confidence exact|import|same_module|fuzzy]
 orbit graph trace    <command> [--depth N=5] [--confidence exact|import|same_module|fuzzy]
+orbit graph overview [dir:… | file:…] [--format summary|full]
+orbit graph implementors <trait-selector>
+orbit graph deps     <file:… | dir:…>
 ```
 
 Bounded outputs: `impact` and `trace` both cap at 200 visited nodes regardless of `--depth`. When the cap fires, the response carries `truncated: true` so callers can split into narrower queries.
 
-`refs` unions queries against the `refs` table (calls/type/use/trait_bound) and the `relations` table (impl/extends/implements). CLI `--kind impl` is a routing alias to `relations`. This means the seven-command surface absorbs what `orbit-knowledge` exposed as separate `callers`, `implementors`, `deps`, and `lineage` queries.
+`refs` unions queries against the `refs` table (calls/type/use/trait_bound) and the `relations` table (impl/extends/implements). CLI `--kind impl` is a routing alias to `relations`. The ten-command surface absorbs `orbit-knowledge`'s navigation use cases while keeping `overview`, `implementors`, and outbound module-level `deps` explicit.
+
+For the agent-facing MCP entry point, the ten canonical names are an explicit safe-surface set in `orbit-cli`. `orbit-mcp` owns the in-process implementations but calls them only through the host's policy/audit seam; `RuntimeMcpHost` applies the allowlist and records success or failure through the shared `ToolEntryPoint::Mcp` runtime boundary. Known graph schemas accidentally re-exposed by a host are replaced by the adapter schemas, so schema presence cannot disable that seam. [ORB-10225] added the startup subset assertion and end-to-end audit coverage.
 
 The `Selector` grammar is preserved verbatim from `orbit-knowledge` — every form used in existing skills (`symbol:<file>#<name>:<kind>`, `file:<path>`, `module:<qualified>`, `command:<name>`) must continue to parse identically. A pre-Step-1 audit of `.claude/skills/` captures the full grammar surface as the canonical reference.
 
@@ -235,5 +240,6 @@ No async on the public surface. SQLite and tree-sitter are both sync. If the MCP
 ## Task References
 
 - [ORB-00377] moved long-lived MCP graph reads to watcher-backed background sync and documented the freshness contract in ADR-0195.
+- [ORB-10225] routed the in-process graph MCP surface through the explicit allowlist and shared runtime audit boundary.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

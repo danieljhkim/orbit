@@ -8,9 +8,9 @@ use orbit_core::OrbitRuntime;
 use orbit_mcp::McpHost;
 
 use super::host::{
-    ADR_TOOL_NAMES, DOCS_TOOL_NAMES, FRICTION_TOOL_NAMES, GRAPH_READ_TOOL_NAMES,
-    LEARNING_TOOL_NAMES, RuntimeMcpHost, SEARCH_TOOL_NAMES, SEMANTIC_TOOL_NAMES, TASK_TOOL_NAMES,
-    is_mcp_tool_exposed, safe_mcp_tool_names,
+    ADR_TOOL_NAMES, DOCS_TOOL_NAMES, FRICTION_TOOL_NAMES, GRAPH_TOOL_NAMES, LEARNING_TOOL_NAMES,
+    RuntimeMcpHost, SEARCH_TOOL_NAMES, SEMANTIC_TOOL_NAMES, TASK_TOOL_NAMES, is_mcp_tool_exposed,
+    safe_mcp_tool_names,
 };
 
 const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
@@ -124,7 +124,6 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
     for name in TASK_TOOL_NAMES
         .iter()
         .chain(FRICTION_TOOL_NAMES)
-        .chain(GRAPH_READ_TOOL_NAMES)
         .chain(SEARCH_TOOL_NAMES)
         .chain(SEMANTIC_TOOL_NAMES)
         .chain(ADR_TOOL_NAMES)
@@ -200,6 +199,19 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
 }
 
 #[test]
+fn graph_adapter_names_are_explicitly_allowlisted() {
+    let safe_names: BTreeSet<&str> = safe_mcp_tool_names().into_iter().collect();
+    let adapter_names: BTreeSet<&str> = orbit_mcp::graph_tool_names().iter().copied().collect();
+    let configured_names: BTreeSet<&str> = GRAPH_TOOL_NAMES.iter().copied().collect();
+
+    assert_eq!(adapter_names, configured_names);
+    assert!(adapter_names.is_subset(&safe_names));
+    for name in adapter_names {
+        assert!(is_mcp_tool_exposed(name));
+    }
+}
+
+#[test]
 fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
     let runtime = OrbitRuntime::in_memory().expect("build test runtime");
     let host = RuntimeMcpHost { runtime };
@@ -209,7 +221,10 @@ fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
         .map(|schema| schema.name)
         .collect();
 
-    for name in safe_mcp_tool_names() {
+    for name in safe_mcp_tool_names()
+        .into_iter()
+        .filter(|name| !GRAPH_TOOL_NAMES.contains(name))
+    {
         assert!(
             listed.contains(name),
             "client-visible MCP tool list missing safe tool: {name}"
@@ -230,10 +245,10 @@ fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
         );
     }
 
-    // ORB-00391: the orbit-tools runtime host must expose NO `orbit.graph.*`
-    // tool. The orbit-mcp adapter gates its in-process orbit-graph (v2) tools on
-    // exactly this condition (`host_exposes_graph_tools` → false), so any graph
-    // tool leaking back into the host surface would silently disable v2.
+    // ORB-00391: the orbit-tools runtime host still owns no `orbit.graph.*`
+    // implementation. The orbit-mcp adapter now replaces any accidentally
+    // re-exposed known graph schema, but this assertion preserves the intended
+    // crate ownership boundary.
     assert!(
         !listed.iter().any(|name| name.starts_with("orbit.graph.")),
         "host must expose no orbit.graph.* tool after the v2 cutover, found: {:?}",
@@ -254,7 +269,7 @@ mod audited_mcp_call_tests {
     };
     use orbit_common::types::{
         AuditEventStatus, LearningInjectionCaps, LearningInjectionState, LearningReminder,
-        LearningScope,
+        LearningScope, ToolSessionContext,
     };
     use orbit_core::LearningEvidence;
     use orbit_core::{LearningCreateParams, OrbitError, OrbitRuntime};
@@ -328,6 +343,92 @@ mod audited_mcp_call_tests {
         assert_eq!(events.len(), 1, "exactly one audit row for happy path");
         assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));
         assert_eq!(events[0].status, AuditEventStatus::Success);
+    }
+
+    #[test]
+    fn in_process_graph_dispatch_records_success_and_failure_audit_rows() {
+        let _guard = EnvGuard::set(&[
+            ("ORBIT_AGENT_NAME", None),
+            ("ORBIT_AGENT_MODEL", None),
+            ("ORBIT_MANAGED_RUN_CONTEXT", None),
+            ("ORBIT_RUN_ID", None),
+        ]);
+        let runtime = OrbitRuntime::in_memory().expect("build test runtime");
+        let host = RuntimeMcpHost {
+            runtime: runtime.clone(),
+        };
+
+        let mut success_dispatch =
+            |input: serde_json::Value, _session_context: ToolSessionContext| {
+                assert_eq!(input["query"], "dispatch");
+                Ok(json!({ "matches": [] }))
+            };
+        host.call_in_process_tool(
+            "orbit.graph.search",
+            json!({ "query": "dispatch", "model": "codex" }),
+            Default::default(),
+            &mut success_dispatch,
+        )
+        .expect("allowlisted graph call succeeds");
+
+        let mut failure_dispatch =
+            |_input: serde_json::Value, _session_context: ToolSessionContext| {
+                Err(OrbitError::InvalidInput("invalid selector".to_string()))
+            };
+        host.call_in_process_tool(
+            "orbit.graph.show",
+            json!({ "selector": "invalid", "model": "codex" }),
+            Default::default(),
+            &mut failure_dispatch,
+        )
+        .expect_err("graph implementation failure propagates");
+
+        for (name, expected_status) in [
+            ("orbit.graph.search", AuditEventStatus::Success),
+            ("orbit.graph.show", AuditEventStatus::Failure),
+        ] {
+            let events = runtime
+                .list_audit_events(None, Some(name.to_string()), None, None, 16)
+                .expect("list graph audit events");
+            assert_eq!(events.len(), 1, "exactly one audit row for {name}");
+            let row = &events[0];
+            assert_eq!(row.subcommand.as_deref(), Some("run-mcp"));
+            assert_eq!(row.tool_name.as_deref(), Some(name));
+            assert_eq!(row.role, "codex");
+            assert_eq!(row.status, expected_status);
+            assert!(row.duration_ms >= 1);
+        }
+    }
+
+    #[test]
+    fn unallowlisted_graph_tool_is_rejected_before_in_process_dispatch() {
+        let runtime = OrbitRuntime::in_memory().expect("build test runtime");
+        let host = RuntimeMcpHost {
+            runtime: runtime.clone(),
+        };
+        let mut called = false;
+        let mut dispatch = |_input: serde_json::Value, _session_context: ToolSessionContext| {
+            called = true;
+            Ok(json!({}))
+        };
+
+        let error = host
+            .call_in_process_tool(
+                "orbit.graph.pack",
+                json!({ "model": "codex" }),
+                Default::default(),
+                &mut dispatch,
+            )
+            .expect_err("unallowlisted graph tool is rejected");
+        assert!(matches!(error, OrbitError::NotFound { .. }));
+        assert!(!called, "rejected graph implementation must not run");
+
+        let events = runtime
+            .list_audit_events(None, Some("orbit.graph.pack".to_string()), None, None, 16)
+            .expect("list graph preflight audit event");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));
+        assert_eq!(events[0].status, AuditEventStatus::Failure);
     }
 
     #[test]

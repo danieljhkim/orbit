@@ -21,13 +21,13 @@ impl OrbitToolServer {
     pub(super) fn combined_tool_schemas(&self) -> Vec<ToolSchema> {
         let mut schemas = self.host.list_tool_schemas();
         // ORB-00391: the v1 orbit-knowledge graph builtins were decommissioned,
-        // so the host exposes no `orbit.graph.*` schema and the in-process
-        // orbit-graph (v2) adapter is the sole graph surface. The gate stays as a
-        // safety net: if any host ever re-exposes a graph tool, the adapter backs
-        // off rather than colliding on names.
-        if !host_exposes_graph_tools(&schemas) {
-            schemas.extend(self.graph_tools.schemas());
-        }
+        // so the in-process orbit-graph (v2) adapter owns its known graph
+        // names. Replace any re-exposed host schema for those names instead of
+        // letting schema presence disable the adapter's policy/audit path.
+        // Unknown host graph names remain visible and take the normal host
+        // dispatch path, including its allowlist preflight.
+        schemas.retain(|schema| !self.graph_tools.is_graph_tool(&schema.name));
+        schemas.extend(self.graph_tools.schemas());
         schemas
     }
 
@@ -104,11 +104,17 @@ impl OrbitToolServer {
         let exec_name = canonical.clone();
         let session_context = self.session_context();
         let input_for_learning = input.clone();
-        let graph_tool =
-            self.adapter_graph_tools_enabled() && self.graph_tools.is_graph_tool(&canonical);
+        // Dispatch recognition is deliberately independent of host schemas.
+        // Re-exposing a host graph schema must not make
+        // adapter-owned graph calls bypass the host's policy/audit seam.
+        let graph_tool = self.graph_tools.is_graph_tool(&canonical);
         let join = tokio::task::spawn_blocking(move || {
             if graph_tool {
-                graph_tools.call_tool(&exec_name, input, session_context)
+                let graph_name = exec_name.clone();
+                let mut dispatch = move |input, session_context| {
+                    graph_tools.call_tool(&graph_name, input, session_context)
+                };
+                host.call_in_process_tool(&exec_name, input, session_context, &mut dispatch)
             } else {
                 host.call_tool(&exec_name, input, session_context)
             }
@@ -141,16 +147,6 @@ impl OrbitToolServer {
             }
         }
     }
-
-    fn adapter_graph_tools_enabled(&self) -> bool {
-        !host_exposes_graph_tools(&self.host.list_tool_schemas())
-    }
-}
-
-fn host_exposes_graph_tools(schemas: &[ToolSchema]) -> bool {
-    schemas
-        .iter()
-        .any(|schema| schema.name.starts_with("orbit.graph."))
 }
 
 impl ServerHandler for OrbitToolServer {

@@ -3,7 +3,7 @@ summary: "Auditability — Design"
 type: design
 title: "Auditability — Design"
 owner: codex
-last_updated: 2026-07-15
+last_updated: 2026-07-16
 status: Draft
 feature: auditability
 doc_role: design
@@ -42,7 +42,7 @@ The CLI RAII guard in `crates/orbit-cli/src/audit_middleware.rs` defaults to fai
 
 For `orbit tool run`, [T20260427-52] first collapsed duplicate `agent` + `model` inputs. [ORB-00080] later made the family the durable identity: agent-facing `model` inputs should be `codex`, `claude`, `gemini`, or `grok`, while full model strings remain accepted for compatibility and normalize to the family before persistence. Missing identity falls back to `agent` for tool dispatch, while direct non-tool CLI commands use `admin`.
 
-After [T20260428-4], tool-invocation audit is written in `OrbitRuntime::execute_tool_command_dispatch` for CLI, MCP, and future entry points. A `ToolEntryPoint` discriminator surfaces as `subcommand: "run"` or `"run-mcp"`, setup failures inside dispatch are audited, and `duration_ms` is clamped to at least `1`. The legacy CLI guard skips its own emission when the runtime sets a per-thread `mark_tool_audit_recorded` signal; pre-runtime CLI failures such as invalid JSON still produce the existing guard-side row.
+After [T20260428-4], tool-invocation audit is written at the OrbitRuntime dispatch boundary for CLI, MCP, and future entry points. A `ToolEntryPoint` discriminator surfaces as `subcommand: "run"` or `"run-mcp"`, setup failures inside dispatch are audited, and `duration_ms` is clamped to at least `1`. [ORB-10225] extracted the shared boundary behind registry-backed dispatch and added `execute_in_process_tool_dispatch` for adapter-owned implementations: the in-process `orbit.graph.*` tools now cross the same MCP allowlist and success/failure audit bracket instead of calling their handler directly. The legacy CLI guard skips its own emission when the runtime sets a per-thread `mark_tool_audit_recorded` signal; pre-runtime CLI failures such as invalid JSON still produce the existing guard-side row.
 
 ---
 
@@ -50,8 +50,8 @@ After [T20260428-4], tool-invocation audit is written in `OrbitRuntime::execute_
 
 Some runtime paths write targeted command-audit rows directly:
 
-- `crates/orbit-core/src/command/tool.rs` records CLI and MCP tool invocations as `command: tool` with `subcommand: "run"` or `"run-mcp"`.
-- `crates/orbit-cli/src/command/mcp/mod.rs` records MCP preflight failures for unknown or unexposed tools before runtime dispatch.
+- `crates/orbit-core/src/command/tool.rs` records registry-backed and in-process CLI/MCP tool invocations as `command: tool` with `subcommand: "run"` or `"run-mcp"`.
+- `crates/orbit-cli/src/command/mcp/host.rs` owns MCP safe-surface preflight. Adapter-owned preflight runs inside the shared runtime boundary; registry preflight failures are recorded explicitly before runtime dispatch. Unknown or unexposed names therefore produce failure rows without invoking either implementation.
 - `crates/orbit-core/src/runtime/orbit_tool_host/mod.rs` records task lock reservation checks, reservations, releases, and denials.
 - `crates/orbit-core/src/runtime/v2_host/pipeline_actions.rs` records gate-starvation failures for task bundles.
 
@@ -176,5 +176,6 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[ORB-00090]** — Aligned agent-facing provenance wording with the family-as-identity convention.
 - **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
 - **[ORB-10200]** — Derive CLI audit metadata and the other cross-cutting command policies from one exhaustive command-operation registry.
+- **[ORB-10225]** — Route in-process graph MCP calls through the safe-surface allowlist and shared runtime audit boundary.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

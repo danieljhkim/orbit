@@ -2,8 +2,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use orbit_common::types::ToolSessionContext;
+use orbit_common::types::{NotFoundKind, OrbitError, ToolSessionContext};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -60,7 +61,7 @@ fn graph_tool_schemas_cover_cli_parameters() {
 }
 
 #[test]
-fn combined_schemas_preserve_legacy_host_graph_tools() {
+fn combined_schemas_replace_known_host_graph_tools_and_preserve_unknown_ones() {
     let host = Arc::new(StubHost {
         schemas: vec![
             tool_schema("orbit.graph.search"),
@@ -83,13 +84,69 @@ fn combined_schemas_preserve_legacy_host_graph_tools() {
         .iter()
         .find(|schema| schema.name == "orbit.graph.search")
         .expect("graph search schema");
-    assert_param_names(search, &[]);
+    assert_param_names(
+        search,
+        &with_workspace_params(&["query", "kind", "lang", "limit"]),
+    );
     assert!(names.contains(&"orbit.graph.pack"));
     assert!(names.contains(&"orbit.task.show"));
-    assert!(!names.contains(&"orbit.graph.sync"));
-    assert!(!names.contains(&"orbit.graph.callees"));
-    assert!(!names.contains(&"orbit.graph.impact"));
-    assert!(!names.contains(&"orbit.graph.trace"));
+    assert!(names.contains(&"orbit.graph.sync"));
+    assert!(names.contains(&"orbit.graph.callees"));
+    assert!(names.contains(&"orbit.graph.impact"));
+    assert!(names.contains(&"orbit.graph.trace"));
+}
+
+#[tokio::test]
+async fn reexposed_graph_schema_still_crosses_in_process_policy_seam() {
+    struct ReexposedGraphHost {
+        host_calls: AtomicUsize,
+        in_process_calls: AtomicUsize,
+    }
+
+    impl crate::McpHost for ReexposedGraphHost {
+        fn list_tool_schemas(&self) -> Vec<orbit_common::types::ToolSchema> {
+            vec![tool_schema("orbit.graph.search")]
+        }
+
+        fn call_tool(
+            &self,
+            _name: &str,
+            _input: Value,
+            _session_context: ToolSessionContext,
+        ) -> Result<Value, OrbitError> {
+            self.host_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(json!({ "bypassed": true }))
+        }
+
+        fn call_in_process_tool(
+            &self,
+            name: &str,
+            _input: Value,
+            _session_context: ToolSessionContext,
+            _dispatch: &mut dyn FnMut(Value, ToolSessionContext) -> Result<Value, OrbitError>,
+        ) -> Result<Value, OrbitError> {
+            self.in_process_calls.fetch_add(1, Ordering::SeqCst);
+            Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()))
+        }
+    }
+
+    let host = Arc::new(ReexposedGraphHost {
+        host_calls: AtomicUsize::new(0),
+        in_process_calls: AtomicUsize::new(0),
+    });
+    let server = OrbitToolServer::new(host.clone());
+
+    let result = server
+        .call_tool_request(request_with_args(
+            "orbit.graph.search",
+            json!({ "query": "dispatch" }),
+        ))
+        .await
+        .expect("MCP request returns a structured policy error");
+
+    assert!(result.is_error.unwrap_or(false));
+    assert_eq!(host.in_process_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(host.host_calls.load(Ordering::SeqCst), 0);
 }
 
 #[test]
