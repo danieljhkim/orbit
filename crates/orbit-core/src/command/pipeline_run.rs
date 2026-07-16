@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -104,8 +105,13 @@ impl OrbitRuntime {
             let active_runs = self.stores().jobs().list_pending_or_running(job_name)?;
             let queued = !pipeline_run_is_runnable(&active_runs, &run.run_id, spec.max_active_runs);
 
-            if let Err(error) = self.spawn_pipeline_worker(&run.run_id) {
-                let _ = self.cancel_job_run(&run.run_id);
+            if let Err(error) = self.spawn_pipeline_worker(&run.run_id, actor) {
+                let message = format!(
+                    "pipeline worker for run '{}' could not start from registered workspace '{}': {error}",
+                    run.run_id,
+                    self.paths().repo_root.display(),
+                );
+                let _ = self.finalize_pipeline_worker_startup_failure(&run, &message, actor);
                 return Err(error);
             }
 
@@ -471,21 +477,12 @@ impl OrbitRuntime {
             .collect()
     }
 
-    fn spawn_pipeline_worker(&self, run_id: &str) -> Result<(), OrbitError> {
+    fn spawn_pipeline_worker(&self, run_id: &str, actor: Option<&str>) -> Result<(), OrbitError> {
         let current_exe = std::env::current_exe().map_err(|error| {
             OrbitError::Execution(format!("resolve current orbit executable: {error}"))
         })?;
         let mut command = Command::new(resolve_pipeline_worker_executable(current_exe));
-        command
-            .arg("--root")
-            .arg(self.data_root())
-            .arg("job")
-            .arg("run-pipeline-worker")
-            .arg(run_id)
-            .current_dir(&self.paths().repo_root)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+        configure_pipeline_worker_command(&mut command, &self.paths().repo_root, run_id);
         #[cfg(unix)]
         unsafe {
             command.pre_exec(|| {
@@ -495,10 +492,143 @@ impl OrbitRuntime {
                 Ok(())
             });
         }
-        command
+
+        // L-0090: discover detached workers by registered cwd, never explicit --root.
+        // Start the observer before the process so every successfully spawned
+        // worker has a parent-side path that can terminalize a pre-claim exit.
+        // Passing `--root` here used to pin both the workspace and global roots
+        // to `.orbit/`, which disconnected the worker from the global registry
+        // database that contains the persisted run. Cwd discovery preserves
+        // the registered workspace context for top-level and nested workers.
+        let (sender, receiver) = mpsc::sync_channel::<Child>(1);
+        let runtime = self.clone();
+        let run_id_for_observer = run_id.to_string();
+        let actor_for_observer = actor.map(ToOwned::to_owned);
+        let workspace_for_observer = self.paths().repo_root.clone();
+        thread::Builder::new()
+            .name(format!("pipeline-start-{run_id}"))
+            .spawn(move || {
+                let Ok(child) = receiver.recv() else {
+                    return;
+                };
+                if let Err(error) = runtime.monitor_pipeline_worker_startup(
+                    &run_id_for_observer,
+                    child,
+                    &workspace_for_observer,
+                    actor_for_observer.as_deref(),
+                ) {
+                    tracing::error!(
+                        target: "orbit.core.job_run",
+                        run_id = run_id_for_observer,
+                        error = %error,
+                        "failed to observe pipeline worker startup",
+                    );
+                }
+            })
+            .map_err(|error| {
+                OrbitError::Execution(format!("spawn pipeline worker observer: {error}"))
+            })?;
+
+        let child = command
             .spawn()
-            .map(|_| ())
-            .map_err(|error| OrbitError::Execution(format!("spawn pipeline worker: {error}")))
+            .map_err(|error| OrbitError::Execution(format!("spawn pipeline worker: {error}")))?;
+        sender.send(child).map_err(|error| {
+            OrbitError::Execution(format!("hand pipeline worker to startup observer: {error}"))
+        })
+    }
+
+    pub(crate) fn monitor_pipeline_worker_startup(
+        &self,
+        run_id: &str,
+        mut child: Child,
+        workspace: &Path,
+        actor: Option<&str>,
+    ) -> Result<(), OrbitError> {
+        let child_pid = child.id();
+        loop {
+            let run = self.show_job_run(run_id)?;
+            if let Some(owner_pid) = run.pid {
+                let _ = self.record_pipeline_audit(
+                    "pipeline.worker.claimed",
+                    Some(run_id),
+                    actor,
+                    AuditEventStatus::Success,
+                    json!({
+                        "run_id": run_id,
+                        "worker_pid": child_pid,
+                        "owner_pid": owner_pid,
+                        "workspace": workspace,
+                        "state": run.state.to_string(),
+                    }),
+                    None,
+                );
+                return Ok(());
+            }
+            if run.state != JobRunState::Pending {
+                return Ok(());
+            }
+
+            if let Some(status) = child.try_wait().map_err(|error| {
+                OrbitError::Execution(format!(
+                    "observe pipeline worker process for run '{run_id}': {error}"
+                ))
+            })? {
+                let message = format!(
+                    "pipeline worker for run '{run_id}' exited with status {status} before claiming the persisted run from registered workspace '{}'; verify workspace registration and worker root discovery",
+                    workspace.display(),
+                );
+                self.finalize_pipeline_worker_startup_failure(&run, &message, actor)?;
+                return Ok(());
+            }
+
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    fn finalize_pipeline_worker_startup_failure(
+        &self,
+        run: &JobRun,
+        message: &str,
+        actor: Option<&str>,
+    ) -> Result<(), OrbitError> {
+        let current = self.show_job_run(&run.run_id)?;
+        if current.state != JobRunState::Pending || current.pid.is_some() {
+            return Ok(());
+        }
+
+        let finished_at = Utc::now();
+        let changed = self.finalize_job_run_with_reservation_cleanup(
+            &run.run_id,
+            JobRunState::Interrupted,
+            finished_at,
+            None,
+            TaskReservationReleaseReason::RunTerminal,
+        )?;
+        if changed {
+            self.record_pipeline_diagnostic_step(
+                run,
+                run.scheduled_at,
+                finished_at,
+                message,
+                JobRunState::Interrupted,
+            )?;
+            self.record_event(OrbitEvent::JobRunCompleted {
+                job_id: run.job_id.clone(),
+                run_id: run.run_id.clone(),
+                state: JobRunState::Interrupted.to_string(),
+            })?;
+        }
+        self.record_pipeline_audit(
+            "pipeline.worker.startup",
+            Some(&run.run_id),
+            actor,
+            AuditEventStatus::Failure,
+            json!({
+                "run_id": run.run_id,
+                "workspace": self.paths().repo_root,
+            }),
+            Some(message.to_string()),
+        )
     }
 
     fn record_pipeline_wait_finished(
@@ -610,6 +740,21 @@ pub(crate) fn resolve_pipeline_worker_executable(current_exe: PathBuf) -> PathBu
     }
 
     current_exe
+}
+
+pub(crate) fn configure_pipeline_worker_command(
+    command: &mut Command,
+    workspace: &Path,
+    run_id: &str,
+) {
+    command
+        .arg("job")
+        .arg("run-pipeline-worker")
+        .arg(run_id)
+        .current_dir(workspace)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
 }
 
 fn pipeline_run_is_runnable(runs: &[JobRun], run_id: &str, max_active_runs: u32) -> bool {
