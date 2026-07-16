@@ -101,7 +101,8 @@ impl Tool for OrbitTaskUpdateTool {
             },
             ToolParam {
                 name: "pr_status".to_string(),
-                description: "PR review status (e.g. approve, request-changes)".to_string(),
+                description: "PR review status (e.g. approve, request-changes; empty string clears)"
+                    .to_string(),
                 param_type: "string".to_string(),
                 required: false,
             },

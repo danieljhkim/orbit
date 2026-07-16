@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **PR review status clearing is documented**: `orbit.task.update` now describes its empty-string clear convention, with tool-host coverage for the persisted null result. ([ORB-10229])
 - **Task PR status updates persist in v2 storage**: local tool and dashboard PATCH updates now retain `pr_status` alongside status and execution-summary changes. ([ORB-10223])
 - **Bundled skills are repository-agnostic**: the embedded skill tree drops Orbit-source paths, private Constellation names, workspace-local artifact IDs, and fixed design-doc filenames; a portability regression test and byte-aligned plugin mirrors guard against reintroduction. ([ORB-10208])
 - **CLI agent envelopes reach workflows**: provider-wrapped, prose-prefixed successful responses now validate and project their result object before workflow templating; malformed or failed envelopes fail closed. ([ORB-10216])
