@@ -183,6 +183,10 @@ pub(crate) fn format_code(target: &str, level: &str, fields: &Value) -> String {
         "orbit.policy.deny" => "DENY".to_string(),
         "orbit.friction.reported" => "FRC".to_string(),
         "orbit.job.step_retry" => "RTRY".to_string(),
+        "orbit.job.step_recovery_resumed" => match fields.get("outcome").and_then(Value::as_str) {
+            Some("success") => "RCVR".to_string(),
+            _ => "ERR".to_string(),
+        },
         "orbit.job.step_finished" => match fields.get("success").and_then(Value::as_bool) {
             Some(true) => "OK".to_string(),
             Some(false) => "ERR".to_string(),
@@ -278,6 +282,19 @@ pub(crate) fn format_message(target: &str, fields: &Value) -> String {
             getn("attempt"),
             getn("next_backoff_ms"),
         ),
+        "orbit.job.step_recovery_resumed" => {
+            let mut message = format!(
+                "step {} resumed after recovery attempt={} outcome={}",
+                getf("step_id"),
+                getn("attempt"),
+                getf("outcome"),
+            );
+            let error = getf("error_message");
+            if !error.is_empty() {
+                message.push_str(&format!(": {error}"));
+            }
+            message
+        }
         "orbit.job.step_skipped" => {
             format!("step {} skipped: {}", getf("step_id"), getf("reason"))
         }

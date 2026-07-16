@@ -1,0 +1,19 @@
+schema_version: 1
+id: L-0086
+status: active
+scope:
+  paths:
+  - crates/orbit-engine/src/activity_job/job_executor/recovery.rs
+  - crates/orbit-engine/src/executor/automation/vcs/pr/open.rs
+  tags: []
+summary: Make every recoverable composite workflow step restartable from its first incomplete side effect before enabling post-recovery retry.
+body: 'A recovery agent can legitimately complete a prefix of the failed step while repairing state. The executor then re-enters the whole step, so leading operations must recognize durable valid state: reuse the task commit, inspect remote branch divergence before choosing or skipping a push, and persist/reuse PR identity before later metadata or lifecycle work. Emit a separate resumed-attempt audit event and return the resumed error if that one bounded attempt fails; otherwise operators see the stale pre-recovery failure and cannot diagnose the real terminal cause.'
+evidence:
+- kind: task
+  reference: ORB-10222
+- kind: external
+  reference: jrun-20260716-0031-4
+created_at: 2026-07-16T02:02:59.773115176Z
+updated_at: 2026-07-16T02:02:59.773115176Z
+created_by: codex
+priority: 180

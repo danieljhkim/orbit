@@ -97,10 +97,19 @@ fn recovery_success_runs_one_post_recovery_attempt_with_exact_input_and_fs_profi
             recovery_succeeded: true,
         } if step_id == "build" && recovery_activity == "recover"
     ));
+    assert!(matches!(
+        resumed_events(&events)[0].kind,
+        V2AuditEventKind::StepRecoveryResumed {
+            ref step_id,
+            attempt: 3,
+            ref outcome,
+            error_message: None,
+        } if step_id == "build" && outcome == "success"
+    ));
 }
 
 #[test]
-fn recovery_success_with_post_recovery_failure_returns_original_error_text() {
+fn recovery_success_with_post_recovery_failure_surfaces_resumed_error_and_stops() {
     let original_error = retryable_error("flaky", "first failure");
     let post_recovery_error = retryable_error("flaky", "post recovery still failing");
     let host = RecoveryHost::new([
@@ -109,7 +118,7 @@ fn recovery_success_with_post_recovery_failure_returns_original_error_text() {
             vec![
                 Err(original_error.clone()),
                 Err(original_error.clone()),
-                Err(post_recovery_error),
+                Err(post_recovery_error.clone()),
             ],
         ),
         ("recover", vec![Ok(json!({"recovered": true}))]),
@@ -124,11 +133,22 @@ fn recovery_success_with_post_recovery_failure_returns_original_error_text() {
         writer.clone(),
         &host,
     )
-    .expect_err("post-recovery failure should surface original error");
+    .expect_err("post-recovery failure should surface resumed error");
 
-    assert_eq!(err.to_string(), original_error.to_string());
+    assert_eq!(err.to_string(), post_recovery_error.to_string());
+    assert_eq!(host.action_count("flaky"), 3, "only one resumed attempt");
     assert_eq!(host.action_count("recover"), 1);
-    assert_eq!(recovery_events(&writer.events_snapshot().unwrap()).len(), 1);
+    let events = writer.events_snapshot().expect("audit snapshot");
+    assert_eq!(recovery_events(&events).len(), 1);
+    assert!(matches!(
+        resumed_events(&events)[0].kind,
+        V2AuditEventKind::StepRecoveryResumed {
+            attempt: 3,
+            ref outcome,
+            error_message: Some(ref message),
+            ..
+        } if outcome == "error" && message == &post_recovery_error.to_string()
+    ));
 }
 
 #[test]
@@ -489,6 +509,13 @@ fn recovery_events(events: &[V2AuditEvent]) -> Vec<&V2AuditEvent> {
     events
         .iter()
         .filter(|event| matches!(event.kind, V2AuditEventKind::StepRecoveryAttempted { .. }))
+        .collect()
+}
+
+fn resumed_events(events: &[V2AuditEvent]) -> Vec<&V2AuditEvent> {
+    events
+        .iter()
+        .filter(|event| matches!(event.kind, V2AuditEventKind::StepRecoveryResumed { .. }))
         .collect()
 }
 

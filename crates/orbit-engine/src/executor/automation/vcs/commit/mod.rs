@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use crate::context::{RuntimeHost, TaskHost};
 
 use super::super::input::{canonicalize_existing_dir, input_string_field, required_job_run_id};
-use super::git::git_success;
+use super::git::{git_output, git_success};
 use author::{append_co_author_trailers, commit_author_for_tasks, git_author_for_task};
 use git_ops::{
     ensure_named_branch, ensure_no_unmerged_changes, git_commit_with_identity, stage_paths,
@@ -168,6 +168,21 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
+    commit_batch_changes_with_reuse(host, input, false)
+}
+
+pub(super) fn commit_batch_changes_for_handoff<H: TaskHost + RuntimeHost + ?Sized>(
+    host: &H,
+    input: &Value,
+) -> Result<Value, OrbitError> {
+    commit_batch_changes_with_reuse(host, input, true)
+}
+
+fn commit_batch_changes_with_reuse<H: TaskHost + RuntimeHost + ?Sized>(
+    host: &H,
+    input: &Value,
+    reuse_existing_task_commit: bool,
+) -> Result<Value, OrbitError> {
     let batch_id = required_job_run_id(input, "commit_batch_changes")?;
     let batch_tasks = host.list_tasks_filtered(None, None, None, Some(batch_id), None, None)?;
     let [task] = batch_tasks.as_slice() else {
@@ -194,6 +209,22 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
                 "task_id": task.id,
             }));
         }
+        if reuse_existing_task_commit {
+            let subject = git_output(&workspace_path, &["log", "-1", "--format=%s", "HEAD"])?;
+            let task_marker = format!("[{}]", task.id);
+            if subject
+                .split_ascii_whitespace()
+                .any(|part| part == task_marker)
+            {
+                let commit_sha = git_output(&workspace_path, &["rev-parse", "HEAD"])?;
+                return Ok(json!({
+                    "committed": false,
+                    "commit_reused": true,
+                    "commit_sha": commit_sha,
+                    "task_id": task.id,
+                }));
+            }
+        }
         return Err(OrbitError::Execution(format!(
             "commit_batch_changes: no staged changes to commit for task '{}' in worktree '{}'; \
              the implement step produced an empty diff",
@@ -206,7 +237,13 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
     let author = git_author_for_task(task);
 
     git_commit_with_identity(&workspace_path, &message, author.as_ref())?;
-    Ok(json!({}))
+    let commit_sha = git_output(&workspace_path, &["rev-parse", "HEAD"])?;
+    Ok(json!({
+        "committed": true,
+        "commit_reused": false,
+        "commit_sha": commit_sha,
+        "task_id": task.id,
+    }))
 }
 
 fn resolve_workspace_path<H: RuntimeHost + ?Sized>(

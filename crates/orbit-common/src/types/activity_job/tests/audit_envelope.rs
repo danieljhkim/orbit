@@ -77,3 +77,29 @@ fn run_finished_error_message_round_trips_and_absence_defaults_to_none() {
         }
     ));
 }
+
+#[test]
+fn step_recovery_resumed_error_round_trips() {
+    let encoded = serde_json::to_value(V2AuditEventKind::StepRecoveryResumed {
+        step_id: "pr_open".to_string(),
+        attempt: 2,
+        outcome: "error".to_string(),
+        error_message: Some("push failed after recovery".to_string()),
+    })
+    .expect("serialize resumed recovery step");
+
+    assert_eq!(encoded["body_kind"], "step_recovery_resumed");
+    assert_eq!(encoded["attempt"], 2);
+    assert_eq!(encoded["error_message"], "push failed after recovery");
+    let decoded: V2AuditEventKind =
+        serde_json::from_value(encoded).expect("deserialize resumed recovery step");
+    assert!(matches!(
+        decoded,
+        V2AuditEventKind::StepRecoveryResumed {
+            step_id,
+            attempt: 2,
+            outcome,
+            error_message: Some(message),
+        } if step_id == "pr_open" && outcome == "error" && message == "push failed after recovery"
+    ));
+}

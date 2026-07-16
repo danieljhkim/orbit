@@ -85,6 +85,13 @@ pub enum V2AuditEventKind {
         recovery_activity: String,
         recovery_succeeded: bool,
     },
+    StepRecoveryResumed {
+        step_id: String,
+        attempt: u32,
+        outcome: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_message: Option<String>,
+    },
     StepDenied {
         step_id: String,
         reason: String,
@@ -196,6 +203,7 @@ impl V2AuditEventKind {
             V2AuditEventKind::StepSkipped { .. } => "step.skipped",
             V2AuditEventKind::StepRetry { .. } => "step.retry",
             V2AuditEventKind::StepRecoveryAttempted { .. } => "step.recovery_attempted",
+            V2AuditEventKind::StepRecoveryResumed { .. } => "step.recovery_resumed",
             V2AuditEventKind::StepDenied { .. } => V2_EVENT_TYPE_STEP_DENIED,
             V2AuditEventKind::StepJoin { .. } => "step.join",
             V2AuditEventKind::FanoutDispatched { .. } => "fanout.dispatched",

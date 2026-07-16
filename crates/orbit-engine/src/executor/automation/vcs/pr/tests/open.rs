@@ -4,6 +4,7 @@ use super::test_support::*;
 use crate::context::TaskReadHost;
 use orbit_common::types::TaskStatus;
 use serde_json::json;
+use std::process::Command;
 
 #[test]
 fn pr_open_rejects_missing_execution_summary_before_create() {
@@ -250,6 +251,125 @@ fn pr_open_records_failed_handoff_comment_when_rebase_fails() {
         host.comments_for("T20260521-1A").len(),
         1,
         "repeated failures from the same run/op must not spam duplicate comments"
+    );
+}
+
+#[test]
+fn pr_open_reuses_recovered_commit_then_continues_push_and_pr_idempotently() {
+    let workspace = rebase_conflict_pr_workspace();
+    git(
+        &workspace.repo,
+        &[
+            "commit",
+            "--amend",
+            "-m",
+            "chore: Rebase recovery task [T20260521-1A]",
+        ],
+    );
+
+    let remote = workspace
+        .repo
+        .parent()
+        .expect("repo parent")
+        .join("remote.git");
+    std::fs::create_dir_all(&remote).expect("create bare remote dir");
+    git(&remote, &["init", "--bare"]);
+    let remote_path = remote.to_string_lossy().to_string();
+    git(&workspace.repo, &["remote", "add", "origin", &remote_path]);
+    git(&workspace.repo, &["push", "origin", "agent-main"]);
+    git(&workspace.repo, &["push", "origin", "orbit/test-batch"]);
+
+    let rebase = Command::new("git")
+        .args(["rebase", "agent-main"])
+        .current_dir(&workspace.repo)
+        .output()
+        .expect("start conflicting recovery rebase");
+    assert!(!rebase.status.success(), "fixture must require recovery");
+    std::fs::write(
+        workspace.repo.join("src/lib.rs"),
+        "pub fn diverged() {}\npub fn recovered() {}\n",
+    )
+    .expect("resolve rebase conflict");
+    git(&workspace.repo, &["add", "src/lib.rs"]);
+    git(
+        &workspace.repo,
+        &["-c", "core.editor=true", "rebase", "--continue"],
+    );
+    assert!(
+        git(&workspace.repo, &["status", "--porcelain"]).is_empty(),
+        "recovery must leave a clean worktree"
+    );
+    assert_eq!(
+        git(
+            &workspace.repo,
+            &["rev-list", "--left-right", "--count", "agent-main...HEAD"]
+        ),
+        "0\t1"
+    );
+
+    let host = PrOpenTestHost::new(
+        vec![batch_task(
+            "T20260521-1A",
+            "Rebase recovery task",
+            "Outcome: success\n\nChanges:\n- Implemented.",
+        )],
+        workspace.repo.clone(),
+    );
+    let input = pr_open_input(&workspace.repo, vec!["T20260521-1A"]);
+    let recovered_head = git(&workspace.repo, &["rev-parse", "HEAD"]);
+    host.fail_tool("github.pr.view", "temporary PR metadata failure");
+
+    let first_error = pr_open(&host, &input)
+        .expect_err("a failure after PR creation should leave resumable state");
+    assert!(
+        first_error
+            .to_string()
+            .contains("temporary PR metadata failure")
+    );
+    assert_eq!(git(&workspace.repo, &["rev-parse", "HEAD"]), recovered_head);
+    assert_eq!(
+        host.get_task("T20260521-1A")
+            .expect("task after partial handoff")
+            .github_pr_number(),
+        Some("42"),
+        "PR identity must be durable before the later view/promotion step"
+    );
+    let first_push = host
+        .tool_calls()
+        .into_iter()
+        .find(|call| call.name == "git.push")
+        .expect("recovered branch push");
+    assert_eq!(first_push.input["force_with_lease"], json!(true));
+
+    // The test host records the push but does not mutate the bare remote. Bring
+    // it to the state a successful real git.push call would have established.
+    git(
+        &workspace.repo,
+        &["push", "--force", "origin", "orbit/test-batch"],
+    );
+    host.clear_tool_failure("github.pr.view");
+
+    let second = pr_open(&host, &input).expect("handoff retry should reuse valid state");
+    assert_eq!(second["commit_reused"], json!(true));
+    assert_eq!(second["push_performed"], json!(false));
+    assert_eq!(second["push_reused"], json!(true));
+    assert_eq!(second["pr_reused"], json!(true));
+    assert_eq!(second["pr_create_performed"], json!(false));
+    assert_eq!(git(&workspace.repo, &["rev-parse", "HEAD"]), recovered_head);
+
+    let calls = host.tool_calls();
+    assert_eq!(
+        calls.iter().filter(|call| call.name == "git.push").count(),
+        1,
+        "a current remote branch must not be pushed twice"
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call.name == "github.pr.create")
+            .count(),
+        1,
+        "the persisted PR identity must prevent duplicate creation"
     );
 }
 

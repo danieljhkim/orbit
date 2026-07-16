@@ -3,7 +3,7 @@ summary: "Activity / Job — Decisions"
 type: design
 title: "Activity / Job — Decisions"
 owner: codex
-last_updated: 2026-07-11
+last_updated: 2026-07-16
 status: Draft
 feature: activity-job
 doc_role: decisions
@@ -249,11 +249,11 @@ Folded into ADR-007's rollup for durable run state and operator inspection.
 
 ## ADR-023 — Seeded task-shipment workflows are deterministic, recoverable, and lock-aware
 
-**Status:** Accepted · 2026-05 · [T20260427-33], [T20260425-2010], [T20260427-45], [T20260430-9], [T20260430-12], [T20260430-14], [T20260421-0542-2], [T20260430-27], [T20260430-30], [T20260430-26], [T20260427-34], [T20260427-36], [T20260505-2], [T20260505-10], [T20260506-18], [T20260509-14]
+**Status:** Accepted · 2026-05 · [T20260427-33], [T20260425-2010], [T20260427-45], [T20260430-9], [T20260430-12], [T20260430-14], [T20260421-0542-2], [T20260430-27], [T20260430-30], [T20260430-26], [T20260427-34], [T20260427-36], [T20260505-2], [T20260505-10], [T20260506-18], [T20260509-14], [ORB-10222]
 
 **Context.** The seeded task workflows added many small ADRs as shipment behavior grew: run aliases, deterministic auto-dispatch, remote base selection, recovery hooks, backlog exclusions, operator status, and lock cleanup. They are one decision family: task shipment is an explicit durable workflow, not an advisory agent step or hidden side effect.
 
-**Decision.** Keep `orbit run` workflow aliases focused on execution, make automatic task shipment deterministic from backlog listing through gate fan-out, default shipping worktrees to fetched remote base refs, admit tasks through status-aware workflow gates, and protect overlapping work with durable task-lock reservations whose seeded TTL covers the child wait budget. Recovery is bounded, step-scoped on direct shipment workflows, and assigned through the configured reviewer role; child pipeline joins are followed by deterministic success guards after required cleanup, operator status is derived from persisted pipeline state, and run-owned reservations clean up when their owner run reaches a terminal state.
+**Decision.** Keep `orbit run` workflow aliases focused on execution, make automatic task shipment deterministic from backlog listing through gate fan-out, default shipping worktrees to fetched remote base refs, admit tasks through status-aware workflow gates, and protect overlapping work with durable task-lock reservations whose seeded TTL covers the child wait budget. Recovery is bounded, step-scoped on direct shipment workflows, assigned through the configured reviewer role, and followed by exactly one audited resumed attempt. Composite shipment actions must reuse verified commit, remote-branch, and PR state so that resumed execution continues at its first incomplete side effect. Child pipeline joins are followed by deterministic success guards after required cleanup, operator status is derived from persisted pipeline state, and run-owned reservations clean up when their owner run reaches a terminal state.
 
 Folded instances:
 
@@ -275,6 +275,7 @@ Folded instances:
 - Auto-dispatch no longer depends on provider credentials before it has deterministic backlog bundles.
 - Gate-owned reservations serialize overlapping bundles while their owner run is alive and are released by both seeded early-release steps and engine-owned terminal cleanup.
 - Seeded gate defaults require `ttl_seconds >= dispatch_timeout_seconds` so a legal child shipment wait cannot outlive its admission reservation.
+- Successful recovery re-enters the failed direct-shipment step once; audit events and step output distinguish reused handoff state from newly performed commit, push, and PR operations.
 - Costs retained from folded entries:
 - Cost: the auto-dispatch audit trail no longer contains a model-authored advisory grouping note.
 - Cost: users of `orbit run ship local`, `orbit run ship list/show`, and `orbit run duel list/show` must update their command muscle memory and scripts.
@@ -282,6 +283,7 @@ Folded instances:
 - Cost: job authors must make the recovery activity generic enough for every retryable step in that job.
 - Cost: this is intentionally conservative; it does not perform semantic git cleanup, task mutation, or child-run reconciliation until a more specific recovery policy is justified.
 - Cost: default recovery now depends on the configured reviewer agent being available, and authors must decide which steps deserve recovery rather than flipping one workflow-level switch.
+- Cost: deterministic shipment actions must carry explicit idempotency probes for their external side effects, and remote divergence checks add network and Git inspection before a push.
 - Cost: the Rust serializer and seeded activity YAML schema now duplicate the exclusion shape and must be kept in sync.
 - Cost: the CLI formatter now knows selected fields from `task_auto_pipeline` state, so future pipeline key renames must either preserve compatibility or update the operator summary parser.
 - Cost: `task_gate_pipeline` now relies on the dynamic `task_{{ input.mode }}_pipeline` job-name convention, so future gate modes must either follow that naming convention or refactor the dispatch selector.
@@ -662,5 +664,6 @@ Rejected alternatives: reconciling by parent linkage (no parent run id is persis
 - **[ORB-00363]** — Security bug: `run_shell` spawned unsandboxed subprocesses behind a tautological allowlist.
 - **[ORB-00374]** — Remove the `shell` activity variant and `run_shell` dispatch (fail-closed resolution of [ORB-00363]).
 - **[ORB-10202]** — Remove the retired friction task status while preserving workflow admission and triage behavior.
+- **[ORB-10222]** — Resume direct shipment once after successful recovery and reuse verified commit, push, and PR state.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

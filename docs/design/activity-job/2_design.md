@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-07-14
+last_updated: 2026-07-16
 status: Draft
 feature: activity-job
 doc_role: design
@@ -134,7 +134,7 @@ The public CLI now executes activity assets through jobs rather than exposing a 
 
 Some module comments still describe older phase ordering; the authoritative behavior is the orbit-core call path in `crates/orbit-core/src/command/job/exec.rs`.
 
-Seeded direct shipment workflows (`task_local_pipeline` and `task_pr_pipeline`) opt into `recovery_activity: step_failure_recovery` on specific steps after [T20260430-14]. After [T20260509-14], the recovery activity is tagged `role: reviewer`, so its effective provider/model/backend comes from `[agent.reviewer]` like other reviewer work. The recovery agent receives only the executor-provided recovery keys, inspects the failed step, makes bounded repairs when safe, and returns before the executor's single post-recovery attempt. Higher-level orchestration workflows do not enable the hook because replaying child-run dispatch or planning orchestration is not a safe default recovery action.
+Seeded direct shipment workflows (`task_local_pipeline` and `task_pr_pipeline`) opt into `recovery_activity: step_failure_recovery` on specific steps after [T20260430-14]. After [T20260509-14], the recovery activity is tagged `role: reviewer`, so its effective provider/model/backend comes from `[agent.reviewer]` like other reviewer work. The recovery agent receives only the executor-provided recovery keys, inspects the failed step, makes bounded repairs when safe, and returns before the executor's single post-recovery attempt. The executor emits `step.recovery_resumed` with that attempt's outcome; success continues the pipeline and failure terminalizes with the resumed error rather than the stale pre-recovery error. Higher-level orchestration workflows do not enable the hook because replaying child-run dispatch or planning orchestration is not a safe default recovery action. [ORB-10222] made this resumed attempt explicit and auditable.
 
 The seeded `list_backlog_tasks` deterministic activity starts `task_auto_pipeline`. Automatic mode admits tasks by `status: backlog`. It emits `task_count`, `task_ids`, `tasks`, singleton `bundles`, and an `excluded` array for admitted backlog tasks filtered because their context files overlap `in-progress` or `review` locks. `excluded` covers only lock overlap; status-based admission and `max_tasks` truncation stay silent, and explicit `task_ids` mode omits it. This attribution contract was added in [T20260421-0542-2].
 
@@ -363,7 +363,7 @@ After [T20260509-9], `writeback_planning_duel_task` also extracts a "Context Fil
 
 After [T20260508-3], generated one-task PR bodies render the task contract first: `## Task`, optional collapsed `## Execution Summary`, `## Validation`, then `## Branch Freshness`. The task section includes the task link, description, and plain-bullet acceptance criteria so reviewers can see the requested work beside the implementation summary. Multi-task callers keep the legacy `## Tasks` plus files-changed layout until those paths are retired.
 
-After [ORB-00016], `pr_open` treats a branch with zero commits ahead of the selected base as a successful no-repository-diff handoff after the same durable task guards pass. This path advances completed `in-progress` tasks to `review`, returns `pr_created: false` with base/head freshness fields, and does not call GitHub PR creation or stamp `github-pr` external refs. The normal branch-with-commits path still pushes, opens the PR, returns `pr_created: true`, and records the PR ref on participating tasks.
+The `pr_open` action is a restartable commit → freshness/rebase → push → PR handoff. A retry with a clean worktree reuses `HEAD` only when its subject carries the exact current task marker; an unrelated clean branch still fails the empty-diff gate established by [ORB-10134], while an explicit `no-diff-expected` task remains the side-effect-only exception. Remote branch inspection skips a push that is already current, uses a normal push for a missing or fast-forward remote, selects `--force-with-lease` only for a recovered divergent task branch, and refuses to overwrite a remote branch that is ahead of local state. PR identity is persisted as soon as creation yields a usable number, so a retry reuses the existing PR and continues with view/task promotion rather than creating another one. The step output records `commit_reused`, `push_performed`/`push_reused`, `push_force_with_lease`, and `pr_create_performed`/`pr_reused`; these fields make the resumed sub-step decision durable in pipeline state. [ORB-10222]
 
 ### 8.12 Test surfaces guarding executor invariants
 
@@ -551,6 +551,8 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260509-38]** — Run legacy parallel-batch workers through cancellable pipeline runs so timeout failure paths return promptly.
 - **[T20260509-40]** — Run CLI subprocesses in killable process groups and bound timeout-path output reader joins.
 - **[ORB-00016]** — Treat no-repository-diff `task_pr_pipeline` handoffs as successful no-PR completions.
+- **[ORB-10134]** — Fail task PR handoff when an ordinary implementation branch has no commits ahead of base.
+- **[ORB-10222]** — Resume once after successful step recovery and make commit/push/PR handoff retries idempotent and auditable.
 - **[ORB-00374]** — Remove the `shell` activity variant and `run_shell` dispatch (fail-closed resolution of security bug [ORB-00363]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

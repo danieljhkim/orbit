@@ -11,14 +11,51 @@ pub(super) fn recover_or_return_original(
         return Err(original_err);
     };
 
+    // L-0086: post-recovery re-entry is bounded and reports the resumed outcome.
     if attempt_recovery_activity(step, ctx, &recovery, &original_err, attempt, max_attempts) {
-        match run_step_body(step, ctx) {
-            Ok(outcome) if outcome.success => return Ok(outcome),
-            Ok(_) | Err(_) => {}
-        }
+        let resumed_attempt = attempt.saturating_add(1);
+        return match run_step_body(step, ctx) {
+            Ok(outcome) if outcome.success => {
+                emit_recovery_resumed(step, ctx, resumed_attempt, "success", None);
+                Ok(outcome)
+            }
+            Ok(outcome) => {
+                let message = outcome.message.unwrap_or_else(|| {
+                    format!(
+                        "post-recovery attempt {resumed_attempt} of step `{}` returned an unsuccessful outcome",
+                        step.id
+                    )
+                });
+                emit_recovery_resumed(step, ctx, resumed_attempt, "failed", Some(message.clone()));
+                Err(DispatchError::JobExecution(message))
+            }
+            Err(err) => {
+                emit_recovery_resumed(step, ctx, resumed_attempt, "error", Some(err.to_string()));
+                Err(err)
+            }
+        };
     }
 
     Err(original_err)
+}
+
+fn emit_recovery_resumed(
+    step: &JobV2Step,
+    ctx: &ExecCtx<'_>,
+    attempt: u32,
+    outcome: &str,
+    error_message: Option<String>,
+) {
+    emit_job_event_lossy(
+        &ctx.audit,
+        ctx.task_id(),
+        V2AuditEventKind::StepRecoveryResumed {
+            step_id: step.id.clone(),
+            attempt,
+            outcome: outcome.to_string(),
+            error_message,
+        },
+    );
 }
 
 pub(super) fn recovery_activity_for_step(

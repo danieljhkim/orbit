@@ -71,6 +71,13 @@ impl PrOpenTestHost {
             .insert(name.to_string(), message.to_string());
     }
 
+    pub fn clear_tool_failure(&self, name: &str) {
+        self.tool_errors
+            .lock()
+            .expect("tool errors lock")
+            .remove(name);
+    }
+
     pub fn comments_for(&self, task_id: &str) -> Vec<TaskComment> {
         self.comments
             .lock()

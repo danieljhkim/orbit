@@ -1,8 +1,10 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use chrono::Utc;
 use orbit_common::types::{
-    ExternalRef, NO_DIFF_EXPECTED_TAG, OrbitError, Role, Task, TaskComment, TaskStatus,
+    ExternalRef, GITHUB_PR_EXTERNAL_REF_SYSTEM, NO_DIFF_EXPECTED_TAG, OrbitError, Role, Task,
+    TaskComment, TaskStatus,
 };
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
@@ -14,7 +16,7 @@ use super::super::super::input::{
     required_job_run_id,
 };
 use super::super::freshness::ensure_branch_rebased_onto_base;
-use super::super::git::git_output;
+use super::super::git::{git_command_success, git_output, git_success};
 use super::attribution::pr_review_attribution;
 use super::body::{build_batch_pr_body, default_pr_title, meaningful_execution_summary};
 
@@ -24,8 +26,13 @@ pub(in crate::executor::automation) fn pr_open<H: RuntimeHost + TaskHost + Sync 
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
-    super::super::commit::commit_batch_changes(host, input)?;
-    open_batch_pr(host, input)
+    // L-0086: each handoff phase must reuse valid state after recovery re-entry.
+    let mut commit_result = super::super::commit::commit_batch_changes_for_handoff(host, input)?;
+    let pr_result = open_batch_pr(host, input)?;
+    if let (Some(base), Some(overlay)) = (commit_result.as_object_mut(), pr_result.as_object()) {
+        base.extend(overlay.clone());
+    }
+    Ok(commit_result)
 }
 
 pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
@@ -191,16 +198,39 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         ..Default::default()
     };
 
-    if let Err(error) = host.run_tool_with_context_and_role(
-        "git.push",
-        json!({
-            "repo_root": workspace_path.to_string_lossy().to_string(),
-            "branch": head,
-            "force_with_lease": branch_was_rebased,
-        }),
-        Role::Admin,
-        tool_context.clone(),
-    ) {
+    let push_decision = match remote_push_decision(&workspace_path, &head) {
+        Ok(decision) => decision,
+        Err(error) => {
+            record_failed_handoff(
+                host,
+                &completed_tasks,
+                FailedHandoff {
+                    batch_id,
+                    workspace_path: &workspace_path,
+                    head: &head,
+                    base: &base,
+                    base_ref: Some(&freshness.base_ref),
+                    op: FailedHandoffOp::Push,
+                    error: &error,
+                },
+            )?;
+            return Err(error);
+        }
+    };
+    let force_with_lease = branch_was_rebased || push_decision.requires_force();
+    let push_performed = !push_decision.is_current();
+    if push_performed
+        && let Err(error) = host.run_tool_with_context_and_role(
+            "git.push",
+            json!({
+                "repo_root": workspace_path.to_string_lossy().to_string(),
+                "branch": head,
+                "force_with_lease": force_with_lease,
+            }),
+            Role::Admin,
+            tool_context.clone(),
+        )
+    {
         record_failed_handoff(
             host,
             &completed_tasks,
@@ -217,63 +247,89 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         return Err(error);
     }
 
-    let pr_create = match host.run_tool_with_context_and_role(
-        "github.pr.create",
-        json!({
-            "title": title,
-            "body": body,
-            "base": base,
-            "head": head,
-        }),
-        Role::Admin,
-        tool_context.clone(),
-    ) {
-        Ok(value) => value,
-        Err(error) => {
-            record_failed_handoff(
-                host,
-                &completed_tasks,
-                FailedHandoff {
-                    batch_id,
-                    workspace_path: &workspace_path,
-                    head: &head,
-                    base: &base,
-                    base_ref: Some(&freshness.base_ref),
-                    op: FailedHandoffOp::PrCreate,
-                    error: &error,
-                },
-            )?;
-            return Err(error);
-        }
-    };
-    let pr_url = match pr_create
-        .get("url")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    {
-        Some(url) => url.to_string(),
-        None => {
-            let error =
-                OrbitError::Execution("github.pr.create did not return a PR url".to_string());
-            record_failed_handoff(
-                host,
-                &completed_tasks,
-                FailedHandoff {
-                    batch_id,
-                    workspace_path: &workspace_path,
-                    head: &head,
-                    base: &base,
-                    base_ref: Some(&freshness.base_ref),
-                    op: FailedHandoffOp::PrCreate,
-                    error: &error,
-                },
-            )?;
-            return Err(error);
+    let existing_pr = completed_tasks_pr_identity(&completed_tasks)?;
+    let mut pr_reused = existing_pr.is_some();
+    let mut pr_url = existing_pr
+        .as_ref()
+        .and_then(|identity| identity.url.clone());
+    let mut expected_pr_number = existing_pr.map(|identity| identity.number);
+    let pr_selector = if let Some(number) = expected_pr_number.as_ref() {
+        number.clone()
+    } else {
+        let pr_create = match host.run_tool_with_context_and_role(
+            "github.pr.create",
+            json!({
+                "title": title,
+                "body": body,
+                "base": base,
+                "head": head,
+            }),
+            Role::Admin,
+            tool_context.clone(),
+        ) {
+            Ok(value) => value,
+            Err(error) if pull_request_already_exists(&error) => {
+                pr_reused = true;
+                Value::Null
+            }
+            Err(error) => {
+                record_failed_handoff(
+                    host,
+                    &completed_tasks,
+                    FailedHandoff {
+                        batch_id,
+                        workspace_path: &workspace_path,
+                        head: &head,
+                        base: &base,
+                        base_ref: Some(&freshness.base_ref),
+                        op: FailedHandoffOp::PrCreate,
+                        error: &error,
+                    },
+                )?;
+                return Err(error);
+            }
+        };
+
+        if pr_reused {
+            head.clone()
+        } else {
+            let url = match pr_create
+                .get("url")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+            {
+                Some(url) => url.to_string(),
+                None => {
+                    let error = OrbitError::Execution(
+                        "github.pr.create did not return a PR url".to_string(),
+                    );
+                    record_failed_handoff(
+                        host,
+                        &completed_tasks,
+                        FailedHandoff {
+                            batch_id,
+                            workspace_path: &workspace_path,
+                            head: &head,
+                            base: &base,
+                            base_ref: Some(&freshness.base_ref),
+                            op: FailedHandoffOp::PrCreate,
+                            error: &error,
+                        },
+                    )?;
+                    return Err(error);
+                }
+            };
+            if let Some(number) = pr_number_from_url(&url) {
+                persist_pr_identity(host, &completed_tasks, &number, Some(&url))?;
+                expected_pr_number = Some(number);
+            }
+            pr_url = Some(url.clone());
+            url
         }
     };
     let pr_view = match host.run_tool_with_context_and_role(
         "github.pr.view",
-        json!({ "pr": pr_url }),
+        json!({ "pr": pr_selector }),
         orbit_common::types::Role::Admin,
         tool_context,
     ) {
@@ -320,6 +376,14 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
             return Err(error);
         }
     };
+    if let Some(expected) = expected_pr_number.as_deref()
+        && expected != pr_number
+    {
+        return Err(OrbitError::Execution(format!(
+            "github.pr.view returned PR {pr_number}, but task state records PR {expected}"
+        )));
+    }
+    persist_pr_identity(host, &completed_tasks, &pr_number, pr_url.as_deref())?;
 
     for task in &completed_tasks {
         let model = pr_review_attribution(host, task, batch_id)?;
@@ -336,8 +400,13 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
 
     Ok(json!({
         "pr_created": true,
+        "pr_create_performed": !pr_reused,
+        "pr_reused": pr_reused,
         "pr_number": pr_number,
         "pr_url": pr_url,
+        "push_performed": push_performed,
+        "push_reused": !push_performed,
+        "push_force_with_lease": push_performed && force_with_lease,
         "base": base,
         "head": head,
         "base_ref": freshness.base_ref,
@@ -345,6 +414,143 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         "commits_behind": freshness.commits_behind,
         "commits_ahead": freshness.commits_ahead,
     }))
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum RemotePushDecision {
+    Missing,
+    Current,
+    FastForward,
+    Diverged,
+}
+
+impl RemotePushDecision {
+    fn is_current(self) -> bool {
+        self == Self::Current
+    }
+
+    fn requires_force(self) -> bool {
+        self == Self::Diverged
+    }
+}
+
+fn remote_push_decision(
+    workspace_path: &Path,
+    head: &str,
+) -> Result<RemotePushDecision, OrbitError> {
+    if !git_command_success(workspace_path, &["remote", "get-url", "origin"])? {
+        return Ok(RemotePushDecision::Missing);
+    }
+
+    let remote_ref = format!("refs/heads/{head}");
+    let remote = git_output(
+        workspace_path,
+        &["ls-remote", "--heads", "origin", &remote_ref],
+    )?;
+    let Some(observed_remote_sha) = remote.split_whitespace().next() else {
+        return Ok(RemotePushDecision::Missing);
+    };
+    let local_sha = git_output(workspace_path, &["rev-parse", head])?;
+    if observed_remote_sha == local_sha {
+        return Ok(RemotePushDecision::Current);
+    }
+
+    // Refresh the tracking ref even when the object is already local. Besides
+    // closing the ls-remote race for the ancestry checks, this supplies the
+    // exact expected remote value used by a later --force-with-lease push.
+    let remote_tracking_ref = format!("refs/remotes/origin/{head}");
+    let fetch_refspec = format!("+{remote_ref}:{remote_tracking_ref}");
+    git_success(workspace_path, &["fetch", "origin", &fetch_refspec])?;
+    let remote_sha = git_output(workspace_path, &["rev-parse", &remote_tracking_ref])?;
+    if remote_sha == local_sha {
+        return Ok(RemotePushDecision::Current);
+    }
+    if git_command_success(
+        workspace_path,
+        &["merge-base", "--is-ancestor", &remote_sha, head],
+    )? {
+        return Ok(RemotePushDecision::FastForward);
+    }
+    if git_command_success(
+        workspace_path,
+        &["merge-base", "--is-ancestor", head, &remote_sha],
+    )? {
+        return Err(OrbitError::Execution(format!(
+            "remote task branch 'origin/{head}' is ahead of local '{head}'; refusing to overwrite remote commits during PR handoff retry"
+        )));
+    }
+    Ok(RemotePushDecision::Diverged)
+}
+
+#[derive(Debug)]
+struct ExistingPrIdentity {
+    number: String,
+    url: Option<String>,
+}
+
+fn completed_tasks_pr_identity(tasks: &[Task]) -> Result<Option<ExistingPrIdentity>, OrbitError> {
+    let mut numbers = BTreeSet::new();
+    let mut url = None;
+    for task in tasks {
+        for external_ref in &task.external_refs {
+            if external_ref.system != GITHUB_PR_EXTERNAL_REF_SYSTEM {
+                continue;
+            }
+            numbers.insert(external_ref.id.clone());
+            if url.is_none() {
+                url = external_ref.url.clone();
+            }
+        }
+    }
+    if numbers.len() > 1 {
+        return Err(OrbitError::Execution(format!(
+            "completed tasks record conflicting GitHub PRs: {}",
+            numbers.into_iter().collect::<Vec<_>>().join(", ")
+        )));
+    }
+    Ok(numbers
+        .into_iter()
+        .next()
+        .map(|number| ExistingPrIdentity { number, url }))
+}
+
+fn persist_pr_identity<H: TaskHost + ?Sized>(
+    host: &H,
+    tasks: &[Task],
+    pr_number: &str,
+    pr_url: Option<&str>,
+) -> Result<(), OrbitError> {
+    let external_ref = ExternalRef::try_new(
+        GITHUB_PR_EXTERNAL_REF_SYSTEM.to_string(),
+        pr_number.to_string(),
+        pr_url.map(str::to_string),
+    )?;
+    for task in tasks {
+        if task.github_pr_number() == Some(pr_number) {
+            continue;
+        }
+        host.apply_task_automation_update(
+            &task.id,
+            TaskAutomationUpdate {
+                external_refs: vec![external_ref.clone()],
+                ..TaskAutomationUpdate::default()
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn pr_number_from_url(url: &str) -> Option<String> {
+    url.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|value| !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit()))
+        .map(str::to_string)
+}
+
+fn pull_request_already_exists(error: &OrbitError) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    message.contains("pull request") && message.contains("already exists")
 }
 
 fn completed_task_ids_from_input(input: &Value) -> Option<Vec<String>> {
