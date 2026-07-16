@@ -50,8 +50,8 @@ pub(super) fn run_deterministic(
                     message: format!("{err}"),
                 })
         }
-        "git_commit" | "git_merge" | "git_push" | "pr_open" | "run_planning_duel"
-        | "update_task" | "worktree_setup" => {
+        "git_commit" | "git_merge" | "git_push" | "git_rebase" | "pr_open" | "pr_prepare"
+        | "pr_promote" | "run_planning_duel" | "update_task" | "worktree_setup" => {
             let state_context = StateExecutionContext {
                 run_id: input
                     .get("run_id")
@@ -414,9 +414,11 @@ fn non_empty(values: Vec<String>) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::task::TaskAddParams;
+    use crate::command::task::{TaskAddParams, TaskUpdateParams};
     use chrono::Utc;
-    use orbit_common::types::{PipelineState, TaskPriority, TaskStatus, TaskType};
+    use orbit_common::types::{
+        NO_DIFF_EXPECTED_TAG, PipelineState, TaskPriority, TaskStatus, TaskType,
+    };
     use orbit_engine::V2RuntimeHost;
     use orbit_tools::ToolContext;
     use serde_json::json;
@@ -445,6 +447,104 @@ mod tests {
             })
             .expect("seed task")
             .id
+    }
+
+    fn seed_pr_handoff_task(runtime: &OrbitRuntime, title: &str, tags: Vec<String>) -> String {
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: title.to_string(),
+                description: format!("Fixture task: {title}"),
+                acceptance_criteria: vec!["Fixture task is observable.".to_string()],
+                tags,
+                plan: "Fixture plan.".to_string(),
+                workspace_path: Some(".".to_string()),
+                priority: TaskPriority::Medium,
+                task_type: Some(TaskType::Chore),
+                status: Some(TaskStatus::InProgress),
+                ..Default::default()
+            })
+            .expect("seed PR handoff task");
+        runtime
+            .update_task(
+                &task.id,
+                TaskUpdateParams {
+                    execution_summary: Some(
+                        "Outcome: success\nChanges:\n- Fixture ready for handoff.".to_string(),
+                    ),
+                    implemented_by: Some(Some("codex".to_string())),
+                    job_run_id: Some(Some("checkpoint-run".to_string())),
+                    ..Default::default()
+                },
+            )
+            .expect("prepare PR handoff task");
+        task.id
+    }
+
+    #[test]
+    fn checkpointed_pr_handoff_actions_are_dispatched_by_v2_host() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+        // These inputs stop at action-specific validation, proving the v2 host
+        // forwarded them to the engine instead of rejecting their names.
+        for action in ["pr_prepare", "git_rebase"] {
+            let err = runtime
+                .run_deterministic(action, &json!({}), &json!({}), ToolContext::default())
+                .expect_err("incomplete fixture input should fail inside the action");
+            match err {
+                DispatchError::DeterministicActionFailed {
+                    action: reported_action,
+                    ..
+                } => assert_eq!(reported_action, action),
+                other => panic!("expected registered action failure, got {other}"),
+            }
+        }
+
+        let no_diff_task = seed_pr_handoff_task(
+            &runtime,
+            "No-diff promotion",
+            vec![NO_DIFF_EXPECTED_TAG.to_string()],
+        );
+        let no_diff = runtime
+            .run_deterministic(
+                "pr_promote",
+                &json!({}),
+                &json!({
+                    "job_run_id": "checkpoint-run",
+                    "completed_task_ids": [no_diff_task.clone()],
+                    "workspace_path": ".",
+                    "no_diff_expected": true,
+                }),
+                ToolContext::default(),
+            )
+            .expect("promote no-diff handoff");
+        assert_eq!(no_diff["decision"], json!("performed"));
+        assert!(no_diff["pr_number"].is_null());
+        let no_diff_task = runtime
+            .get_task(&no_diff_task)
+            .expect("promoted no-diff task");
+        assert_eq!(no_diff_task.status, TaskStatus::Review);
+        assert!(no_diff_task.github_pr_number().is_none());
+
+        let diff_task = seed_pr_handoff_task(&runtime, "PR promotion", Vec::new());
+        let diff = runtime
+            .run_deterministic(
+                "pr_promote",
+                &json!({}),
+                &json!({
+                    "job_run_id": "checkpoint-run",
+                    "completed_task_ids": [diff_task.clone()],
+                    "workspace_path": ".",
+                    "pr_number": "42",
+                    "pr_url": "https://example.test/pull/42",
+                }),
+                ToolContext::default(),
+            )
+            .expect("promote PR handoff");
+        assert_eq!(diff["decision"], json!("performed"));
+        assert_eq!(diff["pr_number"], json!("42"));
+        let diff_task = runtime.get_task(&diff_task).expect("promoted PR task");
+        assert_eq!(diff_task.status, TaskStatus::Review);
+        assert_eq!(diff_task.github_pr_number(), Some("42"));
     }
 
     #[test]
