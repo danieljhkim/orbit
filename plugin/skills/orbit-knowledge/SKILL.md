@@ -53,7 +53,13 @@ Listing is **not** on the agent MCP surface — use `orbit search --kind adr` fo
 
 **Workflow:** (1) inspect nearby decisions first (`orbit search "<concept>" --kind adr`, `orbit.adr.show`, `legacy_id` lookup for migrated per-feature refs). (2) new decision → `add`; body/metadata correction → `update`; reversal of an accepted ADR → create the replacement, accept it with a related task, then `supersede`. (3) body needs exactly `## Context`, `## Decision`, `## Consequences`, with ≥1 consequences bullet starting `Cost:`. (4) `related_features` = feature/area names; `tags` = free-form cross-artifact labels; `paths` = repo-relative globs the decision constrains. (5) `related_tasks` may be empty for a speculative proposed ADR — don't invent a task just to satisfy one; **acceptance requires a real related task**. (6) verify with `.show` or `orbit search --kind adr`.
 
-Creation is warranted only when all three hold: a real alternative was on the table, the choice constrains future work, and the cost is non-trivial and worth preserving. Otherwise put the detail in a design doc, a spec, or an existing ADR's instance table.
+Propose an ADR only when both hold: a real alternative was on the table, and the choice is meaningfully costly to reverse. Treat "surprising without context" as a strong signal, not a third hard requirement — lock-in can be real without being surprising (e.g. a Postgres or monorepo pick), so weigh it as a tiebreaker rather than a filter. Qualifies:
+- A deliberate deviation from the obvious path (e.g. ADR-0217's turn-knobs-out-of-specs).
+- A constraint not visible in the code itself.
+- A non-obvious rejected alternative worth recording.
+- A technology/architecture choice with real lock-in.
+
+Otherwise put the detail in a design doc, a spec, or an existing ADR's instance table.
 
 ```markdown
 ## Context
