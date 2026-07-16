@@ -63,7 +63,7 @@ Do not paste huge transcripts back to the human — summarize the decisive lines
 ## Distinguish Failure Classes
 
 - **Implementation failure:** the agent loop exited nonzero or reported a failed envelope during `implement_one`.
-- **Validation failure:** implementation completed but `make build`, `make fmt`, `cargo test`, or a task-specific command failed.
+- **Validation failure:** implementation completed but the repo's build, format, test, or a task-specific validation command failed.
 - **Git/branch failure:** `git_push`, `pr_open`, `git_merge`, freshness checks, rebase, or conflicts failed after implementation.
 - **Provider/tooling failure:** provider command failed before useful work, model unavailable, timeout, sandbox denial, tool surface mismatch.
 - **Recovery failure:** the original step failed and `step_failure_recovery` also failed — report both, keep the original step as primary unless recovery caused additional damage.

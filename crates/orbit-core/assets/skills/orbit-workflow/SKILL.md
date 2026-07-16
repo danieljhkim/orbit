@@ -7,8 +7,8 @@ description: How to use Orbit's execution layer — jobs, activities, routines, 
 
 ## Concepts
 
-- **Job** — a deterministic, multi-step pipeline (schemaVersion 2 YAML) under `crates/orbit-core/assets/jobs/` (e.g. `task_pr_pipeline`, `task_auto_pipeline`, `task_gate_pipeline`, `task_epic_pipeline`, `job_duel_plan_pipeline`). Jobs compose **activities**.
-- **Activity** — one named step definition under `crates/orbit-core/assets/activities/*.yaml` (`agent_implement`, `agent_review`, `git_commit`, `git_push`, `pr_open`, `worktree_setup`, `reserve_locks`, ...). Activities aren't invoked directly by CLI; a job's step list references them.
+- **Job** — a deterministic, multi-step pipeline (schemaVersion 2 YAML) from the installed job catalog; discover it with `orbit job list` / `orbit job show <id>` (e.g. `task_pr_pipeline`, `task_auto_pipeline`, `task_gate_pipeline`, `task_epic_pipeline`, `job_duel_plan_pipeline`). Jobs compose **activities**.
+- **Activity** — one named step definition referenced by a job's step list (`agent_implement`, `agent_review`, `git_commit`, `git_push`, `pr_open`, `worktree_setup`, `reserve_locks`, ...). Activities aren't invoked directly by CLI; a job's step list references them.
 - **Routine** — a git-versioned cron trigger (`.orbit/routines/*.yaml`) pointing at a `job:<name>` target, with host pinning and a retry/overlap policy.
 - **Sweep** — the stateless per-minute clock tick (`orbit sweep`, fired by an OS timer) that fires whatever routine is due on this host. All scheduler state (last fires, pauses, locks) is host-local in `~/.orbit/orbit.db`, never synced; routine *definitions* sync via git.
 - **`orbit run`** — the execution frontend: `orbit run ship` / `ship-local` / `ship-sweep` (dispatch across every registered workspace) / `duel-plan` / `job <id>` / `history` / `show <run_id>` / `logs <run_id>` / `events <run_id>` / `trace <run_id>`. Equivalent job-catalog commands exist as `orbit job list|show|run|replay|resume`.
@@ -31,11 +31,11 @@ orbit run show <run_id> --json
 3. **Add a routine** — YAML under `<source>/.orbit/routines/`:
    ```yaml
    schemaVersion: 1
-   name: almanac-auto-commit
+   name: <routine-name>
    enabled: true
-   hosts: [dk-mac]                      # explicit pinning; no "any host" in v1
+   hosts: [<host-id>]                   # explicit pinning; no "any host" in v1
    trigger: { cron: "0 22 * * *", missed_run: skip }   # skip | catch_up_once
-   target: job:almanac_commit_pipeline  # job:<name> only — activity: is rejected
+   target: job:<job-name>               # job:<name> only — activity: is rejected
    policy: { timeout_minutes: 10, retries: { max: 2, backoff_minutes: 2 }, overlap: forbid }
    ```
    Parsing is fail-closed: an invalid file makes *that routine* absent and reports a load error — it never fires with defaults.
@@ -43,7 +43,7 @@ orbit run show <run_id> --json
 
 Fires appear in `orbit run history` under actor `routine/<name>`. `orbit routine pause|resume <name>` is host-local and durable across reboots. Toggle resolution order when something doesn't fire: `enabled: false` (versioned) → host not in `hosts` (versioned) → local pause (this host). `orbit routine list` shows all three.
 
-Read the full schema at `docs/design/routines/2_design.md` §1 before hand-authoring a routine — don't answer field semantics from memory.
+Consult `orbit routine --help` for the full field schema before hand-authoring a routine — don't answer field semantics from memory.
 
 ## Checking Operational Logs
 

@@ -21,7 +21,7 @@ orbit search "slow inference after model swap" --limit 5
 
 # Cross-artifact label and path filters (--tag is AND when repeated)
 orbit search "scheduler" --tag perf --kind all
-orbit search path crates/orbit-search/src/lib.rs --kind all
+orbit search path src/lib.rs --kind all
 
 # Hybrid lexical + cosine over indexed fields
 orbit search "agent loop deadlock" --hybrid --kind task --limit 5
@@ -63,7 +63,7 @@ Frontmatter (`type` and `summary` required; `summary` non-empty single line):
 type: design | pattern | context | glossary | runbook
 summary: One-line hook for agent retrieval
 tags: [hook, learning, audit]
-paths: ["crates/orbit-cli/**"]
+paths: ["src/**"]
 related_features: [hook-rewrite]
 related_artifacts: ["<task-id>", "<adr-id>", "<learning-id>"]
 ---

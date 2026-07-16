@@ -17,7 +17,7 @@ Confirm:
 
 ```bash
 orbit locks list --json
-orbit tool run orbit.task.show --full --input '{"id":"<blocking_task_id>","model":"codex"}'
+orbit tool run orbit.task.show --full --input '{"id":"<blocking_task_id>","model":"<agent-family>"}'
 rg -n '<reservation_id>|task.locks.reserve.denied|<blocked_task_id>' .orbit/state/audit/v2_loop
 ```
 
@@ -54,8 +54,9 @@ Confirm:
 
 ```bash
 orbit run show <run_id> --json
+orbit job show <job> --json
 rg -n '<missing_field>|<activity_name>|<job_name>' .orbit/state/audit/v2_loop/<run_id>.jsonl
-diff -u crates/orbit-core/assets/jobs/<job>.yaml ~/.orbit/resources/jobs/job_<job>.yaml
+diff -u .orbit/resources/jobs/job_<job>.yaml ~/.orbit/resources/jobs/job_<job>.yaml
 find .orbit/resources/jobs ~/.orbit/resources/jobs -name '*<job>*' -print
 ```
 
@@ -79,7 +80,7 @@ Confirm:
 orbit run show <run_id> --json
 git -C <workspace_path> status --short --branch
 git -C <workspace_path> rev-list --left-right --count <base_ref>...HEAD
-orbit tool run orbit.task.show --full --input '{"id":"<task_id>","model":"codex"}'
+orbit tool run orbit.task.show --full --input '{"id":"<task_id>","model":"<agent-family>"}'
 ```
 
 Solution:

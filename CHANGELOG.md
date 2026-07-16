@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Bundled skills are repository-agnostic**: the embedded skill tree drops Orbit-source paths, private Constellation names, workspace-local artifact IDs, and fixed design-doc filenames; a portability regression test and byte-aligned plugin mirrors guard against reintroduction. ([ORB-10208])
 - **Scheduled provider discovery fixed**: systemd routine sweeps now use a portable user PATH so provider launchers installed in `~/.local/bin` remain available. ([ORB-10214])
 - **Log rotation and pipeline spawning tolerate replaced paths**: missing log archive directories are silent no-ops, while long-lived Orbit processes resolve Linux deleted-inode executable paths back to the installed binary before spawning workers. ([ORB-10213])
 - **Skill guidance reflects friction triage**: shipped skills use positional learning-show IDs and document mutable friction statuses, direct triage commands, and task-driven resolution. ([ORB-10210])
