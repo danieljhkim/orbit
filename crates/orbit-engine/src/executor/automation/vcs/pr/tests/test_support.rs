@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -39,6 +39,8 @@ pub struct PrOpenTestHost {
     scoreboard_dir: PathBuf,
     registry: ActivityExecutorRegistry,
     tool_errors: Mutex<HashMap<String, String>>,
+    queued_tool_results: Mutex<HashMap<String, VecDeque<Result<Value, String>>>>,
+    pr_exists: Mutex<bool>,
 }
 
 impl PrOpenTestHost {
@@ -56,6 +58,8 @@ impl PrOpenTestHost {
             scoreboard_dir,
             registry: ActivityExecutorRegistry::default(),
             tool_errors: Mutex::new(HashMap::new()),
+            queued_tool_results: Mutex::new(HashMap::new()),
+            pr_exists: Mutex::new(false),
         }
     }
 
@@ -69,6 +73,20 @@ impl PrOpenTestHost {
             .lock()
             .expect("tool errors lock")
             .insert(name.to_string(), message.to_string());
+    }
+
+    pub fn queue_tool_error(&self, name: &str, message: &str) {
+        self.queued_tool_results
+            .lock()
+            .expect("queued tool results lock")
+            .entry(name.to_string())
+            .or_default()
+            .push_back(Err(message.to_string()));
+    }
+
+    pub fn with_existing_pr(self) -> Self {
+        *self.pr_exists.lock().expect("pr exists lock") = true;
+        self
     }
 
     pub fn comments_for(&self, task_id: &str) -> Vec<TaskComment> {
@@ -326,16 +344,34 @@ impl RuntimeHost for PrOpenTestHost {
         {
             return Err(OrbitError::Execution(message));
         }
+        if let Some(result) = self
+            .queued_tool_results
+            .lock()
+            .expect("queued tool results lock")
+            .get_mut(name)
+            .and_then(VecDeque::pop_front)
+        {
+            return result.map_err(OrbitError::Execution);
+        }
 
         match name {
             "git.push" => Ok(json!({})),
             "github.pr.merge" => Ok(json!({})),
-            "github.pr.create" => Ok(json!({
-                "url": "https://github.example/orbit/orbit/pull/42"
+            "github.pr.create" => {
+                *self.pr_exists.lock().expect("pr exists lock") = true;
+                Ok(json!({
+                    "url": "https://github.example/orbit/orbit/pull/42"
+                }))
+            }
+            "github.pr.view" if *self.pr_exists.lock().expect("pr exists lock") => Ok(json!({
+                "pull_request": {
+                    "number": 42,
+                    "url": "https://github.example/orbit/orbit/pull/42"
+                }
             })),
-            "github.pr.view" => Ok(json!({
-                "pull_request": { "number": 42 }
-            })),
+            "github.pr.view" => Err(OrbitError::Execution(
+                "no pull requests found for branch".to_string(),
+            )),
             other => Err(OrbitError::not_found(NotFoundKind::Tool, other.to_string())),
         }
     }
@@ -462,6 +498,11 @@ pub struct PrWorkspace {
 pub fn pr_workspace() -> PrWorkspace {
     let temp = tempdir().expect("tempdir");
     let repo = temp.path().join("repo");
+    let remote = temp.path().join("remote.git");
+    git(
+        temp.path(),
+        &["init", "--bare", remote.to_str().expect("remote path")],
+    );
     fs::create_dir_all(&repo).expect("create repo dir");
     git(&repo, &["init"]);
     git(&repo, &["checkout", "-b", "agent-main"]);
@@ -470,34 +511,22 @@ pub fn pr_workspace() -> PrWorkspace {
     fs::write(repo.join("README.md"), "base\n").expect("write readme");
     git(&repo, &["add", "README.md"]);
     git(&repo, &["commit", "-m", "base"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&repo, &["push", "-u", "origin", "agent-main"]);
     git(&repo, &["checkout", "-b", "orbit/test-batch"]);
     fs::create_dir_all(repo.join("src")).expect("create src dir");
     fs::write(repo.join("src/lib.rs"), "pub fn changed() {}\n").expect("write lib");
     git(&repo, &["add", "src/lib.rs"]);
     git(&repo, &["commit", "-m", "change"]);
-
-    PrWorkspace { _temp: temp, repo }
-}
-
-/// Like `pr_workspace`, but the branch's change is left UNCOMMITTED in the
-/// working tree — mirroring the real PR pipeline, where the implement step
-/// writes changes into the worktree and `pr_open`'s commit step creates the
-/// commit. Used to exercise `pr_open` end-to-end (commit + open).
-pub fn pr_workspace_uncommitted() -> PrWorkspace {
-    let temp = tempdir().expect("tempdir");
-    let repo = temp.path().join("repo");
-    fs::create_dir_all(&repo).expect("create repo dir");
-    git(&repo, &["init"]);
-    git(&repo, &["checkout", "-b", "agent-main"]);
-    git(&repo, &["config", "user.name", "Orbit Test"]);
-    git(&repo, &["config", "user.email", "orbit-test@example.com"]);
-    fs::write(repo.join("README.md"), "base\n").expect("write readme");
-    git(&repo, &["add", "README.md"]);
-    git(&repo, &["commit", "-m", "base"]);
-    git(&repo, &["checkout", "-b", "orbit/test-batch"]);
-    fs::create_dir_all(repo.join("src")).expect("create src dir");
-    // Intentionally left uncommitted: pr_open's commit step must create it.
-    fs::write(repo.join("src/lib.rs"), "pub fn changed() {}\n").expect("write lib");
+    git(&repo, &["push", "-u", "origin", "orbit/test-batch"]);
 
     PrWorkspace { _temp: temp, repo }
 }
@@ -505,6 +534,11 @@ pub fn pr_workspace_uncommitted() -> PrWorkspace {
 pub fn no_diff_pr_workspace() -> PrWorkspace {
     let temp = tempdir().expect("tempdir");
     let repo = temp.path().join("repo");
+    let remote = temp.path().join("remote.git");
+    git(
+        temp.path(),
+        &["init", "--bare", remote.to_str().expect("remote path")],
+    );
     fs::create_dir_all(&repo).expect("create repo dir");
     git(&repo, &["init"]);
     git(&repo, &["checkout", "-b", "agent-main"]);
@@ -513,18 +547,32 @@ pub fn no_diff_pr_workspace() -> PrWorkspace {
     fs::write(repo.join("README.md"), "base\n").expect("write readme");
     git(&repo, &["add", "README.md"]);
     git(&repo, &["commit", "-m", "base"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&repo, &["push", "-u", "origin", "agent-main"]);
     git(&repo, &["checkout", "-b", "orbit/test-batch"]);
 
     PrWorkspace { _temp: temp, repo }
 }
 
-/// Workspace where rebasing `orbit/test-batch` onto `agent-main` conflicts:
-/// both branches edited the same file with incompatible content, so
-/// `git rebase agent-main` fails and `ensure_branch_rebased_onto_base`
-/// returns the original "behind" error.
+/// Workspace where rebasing `orbit/test-batch` onto `agent-main` conflicts.
+/// Recovery can resolve and continue the still-active rebase before the
+/// checkpointed rebase activity is retried.
 pub fn rebase_conflict_pr_workspace() -> PrWorkspace {
     let temp = tempdir().expect("tempdir");
     let repo = temp.path().join("repo");
+    let remote = temp.path().join("remote.git");
+    git(
+        temp.path(),
+        &["init", "--bare", remote.to_str().expect("remote path")],
+    );
     fs::create_dir_all(&repo).expect("create repo dir");
     git(&repo, &["init"]);
     git(&repo, &["checkout", "-b", "agent-main"]);
@@ -535,25 +583,40 @@ pub fn rebase_conflict_pr_workspace() -> PrWorkspace {
     fs::write(repo.join("src/lib.rs"), "pub fn base() {}\n").expect("write lib");
     git(&repo, &["add", "README.md", "src/lib.rs"]);
     git(&repo, &["commit", "-m", "base"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
     git(&repo, &["checkout", "-b", "orbit/test-batch"]);
     fs::write(repo.join("src/lib.rs"), "pub fn branch() {}\n").expect("write branch lib");
     git(&repo, &["add", "src/lib.rs"]);
     git(&repo, &["commit", "-m", "branch change"]);
+    git(&repo, &["push", "-u", "origin", "orbit/test-batch"]);
     git(&repo, &["checkout", "agent-main"]);
     fs::write(repo.join("src/lib.rs"), "pub fn diverged() {}\n").expect("write base lib");
     git(&repo, &["add", "src/lib.rs"]);
     git(&repo, &["commit", "-m", "diverged base"]);
+    git(&repo, &["push", "-u", "origin", "agent-main"]);
     git(&repo, &["checkout", "orbit/test-batch"]);
 
     PrWorkspace { _temp: temp, repo }
 }
 
 pub fn pr_open_input(repo: &Path, completed_task_ids: Vec<&str>) -> Value {
+    let base_sha = git(repo, &["rev-parse", "agent-main"]);
     json!({
         "workspace_path": repo.to_string_lossy(),
         "job_run_id": "batch-1",
         "completed_task_ids": completed_task_ids,
         "base": "agent-main",
+        "base_ref": "agent-main",
+        "base_sha": base_sha,
+        "head": "orbit/test-batch",
         "base_sync": "local",
     })
 }

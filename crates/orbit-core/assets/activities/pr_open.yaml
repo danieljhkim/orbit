@@ -5,8 +5,9 @@ metadata:
 spec:
   type: deterministic
   description: >
-    Open a pull request for a completed task bundle and stamp the participating
-    tasks with PR metadata.
+    Discover an existing pull request for a prepared branch or create it once.
+    Commit, base synchronization, push, and task promotion are separate job
+    checkpoints.
   input_schema_json:
     type: object
     properties:
@@ -24,6 +25,12 @@ spec:
           type: string
       base:
         type: string
+      base_ref:
+        type: string
+      base_sha:
+        type: string
+      head:
+        type: string
       workspace_path:
         type: string
       title:
@@ -32,8 +39,19 @@ spec:
         type: string
   output_schema_json:
     type: object
+    required: [phase, decision, pr_created, pr_reused, pr_number, base, head]
     properties:
+      phase:
+        type: string
+      decision:
+        type: string
+      pr_created:
+        type: boolean
+      pr_reused:
+        type: boolean
       pr_number:
         type: string
+      pr_url:
+        type: [string, "null"]
   action: pr_open
   config: {}

@@ -1,15 +1,18 @@
-//! PR automation state machine split across focused seams for maintainability.
-//! `attribution` owns Review/Done actor labels for ship handoffs; `body` owns PR title/body rendering helpers; `open` owns branch freshness/push/PR creation/review-thread updates; `merge` owns approved-PR merge, remote cleanup, Done updates, and scoreboard reconciliation. Test-only modules mirror the same seams.
+//! PR automation split across focused seams for maintainability. `attribution`
+//! owns Review/Done actor labels, `body` owns PR rendering, `open` owns
+//! create-or-reuse, `promote` owns the explicit Review handoff, and `merge`
+//! owns approved-PR merge, remote cleanup, and Done reconciliation.
 
 mod attribution;
 mod body;
 mod merge;
 mod open;
+mod promote;
 
 #[cfg(test)]
 mod tests;
 
+pub(in crate::executor::automation::vcs) use body::meaningful_execution_summary;
 pub(in crate::executor::automation) use merge::git_merge;
-#[allow(unused_imports)]
-pub(super) use open::open_batch_pr;
 pub(in crate::executor::automation) use open::pr_open;
+pub(in crate::executor::automation) use promote::pr_promote;

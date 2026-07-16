@@ -119,7 +119,9 @@ pub(super) fn render_legacy_task_section(task: &Task, pr_config: &PrConfig) -> S
     }
 }
 
-pub(super) fn meaningful_execution_summary(summary: &str) -> Option<&str> {
+pub(in crate::executor::automation::vcs) fn meaningful_execution_summary(
+    summary: &str,
+) -> Option<&str> {
     let trimmed = summary.trim();
     if trimmed.is_empty() || is_placeholder_execution_summary(trimmed) {
         None

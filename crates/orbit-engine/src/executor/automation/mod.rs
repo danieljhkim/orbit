@@ -28,12 +28,15 @@ const RUN_PLANNING_DUEL_ACTION: &str = "run_planning_duel";
 
 // ---- generic built-in automation actions ----
 const GIT_COMMIT_ACTION: &str = "git_commit";
+const GIT_REBASE_ACTION: &str = "git_rebase";
 const GIT_PUSH_ACTION: &str = "git_push";
 const GIT_PULL_ACTION: &str = "git_pull";
 const GIT_MERGE_ACTION: &str = "git_merge";
 const WORKTREE_SETUP_ACTION: &str = "worktree_setup";
 const WORKTREE_CLEANUP_ACTION: &str = "worktree_cleanup";
 const PR_OPEN_ACTION: &str = "pr_open";
+const PR_PREPARE_ACTION: &str = "pr_prepare";
+const PR_PROMOTE_ACTION: &str = "pr_promote";
 const PR_SYNC_REVIEWS_ACTION: &str = "pr_sync_reviews";
 const CHECK_TASK_VALUE_ACTION: &str = "check_task_value";
 const DISPATCH_BATCH_ACTION: &str = "dispatch_batch";
@@ -169,12 +172,15 @@ pub fn execute_action<
 
         // ---- generic built-in actions ----
         GIT_COMMIT_ACTION => vcs::git_commit(host, input),
+        GIT_REBASE_ACTION => vcs::rebase_pr_branch(host, input),
         GIT_PUSH_ACTION => vcs::push_batch_changes(host, input),
         GIT_PULL_ACTION => vcs::pull_batch_changes(host, input),
         GIT_MERGE_ACTION => vcs::git_merge(host, input),
         WORKTREE_SETUP_ACTION => vcs::setup_worktree(host, input),
         WORKTREE_CLEANUP_ACTION => vcs::cleanup_worktree(host, input),
         PR_OPEN_ACTION => vcs::pr_open(host, input),
+        PR_PREPARE_ACTION => vcs::prepare_pr_handoff(host, input),
+        PR_PROMOTE_ACTION => vcs::pr_promote(host, input),
         PR_SYNC_REVIEWS_ACTION => review::sync_batch_review_to_github(host, input),
         CHECK_TASK_VALUE_ACTION => review::check_task_value(host, input),
         DISPATCH_BATCH_ACTION => batch::dispatch_batch(host, input),
