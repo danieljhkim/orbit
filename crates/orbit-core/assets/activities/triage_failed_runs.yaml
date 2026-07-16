@@ -4,6 +4,7 @@ metadata:
   name: triage_failed_runs
 spec:
   type: agent_loop
+  require_response_envelope: true
   description: >
     Diagnose tasks blocked by terminally-failed job runs. For each candidate
     the agent reads the failure evidence, classifies the cause

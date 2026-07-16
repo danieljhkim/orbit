@@ -72,6 +72,12 @@ pub struct AgentLoopSpec {
     /// where the loop engine applies its own timeout.
     #[serde(default = "default_cli_wall_clock_timeout_seconds")]
     pub wall_clock_timeout_seconds: u64,
+    /// Require a valid Orbit response envelope before a CLI invocation may
+    /// report success. Defaults to `false` for artifact-backed activities,
+    /// whose durable task/review/git state is authoritative. Activities that
+    /// feed response fields into downstream templates opt in explicitly.
+    #[serde(default)]
+    pub require_response_envelope: bool,
     /// Optional role tag (ADR-029). When set, the engine consults
     /// `[agent.<role>]` in `config.toml` and overrides `provider`/`model`/
     /// `backend` field-by-field at dispatch time. The step-level role on
@@ -133,6 +139,7 @@ impl GroundhogSpec {
             backend: Backend::Http,
             provider: self.provider,
             wall_clock_timeout_seconds: self.wall_clock_timeout_seconds,
+            require_response_envelope: false,
             role: self.role,
             proc_allowed_programs: self.proc_allowed_programs.clone(),
         }

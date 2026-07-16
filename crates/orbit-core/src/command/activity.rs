@@ -206,6 +206,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn agent_response_contract_matches_durable_handoff_shape() {
+        for (name, required) in [
+            ("agent_implement", false),
+            ("agent_review", false),
+            ("triage_failed_runs", true),
+            ("epic_orchestrator", true),
+        ] {
+            let (_, yaml) = DEFAULT_ACTIVITY_FILES
+                .iter()
+                .find(|(candidate, _)| *candidate == name)
+                .unwrap_or_else(|| panic!("{name} activity is seeded"));
+            let asset = load_activity_asset(yaml)
+                .unwrap_or_else(|error| panic!("parse {name} activity: {error}"));
+            match asset.spec.spec {
+                ActivityV2Spec::AgentLoop(spec) => assert_eq!(
+                    spec.require_response_envelope, required,
+                    "{name} response contract drifted"
+                ),
+                other => panic!("expected agent_loop {name} activity, got {other:?}"),
+            }
+        }
+    }
+
     /// [ORB-10129] The triage agent's hard bounds are structural: its tool
     /// allowlist must exclude every write/dispatch surface (code edits,
     /// commits/pushes/merges, PR approval, pipeline invocation, task

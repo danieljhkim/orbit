@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-07-14
+last_updated: 2026-07-16
 status: Draft
 feature: activity-job
 doc_role: design
@@ -53,6 +53,8 @@ The common `agent_loop` fields are:
 - `backend`
 - `provider`
 - `wall_clock_timeout_seconds`
+- `require_response_envelope` (default `false`; opt in only when downstream
+  templates consume structured response fields)
 
 Groundhog has its own `GroundhogSpec`, but `as_agent_loop_spec()` projects it into an HTTP-backed agent loop when the runner needs the shared transport path. That sibling kind landed in [T20260420-0510-2].
 
@@ -218,7 +220,7 @@ The CLI path is driven by `cli_runner.rs`, added in [T20260419-0104]. The flow i
 6. Emit `CliInvocationStarted` with redacted argv, stdin blob ref, and resolved cwd.
 7. Spawn the subprocess in that cwd with a wall-clock timeout.
 8. Emit `CliInvocationFinished` with stdout/stderr blob refs and timeout state.
-9. Parse the captured provider output with the existing Orbit response parser and persist its `InvocationTrace` through the host.
+9. Parse the captured provider output with the existing Orbit response parser and persist its `InvocationTrace` through the host. After [ORB-10231] / [ADR-0224], envelope parsing is best-effort by default: provider exit status and timeout determine transport success while durable task/review/git artifacts remain authoritative. A valid envelope still projects its result fields, and an invalid or absent envelope is retained as bounded/redacted diagnostic metadata. Activities whose downstream templates require response fields set `require_response_envelope: true`, preserving fail-closed validation for that explicit contract.
 
 After [T20260426-2313], stdout/stderr readers emit line-level `tracing::info!` events while the child runs, carrying `provider`, `stream`, `job_run_id`, `task_id`, and `line`. After [T20260508-8], those events also carry `cwd` when the CLI subprocess has a resolved cwd. After [T20260426-2349], the default tracing subscriber redacts formatted output. The readers still retain original bytes for the existing audit/blob path, so run logs follow blob refs rather than the live feed.
 

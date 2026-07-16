@@ -340,6 +340,7 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec(
         backend: Backend::Cli,
         provider: Provider::Codex,
         wall_clock_timeout_seconds: timeout.as_secs(),
+        require_response_envelope: false,
         role: None,
         proc_allowed_programs: None,
     }
@@ -365,6 +366,7 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec_for(
         backend: Backend::Cli,
         provider,
         wall_clock_timeout_seconds: timeout.as_secs(),
+        require_response_envelope: false,
         role: None,
         proc_allowed_programs: None,
     }

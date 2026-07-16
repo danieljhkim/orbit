@@ -73,6 +73,7 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         backend: Backend::Cli,
         provider: Provider::Grok,
         wall_clock_timeout_seconds: 120,
+        require_response_envelope: true,
         role: None,
         proc_allowed_programs: None,
     };
