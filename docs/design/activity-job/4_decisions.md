@@ -3,7 +3,7 @@ summary: "Activity / Job — Decisions"
 type: design
 title: "Activity / Job — Decisions"
 owner: codex
-last_updated: 2026-07-11
+last_updated: 2026-07-16
 status: Draft
 feature: activity-job
 doc_role: decisions
@@ -590,6 +590,21 @@ Rejected alternatives: reconciling by parent linkage (no parent run id is persis
 - The agent's output is advisory data: it cannot move a task anywhere but `backlog`, cannot touch a task outside the candidate list, and cannot exceed the budget — misclassification degrades to a wasted bounded retry, never a corrupted lifecycle.
 - Loop-guard state lives in task history events rather than a new task field, so exhaustion survives restarts and is human-auditable.
 - Cost: a second bespoke deterministic action (and its activity asset) to maintain instead of reusing `update_task`, and the disposition vocabulary must be extended in Rust when triage learns new outcomes.
+
+---
+
+## ADR-0224 — CLI response envelopes are optional for artifact-backed activities
+
+**Status:** Accepted · 2026-07 · [ORB-10231]
+
+**Context.** CLI providers can exit successfully after persisting authoritative task, review, and git artifacts while emitting prose or provider wrapper JSON that lacks an Orbit response envelope. Treating every missing or malformed envelope as fatal strands completed work; treating every response as advisory would break activities whose downstream templates consume structured fields.
+
+**Decision.** CLI agent-loop activities treat response envelopes as best-effort by default. Exit status and timeout determine transport success, valid envelopes still project result fields, and parse failures become bounded redacted diagnostics. An activity sets `require_response_envelope: true` only when downstream workflow steps consume its structured response.
+
+**Consequences.**
+- Artifact-backed implementation and review runs no longer fail solely because final agent prose is malformed or missing an envelope.
+- Structured-output activities remain fail-closed through an explicit per-activity contract.
+- Cost: activity authors must classify the handoff correctly, and response-consuming activities need a regression that pins strict mode.
 
 ---
 

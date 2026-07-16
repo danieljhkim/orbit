@@ -434,6 +434,7 @@ fn cli_agent_loop_spec(provider: Option<Provider>) -> AgentLoopSpec {
         backend: Backend::Cli,
         provider: provider.unwrap_or(Provider::Claude),
         wall_clock_timeout_seconds: 30,
+        require_response_envelope: false,
         role: None,
         proc_allowed_programs: None,
     }
@@ -512,6 +513,7 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
                 backend: Backend::Cli,
                 provider: Provider::Claude,
                 wall_clock_timeout_seconds: 30,
+                require_response_envelope: false,
                 role: None,
                 proc_allowed_programs: None,
             }),

@@ -183,7 +183,8 @@ fn run_cli_backend_rejects_schema_invalid_success_envelope() {
         sink_for_writer,
     ));
     let host = TestHost::with_command(script.display().to_string());
-    let spec = test_agent_loop_spec(Duration::from_secs(5));
+    let mut spec = test_agent_loop_spec(Duration::from_secs(5));
+    spec.require_response_envelope = true;
 
     let outcome = run_cli_backend(
         &host,
@@ -204,6 +205,96 @@ fn run_cli_backend_rejects_schema_invalid_success_envelope() {
     assert!(
         message.contains("unsupported schemaVersion: 2"),
         "{message}"
+    );
+}
+
+#[test]
+fn run_cli_backend_accepts_claude_success_prose_without_envelope_for_artifact_activity() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    let stdout = serde_json::json!({
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "result": "All changes are complete and validated. Execution summary persisted to the task.",
+        "stop_reason": "end_turn"
+    })
+    .to_string();
+    write_executable(
+        &script,
+        &format!("#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{stdout}'\n"),
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-artifact-response",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-artifact-response",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10230"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(outcome.success);
+    assert!(outcome.message.is_none());
+    assert_eq!(outcome.output["exit_code"], 0);
+    assert_eq!(outcome.output["response_envelope_required"], false);
+    assert_eq!(outcome.output["response_envelope_valid"], false);
+    assert!(
+        outcome.output["response_envelope_error"]
+            .as_str()
+            .is_some_and(|message| message.contains("does not contain an Orbit response envelope"))
+    );
+}
+
+#[test]
+fn run_cli_backend_requires_envelope_when_activity_opts_in() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"completed\"}'\n",
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-required-response",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let mut spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+    spec.require_response_envelope = true;
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-required-response",
+        audit,
+        &serde_json::json!({"prompt": "return structured data"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(!outcome.success);
+    assert_eq!(outcome.output["response_envelope_required"], true);
+    assert_eq!(outcome.output["response_envelope_valid"], false);
+    assert!(
+        outcome
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("does not contain an Orbit response envelope"))
     );
 }
 
@@ -319,7 +410,8 @@ fn run_cli_backend_bounds_stdout_text_preview_and_keeps_envelope_status_from_ful
         sink_for_writer,
     ));
     let host = TestHost::with_command(script.display().to_string());
-    let spec = test_agent_loop_spec(Duration::from_secs(5));
+    let mut spec = test_agent_loop_spec(Duration::from_secs(5));
+    spec.require_response_envelope = true;
 
     let outcome = run_cli_backend(
         &host,
@@ -801,11 +893,9 @@ impl Drop for EnvVarGuard {
     }
 }
 
-/// Regression for T20260508-17: a CLI subprocess that exits 0 but emits an
-/// embedded Orbit response envelope reporting `status: "failed"` must NOT
-/// be classified as success. Pre-fix, dispatch returned `success: true`
-/// because the dispatcher only consulted exit code, leaving the planning
-/// pipeline to push an empty branch and open an empty PR.
+/// Regression for T20260508-17: a structured-output activity that opts into
+/// strict response validation must demote an exit-0 subprocess whose embedded
+/// Orbit response reports `status: "failed"`.
 #[test]
 fn run_cli_backend_demotes_success_when_envelope_reports_failed_despite_exit_zero() {
     let temp = tempdir().expect("tempdir");
@@ -842,7 +932,8 @@ fn run_cli_backend_demotes_success_when_envelope_reports_failed_despite_exit_zer
         sink_for_writer,
     ));
     let host = TestHost::with_command(script.display().to_string());
-    let spec = test_agent_loop_spec(Duration::from_secs(5));
+    let mut spec = test_agent_loop_spec(Duration::from_secs(5));
+    spec.require_response_envelope = true;
 
     let outcome = run_cli_backend(
         &host,

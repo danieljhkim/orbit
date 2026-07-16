@@ -19,6 +19,7 @@ fn inline_spec() -> AgentLoopSpec {
         backend: Backend::Cli,
         provider: Provider::Claude,
         wall_clock_timeout_seconds: 30,
+        require_response_envelope: false,
         role: Some(AgentRole::Implementer),
         proc_allowed_programs: None,
     }

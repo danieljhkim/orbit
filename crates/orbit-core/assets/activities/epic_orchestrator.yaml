@@ -4,6 +4,7 @@ metadata:
   name: epic_orchestrator
 spec:
   type: agent_loop
+  require_response_envelope: true
   description: >
     Judgment-grade orchestrator for epic-sized tasks. One invocation = one
     cycle: read state, decide READY subtasks, decide SEQUENTIAL vs PARALLEL,

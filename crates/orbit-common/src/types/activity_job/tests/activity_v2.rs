@@ -294,6 +294,23 @@ fn agent_loop_spec_defaults_to_cli_backend() {
 }
 
 #[test]
+fn agent_loop_spec_response_envelope_defaults_to_best_effort() {
+    let yaml = "instruction: hi\n";
+    let parsed: AgentLoopSpec = serde_yaml::from_str(yaml).expect("parse spec");
+    assert!(!parsed.require_response_envelope);
+}
+
+#[test]
+fn agent_loop_spec_required_response_envelope_round_trips() {
+    let yaml = "instruction: hi\nrequire_response_envelope: true\n";
+    let parsed: AgentLoopSpec = serde_yaml::from_str(yaml).expect("parse spec");
+    assert!(parsed.require_response_envelope);
+    let reserialized = serde_yaml::to_string(&parsed).expect("serialize spec");
+    let reparsed: AgentLoopSpec = serde_yaml::from_str(&reserialized).expect("re-parse spec");
+    assert!(reparsed.require_response_envelope);
+}
+
+#[test]
 fn agent_loop_spec_proc_allowed_programs_defaults_to_none() {
     let yaml = "instruction: hi\n";
     let parsed: AgentLoopSpec = serde_yaml::from_str(yaml).expect("parse spec");

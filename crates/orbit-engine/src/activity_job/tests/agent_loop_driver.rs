@@ -152,6 +152,7 @@ fn replay_spec(on_denial: OnDenial) -> AgentLoopSpec {
         backend: Backend::Http,
         provider: Provider::Claude,
         wall_clock_timeout_seconds: 30,
+        require_response_envelope: false,
         role: None,
         proc_allowed_programs: None,
     }

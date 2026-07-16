@@ -219,10 +219,11 @@ pub fn run_cli_backend(
         timed_out,
     });
 
-    // A clean subprocess exit is only provisional. Provider CLIs commonly
-    // wrap the agent response (and Claude may prefix that response with
-    // explanatory prose), so validate and unwrap the embedded Orbit envelope
-    // before exposing anything to downstream workflow templates.
+    // Provider output is not the system of record for artifact-backed
+    // activities: task state, review threads, git state, and deterministic
+    // downstream gates are. Parse response envelopes to project useful fields
+    // and diagnostics, but only make them authoritative when the activity
+    // explicitly declares that downstream templates require them.
     let exit_success = !timed_out && matches!(exit_code, Some(0));
     // A truncated capture retains the final complete JSONL events separately
     // from its diagnostic prefix. Protocol parsing must use that tail so a
@@ -239,7 +240,13 @@ pub fn run_cli_backend(
             true,
         )
     });
-    let success = exit_success && matches!(parsed_result.as_ref(), Some(Ok(_)));
+    let response_envelope_valid = matches!(parsed_result.as_ref(), Some(Ok(_)));
+    let response_envelope_error = parsed_result
+        .as_ref()
+        .and_then(|result| result.as_ref().err())
+        .map(|error| response_diagnostic(error, &redaction));
+    // ADR-0224 / L-0087: parsing is advisory unless the activity opts into strict mode.
+    let success = exit_success && (!spec.require_response_envelope || response_envelope_valid);
     let trace = parse_cli_invocation_trace(
         stdout.protocol_bytes(),
         stderr.protocol_bytes(),
@@ -252,16 +259,17 @@ pub fn run_cli_backend(
             "cli subprocess exceeded {}s wall-clock timeout",
             timeout_seconds
         ))
-    } else if exit_success && matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"))
+    } else if !exit_success {
+        Some(format!("cli subprocess exited with code {:?}", exit_code))
+    } else if spec.require_response_envelope
+        && matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"))
     {
         Some(format!(
             "cli subprocess reported envelope status={:?} despite exit 0",
             envelope_status.as_deref().unwrap_or("unknown")
         ))
-    } else if let Some(Err(error)) = parsed_result.as_ref() {
-        Some(response_diagnostic(error, &redaction))
-    } else if !success {
-        Some(format!("cli subprocess exited with code {:?}", exit_code))
+    } else if spec.require_response_envelope {
+        response_envelope_error.clone()
     } else {
         None
     };
@@ -284,6 +292,22 @@ pub fn run_cli_backend(
             serde_json::json!(duration.as_millis() as u64),
         ),
         ("timed_out", Value::Bool(timed_out)),
+        (
+            "response_envelope_required",
+            Value::Bool(spec.require_response_envelope),
+        ),
+        (
+            "response_envelope_valid",
+            Value::Bool(response_envelope_valid),
+        ),
+        (
+            "response_envelope_status",
+            envelope_status.map_or(Value::Null, Value::String),
+        ),
+        (
+            "response_envelope_error",
+            response_envelope_error.map_or(Value::Null, Value::String),
+        ),
         ("stdout_text", Value::String(stdout_text)),
         (
             "stdout_text_truncated",
