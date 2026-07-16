@@ -45,7 +45,7 @@ This repo has a semantic graph available via the `orbit` MCP server (no live LSP
 
 ## CHANGELOG entries
 
-The freshness guardrail makes every PR add a `## Unreleased` bullet — keep it **terse**. Use the release bullet shape at write time: `- **Theme**: 1–2 sentences that read in isolation. ([ORB-XXXXX])`, hard-capped at ~50 words (enforced by `scripts/check-changelog-style.sh`). Migration steps, rationale, rejected alternatives, and test inventories belong in the cited task / ADR / commit message — **the task ID is the pointer, don't duplicate.** Breaking changes get one extra line max (migration as a phrase, `x removed → use y`). Full rule: [`RELEASING.md`](RELEASING.md) step 2.
+Don't modify `CHANGELOG.md` during task execution — it is compiled at release time from merged work, not accumulated per-PR. The task ID is the record of what changed; cite it in your commit message and let the release drafter pull from `git log` and Orbit task history. `scripts/check-changelog-style.sh` still lints any entries that do exist (harmless under this convention, and useful at release time). Full rule: [`RELEASING.md`](RELEASING.md) step 2.
 
 ## Rust Practices
 
