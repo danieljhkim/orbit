@@ -155,7 +155,7 @@ pub fn execute_job_with_resume(
         audit: audit.clone(),
         host,
         input: base_input.clone(),
-        pipeline: Arc::new(Mutex::new(seed_pipeline_from_resume(resume))),
+        pipeline: Arc::new(Mutex::new(seed_pipeline_from_resume(job, resume))),
         sessions: Arc::new(Mutex::new(HashMap::new())),
         recovery_activity,
         item: None,
@@ -210,17 +210,31 @@ pub fn execute_job_with_resume(
     })
 }
 
-/// [ORB-10002] Seed the executor pipeline map from a resume snapshot so
-/// skipped steps' outputs stay visible to later steps.
-fn seed_pipeline_from_resume(resume: Option<&PipelineState>) -> HashMap<String, Value> {
-    resume
-        .and_then(|state| state.pipeline.as_object())
-        .map(|map| {
-            map.iter()
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect()
+/// [ORB-10002] Seed the executor pipeline map from successful checkpoints so
+/// skipped steps' outputs stay visible without exposing failed/timed-out data.
+fn seed_pipeline_from_resume(
+    job: &JobV2,
+    resume: Option<&PipelineState>,
+) -> HashMap<String, Value> {
+    let Some(state) = resume else {
+        return HashMap::new();
+    };
+
+    job.steps
+        .iter()
+        .enumerate()
+        .filter_map(|(index, step)| {
+            let step_index = index as u32;
+            if state.step_states.get(&step_index) != Some(&JobRunState::Success) {
+                return None;
+            }
+            state
+                .step_outputs
+                .get(&step_index)
+                .cloned()
+                .map(|output| (step.id.clone(), output))
         })
-        .unwrap_or_default()
+        .collect()
 }
 
 /// [ORB-10002] True when the resume snapshot records this top-level step as

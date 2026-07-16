@@ -44,6 +44,14 @@ pub(super) fn render_items_expression(
 pub(super) fn render_value(v: &Value, tctx: &TemplateContext) -> Result<Value, DispatchError> {
     match v {
         Value::String(s) if s.contains("{{") => {
+            // L-0091: Exact step-output templates forward typed JSON values.
+            // ORB-10241: Preserve the source JSON type for an exact step-output
+            // reference. Rendering through text and parsing it again turns a
+            // string such as PR number "618" into the number 618, which then
+            // fails downstream string validation despite being present.
+            if let Some(value) = exact_step_template_value(s, tctx) {
+                return Ok(value);
+            }
             let rendered = template::render(s, tctx)
                 .map_err(|err| DispatchError::JobExecution(format!("template render: {err}")))?;
             // Try to parse back to a JSON value (numbers, bools, arrays);
@@ -63,4 +71,27 @@ pub(super) fn render_value(v: &Value, tctx: &TemplateContext) -> Result<Value, D
         }
         _ => Ok(v.clone()),
     }
+}
+
+fn exact_step_template_value(template: &str, tctx: &TemplateContext) -> Option<Value> {
+    let token = template.strip_prefix("{{")?.strip_suffix("}}")?.trim();
+    if token.contains("{{") || token.contains("}}") {
+        return None;
+    }
+
+    let mut path = token.split('.');
+    if path.next()? != "steps" {
+        return None;
+    }
+    let step_id = path.next()?;
+    let namespace = path.next()?;
+    if namespace != "output" && namespace != "state" {
+        return None;
+    }
+
+    let mut value = tctx.steps.get(step_id)?.get(namespace)?;
+    for segment in path {
+        value = value.get(segment)?;
+    }
+    Some(value.clone())
 }

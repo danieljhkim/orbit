@@ -16,6 +16,7 @@ use super::*;
 struct CheckpointHost {
     inner: ScriptedHost,
     checkpoints: StdMutex<Vec<(u32, String, Value, Value)>>,
+    inputs: StdMutex<Vec<(String, Value)>>,
     fail_checkpoints: bool,
 }
 
@@ -24,6 +25,7 @@ impl CheckpointHost {
         Self {
             inner,
             checkpoints: StdMutex::new(Vec::new()),
+            inputs: StdMutex::new(Vec::new()),
             fail_checkpoints: false,
         }
     }
@@ -38,6 +40,17 @@ impl CheckpointHost {
     fn checkpoints(&self) -> Vec<(u32, String, Value, Value)> {
         self.checkpoints.lock().expect("checkpoints").clone()
     }
+
+    fn inputs_for(&self, action: &str) -> Vec<Value> {
+        self.inputs
+            .lock()
+            .expect("inputs")
+            .iter()
+            .filter_map(|(recorded_action, input)| {
+                (recorded_action == action).then_some(input.clone())
+            })
+            .collect()
+    }
 }
 
 impl V2RuntimeHost for CheckpointHost {
@@ -48,6 +61,10 @@ impl V2RuntimeHost for CheckpointHost {
         input: &Value,
         tool_context: orbit_tools::ToolContext,
     ) -> Result<Value, DispatchError> {
+        self.inputs
+            .lock()
+            .expect("inputs")
+            .push((action.to_string(), input.clone()));
         self.inner
             .run_deterministic(action, config, input, tool_context)
     }
@@ -225,6 +242,109 @@ fn resume_skips_checkpointed_steps_and_feeds_their_outputs() {
     assert_eq!(
         checkpoints[0].3.get("s0"),
         Some(&json!({"v": "checkpointed-0"}))
+    );
+}
+
+#[test]
+fn resume_reexecuted_pr_output_reaches_promotion_and_checkpoint() {
+    // ORB-10241 / ORB-10240 incident shape: push completed in the source
+    // attempt, pr_open failed, then resume skips push, re-executes pr_open,
+    // and renders its numeric-looking string output into pr_promote.
+    let host = CheckpointHost::new(ScriptedHost::new([
+        ("git_push", vec![Action::Ok(json!({"pushed": "again"}))]),
+        (
+            "pr_open",
+            vec![Action::Ok(json!({
+                "pr_number": "618",
+                "pr_url": "https://github.example/pull/618",
+            }))],
+        ),
+        ("pr_promote", vec![Action::Ok(json!({"promoted": true}))]),
+    ]));
+    let mut promote = target_step("promote_tasks", "pr_promote");
+    promote.when = Some("{{ steps.pr_open.output.pr_number }} == 618".to_string());
+    let JobV2StepBody::Target(target) = &mut promote.body else {
+        panic!("target step");
+    };
+    target.default_input = Some(json!({
+        "pr_number": "{{ steps.pr_open.output.pr_number }}",
+        "pr_url": "{{ steps.pr_open.output.pr_url }}",
+    }));
+    let job = job_with_steps(vec![
+        target_step("push", "git_push"),
+        target_step("pr_open", "pr_open"),
+        promote,
+    ]);
+    let mut resume = resume_state_with_completed_steps(&[(0, "push", json!({"pushed": true}))]);
+    resume.record_step(
+        1,
+        JobRunState::Failed,
+        Some(json!({"pr_number": "stale"})),
+        None,
+    );
+    resume.sync_pipeline(json!({
+        "push": {"pushed": true},
+        "pr_open": {"pr_number": "stale"},
+    }));
+    let writer = std::sync::Arc::new(test_writer("run-resume-pr-open"));
+
+    let outcome = execute_job_with_resume(
+        &job,
+        Value::Null,
+        "run-resume-pr-open",
+        writer,
+        &host,
+        Some(&resume),
+    )
+    .expect("resume succeeds through promotion");
+
+    assert!(outcome.success);
+    assert_eq!(host.inner.call_count("git_push"), 0);
+    assert_eq!(host.inner.call_count("pr_open"), 1);
+    assert_eq!(host.inner.call_count("pr_promote"), 1);
+    assert_eq!(
+        host.inputs_for("pr_promote"),
+        vec![json!({
+            "pr_number": "618",
+            "pr_url": "https://github.example/pull/618",
+            "run_id": "run-resume-pr-open",
+        })],
+        "fresh pr_open output retains its string type for downstream input",
+    );
+
+    let checkpoints = host.checkpoints();
+    assert_eq!(checkpoints.len(), 2);
+    assert_eq!(checkpoints[0].0, 1);
+    assert_eq!(checkpoints[0].1, "pr_open");
+    assert_eq!(checkpoints[0].2["pr_number"], json!("618"));
+    assert_eq!(checkpoints[0].3["pr_open"]["pr_number"], json!("618"));
+    assert_eq!(resume.step_states.get(&1), Some(&JobRunState::Failed));
+}
+
+#[test]
+fn resume_seed_uses_only_successful_checkpoint_outputs() {
+    let job = job_with_steps(vec![
+        target_step("success", "a0"),
+        target_step("failed", "a1"),
+        target_step("timed_out", "a2"),
+    ]);
+    let mut resume = PipelineState::new(
+        "jrun-source".to_string(),
+        "qa_resume".to_string(),
+        Value::Object(Default::default()),
+    );
+    resume.record_step(0, JobRunState::Success, Some(json!({"v": 0})), None);
+    resume.record_step(1, JobRunState::Failed, Some(json!({"v": 1})), None);
+    resume.record_step(2, JobRunState::Timeout, Some(json!({"v": 2})), None);
+    resume.sync_pipeline(json!({
+        "success": {"v": 0},
+        "failed": {"v": 1},
+        "timed_out": {"v": 2},
+    }));
+
+    assert_eq!(
+        seed_pipeline_from_resume(&job, Some(&resume)),
+        HashMap::from([("success".to_string(), json!({"v": 0}))]),
     );
 }
 
