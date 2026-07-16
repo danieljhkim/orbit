@@ -218,22 +218,65 @@ impl OrbitRuntime {
             step_index: audit_context.step_index,
         };
 
-        let audit_recorded = match self.record_audit_event(&params) {
-            Ok(()) => {
-                mark_tool_audit_recorded();
-                true
-            }
-            Err(err) => {
-                tracing::warn!("failed to persist tool audit event: {err}");
-                false
-            }
-        };
+        let audit_write = self.record_audit_event(&params);
 
+        // Claim the row for the runtime the moment it persists, so the CLI
+        // `AuditGuard` suppresses its own duplicate emission. This is
+        // independent of the tool's own success/failure: the audit row is
+        // written for both (a failed call still gets a failure-status row).
+        if audit_write.is_ok() {
+            mark_tool_audit_recorded();
+        }
+
+        // Propagate the tool's own error first. A call that already failed
+        // carries no committed mutation to strand, so its error is the
+        // authoritative result and the audit-write outcome is irrelevant.
         let value = result?;
-        Ok(ToolDispatchOutcome {
+
+        // The tool call succeeded, so any mutation it performed is now
+        // committed. Audit persistence is part of that success contract:
+        // finding M1 (SECURITY-REVIEW-2026-07-15) — the previous code only
+        // `warn!`ed on an audit-write `Err` and still returned the tool's
+        // successful value, so an unwritable audit store (disk full, locked
+        // db, bad perms) yielded a successful, un-audited mutation with no
+        // error surfaced. Fail the call instead so a committed change can
+        // never surface without its audit row.
+        finalize_successful_dispatch(name, value, audit_write)
+    }
+}
+
+/// Fold a successful tool call together with its audit-write outcome into the
+/// dispatch result.
+///
+/// On a persisted audit row it returns the value. On a failed audit write it
+/// discards the value and returns the error, so a committed mutation can never
+/// be surfaced without its audit row (finding M1). The caller is responsible
+/// for the per-thread dedup signal, which is set as soon as the row persists
+/// regardless of the tool's own outcome.
+///
+/// No read-only/mutating split exists on the tool schema, so this fails closed
+/// for *every* successful call — strictly safer than the "at least mutating
+/// tools" floor the finding sets, at the cost of also failing a read-only call
+/// when the audit store is unwritable (an already-degraded state).
+fn finalize_successful_dispatch(
+    tool_name: &str,
+    value: Value,
+    audit_write: Result<(), OrbitError>,
+) -> Result<ToolDispatchOutcome, OrbitError> {
+    match audit_write {
+        Ok(()) => Ok(ToolDispatchOutcome {
             value,
-            audit_recorded,
-        })
+            audit_recorded: true,
+        }),
+        Err(err) => {
+            tracing::error!(
+                tool = tool_name,
+                "failed to persist tool audit event: {err}"
+            );
+            Err(OrbitError::Store(format!(
+                "tool '{tool_name}' completed but its audit row could not be persisted; failing the call so no un-audited change is surfaced: {err}"
+            )))
+        }
     }
 }
 
@@ -1123,6 +1166,36 @@ mod audit_tests {
         assert!(ctx.job_run_id.is_none());
         assert!(ctx.activity_id.is_none());
         assert!(ctx.step_index.is_none());
+    }
+
+    #[test]
+    fn successful_dispatch_returns_value_when_audit_persists() {
+        let outcome =
+            finalize_successful_dispatch("orbit.task.update", json!({"ok": true}), Ok(()))
+                .expect("audit persisted -> success");
+
+        assert!(outcome.audit_recorded);
+        assert_eq!(outcome.value, json!({"ok": true}));
+    }
+
+    #[test]
+    fn successful_mutation_fails_when_audit_row_cannot_be_persisted() {
+        // A mutating tool completed (value present), but the audit write
+        // failed. Finding M1: the call must fail rather than surface a
+        // successful, un-audited mutation.
+        let audit_write = Err(OrbitError::Store("disk full".to_string()));
+        let result = finalize_successful_dispatch(
+            "orbit.task.update",
+            json!({"mutated": true}),
+            audit_write,
+        );
+
+        let err = result.expect_err("un-audited mutation must fail the call");
+        let message = err.to_string();
+        assert!(
+            message.contains("orbit.task.update") && message.contains("audit row"),
+            "error names the tool and the missing audit row: {message}"
+        );
     }
 
     #[test]
