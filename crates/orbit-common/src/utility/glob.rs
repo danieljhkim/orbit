@@ -124,13 +124,26 @@ pub fn compile_glob_regex(rule: &str) -> Result<Regex, regex::Error> {
         if prefix.is_empty() {
             return compile_filesystem_regex(r"^.*$");
         }
-        let escaped = regex::escape(prefix);
-        return compile_filesystem_regex(&format!("^{escaped}(?:/.*)?$"));
+        // Route the prefix through the same segment-aware translation as the
+        // general path below. Escaping the whole prefix would turn any `*`/`?`
+        // in it into a literal, so `**/secrets/**` would compile to
+        // `^\*\*/secrets(?:/.*)?$` and match nothing — silently voiding a deny
+        // rule (H1). Translating instead yields `^(?:.*/)?secrets(?:/.*)?$`.
+        let body = translate_glob_body(prefix);
+        return compile_filesystem_regex(&format!("^{body}(?:/.*)?$"));
     }
 
+    let body = translate_glob_body(rule);
+    compile_filesystem_regex(&format!("^{body}$"))
+}
+
+/// Translate a glob pattern into an *unanchored* regex body, honoring the
+/// segment-aware operators (`**/`, `**`, `*`, `?`) and escaping every other
+/// character. Callers wrap the result in anchors (`^`…`$`) and any suffix.
+fn translate_glob_body(rule: &str) -> String {
     let chars: Vec<char> = rule.chars().collect();
     let mut index = 0usize;
-    let mut pattern = String::from("^");
+    let mut pattern = String::new();
     while index < chars.len() {
         if chars[index] == '*' {
             if index + 2 < chars.len() && chars[index + 1] == '*' && chars[index + 2] == '/' {
@@ -157,8 +170,7 @@ pub fn compile_glob_regex(rule: &str) -> Result<Regex, regex::Error> {
         pattern.push_str(&regex::escape(&chars[index].to_string()));
         index += 1;
     }
-    pattern.push('$');
-    compile_filesystem_regex(&pattern)
+    pattern
 }
 
 fn compile_filesystem_regex(pattern: &str) -> Result<Regex, regex::Error> {

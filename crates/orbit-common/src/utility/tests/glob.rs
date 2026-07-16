@@ -90,6 +90,74 @@ mod matching {
         }
     }
 
+    /// [ORB-10224] H1 regression: a `/**`-suffix rule whose prefix contains
+    /// glob metacharacters (`**`, `*`) must route through the same
+    /// segment-aware translation as the general path. Previously the prefix
+    /// was passed through `regex::escape()`, so `**/secrets/**` compiled to
+    /// `^\*\*/secrets(?:/.*)?$` and matched nothing — silently voiding the
+    /// deny rule.
+    #[test]
+    fn wildcard_prefix_subtree_rules_match_intended_paths() {
+        for (rule, path) in [
+            // Subtree-at-any-depth denies — the most natural spelling.
+            ("**/secrets/**", "secrets/key.txt"),
+            ("**/secrets/**", "app/config/secrets/key.txt"),
+            ("**/.git/**", ".git/config"),
+            ("**/.git/**", "vendor/dep/.git/HEAD"),
+            ("**/node_modules/**", "node_modules/left-pad/index.js"),
+            (
+                "**/node_modules/**",
+                "packages/ui/node_modules/react/index.js",
+            ),
+            // Single-star prefix crosses exactly one segment.
+            ("*/dir/**", "top/dir/file.rs"),
+            ("*/dir/**", "top/dir/nested/file.rs"),
+            // The subtree rule also anchors the directory itself.
+            ("**/secrets/**", "secrets"),
+            ("**/.git/**", "vendor/dep/.git"),
+        ] {
+            let normalized = normalize_glob_path(path).expect("normalize");
+            assert!(
+                match_glob(rule, &normalized).expect("match glob"),
+                "rule `{rule}` should match `{normalized}`"
+            );
+        }
+    }
+
+    /// [ORB-10224] The wildcard-prefix subtree rule must still respect
+    /// segment boundaries: a single-star prefix does not cross a separator,
+    /// and a subtree deny does not leak onto a sibling that merely shares a
+    /// name prefix.
+    #[test]
+    fn wildcard_prefix_subtree_rules_reject_non_matching_paths() {
+        for (rule, path) in [
+            // `*` spans one segment, so a two-segment prefix does not match.
+            ("*/dir/**", "a/b/dir/file.rs"),
+            // `secrets` as a path fragment, not a full segment, must not match.
+            ("**/secrets/**", "my-secrets-backup/key.txt"),
+            ("**/.git/**", "not-a.git/file"),
+        ] {
+            let normalized = normalize_glob_path(path).expect("normalize");
+            assert!(
+                !match_glob(rule, &normalized).expect("match glob"),
+                "rule `{rule}` must not match `{normalized}`"
+            );
+        }
+    }
+
+    /// [ORB-10224] `validate()` behavior for metachar-in-prefix: such a rule
+    /// is a *valid* glob (it compiles) and actively blocks its target, rather
+    /// than being an inert, silently-passing deny.
+    #[test]
+    fn wildcard_prefix_subtree_rule_compiles_and_blocks() {
+        let regex = compile_glob_regex("**/secrets/**").expect("compile valid glob");
+        let path = normalize_glob_path("app/secrets/private.key").expect("normalize");
+        assert!(
+            regex.is_match(&path),
+            "a `**/dir/**` deny rule must actually block its target path"
+        );
+    }
+
     #[cfg(any(target_os = "macos", windows))]
     #[test]
     fn deny_globs_match_case_variants_on_case_insensitive_platforms() {
