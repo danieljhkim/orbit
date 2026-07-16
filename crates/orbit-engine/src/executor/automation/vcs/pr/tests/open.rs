@@ -116,6 +116,20 @@ fn pr_open_creates_body_without_promoting_until_explicit_phase() {
     assert!(body.contains(first_summary));
     assert!(body.contains("Second completed task"));
     assert!(body.contains(second_summary));
+    let calls = host.tool_calls();
+    let lookup = calls
+        .iter()
+        .find(|call| call.name == "github.pr.list")
+        .expect("PR lookup must use the branch-aware list tool");
+    assert_eq!(lookup.input["head"], json!("orbit/test-batch"));
+    assert_eq!(lookup.input["state"], json!("open"));
+    assert!(
+        calls
+            .iter()
+            .filter(|call| call.name == "github.pr.view")
+            .all(|call| call.input["pr"] != json!("orbit/test-batch")),
+        "PR view only accepts numeric PR numbers or GitHub PR URLs"
+    );
 
     let promote = json!({
         "workspace_path": workspace.repo,
@@ -176,7 +190,6 @@ fn pr_open_retry_after_create_then_view_failure_discovers_same_pr() {
         )],
         workspace.repo.clone(),
     );
-    host.queue_tool_error("github.pr.view", "no pull requests found for branch");
     host.queue_tool_error("github.pr.view", "temporary local PR view failure");
     let input = pr_open_input(&workspace.repo, vec!["T20260716-2"]);
 
@@ -197,6 +210,13 @@ fn pr_open_retry_after_create_then_view_failure_discovers_same_pr() {
     let retried = pr_open(&host, &input).expect("retry discovers created PR");
     assert_eq!(retried["decision"], json!("reused"));
     assert_eq!(retried["pr_number"], json!("42"));
+    assert!(
+        host.tool_calls()
+            .iter()
+            .filter(|call| call.name == "github.pr.view")
+            .all(|call| call.input["pr"] != json!("orbit/test-batch")),
+        "retry must discover by head branch and view only a numeric PR number or URL"
+    );
     assert_eq!(
         host.tool_calls()
             .iter()

@@ -93,8 +93,8 @@ fn open_or_reuse_pr<H: RuntimeHost + TaskHost + ?Sized>(
         ..Default::default()
     };
 
-    match view_pr(host, head, tool_context.clone()) {
-        Ok((pr_number, pr_url)) => Ok(pr_output(PrOutput {
+    match find_pr_by_head(host, head, tool_context.clone()) {
+        Ok(Some((pr_number, pr_url))) => Ok(pr_output(PrOutput {
             decision: "reused",
             pr_created: false,
             pr_reused: true,
@@ -106,7 +106,7 @@ fn open_or_reuse_pr<H: RuntimeHost + TaskHost + ?Sized>(
             base_sha,
             freshness: &freshness,
         })),
-        Err(error) if pull_request_not_found(&error) => {
+        Ok(None) => {
             let created = host
                 .run_tool_with_context_and_role(
                     "github.pr.create",
@@ -186,11 +186,57 @@ fn view_pr<H: RuntimeHost + ?Sized>(
     Ok((pr_number, pr_url))
 }
 
-fn pull_request_not_found(error: &OrbitError) -> bool {
-    let message = error.to_string().to_ascii_lowercase();
-    message.contains("no pull requests found")
-        || message.contains("could not resolve to a pull request")
-        || message.contains("no pull request found for branch")
+fn find_pr_by_head<H: RuntimeHost + ?Sized>(
+    host: &H,
+    head: &str,
+    tool_context: ToolContext,
+) -> Result<Option<(String, Option<String>)>, OrbitError> {
+    let value = host.run_tool_with_context_and_role(
+        "github.pr.list",
+        json!({ "head": head, "state": "open" }),
+        Role::Admin,
+        tool_context.clone(),
+    )?;
+    let pull_requests = value
+        .get("pull_requests")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            OrbitError::Execution(
+                "github.pr.list did not return pull_requests metadata".to_string(),
+            )
+        })?;
+
+    let mut matching_pr_number = None;
+    for pull_request in pull_requests {
+        let listed_head = pull_request
+            .get("headRefName")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                OrbitError::Execution(
+                    "github.pr.list returned a pull request without headRefName".to_string(),
+                )
+            })?;
+        if listed_head != head {
+            continue;
+        }
+        let pr_number = pull_request
+            .get("number")
+            .and_then(json_number_to_string)
+            .ok_or_else(|| {
+                OrbitError::Execution(
+                    "github.pr.list returned a matching pull request without a number".to_string(),
+                )
+            })?;
+        if matching_pr_number.replace(pr_number).is_some() {
+            return Err(OrbitError::Execution(format!(
+                "github.pr.list returned multiple open pull requests for head branch '{head}'"
+            )));
+        }
+    }
+
+    matching_pr_number
+        .map(|pr_number| view_pr(host, &pr_number, tool_context))
+        .transpose()
 }
 
 struct PrOutput<'a> {

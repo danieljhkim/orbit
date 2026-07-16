@@ -357,21 +357,48 @@ impl RuntimeHost for PrOpenTestHost {
         match name {
             "git.push" => Ok(json!({})),
             "github.pr.merge" => Ok(json!({})),
+            "github.pr.list" => {
+                let head = input.get("head").and_then(Value::as_str).ok_or_else(|| {
+                    OrbitError::InvalidInput("github.pr.list requires a head branch".to_string())
+                })?;
+                let pull_requests = if *self.pr_exists.lock().expect("pr exists lock") {
+                    json!([{
+                        "number": 42,
+                        "headRefName": head,
+                    }])
+                } else {
+                    json!([])
+                };
+                Ok(json!({ "pull_requests": pull_requests }))
+            }
             "github.pr.create" => {
                 *self.pr_exists.lock().expect("pr exists lock") = true;
                 Ok(json!({
                     "url": "https://github.example/orbit/orbit/pull/42"
                 }))
             }
-            "github.pr.view" if *self.pr_exists.lock().expect("pr exists lock") => Ok(json!({
-                "pull_request": {
-                    "number": 42,
-                    "url": "https://github.example/orbit/orbit/pull/42"
+            "github.pr.view" => {
+                let selector = input.get("pr").and_then(Value::as_str).ok_or_else(|| {
+                    OrbitError::InvalidInput("github.pr.view requires a PR selector".to_string())
+                })?;
+                let valid_selector = selector.chars().all(|character| character.is_ascii_digit())
+                    || (selector.contains("://") && selector.contains("/pull/"));
+                if !valid_selector {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "invalid pr: {selector}; must be a numeric PR number or GitHub PR URL"
+                    )));
                 }
-            })),
-            "github.pr.view" => Err(OrbitError::Execution(
-                "no pull requests found for branch".to_string(),
-            )),
+                if *self.pr_exists.lock().expect("pr exists lock") {
+                    Ok(json!({
+                        "pull_request": {
+                            "number": 42,
+                            "url": "https://github.example/orbit/orbit/pull/42"
+                        }
+                    }))
+                } else {
+                    Err(OrbitError::Execution("no pull request found".to_string()))
+                }
+            }
             other => Err(OrbitError::not_found(NotFoundKind::Tool, other.to_string())),
         }
     }
