@@ -1476,6 +1476,18 @@ spec:
             resumed.retry_source_run_id.as_deref(),
             Some(run.run_id.as_str())
         );
+        let resumed_state = runtime
+            .read_run_state(&result.run_id)
+            .expect("read resumed checkpoint")
+            .expect("resumed checkpoint exists");
+        assert_eq!(resumed_state.step_states.len(), 3);
+        assert_eq!(resumed_state.step_outputs.len(), 3);
+        assert_eq!(
+            resumed_state.pipeline.get("nap0"),
+            Some(&json!({"checkpointed": true}))
+        );
+        assert!(resumed_state.pipeline.get("nap1").is_some());
+        assert!(resumed_state.pipeline.get("nap2").is_some());
 
         // Step 0 was NOT re-executed: it is audited as skipped-for-resume and
         // never started; steps 1 and 2 started for real.
@@ -1503,6 +1515,13 @@ spec:
         // Source run stays interrupted; resume never mutates its history.
         let source_after = runtime.show_job_run(&run.run_id).expect("show source");
         assert_eq!(source_after.state, JobRunState::Interrupted);
+        let source_state_after = runtime
+            .read_run_state(&run.run_id)
+            .expect("read source checkpoint")
+            .expect("source checkpoint exists");
+        assert_eq!(source_state_after.step_states.len(), 1);
+        assert!(source_state_after.pipeline.get("nap1").is_none());
+        assert!(source_state_after.pipeline.get("nap2").is_none());
     }
 
     /// [ORB-10002] Resume refuses runs that are not interrupted / failed /
