@@ -123,7 +123,13 @@ impl OrbitRuntime {
         root_override: Option<&Path>,
     ) -> Result<OrbitRuntimeRoots, OrbitError> {
         let resolved = resolve_initialize_roots(cwd, root_override)?;
-        Ok(OrbitRuntimeRoots::new(resolve_global_root()?, resolved))
+        // Only the explicit `--root` flag pins the global registry root to the
+        // isolated root here, so `workspace list` / `show --root <r>` read
+        // `<r>/workspaces.json` — the same file `workspace init --root <r>`
+        // writes — instead of `$HOME/.orbit/workspaces.json` [ORB-10218].
+        // `ORBIT_ROOT` stays a workspace selector that leaves the global root at
+        // `$HOME/.orbit` (see `orbit_root_env_selects_workspace_but_not_global_root`).
+        Self::roots_from_resolved(resolved, root_override.is_some())
     }
 
     pub fn resolve_bootstrap_roots_for_cwd(
@@ -131,14 +137,18 @@ impl OrbitRuntime {
         root_override: Option<&Path>,
     ) -> Result<OrbitRuntimeRoots, OrbitError> {
         let resolved = resolve_bootstrap_roots(cwd, root_override)?;
-        Self::bootstrap_roots_from_resolved_roots(resolved, root_override)
+        Self::roots_from_resolved(resolved, has_explicit_root_override(root_override))
     }
 
-    fn bootstrap_roots_from_resolved_roots(
+    /// Selects the global root for a resolved workspace: when
+    /// `pin_global_to_shared` is set the global root is the isolated shared
+    /// root (registry lookups target the custom root), otherwise it falls back
+    /// to `$HOME/.orbit`.
+    fn roots_from_resolved(
         resolved: ResolvedOrbitRoots,
-        root_override: Option<&Path>,
+        pin_global_to_shared: bool,
     ) -> Result<OrbitRuntimeRoots, OrbitError> {
-        let global_root = if has_explicit_root_override(root_override) {
+        let global_root = if pin_global_to_shared {
             resolved.shared_root.clone()
         } else {
             resolve_global_root()?
