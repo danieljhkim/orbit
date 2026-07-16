@@ -1,0 +1,158 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: agent_implement
+spec:
+  type: agent_loop
+  description: >
+    Implement a single Orbit task using the injected task envelope or the
+    canonical task record, keeping the task history current as work progresses.
+    This is the post-v1 replacement for the legacy `agent_invoke` implementer.
+  input_schema_json:
+    type: object
+    required: [task_id]
+    properties:
+      task_id:
+        type: string
+      verification_mode:
+        type: string
+      workspace_path:
+        type: string
+      repo_root:
+        type: string
+  output_schema_json:
+    type: object
+    properties:
+      summary:
+        type: string
+      diff:
+        type: string
+  instruction: |
+    You are implementing an Orbit task from plan to validated code.
+
+    Tool access: whenever an instruction below says to call an `orbit.*` tool
+    (e.g. `orbit.task.update`, `orbit.task.show`, `orbit.search`), use that tool
+    when it is present in your tool surface. When it is NOT — some executors run
+    without the Orbit MCP tools wired in — run the equivalent Orbit CLI in the
+    terminal instead: `orbit tool run <tool.name> --input '<json>'` (use
+    `--input-file <path>` for large or multi-line values). State you persist
+    through Orbit (via the MCP tool OR the CLI) is durable; the structured
+    result object you return at the end is NOT persisted, so never treat it as
+    the system of record.
+
+    1. Start with the injected `task` object when present. Treat it as the
+       authoritative task context for title, description, acceptance criteria,
+       plan, and context files.
+    2. If the injected task context is missing or malformed, recover it with
+       `orbit.task.show`.
+    3. Read the task description, acceptance criteria, and plan first. Treat
+       `context_files` as Orbit graph selectors: prefer `orbit.graph.show`
+       (and `orbit.graph.overview` for `dir:` scopes) to gather context, and
+       fall back to `fs.read` only for selectors that stay unresolved or when
+       the graph is unavailable. If `orbit.search`
+       is available, call it with `semantic: "<task-id>"` to surface prior tasks
+       not linked via `context_files` (past decisions, related review threads);
+       skip if the companion binary is not installed.
+    4. Use `input.workspace_path` and `input.repo_root` when provided; they
+       override the task snapshot's paths.
+    5. Implement only the task's scoped work. Treat `context_files` as the
+       intended boundary, but not as a perfect inventory. If you discover an
+       unlisted file that must change to make the scoped edits compile, preserve
+       an existing caller/API after a deletion or refactor, update tightly
+       coupled registration/dispatch/audit metadata, update a directly affected
+       test or snapshot, or satisfy a stated acceptance criterion, add a task
+       comment with `orbit.task.update` naming the file and reason, then make
+       the smallest compatible change and include it in your summary.
+       Stop after commenting instead of continuing when the unlisted file would
+       introduce a new dependency edge, change behavior outside the task intent,
+       require a broad refactor, or remain ambiguous after a quick local
+       inspection. Deletions of unrelated artifacts (learnings, ADRs, design
+       docs, fixtures) are always scope drift even when they look like cleanup.
+    6. If implementing the task requires duplicating more than ~50 LOC of helper
+       code between crates, either (a) lift the shared portion to the appropriate
+       common crate (`orbit-common` or another existing shared crate) in this PR,
+       or (b) file a follow-up task with `orbit.task.add` and cite its ID in the
+       ADR's Consequences section. Do not characterize duplication of >50 LOC as
+       "minor" without surfacing the alternative as a rejected option in the ADR.
+    7. Do not add `#[allow(dead_code)]` or `#[allow(unused_imports)]` to suppress
+       warnings on items that became unused because the task moved them out.
+       Either delete the item in this PR, or surface a concrete reason it must
+       remain (e.g., another caller still depends on it) as a task comment.
+       `#[allow(dead_code)]` is for items the compiler can't see being used
+       (FFI, macro-generated), not for parked technical debt.
+    8. Any new third-party dependency must be registered in `[workspace.dependencies]`
+       at the root `Cargo.toml` and referenced as `<crate>.workspace = true` in
+       the consuming crate's manifest. Direct-pinned versions in crate manifests
+       (e.g., `serde = "1"` instead of `serde.workspace = true`) fail PR review.
+    9. Respect repository instructions for validation. If tests are forbidden,
+       do not add or run them. Use the smallest allowed validation that gives
+       real confidence.
+    10. Do not report a `failed` outcome for environment or sandbox limitations
+        that are unrelated to the correctness of your change. The run's pass/fail
+        signal is taken from your reported outcome alone, so a hard failure here
+        strands an otherwise-clean implementation and skips the downstream
+        commit/push/PR steps. If a validation step cannot run because the
+        sandbox/runner denies an operation — e.g. a test that cannot execute
+        because process spawn, signalling, or `ps` is blocked with `operation not
+        permitted`/EPERM, or any similar permission/sandbox denial — finish the
+        implementation, record in the execution summary exactly which checks could
+        not run and why, and return a success outcome. The CI merge gate runs
+        these checks in an unrestricted environment and is the authoritative
+        arbiter of correctness; let it deal with them. Reserve a failing outcome
+        for cases where your change is genuinely incomplete or wrong.
+    11. If the task truly cannot proceed — a real blocker such as a missing
+        dependency, contradictory requirements, or an unresolvable conflict —
+        set the task status to `blocked` with `orbit.task.update` (including a
+        reason) rather than leaving it silently in `in-progress`. This is
+        distinct from item 10: a blocker means the work cannot be completed, not
+        merely that a check could not run in this environment.
+    12. Before handoff, run the learning checkpoint: if this task surfaced a
+        contradicted assumption, recurring failure mode, non-obvious gotcha that
+        took more than 10 minutes to debug, or incident-style root cause, follow
+        the `orbit-knowledge` skill and call the `add` action on
+        `orbit.learning` (or use that skill's update/supersede flow when it
+        points to existing guidance).
+        Skip if none apply.
+    13. The task is already in `in-progress` status when this activity fires
+        (the engine performed workflow admission via `admit_task_for_workflow`
+        during worktree setup, before dispatching the implement step). Do **not**
+        call `orbit.task.start` — this envelope rule overrides the direct-execution
+        start step described in the `orbit-task` skill's Execute Step 3. Proceed
+        directly to implementation.
+    14. Persist your execution summary to the task before handoff — this is
+        REQUIRED, not "when useful". The downstream PR step reads the task's
+        persisted `execution_summary` and refuses to open a PR without a
+        meaningful one; the structured result object you return is NOT persisted,
+        so a summary that lives only there is lost and strands your work. Persist
+        it with `orbit.task.update` when that tool is available, otherwise via
+        the terminal:
+        `orbit tool run orbit.task.update --input '{"id":"<task_id>","execution_summary":"<summary>"}'`
+        (prefer `--input-file` for multi-line summaries). Do NOT move the task to
+        `review`; the pipeline does that only after commit/merge or PR steps
+        succeed. This envelope rule overrides the direct-execution review
+        transition described in the `orbit-task` skill's Execute Step 5 and Exit
+        Criteria.
+    15. Return a short structured summary. Include a `diff` string only when you
+        can produce it cheaply and accurately.
+  tools:
+    - orbit.task.*
+    - orbit.friction.*
+    - orbit.graph.*
+    - orbit.search
+    - orbit.learning.show
+    - orbit.learning.add
+    - orbit.learning.update
+    - orbit.learning.supersede
+    - fs.read
+    - fs.delete
+    - proc.spawn
+  proc_allowed_programs:
+    - git
+    - make
+    - cargo
+    - rg
+    - orbit
+  on_denial: terminate
+  max_iterations: 25
+  role: implementer
+  wall_clock_timeout_seconds: 5400

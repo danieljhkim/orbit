@@ -1,0 +1,163 @@
+# Task bundle PR pipeline.
+#
+# Failure semantics:
+# - `implement_bundle` runs one task at a time in the shared worktree.
+# - If `implement_one` fails, earlier commits remain on the bundle branch.
+# - While the run is still alive, tasks stay `in-progress`: a mid-bundle step
+#   failure that the run recovers from does not block anything. Commit, branch
+#   preparation, base synchronization, push, PR creation/reuse, and promotion
+#   are independent durable steps, so recovery resumes at the failed phase.
+# - When the run itself terminalizes as `failed` (also `cancelled`/`timeout`),
+#   every task coupled to it (stamped with its `job_run_id` by `worktree_setup`)
+#   is moved to `blocked` with a `workflow_run_failed` status event — a dead end
+#   for automation that requires a human/orchestrator decision to clear. Tasks
+#   already in `review`/`done` are left untouched.
+#
+# Optional review step:
+# - `review_bundle` runs after `implement_bundle` when `input.review` is
+#   `true` (default `false`). It invokes `agent_review`, which records
+#   blocking findings as `ReviewThread`s on the participating tasks via
+#   `orbit.task.review_thread.*` and applies fixes in-place. Unresolved
+#   threads ride through to the PR via the existing review-thread sync;
+#   the pipeline does not gate on agent output.
+
+schemaVersion: 2
+kind: Job
+metadata:
+  name: task_pr_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  max_active_runs: 10
+  default_input:
+    task_ids: []
+    base_branch: main
+    base_sync: remote
+    review: false
+    title: null
+    body: null
+
+  steps:
+    - id: worktree
+      target: activity:worktree_setup
+      retry:
+        max_attempts: 4
+        initial_backoff_ms: 200
+        backoff_cap_ms: 2000
+        backoff_strategy: exponential
+      default_input:
+        task_ids: "{{ input.task_ids }}"
+        base: "{{ input.base_branch }}"
+        base_sync: "{{ input.base_sync }}"
+
+    - id: implement_bundle
+      loop:
+        items: "{{ input.task_ids }}"
+        max_iterations: 256
+        steps:
+          - id: implement_one
+            recovery_activity: step_failure_recovery
+            target: activity:agent_implement
+            default_input:
+              task_id: "{{ item }}"
+              workspace_path: "{{ steps.worktree.output.workspace_path }}"
+              repo_root: "{{ steps.worktree.output.workspace_path }}"
+
+    - id: review_bundle
+      when: "{{ input.review }} == true"
+      recovery_activity: step_failure_recovery
+      target: activity:agent_review
+      default_input:
+        task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        base_branch: "{{ input.base_branch }}"
+
+    - id: commit
+      recovery_activity: step_failure_recovery
+      target: activity:git_commit
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        scope: all
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+
+    - id: prepare_branch
+      when: "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+      recovery_activity: step_failure_recovery
+      target: activity:pr_prepare
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        base: "{{ input.base_branch }}"
+        base_sync: "{{ input.base_sync }}"
+        completed_task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+
+    - id: sync_base
+      when: "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+      recovery_activity: step_failure_recovery
+      target: activity:git_rebase
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        completed_task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        head: "{{ steps.prepare_branch.output.head }}"
+        head_sha: "{{ steps.prepare_branch.output.head_sha }}"
+        base: "{{ steps.prepare_branch.output.base }}"
+        base_ref: "{{ steps.prepare_branch.output.base_ref }}"
+        base_sha: "{{ steps.prepare_branch.output.base_sha }}"
+        remote_sha: "{{ steps.prepare_branch.output.remote_sha }}"
+        commits_behind: "{{ steps.prepare_branch.output.commits_behind }}"
+        sync_required: "{{ steps.prepare_branch.output.sync_required }}"
+
+    - id: push
+      when: "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+      recovery_activity: step_failure_recovery
+      target: activity:git_push
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        completed_task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        branch: "{{ steps.sync_base.output.head }}"
+        base: "{{ steps.sync_base.output.base }}"
+        base_ref: "{{ steps.sync_base.output.base_ref }}"
+        rewrite_performed: "{{ steps.sync_base.output.rewritten }}"
+        rewrite_head_before: "{{ steps.sync_base.output.head_sha_before }}"
+        expected_remote_sha: "{{ steps.sync_base.output.remote_sha_before }}"
+
+    - id: pr_open
+      when: "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+      recovery_activity: step_failure_recovery
+      target: activity:pr_open
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        completed_task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        base: "{{ steps.sync_base.output.base }}"
+        base_ref: "{{ steps.sync_base.output.base_ref }}"
+        base_sha: "{{ steps.sync_base.output.base_sha }}"
+        head: "{{ steps.sync_base.output.head }}"
+        body: "{{ input.body }}"
+        title: "{{ input.title }}"
+
+    - id: promote_tasks
+      when: "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+      recovery_activity: step_failure_recovery
+      target: activity:pr_promote
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        completed_task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        head: "{{ steps.sync_base.output.head }}"
+        base: "{{ steps.sync_base.output.base }}"
+        base_ref: "{{ steps.sync_base.output.base_ref }}"
+        pr_number: "{{ steps.pr_open.output.pr_number }}"
+        pr_url: "{{ steps.pr_open.output.pr_url }}"
+
+    - id: promote_no_diff
+      when: "{{ steps.commit.output.skipped_no_diff_expected }} == true"
+      recovery_activity: step_failure_recovery
+      target: activity:pr_promote
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        completed_task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        no_diff_expected: true
