@@ -1,4 +1,4 @@
-use orbit_agent::parse_and_validate_response;
+use orbit_agent::{AgentResponseStatus, parse_and_validate_response};
 use orbit_common::types::activity_job::AgentLoopSpec;
 use orbit_common::types::{ExecutionResult, InvocationTrace};
 use serde_json::Value;
@@ -65,6 +65,48 @@ pub(super) fn parse_cli_invocation_trace(
     parse_and_validate_response(&exec_result)
         .map(|(_, _, trace)| trace)
         .ok()
+}
+
+/// Parse the provider's stdout as an Orbit response envelope and return the
+/// object that workflow templates may consume as an activity output.
+///
+/// Provider CLIs commonly wrap the response in a JSON object and, in
+/// Claude's case, may prefix the embedded response with explanatory prose.
+/// `parse_and_validate_response` owns that wrapper traversal and envelope
+/// validation, so the CLI backend must use the same boundary before exposing
+/// output to later workflow steps.
+pub(super) fn parse_cli_response_result(
+    stdout: &[u8],
+    stderr: &[u8],
+    exit_code: Option<i32>,
+    duration_ms: u64,
+    success: bool,
+) -> Result<serde_json::Map<String, Value>, String> {
+    let exec_result = ExecutionResult {
+        success,
+        stdout: String::from_utf8_lossy(stdout).into_owned(),
+        stderr: String::from_utf8_lossy(stderr).into_owned(),
+        exit_code,
+        duration_ms,
+        output: None,
+    };
+    let (envelope, status, _) =
+        parse_and_validate_response(&exec_result).map_err(|error| error.to_string())?;
+
+    match status {
+        AgentResponseStatus::Success => {
+            if let Some(Value::Object(result)) = envelope.result {
+                Ok(result)
+            } else {
+                Err(
+                    "Orbit response envelope status=success requires an object `result`"
+                        .to_string(),
+                )
+            }
+        }
+        AgentResponseStatus::Failed => Err("Orbit response envelope status=failed".to_string()),
+        AgentResponseStatus::Timeout => Err("Orbit response envelope status=timeout".to_string()),
+    }
 }
 
 pub(super) fn user_prompt_from_input(input: &Value) -> Result<String, DispatchError> {

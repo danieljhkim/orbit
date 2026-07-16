@@ -18,13 +18,17 @@ use super::super::workspace::resolve_subprocess_cwd;
 use super::argv::{
     apply_provider_static_arg_fixups, audit_argv_for_dispatch, neutralize_inner_sandbox,
 };
-use super::envelope::{cli_agent_envelope_json, parse_cli_invocation_trace, task_id_from_input};
+use super::envelope::{
+    cli_agent_envelope_json, parse_cli_invocation_trace, parse_cli_response_result,
+    task_id_from_input,
+};
 use super::supervisor::{
     DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS, SpawnTraceContext, SpawnWithTimeoutRequest,
     spawn_with_timeout,
 };
 
 const STDOUT_TEXT_PREVIEW_LIMIT_BYTES: usize = 64 * 1024;
+const RESPONSE_DIAGNOSTIC_LIMIT_CHARS: usize = 1024;
 
 pub fn run_cli_backend(
     host: &dyn V2RuntimeHost,
@@ -215,19 +219,24 @@ pub fn run_cli_backend(
         timed_out,
     });
 
-    // Provisional success based on exit code; the embedded envelope status
-    // (read below) can demote this to false. Some provider CLIs (notably
-    // claude) can exit 0 with an outer `result.subtype = "success"` envelope
-    // even when their inner Orbit response payload reports `status = "failed"`,
-    // and pre-T20260508-17 the dispatcher recorded that as success. The
-    // structured envelope is now authoritative when present.
+    // A clean subprocess exit is only provisional. Provider CLIs commonly
+    // wrap the agent response (and Claude may prefix that response with
+    // explanatory prose), so validate and unwrap the embedded Orbit envelope
+    // before exposing anything to downstream workflow templates.
     let exit_success = !timed_out && matches!(exit_code, Some(0));
     let stdout_text = String::from_utf8_lossy(&stdout);
     let envelope_status = peek_response_status(stdout_text.as_ref());
     let stdout_preview = stdout_text_preview(stdout_text.as_ref(), &redaction);
-    let envelope_indicates_failure =
-        matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"));
-    let success = exit_success && !envelope_indicates_failure;
+    let parsed_result = exit_success.then(|| {
+        parse_cli_response_result(
+            &stdout,
+            &stderr,
+            exit_code,
+            duration.as_millis() as u64,
+            true,
+        )
+    });
+    let success = exit_success && matches!(parsed_result.as_ref(), Some(Ok(_)));
     let trace = parse_cli_invocation_trace(
         &stdout,
         &stderr,
@@ -240,34 +249,59 @@ pub fn run_cli_backend(
             "cli subprocess exceeded {}s wall-clock timeout",
             timeout_seconds
         ))
-    } else if exit_success && envelope_indicates_failure {
+    } else if exit_success && matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"))
+    {
         Some(format!(
             "cli subprocess reported envelope status={:?} despite exit 0",
             envelope_status.as_deref().unwrap_or("unknown")
         ))
+    } else if let Some(Err(error)) = parsed_result.as_ref() {
+        Some(response_diagnostic(error, &redaction))
     } else if !success {
         Some(format!("cli subprocess exited with code {:?}", exit_code))
     } else {
         None
     };
 
+    let StdoutTextPreview {
+        text: stdout_text,
+        truncated: stdout_text_truncated,
+        preview_bytes: stdout_text_preview_bytes,
+    } = stdout_preview;
+    let mut output = parsed_result.and_then(Result::ok).unwrap_or_default();
+    for (key, value) in [
+        ("provider", Value::String(provider.clone())),
+        ("argv_redacted", serde_json::json!(argv_redacted)),
+        ("stdin_blob_ref", Value::String(stdin_blob_ref.clone())),
+        ("stdout_blob_ref", Value::String(stdout_blob_ref.clone())),
+        ("stderr_blob_ref", Value::String(stderr_blob_ref.clone())),
+        ("exit_code", serde_json::json!(exit_code)),
+        (
+            "duration_ms",
+            serde_json::json!(duration.as_millis() as u64),
+        ),
+        ("timed_out", Value::Bool(timed_out)),
+        ("stdout_text", Value::String(stdout_text)),
+        ("stdout_text_truncated", Value::Bool(stdout_text_truncated)),
+        (
+            "stdout_text_original_bytes",
+            serde_json::json!(stdout.len()),
+        ),
+        (
+            "stdout_text_preview_bytes",
+            serde_json::json!(stdout_text_preview_bytes),
+        ),
+        (
+            "stdout_text_preview_limit_bytes",
+            serde_json::json!(STDOUT_TEXT_PREVIEW_LIMIT_BYTES),
+        ),
+    ] {
+        output.entry(key.to_string()).or_insert(value);
+    }
+
     Ok(DispatchOutcome {
         success,
-        output: serde_json::json!({
-            "provider": provider,
-            "argv_redacted": argv_redacted,
-            "stdin_blob_ref": stdin_blob_ref,
-            "stdout_blob_ref": stdout_blob_ref,
-            "stderr_blob_ref": stderr_blob_ref,
-            "exit_code": exit_code,
-            "duration_ms": duration.as_millis() as u64,
-            "timed_out": timed_out,
-            "stdout_text": stdout_preview.text,
-            "stdout_text_truncated": stdout_preview.truncated,
-            "stdout_text_original_bytes": stdout.len(),
-            "stdout_text_preview_bytes": stdout_preview.preview_bytes,
-            "stdout_text_preview_limit_bytes": STDOUT_TEXT_PREVIEW_LIMIT_BYTES,
-        }),
+        output: Value::Object(output),
         message,
         invocation: trace.map(|trace| DispatchInvocationTrace {
             provider,
@@ -275,6 +309,20 @@ pub fn run_cli_backend(
             trace,
         }),
     })
+}
+
+fn response_diagnostic(error: &str, redactor: &PatternRedactor) -> String {
+    let redacted = redactor.apply_str(&redact_sensitive_env_text(error));
+    let bounded: String = redacted
+        .chars()
+        .take(RESPONSE_DIAGNOSTIC_LIMIT_CHARS)
+        .collect();
+    let suffix = if bounded.len() < redacted.len() {
+        "…"
+    } else {
+        ""
+    };
+    format!("cli response envelope invalid: {bounded}{suffix}")
 }
 
 struct CliLearningContext {

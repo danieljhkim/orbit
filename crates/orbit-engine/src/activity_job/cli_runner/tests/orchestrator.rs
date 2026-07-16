@@ -26,7 +26,7 @@ fn run_cli_backend_finished_audit_event_keeps_stdout_stderr_blob_refs() {
     let script = temp.path().join("codex");
     write_executable(
         &script,
-        "#!/bin/sh\nprintf '%s\\n' 'plain stdout'\nprintf '%s\\n' 'plain stderr' >&2\n",
+        "#!/bin/sh\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\nprintf '%s\\n' 'plain stderr' >&2\n",
     );
 
     let sink = Arc::new(RecordingSink::default());
@@ -47,9 +47,10 @@ fn run_cli_backend_finished_audit_event_keeps_stdout_stderr_blob_refs() {
         .expect("run succeeds");
 
     assert!(outcome.success);
-    assert_eq!(outcome.output["stdout_text"], "plain stdout\n");
+    let stdout = "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}\n";
+    assert_eq!(outcome.output["stdout_text"], stdout);
     assert_eq!(outcome.output["stdout_text_truncated"], false);
-    assert_eq!(outcome.output["stdout_text_original_bytes"], 13);
+    assert_eq!(outcome.output["stdout_text_original_bytes"], stdout.len());
     let events = audit.events_snapshot().expect("events snapshot");
     let finished = events
         .iter()
@@ -77,8 +78,132 @@ fn run_cli_backend_finished_audit_event_keeps_stdout_stderr_blob_refs() {
     assert_eq!(finished.2, Some("blob-2"));
     assert_eq!(finished.3, Some("blob-3"));
     assert!(!finished.4);
-    assert_eq!(sink.blob("blob-2"), Some(b"plain stdout\n".to_vec()));
+    assert_eq!(sink.blob("blob-2"), Some(stdout.as_bytes().to_vec()));
     assert_eq!(sink.blob("blob-3"), Some(b"plain stderr\n".to_vec()));
+}
+
+#[test]
+fn run_cli_backend_projects_prose_prefixed_claude_envelope_result() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    let response = serde_json::json!({
+        "type": "result",
+        "subtype": "success",
+        "result": format!(
+            "I classified both failed runs.\n{}",
+            serde_json::json!({
+                "schemaVersion": 1,
+                "status": "success",
+                "result": {
+                    "dispositions": [
+                        {
+                            "task_id": "ORB-A",
+                            "classification": "environmental",
+                            "disposition": "rebacklog",
+                            "diagnosis": "stale worktree removed"
+                        },
+                        {
+                            "task_id": "ORB-B",
+                            "classification": "code_defect",
+                            "disposition": "stay_blocked",
+                            "diagnosis": "tests remain red"
+                        }
+                    ],
+                    "summary": "one recovery and one human follow-up"
+                },
+                "error": null
+            })
+        ),
+        "usage": {
+            "input_tokens": 11,
+            "output_tokens": 7
+        }
+    })
+    .to_string();
+    write_executable(
+        &script,
+        &format!("#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{response}'\n"),
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-claude-envelope-result",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-claude-envelope-result",
+        audit,
+        &serde_json::json!({"prompt": "triage failed runs"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(outcome.success);
+    assert_eq!(
+        outcome.output["dispositions"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(
+        outcome.output["dispositions"][0]["disposition"],
+        serde_json::json!("rebacklog")
+    );
+    assert_eq!(
+        outcome.output["dispositions"][1]["disposition"],
+        serde_json::json!("stay_blocked")
+    );
+    assert_eq!(
+        outcome.output["summary"],
+        serde_json::json!("one recovery and one human follow-up")
+    );
+    assert_eq!(outcome.output["provider"], serde_json::json!("claude"));
+}
+
+#[test]
+fn run_cli_backend_rejects_schema_invalid_success_envelope() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("codex");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":2,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-invalid-envelope",
+        "codex:gpt-5.5",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-invalid-envelope",
+        audit,
+        &serde_json::json!({"prompt": "hi"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(!outcome.success);
+    let message = outcome.message.expect("invalid envelope message");
+    assert!(
+        message.contains("cli response envelope invalid"),
+        "{message}"
+    );
+    assert!(
+        message.contains("unsupported schemaVersion: 2"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -154,10 +279,11 @@ fn run_cli_backend_redacts_secret_like_stdout_text_preview() {
         &script,
         r#"#!/bin/sh
 cat > /dev/null
-printf '%s\n' 'Authorization: Bearer stdout-secret-token'
-printf '%s\n' 'x-api-key: stdout-header-key'
-printf '%s\n' 'sk-stdoutsecret123'
+printf '%s\n' '{"log":"Authorization: Bearer stdout-secret-token"}'
+printf '%s\n' '{"x-api-key":"stdout-header-key"}'
+printf '%s\n' '{"log":"sk-stdoutsecret123"}'
 printf '%s\n' '{"api_key":"stdout-json-key"}'
+printf '%s\n' '{"schemaVersion":1,"status":"success","result":{},"error":null}'
 "#,
     );
 
@@ -208,7 +334,7 @@ fn run_cli_backend_redacts_live_env_values_in_stored_blobs() {
     write_executable(
         &script,
         &format!(
-            "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' 'stdout leak {secret}'\nprintf '%s\\n' 'stderr leak {secret}' >&2\n"
+            "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{{\"log\":\"stdout leak {secret}\"}}'\nprintf '%s\\n' '{{\"schemaVersion\":1,\"status\":\"success\",\"result\":{{}},\"error\":null}}'\nprintf '%s\\n' 'stderr leak {secret}' >&2\n"
         ),
     );
 
@@ -266,7 +392,7 @@ fn run_cli_backend_returns_error_when_declared_workspace_path_missing() {
     let script = temp.path().join("codex");
     write_executable(
         &script,
-        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"status\":\"ok\"}'\n",
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
     );
     let missing = temp.path().join("missing-worktree");
 
@@ -319,7 +445,7 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
     let script = temp.path().join("codex");
     write_executable(
         &script,
-        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"status\":\"ok\"}'\n",
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
     );
     let workspace_dir = tempdir().expect("workspace tempdir");
     let workspace = workspace_dir
@@ -374,7 +500,7 @@ fn run_cli_backend_passes_provider_config_to_codex_runtime_args() {
     let script = temp.path().join("codex");
     write_executable(
         &script,
-        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"status\":\"ok\"}'\n",
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
     );
 
     let sink = Arc::new(RecordingSink::default());
@@ -703,11 +829,11 @@ fn mixed_crew_drives_exact_models_to_planner_and_implementer() {
     let codex_script = temp.path().join("codex");
     write_executable(
         &claude_script,
-        "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\"}\\n'\n",
+        "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}\\n'\n",
     );
     write_executable(
         &codex_script,
-        "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\"}\\n'\n",
+        "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}\\n'\n",
     );
 
     // planner leg via mixed fixture crew
@@ -831,7 +957,10 @@ fn run_cli_backend_redacts_token_shaped_argv_in_audit() {
     // the persisted run record / audit event, not recorded verbatim.
     let temp = tempdir().expect("tempdir");
     let script = temp.path().join("codex");
-    write_executable(&script, "#!/bin/sh\ncat > /dev/null\nprintf 'ok\\n'\n");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}\\n'\n",
+    );
 
     let sink = Arc::new(RecordingSink::default());
     let sink_for_writer: Arc<dyn AuditSink> = sink;
