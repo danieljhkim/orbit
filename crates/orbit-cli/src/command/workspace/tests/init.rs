@@ -2,13 +2,172 @@ use std::sync::Mutex;
 
 use tempfile::tempdir;
 
-use orbit_common::types::{OverlapPolicy, RoutineTarget, parse_routine_yaml};
+use chrono::Utc;
+use orbit_common::types::{
+    OverlapPolicy, RoutineTarget, Workspace, WorkspaceRegistry, WorkspaceStatus, parse_routine_yaml,
+};
 use orbit_core::command::init::default_orbitignore_template;
 use orbit_core::workspace_registry;
 
 use super::super::init::WorkspaceInitArgs;
+use super::super::list::format_workspace_list;
+use super::super::show::format_workspace_show;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+#[test]
+fn workspace_reinit_merges_explicit_registration_updates_without_resetting_authored_state() {
+    let _guard = ENV_LOCK.lock().expect("lock env");
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+
+    let previous_home = std::env::var_os("HOME");
+    let previous_cwd = std::env::current_dir().expect("capture cwd");
+    unsafe {
+        std::env::set_var("HOME", home.path());
+    }
+    std::env::set_current_dir(workspace.path()).expect("enter workspace");
+
+    let init = |base_branch: Option<&str>, ship_mode: Option<&str>| WorkspaceInitArgs {
+        name: Some("reinit-merge".to_string()),
+        base_branch: base_branch.map(str::to_string),
+        ship_mode: ship_mode.map(str::to_string),
+        task_id_start: None,
+        mcp: false,
+        hooks: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+    };
+
+    init(Some("agent-main"), None)
+        .execute_without_runtime(None)
+        .expect("initial workspace init");
+
+    let registry_path = global.join("workspaces.json");
+    let original = workspace_registry::load_registry_from(&registry_path)
+        .expect("load initial registry")
+        .workspaces
+        .into_iter()
+        .next()
+        .expect("registered workspace");
+    let authored_routine = r#"schemaVersion: 1
+name: custom-ship-sweep
+description: operator-authored routine
+enabled: true
+hosts: [custom-host]
+trigger:
+  cron: "7 3 * * *"
+  missed_run: catch_up_once
+target: job:workspace_ship_pipeline
+policy:
+  timeout_minutes: 77
+  overlap: allow
+"#;
+    let routine_path = workspace.path().join(".orbit/routines/ship_sweep.yaml");
+    std::fs::write(&routine_path, authored_routine).expect("author routine");
+
+    init(None, Some("pr"))
+        .execute_without_runtime(None)
+        .expect("re-init with explicit PR mode");
+    let after_ship_mode = workspace_registry::load_registry_from(&registry_path)
+        .expect("load registry after ship mode update")
+        .workspaces
+        .into_iter()
+        .next()
+        .expect("registered workspace");
+    assert_eq!(after_ship_mode.id, original.id);
+    assert_eq!(after_ship_mode.created_at, original.created_at);
+    assert_eq!(after_ship_mode.base_branch, "agent-main");
+    assert_eq!(after_ship_mode.ship_mode.as_deref(), Some("pr"));
+    assert_eq!(
+        orbit_core::resolved_ship_mode(&after_ship_mode).as_input_value(),
+        "pr",
+        "workspace_ship_pipeline must receive the persisted PR mode"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&routine_path).expect("read authored routine"),
+        authored_routine
+    );
+
+    init(None, None)
+        .execute_without_runtime(None)
+        .expect("re-init with omitted registration options");
+    let after_omitted = workspace_registry::load_registry_from(&registry_path)
+        .expect("load registry after omitted options")
+        .workspaces
+        .into_iter()
+        .next()
+        .expect("registered workspace");
+    assert_eq!(after_omitted.id, original.id);
+    assert_eq!(after_omitted.created_at, original.created_at);
+    assert_eq!(after_omitted.base_branch, "agent-main");
+    assert_eq!(after_omitted.ship_mode.as_deref(), Some("pr"));
+    assert_eq!(
+        std::fs::read_to_string(&routine_path).expect("read authored routine"),
+        authored_routine
+    );
+
+    init(Some("release"), None)
+        .execute_without_runtime(None)
+        .expect("re-init with explicit base branch");
+    let after_base_branch = workspace_registry::load_registry_from(&registry_path)
+        .expect("load registry after base branch update")
+        .workspaces
+        .into_iter()
+        .next()
+        .expect("registered workspace");
+    assert_eq!(after_base_branch.base_branch, "release");
+    assert_eq!(after_base_branch.ship_mode.as_deref(), Some("pr"));
+
+    let before_invalid = after_base_branch.clone();
+    let error = init(None, Some("invalid"))
+        .execute_without_runtime(None)
+        .expect_err("invalid ship mode must fail closed");
+    assert!(error.to_string().contains("unknown ship mode 'invalid'"));
+    let after_invalid = workspace_registry::load_registry_from(&registry_path)
+        .expect("load registry after invalid mode")
+        .workspaces
+        .into_iter()
+        .next()
+        .expect("registered workspace");
+    assert_eq!(after_invalid, before_invalid);
+
+    std::env::set_current_dir(previous_cwd).expect("restore cwd");
+    match previous_home {
+        Some(value) => unsafe { std::env::set_var("HOME", value) },
+        None => unsafe { std::env::remove_var("HOME") },
+    }
+}
+
+#[test]
+fn workspace_list_and_show_report_effective_ship_mode() {
+    let now = Utc::now();
+    let workspace = Workspace {
+        id: "ws_pr_gated".to_string(),
+        name: "pr-gated".to_string(),
+        root: "/work/pr-gated".into(),
+        orbit_dir: "/work/pr-gated/.orbit".into(),
+        git_remote: None,
+        ship_mode: Some("pr".to_string()),
+        base_branch: "agent-main".to_string(),
+        status: WorkspaceStatus::Active,
+        created_at: now,
+        updated_at: now,
+    };
+    let registry = WorkspaceRegistry {
+        workspaces: vec![workspace.clone()],
+        ..Default::default()
+    };
+
+    let list = format_workspace_list(&registry);
+    assert!(list.contains("SHIP MODE"), "{list}");
+    assert!(list.contains("pr"), "{list}");
+
+    let show = format_workspace_show(&workspace);
+    assert!(show.contains("ship_mode:   pr"), "{show}");
+}
 
 #[test]
 fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() {
@@ -28,7 +187,7 @@ fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() 
 
     let init = || WorkspaceInitArgs {
         name: Some("routine-seed-test".to_string()),
-        base_branch: "agent-main".to_string(),
+        base_branch: Some("agent-main".to_string()),
         ship_mode: Some("pr".to_string()),
         task_id_start: None,
         mcp: false,
@@ -134,7 +293,7 @@ fn workspace_init_seeds_auto_detected_mcp_configs() {
 
     let result = WorkspaceInitArgs {
         name: None,
-        base_branch: "main".to_string(),
+        base_branch: Some("main".to_string()),
         ship_mode: None,
         task_id_start: None,
         mcp: true,
@@ -199,7 +358,7 @@ fn workspace_init_skips_mcp_by_default() {
 
     let result = WorkspaceInitArgs {
         name: None,
-        base_branch: "main".to_string(),
+        base_branch: Some("main".to_string()),
         ship_mode: None,
         task_id_start: None,
         mcp: false,
@@ -256,7 +415,7 @@ fn workspace_init_under_home_with_global_orbit_creates_repo_orbit() {
 
     let result = WorkspaceInitArgs {
         name: None,
-        base_branch: "main".to_string(),
+        base_branch: Some("main".to_string()),
         ship_mode: None,
         task_id_start: None,
         mcp: false,
@@ -306,7 +465,7 @@ fn workspace_init_appends_orbit_to_existing_gitignore() {
 
     let result = WorkspaceInitArgs {
         name: None,
-        base_branch: "main".to_string(),
+        base_branch: Some("main".to_string()),
         ship_mode: None,
         task_id_start: None,
         mcp: false,
@@ -352,7 +511,7 @@ fn workspace_init_does_not_duplicate_existing_orbit_gitignore_entry() {
 
     let result = WorkspaceInitArgs {
         name: None,
-        base_branch: "main".to_string(),
+        base_branch: Some("main".to_string()),
         ship_mode: None,
         task_id_start: None,
         mcp: false,
@@ -398,7 +557,7 @@ fn workspace_init_from_git_subdir_gitignores_repo_orbit_dir() {
 
     let result = WorkspaceInitArgs {
         name: None,
-        base_branch: "main".to_string(),
+        base_branch: Some("main".to_string()),
         ship_mode: None,
         task_id_start: None,
         mcp: false,
@@ -444,7 +603,7 @@ fn workspace_init_with_root_override_uses_custom_registry() {
 
     let result = WorkspaceInitArgs {
         name: Some("custom-root".to_string()),
-        base_branch: "main".to_string(),
+        base_branch: None,
         ship_mode: None,
         task_id_start: None,
         mcp: false,
@@ -486,6 +645,7 @@ fn workspace_init_with_root_override_uses_custom_registry() {
         std::fs::canonicalize(&workspace_record.orbit_dir).expect("canonical registered root"),
         std::fs::canonicalize(&custom_root).expect("canonical custom root")
     );
+    assert_eq!(workspace_record.base_branch, "main");
     assert_eq!(
         std::fs::read_to_string(workspace.path().join(".orbitignore"))
             .expect("read workspace .orbitignore"),
@@ -512,7 +672,7 @@ fn workspace_init_seeds_default_orbitignore_when_missing() {
 
     let result = WorkspaceInitArgs {
         name: None,
-        base_branch: "main".to_string(),
+        base_branch: Some("main".to_string()),
         ship_mode: None,
         task_id_start: None,
         mcp: false,
@@ -560,7 +720,7 @@ fn workspace_init_preserves_existing_orbitignore() {
 
     let result = WorkspaceInitArgs {
         name: None,
-        base_branch: "main".to_string(),
+        base_branch: Some("main".to_string()),
         ship_mode: None,
         task_id_start: None,
         mcp: false,
@@ -609,7 +769,7 @@ fn workspace_init_with_root_override_does_not_modify_repo_gitignore() {
 
     let result = WorkspaceInitArgs {
         name: Some("custom-root-git".to_string()),
-        base_branch: "main".to_string(),
+        base_branch: Some("main".to_string()),
         ship_mode: None,
         task_id_start: None,
         mcp: false,

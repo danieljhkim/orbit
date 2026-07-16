@@ -16,8 +16,11 @@ pub struct WorkspaceInitArgs {
     #[arg(long)]
     pub name: Option<String>,
     /// Base branch for this workspace (default: main)
-    #[arg(long, default_value = "main")]
-    pub base_branch: String,
+    ///
+    /// Kept optional so re-initializing an existing workspace can distinguish
+    /// an omitted value from an explicit request to reset it to `main`.
+    #[arg(long)]
+    pub base_branch: Option<String>,
     /// Ship-pipeline mode for this workspace: `pr` or `local`. When omitted, the
     /// effective mode defaults to `local` (only PR-gated workspaces set `pr`).
     #[arg(long, value_name = "MODE")]
@@ -128,6 +131,12 @@ impl WorkspaceInitArgs {
         global_root: &Path,
         registry_path: &Path,
     ) -> Result<WorkspaceInitResult, OrbitError> {
+        // Validate before bootstrapping any workspace state so invalid modes
+        // fail closed at the command boundary.
+        if let Some(mode) = self.ship_mode.as_deref() {
+            orbit_core::ShipMode::parse(mode)?;
+        }
+
         init_workspace_at_root(
             orbit_dir,
             InitOptions {
@@ -139,34 +148,34 @@ impl WorkspaceInitArgs {
         seed_default_orbitignore(cwd)?;
         ensure_orbit_gitignore_entry(cwd, orbit_dir)?;
 
-        // Validate an explicit ship mode up front so a bad value is rejected at
-        // registration rather than surfacing later during a sweep.
-        if let Some(mode) = self.ship_mode.as_deref() {
-            orbit_core::ShipMode::parse(mode)?;
-        }
-
         let name = self.name.unwrap_or_else(|| dir_name_or_fallback(cwd));
 
         let id = format!("ws_{name}");
         let git_remote = detect_git_remote(cwd);
 
-        let ws = Workspace {
-            id: id.clone(),
-            name: name.clone(),
-            root: cwd.to_path_buf(),
-            orbit_dir: orbit_dir.to_path_buf(),
-            git_remote,
-            ship_mode: self.ship_mode,
-            base_branch: self.base_branch,
-            status: WorkspaceStatus::Active,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-
         let mut registry = workspace_registry::load_registry_from(registry_path)?;
         if let Some(existing) = registry.workspaces.iter_mut().find(|w| w.id == id) {
+            if let Some(ship_mode) = self.ship_mode {
+                existing.ship_mode = Some(ship_mode);
+            }
+            if let Some(base_branch) = self.base_branch {
+                existing.base_branch = base_branch;
+            }
             existing.updated_at = Utc::now();
         } else {
+            let now = Utc::now();
+            let ws = Workspace {
+                id: id.clone(),
+                name: name.clone(),
+                root: cwd.to_path_buf(),
+                orbit_dir: orbit_dir.to_path_buf(),
+                git_remote,
+                ship_mode: self.ship_mode,
+                base_branch: self.base_branch.unwrap_or_else(|| "main".to_string()),
+                status: WorkspaceStatus::Active,
+                created_at: now,
+                updated_at: now,
+            };
             workspace_registry::register_workspace(&mut registry, ws)?;
         }
         workspace_registry::save_registry_to(&registry, registry_path)?;
