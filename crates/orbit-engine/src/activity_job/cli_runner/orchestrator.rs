@@ -206,8 +206,8 @@ pub fn run_cli_backend(
             }
         })?;
 
-    let stdout_blob_ref = audit.write_blob(&stdout);
-    let stderr_blob_ref = audit.write_blob(&stderr);
+    let stdout_blob_ref = audit.write_blob(stdout.bytes());
+    let stderr_blob_ref = audit.write_blob(stderr.bytes());
 
     audit.emit_lossy(V2AuditEventKind::CliInvocationFinished {
         provider: provider.clone(),
@@ -224,13 +224,16 @@ pub fn run_cli_backend(
     // explanatory prose), so validate and unwrap the embedded Orbit envelope
     // before exposing anything to downstream workflow templates.
     let exit_success = !timed_out && matches!(exit_code, Some(0));
-    let stdout_text = String::from_utf8_lossy(&stdout);
+    // A truncated capture retains the final complete JSONL events separately
+    // from its diagnostic prefix. Protocol parsing must use that tail so a
+    // verbose provider's final Orbit envelope remains authoritative.
+    let stdout_text = String::from_utf8_lossy(stdout.protocol_bytes());
     let envelope_status = peek_response_status(stdout_text.as_ref());
-    let stdout_preview = stdout_text_preview(stdout_text.as_ref(), &redaction);
+    let stdout_preview = stdout_text_preview(stdout_text.as_ref(), &redaction, stdout.truncated());
     let parsed_result = exit_success.then(|| {
         parse_cli_response_result(
-            &stdout,
-            &stderr,
+            stdout.protocol_bytes(),
+            stderr.protocol_bytes(),
             exit_code,
             duration.as_millis() as u64,
             true,
@@ -238,8 +241,8 @@ pub fn run_cli_backend(
     });
     let success = exit_success && matches!(parsed_result.as_ref(), Some(Ok(_)));
     let trace = parse_cli_invocation_trace(
-        &stdout,
-        &stderr,
+        stdout.protocol_bytes(),
+        stderr.protocol_bytes(),
         exit_code,
         duration.as_millis() as u64,
         success,
@@ -282,10 +285,13 @@ pub fn run_cli_backend(
         ),
         ("timed_out", Value::Bool(timed_out)),
         ("stdout_text", Value::String(stdout_text)),
-        ("stdout_text_truncated", Value::Bool(stdout_text_truncated)),
+        (
+            "stdout_text_truncated",
+            Value::Bool(stdout.truncated() || stdout_text_truncated),
+        ),
         (
             "stdout_text_original_bytes",
-            serde_json::json!(stdout.len()),
+            serde_json::json!(stdout.observed_bytes()),
         ),
         (
             "stdout_text_preview_bytes",
@@ -294,6 +300,28 @@ pub fn run_cli_backend(
         (
             "stdout_text_preview_limit_bytes",
             serde_json::json!(STDOUT_TEXT_PREVIEW_LIMIT_BYTES),
+        ),
+        (
+            "stdout_text_captured_bytes",
+            serde_json::json!(stdout.bytes().len()),
+        ),
+        ("stdout_capture_truncated", Value::Bool(stdout.truncated())),
+        (
+            "stdout_capture_limit_bytes",
+            serde_json::json!(stdout.capture_limit_bytes()),
+        ),
+        (
+            "stderr_original_bytes",
+            serde_json::json!(stderr.observed_bytes()),
+        ),
+        (
+            "stderr_captured_bytes",
+            serde_json::json!(stderr.bytes().len()),
+        ),
+        ("stderr_capture_truncated", Value::Bool(stderr.truncated())),
+        (
+            "stderr_capture_limit_bytes",
+            serde_json::json!(stderr.capture_limit_bytes()),
         ),
     ] {
         output.entry(key.to_string()).or_insert(value);
@@ -373,17 +401,34 @@ struct StdoutTextPreview {
     preview_bytes: usize,
 }
 
-fn stdout_text_preview(raw: &str, redactor: &PatternRedactor) -> StdoutTextPreview {
+fn stdout_text_preview(
+    raw: &str,
+    redactor: &PatternRedactor,
+    prefer_tail: bool,
+) -> StdoutTextPreview {
     let redacted = redactor.apply_str(&redact_sensitive_env_text(raw));
     let truncated = redacted.len() > STDOUT_TEXT_PREVIEW_LIMIT_BYTES;
     let text = if truncated {
-        let boundary = redacted
-            .char_indices()
-            .map(|(idx, _)| idx)
-            .take_while(|idx| *idx <= STDOUT_TEXT_PREVIEW_LIMIT_BYTES)
-            .last()
-            .unwrap_or(0);
-        redacted[..boundary].to_string()
+        if prefer_tail {
+            let requested_start = redacted.len() - STDOUT_TEXT_PREVIEW_LIMIT_BYTES;
+            let boundary = redacted
+                .char_indices()
+                .map(|(idx, _)| idx)
+                .find(|idx| *idx >= requested_start)
+                .unwrap_or(redacted.len());
+            let line_boundary = redacted[boundary..]
+                .find('\n')
+                .map_or(boundary, |idx| boundary + idx + 1);
+            redacted[line_boundary..].to_string()
+        } else {
+            let boundary = redacted
+                .char_indices()
+                .map(|(idx, _)| idx)
+                .take_while(|idx| *idx <= STDOUT_TEXT_PREVIEW_LIMIT_BYTES)
+                .last()
+                .unwrap_or(0);
+            redacted[..boundary].to_string()
+        }
     } else {
         redacted
     };

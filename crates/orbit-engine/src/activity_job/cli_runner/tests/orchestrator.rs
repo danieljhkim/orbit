@@ -17,7 +17,8 @@ use super::super::super::dispatcher::DispatchError;
 use super::super::super::sqlite_sink::V2SqliteSink;
 use super::super::run_cli_backend;
 use super::test_support::{
-    RecordingSink, TestHost, test_agent_loop_spec, test_agent_loop_spec_for, write_executable,
+    RecordingSink, TestHost, capture_events, test_agent_loop_spec, test_agent_loop_spec_for,
+    write_executable,
 };
 
 #[test]
@@ -203,6 +204,90 @@ fn run_cli_backend_rejects_schema_invalid_success_envelope() {
     assert!(
         message.contains("unsupported schemaVersion: 2"),
         "{message}"
+    );
+}
+
+#[test]
+fn run_cli_backend_keeps_verbose_provider_result_usable_after_capture_truncation() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("codex");
+    write_executable(
+        &script,
+        r#"#!/bin/sh
+cat > /dev/null
+printf '%s' '{"type":"item.completed","item":{"type":"reasoning","text":"'
+i=0
+while [ "$i" -lt 18000 ]; do
+  printf '%s' 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+  i=$((i + 1))
+done
+printf '%s\n' '"}}'
+printf '%s\n' '{"schemaVersion":1,"status":"success","result":{"workflow":"usable"},"error":null}'
+"#,
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink.clone();
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-verbose-output",
+        "codex:gpt-5.5",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec(Duration::from_secs(10));
+
+    let (outcome, _events) = capture_events(|| {
+        run_cli_backend(
+            &host,
+            &spec,
+            "job-verbose-output",
+            audit,
+            &serde_json::json!({"prompt": "perform verbose work"}),
+            None,
+        )
+    });
+    let outcome = outcome.expect("verbose run succeeds");
+
+    assert!(outcome.success, "capture truncation must not fail the run");
+    assert!(outcome.message.is_none());
+    assert_eq!(outcome.output["exit_code"], 0);
+    assert_eq!(outcome.output["timed_out"], false);
+    assert_eq!(outcome.output["stdout_capture_truncated"], true);
+    let observed = outcome.output["stdout_text_original_bytes"]
+        .as_u64()
+        .expect("observed byte count");
+    let limit = outcome.output["stdout_capture_limit_bytes"]
+        .as_u64()
+        .expect("capture limit");
+    let captured = outcome.output["stdout_text_captured_bytes"]
+        .as_u64()
+        .expect("captured byte count");
+    assert!(observed > limit);
+    assert!(captured < observed);
+
+    let preview = outcome.output["stdout_text"]
+        .as_str()
+        .expect("stdout protocol tail");
+    let documents = serde_json::Deserializer::from_str(preview)
+        .into_iter::<serde_json::Value>()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("retained stdout text remains valid JSONL");
+    assert_eq!(
+        documents
+            .last()
+            .and_then(|value| value.get("status"))
+            .and_then(serde_json::Value::as_str),
+        Some("success")
+    );
+
+    let stdout_blob_ref = outcome.output["stdout_blob_ref"]
+        .as_str()
+        .expect("stdout blob ref");
+    let stored = sink.blob(stdout_blob_ref).expect("stored bounded stdout");
+    assert!(stored.len() < observed as usize);
+    assert!(
+        String::from_utf8_lossy(&stored).contains("observed_bytes="),
+        "bounded blob should record why and where capture was truncated"
     );
 }
 
