@@ -186,11 +186,16 @@ impl OrbitRuntime {
 }
 
 #[cfg(test)]
-mod drift_tests {
+mod tests {
     //! Parity tests guarding against drift between the four skill catalogs:
     //! the on-disk assets, the seeded registry, the plugin package, and the
     //! router skill's enumeration. The next agent who adds a skill folder
     //! must update all four; these tests fail loudly if any catalog lags.
+    //!
+    //! Plus a portability regression (`embedded_skills_are_repository_agnostic`)
+    //! guarding the shipped skill tree against leaking Orbit-source paths,
+    //! private Constellation names, workspace-local artifact IDs, and fixed
+    //! consumer design-doc filenames into public consumer workspaces.
 
     use super::*;
     use std::collections::BTreeSet;
@@ -502,6 +507,195 @@ mod drift_tests {
             missing.is_empty(),
             "router skill at {} does not name these default skills as inline-code identifiers (expected occurrences of `<id>`): {missing:?}\nfix by adding a bullet to the ## Skill Selection block.",
             router_path.display(),
+        );
+    }
+
+    // --- Portability regression -------------------------------------------
+    //
+    // The shipped skill tree is embedded into the binary, seeded into arbitrary
+    // consumer workspaces, and mirrored into the public plugin package. It must
+    // not encode assumptions that only hold in an Orbit source checkout or in
+    // Daniel's private Constellation environment. `portability_violations`
+    // classifies the leak families the ORB-10208 audit found; the test asserts
+    // no shipped file trips them, while allowing genuine public Orbit runtime
+    // paths (`.orbit/...`, `~/.orbit/...`) and placeholder IDs (`ORB-NNNN`,
+    // `L-NNNN`, `<task-id>`).
+
+    /// Concrete workspace-local artifact IDs (task/friction/learning) that would
+    /// become dangling references in a consumer workspace. Placeholder forms
+    /// (`ORB-NNNN`, `L-NNNN`, `<task-id>`) use non-digit stand-ins and are
+    /// intentionally *not* matched.
+    fn find_artifact_ids(content: &str) -> Vec<String> {
+        let b = content.as_bytes();
+        let n = b.len();
+        let boundary = |i: usize| i == 0 || !b[i - 1].is_ascii_alphanumeric();
+        let digit_run = |start: usize| {
+            let mut k = 0;
+            while start + k < n && b[start + k].is_ascii_digit() {
+                k += 1;
+            }
+            k
+        };
+        let starts = |i: usize, pat: &[u8]| i + pat.len() <= n && &b[i..i + pat.len()] == pat;
+        let is_digit = |j: usize| j < n && b[j].is_ascii_digit();
+
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < n {
+            if boundary(i) {
+                // ORB-<digit...> (task ids). ORB-NNNN / ORB-NNNNN placeholders
+                // have a non-digit after the dash and are skipped.
+                if starts(i, b"ORB-") && is_digit(i + 4) {
+                    let d = digit_run(i + 4);
+                    out.push(String::from_utf8_lossy(&b[i..i + 4 + d]).into_owned());
+                }
+                // L-<3+ digits> (learning ids). L-NNNN placeholder is skipped.
+                if starts(i, b"L-") {
+                    let d = digit_run(i + 2);
+                    if d >= 3 {
+                        out.push(String::from_utf8_lossy(&b[i..i + 2 + d]).into_owned());
+                    }
+                }
+                // F<yyyy>-<mm>-<nnn> (friction ids). F<YYYY>-<MM>-<NNN> is skipped.
+                if b[i] == b'F'
+                    && i + 12 <= n
+                    && (1..=4).all(|k| is_digit(i + k))
+                    && b[i + 5] == b'-'
+                    && is_digit(i + 6)
+                    && is_digit(i + 7)
+                    && b[i + 8] == b'-'
+                    && (9..=11).all(|k| is_digit(i + k))
+                {
+                    out.push(String::from_utf8_lossy(&b[i..i + 12]).into_owned());
+                }
+                // T<6+ digits> (legacy task ids like T20260514-3).
+                if b[i] == b'T' {
+                    let d = digit_run(i + 1);
+                    if d >= 6 {
+                        out.push(String::from_utf8_lossy(&b[i..i + 1 + d]).into_owned());
+                    }
+                }
+            }
+            i += 1;
+        }
+        out
+    }
+
+    /// Fixed numbered consumer design-doc filenames such as `4_decisions.md` or
+    /// `2_design.md` — an Orbit-source layout convention that does not hold in an
+    /// arbitrary consumer repo.
+    fn find_numbered_design_doc(content: &str) -> Option<String> {
+        let b = content.as_bytes();
+        let n = b.len();
+        let boundary = |i: usize| i == 0 || !b[i - 1].is_ascii_alphanumeric();
+        let mut i = 0;
+        while i < n {
+            if b[i].is_ascii_digit() && boundary(i) && i + 1 < n && b[i + 1] == b'_' {
+                let mut j = i + 2;
+                while j < n && (b[j].is_ascii_lowercase() || b[j] == b'_') {
+                    j += 1;
+                }
+                if j > i + 2 && j + 3 <= n && &b[j..j + 3] == b".md" {
+                    return Some(String::from_utf8_lossy(&b[i..j + 3]).into_owned());
+                }
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Every reason `content` is not repository-agnostic. Empty == portable.
+    fn portability_violations(content: &str) -> Vec<String> {
+        let mut hits = Vec::new();
+
+        // Unguarded Orbit source paths (crate tree only exists in a source clone).
+        if content.contains("crates/") {
+            hits.push("Orbit source path `crates/...`".to_string());
+        }
+
+        // Private / Constellation-specific names.
+        for needle in ["almanac", "dk-mac", "dk-server", "Constellation"] {
+            if content.contains(needle) {
+                hits.push(format!("private name `{needle}`"));
+            }
+        }
+
+        // Fixed consumer design-doc filenames.
+        if let Some(name) = find_numbered_design_doc(content) {
+            hits.push(format!("fixed design-doc filename `{name}`"));
+        }
+
+        // Workspace-local artifact IDs.
+        for id in find_artifact_ids(content) {
+            hits.push(format!("workspace-local artifact id `{id}`"));
+        }
+
+        hits
+    }
+
+    #[test]
+    fn portability_checker_flags_and_allows_representative_inputs() {
+        // Fails on representative leaks from each family.
+        for bad in [
+            "see crates/orbit-core/src/lib.rs",
+            "the almanac workspace",
+            "hosts: [dk-mac]",
+            "part of the Constellation",
+            "migrated by ORB-00200",
+            "see learning L-0065",
+            "silently drops it (F2026-05-024)",
+            "--evidence task:T20260514-3",
+            "docs/design/<feature>/4_decisions.md",
+            "put it in 2_design.md",
+        ] {
+            assert!(
+                !portability_violations(bad).is_empty(),
+                "portability checker failed to flag a leak: {bad:?}",
+            );
+        }
+
+        // Allows genuine public Orbit runtime paths and placeholder IDs.
+        for good in [
+            "artifacts live under `.orbit/adrs/{accepted,proposed}/`",
+            "scheduler state in `~/.orbit/orbit.db` is host-local",
+            "evidence under `.orbit/state/job-runs/`",
+            "dependencies: [\"ORB-NNNN\", ...] require ORB-NNNNN targets",
+            "drop a `// L-NNNN: <rationale>` citation",
+            "recommended layout: `docs/design/<feature>/`",
+            "resolve `context_files` selectors, then `fs.read` a `<task-id>`",
+            "run `orbit search --kind adr`",
+        ] {
+            assert!(
+                portability_violations(good).is_empty(),
+                "portability checker false-positive on portable text {good:?}: {:?}",
+                portability_violations(good),
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_skills_are_repository_agnostic() {
+        let root = assets_skills_dir();
+        let files = collect_relative_files(&root)
+            .unwrap_or_else(|e| panic!("collect_relative_files({}): {e}", root.display()));
+
+        let mut failures: Vec<String> = Vec::new();
+        for relative in files {
+            let path = root.join(&relative);
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            for violation in portability_violations(&content) {
+                failures.push(format!("  {}: {violation}", relative.display()));
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "embedded skill assets under crates/orbit-core/assets/skills/ are not repository-agnostic \
+             ({} leak(s)) — generalize, remove, or guard as explicitly source-only/client-specific \
+             guidance (ORB-10208):\n{}",
+            failures.len(),
+            failures.join("\n"),
         );
     }
 }

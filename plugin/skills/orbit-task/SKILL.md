@@ -15,8 +15,8 @@ Create a task another engineer or agent can execute without guessing: a crisp pr
 1. Confirm objective, constraints, and done criteria.
 2. Optionally check for overlapping prior work with `orbit-search` (`hybrid: true`, `kind: "task"`).
 3. Write acceptance criteria that define observable success — no vague pass/fail language like "works correctly"; name a command, inspection step, or observable output for each.
-4. Enumerate files/dirs/symbols this task will modify or delete as canonical selectors (`file:`, `dir:`, `symbol:path#name:kind`) in `context_files`. Only modification targets — not read-for-context files, conventions/pattern docs (cite those in prose instead), or files that don't exist yet. Feature design docs under `docs/design/<feature>/` are the exception (co-change with implementation). Prefer `file:`/`symbol:` over `dir:` when changes can be named more precisely.
-5. Set `complexity` (`low`/`medium`/`hard`) whenever scope is clear enough to judge — batching honors this via `crates/orbit-engine/src/executor/automation/batch/dispatch.rs::task_prefers_single_batch`.
+4. Enumerate files/dirs/symbols this task will modify or delete as canonical selectors (`file:`, `dir:`, `symbol:path#name:kind`) in `context_files`. Only modification targets — not read-for-context files, conventions/pattern docs (cite those in prose instead), or files that don't exist yet. Design docs your repo co-locates with the code they describe are the exception (co-change with implementation). Prefer `file:`/`symbol:` over `dir:` when changes can be named more precisely.
+5. Set `complexity` (`low`/`medium`/`hard`) whenever scope is clear enough to judge — batching honors this when dispatching work.
 6. Add assumptions, risks, and rollback notes to the description when they matter.
 7. Call `orbit.task.add` with description, acceptance criteria, `context_files`, workspace, complexity, and `model`. Leave `plan` blank unless pre-seeding is justified.
 8. Confirm via the tool result, or re-fetch with `orbit.task.show`.
@@ -24,9 +24,9 @@ Create a task another engineer or agent can execute without guessing: a crisp pr
 **Operating rules:** Never edit task files directly. Never invent task IDs — `orbit.task.add` allocates them. `description` should be multi-line markdown for non-trivial tasks. Required: `title`, `description`, `workspace`. Strongly prefer `acceptance_criteria` and `complexity`. Valid `type`: `feature`, `bug`, `refactor`, `chore` — use friction (below) for self-reported tooling issues, not a task type. Blank/missing companion files (`plan.md`, `execution-summary.md`) are blank fields — repair via `orbit.task.update`, never by hand.
 
 **Behavior-affecting optional fields:**
-- `dependencies: ["ORB-NNNN", ...]` — prerequisite tasks must reach a satisfying status first (`crates/orbit-common/src/types/task.rs::task_dependencies_ready`).
-- `relations: [{"type": "resolves", "target": "F<YYYY>-<MM>-<NNN>"}]` — auto-resolves the target friction when this task reaches `done` (`crates/orbit-core/src/command/task/transitions.rs::apply_resolves_side_effects`). Other `relations` types (`produces`, `blocked_by`, `child_of`, `spawned_from`, `regression_from`, `supersedes`, `related_to`) are tracked; only `produces`/`resolves` accept non-`ORB-` targets (friction/learning/ADR IDs), the rest require `ORB-NNNNN`. Dangling `resolves`/`produces` targets succeed but emit a `TaskRelationDangling` audit event.
-- `parent_id`, `source_task_id` (bug-introducing task; creation-time only — `update` silently drops it on existing tasks, see F2026-05-024/ORB-00101), `tags` (reuse existing before inventing new).
+- `dependencies: ["ORB-NNNN", ...]` — prerequisite tasks must reach a satisfying status first.
+- `relations: [{"type": "resolves", "target": "F<YYYY>-<MM>-<NNN>"}]` — auto-resolves the target friction when this task reaches `done`. Other `relations` types (`produces`, `blocked_by`, `child_of`, `spawned_from`, `regression_from`, `supersedes`, `related_to`) are tracked; only `produces`/`resolves` accept non-`ORB-` targets (friction/learning/ADR IDs), the rest require `ORB-NNNNN`. Dangling `resolves`/`produces` targets succeed but emit a `TaskRelationDangling` audit event.
+- `parent_id`, `source_task_id` (bug-introducing task; creation-time only — `update` silently drops it on existing tasks), `tags` (reuse existing before inventing new).
 
 **Task quality bar:** validation must not assume `.orbit/knowledge/` or uncommitted artifacts; file I/O checks use temp dirs/fakes; behavior-changing tasks touching external services/FS/time should call for deterministic mock coverage in acceptance criteria; graph/knowledge task nodes define `purpose` as role + crate/module + leaf-or-internal.
 
@@ -89,7 +89,7 @@ Exit: task started via `orbit.task.start`; execution summary persisted; learning
 
 Review someone else's work and surface issues as review threads — read plus write-only-into-threads; **never** transition the reviewed task's lifecycle.
 
-**Load context.** `orbit.task.show` for `description`/`acceptance_criteria`/`plan`/`execution_summary`; inspect the diff and changed files; run `make build` and the relevant test target. Optionally `orbit.search` with `semantic: "<task-id>"` for prior similar decisions.
+**Load context.** `orbit.task.show` for `description`/`acceptance_criteria`/`plan`/`execution_summary`; inspect the diff and changed files; run the target repo's build and the relevant test commands (from its own instructions/configuration). Optionally `orbit.search` with `semantic: "<task-id>"` for prior similar decisions.
 
 **Two-stage review — stage 1 first:** spec compliance (does the change satisfy every acceptance criterion? anything missing or added beyond scope? interpretation gaps?). If it fails, file those threads and stop — don't spend time on stage 2. **Stage 2** (only if stage 1 passes): maintainability, patterns, performance, test-coverage gaps, risks/edge cases/security.
 
@@ -110,7 +110,7 @@ orbit tool run orbit.task.review_thread.resolve --input '{"id":"<task-id>","thre
 
 **Summarize** in chat: thread count, which are blockers, overall verdict (approve/request changes). Don't add a task `comment` — threads are the persistent surface.
 
-**Meta-review.** After filing threads, check whether they reveal a gap in an Orbit-authored instruction asset (`crates/orbit-core/assets/activities/*.yaml`, or a `SKILL.md`). Trigger: ≥2 threads map to the same instruction gap, or one thread is clearly a recurring class. When it fires, file a friction (see §4) *in addition to* the individual threads — never as a replacement. Skip for a single nit, a style preference, or a one-off mistake with no link to instruction text.
+**Meta-review.** After filing threads, check whether they reveal a gap in an Orbit-authored instruction asset (an activity definition or a `SKILL.md`). Trigger: ≥2 threads map to the same instruction gap, or one thread is clearly a recurring class. When it fires, file a friction (see §4) *in addition to* the individual threads — never as a replacement. Skip for a single nit, a style preference, or a one-off mistake with no link to instruction text.
 
 **Rules:** never transition the reviewed task's status; never resolve threads you authored (exception: retracting your own thread); always include `model` on `review_thread.add`/`.reply` (rejected without it — `list`/`.resolve` don't require it); replies don't create new findings, only `.add` counts toward the scoreboard. No PR yet → threads stay local; with a PR, they mirror as PR review comments.
 

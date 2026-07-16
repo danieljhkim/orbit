@@ -66,7 +66,7 @@ After hand-off, subsequent Orbit work routes through the rest of the `orbit` ski
 
 Routines make Orbit the host's scheduler: a git-versioned YAML definition (`.orbit/routines/*.yaml`) pairs a cron trigger with a catalog `job:<name>` target, host pinning, and a retry/overlap policy. A stateless `orbit sweep` pass — invoked every minute by the OS clock (launchd / systemd timer) — fires whatever is due on this host as a normal run. Definitions sync across hosts via git; **all scheduler state (last fires, pauses, locks) is host-local in `~/.orbit/orbit.db` and never synced.** Full detail (job/activity/`orbit run` usage) lives in the `orbit-workflow` skill; this section covers setup only.
 
-**Canonical sources — read at invocation time; don't answer routine field semantics from memory:** design contract at `docs/design/routines/2_design.md` §1 (field-by-field schema); command surface via `orbit routine --help` and `orbit sweep --help`.
+**Canonical sources — read at invocation time; don't answer routine field semantics from memory:** command surface via `orbit routine --help` and `orbit sweep --help` (field-by-field schema).
 
 Setup sequence (skeleton is stable; re-read the design doc for full field semantics before hand-authoring a routine):
 
@@ -76,13 +76,13 @@ Setup sequence (skeleton is stable; re-read the design doc for full field semant
 
    ```yaml
    schemaVersion: 1
-   name: almanac-auto-commit          # unique across all sources on a host
+   name: <routine-name>               # unique across all sources on a host
    enabled: true                       # versioned kill-switch
-   hosts: [dk-mac]                      # explicit pinning; no "any host" in v1
+   hosts: [<host-id>]                   # explicit pinning; no "any host" in v1
    trigger:
      cron: "0 22 * * *"                # 5-field, host-local time
      missed_run: skip                   # skip | catch_up_once (default: skip)
-   target: job:almanac_commit_pipeline  # job:<name> only; activity: is rejected — wrap it in a one-step job
+   target: job:<job-name>               # job:<name> only; activity: is rejected — wrap it in a one-step job
    policy:
      timeout_minutes: 10
      retries: { max: 2, backoff_minutes: 2 }
@@ -105,7 +105,7 @@ If setup or a sweep misbehaves, surface it and offer `orbit-task` friction repor
 
 If the user runs the plugin inside **Cowork** (the Claude desktop app) and only the `orbit_graph_*` tools appear — no `orbit_task_add` / ADR / learning tools — it's the known workspace-discovery gap: Cowork launches the plugin's MCP server with cwd and `CLAUDE_PROJECT_DIR` set to an internal scratchpad, not the selected repo, so `serve` finds no `.orbit/` and falls back to the graph-only surface.
 
-Fix: pass the repo explicitly via the global `--root` flag in the orbit MCP launch, in user config (`~/.claude/settings.json`) since the cached plugin copy is overwritten on reinstall. See the README "Cowork users" note for the exact `mcpServers` block — re-read it at invocation time. There is no env/cwd source for the repo path in Cowork today (see learning L-0065).
+Fix: pass the repo explicitly via the global `--root` flag in the orbit MCP launch, in user config (`~/.claude/settings.json`) since the cached plugin copy is overwritten on reinstall. See the README "Cowork users" note for the exact `mcpServers` block — re-read it at invocation time. There is no env/cwd source for the repo path in Cowork today.
 
 ## Anti-patterns (DO NOT)
 

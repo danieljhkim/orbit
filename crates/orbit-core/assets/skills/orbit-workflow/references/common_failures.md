@@ -54,8 +54,9 @@ Confirm:
 
 ```bash
 orbit run show <run_id> --json
+orbit job show <job> --json
 rg -n '<missing_field>|<activity_name>|<job_name>' .orbit/state/audit/v2_loop/<run_id>.jsonl
-diff -u crates/orbit-core/assets/jobs/<job>.yaml ~/.orbit/resources/jobs/job_<job>.yaml
+diff -u .orbit/resources/jobs/job_<job>.yaml ~/.orbit/resources/jobs/job_<job>.yaml
 find .orbit/resources/jobs ~/.orbit/resources/jobs -name '*<job>*' -print
 ```
 
