@@ -104,6 +104,28 @@ fn orbit_root_env_selects_workspace_but_not_global_root() {
     assert_eq!(resolved_roots.local_root, workspace_root);
 }
 
+#[test]
+fn explicit_root_flag_pins_global_registry_root() {
+    let _guard = ENV_LOCK.lock().expect("lock env");
+    let home = tempdir().expect("home tempdir");
+    let repo = tempdir().expect("repo tempdir");
+    let custom_root_parent = tempdir().expect("custom root parent");
+    let custom_root = custom_root_parent.path().join("custom-orbit");
+    seed_initialized_workspace_root(&custom_root);
+    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
+
+    let resolved_roots =
+        OrbitRuntime::resolve_roots_for_cwd(repo.path(), Some(custom_root.as_path()))
+            .expect("resolve roots with explicit --root");
+
+    // The `--root` flag pins both the shared and global roots to the isolated
+    // custom root, so `workspace list`/`show --root <custom>` read
+    // `<custom>/workspaces.json` rather than `$HOME/.orbit` [ORB-10218].
+    assert_eq!(resolved_roots.global_root, custom_root);
+    assert_eq!(resolved_roots.shared_root, custom_root);
+    assert_ne!(resolved_roots.global_root, home.path().join(".orbit"));
+}
+
 fn seed_initialized_workspace_root(path: &Path) {
     std::fs::create_dir_all(path.join("resources")).expect("create resources dir");
     std::fs::create_dir_all(path.join("tasks")).expect("create tasks dir");
