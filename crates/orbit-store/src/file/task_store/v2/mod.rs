@@ -10,7 +10,6 @@
 //! The `sequencing` module owns monotonic event and comment sequence calculations.
 //! The `artifact_paths` module owns artifact path normalization and safe resolution.
 //! The `acceptance` module owns acceptance-criteria rendering and parsing.
-//! The `document_fields` module owns v2 unsupported-field validation.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -42,7 +41,6 @@ mod acceptance;
 mod artifact_paths;
 mod artifacts;
 mod crud;
-mod document_fields;
 mod index;
 mod query;
 mod relations;
@@ -56,7 +54,6 @@ mod tests;
 
 use acceptance::{parse_acceptance, render_acceptance};
 use artifact_paths::{normalize_v2_artifact_path, resolve_v2_artifact_file_path};
-use document_fields::reject_unsupported_document_fields;
 use relations::{relations_from_create_params, replace_relations};
 use review_threads::{merge_review_threads_v2, review_thread_from_v2, review_thread_to_v2};
 use sequencing::{next_event_id, next_sequence};

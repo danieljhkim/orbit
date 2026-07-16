@@ -20,6 +20,7 @@ fn document_update_rewrites_v2_documents_and_envelope() {
                 plan: Some("1. Updated plan".to_string()),
                 execution_summary: Some("Updated summary".to_string()),
                 priority: Some(TaskPriority::Low),
+                pr_status: Some(Some("approved".to_string())),
                 ..Default::default()
             },
         )
@@ -36,6 +37,7 @@ fn document_update_rewrites_v2_documents_and_envelope() {
     assert_eq!(task.plan, "1. Updated plan");
     assert_eq!(task.execution_summary, "Updated summary");
     assert_eq!(task.priority, TaskPriority::Low);
+    assert_eq!(task.pr_status.as_deref(), Some("approved"));
     assert!(
         store
             .get_task_history("ORB-00000")

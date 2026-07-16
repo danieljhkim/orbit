@@ -65,6 +65,7 @@ updated_at: 2026-05-10T12:00:00Z
             task_type: TaskType::Feature,
             priority: TaskPriority::Medium,
             complexity: None,
+            pr_status: None,
             job_run_id: None,
             crew: None,
             relations: Vec::new(),

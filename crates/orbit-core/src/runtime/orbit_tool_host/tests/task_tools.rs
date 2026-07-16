@@ -783,6 +783,79 @@ fn task_update_tool_infers_agent_from_model_only_input() {
 }
 
 #[test]
+fn task_update_tool_persists_pr_status_with_status_and_execution_summary() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Review-ready task",
+        "A task updated through the agent tool surface.",
+        TaskStatus::InProgress,
+        &[],
+    );
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task.id,
+                "pr_status": "approved",
+                "execution_summary": "Implemented and verified.",
+                "status": "review",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("combined update succeeds");
+
+    assert_eq!(
+        output.get("pr_status").and_then(Value::as_str),
+        Some("approved")
+    );
+    assert_eq!(
+        output.get("execution_summary").and_then(Value::as_str),
+        Some("Implemented and verified.")
+    );
+    assert_eq!(output.get("status").and_then(Value::as_str), Some("review"));
+
+    let persisted = runtime.get_task(&task.id).expect("read updated task");
+    assert_eq!(persisted.pr_status.as_deref(), Some("approved"));
+    assert_eq!(persisted.execution_summary, "Implemented and verified.");
+    assert_eq!(persisted.status, TaskStatus::Review);
+}
+
+#[test]
+fn task_update_tool_leaves_all_fields_unchanged_when_composite_update_is_invalid() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Backlog task",
+        "A task whose invalid status transition must not partially apply.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let message = invalid_input_message(runtime.execute_tool_command(
+        "orbit.task.update",
+        json!({
+            "id": task.id,
+            "pr_status": "approved",
+            "execution_summary": "This must not persist.",
+            "status": "archived",
+        }),
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    ));
+    assert!(message.contains("archive"), "{message}");
+
+    let persisted = runtime.get_task(&task.id).expect("read unchanged task");
+    assert_eq!(persisted.pr_status, None);
+    assert!(persisted.execution_summary.is_empty());
+    assert_eq!(persisted.status, TaskStatus::Backlog);
+}
+
+#[test]
 fn task_update_tool_rejects_dropped_task_types() {
     let (_root, runtime, repo_root) = test_runtime();
     let task = create_task(

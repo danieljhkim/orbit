@@ -37,6 +37,7 @@ impl TaskV2Store {
                 task_type: params.task_type,
                 priority: params.priority,
                 complexity: params.complexity,
+                pr_status: None,
                 job_run_id: None,
                 crew: params.crew,
                 relations,

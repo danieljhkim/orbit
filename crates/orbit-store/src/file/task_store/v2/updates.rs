@@ -12,8 +12,6 @@ impl TaskV2Store {
                 "task actor must not be empty".to_string(),
             ));
         }
-        reject_unsupported_document_fields(fields)?;
-
         self.with_task_lock(id, || {
             let mut bundle = self.read_existing_bundle(id)?;
             let mut envelope_changed = false;
@@ -59,6 +57,10 @@ impl TaskV2Store {
             }
             if let Some(value) = fields.task_type {
                 bundle.envelope.task_type = value;
+                envelope_changed = true;
+            }
+            if let Some(value) = &fields.pr_status {
+                bundle.envelope.pr_status = value.clone();
                 envelope_changed = true;
             }
             if let Some(value) = &fields.dependencies {
