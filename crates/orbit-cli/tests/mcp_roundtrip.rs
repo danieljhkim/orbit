@@ -73,7 +73,11 @@ impl McpWorkspace {
             .env_remove("ORBIT_TASK_ID")
             .env_remove("ORBIT_RUN_ID")
             .env_remove("ORBIT_ACTIVITY_ID")
-            .env_remove("ORBIT_STEP_INDEX");
+            .env_remove("ORBIT_STEP_INDEX")
+            .env_remove("ORBIT_AGENT_NAME")
+            .env_remove("ORBIT_AGENT_MODEL")
+            .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
+            .env_remove("ORBIT_TASK_ACTOR_KIND");
         command
     }
 
@@ -402,4 +406,51 @@ fn mcp_serve_error_paths_return_tool_errors_and_keep_serving() {
     // The server must still answer after every error path above.
     let listed = client.call_tool_ok("orbit_task_list", json!({}));
     assert!(listed["items"].is_array(), "server wedged: {listed}");
+}
+
+#[test]
+fn mcp_graph_calls_persist_success_and_failure_audit_rows() {
+    let workspace = McpWorkspace::init();
+    let mut client = workspace.serve();
+
+    client.call_tool_ok(
+        "orbit_graph_search",
+        json!({ "query": "mcp-audit-marker", "model": "codex" }),
+    );
+    let error = client.call_tool_err(
+        "orbit_graph_show",
+        json!({ "selector": "not-a-selector", "model": "codex" }),
+    );
+    assert_eq!(error["code"], "invalid_input");
+    let unallowlisted = client.call_tool_err(
+        "orbit.graph.pack",
+        json!({ "selectors": ["file:src/lib.rs"], "model": "codex" }),
+    );
+    assert_eq!(unallowlisted["code"], "tool_not_found");
+    drop(client);
+
+    for (tool_name, status) in [
+        ("orbit.graph.search", "success"),
+        ("orbit.graph.show", "failure"),
+        ("orbit.graph.pack", "failure"),
+    ] {
+        let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+            .args(["audit", "list", "--tool", tool_name, "--json"])
+            .output()
+            .expect("query graph audit rows");
+        assert!(
+            output.status.success(),
+            "audit list failed for {tool_name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let rows: Value = serde_json::from_slice(&output.stdout).expect("parse audit rows");
+        let rows = rows.as_array().expect("audit row array");
+        assert_eq!(rows.len(), 1, "exactly one audit row for {tool_name}");
+        let row = &rows[0];
+        assert_eq!(row["tool_name"], tool_name);
+        assert_eq!(row["subcommand"], "run-mcp");
+        assert_eq!(row["status"], status);
+        assert_eq!(row["role"], "codex");
+        assert!(row["duration_ms"].as_i64().is_some_and(|value| value >= 1));
+    }
 }

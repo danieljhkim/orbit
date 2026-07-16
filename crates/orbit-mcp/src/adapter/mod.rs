@@ -100,3 +100,7 @@ impl OrbitToolServer {
 }
 
 pub(super) const PROCESS_LEARNING_SESSION_KEY: &str = "__process__";
+
+pub(crate) fn graph_tool_names() -> &'static [&'static str] {
+    graph::GRAPH_TOOL_NAMES
+}

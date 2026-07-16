@@ -1,12 +1,12 @@
 //! MCP host implementations and audit bracketing.
 //!
-//! Listing is sourced from [`OrbitRuntime::list_tools`], which already filters
-//! disabled tools and merges external (non-builtin) entries. Execution is
-//! routed through [`OrbitRuntime::execute_tool_command_dispatch`] tagged with
-//! [`ToolEntryPoint::Mcp`], so the runtime persists an audit row for every
-//! dispatch with the same identity-resolution rules as the CLI path. The
-//! `tools/call` preflight wraps the dispatch so rejected names also produce a
-//! failure-status audit row.
+//! Registry-backed listing is sourced from [`OrbitRuntime::list_tools`], which
+//! already filters disabled tools and merges external (non-builtin) entries.
+//! Registry-backed and adapter-owned execution both use the runtime audit
+//! boundary tagged with [`ToolEntryPoint::Mcp`], so every dispatch has the same
+//! identity-resolution rules as the CLI path. Adapter preflight lives inside
+//! that boundary; registry preflight failures are recorded explicitly before
+//! runtime dispatch. Either rejection path produces a failure-status row.
 
 use std::time::Instant;
 
@@ -49,15 +49,21 @@ pub(crate) const FRICTION_TOOL_NAMES: &[&str] = &[
     "orbit.friction.update",
 ];
 
-// ORB-00391: the agent `orbit.graph.*` surface is now served by the in-process
-// orbit-graph (v2) adapter in `orbit-mcp` (`adapter::graph::GraphToolRegistry`),
-// not by orbit-knowledge (v1) builtins. The adapter is gated off whenever the
-// host exposes ANY `orbit.graph.*` schema (`host_exposes_graph_tools`), so this
-// allowlist is intentionally empty — the host must expose no graph tool for the
-// v2 adapter to activate. The constant is kept (empty) so the aggregation in
-// `safe_mcp_tool_names` and the `mcp/tests/mod.rs` chain stay structurally
-// symmetric. See ADR-0192 and GRAPH_SPEC §16.
-pub(crate) const GRAPH_READ_TOOL_NAMES: &[&str] = &[];
+// The implementation lives in orbit-mcp's in-process graph adapter, but the
+// safe-surface decision remains explicit here alongside every registry-backed
+// MCP tool. This set includes sync because it mutates the local graph index.
+pub(crate) const GRAPH_TOOL_NAMES: &[&str] = &[
+    "orbit.graph.sync",
+    "orbit.graph.search",
+    "orbit.graph.show",
+    "orbit.graph.refs",
+    "orbit.graph.callees",
+    "orbit.graph.impact",
+    "orbit.graph.trace",
+    "orbit.graph.overview",
+    "orbit.graph.implementors",
+    "orbit.graph.deps",
+];
 
 pub(crate) const SEARCH_TOOL_NAMES: &[&str] = &["orbit.search"];
 
@@ -106,7 +112,7 @@ pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
     let mut names = Vec::with_capacity(
         TASK_TOOL_NAMES.len()
             + FRICTION_TOOL_NAMES.len()
-            + GRAPH_READ_TOOL_NAMES.len()
+            + GRAPH_TOOL_NAMES.len()
             + SEARCH_TOOL_NAMES.len()
             + SEMANTIC_TOOL_NAMES.len()
             + ADR_TOOL_NAMES.len()
@@ -116,7 +122,7 @@ pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
     );
     names.extend_from_slice(TASK_TOOL_NAMES);
     names.extend_from_slice(FRICTION_TOOL_NAMES);
-    names.extend_from_slice(GRAPH_READ_TOOL_NAMES);
+    names.extend_from_slice(GRAPH_TOOL_NAMES);
     names.extend_from_slice(SEARCH_TOOL_NAMES);
     names.extend_from_slice(SEMANTIC_TOOL_NAMES);
     names.extend_from_slice(ADR_TOOL_NAMES);
@@ -129,7 +135,7 @@ pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
 pub(crate) fn is_mcp_tool_exposed(name: &str) -> bool {
     TASK_TOOL_NAMES.contains(&name)
         || FRICTION_TOOL_NAMES.contains(&name)
-        || GRAPH_READ_TOOL_NAMES.contains(&name)
+        || GRAPH_TOOL_NAMES.contains(&name)
         || SEARCH_TOOL_NAMES.contains(&name)
         || SEMANTIC_TOOL_NAMES.contains(&name)
         || ADR_TOOL_NAMES.contains(&name)
@@ -154,6 +160,13 @@ pub(super) struct RuntimeMcpHost {
 
 impl RuntimeMcpHost {
     pub(super) fn new(runtime: OrbitRuntime) -> Self {
+        let safe_names = safe_mcp_tool_names();
+        assert!(
+            orbit_mcp::graph_tool_names()
+                .iter()
+                .all(|name| safe_names.contains(name)),
+            "in-process graph tool names must be a subset of the MCP safe surface"
+        );
         Self { runtime }
     }
 }
@@ -180,6 +193,21 @@ impl McpHost for RuntimeMcpHost {
         session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
         audited_mcp_call_with_session_context(&self.runtime, name, input, session_context)
+    }
+
+    fn call_in_process_tool(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+        dispatch: &mut dyn FnMut(Value, ToolSessionContext) -> Result<Value, OrbitError>,
+    ) -> Result<Value, OrbitError> {
+        self.runtime
+            .execute_in_process_tool_dispatch(name, input, ToolEntryPoint::Mcp, |input| {
+                ensure_mcp_tool_exposed(name)?;
+                dispatch(input, session_context)
+            })
+            .map(|outcome| outcome.value)
     }
 
     fn learning_candidates_for_path(

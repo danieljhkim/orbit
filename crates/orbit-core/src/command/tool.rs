@@ -142,6 +142,68 @@ impl OrbitRuntime {
         entry_point: ToolEntryPoint,
         session_context: ToolSessionContext,
     ) -> Result<ToolDispatchOutcome, OrbitError> {
+        self.execute_tool_dispatch_with(
+            name,
+            input,
+            agent_override.clone(),
+            model_override.clone(),
+            entry_point,
+            |input| {
+                self.ensure_tool_agent_facing(name)?;
+                let allowed_tools = read_activity_tools_from_env();
+                let (agent_name, model_name) =
+                    resolve_agent_identity(agent_override, model_override)?;
+                let proc_allowed_programs = read_proc_allowed_programs_from_env();
+                let cwd = std::env::current_dir()
+                    .ok()
+                    .map(|path| path.to_string_lossy().into_owned());
+                let tool_context = ToolContext {
+                    cwd,
+                    session_context,
+                    allowed_tools,
+                    agent_name,
+                    model_name,
+                    workspace_root: None,
+                    proc_allowed_programs,
+                    reservation_owner: reservation_owner_from_env(),
+                    ..Default::default()
+                };
+                self.run_tool_with_context_and_role(name, input, Role::Admin, tool_context)
+            },
+        )
+    }
+
+    /// Run an in-process tool implementation inside the same audit boundary
+    /// used by registry-backed tool dispatch.
+    ///
+    /// Transport adapters use this for tools whose implementation deliberately
+    /// lives outside the runtime registry. Policy checks belong inside
+    /// `dispatch` so a rejection is captured by the resulting audit row.
+    pub fn execute_in_process_tool_dispatch<F>(
+        &self,
+        name: &str,
+        input: Value,
+        entry_point: ToolEntryPoint,
+        dispatch: F,
+    ) -> Result<ToolDispatchOutcome, OrbitError>
+    where
+        F: FnOnce(Value) -> Result<Value, OrbitError>,
+    {
+        self.execute_tool_dispatch_with(name, input, None, None, entry_point, dispatch)
+    }
+
+    fn execute_tool_dispatch_with<F>(
+        &self,
+        name: &str,
+        input: Value,
+        agent_override: Option<String>,
+        model_override: Option<String>,
+        entry_point: ToolEntryPoint,
+        dispatch: F,
+    ) -> Result<ToolDispatchOutcome, OrbitError>
+    where
+        F: FnOnce(Value) -> Result<Value, OrbitError>,
+    {
         let start = Instant::now();
         let role_label =
             audit_role_label(&input, agent_override.as_deref(), model_override.as_deref());
@@ -150,33 +212,9 @@ impl OrbitRuntime {
             .unwrap_or_else(|_| ".".to_string());
         let audit_context = resolve_audit_context(&input);
 
-        // Closure boundary so any setup failure (e.g. an inconsistent
-        // `agent`/`model` rejected by `resolve_agent_identity`) becomes a
-        // recorded failure-status audit row rather than a silent early `?`
-        // return. Without this, MCP-originated calls — which have no
-        // surrounding `AuditGuard` to fall back on — would fail without any
-        // audit row at all when identity setup is the cause.
-        let result: Result<Value, OrbitError> = (|| {
-            self.ensure_tool_agent_facing(name)?;
-            let allowed_tools = read_activity_tools_from_env();
-            let (agent_name, model_name) = resolve_agent_identity(agent_override, model_override)?;
-            let proc_allowed_programs = read_proc_allowed_programs_from_env();
-            let cwd = std::env::current_dir()
-                .ok()
-                .map(|path| path.to_string_lossy().into_owned());
-            let tool_context = ToolContext {
-                cwd,
-                session_context,
-                allowed_tools,
-                agent_name,
-                model_name,
-                workspace_root: None,
-                proc_allowed_programs,
-                reservation_owner: reservation_owner_from_env(),
-                ..Default::default()
-            };
-            self.run_tool_with_context_and_role(name, input, Role::Admin, tool_context)
-        })();
+        // Keep the callback inside the audit boundary so setup, policy, and
+        // implementation failures all produce a failure-status row.
+        let result = dispatch(input);
         let duration_ms = (start.elapsed().as_millis() as i64).max(1);
 
         let (status, exit_code, error_message) = match &result {

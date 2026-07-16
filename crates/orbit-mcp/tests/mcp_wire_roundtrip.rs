@@ -176,6 +176,16 @@ impl McpHost for FileStoreHost {
             other => Err(OrbitError::not_found(NotFoundKind::Tool, other.to_string())),
         }
     }
+
+    fn call_in_process_tool(
+        &self,
+        _name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+        dispatch: &mut dyn FnMut(Value, ToolSessionContext) -> Result<Value, OrbitError>,
+    ) -> Result<Value, OrbitError> {
+        dispatch(input, session_context)
+    }
 }
 
 // ---------------------------------------------------------------------------

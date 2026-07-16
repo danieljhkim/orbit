@@ -27,7 +27,7 @@ const GRAPH_OVERVIEW_TOOL: &str = "orbit.graph.overview";
 const GRAPH_IMPLEMENTORS_TOOL: &str = "orbit.graph.implementors";
 const GRAPH_DEPS_TOOL: &str = "orbit.graph.deps";
 
-const GRAPH_TOOL_NAMES: &[&str] = &[
+pub(super) const GRAPH_TOOL_NAMES: &[&str] = &[
     GRAPH_SYNC_TOOL,
     GRAPH_SEARCH_TOOL,
     GRAPH_SHOW_TOOL,
