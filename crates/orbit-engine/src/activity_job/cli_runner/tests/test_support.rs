@@ -48,11 +48,9 @@ pub(in crate::activity_job::cli_runner) fn sh_args(script: &str) -> Vec<String> 
     vec!["-c".to_string(), script.to_string()]
 }
 
-pub(in crate::activity_job::cli_runner) fn capture_events<F>(
-    f: F,
-) -> (Result<SpawnOutput, SpawnError>, Vec<CapturedEvent>)
+pub(in crate::activity_job::cli_runner) fn capture_events<F, T>(f: F) -> (T, Vec<CapturedEvent>)
 where
-    F: FnOnce() -> Result<SpawnOutput, SpawnError>,
+    F: FnOnce() -> T,
 {
     let events = Arc::new(Mutex::new(Vec::new()));
     let subscriber = CaptureSubscriber {
