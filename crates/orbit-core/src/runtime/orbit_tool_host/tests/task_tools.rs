@@ -783,7 +783,7 @@ fn task_update_tool_infers_agent_from_model_only_input() {
 }
 
 #[test]
-fn task_update_tool_persists_pr_status_with_status_and_execution_summary() {
+fn task_update_tool_persists_and_clears_pr_status() {
     let (_root, runtime, repo_root) = test_runtime();
     let task = create_task(
         &runtime,
@@ -822,6 +822,29 @@ fn task_update_tool_persists_pr_status_with_status_and_execution_summary() {
     assert_eq!(persisted.pr_status.as_deref(), Some("approved"));
     assert_eq!(persisted.execution_summary, "Implemented and verified.");
     assert_eq!(persisted.status, TaskStatus::Review);
+
+    let cleared = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task.id,
+                "pr_status": "",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("empty pr status clears the field");
+    assert_eq!(cleared.get("pr_status"), Some(&Value::Null));
+
+    let persisted = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task.id }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task show tool succeeds after clearing pr status");
+    assert_eq!(persisted.get("pr_status"), Some(&Value::Null));
 }
 
 #[test]

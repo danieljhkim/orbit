@@ -1699,7 +1699,7 @@
           "type": "string"
         },
         "pr_status": {
-          "description": "PR review status (e.g. approve, request-changes)",
+          "description": "PR review status (e.g. approve, request-changes; empty string clears)",
           "type": "string"
         },
         "relations": {
