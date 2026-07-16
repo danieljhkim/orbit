@@ -620,6 +620,16 @@ mod tests {
             }
         }
 
+        // A shipped example must not silently select one provider family.
+        // Ignore formatting whitespace so both compact and pretty JSON are caught.
+        let compact: String = content
+            .chars()
+            .filter(|ch| !ch.is_ascii_whitespace())
+            .collect();
+        if compact.contains("\"model\":\"codex\"") {
+            hits.push("hard-coded agent model `codex`".to_string());
+        }
+
         // Fixed consumer design-doc filenames.
         if let Some(name) = find_numbered_design_doc(content) {
             hits.push(format!("fixed design-doc filename `{name}`"));
@@ -641,6 +651,7 @@ mod tests {
             "the almanac workspace",
             "hosts: [dk-mac]",
             "part of the Constellation",
+            r#"{"model": "codex"}"#,
             "migrated by ORB-00200",
             "see learning L-0065",
             "silently drops it (F2026-05-024)",

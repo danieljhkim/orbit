@@ -17,7 +17,7 @@ Confirm:
 
 ```bash
 orbit locks list --json
-orbit tool run orbit.task.show --full --input '{"id":"<blocking_task_id>","model":"codex"}'
+orbit tool run orbit.task.show --full --input '{"id":"<blocking_task_id>","model":"<agent-family>"}'
 rg -n '<reservation_id>|task.locks.reserve.denied|<blocked_task_id>' .orbit/state/audit/v2_loop
 ```
 
@@ -80,7 +80,7 @@ Confirm:
 orbit run show <run_id> --json
 git -C <workspace_path> status --short --branch
 git -C <workspace_path> rev-list --left-right --count <base_ref>...HEAD
-orbit tool run orbit.task.show --full --input '{"id":"<task_id>","model":"codex"}'
+orbit tool run orbit.task.show --full --input '{"id":"<task_id>","model":"<agent-family>"}'
 ```
 
 Solution:
