@@ -51,12 +51,44 @@ Out of scope:
 Agent filesystem access is scoped by an `fsProfile` (`read` / `modify` globs)
 plus global `denyRead` / `denyModify` rules, evaluated by `orbit-policy`.
 
-**Enforcement layers differ by platform:**
+**Enforcement layers differ by platform, and by backend:**
 
-| Platform | Layers |
+For built-in Orbit tools (the `fs.*`/`proc.*` tool surface), `orbit-policy`
+evaluation applies on every platform and is the sole enforcement point for
+those tools' filesystem access.
+
+For `backend: cli` agents (an agent CLI such as Codex/Claude/Gemini/Grok
+spawned as a subprocess, making its own syscalls outside Orbit's tool
+surface), enforcement differs sharply by platform:
+
+| Platform | What actually constrains a `backend: cli` agent's own syscalls |
 | --- | --- |
-| **macOS** | Policy evaluation **and** the `orbit-exec` seatbelt (`sandbox-exec`) profile — two independent layers. |
-| **Linux** | Policy evaluation **only** — there is no OS-level sandbox. The policy check is the sole line of defense, so it must be correct on its own. |
+| **macOS** | The `orbit-exec` seatbelt (`sandbox-exec`) profile is a **write** boundary, not a meaningful **read** boundary. The compiled profile emits a blanket `(allow file-read*)` for the whole filesystem, minus a small fixed credential denylist (`~/.ssh`, `~/.aws`, `~/.config/gh`, browser keychains/profile stores, system Keychains) — the `fsProfile`'s positive `read` globs are never emitted into the seatbelt at all (only `read` *deny* entries are). Combined with the unrestricted `(allow network*)` the profile also grants (agents need to reach provider APIs), a `backend: cli` agent's read scope is effectively "everything except the denylist," with an open network egress path — an exfiltration exposure. The credential denylist is also known-incomplete: it does not cover `~/.netrc`, `~/.git-credentials`, `~/.gnupg`, `~/.docker/config.json`, `~/.kube/config`, `~/.npmrc`, or cloud-CLI credential caches (e.g. `~/.aws/sso/cache`, `~/.config/gcloud`, `~/.azure`). Treat the macOS seatbelt's read scoping as **advisory, not a security boundary**, for `backend: cli` agents. Tracked in `ORB-10233`. |
+| **Linux** | **No OS-level sandbox exists for `backend: cli` agents at all.** Orbit's policy governs only the built-in tool surface; a CLI agent's own syscalls (arbitrary file reads/writes, network egress, process spawn) are constrained by nothing Orbit provides. On Linux, a `backend: cli` agent has the full filesystem and network access of the user running Orbit. Tracked in `ORB-10236`. |
+
+Additionally, on macOS the seatbelt profile allows writes to each supported
+provider's state directory (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.grok`)
+unconditionally, regardless of which provider is actually active for the
+run — a config or hook file dropped in another provider's state directory is
+a cross-session persistence vector, not scoped to the current agent's own
+provider. Tracked in `ORB-10234`.
+
+**Environment forwarding to sandboxed/subprocess agents is name-based, not
+value-shaped.** Orbit filters ambient environment variables passed to
+provider subprocesses by matching variable *names* against a fixed list of
+substrings (`SECRET`, `TOKEN`, `PASSWORD`, `API_KEY`, `_KEY`, `PRIVATE`,
+`CREDENTIAL`, `COOKIE`, `SESSION`, `BEARER`, `AUTH`). A secret held in a
+benignly-named variable — `DATABASE_URL`, a bare connection string, an
+internal service URL with embedded credentials — is forwarded unredacted to
+any spawned agent, including `backend: cli` agents with open network access.
+Tracked in `ORB-10235`.
+
+**Follow-up remediation** (filed from the pre-release security review,
+`SECURITY-REVIEW-2026-07-15.md`, findings H2/M6/M7/M9): `ORB-10233` (macOS
+seatbelt positive read allowlist), `ORB-10234` (scope provider state-dir
+writes to the active provider), `ORB-10235` (env forwarding allowlist instead
+of denylist), `ORB-10236` (Linux provider-native sandbox for `backend: cli`
+agents).
 
 **Symlink resolution.** Policy rules are matched against the *real*
 filesystem location, not the requested path. Before matching, the requested
