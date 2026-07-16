@@ -128,6 +128,7 @@ mod tests;
 pub fn register(registry: &mut ToolRegistry) {
     registry.register(pr_create::GithubPrCreateTool);
     registry.register(pr_view::GithubPrViewTool);
+    registry.register(pr_list::GithubPrListTool);
     registry.register(pr_comment::GithubPrCommentTool);
     registry.register(pr_comment_reply::GithubPrCommentReplyTool);
     registry.register(pr_comments::GithubPrCommentsTool);

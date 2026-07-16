@@ -169,7 +169,6 @@ fn recovered_rebase_continues_remaining_handoff_phases_without_replay() {
     let push = push_batch_changes(&host, &push_input(&input, &synced)).expect("safe force push");
     assert_eq!(push["decision"], json!("performed_force_with_lease"));
 
-    host.queue_tool_error("github.pr.view", "no pull requests found for branch");
     host.queue_tool_error("github.pr.view", "local persistence/view failed");
     let open_input = open_input(&input, &synced);
     pr_open(&host, &open_input).expect_err("first create loses local view result");
