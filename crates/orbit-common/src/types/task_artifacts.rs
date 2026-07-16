@@ -64,6 +64,8 @@ pub struct TaskEnvelopeV2 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complexity: Option<TaskComplexity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub job_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crew: Option<String>,

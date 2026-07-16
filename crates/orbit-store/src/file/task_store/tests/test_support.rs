@@ -27,6 +27,7 @@ pub(crate) fn sample_bundle(id: &str) -> TaskBundleV2 {
             task_type: TaskType::Feature,
             priority: TaskPriority::High,
             complexity: None,
+            pr_status: None,
             job_run_id: None,
             crew: None,
             relations: Vec::new(),

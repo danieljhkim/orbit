@@ -683,6 +683,59 @@ async fn patch_api_accepts_in_progress_hyphen_from_dashboard_and_returns_in_prog
     );
 }
 
+#[tokio::test]
+async fn patch_api_persists_pr_status_with_status_and_execution_summary() {
+    use axum::http::{Method, Request, header};
+
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Dashboard PR status update".to_string(),
+            description: "An HTTP update must persist every supplied field.".to_string(),
+            status: Some(TaskStatus::InProgress),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("seed in-progress task");
+
+    let response = router()
+        .with_state(crate::state::DashboardState::single(Arc::new(
+            runtime.clone(),
+        )))
+        .oneshot(
+            Request::builder()
+                .method(Method::PATCH)
+                .uri(format!("/tasks/{}", task.id))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::ORIGIN, "http://localhost:7878")
+                .body(Body::from(
+                    json!({
+                        "pr_status": "approved",
+                        "execution_summary": "Implemented and verified.",
+                        "status": "review",
+                    })
+                    .to_string(),
+                ))
+                .expect("build patch request"),
+        )
+        .await
+        .expect("oneshot");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["pr_status"], json!("approved"));
+    assert_eq!(
+        body["execution_summary"],
+        json!("Implemented and verified.")
+    );
+    assert_eq!(body["status"], json!("review"));
+
+    let persisted = runtime.get_task(&task.id).expect("read updated task");
+    assert_eq!(persisted.pr_status.as_deref(), Some("approved"));
+    assert_eq!(persisted.execution_summary, "Implemented and verified.");
+    assert_eq!(persisted.status, TaskStatus::Review);
+}
+
 /// Contract test: /tasks projection (and /tasks/:id) must include `complexity` string
 /// when TaskComplexity is set on the task (low/medium/hard). Null complexity omits the key
 /// or yields null (per current projection); this test asserts presence for a hard task.

@@ -102,7 +102,7 @@ impl TaskV2Store {
             priority: bundle.envelope.priority,
             complexity: bundle.envelope.complexity,
             task_type: bundle.envelope.task_type,
-            pr_status: None,
+            pr_status: bundle.envelope.pr_status,
             external_refs: bundle.envelope.external_refs,
             relations: bundle.envelope.relations,
             job_run_id: bundle.envelope.job_run_id,
