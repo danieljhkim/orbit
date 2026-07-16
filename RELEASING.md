@@ -74,15 +74,15 @@ Bullet shape:
 
 Group related task IDs into a single themed bullet rather than emitting one bullet per task. Cite the lead task ID only; skip commit SHAs.
 
-#### Unreleased entries use this same shape — at write time
+#### Compiled at release time, not accumulated per-PR
 
-The `## Unreleased` section is not a staging area for full PR descriptions. Every entry — the one each PR adds during accumulation, not just the ones drafted at release time — uses the bullet shape above from the moment it is written:
+Task execution never touches `CHANGELOG.md` — no PR adds an `## Unreleased` bullet. Instead, the release drafter compiles the new `## <X.Y.Z>` section directly from `git log v<prev>..HEAD` (step 1's survey) plus the cited Orbit task IDs, using the same bullet shape:
 
 - Format: `- **Theme**: 1–2 sentences that read in isolation. ([ORB-XXXXX])`. Hard cap **~50 words per bullet** (the `scripts/check-changelog-style.sh` guardrail fails past ~60 words or 3 physical lines).
 - Migration steps, rationale, rejected alternatives, and test inventories live in the cited Orbit task / ADR / commit message — **the task ID is the pointer, don't duplicate the detail here.** Anyone who wants the full story follows the ID.
 - **Breaking changes** get one extra line max, with the migration as a phrase (`x removed → use y`). Multi-step migration guides go in the task or docs, not the CHANGELOG.
 
-Only `## Unreleased` is linted; released `## <X.Y.Z>` sections are frozen history and are never reflowed. At release time, drafting a version section (steps above) is just moving already-terse Unreleased bullets into place and dropping the ones that aren't Highlights.
+`scripts/check-changelog-style.sh` still lints whatever lands under `## Unreleased`, so it's worth drafting bullets there first if that helps you iterate before moving them into the version section — but that section is scratch space at release time now, not a per-PR accumulation target. Released `## <X.Y.Z>` sections are frozen history and are never reflowed.
 
 ### 3. Confirm breaking changes with the human
 
