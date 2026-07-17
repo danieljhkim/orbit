@@ -1,7 +1,7 @@
 ---
 title: Design Doc Conventions
 owner: daniel
-last_updated: 2026-06-20
+last_updated: 2026-07-16
 status: Accepted
 ---
 
@@ -193,7 +193,9 @@ Retired features stay listed with their `_archive/` path as a historical record.
 | Executors | [docs/design/executors/](./executors/) | claude |
 | Global Store Consolidation | [docs/design/_archive/global-store-consolidation/](./_archive/global-store-consolidation/) | codex |
 | Groundhog | [docs/design/groundhog/](./groundhog/) | codex |
+| Host Registry | [docs/design/host-registry/](./host-registry/) | claude |
 | Knowledge graph | [docs/design/_archive/knowledge-graph/](./_archive/knowledge-graph/) | claude |
+| MCP Bridge | [docs/design/mcp-bridge/](./mcp-bridge/) | codex |
 | MCP Session Context | [docs/design/mcp-session-context/](./mcp-session-context/) | codex |
 | Orbit Core | [docs/design/orbit-core/](./orbit-core/) | claude |
 | Orbit Docs | [docs/design/orbit-docs/](./orbit-docs/) | claude |
