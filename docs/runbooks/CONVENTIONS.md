@@ -32,7 +32,7 @@ enablement, and machine-specific sync topology belong in a private operations kn
 - Use one operator goal or tightly coupled failure mode per file.
 - Name files with lowercase hyphenated nouns or actions, such as
   `database-recovery.md` or `health-checks.md`.
-- Do not create a `README.md`; [`../OPERATIONS.md`](../OPERATIONS.md) is the section index.
+- Do not create a `README.md`; [`../INDEX.md`](../INDEX.md#runbooks) is the generated index.
 - `CONVENTIONS.md` is the only uppercase filename in this directory.
 
 Every runbook uses Orbit Docs' locked frontmatter schema. `type` and `summary` are required;
@@ -92,8 +92,8 @@ inspection sequence and interpretation notes.
 
 - Update the runbook in the same change as behavior that makes a command, path, state
   transition, or expected output stale.
-- Keep [`../OPERATIONS.md`](../OPERATIONS.md) as a short compatibility index; substantive
-  procedures belong here and should not be duplicated there.
+- Keep [`../INDEX.md`](../INDEX.md#runbooks) generated and short; substantive procedures
+  belong here and should not be duplicated in the index.
 - When splitting a large document, preserve operational detail, repair relative links, and
   replace section-number references with direct file links.
 - Search the repository for incoming links before moving or renaming a runbook. Prefer a
@@ -103,5 +103,6 @@ inspection sequence and interpretation notes.
 
 ## 6. Section index
 
-Add each new runbook to the table in [`../OPERATIONS.md`](../OPERATIONS.md). The table should
-describe the operator's need in their language, not merely repeat the filename.
+Do not edit [`../INDEX.md`](../INDEX.md#runbooks) by hand. Give each runbook a precise H1 and
+one-line `summary`, then run `scripts/generate-doc-indexes.sh` from the repository root. Use
+`scripts/generate-doc-indexes.sh --check` to verify that the top-level doc index is current.

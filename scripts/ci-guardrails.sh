@@ -32,6 +32,7 @@ if command -v cargo-deny >/dev/null 2>&1; then
 else
   echo "cargo-deny not found; skipping supply-chain gate (install: cargo install cargo-deny --locked)" >&2
 fi
+"$repo_root/scripts/generate-doc-indexes.sh" --check
 "$repo_root/scripts/check-installer-pubkey.sh"
 "$repo_root/scripts/test-installer-security.sh"
 "$repo_root/scripts/check-dependency-direction.sh"

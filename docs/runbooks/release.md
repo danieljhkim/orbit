@@ -1,15 +1,23 @@
-# Release Procedure
+---
+type: runbook
+summary: Cut and verify an Orbit release across plugin manifests, GitHub artifacts, Homebrew, and npm.
+tags: [operations, release, plugins, npm, signing]
+paths: [".github/workflows/release.yml", "plugin/**", "scripts/release-check.sh"]
+related_features: [orbit-docs-plugin]
+---
+
+# Release Orbit
 
 How to cut an Orbit release such that `/plugin install orbit` and
 `codex plugin add orbit@orbit` work against the new version. The version
 invariant is load-bearing: the npm package, the Claude and Codex plugin
 manifests, and the GitHub Release tag must all agree, or the
 `npx -y @orbit-tools/cli@latest mcp serve` indirection in
-[`plugin/.mcp.json`](../plugin/.mcp.json) and
-[`plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json)
+[`plugin/.mcp.json`](../../plugin/.mcp.json) and
+[`plugin/.codex-plugin/plugin.json`](../../plugin/.codex-plugin/plugin.json)
 downloads a binary that does not match the installed plugin manifest.
 
-See also [../RELEASING.md](../RELEASING.md) for the higher-level release runbook and versioning policy.
+See also [RELEASING.md](../../RELEASING.md) for the higher-level release runbook and versioning policy.
 
 ## Account setup (one-time)
 
@@ -20,7 +28,7 @@ npm **manually** from a maintainer's laptop, prompting for an OTP. No
 
 GitHub Releases also require `ORBIT_RELEASE_SIGNING_KEY_PEM`, a PEM-encoded
 private key whose public half matches
-[`plugin/npm/release-signing.pub`](../plugin/npm/release-signing.pub). The
+[`plugin/npm/release-signing.pub`](../../plugin/npm/release-signing.pub). The
 release workflow signs `orbit-checksums.txt` as `orbit-checksums.txt.sig`;
 `install.sh`, the npm postinstall, and `orbit semantic install` authenticate
 that signature before trusting release-hosted SHA-256 values.
@@ -57,16 +65,16 @@ untrusted.
 Each step names the exact file or command. Do them in order.
 
 1. **Bump the npm package version** in
-   [`plugin/npm/package.json`](../plugin/npm/package.json) (`.version`).
+   [`plugin/npm/package.json`](../../plugin/npm/package.json) (`.version`).
    The npm postinstall in
-   [`plugin/npm/scripts/install-binary.js`](../plugin/npm/scripts/install-binary.js)
+   [`plugin/npm/scripts/install-binary.js`](../../plugin/npm/scripts/install-binary.js)
    derives the binary tag as `v${PKG.version}`; this field is the source of
    truth that gets in front of users.
 
 2. **Bump the plugin manifest versions** in
-   [`plugin/.claude-plugin/plugin.json`](../plugin/.claude-plugin/plugin.json)
+   [`plugin/.claude-plugin/plugin.json`](../../plugin/.claude-plugin/plugin.json)
    and
-   [`plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json)
+   [`plugin/.codex-plugin/plugin.json`](../../plugin/.codex-plugin/plugin.json)
    (`.version`). Both must match step 1.
 
 3. **Run `make release-check`.** Pre-tag, it will exit non-zero because
@@ -87,7 +95,7 @@ Each step names the exact file or command. Do them in order.
    git push origin vX.Y.Z
    ```
 
-6. **Watch [`.github/workflows/release.yml`](../.github/workflows/release.yml).**
+6. **Watch [`.github/workflows/release.yml`](../../.github/workflows/release.yml).**
    Five jobs gate the cut:
 
    - `build-release` — builds platform CLI binaries and standalone
@@ -133,7 +141,7 @@ Each step names the exact file or command. Do them in order.
    - `make release-check` should now pass (all local manifests, npm, and the
      release tag agree).
    - The on-tag run of
-     [`.github/workflows/smoke-plugin-install.yml`](../.github/workflows/smoke-plugin-install.yml)
+     [`.github/workflows/smoke-plugin-install.yml`](../../.github/workflows/smoke-plugin-install.yml)
      should be green on macOS and Linux. (If you re-run via
      `workflow_dispatch` it'll pull the freshly-published npm and exercise
      the full chain.)
@@ -153,7 +161,7 @@ Each step names the exact file or command. Do them in order.
 
 ## Continuous verification
 
-[`.github/workflows/smoke-plugin-install.yml`](../.github/workflows/smoke-plugin-install.yml)
+[`.github/workflows/smoke-plugin-install.yml`](../../.github/workflows/smoke-plugin-install.yml)
 runs the smoke on `macos-15` and `ubuntu-22.04` weekly (Monday 12:00 UTC)
 and on every `v*` tag. It pulls the published `@orbit-tools/cli@latest`
 from npm, exercises the postinstall download + sha256 verification, and
@@ -170,7 +178,7 @@ canonical selectors used in skills and CLI args are dot-form.)
 The smoke runs against published artifacts, not the local working tree, so
 it catches version drift that local builds would miss. The Codex plugin
 installation uses the checked-out repository marketplace
-([`.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json))
+([`.agents/plugins/marketplace.json`](../../.agents/plugins/marketplace.json))
 so manifest and skill packaging regressions are caught before publication.
 Windows is not covered — the npm proxy only ships `darwin` and `linux`
 builds.
@@ -208,13 +216,13 @@ Normal rotation uses an overlap window:
 
 1. Generate the successor keypair offline. Add the public half to the trust
    set in both `install.sh` and
-   [`plugin/npm/scripts/install-binary.js`](../plugin/npm/scripts/install-binary.js)
+   [`plugin/npm/scripts/install-binary.js`](../../plugin/npm/scripts/install-binary.js)
    with a new key ID and `not_after` date. Keep the old active key until at
    least one npm package containing both keys has been published.
 2. Publish a release and npm package that still signs with the old key, but
    whose installers trust both old and new keys.
 3. Update `ORBIT_RELEASE_SIGNING_KEY_PEM` and
-   [`plugin/npm/release-signing.pub`](../plugin/npm/release-signing.pub) to the
+   [`plugin/npm/release-signing.pub`](../../plugin/npm/release-signing.pub) to the
    successor key. Cut the next release signed by the successor key.
 4. After the overlap window, remove the old key from the trusted set or set
    its `revoked_at` date if it should remain visible for audit history.
@@ -251,17 +259,17 @@ catches a lingering broken state.
 
 ## What `make release-check` enforces
 
-The script at [`scripts/release-check.sh`](../scripts/release-check.sh)
+The script at [`scripts/release-check.sh`](../../scripts/release-check.sh)
 asserts equality across these sources, when each is reachable:
 
-- `.version` in [`plugin/npm/package.json`](../plugin/npm/package.json)
-- `.version` in [`plugin/.claude-plugin/plugin.json`](../plugin/.claude-plugin/plugin.json)
-- `.version` in [`plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json)
+- `.version` in [`plugin/npm/package.json`](../../plugin/npm/package.json)
+- `.version` in [`plugin/.claude-plugin/plugin.json`](../../plugin/.claude-plugin/plugin.json)
+- `.version` in [`plugin/.codex-plugin/plugin.json`](../../plugin/.codex-plugin/plugin.json)
 - `npm view @orbit-tools/cli version`
 - `gh release list -L 1` (latest tag, leading `v` stripped)
 
 It also runs
-[`scripts/validate-codex-plugin.sh`](../scripts/validate-codex-plugin.sh),
+[`scripts/validate-codex-plugin.sh`](../../scripts/validate-codex-plugin.sh),
 which checks the Codex manifest, repository marketplace entry, shared skill
 paths, and the absence of user-specific absolute paths or
 `CLAUDE_PROJECT_DIR` in Codex MCP configuration.
@@ -275,7 +283,7 @@ described in step 3 is by design.
 
 If a release lands and the smoke fails:
 
-1. Re-run [`.github/workflows/smoke-plugin-install.yml`](../.github/workflows/smoke-plugin-install.yml)
+1. Re-run [`.github/workflows/smoke-plugin-install.yml`](../../.github/workflows/smoke-plugin-install.yml)
    via `workflow_dispatch` to rule out a transient network failure or a
    "smoke fired before manual npm publish" race.
 2. If the failure is reproducible, cut a patch release (`vX.Y.Z+1`) with

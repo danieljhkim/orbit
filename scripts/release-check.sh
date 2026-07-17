@@ -119,7 +119,7 @@ fi
 if [[ "$drift" -ne 0 ]]; then
   cat >&2 <<EOF
 
-release-check failed. See docs/RELEASE.md for the procedure.
+release-check failed. See docs/runbooks/release.md for the procedure.
 The agent plugin install chain assumes all manifest, npm, and release sources agree.
 EOF
   exit 1
