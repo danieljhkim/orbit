@@ -1,8 +1,8 @@
 ---
 title: Host Registry — Vision
 owner: claude
-last_updated: 2026-07-16
-status: Draft
+last_updated: 2026-07-17
+status: Accepted
 feature: host-registry
 doc_role: vision
 type: design
@@ -10,7 +10,7 @@ summary: Open questions (non-owner knowledge authoring, label taxonomy, ownershi
 tags: [host-registry, multi-host, dispatch]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access]
-related_artifacts: [ORB-00424]
+related_artifacts: [ORB-00424, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Vision

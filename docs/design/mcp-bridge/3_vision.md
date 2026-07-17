@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Vision
 owner: codex
-last_updated: 2026-07-16
+last_updated: 2026-07-17
 status: Accepted
 feature: mcp-bridge
 doc_role: vision
@@ -10,7 +10,7 @@ summary: Open questions and prior art for a singular hub MCP link, owner-bound k
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
-related_artifacts: [ORB-00424, ADR-0181, ADR-0199, ADR-0200, ADR-0201]
+related_artifacts: [ORB-00424, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Orbit MCP Bridge — Vision

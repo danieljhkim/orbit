@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Design
 owner: codex
-last_updated: 2026-07-16
+last_updated: 2026-07-17
 status: Accepted
 feature: mcp-bridge
 doc_role: design
@@ -10,7 +10,7 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
-related_artifacts: [ORB-00424, ADR-0181, ADR-0199, ADR-0200, ADR-0201]
+related_artifacts: [ORB-00424, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Orbit MCP Bridge — Design

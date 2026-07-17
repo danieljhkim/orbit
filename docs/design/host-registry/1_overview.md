@@ -1,8 +1,8 @@
 ---
 title: Host Registry — Overview
 owner: claude
-last_updated: 2026-07-16
-status: Draft
+last_updated: 2026-07-17
+status: Accepted
 feature: host-registry
 doc_role: overview
 type: design
@@ -10,7 +10,7 @@ summary: First-class, validated machine identity plus a main-host inventory, ena
 tags: [host-registry, multi-host, dispatch, routines]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access]
-related_artifacts: [ORB-00424, ADR-0200, ADR-0205, ADR-0208]
+related_artifacts: [ORB-00424, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Overview
