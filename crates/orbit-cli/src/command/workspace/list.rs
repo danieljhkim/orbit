@@ -32,9 +32,22 @@ pub(super) fn format_workspace_list(registry: &WorkspaceRegistry) -> String {
         return "no workspaces registered\n".to_string();
     }
 
+    let id_width = registry
+        .workspaces
+        .iter()
+        .map(|workspace| workspace.id.chars().count())
+        .max()
+        .unwrap_or_default()
+        .max("ID".len());
     let mut output = format!(
-        "{:<20} {:<12} {:<8} {:<10} {:<22} {:<8} ROOT\n",
-        "NAME", "ID", "STATUS", "SHIP MODE", "OWNER", "ROLE"
+        "{:<20} {:<id_width$} {:<8} {:<10} {:<22} {:<8} ROOT\n",
+        "NAME",
+        "ID",
+        "STATUS",
+        "SHIP MODE",
+        "OWNER",
+        "ROLE",
+        id_width = id_width
     );
     for workspace in &registry.workspaces {
         let checkout = workspace_registry::find_checkout(registry, &workspace.id);
@@ -49,14 +62,15 @@ pub(super) fn format_workspace_list(registry: &WorkspaceRegistry) -> String {
             .map(|role| role.to_string())
             .unwrap_or_else(|| "-".to_string());
         output.push_str(&format!(
-            "{:<20} {:<12} {:<8} {:<10} {:<22} {:<8} {}\n",
+            "{:<20} {:<id_width$} {:<8} {:<10} {:<22} {:<8} {}\n",
             workspace.name,
             workspace.id,
             workspace.status,
             orbit_core::resolved_ship_mode(workspace).as_input_value(),
             owner,
             role,
-            root
+            root,
+            id_width = id_width
         ));
     }
     output

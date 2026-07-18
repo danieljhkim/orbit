@@ -272,7 +272,7 @@ fn invalid_replica_init_fails_before_workspace_artifacts_or_registry_mutation() 
 fn workspace_list_and_show_report_effective_ship_mode() {
     let now = Utc::now();
     let workspace = Workspace {
-        id: "ws_pr_gated".to_string(),
+        id: "ws_constellation".to_string(),
         name: "pr-gated".to_string(),
         owner_machine_id: None,
         git_remote: None,
@@ -295,6 +295,8 @@ fn workspace_list_and_show_report_effective_ship_mode() {
     let list = format_workspace_list(&registry);
     assert!(list.contains("SHIP MODE"), "{list}");
     assert!(list.contains("pr"), "{list}");
+    assert_eq!(list.find("STATUS"), list.find("active"), "{list}");
+    assert_eq!(list.find("SHIP MODE"), list.find("pr"), "{list}");
 
     let show = format_workspace_show(&workspace, &registry.checkouts[0]);
     assert!(show.contains("ship_mode:   pr"), "{show}");
