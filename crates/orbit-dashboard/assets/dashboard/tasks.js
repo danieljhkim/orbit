@@ -578,18 +578,24 @@ function buildTaskDetail(task, context) {
   }
 
   if (Array.isArray(task.history) && task.history.length > 0) {
-    const wrap = el("div");
-    const recent = task.history.slice(-5).reverse();
-    for (const h of recent) {
-      const note = h.note ? ` (${h.note})` : "";
-      const line = el("div", { class: "history-line" }, [
-        document.createTextNode(`[${fmtAbsTimeValue(context, h.at)}] `),
-        el("span", { class: "actor", text: h.by || "?" }),
-        document.createTextNode(`: ${h.event}${note}`),
-      ]);
-      wrap.appendChild(line);
+    // ORB-10311: drop legacy bare `commented` stubs *before* the recent-history
+    // limit so meaningful status/workflow events are not displaced by comment
+    // noise (comments render in their own panel below).
+    const meaningful = task.history.filter((h) => h && h.event !== "commented");
+    if (meaningful.length > 0) {
+      const wrap = el("div");
+      const recent = meaningful.slice(-5).reverse();
+      for (const h of recent) {
+        const note = h.note ? ` (${h.note})` : "";
+        const line = el("div", { class: "history-line" }, [
+          document.createTextNode(`[${fmtAbsTimeValue(context, h.at)}] `),
+          el("span", { class: "actor", text: h.by || "?" }),
+          document.createTextNode(`: ${h.event}${note}`),
+        ]);
+        wrap.appendChild(line);
+      }
+      addField(rightCol, "recent history", wrap);
     }
-    addField(rightCol, "recent history", wrap);
   }
 
   if (Array.isArray(task.comments) && task.comments.length > 0) {

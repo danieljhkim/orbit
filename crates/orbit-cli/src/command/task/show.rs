@@ -4,7 +4,10 @@ use serde_json::Value;
 
 use crate::command::Execute;
 
-use super::output::{print_task_fields, task_fields_to_json, task_to_json_for_runtime};
+use super::output::{
+    is_human_visible_history_event, print_task_fields, task_fields_to_json,
+    task_to_json_for_runtime,
+};
 
 #[derive(Args)]
 pub struct TaskShowArgs {
@@ -145,9 +148,13 @@ impl Execute for TaskShowArgs {
                 println!("{} {}", bold("Implemented By:"), implemented_by);
             }
             let history = runtime.get_task_history(&task.id)?;
-            if !history.is_empty() {
+            let visible_history: Vec<_> = history
+                .iter()
+                .filter(|entry| is_human_visible_history_event(&entry.event))
+                .collect();
+            if !visible_history.is_empty() {
                 println!("{}", bold("History:"));
-                for entry in &history {
+                for entry in visible_history {
                     if let Some(note) = &entry.note {
                         println!(
                             "  {} {}: {} ({})",

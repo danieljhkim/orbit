@@ -653,12 +653,13 @@ fn activity_update_comment_records_comment_as_system() {
         .expect("reload comments");
     let comment = comments.last().expect("activity comment");
     assert_eq!(comment.by, SYSTEM_ACTOR_LABEL);
+    assert_eq!(comment.message, "Automation left a note.");
+    // ORB-10311: the comment persists but no bare `commented` history stub is created.
     let history = runtime.get_task_history(&task.id).expect("reload history");
-    let comment_history = history
-        .iter()
-        .find(|entry| entry.event == "commented")
-        .expect("comment history");
-    assert_eq!(comment_history.by, SYSTEM_ACTOR_LABEL);
+    assert!(
+        !history.iter().any(|entry| entry.event == "commented"),
+        "a persisted comment must not emit a `commented` history entry"
+    );
 }
 
 #[test]
@@ -865,12 +866,78 @@ fn direct_update_task_keeps_default_human_attribution() {
         .expect("reload comments");
     let comment = comments.last().expect("human comment");
     assert_eq!(comment.by, "human");
+    assert_eq!(comment.message, "Human-visible note.");
+    // ORB-10311: the full comment is persisted, but no redundant `commented`
+    // history entry is emitted alongside it.
     let history = runtime.get_task_history(&task.id).expect("reload history");
-    let comment_history = history
-        .iter()
-        .find(|entry| entry.event == "commented")
-        .expect("comment history");
-    assert_eq!(comment_history.by, "human");
+    assert!(
+        !history.iter().any(|entry| entry.event == "commented"),
+        "a persisted comment must not emit a `commented` history entry"
+    );
+}
+
+#[test]
+fn source_task_id_change_history_records_previous_and_replacement() {
+    let (_root, runtime) = test_runtime();
+    let source = runtime
+        .add_task(TaskAddParams {
+            title: "Source of regression".to_string(),
+            description: "Origin task referenced by a regression.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("add source task");
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Regressed task".to_string(),
+            description: "Exercise source_task_id change history enrichment.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("add task");
+
+    runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                source_task_id: Some(Some(source.id.clone())),
+                ..Default::default()
+            },
+        )
+        .expect("set source_task_id");
+    let set_note = latest_source_task_id_note(&runtime, &task.id);
+    assert!(set_note.contains("(none)"), "{set_note}");
+    assert!(set_note.contains(&source.id), "{set_note}");
+
+    runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                source_task_id: Some(None),
+                ..Default::default()
+            },
+        )
+        .expect("clear source_task_id");
+    let cleared_note = latest_source_task_id_note(&runtime, &task.id);
+    assert!(cleared_note.contains(&source.id), "{cleared_note}");
+    assert!(cleared_note.contains("(none)"), "{cleared_note}");
+}
+
+fn latest_source_task_id_note(runtime: &OrbitRuntime, id: &str) -> String {
+    runtime
+        .get_task_history(id)
+        .expect("reload history")
+        .into_iter()
+        .rev()
+        .find(|entry| {
+            entry.event == "updated"
+                && entry
+                    .note
+                    .as_deref()
+                    .is_some_and(|note| note.contains("source_task_id changed"))
+        })
+        .and_then(|entry| entry.note)
+        .expect("source_task_id change history entry")
 }
 
 #[test]

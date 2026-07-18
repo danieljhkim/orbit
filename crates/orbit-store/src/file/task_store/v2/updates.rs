@@ -16,6 +16,7 @@ impl TaskV2Store {
             let mut bundle = self.read_existing_bundle(id)?;
             let mut envelope_changed = false;
             let mut title_changed = false;
+            let mut previous_title: Option<String> = None;
             let relations_changed = fields.dependencies.is_some()
                 || fields.source_task_id.is_some()
                 || fields.relations.is_some();
@@ -27,6 +28,9 @@ impl TaskV2Store {
                     ));
                 }
                 title_changed = *value != bundle.envelope.title;
+                if title_changed {
+                    previous_title = Some(bundle.envelope.title.clone());
+                }
                 bundle.envelope.title = value.clone();
                 envelope_changed = true;
             }
@@ -135,13 +139,18 @@ impl TaskV2Store {
 
             if title_changed {
                 let now = Utc::now();
+                // ORB-10311: capture both titles so the rename is auditable from
+                // history alone rather than an empty `renamed` marker.
+                let note = previous_title
+                    .as_ref()
+                    .map(|previous| format!("\"{previous}\" → \"{}\"", bundle.envelope.title));
                 let event = TaskEventRowV2 {
                     schema_version: TASK_ARTIFACT_SCHEMA_VERSION,
                     event_id: next_event_id(&bundle.events),
                     at: now,
                     by: fields.actor.clone(),
                     event_type: "renamed".to_string(),
-                    note: None,
+                    note,
                     from_status: None,
                     to_status: None,
                 };
