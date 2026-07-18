@@ -23,6 +23,8 @@ use crate::state::DashboardState;
 /// frontend can render the selected workspace's location directly, without
 /// needing to know the server's home directory (ORB-00037).
 pub(super) async fn list_workspaces(State(state): State<DashboardState>) -> Response {
+    // Reflect native registry mutations (add/remove/rebind) before listing.
+    state.refresh();
     let default = state.default_workspace();
     let home = home_dir();
     let values: Vec<Value> = state
@@ -35,7 +37,7 @@ pub(super) async fn list_workspaces(State(state): State<DashboardState>) -> Resp
                 "root": abbreviate_home(&entry.repo_root, home.as_deref()),
                 "orbit_dir": abbreviate_home(&entry.orbit_dir, home.as_deref()),
                 "status": if entry.active { "active" } else { "invalid" },
-                "is_default": Some(entry.id.as_str()) == default,
+                "is_default": default.as_deref() == Some(entry.id.as_str()),
             })
         })
         .collect();
@@ -51,9 +53,12 @@ pub(super) async fn list_workspaces(State(state): State<DashboardState>) -> Resp
 /// any that fail to open — the aggregate view stays available even when one
 /// workspace is broken.
 pub(super) async fn list_all_tasks(State(state): State<DashboardState>) -> Response {
+    // Reflect native registry mutations before aggregating across workspaces.
+    state.refresh();
     let home = home_dir();
     let mut all = Vec::new();
-    for entry in state.entries().iter().filter(|entry| entry.active) {
+    let entries = state.entries();
+    for entry in entries.iter().filter(|entry| entry.active) {
         let Ok(runtime) = state.runtime_for(&entry.id) else {
             continue;
         };

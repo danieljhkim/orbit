@@ -79,6 +79,9 @@ pub(crate) async fn detailed_response(
     state: &DashboardState,
     log_path: Result<PathBuf, String>,
 ) -> Response {
+    // Reconcile the open-runtime view with the current registry so an
+    // evicted/removed workspace does not linger in the health report.
+    state.refresh();
     let mut checks: Vec<CheckOutcome> = Vec::new();
 
     for (workspace, runtime) in state.open_runtimes() {

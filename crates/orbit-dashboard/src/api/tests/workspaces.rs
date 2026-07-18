@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use chrono::Utc;
+use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 use orbit_core::command::task::TaskAddParams;
 use orbit_core::{ActorIdentity, OrbitRuntime, TaskStatus};
 use serde_json::json;
@@ -13,7 +15,7 @@ use tower::ServiceExt;
 
 use super::super::*;
 use super::test_support::body_json;
-use crate::state::{DashboardState, WsEntry};
+use crate::state::{DashboardState, RegistrySource, WsEntry};
 
 fn get(uri: &str) -> Request<Body> {
     Request::builder()
@@ -532,4 +534,290 @@ async fn create_task_with_unknown_workspace_is_404_and_creates_nothing() {
         !alpha_titles.iter().any(|t| t == "lost"),
         "nothing may be created in the default workspace, got {alpha_titles:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// ORB-10294: refresh orbit-web workspace state after native registry mutations.
+// A registry-backed `DashboardState` reloads `~/.orbit/workspaces.json` at each
+// request boundary, so native `orbit workspace init/remove` and binding changes
+// are honored without a restart.
+// ---------------------------------------------------------------------------
+
+/// Write a registry file at `<global_root>/workspaces.json` binding each
+/// `(id, repo_root)` as an active, owner-role workspace.
+fn write_registry(global_root: &Path, workspaces: &[(&str, &Path)]) {
+    let now = Utc::now();
+    let mut registry = WorkspaceRegistry::default();
+    for (id, repo_root) in workspaces {
+        registry.workspaces.push(Workspace {
+            id: (*id).to_string(),
+            name: (*id).to_string(),
+            owner_machine_id: None,
+            git_remote: None,
+            ship_mode: None,
+            base_branch: "main".to_string(),
+            status: WorkspaceStatus::Active,
+            created_at: now,
+            updated_at: now,
+        });
+        registry.checkouts.push(WorkspaceCheckout::owner(
+            (*id).to_string(),
+            repo_root.to_path_buf(),
+            repo_root.join(".orbit"),
+        ));
+    }
+    orbit_core::workspace_registry::save_registry_to(
+        &registry,
+        &global_root.join("workspaces.json"),
+    )
+    .expect("save registry");
+}
+
+/// A registry-backed state reloading from `<global_root>/workspaces.json`.
+fn registry_state(global_root: &Path) -> DashboardState {
+    let source = RegistrySource::new(global_root.join("workspaces.json"), None, None);
+    DashboardState::from_registry(global_root.to_path_buf(), source).expect("from_registry")
+}
+
+/// Sorted workspace ids as seen over `GET /api/workspaces` (which refreshes).
+async fn workspace_ids(state: &DashboardState) -> Vec<String> {
+    let response = router()
+        .with_state(state.clone())
+        .oneshot(get("/workspaces"))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut ids: Vec<String> = body_json(response)
+        .await
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|w| w["id"].as_str().expect("id").to_string())
+        .collect();
+    ids.sort();
+    ids
+}
+
+async fn route_status(state: &DashboardState, workspace: &str) -> StatusCode {
+    router()
+        .with_state(state.clone())
+        .oneshot(get(&format!("/tasks?workspace={workspace}")))
+        .await
+        .expect("response")
+        .status()
+}
+
+/// The cached runtime for `id`, or `None` if the server holds none open.
+fn open_runtime(state: &DashboardState, id: &str) -> Option<Arc<OrbitRuntime>> {
+    state
+        .open_runtimes()
+        .into_iter()
+        .find(|(ws, _)| ws == id)
+        .map(|(_, runtime)| runtime)
+}
+
+/// A native workspace add becomes visible through `/api/workspaces` and
+/// routable through the workspace-scoped API without a restart.
+#[tokio::test]
+async fn refresh_surfaces_native_workspace_add() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (_alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    write_registry(&global_root, &[("alpha", &alpha_repo)]);
+    let state = registry_state(&global_root);
+
+    assert_eq!(workspace_ids(&state).await, vec!["alpha".to_string()]);
+    assert_eq!(route_status(&state, "beta").await, StatusCode::NOT_FOUND);
+
+    // Native add: seed beta on disk and append it to the registry.
+    let (_beta_orbit, beta_repo) = seed_workspace(&global_root, tmp.path(), "beta");
+    write_registry(
+        &global_root,
+        &[("alpha", &alpha_repo), ("beta", &beta_repo)],
+    );
+
+    assert_eq!(
+        workspace_ids(&state).await,
+        vec!["alpha".to_string(), "beta".to_string()]
+    );
+    assert_eq!(route_status(&state, "beta").await, StatusCode::OK);
+}
+
+/// A native removal disappears from discovery and routing and evicts its cached
+/// runtime, without disturbing another workspace's live runtime.
+#[tokio::test]
+async fn refresh_removes_workspace_and_evicts_only_its_runtime() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (_alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    let (_beta_orbit, beta_repo) = seed_workspace(&global_root, tmp.path(), "beta");
+    write_registry(
+        &global_root,
+        &[("alpha", &alpha_repo), ("beta", &beta_repo)],
+    );
+    let state = registry_state(&global_root);
+
+    // Build + cache both runtimes.
+    assert_eq!(route_status(&state, "alpha").await, StatusCode::OK);
+    assert_eq!(route_status(&state, "beta").await, StatusCode::OK);
+    let alpha_runtime = open_runtime(&state, "alpha").expect("alpha open");
+    assert!(
+        open_runtime(&state, "beta").is_some(),
+        "beta should be open"
+    );
+
+    // Native remove of beta.
+    write_registry(&global_root, &[("alpha", &alpha_repo)]);
+    state.refresh();
+
+    assert_eq!(workspace_ids(&state).await, vec!["alpha".to_string()]);
+    assert_eq!(route_status(&state, "beta").await, StatusCode::NOT_FOUND);
+    // beta's runtime is evicted; alpha's is the *same* handle, never rebuilt.
+    assert!(
+        open_runtime(&state, "beta").is_none(),
+        "beta runtime evicted"
+    );
+    let alpha_after = open_runtime(&state, "alpha").expect("alpha still open");
+    assert!(
+        Arc::ptr_eq(&alpha_runtime, &alpha_after),
+        "alpha runtime must be untouched by beta's removal"
+    );
+}
+
+/// A changed root/orbit-dir binding invalidates the old runtime and routes
+/// subsequent requests through the new validated binding.
+#[tokio::test]
+async fn refresh_rebinds_workspace_to_new_checkout() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (_alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    write_registry(&global_root, &[("alpha", &alpha_repo)]);
+    let state = registry_state(&global_root);
+
+    let titles = task_titles(&state, "alpha").await;
+    assert!(titles.iter().any(|t| t == "alpha task"), "got {titles:?}");
+    let before = open_runtime(&state, "alpha").expect("alpha open");
+
+    // Rebind `alpha` to a different on-disk checkout with a distinct task.
+    let (_v2_orbit, v2_repo) = seed_workspace(&global_root, tmp.path(), "alpha_v2");
+    write_registry(&global_root, &[("alpha", &v2_repo)]);
+    state.refresh();
+
+    let titles = task_titles(&state, "alpha").await;
+    assert!(
+        titles.iter().any(|t| t == "alpha_v2 task") && !titles.iter().any(|t| t == "alpha task"),
+        "rebound workspace must serve the new checkout's tasks, got {titles:?}"
+    );
+    let after = open_runtime(&state, "alpha").expect("alpha open");
+    assert!(
+        !Arc::ptr_eq(&before, &after),
+        "a rebind must invalidate the old runtime"
+    );
+}
+
+/// A path that disappears after startup is reported inactive on refresh, not
+/// left falsely active and not auto-deleted from the registry.
+#[tokio::test]
+async fn refresh_marks_vanished_path_inactive_without_deleting_record() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (_alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    write_registry(&global_root, &[("alpha", &alpha_repo)]);
+    let state = registry_state(&global_root);
+    assert_eq!(route_status(&state, "alpha").await, StatusCode::OK);
+
+    // The checkout vanishes after startup; the registry record stays.
+    std::fs::remove_dir_all(&alpha_repo).expect("remove checkout");
+    state.refresh();
+
+    let response = router()
+        .with_state(state.clone())
+        .oneshot(get("/workspaces"))
+        .await
+        .expect("response");
+    let listed = body_json(response).await;
+    let alpha = listed
+        .as_array()
+        .expect("array")
+        .iter()
+        .find(|w| w["id"] == json!("alpha"))
+        .expect("alpha still listed");
+    assert_eq!(alpha["status"], json!("invalid"), "reported inactive");
+    // Routing an inactive workspace is a clean 400, never a rebuild attempt.
+    assert_eq!(route_status(&state, "alpha").await, StatusCode::BAD_REQUEST);
+    // The operator record is not auto-deleted.
+    let content =
+        std::fs::read_to_string(global_root.join("workspaces.json")).expect("read registry");
+    assert!(
+        content.contains("\"alpha\""),
+        "registry record must not be auto-deleted, got {content}"
+    );
+}
+
+/// A malformed or partially-written registry cannot replace the last valid
+/// in-memory snapshot; the previous workspace set stays visible and routable.
+#[tokio::test]
+async fn refresh_retains_last_valid_snapshot_on_malformed_registry() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (_alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    write_registry(&global_root, &[("alpha", &alpha_repo)]);
+    let state = registry_state(&global_root);
+    assert_eq!(workspace_ids(&state).await, vec!["alpha".to_string()]);
+
+    // Corrupt the registry mid-flight.
+    std::fs::write(
+        global_root.join("workspaces.json"),
+        "{ this is not valid json",
+    )
+    .expect("corrupt registry");
+
+    // The refresh triggered by these requests keeps the last valid snapshot.
+    assert_eq!(workspace_ids(&state).await, vec!["alpha".to_string()]);
+    assert_eq!(route_status(&state, "alpha").await, StatusCode::OK);
+}
+
+/// Refreshes and reads race safely: concurrent `refresh`, `entries`,
+/// `runtime_for`, and `open_runtimes` never deadlock or corrupt state, and the
+/// runtime cache stays idempotent (construction happens off the lock).
+#[test]
+fn concurrent_refresh_and_reads_stay_consistent() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (_alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    let (_beta_orbit, beta_repo) = seed_workspace(&global_root, tmp.path(), "beta");
+    write_registry(
+        &global_root,
+        &[("alpha", &alpha_repo), ("beta", &beta_repo)],
+    );
+    let state = registry_state(&global_root);
+
+    // Warm the cache so threads mostly exercise the fast path + refresh race.
+    let alpha0 = state.runtime_for("alpha").expect("alpha");
+    let _ = state.runtime_for("beta").expect("beta");
+
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            let state = &state;
+            scope.spawn(move || {
+                for _ in 0..50 {
+                    state.refresh();
+                    assert_eq!(state.entries().len(), 2);
+                    let _ = state.runtime_for("alpha").expect("alpha");
+                    let _ = state.open_runtimes();
+                }
+            });
+        }
+    });
+
+    assert_eq!(state.entries().len(), 2);
+    // The static binding is never evicted, so the cache handle is stable.
+    let alpha1 = state.runtime_for("alpha").expect("alpha");
+    assert!(Arc::ptr_eq(&alpha0, &alpha1), "idempotent runtime cache");
 }

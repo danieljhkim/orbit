@@ -3,8 +3,8 @@ type: runbook
 summary: Locate Orbit state and perform WAL-safe backups, restores, and task migrations.
 tags: [operations, backup, restore, state, sqlite]
 paths: ["crates/orbit-common/src/types/workspace.rs", "crates/orbit-core/src/config/**", "crates/orbit-store/**"]
-related_features: [orbit-core]
-related_artifacts: [ORB-10014]
+related_features: [orbit-core, remote-access]
+related_artifacts: [ORB-10014, ORB-10294]
 ---
 
 # Inventory and Protect Orbit State
@@ -51,6 +51,21 @@ precedence). Path layout is defined in
 | `state/logs/orbit.jsonl` (+ rotated archives) | unified JSONL log sink for all Orbit processes | disposable |
 | `embed/` | semantic-search companion binary + models | regenerable (`orbit semantic install`) |
 | `bin/` | installed Orbit binary (when installed via `install.sh`) | reinstallable |
+
+> **Live registry refresh (ORB-10294).** A running `orbit web serve` no longer needs a
+> restart to pick up `workspaces.json` changes. It reloads the registry at each request
+> boundary, so a native `orbit workspace init` / `remove` — or a re-pointed checkout
+> binding — becomes visible through `/api/workspaces` and routable through the
+> workspace-scoped API on the next request; a removed workspace's cached runtime is evicted
+> without disturbing the others. **Operator recovery semantics:** a checkout path that
+> disappears after startup is reported `invalid` (inactive) rather than deleted — restore or
+> re-point the path and the next request re-activates it, no restart needed. A malformed or
+> half-written `workspaces.json` (e.g. an editor mid-save) never replaces the last good
+> in-memory set: the server keeps serving the previous workspaces and logs a credential-safe
+> diagnostic (the registry path plus the parse error, never the file contents) until the file
+> parses again. A malformed registry present *at server startup* is still fatal — fix the file
+> before launching. See [remote-access design §2.1](../design/remote-access/2_design.md) and
+> [ADR-0234](../design/remote-access/4_decisions.md).
 
 ### Git-committed versus local state
 
