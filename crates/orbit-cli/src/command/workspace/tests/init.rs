@@ -1,5 +1,3 @@
-use std::sync::Mutex;
-
 use tempfile::tempdir;
 
 use chrono::Utc;
@@ -10,15 +8,14 @@ use orbit_common::types::{
 use orbit_core::command::init::default_orbitignore_template;
 use orbit_core::workspace_registry;
 
+use crate::tests::env_isolation::EnvGuard;
+
 use super::super::init::WorkspaceInitArgs;
 use super::super::list::format_workspace_list;
 use super::super::show::format_workspace_show;
 
-static ENV_LOCK: Mutex<()> = Mutex::new(());
-
 #[test]
 fn workspace_reinit_merges_explicit_registration_updates_without_resetting_authored_state() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
     let global = home.path().join(".orbit");
@@ -31,12 +28,7 @@ fn workspace_reinit_merges_explicit_registration_updates_without_resetting_autho
     )
     .expect("write host identity");
 
-    let previous_home = std::env::var_os("HOME");
-    let previous_cwd = std::env::current_dir().expect("capture cwd");
-    unsafe {
-        std::env::set_var("HOME", home.path());
-    }
-    std::env::set_current_dir(workspace.path()).expect("enter workspace");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
     let init = |base_branch: Option<&str>, ship_mode: Option<&str>| WorkspaceInitArgs {
         name: Some("reinit-merge".to_string()),
@@ -141,12 +133,6 @@ policy:
         .next()
         .expect("registered workspace");
     assert_eq!(after_invalid, before_invalid);
-
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
-    match previous_home {
-        Some(value) => unsafe { std::env::set_var("HOME", value) },
-        None => unsafe { std::env::remove_var("HOME") },
-    }
 }
 
 #[test]
@@ -183,7 +169,6 @@ fn workspace_list_and_show_report_effective_ship_mode() {
 
 #[test]
 fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
     let global = home.path().join(".orbit");
@@ -194,12 +179,7 @@ fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() 
     )
     .expect("write host identity");
 
-    let previous_home = std::env::var_os("HOME");
-    let previous_cwd = std::env::current_dir().expect("capture cwd");
-    unsafe {
-        std::env::set_var("HOME", home.path());
-    }
-    std::env::set_current_dir(workspace.path()).expect("enter workspace");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
     let init = || WorkspaceInitArgs {
         name: Some("routine-seed-test".to_string()),
@@ -276,17 +256,10 @@ policy:
             .expect("parse recreated routine")
             .enabled
     );
-
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
-    match previous_home {
-        Some(value) => unsafe { std::env::set_var("HOME", value) },
-        None => unsafe { std::env::remove_var("HOME") },
-    }
 }
 
 #[test]
 fn workspace_init_seeds_auto_detected_mcp_configs() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
 
@@ -300,12 +273,7 @@ fn workspace_init_seeds_auto_detected_mcp_configs() {
     )
     .expect("write global codex config");
 
-    let previous_home = std::env::var_os("HOME");
-    let previous_cwd = std::env::current_dir().expect("capture cwd");
-    unsafe {
-        std::env::set_var("HOME", home.path());
-    }
-    std::env::set_current_dir(workspace.path()).expect("enter workspace");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
     let result = WorkspaceInitArgs {
         name: None,
@@ -318,17 +286,6 @@ fn workspace_init_seeds_auto_detected_mcp_configs() {
         refresh_defaults: false,
     }
     .execute_without_runtime(None);
-
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
-
-    match previous_home {
-        Some(value) => unsafe {
-            std::env::set_var("HOME", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOME");
-        },
-    }
 
     result.expect("workspace init");
     assert!(
@@ -351,7 +308,6 @@ fn workspace_init_seeds_auto_detected_mcp_configs() {
 
 #[test]
 fn workspace_init_skips_mcp_by_default() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
 
@@ -365,12 +321,7 @@ fn workspace_init_skips_mcp_by_default() {
     )
     .expect("write global codex config");
 
-    let previous_home = std::env::var_os("HOME");
-    let previous_cwd = std::env::current_dir().expect("capture cwd");
-    unsafe {
-        std::env::set_var("HOME", home.path());
-    }
-    std::env::set_current_dir(workspace.path()).expect("enter workspace");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
     let result = WorkspaceInitArgs {
         name: None,
@@ -383,17 +334,6 @@ fn workspace_init_skips_mcp_by_default() {
         refresh_defaults: false,
     }
     .execute_without_runtime(None);
-
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
-
-    match previous_home {
-        Some(value) => unsafe {
-            std::env::set_var("HOME", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOME");
-        },
-    }
 
     result.expect("workspace init");
     assert!(
@@ -416,18 +356,12 @@ fn workspace_init_skips_mcp_by_default() {
 
 #[test]
 fn workspace_init_under_home_with_global_orbit_creates_repo_orbit() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let home = tempdir().expect("home tempdir");
     let workspace = home.path().join("work").join("repo");
     std::fs::create_dir_all(workspace.join(".git")).expect("create workspace repo");
     std::fs::create_dir_all(home.path().join(".orbit")).expect("create global orbit root");
 
-    let previous_home = std::env::var_os("HOME");
-    let previous_cwd = std::env::current_dir().expect("capture cwd");
-    unsafe {
-        std::env::set_var("HOME", home.path());
-    }
-    std::env::set_current_dir(&workspace).expect("enter workspace");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(&workspace);
 
     let result = WorkspaceInitArgs {
         name: None,
@@ -440,17 +374,6 @@ fn workspace_init_under_home_with_global_orbit_creates_repo_orbit() {
         refresh_defaults: false,
     }
     .execute_without_runtime(None);
-
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
-
-    match previous_home {
-        Some(value) => unsafe {
-            std::env::set_var("HOME", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOME");
-        },
-    }
 
     result.expect("workspace init");
     assert!(workspace.join(".orbit").join("state").is_dir());
@@ -465,19 +388,13 @@ fn workspace_init_under_home_with_global_orbit_creates_repo_orbit() {
 
 #[test]
 fn workspace_init_appends_orbit_to_existing_gitignore() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
     std::fs::create_dir_all(workspace.path().join(".git")).expect("create .git");
     std::fs::write(workspace.path().join(".gitignore"), "target/\n.DS_Store")
         .expect("write .gitignore");
 
-    let previous_home = std::env::var_os("HOME");
-    let previous_cwd = std::env::current_dir().expect("capture cwd");
-    unsafe {
-        std::env::set_var("HOME", home.path());
-    }
-    std::env::set_current_dir(workspace.path()).expect("enter workspace");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
     let result = WorkspaceInitArgs {
         name: None,
@@ -490,17 +407,6 @@ fn workspace_init_appends_orbit_to_existing_gitignore() {
         refresh_defaults: false,
     }
     .execute_without_runtime(None);
-
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
-
-    match previous_home {
-        Some(value) => unsafe {
-            std::env::set_var("HOME", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOME");
-        },
-    }
 
     result.expect("workspace init");
     assert_eq!(
@@ -511,19 +417,13 @@ fn workspace_init_appends_orbit_to_existing_gitignore() {
 
 #[test]
 fn workspace_init_does_not_duplicate_existing_orbit_gitignore_entry() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
     std::fs::create_dir_all(workspace.path().join(".git")).expect("create .git");
     std::fs::write(workspace.path().join(".gitignore"), "target/\n/.orbit/\n")
         .expect("write .gitignore");
 
-    let previous_home = std::env::var_os("HOME");
-    let previous_cwd = std::env::current_dir().expect("capture cwd");
-    unsafe {
-        std::env::set_var("HOME", home.path());
-    }
-    std::env::set_current_dir(workspace.path()).expect("enter workspace");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
     let result = WorkspaceInitArgs {
         name: None,
@@ -536,17 +436,6 @@ fn workspace_init_does_not_duplicate_existing_orbit_gitignore_entry() {
         refresh_defaults: false,
     }
     .execute_without_runtime(None);
-
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
-
-    match previous_home {
-        Some(value) => unsafe {
-            std::env::set_var("HOME", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOME");
-        },
-    }
 
     result.expect("workspace init");
     assert_eq!(
@@ -557,19 +446,13 @@ fn workspace_init_does_not_duplicate_existing_orbit_gitignore_entry() {
 
 #[test]
 fn workspace_init_from_git_subdir_gitignores_repo_orbit_dir() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let repo = tempdir().expect("repo tempdir");
     let home = tempdir().expect("home tempdir");
     let nested = repo.path().join("packages").join("demo");
     std::fs::create_dir_all(repo.path().join(".git")).expect("create .git");
     std::fs::create_dir_all(&nested).expect("create nested workspace");
 
-    let previous_home = std::env::var_os("HOME");
-    let previous_cwd = std::env::current_dir().expect("capture cwd");
-    unsafe {
-        std::env::set_var("HOME", home.path());
-    }
-    std::env::set_current_dir(&nested).expect("enter nested workspace");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(&nested);
 
     let result = WorkspaceInitArgs {
         name: None,
@@ -582,17 +465,6 @@ fn workspace_init_from_git_subdir_gitignores_repo_orbit_dir() {
         refresh_defaults: false,
     }
     .execute_without_runtime(None);
-
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
-
-    match previous_home {
-        Some(value) => unsafe {
-            std::env::set_var("HOME", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOME");
-        },
-    }
 
     result.expect("workspace init");
     assert_eq!(
@@ -604,18 +476,12 @@ fn workspace_init_from_git_subdir_gitignores_repo_orbit_dir() {
 
 #[test]
 fn workspace_init_with_root_override_uses_custom_registry() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
     let custom_root_parent = tempdir().expect("custom root parent");
     let custom_root = custom_root_parent.path().join("custom-orbit");
 
-    let previous_home = std::env::var_os("HOME");
-    let previous_cwd = std::env::current_dir().expect("capture cwd");
-    unsafe {
-        std::env::set_var("HOME", home.path());
-    }
-    std::env::set_current_dir(workspace.path()).expect("enter workspace");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
     let result = WorkspaceInitArgs {
         name: Some("custom-root".to_string()),
@@ -628,17 +494,6 @@ fn workspace_init_with_root_override_uses_custom_registry() {
         refresh_defaults: false,
     }
     .execute_without_runtime(Some(custom_root.as_path()));
-
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
-
-    match previous_home {
-        Some(value) => unsafe {
-            std::env::set_var("HOME", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOME");
-        },
-    }
 
     result.expect("workspace init with root override");
 
@@ -677,16 +532,10 @@ fn workspace_init_with_root_override_uses_custom_registry() {
 
 #[test]
 fn workspace_init_seeds_default_orbitignore_when_missing() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
 
-    let previous_home = std::env::var_os("HOME");
-    let previous_cwd = std::env::current_dir().expect("capture cwd");
-    unsafe {
-        std::env::set_var("HOME", home.path());
-    }
-    std::env::set_current_dir(workspace.path()).expect("enter workspace");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
     let result = WorkspaceInitArgs {
         name: None,
@@ -699,17 +548,6 @@ fn workspace_init_seeds_default_orbitignore_when_missing() {
         refresh_defaults: false,
     }
     .execute_without_runtime(None);
-
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
-
-    match previous_home {
-        Some(value) => unsafe {
-            std::env::set_var("HOME", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOME");
-        },
-    }
 
     result.expect("workspace init");
     assert_eq!(
@@ -720,7 +558,6 @@ fn workspace_init_seeds_default_orbitignore_when_missing() {
 
 #[test]
 fn workspace_init_preserves_existing_orbitignore() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
     std::fs::write(
@@ -729,12 +566,7 @@ fn workspace_init_preserves_existing_orbitignore() {
     )
     .expect("seed existing .orbitignore");
 
-    let previous_home = std::env::var_os("HOME");
-    let previous_cwd = std::env::current_dir().expect("capture cwd");
-    unsafe {
-        std::env::set_var("HOME", home.path());
-    }
-    std::env::set_current_dir(workspace.path()).expect("enter workspace");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
     let result = WorkspaceInitArgs {
         name: None,
@@ -748,17 +580,6 @@ fn workspace_init_preserves_existing_orbitignore() {
     }
     .execute_without_runtime(None);
 
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
-
-    match previous_home {
-        Some(value) => unsafe {
-            std::env::set_var("HOME", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOME");
-        },
-    }
-
     result.expect("workspace init");
     assert_eq!(
         std::fs::read_to_string(workspace.path().join(".orbitignore")).expect("read .orbitignore"),
@@ -768,7 +589,6 @@ fn workspace_init_preserves_existing_orbitignore() {
 
 #[test]
 fn workspace_init_with_root_override_does_not_modify_repo_gitignore() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
     let custom_root_parent = tempdir().expect("custom root parent");
@@ -778,12 +598,7 @@ fn workspace_init_with_root_override_does_not_modify_repo_gitignore() {
     // appended `.orbit` to <workspace>/.gitignore.
     std::fs::create_dir_all(workspace.path().join(".git")).expect("seed git dir");
 
-    let previous_home = std::env::var_os("HOME");
-    let previous_cwd = std::env::current_dir().expect("capture cwd");
-    unsafe {
-        std::env::set_var("HOME", home.path());
-    }
-    std::env::set_current_dir(workspace.path()).expect("enter workspace");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
     let result = WorkspaceInitArgs {
         name: Some("custom-root-git".to_string()),
@@ -797,22 +612,81 @@ fn workspace_init_with_root_override_does_not_modify_repo_gitignore() {
     }
     .execute_without_runtime(Some(custom_root.as_path()));
 
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
-
-    match previous_home {
-        Some(value) => unsafe {
-            std::env::set_var("HOME", value);
-        },
-        None => unsafe {
-            std::env::remove_var("HOME");
-        },
-    }
-
     result.expect("workspace init with root override in a git repo");
 
     let gitignore = workspace.path().join(".gitignore");
     assert!(
         !gitignore.exists(),
         "`--root` outside the workspace must not create <workspace>/.gitignore",
+    );
+}
+
+/// Regression (ORB-10293): a nameless workspace whose default name is derived
+/// from a `.tmpXXXXXX` cwd must register only in the isolated fixture registry
+/// and never touch a synthetic "outer" HOME registry standing in for the
+/// operator's real `~/.orbit/workspaces.json`. This reproduces the exact shape
+/// (`ws_.tmpXXXXXX`) that leaked into the operator's registry before the shared
+/// env guard serialized these tests.
+#[test]
+fn nameless_tmp_workspace_registers_only_in_isolated_registry() {
+    // Synthetic operator HOME with a sentinel registry that must never change.
+    let outer_home = tempdir().expect("outer home tempdir");
+    let outer_registry = outer_home.path().join(".orbit").join("workspaces.json");
+    std::fs::create_dir_all(outer_registry.parent().expect("outer .orbit parent"))
+        .expect("create outer .orbit");
+    let sentinel = "{\"sentinel\":\"operator-registry\"}\n";
+    std::fs::write(&outer_registry, sentinel).expect("seed sentinel registry");
+
+    // Isolated fixture HOME plus a nameless workspace directory. `tempdir()`
+    // yields `/tmp/.tmpXXXXXX`, so the default workspace name is `.tmpXXXXXX`.
+    let fixture_home = tempdir().expect("fixture home tempdir");
+    let workspace = tempdir().expect("nameless workspace tempdir");
+    let workspace_name = workspace
+        .path()
+        .file_name()
+        .expect("workspace dir name")
+        .to_string_lossy()
+        .into_owned();
+    assert!(
+        workspace_name.starts_with(".tmp"),
+        "fixture must reproduce the nameless `.tmpXXXXXX` shape, got {workspace_name}"
+    );
+
+    {
+        let _env = EnvGuard::acquire()
+            .home(fixture_home.path())
+            .cwd(workspace.path());
+        WorkspaceInitArgs {
+            name: None,
+            base_branch: Some("main".to_string()),
+            ship_mode: None,
+            task_id_start: None,
+            mcp: false,
+            hooks: false,
+            inject_agent_rules: false,
+            refresh_defaults: false,
+        }
+        .execute_without_runtime(None)
+        .expect("nameless workspace init");
+    }
+
+    // The nameless workspace registered only in the isolated fixture registry.
+    let fixture_registry = fixture_home.path().join(".orbit").join("workspaces.json");
+    let registry =
+        workspace_registry::load_registry_from(&fixture_registry).expect("load fixture registry");
+    assert!(
+        registry
+            .workspaces
+            .iter()
+            .any(|w| w.id == format!("ws_{workspace_name}")),
+        "nameless workspace must register in the isolated fixture registry"
+    );
+
+    // The synthetic outer registry is byte-for-byte unchanged: workspace init
+    // never touched the operator's real machine-global registry.
+    assert_eq!(
+        std::fs::read_to_string(&outer_registry).expect("read outer registry"),
+        sentinel,
+        "workspace init must never mutate the operator's real registry"
     );
 }
