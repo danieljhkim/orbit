@@ -40,6 +40,10 @@ pub struct RawCrewEntry {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     /// Legacy three-role fields retained for compatibility. Runtime loading
     /// selects `implementer` and warns when the discarded roles diverge.
     #[serde(default, skip_serializing_if = "Option::is_none")]

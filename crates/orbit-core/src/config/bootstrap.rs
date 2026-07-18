@@ -76,6 +76,8 @@ fn render_crews(
                     provider: Some(crew.assignment.provider),
                     model: Some(crew.assignment.model),
                     backend: Some(crew.assignment.backend),
+                    description: crew.description,
+                    tags: crew.tags,
                     planner: None,
                     implementer: None,
                     reviewer: None,
@@ -96,6 +98,8 @@ fn render_crews(
                 provider: assignment.provider.clone(),
                 model: assignment.model.clone(),
                 backend: assignment.backend.clone(),
+                description: None,
+                tags: Vec::new(),
                 planner: None,
                 implementer: None,
                 reviewer: None,
@@ -112,6 +116,8 @@ fn render_crews(
             provider: qa.provider,
             model: qa.model,
             backend: qa.backend,
+            description: None,
+            tags: Vec::new(),
             planner: None,
             implementer: None,
             reviewer: None,
@@ -166,6 +172,25 @@ fn render_crew_table(name: &str, entry: &RawCrewEntry) -> Result<String, OrbitEr
             "{field} = {}\n",
             toml::Value::String(value.to_string())
         ));
+    }
+    if let Some(description) = entry
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        rendered.push_str(&format!(
+            "description = {}\n",
+            toml::Value::String(description.to_string())
+        ));
+    }
+    if !entry.tags.is_empty() {
+        let tags = entry
+            .tags
+            .iter()
+            .map(|tag| toml::Value::String(tag.clone()))
+            .collect::<Vec<_>>();
+        rendered.push_str(&format!("tags = {}\n", toml::Value::Array(tags)));
     }
     rendered.push('\n');
     Ok(rendered)

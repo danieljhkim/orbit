@@ -113,7 +113,7 @@ fn run_archive_stage_migration_adds_archived_at() {
 }
 
 #[test]
-fn host_registry_migration_creates_typed_tables_without_touching_existing_records() {
+fn coordination_migrations_create_typed_tables_without_touching_existing_records() {
     let conn = Connection::open_in_memory().expect("open in-memory connection");
     conn.execute_batch(
         r#"
@@ -161,7 +161,14 @@ fn host_registry_migration_creates_typed_tables_without_touching_existing_record
         )
         .expect("existing row");
     assert_eq!(preserved, "unchanged");
-    assert_eq!(current_schema_version(&conn).expect("version"), 5);
+    assert_eq!(current_schema_version(&conn).expect("version"), 6);
+    for table in [
+        "workspace_ownership",
+        "host_workspace_presence",
+        "workspace_execution_profiles",
+    ] {
+        assert!(table_exists(&conn, table).expect("coordination table"));
+    }
 
     let first = applied_migrations(&conn).expect("first ledger");
     apply_schema(&conn).expect("reapply");

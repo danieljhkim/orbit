@@ -244,6 +244,8 @@ fn default_admission_crews() -> BTreeMap<String, Crew> {
                 provider: DEFAULT_WORKFLOW_CREW.to_string(),
                 backend: String::new(),
             },
+            description: None,
+            tags: Vec::new(),
         },
     )])
 }

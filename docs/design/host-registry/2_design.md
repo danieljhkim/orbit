@@ -10,7 +10,7 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10258, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Design
@@ -201,6 +201,39 @@ including unversioned input without an explicit role, require stable owner ident
 and reject missing/unknown roles, owner/replica contradictions, and replicas without
 an owner, naming the workspace ID. Malformed/future schemas are read-only failures,
 and a failed staged write leaves the prior file readable.
+
+**Concrete hub coordination projections ([ORB-10257]).** Additive store migration
+v6 creates three path-separated projections:
+
+- `workspace_ownership` binds each stable logical `workspace_id` to exactly one
+  active, known `owner_machine_id`. Binding validates the logical workspace through
+  `HostRegistryService`; the B2 `owner_machine_id` is checked only as the local
+  mirror. Rebinding is not inferred or silently performed.
+- `host_workspace_presence` is private and keyed by
+  `(machine_id, workspace_id)`. An authenticated publication atomically replaces
+  that host's complete declared map and explicitly stamps host `last_seen_at`.
+  The reported absolute root is the sole path-bearing hub-link exception: it is
+  retained only in this private placement projection and is absent from sanitized
+  reads, profiles, audit, leases, routing frames, and remote execution.
+- `workspace_execution_profiles` stores one owner payload plus hub-owned
+  `generation` and `received_at`. The frozen `ExecutionProfileV1` is exactly
+  identity, owner `observed_at`, `config_digest`, normalized effective crews, and
+  `{mode, base_branch, ship_closure_digest}`. Identical semantic publication
+  refreshes both timestamps without advancing generation; a semantic change
+  advances it atomically. Owner authentication, generation CAS, active ownership,
+  already-stale/future observations, and observations older than the stored one
+  all fail before overwrite. Freshness is calculated only from hub `received_at`.
+
+`config_digest` hashes domain-separated canonical compact JSON of the normalized
+crew/config and effective mode/base branch. `ship_closure_digest` separately hashes
+the execution-selected, fully materialized four-job ship closure, its reachable
+named and recovery activities, resolved backends, and versioned static ship
+contract. Neither digest contains identities, clocks, paths, raw config/assets or
+environment values. Publication rejects execution-affecting catalog/backend
+environment overrides and unknown provider/backend values rather than publishing
+an ambiguous projection. These projections are typed service/store foundations;
+administration, dispatch gating, run snapshots, leases, and connectors remain later
+units.
 
 Enforcement reads only local data, so it works offline; what fails offline is the
 MCP write itself, loudly. Two local rules (§5 for the record types they guard):
@@ -429,6 +462,9 @@ of that routine.** Consequences:
 - [ORB-10255] — implemented the append-only v5 host/alias schema and typed C1
   registry core: compatible idempotent registration, collision refusal, permanent
   rename chains, retirement, active enumeration, and fail-closed name resolution.
+- [ORB-10257] — implemented additive v6 singular workspace ownership, private
+  host-keyed presence replacement/freshness, and owner-authenticated execution
+  profile CAS with canonical config and fully materialized ship-closure digests.
 - [ORB-10258] — implemented origin-aware routine loading (§6 items 1–2; Unit R1 under
   ORB-10246): committed definitions fail closed without a non-empty host pin,
   `.orbit/routines/local/` definitions are implicit to the loading host and reject

@@ -48,6 +48,15 @@ pub struct CrewRoleAssignment {
 pub struct Crew {
     pub name: String,
     pub assignment: CrewRoleAssignment,
+    /// Optional human-facing summary carried through every canonical crew
+    /// projection. Execution-profile publication normalizes blank values to
+    /// `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Search/discovery labels. Runtime config loading canonicalizes these to
+    /// a sorted, deduplicated list of non-empty strings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 impl Crew {

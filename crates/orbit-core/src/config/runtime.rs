@@ -256,6 +256,8 @@ pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
         Crew {
             name: "claude".to_string(),
             assignment: crew_role(CLAUDE_DEFAULT_WEAK, "claude", "cli"),
+            description: None,
+            tags: Vec::new(),
         },
     );
     crews.insert(
@@ -263,6 +265,8 @@ pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
         Crew {
             name: "codex".to_string(),
             assignment: crew_role(CODEX_DEFAULT_MODEL, "codex", "cli"),
+            description: None,
+            tags: Vec::new(),
         },
     );
     crews.insert(
@@ -270,6 +274,8 @@ pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
         Crew {
             name: "gemini".to_string(),
             assignment: crew_role(GEMINI_CREW_MODEL, "gemini", "cli"),
+            description: None,
+            tags: Vec::new(),
         },
     );
     crews.insert(
@@ -277,6 +283,8 @@ pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
         Crew {
             name: "grok".to_string(),
             assignment: crew_role(GROK_DEFAULT_MODEL, "grok", "cli"),
+            description: None,
+            tags: Vec::new(),
         },
     );
     crews
@@ -318,8 +326,14 @@ fn crews_from_raw(
         let crew = Crew {
             name: trimmed.to_string(),
             assignment: crew_assignment_from_raw(trimmed, entry)?,
+            description: normalized_crew_description(entry.description.as_deref()),
+            tags: normalized_crew_tags(&entry.tags),
         };
-        crews.insert(trimmed.to_string(), crew);
+        if crews.insert(trimmed.to_string(), crew).is_some() {
+            return Err(OrbitError::InvalidInput(format!(
+                "[crews] contains duplicate name '{trimmed}' after whitespace normalization"
+            )));
+        }
     }
     if crews.is_empty() {
         return Err(OrbitError::InvalidInput(
@@ -327,6 +341,24 @@ fn crews_from_raw(
         ));
     }
     Ok(crews)
+}
+
+fn normalized_crew_description(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn normalized_crew_tags(raw: &[String]) -> Vec<String> {
+    let mut tags = raw
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    tags.sort();
+    tags.dedup();
+    tags
 }
 
 fn crew_assignment_from_raw(

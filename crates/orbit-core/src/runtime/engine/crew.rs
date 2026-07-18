@@ -51,6 +51,10 @@ pub struct ConfiguredCrewRegistryProjection {
 pub struct ConfiguredCrewProjection {
     pub name: String,
     pub model: String,
+    pub provider: String,
+    pub backend: String,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
     pub is_default: bool,
 }
 
@@ -59,6 +63,10 @@ impl ConfiguredCrewProjection {
         Self {
             name: crew.name.clone(),
             model: crew.assignment.model.clone(),
+            provider: crew.assignment.provider.clone(),
+            backend: crew.assignment.backend.clone(),
+            description: crew.description.clone(),
+            tags: crew.tags.clone(),
             is_default,
         }
     }

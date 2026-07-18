@@ -33,6 +33,7 @@ pub mod auto_task;
 pub mod duel;
 pub mod error;
 pub mod event;
+pub mod execution_profile;
 pub mod executor_def;
 pub mod friction;
 pub mod host;
@@ -94,6 +95,12 @@ pub use duel::{
 };
 pub use error::{NotFoundKind, OrbitError};
 pub use event::OrbitEvent;
+pub use execution_profile::{
+    EXECUTION_CONFIG_DIGEST_DOMAIN, EXECUTION_PROFILE_SCHEMA_VERSION, ExecutionProfileCrewV1,
+    ExecutionProfileShipV1, ExecutionProfileV1, HostWorkspacePresence, ProjectionFreshness,
+    SanitizedExecutionProfile, SanitizedWorkspacePresence, StoredExecutionProfile,
+    WorkspaceOwnership, WorkspacePresenceDeclaration,
+};
 pub use executor_def::{
     ExecutorDef, ExecutorSandboxKind, ExecutorType, ModelPairOverride, StdoutFormat,
 };
