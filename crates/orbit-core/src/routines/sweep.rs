@@ -87,6 +87,8 @@ pub struct RoutineSweepReport {
     pub routine: String,
     /// Source workspace name.
     pub source: String,
+    /// Whether the definition is `committed` or `local` origin.
+    pub origin: &'static str,
     /// One of: `fired`, `retry_fired`, `would_fire`, `baselined`,
     /// `would_baseline`, `skipped`, `error`.
     pub action: &'static str,
@@ -149,7 +151,7 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
     let discovered = discover_workspaces(global_root)?;
     let mut load_errors: Vec<RoutineLoadError> = discovered.errors.clone();
 
-    let mut collection = collect_routines(&discovered.entries);
+    let mut collection = collect_routines(&discovered.entries, &host_id);
     load_errors.append(&mut collection.errors);
 
     let dispatch = RuntimeDispatch {
@@ -208,6 +210,7 @@ pub(crate) fn run_sweep_core(
             .unwrap_or_else(|error| RoutineSweepReport {
                 routine: routine.definition.name.clone(),
                 source: routine.source_workspace.clone(),
+                origin: routine.origin.as_str(),
                 action: "error",
                 reason: Some(error.to_string()),
                 slot: None,
@@ -383,6 +386,7 @@ fn fire(
             Ok(RoutineSweepReport {
                 routine: name.clone(),
                 source: routine.source_workspace.clone(),
+                origin: routine.origin.as_str(),
                 action: fired_action,
                 reason: None,
                 slot: Some(slot.to_string()),
@@ -404,6 +408,7 @@ fn fire(
             Ok(RoutineSweepReport {
                 routine: name.clone(),
                 source: routine.source_workspace.clone(),
+                origin: routine.origin.as_str(),
                 action: "error",
                 reason: Some(format!("dispatch failed: {error}")),
                 slot: Some(slot.to_string()),
@@ -490,6 +495,7 @@ fn skipped(routine: &LoadedRoutine, reason: &str) -> RoutineSweepReport {
     RoutineSweepReport {
         routine: routine.definition.name.clone(),
         source: routine.source_workspace.clone(),
+        origin: routine.origin.as_str(),
         action: "skipped",
         reason: Some(reason.to_string()),
         slot: None,
@@ -501,6 +507,7 @@ fn action(routine: &LoadedRoutine, action: &'static str) -> RoutineSweepReport {
     RoutineSweepReport {
         routine: routine.definition.name.clone(),
         source: routine.source_workspace.clone(),
+        origin: routine.origin.as_str(),
         action,
         reason: None,
         slot: None,

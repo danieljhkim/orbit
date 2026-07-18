@@ -27,6 +27,7 @@ impl RoutineListArgs {
                     json!({
                         "name": status.routine.definition.name,
                         "source": status.routine.source_workspace,
+                        "origin": status.routine.origin.as_str(),
                         "target": status.routine.definition.target.as_ref_string(),
                         "enabled": status.routine.definition.enabled,
                         "hosts": status.routine.definition.hosts,
@@ -67,6 +68,7 @@ impl RoutineListArgs {
         let mut table = build_table(&[
             "NAME",
             "SOURCE",
+            "ORIGIN",
             "ENABLED",
             "PINNED",
             "PAUSED",
@@ -84,6 +86,7 @@ impl RoutineListArgs {
                 vec![
                     Cell::new(&status.routine.definition.name),
                     Cell::new(&status.routine.source_workspace),
+                    Cell::new(status.routine.origin.as_str()),
                     Cell::new(if status.routine.definition.enabled {
                         "yes"
                     } else {

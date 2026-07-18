@@ -131,6 +131,7 @@ pub(crate) fn outcome_json(outcome: &SweepOutcome, dry_run: bool) -> serde_json:
         "reports": outcome.reports.iter().map(|r| json!({
             "routine": r.routine,
             "source": r.source,
+            "origin": r.origin,
             "action": r.action,
             "reason": r.reason,
             "slot": r.slot,

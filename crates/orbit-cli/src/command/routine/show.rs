@@ -38,6 +38,7 @@ impl RoutineShowArgs {
                 "name": definition.name,
                 "description": definition.description,
                 "source": status.routine.source_workspace,
+                "origin": status.routine.origin.as_str(),
                 "path": status.routine.path.display().to_string(),
                 "enabled": definition.enabled,
                 "hosts": definition.hosts,
@@ -66,9 +67,10 @@ impl RoutineShowArgs {
             println!("Description: {}", definition.description);
         }
         println!(
-            "Source: {} ({})",
+            "Source: {} ({}, {} origin)",
             status.routine.source_workspace,
-            status.routine.path.display()
+            status.routine.path.display(),
+            status.routine.origin.as_str()
         );
         println!("Target: {}", definition.target.as_ref_string());
         println!(

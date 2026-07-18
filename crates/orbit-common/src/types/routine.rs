@@ -40,6 +40,14 @@ pub struct RoutineDefinition {
     pub enabled: bool,
     /// Explicit host pinning — the routine fires only on hosts whose
     /// `host_id` appears here. There is no "any host" value in v1.
+    ///
+    /// A *committed* definition (`.orbit/routines/*.yaml`) must list at least
+    /// one host (see [`RoutineDefinition::validate_committed`]). A *local*
+    /// definition (`.orbit/routines/local/*.yaml`) may omit it — it is
+    /// implicitly pinned to the loading host — and, if present, may name only
+    /// that host (see [`RoutineDefinition::validate_local`] and
+    /// [`parse_local_routine_yaml`]).
+    #[serde(default)]
     pub hosts: Vec<String>,
     /// When the routine is due.
     pub trigger: RoutineTrigger,
@@ -209,11 +217,41 @@ const fn default_backoff_minutes() -> u64 {
     2
 }
 
-/// Parse one routine YAML document fail-closed: schema-version gate first,
-/// then a strict typed parse (unknown fields rejected), then semantic
-/// validation. Any error means the routine is treated as absent by the
-/// caller — it never degrades into "fire with defaults".
+/// Parse one *committed* routine YAML document fail-closed: schema-version
+/// gate first, then a strict typed parse (unknown fields rejected), then
+/// origin-agnostic semantic validation, then the committed-origin host rule
+/// (a non-empty `hosts:` pin is mandatory). Any error means the routine is
+/// treated as absent by the caller — it never degrades into "fire with
+/// defaults". Local-origin definitions parse through
+/// [`parse_local_routine_yaml`] instead.
 pub fn parse_routine_yaml(yaml: &str) -> Result<RoutineDefinition, OrbitError> {
+    let definition = parse_routine_document(yaml)?;
+    definition.validate_committed()?;
+    Ok(definition)
+}
+
+/// Parse a *local*-origin routine YAML document (`.orbit/routines/local/`)
+/// fail-closed. Hosts are optional — a local definition is implicitly pinned
+/// to the loading host — but any explicit `hosts:` entry may name only
+/// `local_host_id`; a remote or other-host pin is an error rather than a
+/// hidden cross-machine schedule. On success an omitted or empty host list is
+/// normalized to `[local_host_id]`, so downstream host-pinning logic (the
+/// sweep, `routine status`) is identical for committed and local origins.
+pub fn parse_local_routine_yaml(
+    yaml: &str,
+    local_host_id: &str,
+) -> Result<RoutineDefinition, OrbitError> {
+    let mut definition = parse_routine_document(yaml)?;
+    definition.validate_local(local_host_id)?;
+    if definition.hosts.is_empty() {
+        definition.hosts = vec![local_host_id.to_string()];
+    }
+    Ok(definition)
+}
+
+/// Shared header gate + strict typed parse + origin-agnostic validation. The
+/// origin-specific host rules are applied by the two public entry points.
+fn parse_routine_document(yaml: &str) -> Result<RoutineDefinition, OrbitError> {
     let header = SchemaHeader::parse_yaml(yaml)
         .map_err(|error| OrbitError::InvalidInput(format!("routine header: {error}")))?;
     if header.schema_version != ROUTINE_SCHEMA_VERSION {
@@ -224,25 +262,21 @@ pub fn parse_routine_yaml(yaml: &str) -> Result<RoutineDefinition, OrbitError> {
     }
     let definition: RoutineDefinition = serde_yaml::from_str(yaml)
         .map_err(|error| OrbitError::InvalidInput(format!("routine: {error}")))?;
-    definition.validate()?;
+    definition.validate_common()?;
     Ok(definition)
 }
 
 impl RoutineDefinition {
-    /// Semantic checks beyond serde shape: name charset, non-empty host
-    /// pinning, non-empty cron. Full cron parsing happens in the scheduler
-    /// (orbit-core), which owns the cron dependency.
-    pub fn validate(&self) -> Result<(), OrbitError> {
+    /// Origin-agnostic semantic checks beyond serde shape: name charset, no
+    /// blank host entries, non-empty cron, positive timeout. Full cron parsing
+    /// happens in the scheduler (orbit-core), which owns the cron dependency.
+    /// Host-count and host-identity rules are origin-specific — see
+    /// [`Self::validate_committed`] and [`Self::validate_local`].
+    fn validate_common(&self) -> Result<(), OrbitError> {
         if !is_valid_routine_name(&self.name) {
             return Err(OrbitError::InvalidInput(format!(
                 "routine name '{}' must be non-empty, lowercase alphanumeric \
                  with '-' or '_' separators, and start alphanumeric",
-                self.name
-            )));
-        }
-        if self.hosts.is_empty() {
-            return Err(OrbitError::InvalidInput(format!(
-                "routine '{}' must pin at least one host (there is no \"any host\" in v1)",
                 self.name
             )));
         }
@@ -263,6 +297,47 @@ impl RoutineDefinition {
                 "routine '{}' policy.timeout_minutes must be at least 1",
                 self.name
             )));
+        }
+        Ok(())
+    }
+
+    /// Committed-origin validation (`.orbit/routines/*.yaml`, excluding
+    /// `local/`): the origin-agnostic checks plus a mandatory, non-empty host
+    /// pin. A committed definition with no `hosts:` is a fail-closed load error
+    /// — never "any host" — because an unpinned routine checked out on N
+    /// source machines is N independent schedules (host-registry design §6).
+    pub fn validate_committed(&self) -> Result<(), OrbitError> {
+        self.validate_common()?;
+        if self.hosts.is_empty() {
+            return Err(OrbitError::InvalidInput(format!(
+                "committed routine '{}' must pin at least one host (there is no \
+                 \"any host\" in v1; move it to .orbit/routines/local/ to run \
+                 only on the local host)",
+                self.name
+            )));
+        }
+        Ok(())
+    }
+
+    /// Local-origin validation (`.orbit/routines/local/`): the origin-agnostic
+    /// checks; `hosts:` may be omitted (an implicit pin to the loading host)
+    /// but any entry must name only `local_host_id`. A local definition that
+    /// names another host — a remote pin — is rejected rather than becoming a
+    /// hidden cross-machine schedule (host-registry design §6).
+    pub fn validate_local(&self, local_host_id: &str) -> Result<(), OrbitError> {
+        self.validate_common()?;
+        for host in &self.hosts {
+            if host.trim() != local_host_id {
+                return Err(OrbitError::InvalidInput(format!(
+                    "local routine '{}' pins host '{}', but a definition under \
+                     .orbit/routines/local/ is implicit to the loading host '{}' and \
+                     may not name another host; move it to a committed \
+                     .orbit/routines/ definition to target another machine",
+                    self.name,
+                    host.trim(),
+                    local_host_id
+                )));
+            }
         }
         Ok(())
     }
