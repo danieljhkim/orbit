@@ -1,0 +1,32 @@
+schema_version: 1
+id: L-0097
+status: active
+scope:
+  paths: []
+  tags:
+  - qa-sweep
+  - task-lifecycle
+  - cli
+summary: Default `orbit task list` (incl. `--tag`) hides proposed-status tasks; a tag/dedup check must add `--status proposed` (or query all statuses) before concluding a tag didn't persist or a task doesn't exist.
+body: |-
+  ## Gotcha
+
+  `orbit task list` and `orbit task list --tag <tag>` default to the *open/active* status set and **exclude** `proposed` tasks. On a store with 27 proposed tasks, plain `orbit task list` showed zero of them.
+
+  ## Why it bites (and how it wasted ~10 min during a qa-sweep)
+
+  A freshly filed task lands in `proposed`. Right after creating a `proposed` task via `orbit.task.add` + tagging it, `orbit task list --tag <tag>` did NOT show it, which looked exactly like a **tag-persistence bug** — reinforced because `orbit.task.show` returns a summary subset that omits `tags` entirely, so `show` couldn't confirm the tag either. The tag was in fact correctly written to the durable bundle (`.orbit/tasks/<ID>/task.yaml` had `tags: [qa-sweep]`); the task was simply filtered out by status. Confirming with `orbit task list --tag <tag> --status proposed` returned it immediately.
+
+  ## Guardrail
+
+  - When verifying that a tag/field persisted, check the durable bundle file or use `--status proposed` — do NOT infer 'not persisted' from an unfiltered `task list`.
+  - The qa-sweep dedup step ('search open Orbit tasks tagged qa-sweep' before filing) is directly exposed: an unfiltered/default `task list --tag qa-sweep` will MISS proposed qa-sweep tasks and can cause duplicate filings. Query proposed status too when deduping against previously-filed sweep tasks.
+  - `orbit.task.show` JSON is a summary view (id, title, status, type, priority, deps, timestamps) and does not carry tags/description/acceptance_criteria; don't use it to verify those fields.
+evidence:
+- kind: task
+  reference: ORB-10250
+- kind: task
+  reference: ORB-10308
+created_at: 2026-07-18T20:42:10.954665843Z
+updated_at: 2026-07-18T20:42:10.954665843Z
+created_by: claude
