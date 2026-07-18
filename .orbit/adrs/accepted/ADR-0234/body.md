@@ -1,1 +1,11 @@
-orbit-web snapshotted ~/.orbit/workspaces.json once at startup and cached runtimes indefinitely, so native `orbit workspace init/remove` and binding changes required a server restart. Decision: a registry-backed DashboardState reloads the authoritative registry at each request boundary (the Ws extractor plus the /api/workspaces, /api/tasks/all, and detailed /healthz handlers call refresh()), swaps the whole workspace snapshot atomically under a mutex, and evicts runtimes whose workspace was removed, went inactive, or was rebound. A watcher daemon was rejected as heavier than the request/refresh path needs. A malformed or partially-written registry refresh retains the last valid in-memory snapshot and emits a credential-safe diagnostic (registry path + Orbit's own error, never the file body). Stale-path workspaces are reported inactive, never auto-deleted. Cost: every request boundary re-reads and re-parses the registry file (cheap for a loopback dashboard) and refresh is eventually-consistent under concurrent mutation rather than strongly serialized with in-flight requests.
+## Context
+orbit-web previously snapshotted ~/.orbit/workspaces.json once at startup and cached runtimes indefinitely, so native workspace init/remove and binding changes required a server restart. A watcher would add a resident process and synchronization surface that the loopback request path does not need.
+
+## Decision
+A registry-backed DashboardState reloads the authoritative workspace registry at each request boundary used by the Ws extractor, /api/workspaces, /api/tasks/all, and detailed /healthz. Refresh builds a complete new snapshot, swaps it atomically, and evicts only runtimes for workspaces that were removed, became inactive, or changed binding. A malformed or partial refresh retains the last valid snapshot and emits a credential-safe diagnostic; stale-path entries are reported inactive and are never auto-deleted.
+
+## Consequences
+- Native registry mutations become visible without restarting orbit-web.
+- Concurrent requests observe either the previous complete snapshot or the next complete snapshot, never a partially rebuilt registry.
+- Malformed refreshes remain serviceable from the last known-good snapshot and require operator correction of the registry file.
+- Cost: each request boundary re-reads and parses the small registry file, and mutations are eventually consistent with requests already in flight rather than transactionally synchronized with them.
