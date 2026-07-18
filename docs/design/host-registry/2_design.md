@@ -10,7 +10,7 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10258, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Design
@@ -400,5 +400,10 @@ of that routine.** Consequences:
   strict fail-closed loading (Phase 1 / Unit B1 under ORB-10246).
 - [ORB-10248] — implemented the versioned path-free workspace catalog and
   machine-local owner/replica checkout bindings (§3; Phase 1 / Unit B2).
+- [ORB-10258] — implemented origin-aware routine loading (§6 items 1–2; Unit R1 under
+  ORB-10246): committed definitions fail closed without a non-empty host pin,
+  `.orbit/routines/local/` definitions are implicit to the loading host and reject
+  remote pins, and cross-origin name collisions fail deterministically. Registry-cache
+  pin validation (§6 item 3) and reassignment baselines (§6 item 5) remain deferred to R2.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

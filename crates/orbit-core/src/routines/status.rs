@@ -54,7 +54,7 @@ pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, Orbit
 
     let discovered = discover_workspaces(global_root)?;
     let mut load_errors = discovered.errors.clone();
-    let mut collection = collect_routines(&discovered.entries);
+    let mut collection = collect_routines(&discovered.entries, &host_id);
     load_errors.append(&mut collection.errors);
 
     let pauses = store.routine_pauses()?;

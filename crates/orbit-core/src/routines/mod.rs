@@ -22,7 +22,9 @@ pub use host::{
     HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostIdentityOutcome, HostIdentityState, HostMode,
     NewHostIdentity, ensure_host_identity, inspect_host_identity, load_host_identity, os_hostname,
 };
-pub use loader::{LoadedRoutine, RoutineCollection, RoutineLoadError, collect_routines};
+pub use loader::{
+    LoadedRoutine, RoutineCollection, RoutineLoadError, RoutineOrigin, collect_routines,
+};
 pub use status::{
     RoutineStatus, RoutineStatusReport, pause_routine, recent_fires, resume_routine,
     routine_statuses,
