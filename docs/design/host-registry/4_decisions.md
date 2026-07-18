@@ -8,17 +8,18 @@ doc_role: decisions
 type: design
 summary: Accepted ADR log for the coupled Host Registry and MCP Bridge v1 contract.
 tags: [host-registry, mcp-bridge, multi-host, placement]
-paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
+paths: ["crates/orbit-registry/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10302, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Host Registry — Decisions
 
 ADR log for `host-registry`. Entries are append-only and ordered by global ID.
 The Orbit ADR store owns their allocation, status, and task link; this document is
-the long-form feature log. The seven entries below are the complete consolidated
-v1 decision set shared with [mcp-bridge](../mcp-bridge/4_decisions.md).
+the long-form feature log. The first seven entries are the consolidated v1
+behavior contract shared with [mcp-bridge](../mcp-bridge/4_decisions.md);
+ADR-0235 records the implementation boundary that keeps that contract singular.
 
 ## ADR-0226 — Singular coordination hub, workspace owner, and per-run placement
 
@@ -162,6 +163,30 @@ for its non-Orbit constellation domains.
 - Clients register Orbit and Bridge side by side during migration.
 - Cost: cutover temporarily maintains two registrations and requires deletion of a compatibility layer.
 
+## ADR-0235 — Make orbit-registry the singular host/workspace registry domain crate
+
+**Status:** Accepted · 2026-07 · [ORB-10302] established the crate boundary.
+
+### Context
+
+C3 left identity, workspace-catalog, cache, and registry-service behavior in
+`orbit-core`, while `orbit-registry` exposed an unused opaque-byte replication and
+merge model that contradicted the singular-hub contract.
+
+### Decision
+
+Repurpose `orbit-registry` as the machine/workspace registry domain. It owns host
+identity, local catalog/checkouts/roles, cache semantics, and the store-backed
+service. Keep runtime profile/ship construction in `orbit-core`, persistence in
+`orbit-store`, shared DTOs in `orbit-common`, and reject any
+`orbit-store -> orbit-registry` edge.
+
+### Consequences
+
+- The dependency direction is `orbit-core -> orbit-registry -> orbit-store -> orbit-common`, with the existing direct `orbit-core -> orbit-store` edge retained.
+- Temporary `orbit-core` compatibility re-exports avoid an atomic caller rewrite without retaining duplicate implementations.
+- Cost: `orbit-registry` is no longer a consumer-agnostic leaf and now compiles the store layer; reversing the boundary requires another domain move or a cycle-prone abstraction.
+
 ## Task References
 
 - [ORB-00424] — completed design proposal for canonical Orbit MCP and Bridge parity retirement.
@@ -191,5 +216,8 @@ for its non-Orbit constellation domains.
   CLI enumeration renders the same single-transaction sanitized snapshot as discovery.
   Remote registration and
   post-link/register cache refresh remain deferred to E3; poll-driven refresh to I/J.
+- [ORB-10302] — implemented Unit C4: moved the host/workspace/cache/service domain
+  and its tests into `orbit-registry`, retired the replicated-registry scaffold,
+  and preserved core/store/common ownership boundaries ([ADR-0235]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -8,16 +8,18 @@ doc_role: design
 type: design
 summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-only coordination, owner-bound knowledge, checkout-local indexes, role-aware search, capability sets, provenance, and Bridge parity retirement.
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
-paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
+paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-registry/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10267, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10267, ORB-10302, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Orbit MCP Bridge — Design
 
 This document specifies the **target** design. The host-registry identity,
 workspace, registry core/projections, C3 discovery tools, and typed placement,
-capability, scope, and trusted-session metadata they depend on have landed; the
+capability, scope, and trusted-session metadata they depend on have landed. C4
+places identity, catalog, cache, and the store-backed registry service in the
+dedicated `orbit-registry` domain crate ([ORB-10302], [ADR-0235]); the
 checkout-aware broker and transport surfaces here remain pending. It replaces both
 Bridge's HTTP parity layer and the earlier
 per-workspace-authority draft with a local broker that has one remote destination:
@@ -536,6 +538,12 @@ proxy. `orbit.crew.list`, task crew validation, and workflow preflight all read 
 same projection. Missing/stale owner profile fails dispatch with the owner named;
 the hub never asks the owner synchronously.
 
+The publication/ownership/presence/freshness service lives in `orbit-registry`.
+`OrbitRuntime::build_execution_profile_v1`, catalog validation, and ship-closure
+hashing remain in `orbit-core`; snapshot SQL, revision advancement, and the
+single-transaction sanitized query remain in `orbit-store`. This one-way boundary
+prevents the broker work from creating a store/domain dependency cycle.
+
 ### 8.2 Operator tools and placement
 
 Bridge's high-level workflow tools move into Orbit:
@@ -724,5 +732,8 @@ Required validation:
 
 - [ORB-00424] — umbrella proposal for canonical local/remote Orbit MCP and Bridge
   parity retirement; implementation should follow the coupled phases above.
+- [ORB-10302] — established the `orbit-registry` domain boundary used by future
+  broker registration, discovery, profile, and cache flows while preserving the
+  MCP adapter as serialization/dispatch only ([ADR-0235]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
