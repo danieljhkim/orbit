@@ -259,6 +259,116 @@ async fn workspace_selection_errors_are_clean_4xx_json() {
     assert_eq!(response.status(), axum::http::StatusCode::OK);
 }
 
+/// ORB-10291: a task in one registered workspace depending on a task in
+/// another workspace sharing the same global root must resolve that
+/// dependency's real status, not `[missing]`. Dependency resolution has to
+/// use the coordination registry's global status projection
+/// (`OrbitRuntime::task_status_index`) rather than the selected workspace's
+/// own task list.
+#[tokio::test]
+async fn cross_workspace_dependency_resolves_global_status_not_missing() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+
+    let (beta_orbit, beta_repo) = seed_workspace(&global_root, tmp.path(), "beta");
+    let beta_task = {
+        let beta_runtime = OrbitRuntime::from_roots(&global_root, &beta_orbit)
+            .expect("build beta runtime")
+            .with_actor(ActorIdentity::human("human"));
+        beta_runtime
+            .add_task(TaskAddParams {
+                title: "beta dependency".to_string(),
+                description: "seed".to_string(),
+                workspace_path: Some(".".to_string()),
+                status: Some(TaskStatus::Done),
+                ..Default::default()
+            })
+            .expect("add beta task")
+    };
+
+    let alpha_repo = tmp.path().join("alpha");
+    let alpha_orbit = alpha_repo.join(".orbit");
+    std::fs::create_dir_all(&alpha_orbit).expect("create .orbit");
+    std::fs::write(alpha_orbit.join("config.toml"), "").expect("write config");
+    let alpha_task = {
+        let alpha_runtime = OrbitRuntime::from_roots(&global_root, &alpha_orbit)
+            .expect("build alpha runtime")
+            .with_actor(ActorIdentity::human("human"));
+        alpha_runtime
+            .add_task(TaskAddParams {
+                title: "alpha dependent".to_string(),
+                description: "seed".to_string(),
+                workspace_path: Some(".".to_string()),
+                status: Some(TaskStatus::InProgress),
+                dependencies: vec![beta_task.id.clone()],
+                ..Default::default()
+            })
+            .expect("add alpha task")
+    };
+
+    let entries = vec![
+        WsEntry {
+            id: "alpha".to_string(),
+            name: "alpha".to_string(),
+            repo_root: alpha_repo,
+            orbit_dir: alpha_orbit,
+            active: true,
+        },
+        WsEntry {
+            id: "beta".to_string(),
+            name: "beta".to_string(),
+            repo_root: beta_repo,
+            orbit_dir: beta_orbit,
+            active: true,
+        },
+    ];
+    let state = DashboardState::global(global_root, entries, Some("alpha".to_string()));
+    let expected_label = format!("{} [done]", beta_task.id);
+
+    // GET /tasks?workspace=alpha: the cross-workspace dependency resolves to
+    // beta's real status, and the response contains only alpha's own task.
+    let response = router()
+        .with_state(state.clone())
+        .oneshot(get("/tasks?workspace=alpha"))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let tasks = body.as_array().expect("array");
+    assert_eq!(
+        tasks.len(),
+        1,
+        "workspace-local list must contain only alpha's own task, got {tasks:?}"
+    );
+    let alpha_row = &tasks[0];
+    assert_eq!(alpha_row["id"], json!(alpha_task.id));
+    let labels: Vec<&str> = alpha_row["resolved_dependencies"]
+        .as_array()
+        .expect("resolved_dependencies array")
+        .iter()
+        .map(|value| value.as_str().expect("dependency label"))
+        .collect();
+    assert_eq!(labels, vec![expected_label.as_str()]);
+
+    // GET /tasks/<alpha-id>?workspace=alpha: the show projection reports the
+    // identical cross-workspace dependency status.
+    let response = router()
+        .with_state(state)
+        .oneshot(get(&format!("/tasks/{}?workspace=alpha", alpha_task.id)))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let labels: Vec<&str> = body["resolved_dependencies"]
+        .as_array()
+        .expect("resolved_dependencies array")
+        .iter()
+        .map(|value| value.as_str().expect("dependency label"))
+        .collect();
+    assert_eq!(labels, vec![expected_label.as_str()]);
+}
+
 /// ORB-00037: the pure display helper collapses `$HOME` to `~` and otherwise
 /// renders paths verbatim.
 #[test]

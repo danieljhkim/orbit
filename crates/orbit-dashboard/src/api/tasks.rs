@@ -178,10 +178,18 @@ fn list_dashboard_tasks(runtime: &OrbitRuntime) -> Result<Vec<Task>, orbit_core:
     Ok(tasks)
 }
 
+/// Dependency-status projection for dashboard task serialization.
+///
+/// Uses the coordination registry's global status index
+/// ([`OrbitRuntime::task_status_index`]) rather than `runtime.list_tasks()`
+/// (workspace-scoped), so a task depending on another registered workspace's
+/// task resolves that dependency's real status instead of `[missing]`
+/// (ORB-10291). Task *listing* stays workspace-scoped: this index is only
+/// consulted to label dependencies, never to add tasks to the response body.
 fn dashboard_status_index(
     runtime: &OrbitRuntime,
 ) -> Result<std::collections::BTreeMap<String, TaskStatus>, orbit_core::OrbitError> {
-    Ok(orbit_core::build_task_status_index(&runtime.list_tasks()?))
+    runtime.task_status_index()
 }
 
 pub(super) async fn get_task(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
