@@ -79,11 +79,17 @@ pub(crate) async fn detailed_response(
     state: &DashboardState,
     log_path: Result<PathBuf, String>,
 ) -> Response {
+    // Refresh and pin one snapshot so the probed runtimes and the reported
+    // `workspaces_open` count come from a single coherent generation — an
+    // evicted/removed workspace does not linger, and a concurrent rebind cannot
+    // make the report probe or tag the wrong checkout.
+    let pinned = state.pin();
+    let open = pinned.open_runtimes();
     let mut checks: Vec<CheckOutcome> = Vec::new();
 
-    for (workspace, runtime) in state.open_runtimes() {
+    for (workspace, runtime) in &open {
         checks.push(store_writable_check(workspace.clone(), runtime.clone()).await);
-        checks.push(graph_index_check(workspace, runtime).await);
+        checks.push(graph_index_check(workspace.clone(), runtime.clone()).await);
     }
     checks.push(log_sink_check(log_path).await);
 
@@ -95,7 +101,7 @@ pub(crate) async fn detailed_response(
     };
     let body = json!({
         "status": if failed { "fail" } else { "ok" },
-        "workspaces_open": state.open_runtimes().len(),
+        "workspaces_open": open.len(),
         "checks": checks.iter().map(CheckOutcome::to_json).collect::<Vec<_>>(),
     });
     (status, Json(body)).into_response()

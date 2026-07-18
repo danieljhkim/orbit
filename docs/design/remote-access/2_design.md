@@ -1,7 +1,7 @@
 ---
 title: "Remote Access — Design"
 owner: claude
-last_updated: 2026-07-15
+last_updated: 2026-07-18
 status: Accepted
 feature: remote-access
 doc_role: design
@@ -10,7 +10,7 @@ summary: "The two shipped surfaces — global multi-workspace serve (the only mo
 tags: [remote-access]
 paths: ["crates/orbit-dashboard/**", "crates/orbit-cli/src/command/web.rs", "crates/orbit-cli/src/command/operation.rs"]
 related_features: [remote-access, user-interface]
-related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ORB-10200, ADR-0200, ADR-0201]
+related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ORB-10200, ORB-10294, ADR-0200, ADR-0201, ADR-0234]
 ---
 
 # Remote Access — Design
@@ -21,19 +21,32 @@ This document specifies the two shipped surfaces of remote access — global mul
 
 ## 1. Global multi-workspace serve
 
-`orbit web serve` always serves in global mode: [`build_state`](../../../crates/orbit-dashboard/src/lib.rs) unconditionally enumerates `~/.orbit/workspaces.json` via `orbit_core::workspace_registry` (`global_orbit_dir` → `load_registry` → `validate_workspaces`) and builds a `DashboardState::global`. Each registry entry becomes a `WsEntry { id, name, repo_root, orbit_dir, active }`, where `active` mirrors registry status — stale-path workspaces flip to inactive. `default_workspace_selection` picks the dropdown's default selection when a request omits `?workspace=`, in priority order: the top-level `--root <path>` flag (`root_override`), if given and it resolves to a registered/active workspace via `default_workspace_for_cwd`; else the longest active repo-root prefix of the process cwd (also `default_workspace_for_cwd`); else `None` (the frontend opens the aggregate "All workspaces" view). A given `--root` that matches no workspace resolves straight to `None` — it never falls back to the cwd-based default, is never an error, and never auto-registers. The `--root` path matters specifically for `orbit web connect` (§3): the remote `orbit web serve` it launches runs non-interactively over `ssh` with cwd set to the SSH user's home directory, so `--root` is the only signal that can hint which workspace to preselect there.
+`orbit web serve` always serves in global mode: [`build_state`](../../../crates/orbit-dashboard/src/lib.rs) enumerates `~/.orbit/workspaces.json` via `orbit_core::workspace_registry` (`global_orbit_dir` → `registry_path` → `load_registry_from` → `validate_workspaces`) and builds a registry-backed `DashboardState::from_registry`, capturing a `RegistrySource { registry_path, root_override, cwd }` so the servable set can be reloaded later (§2.1). Each registry entry becomes a `WsEntry { id, name, repo_root, orbit_dir, active }`, where `active` mirrors registry status — stale-path workspaces flip to inactive. `default_workspace_selection` picks the dropdown's default selection when a request omits `?workspace=`, in priority order: the top-level `--root <path>` flag (`root_override`), if given and it resolves to a registered/active workspace via `default_workspace_for_cwd`; else the longest active repo-root prefix of the process cwd (also `default_workspace_for_cwd`); else `None` (the frontend opens the aggregate "All workspaces" view). A given `--root` that matches no workspace resolves straight to `None` — it never falls back to the cwd-based default, is never an error, and never auto-registers. The `--root` path matters specifically for `orbit web connect` (§3): the remote `orbit web serve` it launches runs non-interactively over `ssh` with cwd set to the SSH user's home directory, so `--root` is the only signal that can hint which workspace to preselect there.
 
 [ORB-10029] made this the only mode: single-workspace serving used to be the default when `orbit web serve` ran inside a workspace (opening that workspace's runtime via `OrbitRuntime::try_initialize_existing` and wrapping it in `DashboardState::single`), reachable only via the then-opt-in `--global` flag otherwise. `--global` is now a deprecated no-op, kept parsing only because `orbit web connect` (§3) unconditionally forwards it to the remote `orbit web serve`. `DashboardState::single` and the `serve(runtime, args)` entry point are retained for callers that already hold a built `OrbitRuntime` and want it embedded directly, and for the dashboard's handler tests (an in-memory runtime needs no lazy registry lookup) — but `orbit web serve` no longer reaches either.
 
 ## 2. Workspace-keyed state and the `Ws` extractor
 
-[`DashboardState`](../../../crates/orbit-dashboard/src/state.rs) holds a set of `WsEntry` plus a `Mutex<HashMap<String, Arc<OrbitRuntime>>>` runtime cache. `runtime_for(id)`:
+[`DashboardState`](../../../crates/orbit-dashboard/src/state.rs) holds a `Mutex<Arc<Snapshot>>` (the servable `WsEntry` set plus the default selection, stamped with a monotonic **generation**) and a `Mutex<HashMap<String, CachedRuntime>>` runtime cache, where each `CachedRuntime` records both the `repo_root`/`orbit_dir` binding **and the generation** it was built for. The cache is *non-authoritative*: a pinned `Snapshot` is the sole authority for a workspace's binding, and every cache read and publication is validated against it. Runtime resolution (`resolve_runtime(snapshot, id)`):
 
-1. rejects an unknown id (`404`) and an inactive id (`400`);
-2. returns the cached runtime if present;
-3. otherwise builds `OrbitRuntime::from_roots(global_root, entry.orbit_dir).with_actor(human)` **outside** the cache lock, then inserts cache-first so a concurrent build is harmless.
+1. resolves the binding from the **pinned** snapshot, rejecting an unknown id (`404`) and an inactive id (`400`), holding no lock;
+2. returns the cached runtime only if its binding still matches that snapshot (a rebound workspace, or a stale entry left by an older-snapshot publication, is a cache miss);
+3. otherwise builds `OrbitRuntime::from_roots(global_root, entry.orbit_dir).with_actor(human)` **outside** the cache lock, then publishes under it with generation discipline: an identical binding is idempotent (first build wins); a build whose generation is **older** than a differing cached binding is never published — it is returned only to its own pinned request, so an older-snapshot build can never overwrite or be surfaced as the current runtime. `open_runtimes` likewise joins the cache to the pinned snapshot by exact binding, not by id, so a stale entry is never reported or tagged as the wrong checkout.
 
-The `Ws(pub(crate) Arc<OrbitRuntime>)` extractor implements `FromRequestParts<DashboardState>`: it reads `?workspace=<id>` (percent-decoded; empty is treated as absent), else the configured default, else rejects with a structured JSON `{ "error": ... }`. Handlers changed only their signature line — `State(runtime): State<Arc<OrbitRuntime>>` → `Ws(runtime): Ws` — so 46 handler bodies were untouched. This "query-param choke point + one-line signature swap" was chosen over workspace-prefixed route paths; the rationale is [user-interface ADR-00030](../user-interface/4_decisions.md).
+The `Ws(pub(crate) Arc<OrbitRuntime>)` extractor implements `FromRequestParts<DashboardState>`: it calls `pin()` (refresh + pin one snapshot, §2.1), then reads `?workspace=<id>` (percent-decoded; empty is treated as absent), else the pinned default, else rejects with a structured JSON `{ "error": ... }` — resolving the runtime against the same pinned generation. Handlers changed only their signature line — `State(runtime): State<Arc<OrbitRuntime>>` → `Ws(runtime): Ws` — so 46 handler bodies were untouched. This "query-param choke point + one-line signature swap" was chosen over workspace-prefixed route paths; the rationale is [user-interface ADR-00030](../user-interface/4_decisions.md).
+
+### 2.1 Live registry refresh ([ORB-10294])
+
+The servable set is not frozen at startup. A registry-backed `DashboardState` reloads `~/.orbit/workspaces.json` at each request boundary via `DashboardState::refresh()`, so a native `orbit workspace init/remove` or a changed root/orbit-dir binding is honored **without restarting the server** — the restart this replaced was a Build Week cleanup papercut. Every request refreshes and then **pins one snapshot generation** with `DashboardState::pin()` (returning a `Pinned` view), and derives everything from it — default selection, entry metadata, runtime resolution, and the open-runtime set. The `Ws` extractor pins for all 46 routed handlers; the three aggregate/host handlers that read the entry set directly — `GET /api/workspaces`, `GET /api/tasks/all`, and detailed `GET /healthz` — each pin once per response, so a concurrent add/remove/rebind is observed as one coherent old-or-new generation and never splices old entry metadata onto a runtime resolved from a newer binding. States built via `DashboardState::single`/`::global` carry no `RegistrySource`, so `refresh()` is a no-op there (handler tests keep their fixed entries).
+
+`refresh()` guarantees:
+
+- **Atomic swap.** It reloads into a fresh, generation-stamped `Snapshot`, then replaces the whole `Arc<Snapshot>` in one assignment under the snapshot mutex; a concurrent reader sees the old view or the new one, never a half-applied update. A dedicated refresh mutex serializes refreshes so the swap and the runtime eviction that follows are one step relative to other refreshes.
+- **Runtime eviction, off the lock.** After the swap it drops cache entries whose workspace is gone, inactive, or rebound (binding mismatch), leaving every other workspace's live runtime untouched. Runtimes are only ever *built* lazily in `resolve_runtime`, never under the registry/cache mutation lock; the generation stamp then guarantees an in-flight older-snapshot build cannot re-publish over the newer binding after eviction.
+- **Keep-last-valid.** A malformed or partially-written registry read leaves the current snapshot in place and emits a credential-safe diagnostic — the registry path and Orbit's own error, never the file contents, so a tokenized `git_remote` cannot leak into logs. The initial `from_registry` load is the exception: a malformed registry **at startup** is fatal, exactly as before refresh existed.
+- **No auto-delete.** A path that disappears after startup flips its entry to inactive (`validate_workspaces`) and the workspace is rejected with `400` on routing, but the operator's registry record is never rewritten or removed. Operator recovery: restore the checkout (or `orbit workspace` re-point it) and the next request re-activates it — no restart, no manual cache flush.
+
+The rationale for request-driven reload over a filesystem watcher daemon, and for eventual-consistency under concurrent mutation, is [ADR-0234](./4_decisions.md).
 
 Two aggregate endpoints expose the machine-wide surface:
 
@@ -79,5 +92,6 @@ Neither surface touches the loopback-only bind guard from [ORB-00360]: `check_bi
 - [ORB-00360] — Loopback-only bind guard and stored-XSS fix.
 - [ORB-10029] — Made global mode the only mode for `orbit web serve`; `--global` is now a deprecated no-op kept for `connect` passthrough compatibility.
 - [ORB-10200] — Moved runtime-free web dispatch into the exhaustive command-operation registry.
+- [ORB-10294] — Live per-request registry refresh (§2.1): native workspace add/remove/rebind is honored without a restart, with atomic snapshot swap, runtime eviction, keep-last-valid on malformed reads, and no auto-delete. See [ADR-0234](./4_decisions.md).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

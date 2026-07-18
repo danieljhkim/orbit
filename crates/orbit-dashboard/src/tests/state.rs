@@ -40,7 +40,7 @@ fn single_mode_exposes_one_default_workspace() {
     let state = DashboardState::single(Arc::new(runtime));
 
     assert_eq!(state.entries().len(), 1);
-    assert_eq!(state.default_workspace(), Some("default"));
+    assert_eq!(state.default_workspace().as_deref(), Some("default"));
     assert!(state.runtime_for("default").is_ok());
     assert!(state.runtime_for("unknown").is_err());
 }

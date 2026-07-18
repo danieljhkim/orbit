@@ -1,16 +1,16 @@
 ---
 title: "Remote Access — Decisions"
 owner: claude
-last_updated: 2026-07-02
+last_updated: 2026-07-18
 status: Accepted
 feature: remote-access
 doc_role: decisions
 type: design
-summary: "ADR log: why live viewing supersedes a git-sync registry, and why remote access is SSH-over-loopback rather than a network bind with auth."
+summary: "ADR log: why live viewing supersedes a git-sync registry, why remote access is SSH-over-loopback rather than a network bind with auth, and why orbit-web reloads the registry per request rather than watching it."
 tags: [remote-access]
 paths: ["crates/orbit-dashboard/**"]
 related_features: [remote-access]
-related_artifacts: [ADR-0200, ADR-0201, ORB-00029, ORB-00030, ORB-00360]
+related_artifacts: [ADR-0200, ADR-0201, ADR-0234, ORB-00029, ORB-00030, ORB-00360, ORB-10294]
 ---
 
 # Remote Access — Decisions
@@ -53,11 +53,28 @@ The workspace-keyed-state machinery (the `Ws` extractor vs. path-prefixed routes
 
 ---
 
+## ADR-0234 — orbit-web reloads the workspace registry per request rather than watching or snapshotting once
+
+**Status:** Accepted · 2026-07 · [ORB-10294]
+
+**Context.** `orbit web serve` snapshotted `~/.orbit/workspaces.json` once in `build_state` and cached each workspace runtime indefinitely. A native `orbit workspace init/remove` (or a re-pointed checkout binding) succeeded on disk but stayed invisible to the web/Bridge surface until the server was restarted — a papercut that forced a restart during Build Week cleanup and contradicts the server's contract of routing the *current* registered workspace set. Three shapes were on the table: (a) keep the startup snapshot and accept restarts; (b) run a filesystem watcher daemon that reloads on `workspaces.json` change; (c) reload the registry on demand at each request boundary.
+
+**Decision.** Option (c). A registry-backed `DashboardState` keeps a `RegistrySource` and reloads the authoritative registry via `refresh()` at each request boundary (the `Ws` extractor for all routed handlers, plus `/api/workspaces`, `/api/tasks/all`, and detailed `/healthz`). `refresh()` reloads into a fresh `Snapshot`, swaps the whole `Arc<Snapshot>` atomically under a mutex, and — serialized by a dedicated refresh lock — evicts only the runtimes whose workspace was removed, went inactive, or was rebound; runtimes are (re)built lazily in `runtime_for`, never under the registry/cache lock. A malformed or partially-written registry read retains the last valid in-memory snapshot and emits a credential-safe diagnostic (registry path + Orbit's own error, never the file body). Stale-path entries are reported inactive, never auto-deleted. The watcher daemon (b) was rejected as more moving parts (a background task, inotify/kqueue portability, debounce, its own failure modes) than a loopback dashboard reached per request needs; the request/refresh path reuses the existing choke points and carries no daemon.
+
+**Consequences.**
+- Native add/remove/rebind and post-startup path disappearance are reflected without a restart, and one broken workspace never strands the rest — eviction is per-binding and the aggregate views skip unopenable workspaces.
+- Operator recovery is "fix the checkout and issue any request": a re-pointed or restored path re-activates on the next refresh, with no manual cache flush or restart. A malformed registry is self-healing — the last good set keeps serving until the file parses again.
+- Startup keeps its original strictness: `from_registry`'s initial load is eager, so a malformed registry *at boot* is still fatal; only *refreshes* fall back to keep-last-valid.
+- Cost: every request boundary re-reads and re-parses `workspaces.json` (cheap for a loopback dashboard, but not free), and refresh is eventually-consistent rather than strongly serialized against in-flight requests — two concurrent refreshes race to publish, and a runtime evicted by a stale race is simply rebuilt on the next request. This is acceptable precisely because the binding recheck in `runtime_for` makes a stale cache entry unservable regardless of eviction timing.
+
+---
+
 ## Task References
 
 - [ORB-00029] — Added `orbit web connect <ssh-host>` and forwarded `--global` to the remote serve.
 - [ORB-00030] — Global multi-workspace dashboard, workspace-keyed state, aggregate endpoints.
 - [ORB-00360] — Loopback-only bind guard and stored-XSS fix.
 - [ORB-10029] — Made global mode the default and only mode for `orbit web serve` (single mode is no longer reachable from the CLI); `--global` is now a deprecated no-op kept for `connect` passthrough compatibility. Does not change either ADR above — the security posture and viewing-not-sync boundary are unaffected — but evolves the `web serve --global` behavior both describe.
+- [ORB-10294] — Live per-request registry refresh for `orbit web serve` ([ADR-0234]): native workspace add/remove/rebind without a restart.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
