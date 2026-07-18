@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use orbit_common::types::{
-    OrbitError, TaskPriority, build_task_status_index, optional_csv_or_string_list_alias,
-    optional_raw_string, optional_string, optional_string_alias, optional_string_list_alias,
-    required_string, strip_retired_task_add_input_fields, task_dependencies_ready,
+    OrbitError, TaskPriority, optional_csv_or_string_list_alias, optional_raw_string,
+    optional_string, optional_string_alias, optional_string_list_alias, required_string,
+    strip_retired_task_add_input_fields, task_dependencies_ready,
 };
 use serde_json::{Value, json};
 
@@ -135,7 +135,7 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         None,
         None,
     )?;
-    let status_by_id = build_task_status_index(&runtime.list_tasks()?);
+    let status_by_id = runtime.task_status_index()?;
     let tasks = all_tasks
         .into_iter()
         .filter(|task| orbit_common::types::task_matches_tags(task, &tags))

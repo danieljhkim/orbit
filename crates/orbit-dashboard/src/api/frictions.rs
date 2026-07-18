@@ -1,6 +1,7 @@
 //! Friction artifact scan and triage handlers.
 
 use crate::state::Ws;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query};
 use axum::response::{IntoResponse, Json, Response};
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -26,6 +27,25 @@ pub(super) struct FrictionsQuery {
     limit: Option<usize>,
     #[serde(default)]
     offset: Option<usize>,
+}
+
+/// Create body for `POST /frictions`. Mirrors the `orbit.friction.add` tool
+/// schema: `body` is required, `model` provenance and `tags`/`during_task` are
+/// optional. Field parsing and validation stay in the shared runtime add path
+/// so the wire shape and defaults match the native MCP tool exactly. `model`
+/// falls back to the dashboard default (`FRICTION_TOOL_MODEL`) via
+/// [`run_friction_tool`] when the caller omits it, matching the other friction
+/// routes.
+#[derive(Deserialize, Default)]
+pub(super) struct CreateFrictionBody {
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+    #[serde(default)]
+    during_task: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -75,6 +95,44 @@ pub(super) async fn list_frictions(
         "items": items,
     }))
     .into_response()
+}
+
+/// `POST /frictions` — file a new friction, mirroring `orbit.friction.add`.
+/// The request body is passed through the shared runtime add path so validation
+/// and defaults stay identical to the native MCP tool; the created friction JSON
+/// (same projection the list/get handlers emit) is returned on success.
+/// Malformed JSON is rejected with a structured 400; deeper validation errors
+/// (missing/empty `body`, bad fields) surface through [`map_runtime_error`] as
+/// 4xx carrying Orbit's own error text.
+pub(super) async fn create_friction_action(
+    Ws(runtime): Ws,
+    body: Result<Json<CreateFrictionBody>, JsonRejection>,
+) -> Response {
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(rejection) => {
+            return bad_request(format!("malformed friction create payload: {rejection}"));
+        }
+    };
+
+    let mut input = Map::new();
+    if let Some(model) = body.model.as_deref().and_then(non_empty_string) {
+        input.insert("model".to_string(), Value::String(model));
+    }
+    if let Some(friction_body) = body.body {
+        input.insert("body".to_string(), Value::String(friction_body));
+    }
+    if let Some(tags) = body.tags {
+        input.insert("tags".to_string(), json!(tags));
+    }
+    if let Some(during_task) = body.during_task.as_deref().and_then(non_empty_string) {
+        input.insert("during_task".to_string(), Value::String(during_task));
+    }
+
+    match run_friction_tool(&runtime, "orbit.friction.add", Value::Object(input)) {
+        Ok(friction) => Json(friction).into_response(),
+        Err(e) => map_runtime_error(e),
+    }
 }
 
 pub(super) async fn get_friction(Ws(runtime): Ws, Path(id): Path<String>) -> Response {

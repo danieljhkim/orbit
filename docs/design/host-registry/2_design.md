@@ -10,12 +10,13 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Design
 
-This doc specifies the **target** design; nothing here has landed and the folder is
+This doc specifies the **target** design; the Phase 1 host identity and workspace
+registry foundations have landed, while later phases remain pending. The folder is
 Accepted. It covers host identity, the registry, the coordination-plane/workspace-
 ownership split, execution placement (including the hub→satellite protocol), the
 per-record data-placement split, and the revision to routine sweep ownership. It
@@ -148,6 +149,33 @@ locally readable:
   SSH-target mapping is machine-level state in `~/.orbit/mcp.toml`; workspace role
   carries no transport target and never grants or redirects access to its owner.
 
+**Concrete local registry schema ([ORB-10248]).** `~/.orbit/workspaces.json` is
+versioned independently of `host.toml`. Schema v1 has two collections:
+
+- `workspaces: Vec<Workspace>` is the path-free logical catalog. Each record keeps
+  stable ID/name, owner `machine_id` (optional only for pre-identity standalone
+  installs), Git/workflow metadata, status, and timestamps. A hub may therefore
+  retain a workspace it cannot check out without fabricating a path.
+- `checkouts: Vec<WorkspaceCheckout>` is machine-local. Each binding names the
+  `workspace_id`, `repo_root`, `orbit_dir`, path overrides, and `role`. `owner`
+  carries no replica owner field; `replica` must carry `owner_machine_id`, which
+  must equal the logical record's stable owner.
+
+ID/name lookup reads only `workspaces`. Path lookup uses longest-prefix matching
+across `WorkspaceCheckout.repo_root` and that checkout's overrides; a checkoutless
+logical workspace can never resolve to a path. Existing list output renders `-`
+for such a record rather than inventing a root.
+
+Legacy unversioned registries migrate in one atomic write in standalone mode: every
+legacy workspace becomes one logical record plus one local owner checkout, while
+IDs, names, Git/workflow fields, status, timestamps, and valid overrides are
+retained. A second load is byte-stable. Pre-host-identity input is the standalone
+compatibility case; an absent local role canonicalizes to `owner`. Hub/spoke loads,
+including unversioned input without an explicit role, require stable owner identity
+and reject missing/unknown roles, owner/replica contradictions, and replicas without
+an owner, naming the workspace ID. Malformed/future schemas are read-only failures,
+and a failed staged write leaves the prior file readable.
+
 Enforcement reads only local data, so it works offline; what fails offline is the
 MCP write itself, loudly. Two local rules (§5 for the record types they guard):
 
@@ -166,6 +194,28 @@ warning-only when the cache is absent or stale. Scheduling keeps working offline
 Neither role is ever selected per-task: coordination has one writer by construction,
 and two owners for one workspace is the split-brain the system already rejected
 ([ADR-0200]).
+
+**Concrete task coordination schema ([ORB-10249]).** The hub task registry's
+`workspace_bindings` table is a path-free logical record: `workspace_id`, slug,
+optional repository fingerprint, and timestamps. Machine-local paths live only in
+the optional one-to-one `workspace_checkout_bindings` table (`workspace_id`,
+`repo_root`, `workspace_path`, `orbit_dir`, timestamps). Allocator, canonical task
+bundle, workspace index, tag, and relation rows reference the logical
+`workspace_id`; none requires a checkout row. Canonical bundles remain in the
+hub's coordination tree, so a checkoutless workspace can create, read, update, and
+schedule tasks without a fabricated repository path. Checkout-local projections
+resolve the optional checkout binding first and fail before filesystem mutation,
+naming the workspace when absent.
+
+Task IDs remain globally unique. Every ORB-valued dependency or typed-relation
+target resolves through the whole coordination registry, while task list/index
+queries remain workspace-scoped. The global status projection supplies dependency
+readiness across workspaces without opening either checkout. Missing ORB targets
+are rejected before task allocation or bundle/index mutation with both target ID
+and source workspace in the error. Schema v4 migrates each legacy path-coupled row
+into one logical record plus one checkout binding without changing task IDs,
+canonical bundle paths, payloads, relations, workspace associations, or allocator
+state; repeated open/reindex is idempotent.
 
 ## 4. Execution Placement
 
@@ -348,5 +398,7 @@ of that routine.** Consequences:
 - [ORB-10247] — implemented the versioned `HostIdentity` (§1): `schema_version` /
   `machine_id` / `host_id` / `mode`, `orbit init` ownership, legacy migration, and
   strict fail-closed loading (Phase 1 / Unit B1 under ORB-10246).
+- [ORB-10248] — implemented the versioned path-free workspace catalog and
+  machine-local owner/replica checkout bindings (§3; Phase 1 / Unit B2).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

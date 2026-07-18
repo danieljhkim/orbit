@@ -82,4 +82,15 @@ impl TaskV2Store {
             workspace_id,
         }
     }
+
+    pub(crate) fn new_checkoutless(registry: TaskRegistryStore, workspace_id: String) -> Self {
+        Self {
+            bundle_store: TaskBundleStoreV2::new_checkoutless(
+                registry.clone(),
+                workspace_id.clone(),
+            ),
+            registry,
+            workspace_id,
+        }
+    }
 }

@@ -19,14 +19,30 @@ pub struct BindWorkspaceParams {
     pub repo_fingerprint: Option<String>,
 }
 
+/// Path-free coordination record for a logical workspace.
+#[derive(Debug, Clone)]
+pub struct RegisterWorkspaceParams {
+    pub workspace_id: String,
+    pub slug: String,
+    pub repo_fingerprint: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceBinding {
     pub workspace_id: String,
     pub slug: String,
+    pub repo_fingerprint: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Machine-local checkout attached to a logical workspace, when one exists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceCheckoutBinding {
+    pub workspace_id: String,
     pub repo_root: PathBuf,
     pub workspace_path: PathBuf,
     pub orbit_dir: PathBuf,
-    pub repo_fingerprint: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

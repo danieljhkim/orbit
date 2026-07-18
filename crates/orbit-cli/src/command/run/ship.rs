@@ -82,9 +82,12 @@ fn resolve_ship_mode(
     let registry = orbit_core::workspace_registry::load_registry()?;
     let orbit_dir = runtime.shared_root();
     let mode = registry
-        .workspaces
+        .checkouts
         .iter()
-        .find(|ws| ws.orbit_dir == orbit_dir)
+        .find(|checkout| checkout.orbit_dir == orbit_dir)
+        .and_then(|checkout| {
+            orbit_core::workspace_registry::find_workspace(&registry, &checkout.workspace_id)
+        })
         .map(orbit_core::resolved_ship_mode)
         .unwrap_or(orbit_core::ShipMode::Local);
     Ok(mode)

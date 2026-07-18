@@ -53,6 +53,23 @@ pub fn workspace_task_backends(
     }
 }
 
+/// Constructs coordination-only task backends for a logical workspace that
+/// has no checkout on this machine. Canonical bundles and registry indexes
+/// remain available; checkout-local projections are intentionally omitted.
+pub fn coordination_task_backends(
+    registry: TaskRegistryStore,
+    workspace_id: String,
+) -> WorkspaceTaskBackends {
+    let store = Arc::new(TaskV2Store::new_checkoutless(registry, workspace_id));
+    WorkspaceTaskBackends {
+        task: store.clone(),
+        document: store.clone(),
+        history: store.clone(),
+        review: store.clone(),
+        artifact: store,
+    }
+}
+
 pub fn workspace_job_run_store(
     store: Store,
     workspace_id: impl Into<String>,

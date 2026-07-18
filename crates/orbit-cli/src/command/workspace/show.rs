@@ -1,5 +1,5 @@
 use clap::Args;
-use orbit_common::types::Workspace;
+use orbit_common::types::{Workspace, WorkspaceCheckout};
 use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
 
@@ -17,15 +17,18 @@ impl Execute for WorkspaceShowArgs {
         let registry = workspace_registry::load_registry_from(&registry_path)?;
 
         // Find workspace whose orbit_dir matches the current runtime's data root
-        let ws = registry.workspaces.iter().find(|w| {
-            let ws_canonical =
-                std::fs::canonicalize(&w.orbit_dir).unwrap_or_else(|_| w.orbit_dir.clone());
+        let checkout = registry.checkouts.iter().find(|checkout| {
+            let ws_canonical = std::fs::canonicalize(&checkout.orbit_dir)
+                .unwrap_or_else(|_| checkout.orbit_dir.clone());
             ws_canonical == data_root_canonical
         });
 
-        match ws {
-            Some(ws) => {
-                print!("{}", format_workspace_show(ws));
+        match checkout.and_then(|checkout| {
+            workspace_registry::find_workspace(&registry, &checkout.workspace_id)
+                .map(|workspace| (workspace, checkout))
+        }) {
+            Some((workspace, checkout)) => {
+                print!("{}", format_workspace_show(workspace, checkout));
             }
             None => {
                 println!("current orbit root: {}", data_root.display());
@@ -36,13 +39,13 @@ impl Execute for WorkspaceShowArgs {
     }
 }
 
-pub(super) fn format_workspace_show(workspace: &Workspace) -> String {
+pub(super) fn format_workspace_show(workspace: &Workspace, checkout: &WorkspaceCheckout) -> String {
     let mut output = format!(
         "name:        {}\nid:          {}\nroot:        {}\norbit_dir:   {}\nbase_branch: {}\nship_mode:   {}\nstatus:      {}\n",
         workspace.name,
         workspace.id,
-        workspace.root.display(),
-        workspace.orbit_dir.display(),
+        checkout.repo_root.display(),
+        checkout.orbit_dir.display(),
         workspace.base_branch,
         orbit_core::resolved_ship_mode(workspace).as_input_value(),
         workspace.status,

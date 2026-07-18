@@ -8,6 +8,7 @@ use orbit_common::types::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::sqlite::audit_event_store::{
@@ -345,6 +346,13 @@ pub struct JobRunQuery {
 pub trait TaskStoreBackend: Send + Sync {
     fn create_task(&self, params: TaskCreateParams) -> Result<Task, OrbitError>;
     fn list_tasks(&self) -> Result<Vec<Task>, OrbitError>;
+    fn task_status_index(&self) -> Result<BTreeMap<OrbitId, TaskStatus>, OrbitError> {
+        Ok(self
+            .list_tasks()?
+            .into_iter()
+            .map(|task| (task.id, task.status))
+            .collect())
+    }
     fn list_tasks_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
         let required_tags = normalize_task_tags(tags.to_vec());
         let mut tasks = self.list_tasks()?;

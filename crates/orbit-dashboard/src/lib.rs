@@ -140,15 +140,13 @@ fn build_state(root_override: Option<&Path>) -> Result<state::DashboardState, Or
     let cwd = std::env::current_dir().ok();
     let default_workspace = default_workspace_selection(&registry, root_override, cwd.as_deref());
 
-    let entries = registry
-        .workspaces
-        .iter()
-        .map(|ws| state::WsEntry {
-            id: ws.id.clone(),
-            name: ws.name.clone(),
-            repo_root: ws.root.clone(),
-            orbit_dir: ws.orbit_dir.clone(),
-            active: ws.status == WorkspaceStatus::Active,
+    let entries = workspace_registry::local_workspaces(&registry)
+        .map(|(workspace, checkout)| state::WsEntry {
+            id: workspace.id.clone(),
+            name: workspace.name.clone(),
+            repo_root: checkout.repo_root.clone(),
+            orbit_dir: checkout.orbit_dir.clone(),
+            active: workspace.status == WorkspaceStatus::Active,
         })
         .collect();
 
@@ -163,12 +161,18 @@ fn build_state(root_override: Option<&Path>) -> Result<state::DashboardState, Or
 /// repo root is the longest prefix of `cwd`, if the server was launched inside
 /// one. `None` means the frontend opens on the aggregate "all workspaces" view.
 fn default_workspace_for_cwd(registry: &WorkspaceRegistry, cwd: &Path) -> Option<String> {
-    registry
-        .workspaces
-        .iter()
-        .filter(|ws| ws.status == WorkspaceStatus::Active && cwd.starts_with(&ws.root))
-        .max_by_key(|ws| ws.root.as_os_str().len())
-        .map(|ws| ws.id.clone())
+    workspace_registry::local_workspaces(registry)
+        .filter(|(workspace, _)| workspace.status == WorkspaceStatus::Active)
+        .filter_map(|(workspace, checkout)| {
+            std::iter::once(&checkout.repo_root)
+                .chain(&checkout.path_overrides)
+                .filter(|candidate| cwd.starts_with(candidate))
+                .map(|candidate| candidate.as_os_str().len())
+                .max()
+                .map(|prefix_len| (workspace, prefix_len))
+        })
+        .max_by_key(|(_, prefix_len)| *prefix_len)
+        .map(|(workspace, _)| workspace.id.clone())
 }
 
 /// Precedence logic for the dropdown's default-preselected workspace: an

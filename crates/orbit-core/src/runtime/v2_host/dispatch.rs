@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
-use orbit_common::types::{
-    OrbitError, Role, build_task_status_index, optional_string_list_alias, unmet_task_dependencies,
-};
+use orbit_common::types::{OrbitError, Role, optional_string_list_alias, unmet_task_dependencies};
 use orbit_engine::DispatchError;
 use orbit_engine::{StateExecutionContext, execute_deterministic_action};
 use orbit_tools::ToolContext;
@@ -319,9 +317,12 @@ fn resolve_workspace_ship_input(
         })?;
     let source_orbit_dir = runtime.shared_root();
     let mode = registry
-        .workspaces
+        .checkouts
         .iter()
-        .find(|workspace| workspace.orbit_dir == source_orbit_dir)
+        .find(|checkout| checkout.orbit_dir == source_orbit_dir)
+        .and_then(|checkout| {
+            crate::workspace_registry::find_workspace(&registry, &checkout.workspace_id)
+        })
         .map(crate::command::workflow::resolved_ship_mode)
         .unwrap_or(crate::command::workflow::ShipMode::Local);
 
@@ -349,7 +350,7 @@ fn unmet_dependency_ids_for_input(
     };
     let task_ids = parse_task_ids(&serde_json::json!({ "task_ids": raw_task_ids }))?;
     let tasks = runtime.stores().tasks().list()?;
-    let status_by_id = build_task_status_index(&tasks);
+    let status_by_id = runtime.task_status_index()?;
     let task_by_id = tasks
         .into_iter()
         .map(|task| (task.id.clone(), task))
@@ -429,7 +430,7 @@ mod tests {
     use serde_json::json;
     use tempfile::tempdir;
 
-    use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
+    use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 
     fn seed_task(
         runtime: &OrbitRuntime,
@@ -623,8 +624,7 @@ mod tests {
                 Workspace {
                     id: "ws-other".to_string(),
                     name: "other".to_string(),
-                    root: other_root,
-                    orbit_dir: other_orbit,
+                    owner_machine_id: None,
                     git_remote: None,
                     ship_mode: Some("local".to_string()),
                     base_branch: "wrong-branch".to_string(),
@@ -635,8 +635,7 @@ mod tests {
                 Workspace {
                     id: "ws-source".to_string(),
                     name: "source".to_string(),
-                    root: source_root,
-                    orbit_dir: source_orbit.clone(),
+                    owner_machine_id: None,
                     git_remote: None,
                     ship_mode: Some("pr".to_string()),
                     base_branch: "registry-branch".to_string(),
@@ -644,6 +643,14 @@ mod tests {
                     created_at: now,
                     updated_at: now,
                 },
+            ],
+            checkouts: vec![
+                WorkspaceCheckout::owner("ws-other".to_string(), other_root, other_orbit),
+                WorkspaceCheckout::owner(
+                    "ws-source".to_string(),
+                    source_root,
+                    source_orbit.clone(),
+                ),
             ],
             ..WorkspaceRegistry::default()
         };

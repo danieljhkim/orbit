@@ -5,6 +5,7 @@ use super::REGISTRY_SCHEMA_VERSION;
 use super::util::now_string;
 
 pub(super) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
+    migrate_path_coupled_workspace_bindings(conn)?;
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS allocator_state (
@@ -16,15 +17,22 @@ pub(super) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
         CREATE TABLE IF NOT EXISTS workspace_bindings (
             workspace_id TEXT PRIMARY KEY,
             slug TEXT NOT NULL,
-            repo_root TEXT NOT NULL,
-            workspace_path TEXT NOT NULL,
-            orbit_dir TEXT NOT NULL UNIQUE,
             repo_fingerprint TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_workspace_bindings_paths
-            ON workspace_bindings(repo_root, workspace_path, orbit_dir);
+
+        CREATE TABLE IF NOT EXISTS workspace_checkout_bindings (
+            workspace_id TEXT PRIMARY KEY,
+            repo_root TEXT NOT NULL,
+            workspace_path TEXT NOT NULL,
+            orbit_dir TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(workspace_id) REFERENCES workspace_bindings(workspace_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_workspace_checkout_bindings_paths
+            ON workspace_checkout_bindings(repo_root, workspace_path, orbit_dir);
 
         CREATE TABLE IF NOT EXISTS task_bundle_bindings (
             task_id TEXT PRIMARY KEY,
@@ -116,6 +124,74 @@ pub(super) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
     conn.pragma_update(None, "user_version", i64::from(REGISTRY_SCHEMA_VERSION))
         .map_err(|e| OrbitError::Store(format!("failed to set registry user_version: {e}")))?;
     Ok(())
+}
+
+/// Schema v4 splits stable coordination identity from machine-local checkout
+/// paths. Rebuild the parent table under the same final name so existing child
+/// foreign keys keep referencing `workspace_bindings` without rewriting any
+/// task, index, tag, relation, or allocator rows.
+fn migrate_path_coupled_workspace_bindings(conn: &Connection) -> Result<(), OrbitError> {
+    if !table_has_column(conn, "workspace_bindings", "repo_root")? {
+        return Ok(());
+    }
+
+    conn.execute_batch("PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE;")
+        .map_err(|e| OrbitError::Store(format!("start task registry v4 migration: {e}")))?;
+    let migration = conn.execute_batch(
+        "
+        CREATE TABLE workspace_bindings_v4 (
+            workspace_id TEXT PRIMARY KEY,
+            slug TEXT NOT NULL,
+            repo_fingerprint TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO workspace_bindings_v4(
+            workspace_id, slug, repo_fingerprint, created_at, updated_at
+        )
+        SELECT workspace_id, slug, repo_fingerprint, created_at, updated_at
+        FROM workspace_bindings;
+
+        CREATE TABLE workspace_checkout_bindings (
+            workspace_id TEXT PRIMARY KEY,
+            repo_root TEXT NOT NULL,
+            workspace_path TEXT NOT NULL,
+            orbit_dir TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(workspace_id) REFERENCES workspace_bindings(workspace_id) ON DELETE CASCADE
+        );
+        INSERT INTO workspace_checkout_bindings(
+            workspace_id, repo_root, workspace_path, orbit_dir, created_at, updated_at
+        )
+        SELECT workspace_id, repo_root, workspace_path, orbit_dir, created_at, updated_at
+        FROM workspace_bindings;
+
+        DROP TABLE workspace_bindings;
+        ALTER TABLE workspace_bindings_v4 RENAME TO workspace_bindings;
+        ",
+    );
+    if let Err(error) = migration {
+        let _ = conn.execute_batch("ROLLBACK; PRAGMA foreign_keys = ON;");
+        return Err(OrbitError::Store(format!(
+            "migrate task registry workspace bindings to v4: {error}"
+        )));
+    }
+    conn.execute_batch("COMMIT; PRAGMA foreign_keys = ON;")
+        .map_err(|e| OrbitError::Store(format!("finish task registry v4 migration: {e}")))?;
+    Ok(())
+}
+
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, OrbitError> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| OrbitError::Store(e.to_string()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    Ok(columns.iter().any(|candidate| candidate == column))
 }
 
 pub(super) fn reject_unsupported_registry_schema(conn: &Connection) -> Result<(), OrbitError> {

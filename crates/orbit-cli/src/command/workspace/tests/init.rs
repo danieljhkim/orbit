@@ -4,7 +4,8 @@ use tempfile::tempdir;
 
 use chrono::Utc;
 use orbit_common::types::{
-    OverlapPolicy, RoutineTarget, Workspace, WorkspaceRegistry, WorkspaceStatus, parse_routine_yaml,
+    OverlapPolicy, RoutineTarget, Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus,
+    parse_routine_yaml,
 };
 use orbit_core::command::init::default_orbitignore_template;
 use orbit_core::workspace_registry;
@@ -154,8 +155,7 @@ fn workspace_list_and_show_report_effective_ship_mode() {
     let workspace = Workspace {
         id: "ws_pr_gated".to_string(),
         name: "pr-gated".to_string(),
-        root: "/work/pr-gated".into(),
-        orbit_dir: "/work/pr-gated/.orbit".into(),
+        owner_machine_id: None,
         git_remote: None,
         ship_mode: Some("pr".to_string()),
         base_branch: "agent-main".to_string(),
@@ -165,6 +165,11 @@ fn workspace_list_and_show_report_effective_ship_mode() {
     };
     let registry = WorkspaceRegistry {
         workspaces: vec![workspace.clone()],
+        checkouts: vec![WorkspaceCheckout::owner(
+            workspace.id.clone(),
+            "/work/pr-gated".into(),
+            "/work/pr-gated/.orbit".into(),
+        )],
         ..Default::default()
     };
 
@@ -172,7 +177,7 @@ fn workspace_list_and_show_report_effective_ship_mode() {
     assert!(list.contains("SHIP MODE"), "{list}");
     assert!(list.contains("pr"), "{list}");
 
-    let show = format_workspace_show(&workspace);
+    let show = format_workspace_show(&workspace, &registry.checkouts[0]);
     assert!(show.contains("ship_mode:   pr"), "{show}");
 }
 
@@ -648,12 +653,14 @@ fn workspace_init_with_root_override_uses_custom_registry() {
         .iter()
         .find(|workspace| workspace.name == "custom-root")
         .expect("registered workspace");
+    let checkout = workspace_registry::find_checkout(&registry, &workspace_record.id)
+        .expect("registered checkout");
     assert_eq!(
-        std::fs::canonicalize(&workspace_record.root).expect("canonical registered root"),
+        std::fs::canonicalize(&checkout.repo_root).expect("canonical registered root"),
         std::fs::canonicalize(workspace.path()).expect("canonical workspace")
     );
     assert_eq!(
-        std::fs::canonicalize(&workspace_record.orbit_dir).expect("canonical registered root"),
+        std::fs::canonicalize(&checkout.orbit_dir).expect("canonical registered root"),
         std::fs::canonicalize(&custom_root).expect("canonical custom root")
     );
     assert_eq!(workspace_record.base_branch, "main");

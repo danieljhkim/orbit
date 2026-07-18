@@ -41,7 +41,7 @@ pub(crate) struct TaskBundleStoreV2 {
     // deliberately rather than keep nested anti-pattern).
     pub(crate) registry: TaskRegistryStore,
     pub(crate) workspace_id: String,
-    pub(crate) workspace_orbit_dir: PathBuf,
+    pub(crate) workspace_orbit_dir: Option<PathBuf>,
 }
 
 impl TaskBundleStoreV2 {
@@ -53,7 +53,15 @@ impl TaskBundleStoreV2 {
         Self {
             registry,
             workspace_id,
-            workspace_orbit_dir,
+            workspace_orbit_dir: Some(workspace_orbit_dir),
+        }
+    }
+
+    pub(crate) fn new_checkoutless(registry: TaskRegistryStore, workspace_id: String) -> Self {
+        Self {
+            registry,
+            workspace_id,
+            workspace_orbit_dir: None,
         }
     }
 
@@ -133,27 +141,34 @@ impl TaskBundleStoreV2 {
                     return Err(err);
                 }
             };
-        let projection = match self
-            .registry
-            .rebuild_projection(&self.workspace_orbit_dir, &self.workspace_id)
-        {
-            Ok(projection) => projection,
-            Err(err) => {
-                orbit_common::tracing::warn!(
-                    target: "orbit.store.task_bundle_v2",
-                    task_id,
-                    workspace_id = %self.workspace_id,
-                    error = %err,
-                    "task bundle created, but projection rebuild failed; continuing in degraded mode",
-                );
-                ProjectionRebuildResult {
-                    projected: 0,
-                    repaired: 0,
-                    degraded_reason: Some(format!(
-                        "projection rebuild failed after bundle creation: {err}"
-                    )),
+        let projection = match self.workspace_orbit_dir.as_deref() {
+            None => ProjectionRebuildResult {
+                projected: 0,
+                repaired: 0,
+                degraded_reason: None,
+            },
+            Some(workspace_orbit_dir) => match self
+                .registry
+                .rebuild_projection(workspace_orbit_dir, &self.workspace_id)
+            {
+                Ok(projection) => projection,
+                Err(err) => {
+                    orbit_common::tracing::warn!(
+                        target: "orbit.store.task_bundle_v2",
+                        task_id,
+                        workspace_id = %self.workspace_id,
+                        error = %err,
+                        "task bundle created, but projection rebuild failed; continuing in degraded mode",
+                    );
+                    ProjectionRebuildResult {
+                        projected: 0,
+                        repaired: 0,
+                        degraded_reason: Some(format!(
+                            "projection rebuild failed after bundle creation: {err}"
+                        )),
+                    }
                 }
-            }
+            },
         };
 
         Ok(TaskBundleCreateResult {
@@ -171,7 +186,9 @@ impl TaskBundleStoreV2 {
         orbit_common::types::validate_orb_task_id(task_id)?;
         let bundle_dir = self.bundle_path(task_id)?;
 
-        ensure_projection_entry_removable(&self.workspace_orbit_dir, task_id)?;
+        if let Some(workspace_orbit_dir) = self.workspace_orbit_dir.as_deref() {
+            ensure_projection_entry_removable(workspace_orbit_dir, task_id)?;
+        }
         let unregistered = self
             .registry
             .unregister_task_bundle(task_id, &self.workspace_id)?;
@@ -180,7 +197,10 @@ impl TaskBundleStoreV2 {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
             Err(err) => return Err(OrbitError::Io(err.to_string())),
         };
-        let removed_projection = remove_projection_entry(&self.workspace_orbit_dir, task_id)?;
+        let removed_projection = match self.workspace_orbit_dir.as_deref() {
+            Some(workspace_orbit_dir) => remove_projection_entry(workspace_orbit_dir, task_id)?,
+            None => false,
+        };
         Ok(unregistered || removed_bundle || removed_projection)
     }
 

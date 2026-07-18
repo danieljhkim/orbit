@@ -160,7 +160,10 @@ pub use tool_input::{
     optional_string, optional_string_alias, optional_string_list_alias, optional_u32_alias,
     required_string, split_csv, strip_retired_task_add_input_fields,
 };
-pub use workspace::{Workspace, WorkspacePaths, WorkspaceRegistry, WorkspaceStatus};
+pub use workspace::{
+    WORKSPACE_REGISTRY_SCHEMA_VERSION, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
+    WorkspacePaths, WorkspaceRegistry, WorkspaceStatus,
+};
 
 #[cfg(test)]
 mod tests;

@@ -37,13 +37,16 @@ pub(super) fn format_workspace_list(registry: &WorkspaceRegistry) -> String {
         "NAME", "ID", "STATUS", "SHIP MODE"
     );
     for workspace in &registry.workspaces {
+        let root = workspace_registry::find_checkout(registry, &workspace.id)
+            .map(|checkout| checkout.repo_root.display().to_string())
+            .unwrap_or_else(|| "-".to_string());
         output.push_str(&format!(
             "{:<20} {:<12} {:<8} {:<10} {}\n",
             workspace.name,
             workspace.id,
             workspace.status,
             orbit_core::resolved_ship_mode(workspace).as_input_value(),
-            workspace.root.display()
+            root
         ));
     }
     output

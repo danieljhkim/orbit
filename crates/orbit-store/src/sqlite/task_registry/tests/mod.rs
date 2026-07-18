@@ -15,9 +15,10 @@ use super::REGISTRY_SCHEMA_VERSION;
 use super::schema::registry_user_version;
 use super::util::{normalize_path, now_string};
 use super::{
-    BindWorkspaceParams, ProjectionRebuildResult, TaskIndexFilter, TaskRegistryStore,
-    WorkspaceBinding, WorkspaceConfig, read_workspace_config, read_workspace_config_optional,
-    task_registry_path, workspace_config_path, workspace_id_for_orbit_dir, write_workspace_config,
+    BindWorkspaceParams, ProjectionRebuildResult, RegisterWorkspaceParams, TaskIndexFilter,
+    TaskRegistryStore, WorkspaceCheckoutBinding, WorkspaceConfig, read_workspace_config,
+    read_workspace_config_optional, task_registry_path, workspace_config_path,
+    workspace_id_for_orbit_dir, write_workspace_config,
 };
 
 fn registry_path(temp: &TempDir) -> PathBuf {
@@ -28,7 +29,7 @@ fn store(temp: &TempDir) -> TaskRegistryStore {
     TaskRegistryStore::open(&registry_path(temp)).expect("open registry")
 }
 
-fn bind(store: &TaskRegistryStore, root: &Path) -> WorkspaceBinding {
+fn bind(store: &TaskRegistryStore, root: &Path) -> WorkspaceCheckoutBinding {
     let orbit_dir = root.join(".orbit");
     fs::create_dir_all(&orbit_dir).expect("create orbit dir");
     store
@@ -45,7 +46,7 @@ fn bind(store: &TaskRegistryStore, root: &Path) -> WorkspaceBinding {
 
 fn create_canonical_bundle(
     store: &TaskRegistryStore,
-    workspace: &WorkspaceBinding,
+    workspace: &WorkspaceCheckoutBinding,
     task_id: &str,
 ) -> PathBuf {
     let bundle_dir = store
@@ -196,6 +197,188 @@ fn open_migrates_existing_task_index_columns_before_creating_indexes() {
 }
 
 #[test]
+fn open_migrates_path_coupled_registry_once_without_changing_coordination_state() {
+    let temp = TempDir::new().expect("tempdir");
+    let path = registry_path(&temp);
+    fs::create_dir_all(path.parent().expect("registry parent")).expect("create parent");
+    let repo_root = temp.path().join("legacy-repo");
+    let orbit_dir = repo_root.join(".orbit");
+    let canonical_path = temp
+        .path()
+        .join("tasks/workspaces/legacy-workspace-aaaaaa/ORB-00041");
+    fs::create_dir_all(&canonical_path).expect("create canonical task payload");
+    fs::write(canonical_path.join("payload.sentinel"), "preserve-me")
+        .expect("write payload sentinel");
+    let timestamp = "2026-07-17T00:00:00+00:00";
+
+    let conn = Connection::open(&path).expect("open legacy sqlite");
+    conn.execute_batch(
+        "
+        CREATE TABLE allocator_state (
+            authority TEXT PRIMARY KEY,
+            next_number INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE workspace_bindings (
+            workspace_id TEXT PRIMARY KEY,
+            slug TEXT NOT NULL,
+            repo_root TEXT NOT NULL,
+            workspace_path TEXT NOT NULL,
+            orbit_dir TEXT NOT NULL UNIQUE,
+            repo_fingerprint TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE task_bundle_bindings (
+            task_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            canonical_path TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE task_bundle_index (
+            task_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            priority TEXT NOT NULL,
+            job_run_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            terminal_month TEXT
+        );
+        CREATE TABLE task_bundle_tags (
+            task_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            PRIMARY KEY(task_id, tag)
+        );
+        CREATE TABLE task_bundle_relations (
+            source_task_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            relation_type TEXT NOT NULL,
+            target_task_id TEXT NOT NULL,
+            PRIMARY KEY(source_task_id, relation_type, target_task_id)
+        );
+        PRAGMA user_version = 3;
+        ",
+    )
+    .expect("create legacy schema");
+    conn.execute(
+        "INSERT INTO allocator_state VALUES ('local', 42, ?1)",
+        [timestamp],
+    )
+    .expect("seed allocator");
+    conn.execute(
+        "INSERT INTO workspace_bindings VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?6)",
+        params![
+            "legacy-workspace-aaaaaa",
+            "legacy-workspace",
+            repo_root.to_string_lossy(),
+            orbit_dir.to_string_lossy(),
+            "legacy-fingerprint",
+            timestamp,
+        ],
+    )
+    .expect("seed workspace");
+    conn.execute(
+        "INSERT INTO task_bundle_bindings VALUES (?1, ?2, ?3, ?4, ?4)",
+        params![
+            "ORB-00041",
+            "legacy-workspace-aaaaaa",
+            canonical_path.to_string_lossy(),
+            timestamp,
+        ],
+    )
+    .expect("seed task binding");
+    conn.execute(
+        "INSERT INTO task_bundle_index VALUES (?1, ?2, 'done', 'high', NULL, ?3, ?3, '2026-07')",
+        params!["ORB-00041", "legacy-workspace-aaaaaa", timestamp],
+    )
+    .expect("seed task index");
+    conn.execute(
+        "INSERT INTO task_bundle_tags VALUES (?1, ?2, 'migration')",
+        params!["ORB-00041", "legacy-workspace-aaaaaa"],
+    )
+    .expect("seed tag");
+    conn.execute(
+        "INSERT INTO task_bundle_relations VALUES (?1, ?2, 'resolves', 'F2026-07-001')",
+        params!["ORB-00041", "legacy-workspace-aaaaaa"],
+    )
+    .expect("seed relation");
+    drop(conn);
+
+    let migrated = TaskRegistryStore::open(&path).expect("migrate registry");
+    let workspace = migrated
+        .find_workspace_binding("legacy-workspace-aaaaaa")
+        .expect("find logical workspace")
+        .expect("logical workspace exists");
+    let checkout = migrated
+        .find_workspace_checkout("legacy-workspace-aaaaaa")
+        .expect("find checkout")
+        .expect("checkout exists");
+    let tasks = migrated
+        .tasks_for_workspace("legacy-workspace-aaaaaa")
+        .expect("task bindings");
+    let statuses = migrated
+        .global_task_status_index()
+        .expect("status projection");
+    assert_eq!(workspace.slug, "legacy-workspace");
+    assert_eq!(
+        workspace.repo_fingerprint.as_deref(),
+        Some("legacy-fingerprint")
+    );
+    assert_eq!(checkout.repo_root, normalize_path(&repo_root));
+    assert_eq!(checkout.orbit_dir, normalize_path(&orbit_dir));
+    assert_eq!(tasks[0].task_id, "ORB-00041");
+    assert_eq!(tasks[0].canonical_path, normalize_path(&canonical_path));
+    assert_eq!(statuses.get("ORB-00041"), Some(&TaskStatus::Done));
+    assert_eq!(migrated.allocator_next_number().expect("allocator"), 42);
+    assert_eq!(
+        fs::read_to_string(canonical_path.join("payload.sentinel")).expect("read payload"),
+        "preserve-me"
+    );
+    drop(migrated);
+
+    let conn = Connection::open(&path).expect("inspect migrated sqlite");
+    let logical_columns = table_columns(&conn, "workspace_bindings");
+    assert!(!logical_columns.iter().any(|column| column == "repo_root"));
+    assert!(
+        !logical_columns
+            .iter()
+            .any(|column| column == "workspace_path")
+    );
+    assert!(!logical_columns.iter().any(|column| column == "orbit_dir"));
+    drop(conn);
+
+    let reopened = TaskRegistryStore::open(&path).expect("reopen migrated registry");
+    assert_eq!(
+        reopened
+            .find_workspace_binding("legacy-workspace-aaaaaa")
+            .expect("find logical workspace"),
+        Some(workspace)
+    );
+    assert_eq!(
+        reopened
+            .find_workspace_checkout("legacy-workspace-aaaaaa")
+            .expect("find checkout"),
+        Some(checkout)
+    );
+    assert_eq!(
+        reopened
+            .tasks_for_workspace("legacy-workspace-aaaaaa")
+            .expect("task bindings"),
+        tasks
+    );
+    assert_eq!(
+        reopened
+            .global_task_status_index()
+            .expect("status projection"),
+        statuses
+    );
+    assert_eq!(reopened.allocator_next_number().expect("allocator"), 42);
+}
+
+#[test]
 fn open_rejects_newer_registry_schema_version() {
     let temp = TempDir::new().expect("tempdir");
     let path = registry_path(&temp);
@@ -245,6 +428,176 @@ fn allocator_is_global_across_workspaces() {
 }
 
 #[test]
+fn checkoutless_workspaces_coordinate_cross_workspace_relations_without_paths() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    let first = store
+        .register_workspace(RegisterWorkspaceParams {
+            workspace_id: "logical-first-aaaaaa".into(),
+            slug: "Logical First".into(),
+            repo_fingerprint: Some("first-fingerprint".into()),
+        })
+        .expect("register first logical workspace");
+    let second = store
+        .register_workspace(RegisterWorkspaceParams {
+            workspace_id: "logical-second-bbbbbb".into(),
+            slug: "Logical Second".into(),
+            repo_fingerprint: None,
+        })
+        .expect("register second logical workspace");
+
+    assert!(
+        store
+            .find_workspace_checkout(&first.workspace_id)
+            .expect("find first checkout")
+            .is_none()
+    );
+    assert!(
+        store
+            .find_workspace_checkout(&second.workspace_id)
+            .expect("find second checkout")
+            .is_none()
+    );
+
+    let target_id = store
+        .allocate_task_id(&second.workspace_id)
+        .expect("allocate target");
+    let source_id = store
+        .allocate_task_id(&first.workspace_id)
+        .expect("allocate source");
+    assert_eq!(
+        (target_id.as_str(), source_id.as_str()),
+        ("ORB-00000", "ORB-00001")
+    );
+
+    for (workspace_id, task_id) in [
+        (second.workspace_id.as_str(), target_id.as_str()),
+        (first.workspace_id.as_str(), source_id.as_str()),
+    ] {
+        let path = store
+            .canonical_task_bundle_path(workspace_id, task_id)
+            .expect("canonical coordination path");
+        fs::create_dir_all(&path).expect("create canonical bundle");
+        store
+            .register_task_bundle(task_id, workspace_id, &path)
+            .expect("register canonical bundle");
+    }
+    store
+        .replace_task_index(
+            &second.workspace_id,
+            &envelope(&target_id, TaskStatus::Done, Vec::new(), Vec::new()),
+        )
+        .expect("index completed target");
+    store
+        .replace_task_index(
+            &first.workspace_id,
+            &envelope(
+                &source_id,
+                TaskStatus::Backlog,
+                Vec::new(),
+                vec![
+                    TaskRelation {
+                        relation_type: TaskRelationType::BlockedBy,
+                        target: target_id.clone(),
+                    },
+                    TaskRelation {
+                        relation_type: TaskRelationType::RelatedTo,
+                        target: target_id.clone(),
+                    },
+                ],
+            ),
+        )
+        .expect("index cross-workspace relations");
+
+    assert_eq!(
+        store
+            .global_task_status_index()
+            .expect("global statuses")
+            .get(&target_id),
+        Some(&TaskStatus::Done)
+    );
+    assert_eq!(
+        store
+            .indexed_relation_targets(&first.workspace_id, &source_id, TaskRelationType::BlockedBy,)
+            .expect("cross-workspace dependency"),
+        vec![target_id.clone()]
+    );
+    assert_eq!(
+        store
+            .indexed_task_count_for_workspace(&first.workspace_id)
+            .expect("first count"),
+        1
+    );
+    assert_eq!(
+        store
+            .indexed_task_count_for_workspace(&second.workspace_id)
+            .expect("second count"),
+        1
+    );
+
+    let fake_checkout = temp.path().join("must-not-be-created").join(".orbit");
+    let error = store
+        .rebuild_projection(&fake_checkout, &first.workspace_id)
+        .expect_err("checkout-local projection requires a binding");
+    assert!(error.to_string().contains(&first.workspace_id));
+    assert!(error.to_string().contains("no local checkout binding"));
+    assert!(
+        !fake_checkout.exists(),
+        "preflight must happen before mutation"
+    );
+
+    let before_allocator = store.allocator_next_number().expect("allocator before");
+    let missing_target = "ORB-09999";
+    let error = store
+        .validate_new_task_relation_targets(
+            &first.workspace_id,
+            &[TaskRelation {
+                relation_type: TaskRelationType::BlockedBy,
+                target: missing_target.into(),
+            }],
+        )
+        .expect_err("missing global target");
+    assert!(error.to_string().contains(missing_target));
+    assert!(error.to_string().contains(&first.workspace_id));
+    assert_eq!(
+        store.allocator_next_number().expect("allocator after"),
+        before_allocator,
+        "missing target preflight must not consume an ID"
+    );
+
+    let error = store
+        .replace_task_index(
+            &first.workspace_id,
+            &envelope(
+                &source_id,
+                TaskStatus::Review,
+                Vec::new(),
+                vec![TaskRelation {
+                    relation_type: TaskRelationType::RelatedTo,
+                    target: missing_target.into(),
+                }],
+            ),
+        )
+        .expect_err("missing relation target");
+    assert!(error.to_string().contains(missing_target));
+    assert!(error.to_string().contains(&first.workspace_id));
+    assert_eq!(
+        store
+            .global_task_status_index()
+            .expect("status after rejected update")
+            .get(&source_id),
+        Some(&TaskStatus::Backlog),
+        "rejected relation update must be atomic"
+    );
+    assert_eq!(
+        store
+            .indexed_relation_targets(&first.workspace_id, &source_id, TaskRelationType::BlockedBy,)
+            .expect("relation after rejected update"),
+        vec![target_id]
+    );
+}
+
+#[test]
 fn allocator_reports_exhaustion() {
     let temp = TempDir::new().expect("tempdir");
     let store = store(&temp);
@@ -283,7 +636,7 @@ fn bind_workspace_is_idempotent_for_orbit_dir() {
         .expect("idempotent bind");
 
     assert_eq!(first.workspace_id, second.workspace_id);
-    assert_eq!(first.slug, second.slug);
+    assert_eq!(first.workspace_id, second.workspace_id);
 }
 
 #[test]
@@ -516,10 +869,12 @@ fn generated_relation_index_supports_forward_and_inverse_lookup() {
     let temp = TempDir::new().expect("tempdir");
     let store = store(&temp);
     let workspace = bind(&store, temp.path());
-    let bundle_dir = create_canonical_bundle(&store, &workspace, "ORB-00000");
-    store
-        .register_task_bundle("ORB-00000", &workspace.workspace_id, &bundle_dir)
-        .expect("register bundle");
+    for task_id in ["ORB-00000", "ORB-00001", "ORB-00002"] {
+        let bundle_dir = create_canonical_bundle(&store, &workspace, task_id);
+        store
+            .register_task_bundle(task_id, &workspace.workspace_id, &bundle_dir)
+            .expect("register bundle");
+    }
 
     store
         .replace_task_index(

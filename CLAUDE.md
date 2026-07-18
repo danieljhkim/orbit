@@ -20,6 +20,19 @@ Be submission-ready Monday; Tuesday is for final verification and submission, no
 Primary `/feedback` session ID: `019f6e0f-eb02-73e3-b8ea-dbc8217ba57e`. Remove this section after
 submission.
 
+## Resident agent
+
+**Hohmann** (`agentbase/hohmann/memory`) is Sol's resident systems engineer for Orbit. The shared
+front-door orchestrator owns cross-workspace routing, dispatch, independent review, merge, and task
+closure; Hohmann holds this repository's deep implementation context and executes one scoped Orbit
+mandate at a time.
+
+A direct Hohmann run must use Bridge `agent_invoke` with `provider="codex"` and
+`model="gpt-5.6-sol"`; its prompt reads the on-box Hohmann memory layer first and states "you are
+Hohmann, Sol's Orbit systems engineer." Generic Codex/Claude runs and independent Opus/Fable
+reviewers may work on Orbit, but they do not impersonate Hohmann. The full invocation and
+cross-codebase handoff contract lives in Hohmann's `CLAUDE.md`.
+
 ## Rules
 
 - **Don't commit** until the Orbit task has been explicitly approved by the human.

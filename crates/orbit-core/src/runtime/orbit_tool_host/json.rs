@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use orbit_common::types::{
     Learning, OrbitError, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskStatus,
-    build_task_status_index, resolve_task_dependencies,
+    resolve_task_dependencies,
 };
 use serde_json::{Map, Value, json};
 
@@ -75,8 +75,7 @@ pub(super) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStat
 }
 
 pub(super) fn serialize_task(runtime: &OrbitRuntime, task: &Task) -> Result<Value, OrbitError> {
-    let tasks = runtime.list_tasks()?;
-    let status_by_id = build_task_status_index(&tasks);
+    let status_by_id = runtime.task_status_index()?;
     let mut value = task_to_json(task, &status_by_id);
     let object = value.as_object_mut().ok_or_else(|| {
         OrbitError::Execution("task JSON projection did not produce an object".to_string())
@@ -132,7 +131,7 @@ pub(super) fn task_fields_to_json(
     fields: &[String],
 ) -> Result<Value, OrbitError> {
     let status_by_id = if fields.iter().any(|field| field == "resolved_dependencies") {
-        Some(build_task_status_index(&runtime.list_tasks()?))
+        Some(runtime.task_status_index()?)
     } else {
         None
     };
