@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use orbit_common::types::{OrbitError, ToolSchema, ToolSessionContext};
+use orbit_common::types::{
+    McpToolDefinition, NotFoundKind, OrbitError, ToolSchema, ToolSessionContext,
+    mcp_advertised_tool_name,
+};
 use rmcp::ErrorData as McpError;
 use rmcp::ServerHandler;
 use rmcp::model::{
@@ -18,17 +21,29 @@ use super::structured::mcp_structured_content;
 use crate::error::tool_error_result;
 
 impl OrbitToolServer {
-    pub(super) fn combined_tool_schemas(&self) -> Vec<ToolSchema> {
-        let mut schemas = self.host.list_tool_schemas();
+    pub(super) fn combined_tool_definitions(&self) -> Vec<McpToolDefinition> {
+        let mut definitions = self
+            .host
+            .list_tool_schemas()
+            .into_iter()
+            .filter(|schema| !self.graph_tools.is_graph_tool(&schema.name))
+            .filter_map(|schema| {
+                let policy = self.host.mcp_tool_policy(&schema.name)?;
+                McpToolDefinition::new(schema, policy).ok()
+            })
+            .collect::<Vec<_>>();
         // ORB-00391: the v1 orbit-knowledge graph builtins were decommissioned,
         // so the in-process orbit-graph (v2) adapter owns its known graph
-        // names. Replace any re-exposed host schema for those names instead of
-        // letting schema presence disable the adapter's policy/audit path.
-        // Unknown host graph names remain visible and take the normal host
-        // dispatch path, including its allowlist preflight.
-        schemas.retain(|schema| !self.graph_tools.is_graph_tool(&schema.name));
-        schemas.extend(self.graph_tools.schemas());
-        schemas
+        // names and their local-derived policies.
+        definitions.extend(self.graph_tools.definitions());
+        definitions
+    }
+
+    pub(super) fn combined_tool_schemas(&self) -> Vec<ToolSchema> {
+        self.combined_tool_definitions()
+            .into_iter()
+            .map(|definition| definition.schema)
+            .collect()
     }
 
     // pub(super) visibility widened from private so that adapter::tests (sibling under adapter)
@@ -94,6 +109,25 @@ impl OrbitToolServer {
         let canonical = self
             .canonical_name(&inbound)
             .map_err(ToolNameCollision::into_mcp_error)?;
+        let has_valid_definition = self
+            .combined_tool_schemas()
+            .iter()
+            .any(|schema| schema.name == canonical);
+        // L-0093: reject declared policy drift here, but let truly unknown names
+        // reach the host preflight because it owns rejected-call audit insertion.
+        let declared_without_valid_policy = !has_valid_definition
+            && (self.host.list_tool_schemas().iter().any(|schema| {
+                schema.name == canonical || mcp_advertised_tool_name(&schema.name) == inbound
+            }) || self.graph_tools.is_graph_tool(&canonical)
+                || super::graph::GRAPH_TOOL_NAMES
+                    .iter()
+                    .any(|name| mcp_advertised_tool_name(name) == inbound));
+        if declared_without_valid_policy {
+            return Ok(tool_error_result(&OrbitError::not_found(
+                NotFoundKind::Tool,
+                canonical,
+            )));
+        }
         let input = req
             .arguments
             .map(Value::Object)

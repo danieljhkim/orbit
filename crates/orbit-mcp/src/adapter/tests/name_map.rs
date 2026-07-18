@@ -52,3 +52,11 @@ fn build_name_map_rejects_sanitized_name_collisions() {
         Some("foo_bar")
     );
 }
+
+#[test]
+fn build_name_map_rejects_duplicate_canonical_names() {
+    let schemas = vec![tool_schema("orbit.task.add"), tool_schema("orbit.task.add")];
+    let err = build_name_map(&schemas).expect_err("canonical names must be unique");
+    assert_eq!(err.advertised_name, "orbit_task_add");
+    assert_eq!(err.canonical_names, vec!["orbit.task.add".to_string()]);
+}

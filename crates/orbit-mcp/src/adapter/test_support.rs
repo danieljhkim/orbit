@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::sync::Mutex as StdMutex;
 
 use orbit_common::types::{
-    LearningInjectionState, OrbitError, ToolParam, ToolSchema, ToolSessionContext,
+    LearningInjectionState, McpCapability, McpToolPlacement, McpToolPolicy, OrbitError, ToolParam,
+    ToolSchema, ToolSessionContext,
 };
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
@@ -31,6 +32,19 @@ pub(super) fn tool_schema(name: &str) -> ToolSchema {
     }
 }
 
+pub(super) fn test_mcp_policy_for(
+    canonical_name: &str,
+    names: impl IntoIterator<Item = impl AsRef<str>>,
+) -> Option<McpToolPolicy> {
+    names
+        .into_iter()
+        .any(|name| name.as_ref() == canonical_name)
+        .then(|| {
+            McpToolPolicy::new(McpToolPlacement::LocalDerived, [McpCapability::Agent])
+                .expect("test MCP policy has one static capability")
+        })
+}
+
 pub(super) fn request_with_args(name: &str, args: Value) -> CallToolRequestParams {
     CallToolRequestParams::new(sanitize_tool_name(name)).with_arguments(
         args.as_object()
@@ -48,6 +62,13 @@ pub(super) struct StubHost {
 impl crate::McpHost for StubHost {
     fn list_tool_schemas(&self) -> Vec<ToolSchema> {
         self.schemas.clone()
+    }
+
+    fn mcp_tool_policy(&self, canonical_name: &str) -> Option<McpToolPolicy> {
+        test_mcp_policy_for(
+            canonical_name,
+            self.schemas.iter().map(|schema| &schema.name),
+        )
     }
 
     fn call_tool(
@@ -77,6 +98,13 @@ pub(super) struct EchoArrayHost {
 impl crate::McpHost for EchoArrayHost {
     fn list_tool_schemas(&self) -> Vec<ToolSchema> {
         self.schemas.clone()
+    }
+
+    fn mcp_tool_policy(&self, canonical_name: &str) -> Option<McpToolPolicy> {
+        test_mcp_policy_for(
+            canonical_name,
+            self.schemas.iter().map(|schema| &schema.name),
+        )
     }
 
     fn call_tool(
@@ -115,6 +143,18 @@ impl crate::McpHost for LearningSidecarHost {
             tool_schema("orbit.task.show"),
             tool_schema("orbit.learning.list"),
         ]
+    }
+
+    fn mcp_tool_policy(&self, canonical_name: &str) -> Option<McpToolPolicy> {
+        test_mcp_policy_for(
+            canonical_name,
+            [
+                "orbit.graph.show",
+                "orbit.graph.refs",
+                "orbit.task.show",
+                "orbit.learning.list",
+            ],
+        )
     }
 
     fn call_tool(
@@ -205,6 +245,10 @@ impl crate::McpHost for SessionContextHost {
         ]
     }
 
+    fn mcp_tool_policy(&self, canonical_name: &str) -> Option<McpToolPolicy> {
+        test_mcp_policy_for(canonical_name, ["orbit.task.list", "orbit.task.add"])
+    }
+
     fn call_tool(
         &self,
         name: &str,
@@ -237,6 +281,17 @@ impl crate::McpHost for LearningPersistenceHost {
             tool_schema("orbit.learning.update"),
             tool_schema("orbit.learning.show"),
         ]
+    }
+
+    fn mcp_tool_policy(&self, canonical_name: &str) -> Option<McpToolPolicy> {
+        test_mcp_policy_for(
+            canonical_name,
+            [
+                "orbit.learning.add",
+                "orbit.learning.update",
+                "orbit.learning.show",
+            ],
+        )
     }
 
     fn call_tool(

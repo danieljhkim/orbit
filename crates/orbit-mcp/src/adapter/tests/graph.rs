@@ -4,17 +4,33 @@ use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use orbit_common::types::{NotFoundKind, OrbitError, ToolSessionContext};
+use orbit_common::types::{
+    McpCapability, McpToolPlacement, NotFoundKind, OrbitError, ToolSessionContext,
+    canonical_mcp_tool_policy,
+};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::super::OrbitToolServer;
-use super::super::graph::graph_tool_schemas;
+use super::super::graph::graph_tool_definitions;
 use super::super::test_support::{StubHost, request_with_args, tool_schema};
 
 #[test]
 fn graph_tool_schemas_cover_cli_parameters() {
-    let schemas = graph_tool_schemas();
+    let definitions = graph_tool_definitions();
+    assert!(definitions.iter().all(|definition| {
+        definition.policy.placement() == McpToolPlacement::LocalDerived
+            && definition.policy.allowed_capabilities()
+                == &[McpCapability::Agent, McpCapability::Operator]
+                    .into_iter()
+                    .collect()
+            && canonical_mcp_tool_policy(&definition.schema.name).as_ref()
+                == Some(&definition.policy)
+    }));
+    let schemas: Vec<_> = definitions
+        .into_iter()
+        .map(|definition| definition.schema)
+        .collect();
     let names: Vec<_> = schemas.iter().map(|schema| schema.name.as_str()).collect();
     assert_eq!(
         names,

@@ -40,7 +40,7 @@ mod error;
 use std::sync::Arc;
 
 use orbit_common::types::{
-    LearningInjectionState, NotFoundKind, OrbitError, ToolSchema, ToolSessionContext,
+    LearningInjectionState, McpToolPolicy, NotFoundKind, OrbitError, ToolSchema, ToolSessionContext,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::io::stdio;
@@ -63,6 +63,12 @@ pub fn graph_tool_names() -> &'static [&'static str] {
 /// implementation without first crossing the latter host seam.
 pub trait McpHost: Send + Sync + 'static {
     fn list_tool_schemas(&self) -> Vec<ToolSchema>;
+
+    /// Return canonical placement/capability metadata for a listed schema.
+    /// Missing policy is fail-closed and the adapter will not advertise it.
+    fn mcp_tool_policy(&self, _canonical_name: &str) -> Option<McpToolPolicy> {
+        None
+    }
     fn call_tool(
         &self,
         name: &str,

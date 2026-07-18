@@ -149,7 +149,12 @@ pub use task_artifacts::{
     validate_relative_artifact_path, validate_task_relations_for_source,
 };
 pub use task_plan::{TaskPlan, TaskPlanCheckpoint, TaskPlanSuccessCriterion, parse_task_plan};
-pub use tool::{ExecutionResult, StoredTool, ToolParam, ToolSchema, ToolSessionContext};
+pub use tool::{
+    CanonicalMcpToolPolicy, ExecutionResult, McpCapability, McpCapabilityPlacementMatrix,
+    McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolPolicyError, StoredTool, ToolParam,
+    ToolSchema, ToolSessionContext, canonical_mcp_tool_policies, canonical_mcp_tool_policy,
+    mcp_advertised_tool_name, mcp_capability_placement_matrix, validate_mcp_tool_policies,
+};
 pub use tool_input::{
     RETIRED_TASK_ADD_INPUT_FIELDS, optional_csv_or_string_list_alias, optional_raw_string,
     optional_string, optional_string_alias, optional_string_list_alias, optional_u32_alias,

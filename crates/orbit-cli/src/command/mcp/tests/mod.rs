@@ -2,16 +2,17 @@
 
 // Content moved from inline #[cfg(test)] mod tests in mcp/mod.rs per ORB-00221.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use orbit_common::types::{
+    CanonicalMcpToolPolicy, McpCapability, McpToolPlacement, McpToolPolicyError,
+    canonical_mcp_tool_policies, mcp_capability_placement_matrix, validate_mcp_tool_policies,
+};
 use orbit_core::OrbitRuntime;
 use orbit_mcp::McpHost;
+use serde::Deserialize;
 
-use super::host::{
-    ADR_TOOL_NAMES, DOCS_TOOL_NAMES, FRICTION_TOOL_NAMES, GRAPH_TOOL_NAMES, LEARNING_TOOL_NAMES,
-    RuntimeMcpHost, SEARCH_TOOL_NAMES, SEMANTIC_TOOL_NAMES, TASK_TOOL_NAMES, is_mcp_tool_exposed,
-    safe_mcp_tool_names,
-};
+use super::host::{RuntimeMcpHost, is_mcp_tool_exposed, safe_mcp_tool_names};
 
 const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.docs.index",
@@ -121,17 +122,12 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
     let safe_names: BTreeSet<&str> = safe_mcp_tool_names().into_iter().collect();
     let inactive_names: BTreeSet<&str> = EXPECTED_INACTIVE_TOOL_NAMES.iter().copied().collect();
 
-    for name in TASK_TOOL_NAMES
-        .iter()
-        .chain(FRICTION_TOOL_NAMES)
-        .chain(SEARCH_TOOL_NAMES)
-        .chain(SEMANTIC_TOOL_NAMES)
-        .chain(ADR_TOOL_NAMES)
-        .chain(DOCS_TOOL_NAMES)
-        .chain(LEARNING_TOOL_NAMES)
+    for name in safe_mcp_tool_names()
+        .into_iter()
+        .filter(|name| !name.starts_with("orbit.graph."))
     {
         assert!(
-            names.contains(*name),
+            names.contains(name),
             "MCP-candidate tool missing from runtime registry: {name}"
         );
     }
@@ -202,7 +198,11 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
 fn graph_adapter_names_are_explicitly_allowlisted() {
     let safe_names: BTreeSet<&str> = safe_mcp_tool_names().into_iter().collect();
     let adapter_names: BTreeSet<&str> = orbit_mcp::graph_tool_names().iter().copied().collect();
-    let configured_names: BTreeSet<&str> = GRAPH_TOOL_NAMES.iter().copied().collect();
+    let configured_names: BTreeSet<&str> = safe_names
+        .iter()
+        .copied()
+        .filter(|name| name.starts_with("orbit.graph."))
+        .collect();
 
     assert_eq!(adapter_names, configured_names);
     assert!(adapter_names.is_subset(&safe_names));
@@ -223,7 +223,7 @@ fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
 
     for name in safe_mcp_tool_names()
         .into_iter()
-        .filter(|name| !GRAPH_TOOL_NAMES.contains(name))
+        .filter(|name| !name.starts_with("orbit.graph."))
     {
         assert!(
             listed.contains(name),
@@ -257,6 +257,136 @@ fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
             .filter(|name| name.starts_with("orbit.graph."))
             .collect::<Vec<_>>()
     );
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformanceFixture {
+    capabilities: McpConformanceCapabilities,
+    tools: BTreeMap<String, McpConformancePolicy>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformanceCapabilities {
+    allowed_values: BTreeSet<McpCapability>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformancePolicy {
+    placement: McpToolPlacement,
+    allowed_capabilities: BTreeSet<McpCapability>,
+}
+
+#[test]
+fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
+    assert!(
+        serde_yaml::from_str::<McpConformancePolicy>(
+            "{ placement: hub, allowed_capabilities: [unknown] }"
+        )
+        .is_err(),
+        "unknown capabilities must fail typed fixture parsing"
+    );
+    assert!(
+        serde_yaml::from_str::<McpConformancePolicy>("{ placement: hub }").is_err(),
+        "missing capability policy must fail typed fixture parsing"
+    );
+
+    let fixture: McpConformanceFixture = serde_yaml::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/design/mcp-bridge/references/conformance-v1.yaml"
+    )))
+    .expect("frozen MCP conformance fixture must use known typed policy values");
+    assert_eq!(
+        fixture.capabilities.allowed_values,
+        BTreeSet::from([
+            McpCapability::Agent,
+            McpCapability::Operator,
+            McpCapability::Runner,
+        ])
+    );
+
+    let registry = canonical_mcp_tool_policies().expect("canonical MCP policy registry is valid");
+    assert!(matches!(
+        validate_mcp_tool_policies(&[registry[0], registry[0]]),
+        Err(McpToolPolicyError::DuplicateCanonicalName(_))
+    ));
+    let empty_policy = CanonicalMcpToolPolicy {
+        canonical_name: "demo.empty",
+        placement: McpToolPlacement::Hub,
+        allowed_capabilities: &[],
+    };
+    assert_eq!(
+        validate_mcp_tool_policies(&[empty_policy]),
+        Err(McpToolPolicyError::EmptyCapabilities)
+    );
+    let colliding_advertised_names = [
+        CanonicalMcpToolPolicy {
+            canonical_name: "demo.name",
+            placement: McpToolPlacement::Hub,
+            allowed_capabilities: &[McpCapability::Agent],
+        },
+        CanonicalMcpToolPolicy {
+            canonical_name: "demo_name",
+            placement: McpToolPlacement::Hub,
+            allowed_capabilities: &[McpCapability::Agent],
+        },
+    ];
+    assert!(matches!(
+        validate_mcp_tool_policies(&colliding_advertised_names),
+        Err(McpToolPolicyError::DuplicateAdvertisedName(_))
+    ));
+    let canonical_names: BTreeSet<&str> =
+        registry.iter().map(|entry| entry.canonical_name).collect();
+    assert_eq!(canonical_names.len(), registry.len());
+
+    let advertised_names: BTreeSet<String> = registry
+        .iter()
+        .map(|entry| entry.advertised_name())
+        .collect();
+    assert_eq!(advertised_names.len(), registry.len());
+    assert!(advertised_names.iter().all(|name| !name.is_empty()));
+
+    let fixture_names: BTreeSet<&str> = fixture.tools.keys().map(String::as_str).collect();
+    assert_eq!(canonical_names, fixture_names);
+    for entry in registry {
+        let expected = fixture
+            .tools
+            .get(entry.canonical_name)
+            .expect("every advertised canonical name has fixture policy");
+        assert_eq!(
+            entry.placement, expected.placement,
+            "{}",
+            entry.canonical_name
+        );
+        assert_eq!(
+            entry
+                .allowed_capabilities
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>(),
+            expected.allowed_capabilities,
+            "{}",
+            entry.canonical_name
+        );
+        assert!(
+            !expected.allowed_capabilities.is_empty(),
+            "{} has an empty capability set",
+            entry.canonical_name
+        );
+    }
+
+    let matrix =
+        mcp_capability_placement_matrix().expect("capability matrix derives from valid registry");
+    for entry in registry {
+        for capability in entry.allowed_capabilities {
+            assert!(
+                matrix[&entry.placement][capability].contains(&entry.canonical_name),
+                "matrix omitted {} at {:?}/{:?}",
+                entry.canonical_name,
+                entry.placement,
+                capability
+            );
+        }
+    }
 }
 
 mod audited_mcp_call_tests {

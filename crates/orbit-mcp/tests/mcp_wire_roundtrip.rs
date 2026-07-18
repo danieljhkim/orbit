@@ -20,7 +20,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use orbit_common::types::{NotFoundKind, OrbitError, ToolParam, ToolSchema, ToolSessionContext};
+use orbit_common::types::{
+    McpToolPolicy, NotFoundKind, OrbitError, ToolParam, ToolSchema, ToolSessionContext,
+    canonical_mcp_tool_policy,
+};
 use orbit_mcp::{McpHost, OrbitToolServer};
 use rmcp::ServiceExt;
 use serde_json::{Value, json};
@@ -156,6 +159,10 @@ impl McpHost for FileStoreHost {
                 Vec::new(),
             ),
         ]
+    }
+
+    fn mcp_tool_policy(&self, canonical_name: &str) -> Option<McpToolPolicy> {
+        canonical_mcp_tool_policy(canonical_name)
     }
 
     fn call_tool(

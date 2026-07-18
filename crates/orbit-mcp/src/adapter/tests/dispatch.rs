@@ -1,11 +1,29 @@
 use std::sync::Arc;
 
+use orbit_common::types::{OrbitError, ToolSchema, ToolSessionContext};
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
 
 use super::super::OrbitToolServer;
 use super::super::name_map::sanitize_tool_name;
 use super::super::test_support::{EchoArrayHost, StubHost, tool_schema};
+
+struct MissingPolicyHost;
+
+impl crate::McpHost for MissingPolicyHost {
+    fn list_tool_schemas(&self) -> Vec<ToolSchema> {
+        vec![tool_schema("demo.unclassified")]
+    }
+
+    fn call_tool(
+        &self,
+        _name: &str,
+        _input: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        Ok(json!({ "must_not_execute": true }))
+    }
+}
 
 #[test]
 fn refresh_name_map_rejects_listing_collisions() {
@@ -18,6 +36,31 @@ fn refresh_name_map_rejects_listing_collisions() {
         .refresh_name_map(&schemas)
         .expect_err("tools/list refresh must reject ambiguous advertised names");
     assert_eq!(err.advertised_name, "foo_bar");
+}
+
+#[tokio::test]
+async fn missing_policy_is_excluded_and_rejected_before_dispatch() {
+    let server = OrbitToolServer::new(Arc::new(MissingPolicyHost));
+    assert!(
+        !server
+            .combined_tool_schemas()
+            .iter()
+            .any(|schema| schema.name == "demo.unclassified")
+    );
+
+    let result = server
+        .call_tool_request(CallToolRequestParams::new("demo_unclassified"))
+        .await
+        .expect("policy rejection returns structured MCP tool error");
+    assert!(result.is_error.unwrap_or(false));
+    assert_eq!(
+        result
+            .structured_content
+            .as_ref()
+            .and_then(|content| content.get("code"))
+            .and_then(Value::as_str),
+        Some("tool_not_found")
+    );
 }
 
 #[tokio::test]
