@@ -2,15 +2,18 @@
 
 // Content moved from inline #[cfg(test)] mod tests in mcp/mod.rs per ORB-00221.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use orbit_common::types::{
+    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolPolicyError,
+    mcp_advertised_tool_name, mcp_capability_placement_matrix, validate_mcp_tool_definitions,
+};
 use orbit_core::OrbitRuntime;
 use orbit_mcp::McpHost;
+use serde::Deserialize;
 
 use super::host::{
-    ADR_TOOL_NAMES, DOCS_TOOL_NAMES, FRICTION_TOOL_NAMES, GRAPH_TOOL_NAMES, LEARNING_TOOL_NAMES,
-    RuntimeMcpHost, SEARCH_TOOL_NAMES, SEMANTIC_TOOL_NAMES, TASK_TOOL_NAMES, is_mcp_tool_exposed,
-    safe_mcp_tool_names,
+    RuntimeMcpHost, canonical_mcp_tool_definitions, is_mcp_tool_exposed, safe_mcp_tool_names,
 };
 
 const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
@@ -88,12 +91,12 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
 
 #[test]
 fn inactive_tools_are_not_in_the_mcp_safe_surface() {
-    let safe_names: BTreeSet<&str> = safe_mcp_tool_names().into_iter().collect();
+    let safe_names: BTreeSet<String> = safe_mcp_tool_names().into_iter().collect();
     assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 23);
 
     for name in EXPECTED_INACTIVE_TOOL_NAMES {
         assert!(
-            !safe_names.contains(name),
+            !safe_names.contains(*name),
             "inactive tool leaked into safe MCP names: {name}"
         );
         assert!(
@@ -118,20 +121,15 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
         .into_iter()
         .map(|tool| tool.name)
         .collect();
-    let safe_names: BTreeSet<&str> = safe_mcp_tool_names().into_iter().collect();
+    let safe_names: BTreeSet<String> = safe_mcp_tool_names().into_iter().collect();
     let inactive_names: BTreeSet<&str> = EXPECTED_INACTIVE_TOOL_NAMES.iter().copied().collect();
 
-    for name in TASK_TOOL_NAMES
-        .iter()
-        .chain(FRICTION_TOOL_NAMES)
-        .chain(SEARCH_TOOL_NAMES)
-        .chain(SEMANTIC_TOOL_NAMES)
-        .chain(ADR_TOOL_NAMES)
-        .chain(DOCS_TOOL_NAMES)
-        .chain(LEARNING_TOOL_NAMES)
+    for name in safe_mcp_tool_names()
+        .into_iter()
+        .filter(|name| !name.starts_with("orbit.graph."))
     {
         assert!(
-            names.contains(*name),
+            names.contains(&name),
             "MCP-candidate tool missing from runtime registry: {name}"
         );
     }
@@ -199,13 +197,17 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
 }
 
 #[test]
-fn graph_adapter_names_are_explicitly_allowlisted() {
-    let safe_names: BTreeSet<&str> = safe_mcp_tool_names().into_iter().collect();
+fn graph_adapter_names_have_schema_adjacent_canonical_definitions() {
+    let safe_names: BTreeSet<String> = safe_mcp_tool_names().into_iter().collect();
     let adapter_names: BTreeSet<&str> = orbit_mcp::graph_tool_names().iter().copied().collect();
-    let configured_names: BTreeSet<&str> = GRAPH_TOOL_NAMES.iter().copied().collect();
+    let configured_names: BTreeSet<&str> = safe_names
+        .iter()
+        .map(String::as_str)
+        .filter(|name| name.starts_with("orbit.graph."))
+        .collect();
 
     assert_eq!(adapter_names, configured_names);
-    assert!(adapter_names.is_subset(&safe_names));
+    assert!(adapter_names.iter().all(|name| safe_names.contains(*name)));
     for name in adapter_names {
         assert!(is_mcp_tool_exposed(name));
     }
@@ -216,17 +218,18 @@ fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
     let runtime = OrbitRuntime::in_memory().expect("build test runtime");
     let host = RuntimeMcpHost { runtime };
     let listed: BTreeSet<String> = host
-        .list_tool_schemas()
+        .list_mcp_tool_definitions()
+        .expect("list valid MCP definitions")
         .into_iter()
-        .map(|schema| schema.name)
+        .map(|definition| definition.schema.name)
         .collect();
 
     for name in safe_mcp_tool_names()
         .into_iter()
-        .filter(|name| !GRAPH_TOOL_NAMES.contains(name))
+        .filter(|name| !name.starts_with("orbit.graph."))
     {
         assert!(
-            listed.contains(name),
+            listed.contains(&name),
             "client-visible MCP tool list missing safe tool: {name}"
         );
     }
@@ -256,6 +259,143 @@ fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
             .iter()
             .filter(|name| name.starts_with("orbit.graph."))
             .collect::<Vec<_>>()
+    );
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformanceFixture {
+    capabilities: McpConformanceCapabilities,
+    tools: BTreeMap<String, McpConformancePolicy>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformanceCapabilities {
+    allowed_values: BTreeSet<McpCapability>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformancePolicy {
+    placement: McpToolPlacement,
+    allowed_capabilities: BTreeSet<McpCapability>,
+}
+
+#[test]
+fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
+    assert!(
+        serde_yaml::from_str::<McpConformancePolicy>(
+            "{ placement: hub, allowed_capabilities: [unknown] }"
+        )
+        .is_err(),
+        "unknown capabilities must fail typed fixture parsing"
+    );
+    assert!(
+        serde_yaml::from_str::<McpConformancePolicy>("{ placement: hub }").is_err(),
+        "missing capability policy must fail typed fixture parsing"
+    );
+
+    let fixture: McpConformanceFixture = serde_yaml::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/design/mcp-bridge/references/conformance-v1.yaml"
+    )))
+    .expect("frozen MCP conformance fixture must use known typed policy values");
+    assert_eq!(
+        fixture.capabilities.allowed_values,
+        BTreeSet::from([
+            McpCapability::Agent,
+            McpCapability::Operator,
+            McpCapability::Runner,
+        ])
+    );
+
+    let definitions =
+        canonical_mcp_tool_definitions().expect("canonical MCP definitions are valid");
+    assert!(matches!(
+        validate_mcp_tool_definitions(&[definitions[0].clone(), definitions[0].clone()]),
+        Err(McpToolPolicyError::DuplicateCanonicalName(_))
+    ));
+    let empty_policy =
+        serde_yaml::from_str::<McpToolPolicy>("{ placement: hub, allowed_capabilities: [] }")
+            .expect("typed policy can deserialize an invalid empty set for validation coverage");
+    let empty_definition = McpToolDefinition {
+        schema: definitions[0].schema.clone(),
+        policy: empty_policy,
+    };
+    assert_eq!(
+        validate_mcp_tool_definitions(&[empty_definition]),
+        Err(McpToolPolicyError::EmptyCapabilities)
+    );
+    let mut dotted = definitions[0].clone();
+    dotted.schema.name = "demo.name".to_string();
+    let mut underscored = definitions[1].clone();
+    underscored.schema.name = "demo_name".to_string();
+    assert!(matches!(
+        validate_mcp_tool_definitions(&[dotted, underscored]),
+        Err(McpToolPolicyError::DuplicateAdvertisedName(_))
+    ));
+    let canonical_names: BTreeSet<String> = definitions
+        .iter()
+        .map(|definition| definition.schema.name.clone())
+        .collect();
+    assert_eq!(canonical_names.len(), definitions.len());
+
+    let advertised_names: BTreeSet<String> = definitions
+        .iter()
+        .map(|definition| mcp_advertised_tool_name(&definition.schema.name))
+        .collect();
+    assert_eq!(advertised_names.len(), definitions.len());
+    assert!(advertised_names.iter().all(|name| !name.is_empty()));
+
+    let fixture_names: BTreeSet<String> = fixture.tools.keys().cloned().collect();
+    assert_eq!(canonical_names, fixture_names);
+    for definition in &definitions {
+        let expected = fixture
+            .tools
+            .get(&definition.schema.name)
+            .expect("every advertised canonical name has fixture policy");
+        assert_eq!(
+            definition.policy.placement(),
+            expected.placement,
+            "{}",
+            definition.schema.name
+        );
+        assert_eq!(
+            definition.policy.allowed_capabilities(),
+            &expected.allowed_capabilities,
+            "{}",
+            definition.schema.name
+        );
+        assert!(
+            !expected.allowed_capabilities.is_empty(),
+            "{} has an empty capability set",
+            definition.schema.name
+        );
+    }
+
+    let matrix = mcp_capability_placement_matrix(&definitions)
+        .expect("capability matrix derives from valid definitions");
+    for definition in &definitions {
+        for capability in definition.policy.allowed_capabilities() {
+            assert!(
+                matrix[&definition.policy.placement()][capability]
+                    .contains(&definition.schema.name),
+                "matrix omitted {} at {:?}/{:?}",
+                definition.schema.name,
+                definition.policy.placement(),
+                capability
+            );
+        }
+    }
+
+    let runner_only = McpToolPolicy::new(McpToolPlacement::Hub, [McpCapability::Runner])
+        .expect("runner-only is a valid non-empty capability set");
+    assert_eq!(
+        runner_only.allowed_capabilities(),
+        &BTreeSet::from([McpCapability::Runner])
+    );
+    let operator_only = McpToolPolicy::operator_only(McpToolPlacement::Hub);
+    assert_eq!(
+        operator_only.allowed_capabilities(),
+        &BTreeSet::from([McpCapability::Operator])
     );
 }
 

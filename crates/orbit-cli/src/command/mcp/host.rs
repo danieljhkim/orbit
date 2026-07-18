@@ -1,7 +1,8 @@
 //! MCP host implementations and audit bracketing.
 //!
-//! Registry-backed listing is sourced from [`OrbitRuntime::list_tools`], which
-//! already filters disabled tools and merges external (non-builtin) entries.
+//! Registry-backed listing is sourced from
+//! [`OrbitRuntime::list_mcp_tool_definitions`], which filters disabled tools
+//! while preserving each builtin schema's adjacent MCP policy.
 //! Registry-backed and adapter-owned execution both use the runtime audit
 //! boundary tagged with [`ToolEntryPoint::Mcp`], so every dispatch has the same
 //! identity-resolution rules as the CLI path. Adapter preflight lives inside
@@ -11,7 +12,8 @@
 use std::time::Instant;
 
 use orbit_common::types::{
-    AuditEventStatus, LearningInjectionState, ToolSchema, ToolSessionContext, audit_execution_id,
+    AuditEventStatus, LearningInjectionState, McpToolDefinition, McpToolPolicyError,
+    ToolSessionContext, audit_execution_id, validate_mcp_tool_definitions,
 };
 use orbit_core::command::tool::{ToolEntryPoint, audit_role_label};
 use orbit_core::{
@@ -23,125 +25,31 @@ use serde_json::{Value, json};
 
 pub(crate) const ORBIT_MCP_SERVER_ID: &str = "orbit";
 
-pub(crate) const TASK_TOOL_NAMES: &[&str] = &[
-    "orbit.task.add",
-    "orbit.task.approve",
-    "orbit.task.artifact.put",
-    // ORB-00289: `orbit.task.delete` and `orbit.task.lint` are admin-only
-    // and remain reachable through the CLI / `runtime.run_tool` path,
-    // but are not exposed on the agent MCP surface. `orbit.task.reject`
-    // is also CLI-only — task rejection is a human/operator decision.
-    "orbit.task.list",
-    "orbit.task.review_thread.add",
-    "orbit.task.review_thread.list",
-    "orbit.task.review_thread.reply",
-    "orbit.task.review_thread.resolve",
-    "orbit.task.show",
-    "orbit.task.start",
-    "orbit.task.update",
-];
+pub(crate) fn canonical_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError>
+{
+    let mut definitions = orbit_core::canonical_builtin_mcp_tool_definitions()?;
+    definitions.extend(orbit_mcp::graph_mcp_tool_definitions()?);
+    validate_mcp_tool_definitions(&definitions)?;
+    Ok(definitions)
+}
 
-// Agent surface intentionally narrow: agents file friction via `add`; triage
-// (list/show/resolve) belongs to operators on the CLI / dashboard path.
-pub(crate) const FRICTION_TOOL_NAMES: &[&str] = &[
-    "orbit.friction.add",
-    "orbit.friction.tags",
-    "orbit.friction.update",
-];
-
-// The implementation lives in orbit-mcp's in-process graph adapter, but the
-// safe-surface decision remains explicit here alongside every registry-backed
-// MCP tool. This set includes sync because it mutates the local graph index.
-pub(crate) const GRAPH_TOOL_NAMES: &[&str] = &[
-    "orbit.graph.sync",
-    "orbit.graph.search",
-    "orbit.graph.show",
-    "orbit.graph.refs",
-    "orbit.graph.callees",
-    "orbit.graph.impact",
-    "orbit.graph.trace",
-    "orbit.graph.overview",
-    "orbit.graph.implementors",
-    "orbit.graph.deps",
-];
-
-pub(crate) const SEARCH_TOOL_NAMES: &[&str] = &["orbit.search"];
-
-// ORB-00289: `orbit.semantic.uninstall` is admin-only (destructive teardown
-// of the local semantic index) and is no longer exposed on the agent MCP
-// surface; the CLI / `runtime.run_tool` path retains it. The constant is
-// kept (empty) so the aggregation in `safe_mcp_tool_names` and the test
-// chain in `mcp/tests/mod.rs` stay structurally symmetric.
-pub(crate) const SEMANTIC_TOOL_NAMES: &[&str] = &[];
-
-pub(crate) const ADR_TOOL_NAMES: &[&str] = &[
-    "orbit.adr.add",
-    // ORB-00289: agents query ADRs via `orbit.search --kind adr`;
-    // `orbit.adr.list` remains on the CLI / dashboard `runtime.run_tool`
-    // path for admin workflows.
-    "orbit.adr.show",
-    "orbit.adr.supersede",
-    "orbit.adr.update",
-];
-
-pub(crate) const DOCS_TOOL_NAMES: &[&str] = &[];
-
-// Auto-task definitions [ORB-10149]: agents can define, retune, and disable
-// recurring chores. `orbit.auto_task.list` is admin-only (mirrors
-// `orbit.learning.list`) and stays on the CLI / `runtime.run_tool` path.
-pub(crate) const AUTO_TASK_TOOL_NAMES: &[&str] = &[
-    "orbit.auto_task.add",
-    "orbit.auto_task.show",
-    "orbit.auto_task.update",
-    "orbit.auto_task.toggle",
-];
-
-pub(crate) const LEARNING_TOOL_NAMES: &[&str] = &[
-    "orbit.learning.add",
-    // ORB-00289: `orbit.learning.prune` is a destructive admin-only op and
-    // is not exposed on the agent MCP surface; the CLI / `runtime.run_tool`
-    // path retains it. ORB-10046: the comment and upvote surfaces were
-    // removed entirely (corrections use `update`/`supersede`; provenance
-    // uses `evidence`).
-    "orbit.learning.show",
-    "orbit.learning.update",
-    "orbit.learning.supersede",
-];
-
-pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
-    let mut names = Vec::with_capacity(
-        TASK_TOOL_NAMES.len()
-            + FRICTION_TOOL_NAMES.len()
-            + GRAPH_TOOL_NAMES.len()
-            + SEARCH_TOOL_NAMES.len()
-            + SEMANTIC_TOOL_NAMES.len()
-            + ADR_TOOL_NAMES.len()
-            + DOCS_TOOL_NAMES.len()
-            + LEARNING_TOOL_NAMES.len()
-            + AUTO_TASK_TOOL_NAMES.len(),
-    );
-    names.extend_from_slice(TASK_TOOL_NAMES);
-    names.extend_from_slice(FRICTION_TOOL_NAMES);
-    names.extend_from_slice(GRAPH_TOOL_NAMES);
-    names.extend_from_slice(SEARCH_TOOL_NAMES);
-    names.extend_from_slice(SEMANTIC_TOOL_NAMES);
-    names.extend_from_slice(ADR_TOOL_NAMES);
-    names.extend_from_slice(DOCS_TOOL_NAMES);
-    names.extend_from_slice(LEARNING_TOOL_NAMES);
-    names.extend_from_slice(AUTO_TASK_TOOL_NAMES);
-    names
+pub(crate) fn safe_mcp_tool_names() -> Vec<String> {
+    canonical_mcp_tool_definitions()
+        .map(|definitions| {
+            definitions
+                .into_iter()
+                .map(|definition| definition.schema.name)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub(crate) fn is_mcp_tool_exposed(name: &str) -> bool {
-    TASK_TOOL_NAMES.contains(&name)
-        || FRICTION_TOOL_NAMES.contains(&name)
-        || GRAPH_TOOL_NAMES.contains(&name)
-        || SEARCH_TOOL_NAMES.contains(&name)
-        || SEMANTIC_TOOL_NAMES.contains(&name)
-        || ADR_TOOL_NAMES.contains(&name)
-        || DOCS_TOOL_NAMES.contains(&name)
-        || LEARNING_TOOL_NAMES.contains(&name)
-        || AUTO_TASK_TOOL_NAMES.contains(&name)
+    canonical_mcp_tool_definitions().is_ok_and(|definitions| {
+        definitions
+            .iter()
+            .any(|definition| definition.schema.name == name)
+    })
 }
 
 fn ensure_mcp_tool_exposed(name: &str) -> Result<(), OrbitError> {
@@ -160,30 +68,13 @@ pub(super) struct RuntimeMcpHost {
 
 impl RuntimeMcpHost {
     pub(super) fn new(runtime: OrbitRuntime) -> Self {
-        let safe_names = safe_mcp_tool_names();
-        assert!(
-            orbit_mcp::graph_tool_names()
-                .iter()
-                .all(|name| safe_names.contains(name)),
-            "in-process graph tool names must be a subset of the MCP safe surface"
-        );
         Self { runtime }
     }
 }
 
 impl McpHost for RuntimeMcpHost {
-    fn list_tool_schemas(&self) -> Vec<ToolSchema> {
-        let tools = self.runtime.list_tools().unwrap_or_default();
-        tools
-            .into_iter()
-            .filter(|tool| tool.enabled && is_mcp_tool_exposed(&tool.name))
-            .map(|tool| ToolSchema {
-                name: tool.name,
-                description: tool.description,
-                parameters: tool.parameters,
-                builtin: tool.builtin,
-            })
-            .collect()
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        self.runtime.list_mcp_tool_definitions()
     }
 
     fn call_tool(
@@ -363,8 +254,8 @@ fn record_mcp_preflight_failure(
 pub(super) struct EmptyMcpHost;
 
 impl McpHost for EmptyMcpHost {
-    fn list_tool_schemas(&self) -> Vec<ToolSchema> {
-        Vec::new()
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        Ok(Vec::new())
     }
 
     fn call_tool(

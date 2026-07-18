@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::sync::Mutex as StdMutex;
 
 use orbit_common::types::{
-    LearningInjectionState, OrbitError, ToolParam, ToolSchema, ToolSessionContext,
+    LearningInjectionState, McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy,
+    OrbitError, ToolParam, ToolSchema, ToolSessionContext,
 };
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
@@ -31,6 +32,20 @@ pub(super) fn tool_schema(name: &str) -> ToolSchema {
     }
 }
 
+pub(super) fn test_mcp_definitions(
+    schemas: impl IntoIterator<Item = ToolSchema>,
+) -> Result<Vec<McpToolDefinition>, OrbitError> {
+    schemas
+        .into_iter()
+        .map(|schema| {
+            let policy = McpToolPolicy::new(McpToolPlacement::LocalDerived, [McpCapability::Agent])
+                .expect("test MCP policy has one static capability");
+            McpToolDefinition::new(schema, policy)
+                .map_err(|error| OrbitError::InvalidInput(error.to_string()))
+        })
+        .collect()
+}
+
 pub(super) fn request_with_args(name: &str, args: Value) -> CallToolRequestParams {
     CallToolRequestParams::new(sanitize_tool_name(name)).with_arguments(
         args.as_object()
@@ -46,8 +61,8 @@ pub(super) struct StubHost {
 }
 
 impl crate::McpHost for StubHost {
-    fn list_tool_schemas(&self) -> Vec<ToolSchema> {
-        self.schemas.clone()
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        test_mcp_definitions(self.schemas.clone())
     }
 
     fn call_tool(
@@ -75,8 +90,8 @@ pub(super) struct EchoArrayHost {
 }
 
 impl crate::McpHost for EchoArrayHost {
-    fn list_tool_schemas(&self) -> Vec<ToolSchema> {
-        self.schemas.clone()
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        test_mcp_definitions(self.schemas.clone())
     }
 
     fn call_tool(
@@ -108,13 +123,13 @@ impl LearningSidecarHost {
 }
 
 impl crate::McpHost for LearningSidecarHost {
-    fn list_tool_schemas(&self) -> Vec<ToolSchema> {
-        vec![
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        test_mcp_definitions(vec![
             tool_schema("orbit.graph.show"),
             tool_schema("orbit.graph.refs"),
             tool_schema("orbit.task.show"),
             tool_schema("orbit.learning.list"),
-        ]
+        ])
     }
 
     fn call_tool(
@@ -198,11 +213,11 @@ impl SessionContextHost {
 }
 
 impl crate::McpHost for SessionContextHost {
-    fn list_tool_schemas(&self) -> Vec<ToolSchema> {
-        vec![
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        test_mcp_definitions(vec![
             tool_schema("orbit.task.list"),
             tool_schema("orbit.task.add"),
-        ]
+        ])
     }
 
     fn call_tool(
@@ -231,12 +246,12 @@ impl crate::McpHost for SessionContextHost {
 }
 
 impl crate::McpHost for LearningPersistenceHost {
-    fn list_tool_schemas(&self) -> Vec<ToolSchema> {
-        vec![
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        test_mcp_definitions(vec![
             tool_schema("orbit.learning.add"),
             tool_schema("orbit.learning.update"),
             tool_schema("orbit.learning.show"),
-        ]
+        ])
     }
 
     fn call_tool(

@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Overview
 owner: codex
-last_updated: 2026-07-17
+last_updated: 2026-07-18
 status: Accepted
 feature: mcp-bridge
 doc_role: overview
@@ -92,7 +92,8 @@ network edge per spoke: spoke → hub.
 |---------|------|------|
 | MCP wire adapter and graph wrappers | [crates/orbit-mcp/](../../../crates/orbit-mcp/) | [ORB-00424] |
 | Local broker, safe surface, and audit boundary | [crates/orbit-cli/src/command/mcp/](../../../crates/orbit-cli/src/command/mcp/) | [ORB-00424] |
-| Canonical tool placement metadata | [crates/orbit-common/src/types/tool.rs](../../../crates/orbit-common/src/types/tool.rs) | [ORB-00424] |
+| Canonical builtin schema + placement metadata | [crates/orbit-tools/src/builtin/orbit/mod.rs](../../../crates/orbit-tools/src/builtin/orbit/mod.rs) | [ORB-00424] |
+| Canonical graph schema + placement metadata | [crates/orbit-mcp/src/adapter/graph.rs](../../../crates/orbit-mcp/src/adapter/graph.rs) | [ORB-00424] |
 | Runtime tool dispatch and audit provenance | [crates/orbit-core/src/command/tool.rs](../../../crates/orbit-core/src/command/tool.rs) | [ORB-00424] |
 | Hub, ownership, replica role, and run placement | [host-registry/2_design.md](../host-registry/2_design.md) | [ORB-00424] |
 | Session workspace and caller-host metadata | [mcp-session-context/2_design.md](../mcp-session-context/2_design.md) | [ORB-00424] |

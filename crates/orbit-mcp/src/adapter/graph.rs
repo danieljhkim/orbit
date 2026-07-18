@@ -5,8 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use orbit_common::types::{
+    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolPolicyError,
     OrbitError, ToolParam, ToolSchema, ToolSessionContext, optional_string, optional_u32_alias,
-    required_string,
+    required_string, validate_mcp_tool_definitions,
 };
 use orbit_graph::{
     DEFAULT_IMPACT_DEPTH, DEFAULT_SHOW_MAX_BYTES, DEFAULT_TRACE_DEPTH, Graph, OverviewFormat,
@@ -53,8 +54,8 @@ impl GraphToolRegistry {
         }
     }
 
-    pub(super) fn schemas(&self) -> Vec<ToolSchema> {
-        graph_tool_schemas()
+    pub(super) fn definitions(&self) -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
+        graph_tool_definitions()
     }
 
     pub(super) fn is_graph_tool(&self, name: &str) -> bool {
@@ -123,9 +124,9 @@ impl GraphToolRegistry {
     }
 }
 
-pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
-    vec![
-        schema(
+pub(crate) fn graph_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
+    let definitions = vec![
+        local_derived_schema(
             GRAPH_SYNC_TOOL,
             "Synchronize the orbit-graph index for the current worktree.",
             vec![param(
@@ -134,8 +135,8 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
                 "boolean",
                 false,
             )],
-        ),
-        schema(
+        )?,
+        local_derived_schema(
             GRAPH_SEARCH_TOOL,
             "Search orbit-graph symbols, notable strings, and config keys.",
             vec![
@@ -149,8 +150,8 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
                 param("lang", "Optional language filter.", "string", false),
                 param("limit", "Maximum number of matches.", "number", false),
             ],
-        ),
-        schema(
+        )?,
+        local_derived_schema(
             GRAPH_SHOW_TOOL,
             "Show source and metadata for an orbit-graph selector. Selector forms: `symbol:<path>#<name>:<kind>` (kind is one of function, method, struct, trait, impl, field, module), `file:<path>`, or `dir:<path>`.",
             vec![
@@ -167,8 +168,8 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
                     false,
                 ),
             ],
-        ),
-        schema(
+        )?,
+        local_derived_schema(
             GRAPH_REFS_TOOL,
             "Find inbound references and relations for an orbit-graph symbol selector. Use this for caller-chain questions too — there is no separate callers tool.",
             vec![
@@ -191,13 +192,13 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
                     false,
                 ),
             ],
-        ),
-        schema(
+        )?,
+        local_derived_schema(
             GRAPH_CALLEES_TOOL,
             "Find outbound calls from an orbit-graph symbol selector.",
             vec![param("symbol", "Symbol selector to query.", "string", true)],
-        ),
-        schema(
+        )?,
+        local_derived_schema(
             GRAPH_IMPACT_TOOL,
             "Return a bounded orbit-graph blast-radius traversal. Use before an edit to bound what a change can affect.",
             vec![
@@ -215,8 +216,8 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
                     false,
                 ),
             ],
-        ),
-        schema(
+        )?,
+        local_derived_schema(
             GRAPH_TRACE_TOOL,
             "Trace a command handler call tree from orbit-graph command metadata. Run a full sync (`orbit.graph.sync` with `full: true`) first for complete coverage.",
             vec![
@@ -229,8 +230,8 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
                     false,
                 ),
             ],
-        ),
-        schema(
+        )?,
+        local_derived_schema(
             GRAPH_OVERVIEW_TOOL,
             "Summarize indexed files and symbols, optionally scoped to a dir: or file: selector.",
             vec![
@@ -247,8 +248,8 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
                     false,
                 ),
             ],
-        ),
-        schema(
+        )?,
+        local_derived_schema(
             GRAPH_IMPLEMENTORS_TOOL,
             "List the concrete types implementing the trait addressed by a selector.",
             vec![param(
@@ -257,8 +258,8 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
                 "string",
                 true,
             )],
-        ),
-        schema(
+        )?,
+        local_derived_schema(
             GRAPH_DEPS_TOOL,
             "List outbound module/import edges for a file: or dir: selector. Use this for crate/module dependency questions.",
             vec![param(
@@ -267,11 +268,17 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
                 "string",
                 true,
             )],
-        ),
-    ]
+        )?,
+    ];
+    validate_mcp_tool_definitions(&definitions)?;
+    Ok(definitions)
 }
 
-fn schema(name: &str, description: &str, mut parameters: Vec<ToolParam>) -> ToolSchema {
+fn local_derived_schema(
+    name: &str,
+    description: &str,
+    mut parameters: Vec<ToolParam>,
+) -> Result<McpToolDefinition, McpToolPolicyError> {
     parameters.push(param(
         "workspace_path",
         "Optional worktree path for this graph request.",
@@ -284,12 +291,17 @@ fn schema(name: &str, description: &str, mut parameters: Vec<ToolParam>) -> Tool
         "string",
         false,
     ));
-    ToolSchema {
+    let schema = ToolSchema {
         name: name.to_string(),
         description: description.to_string(),
         parameters,
         builtin: true,
-    }
+    };
+    let policy = McpToolPolicy::new(
+        McpToolPlacement::LocalDerived,
+        [McpCapability::Agent, McpCapability::Operator],
+    )?;
+    McpToolDefinition::new(schema, policy)
 }
 
 fn param(name: &str, description: &str, param_type: &str, required: bool) -> ToolParam {

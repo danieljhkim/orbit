@@ -3,8 +3,8 @@ use std::path::Path;
 use std::time::Instant;
 
 use orbit_common::types::{
-    AuditEventStatus, NotFoundKind, OrbitError, OrbitEvent, Role, StoredTool, ToolParam,
-    ToolSessionContext, audit_execution_id, normalize_agent_family_for_model,
+    AuditEventStatus, McpToolDefinition, NotFoundKind, OrbitError, OrbitEvent, Role, StoredTool,
+    ToolParam, ToolSessionContext, audit_execution_id, normalize_agent_family_for_model,
     normalize_optional_attribution_label,
 };
 use orbit_store::AuditEventInsertParams;
@@ -525,6 +525,22 @@ fn read_input_identity(input: &Value) -> (Option<String>, Option<String>) {
 }
 
 impl OrbitRuntime {
+    /// Return runtime-enabled MCP definitions with schema and policy still paired.
+    pub fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        let stored_tools = self.stores().tools().list()?;
+        let mut definitions = self
+            .tool_registry()
+            .mcp_tool_definitions()
+            .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
+        definitions.retain(|definition| {
+            stored_tools
+                .iter()
+                .find(|stored| stored.name == definition.schema.name)
+                .is_none_or(|stored| stored.enabled)
+        });
+        Ok(definitions)
+    }
+
     pub fn list_tools(&self) -> Result<Vec<ToolInfo>, OrbitError> {
         self.list_tools_with_inactive(false)
     }

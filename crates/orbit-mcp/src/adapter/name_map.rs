@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
-use orbit_common::types::ToolSchema;
+use orbit_common::types::{ToolSchema, mcp_advertised_tool_name};
 use rmcp::ErrorData as McpError;
 use serde_json::json;
 
@@ -11,7 +11,7 @@ use serde_json::json;
 /// `.` with `_` keeps Orbit's existing names within the intersection of both
 /// rule sets without renaming any internal canonical identifier.
 pub(super) fn sanitize_tool_name(name: &str) -> String {
-    name.replace('.', "_")
+    mcp_advertised_tool_name(name)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,9 +58,10 @@ pub(super) fn build_name_map(
 
     let mut map = HashMap::with_capacity(schemas.len());
     for (advertised_name, mut canonical_names) in grouped {
+        let has_duplicate = canonical_names.len() > 1;
         canonical_names.sort();
         canonical_names.dedup();
-        if canonical_names.len() > 1 {
+        if has_duplicate {
             return Err(ToolNameCollision {
                 advertised_name,
                 canonical_names,

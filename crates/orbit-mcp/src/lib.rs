@@ -40,7 +40,8 @@ mod error;
 use std::sync::Arc;
 
 use orbit_common::types::{
-    LearningInjectionState, NotFoundKind, OrbitError, ToolSchema, ToolSessionContext,
+    LearningInjectionState, McpToolDefinition, McpToolPolicyError, NotFoundKind, OrbitError,
+    ToolSessionContext,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::io::stdio;
@@ -53,16 +54,22 @@ pub fn graph_tool_names() -> &'static [&'static str] {
     adapter::graph_tool_names()
 }
 
+/// Workspace-independent source for the graph adapter's schema-adjacent policies.
+pub fn graph_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
+    adapter::graph_mcp_tool_definitions()
+}
+
 /// A pluggable back-end that satisfies MCP `tools/list` and `tools/call`
 /// requests.
 ///
-/// `list_tool_schemas` is expected to return only the tools the host wants
-/// exposed — disabled tools should be filtered out here, not in the adapter.
+/// `list_mcp_tool_definitions` returns only the tools the host wants exposed,
+/// with schema and policy already paired at their canonical definition site.
+/// Disabled tools should be filtered out here, not in the adapter.
 /// `call_tool` and `call_in_process_tool` must run whatever policy, audit, and
 /// sandboxing the host wants applied; the adapter never invokes an in-process
 /// implementation without first crossing the latter host seam.
 pub trait McpHost: Send + Sync + 'static {
-    fn list_tool_schemas(&self) -> Vec<ToolSchema>;
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError>;
     fn call_tool(
         &self,
         name: &str,

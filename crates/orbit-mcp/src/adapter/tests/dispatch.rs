@@ -1,11 +1,31 @@
 use std::sync::Arc;
 
+use orbit_common::types::{McpToolDefinition, OrbitError, ToolSessionContext};
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
 
 use super::super::OrbitToolServer;
 use super::super::name_map::sanitize_tool_name;
 use super::super::test_support::{EchoArrayHost, StubHost, tool_schema};
+
+struct MissingPolicyHost;
+
+impl crate::McpHost for MissingPolicyHost {
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        Err(OrbitError::InvalidInput(
+            "demo.unclassified is missing MCP policy".to_string(),
+        ))
+    }
+
+    fn call_tool(
+        &self,
+        _name: &str,
+        _input: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        Ok(json!({ "must_not_execute": true }))
+    }
+}
 
 #[test]
 fn refresh_name_map_rejects_listing_collisions() {
@@ -18,6 +38,25 @@ fn refresh_name_map_rejects_listing_collisions() {
         .refresh_name_map(&schemas)
         .expect_err("tools/list refresh must reject ambiguous advertised names");
     assert_eq!(err.advertised_name, "foo_bar");
+}
+
+#[tokio::test]
+async fn missing_policy_is_excluded_and_rejected_before_dispatch() {
+    let server = OrbitToolServer::new(Arc::new(MissingPolicyHost));
+    assert!(
+        server.combined_tool_schemas().is_err(),
+        "invalid definitions fail the whole advertised surface closed"
+    );
+
+    let error = server
+        .call_tool_request(CallToolRequestParams::new("demo_unclassified"))
+        .await
+        .expect_err("invalid definition source rejects before host dispatch");
+    assert!(
+        error
+            .message
+            .contains("invalid canonical MCP tool definitions")
+    );
 }
 
 #[tokio::test]
@@ -109,9 +148,5 @@ fn canonical_name_rejects_sanitized_dispatch_collisions() {
     let err = server
         .canonical_name("foo_bar")
         .expect_err("dispatch must reject ambiguous advertised names");
-    assert_eq!(err.advertised_name, "foo_bar");
-    assert_eq!(
-        err.canonical_names,
-        vec!["foo.bar".to_string(), "foo_bar".to_string()]
-    );
+    assert!(err.message.contains("duplicate advertised MCP tool name"));
 }
