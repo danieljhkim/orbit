@@ -23,7 +23,7 @@ use orbit_common::types::{
 use orbit_store::{RoutineFireIntentParams, RoutineFireState, Store};
 use tempfile::tempdir;
 
-use crate::routines::loader::{LoadedRoutine, RoutineCollection};
+use crate::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin};
 use crate::routines::sweep::{RoutineDispatch, SweepOptions, run_sweep_at, run_sweep_core};
 use crate::workspace_registry;
 
@@ -57,6 +57,7 @@ fn loaded(definition: RoutineDefinition) -> LoadedRoutine {
     let name = definition.name.clone();
     LoadedRoutine {
         definition,
+        origin: RoutineOrigin::Committed,
         source_workspace: "polaris".to_string(),
         source_orbit_dir: PathBuf::from(SOURCE_DIR),
         path: PathBuf::from(format!("{SOURCE_DIR}/routines/{name}.yaml")),

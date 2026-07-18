@@ -10,7 +10,7 @@ summary: Accepted ADR log for the coupled Host Registry and MCP Bridge v1 contra
 tags: [host-registry, mcp-bridge, multi-host, placement]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10258, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Decisions
@@ -165,5 +165,10 @@ for its non-Orbit constellation domains.
 - [ORB-10245] — accepted the coupled contract and recorded this ADR set.
 - [ORB-10248] — implemented the versioned logical-workspace/local-checkout split.
 - [ORB-10249] — implemented path-free task coordination and global task-relation/readiness lookup.
+- [ORB-10258] — implemented the enforcement half of ADR-0231 (Unit R1 of ORB-10246):
+  origin-aware routine loading. Committed definitions fail closed without a non-empty host
+  pin; `.orbit/routines/local/` definitions are implicit to the loading host and may not
+  name another host; cross-origin name collisions fail deterministically. Registry-cache
+  pin validation and reassignment-baseline semantics remain deferred to R2.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

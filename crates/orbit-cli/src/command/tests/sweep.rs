@@ -10,6 +10,7 @@ fn report(action: &'static str) -> RoutineSweepReport {
     RoutineSweepReport {
         routine: "nightly".to_string(),
         source: "polaris".to_string(),
+        origin: "committed",
         action,
         reason: None,
         slot: None,
@@ -53,6 +54,7 @@ fn json_shape_is_stable() {
         reports: vec![RoutineSweepReport {
             routine: "nightly".to_string(),
             source: "polaris".to_string(),
+            origin: "committed",
             action: "fired",
             reason: None,
             slot: Some("2026-01-01T00:01:00+00:00".to_string()),
@@ -77,7 +79,9 @@ fn json_shape_is_stable() {
 
     let first = &value["reports"][0];
     let report_obj = first.as_object().expect("report object");
-    for key in ["routine", "source", "action", "reason", "slot", "run_id"] {
+    for key in [
+        "routine", "source", "origin", "action", "reason", "slot", "run_id",
+    ] {
         assert!(report_obj.contains_key(key), "missing report key {key}");
     }
     assert_eq!(first["action"], "fired");

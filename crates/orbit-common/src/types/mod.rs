@@ -124,7 +124,7 @@ pub use resource::{
 pub use role::Role;
 pub use routine::{
     MissedRunPolicy, OverlapPolicy, ROUTINE_SCHEMA_VERSION, RoutineDefinition, RoutinePolicy,
-    RoutineRetries, RoutineTarget, RoutineTrigger, parse_routine_yaml,
+    RoutineRetries, RoutineTarget, RoutineTrigger, parse_local_routine_yaml, parse_routine_yaml,
 };
 pub use run_state::PipelineState;
 pub use skill::Skill;

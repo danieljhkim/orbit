@@ -1,4 +1,6 @@
-use super::super::routine::{MissedRunPolicy, OverlapPolicy, RoutineTarget, parse_routine_yaml};
+use super::super::routine::{
+    MissedRunPolicy, OverlapPolicy, RoutineTarget, parse_local_routine_yaml, parse_routine_yaml,
+};
 
 const VALID_ROUTINE: &str = r#"
 schemaVersion: 1
@@ -151,6 +153,59 @@ target: job:almanac_commit_pipeline
     )
     .expect_err("uppercase/space name must fail");
     assert!(bad_name.to_string().contains("routine name"), "{bad_name}");
+}
+
+#[test]
+fn local_routine_may_omit_hosts_and_pins_the_loading_host() {
+    // A local definition carries no `hosts:` — it is implicit to the machine
+    // loading it and must resolve without a registry or network.
+    let routine = parse_local_routine_yaml(
+        r#"
+schemaVersion: 1
+name: local-reindex
+trigger:
+  cron: "*/30 * * * *"
+target: job:docs_reindex
+"#,
+        "dk-mac",
+    )
+    .expect("local routine loads without a host pin");
+    // Normalized to an implicit single-host pin so downstream matching is
+    // origin-agnostic.
+    assert_eq!(routine.hosts, vec!["dk-mac".to_string()]);
+}
+
+#[test]
+fn local_routine_may_name_only_the_loading_host() {
+    let ok = parse_local_routine_yaml(
+        r#"
+schemaVersion: 1
+name: local-reindex
+hosts: [dk-mac]
+trigger:
+  cron: "*/30 * * * *"
+target: job:docs_reindex
+"#,
+        "dk-mac",
+    )
+    .expect("local routine naming the loading host is valid");
+    assert_eq!(ok.hosts, vec!["dk-mac".to_string()]);
+
+    let remote = parse_local_routine_yaml(
+        r#"
+schemaVersion: 1
+name: local-reindex
+hosts: [dk-server-1]
+trigger:
+  cron: "*/30 * * * *"
+target: job:docs_reindex
+"#,
+        "dk-mac",
+    )
+    .expect_err("a local definition naming another host is a remote pin and must fail");
+    let message = remote.to_string();
+    assert!(message.contains("local-reindex"), "{message}");
+    assert!(message.contains("dk-server-1"), "{message}");
 }
 
 #[test]
