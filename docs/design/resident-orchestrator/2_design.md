@@ -1,7 +1,7 @@
 ---
 title: Resident Orchestrator — Design
 owner: codex
-last_updated: 2026-07-17
+last_updated: 2026-07-18
 status: Draft
 feature: resident-orchestrator
 doc_role: design
@@ -41,6 +41,15 @@ The `epic` tag is deliberately behavioral only at the resident pickup boundary. 
 the task schema or create a new task type. Child tasks are recognized by `parent_id`, not by a
 special child tag.
 
+This differs from the legacy `task_epic_pipeline`, whose `load_epic` path recognizes a root by
+`TaskType::Feature`. During retirement stages 1–3, the two selectors are disjoint by workspace:
+enabling the resident routine marks that workspace resident-owned and must make legacy epic-pipeline
+admission reject runs from the same workspace. A workspace without the resident capability may
+continue using the legacy Feature-typed path. Task type and tag may coexist on one task, but the
+workspace capability chooses exactly one claimant; neither selector may treat the other marker as
+permission to bypass that boundary. The proposed marker choice and coexistence rule are named in
+[4_decisions.md](./4_decisions.md).
+
 ## 2. Workspace-Local Resident Identity
 
 Each participating workspace owns an activity named `resident_orchestrator`. The activity is the
@@ -57,7 +66,6 @@ spec:
   backend: cli
   provider: codex
   model: gpt-5.6-sol
-  max_iterations: 1
   wall_clock_timeout_seconds: 7200
   instruction: |
     Read the resident identity and active rules before acting.
@@ -68,6 +76,11 @@ The example values are illustrative; each workspace chooses its own provider, mo
 instruction. The resolved provider/model must be explicit and must match the named resident's
 identity. Defaults or role overrides that silently change the resolved identity are invalid for a
 resident activity.
+
+`AgentLoopSpec.max_iterations` in `activity_v2.rs` bounds turns in Orbit's HTTP loop. The CLI
+dispatcher launches one provider process and does not apply that field to provider turns, so the
+resident example omits it: a full shepherd cycle is bounded by the 7,200-second wall clock, while
+provider turn knobs remain provider/harness policy rather than Orbit activity configuration.
 
 Identity memory remains outside Orbit's task store. The activity instruction points the CLI agent
 to its versioned memory layer, and the CLI harness loads the workspace's normal repository
@@ -99,15 +112,22 @@ Selection order is deterministic:
 
 1. resume the oldest `in-progress`, root, `epic` task;
 2. otherwise select the highest-priority ready `backlog` root epic, then creation order;
-3. otherwise select a `proposed` root epic only when workspace policy permits the resident to plan
-   and start it; and
-4. otherwise return a successful no-op.
+3. otherwise return a successful no-op.
+
+V1 does not pick up `proposed` epics. A human or upstream authority must approve one into `backlog`
+before the resident can claim it; a future policy surface for proposed pickup remains an open
+question in [3_vision.md](./3_vision.md).
 
 The first version permits one active epic per workspace. The routine uses `overlap: forbid`, pins
 one host, and the selector always resumes active ownership before admitting new work. These three
 constraints avoid a new lease or assignee subsystem. A concurrent manual lifecycle transition is
 resolved by the task store's existing status validation; the losing cycle refreshes instead of
 forcing state.
+
+`overlap: forbid` prevents concurrent fires of this routine, not a manual invocation of the same
+activity. Status validation is the admission backstop: only one contender can transition the
+selected backlog epic to `in-progress`; a loser refreshes, while contenders resuming an already
+active epic are made dispatch-safe by the authoritative task/run lookup in Section 4.
 
 ## 4. Resident Cycle Contract
 
@@ -121,14 +141,29 @@ supervisor. During each cycle it must:
 4. create independently shippable child tasks with `parent_id`, strong acceptance criteria,
    precise `context_files`, dependencies, priority, complexity, and crew;
 5. dispatch only explicit ready child IDs through the workspace's normal shipment workflow;
-6. observe existing child runs before dispatching anything, so a restart never duplicates an
-   in-flight shipment;
+6. query the authoritative run-list projection by each ready child task ID before dispatching;
+   observe any non-terminal matching run instead of submitting another shipment;
 7. obtain and enforce the workspace's independent-review policy;
-8. resolve failures, review findings, merge conflicts, and stale branches within its workspace;
-9. verify landed commits and child lifecycle state rather than trusting agent prose or a PR merge
+8. treat waiting for human review/merge approval as an explicit gate: record the pending PR and
+   required approver evidence, then exit until that evidence exists;
+9. resolve failures, review findings, merge conflicts, and stale branches within its workspace;
+10. verify landed commits and child lifecycle state rather than trusting agent prose or a PR merge
    button; and
-10. complete the parent only after every required child is terminal and the parent-level acceptance
+11. complete the parent only after every required child is terminal and the parent-level acceptance
     criteria have been verified as an integrated outcome.
+
+Shipment submission takes explicit child task IDs. Before a Run becomes dispatchable, the shipment
+path must persist those IDs on the Run in the same transaction as Run creation; the run-list
+projection indexed by task ID is therefore the authoritative run↔task association. Comments,
+execution summaries, and resident checkpoints may point to that association, but are never its
+source of truth. This makes the pre-dispatch query reliable even if the resident crashes immediately
+after submission and before writing its own checkpoint.
+
+For the `ws_orbit` canary, the review gate is Daniel's human merge approval; agent review is off by
+default. Planner, implementer, and reviewer crew labels are activity labels on one resolved
+provider/model/backend assignment and do not establish independent review. The resident may prepare
+and repair the candidate, but it must enter the human-approval wait state rather than approving or
+merging on Daniel's behalf.
 
 The resident may inspect adjacent workspaces to understand an interface, but it must not silently
 edit or dispatch into them. A cross-workspace dependency becomes a separate epic assignment in the
@@ -142,7 +177,7 @@ No correctness may depend on CLI conversation history. The recovery state is the
 - the parent task's status, plan, comments, execution summary, and acceptance criteria;
 - child tasks connected by `parent_id`;
 - child `dependencies` and relations;
-- workflow/run IDs attached to tasks or recorded in artifacts/comments;
+- workflow Runs whose transactionally stored task IDs are exposed by the run-list projection;
 - review threads and structured verdicts; and
 - repository/PR state verified during the cycle.
 
@@ -158,8 +193,9 @@ Crash behavior follows from where the failure occurs:
 | After selection, before start | Parent remains proposed/backlog | Re-evaluate and retry |
 | After parent start | Parent remains `in-progress` | Resume it before new work |
 | After child creation | Children remain attached | Continue decomposition/dispatch |
-| After workflow submit | Run/task link remains authoritative | Observe; do not redispatch |
-| While waiting for review or CI evidence | Parent remains active | Recheck only the required gate |
+| After workflow submit, before resident checkpoint | Run already contains the child task ID and appears in the task-indexed run-list projection | Observe the matching run; do not redispatch |
+| While waiting for agent review or CI evidence | Parent remains active with the pending gate recorded | Recheck only the required gate |
+| While waiting for human review/merge approval | Parent remains active with the PR and required approval evidence recorded | Recheck human approval/merge evidence; do not redispatch or complete |
 | Genuine product-authority blocker | Parent moves to `blocked` with exact question | Stop automatic retries |
 
 ## 6. Routine Contract
@@ -174,7 +210,7 @@ hosts: [dk-server-1]
 trigger: { cron: "*/5 * * * *", missed_run: skip }
 target: job:resident_epic_cycle
 policy:
-  timeout_minutes: 120
+  timeout_minutes: 135
   overlap: forbid
 ```
 
@@ -186,6 +222,12 @@ Routine definitions remain disabled by default when seeded. Enabling a resident 
 workspace decision, and the activity must resolve to a valid CLI provider/model on the pinned host
 before enablement.
 
+The routine timeout must be strictly greater than the resident activity wall clock plus job and
+checkpoint overhead. For the 120-minute activity example, the routine reserves 15 minutes of
+headroom (`135` minutes total), so routine-level expiry cannot preempt the activity supervisor's
+shutdown and final durable checkpoint. Workspaces that change the activity wall clock must increase
+the routine timeout by at least the same delta while retaining explicit headroom.
+
 ## 7. Child Shipment and Completion
 
 The resident reuses existing leaf delivery workflows. It does not implement code inside the epic
@@ -193,15 +235,17 @@ cycle unless the workspace's delivery policy explicitly treats a bounded change 
 Normally it promotes ready children and invokes shipment with explicit task IDs, selected mode,
 crew, base branch, and independent review configuration.
 
-An epic may have sequential and parallel children. Ordering is expressed durably through child
-`dependencies`; disjoint ready children may be shipped concurrently within the workspace's normal
-run and lock limits. Dependency inference that exists only in a model's reasoning is incomplete —
-the resident must write it to the child tasks before dispatch.
+An epic may have sequential and parallel children. Ordering is expressed durably by creating
+`BlockedBy` relations on child tasks; `dependencies` is the read projection of those relations, not
+a stored scalar field. Disjoint ready children may be shipped concurrently within the workspace's
+normal run and lock limits. Dependency inference that exists only in a model's reasoning is
+incomplete — the resident must create the relations before dispatch.
 
 The parent does not become `done` merely because all children reached `review`. Completion requires:
 
 - every required child is `done`, `rejected`, or explicitly accepted as out of scope;
 - no open blocking review thread remains;
+- every required PR has the human review/merge approval evidence required by workspace policy;
 - required PRs are merged and candidate commits are on the integration branch;
 - parent-level integration checks pass; and
 - the parent execution summary contains a structured final verdict and evidence pointers.

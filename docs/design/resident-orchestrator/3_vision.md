@@ -1,7 +1,7 @@
 ---
 title: Resident Orchestrator — Vision
 owner: codex
-last_updated: 2026-07-17
+last_updated: 2026-07-18
 status: Draft
 feature: resident-orchestrator
 doc_role: vision
@@ -39,6 +39,10 @@ durable task state are sufficient before adding routing or coordination machiner
 6. **Should identity be promoted beyond an activity asset?** If many products need resident agents,
    a typed resident profile may become worthwhile. It should be justified by repeated configuration
    drift, not introduced before the activity-based canary.
+7. **Should residents pick up proposed epics?** V1 requires an upstream authority to move an epic
+   to `backlog`; it deliberately has no implicit proposed-work authority. A future version could
+   add an explicit policy block to the routine or workspace configuration, but only once its
+   approval provenance and operator visibility are defined.
 
 ## 2. Prior Work
 

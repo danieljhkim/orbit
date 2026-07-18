@@ -1,7 +1,7 @@
 ---
 title: Resident Orchestrator — Decisions
 owner: codex
-last_updated: 2026-07-17
+last_updated: 2026-07-18
 status: Draft
 feature: resident-orchestrator
 doc_role: decisions
@@ -23,6 +23,21 @@ This folder is still Draft and has no allocated ADR. The candidate choices descr
 [2_design.md](./2_design.md)—workspace-addressed `epic` tasks, bounded CLI ownership cycles, and
 replacement rather than conversion of the HTTP epic pipeline—remain proposals until the design is
 accepted and implementation tasks are allocated.
+
+## Candidate Decision: Epic Marker and Legacy Coexistence
+
+**Proposal.** Resident orchestration selects root tasks by the `epic` tag rather than changing or
+depending on `TaskType`. The legacy `task_epic_pipeline` continues to identify epics by
+`TaskType::Feature` until it is retired.
+
+**Coexistence rule.** The paths are disjoint by workspace capability during retirement stages 1–3.
+Once a workspace enables its resident routine, legacy epic-pipeline admission must reject that
+workspace; workspaces without the resident capability may continue to use the Feature-typed legacy
+path. A task may carry both markers, but may never be claimed by both paths.
+
+**Why this proposal.** A tag is an explicit delegation signal that does not overload the broad
+`feature` type, while workspace-level exclusion provides a fail-closed migration boundary without
+rewriting existing legacy tasks. This remains a candidate decision, not an allocated ADR.
 
 ## Task References
 
