@@ -39,8 +39,24 @@ impl OrbitRuntime {
             target_type,
             status,
             role,
+            workspace_id: None,
+            caller_machine_id: None,
+            process_machine_id: None,
+            transport: None,
+            capability: None,
+            origin_session_id: None,
+            mcp_call_id: None,
+            job_run_id: None,
+            lease_id: None,
             limit,
         })
+    }
+
+    pub fn list_audit_events_filtered(
+        &self,
+        filter: &AuditEventFilter,
+    ) -> Result<Vec<AuditEvent>, OrbitError> {
+        self.stores().audit_events().list(filter)
     }
 
     pub fn show_audit_event(&self, id: i64) -> Result<AuditEvent, OrbitError> {
@@ -121,6 +137,16 @@ impl OrbitRuntime {
             host: std::env::var("HOSTNAME").ok(),
             pid: std::process::id(),
             session_id: None,
+            workspace_id: None,
+            caller_machine_id: None,
+            caller_host_id: None,
+            process_machine_id: None,
+            process_host_id: None,
+            transport: None,
+            effective_capabilities: Default::default(),
+            origin_session_id: None,
+            mcp_call_id: None,
+            lease_id: None,
             task_id: None,
             job_run_id: std::env::var("ORBIT_RUN_ID").ok().filter(|s| !s.is_empty()),
             activity_id: std::env::var("ORBIT_ACTIVITY_ID")

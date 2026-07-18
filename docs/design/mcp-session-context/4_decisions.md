@@ -3,14 +3,14 @@ summary: "MCP Session Context — Decisions"
 type: design
 title: "MCP Session Context — Decisions"
 owner: codex
-last_updated: 2026-06-21
-status: Draft
+last_updated: 2026-07-18
+status: Accepted
 feature: mcp-session-context
 doc_role: decisions
 tags: ["mcp-session-context", "mcp", "workspace"]
 paths: ["crates/orbit-mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-cli/src/command/mcp/**"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-00406", "ADR-0181", "ADR-0199", "ADR-0149"]
+related_artifacts: ["ORB-00256", "ORB-00406", "ORB-10228", "ADR-0181", "ADR-0199", "ADR-0149"]
 ---
 
 # MCP Session Context — Decisions
@@ -21,17 +21,21 @@ ADR log for MCP session context. Format follows [docs/design/CONVENTIONS.md §4]
 
 ## ADR-0181 — MCP ambient workspace session context
 
-**Status:** Proposed · 2026-05 · [ORB-00256]
+**Status:** Accepted · 2026-05 · [ORB-00256], amended 2026-07 · [ORB-10228]
 
 **Context.** MCP tools need CLI-like workspace ergonomics, but [ADR-0149] makes process-cwd defaults unsafe because worktree cwd can bind to a different `workspace_id`. The viable alternatives were per-call workspace input forever, a one-shot workspace lookup tool that clients cache, or a deliberate session-level signal from the MCP client.
 
 **Decision.** MCP clients announce the canonical workspace path in `initialize.params._meta.orbit.workspace`. `orbit-mcp` stores that value in the server session context for the stdio session and passes it through `ToolSessionContext` into `ToolContext`; workspace-taking tools resolve explicit input first, then session context, then return a clear missing-workspace error. If explicit input and session context differ, the tool logs the mismatch at info level and honors explicit input.
+
+**Trusted-provenance amendment.** The announced workspace is only the legacy untrusted address selector. An Orbit adapter/runtime separately injects validated `workspace_id`, caller/process machine and display-host identity, transport, the full canonical effective capability set, origin session, exactly one call ID per call, and optional typed leased-run correlation. External metadata/tool JSON cannot populate those fields or audit identity/correlation. Standalone stdio is local, exactly `{agent}`, and `unverified`; authenticated managed-envelope fields win when the existing managed marker is present.
 
 **Consequences.**
 - [ADR-0149] remains the `workspace_id` binding invariant; this ADR amends only how MCP calls address that binding.
 - `orbit.task.add` and future workspace-taking tools can make `workspace` optional without defaulting to process cwd.
 - Clients that cannot send initialize metadata can continue passing `workspace` explicitly.
 - Cost: Orbit now carries MCP session metadata across the adapter, CLI host, runtime dispatch, and tool context, so new host surfaces must preserve that thread-through path.
+- Capability authorization is membership in the complete set; scalar or max-capability representations are forbidden.
+- Existing audit `host`, `session_id`, and `job_run_id` meanings remain canonical; all new provenance is additive.
 
 ## ADR-0199 — Workspace_path-addressable MCP host tools with surface-scoped containment
 
@@ -51,5 +55,6 @@ ADR log for MCP session context. Format follows [docs/design/CONVENTIONS.md §4]
 
 - [ORB-00256] implemented MCP ambient workspace session context.
 - [ORB-00406] proposes workspace_path-addressable host tools ([ADR-0199]).
+- [ORB-10228] accepted and implemented the trusted-provenance amendment to [ADR-0181].
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

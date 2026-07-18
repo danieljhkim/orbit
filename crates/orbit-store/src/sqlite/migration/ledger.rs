@@ -63,12 +63,17 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "workspace_coordination_projections",
         apply: super::apply_workspace_coordination_projections,
     },
+    Migration {
+        version: 7,
+        name: "trusted_mcp_audit_provenance",
+        apply: super::apply_trusted_mcp_audit_provenance,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 6;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 7;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

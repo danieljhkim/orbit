@@ -49,6 +49,9 @@ fn fresh_db_applies_baseline_and_records_ledger() {
     assert_eq!(applied[5].version, 6);
     assert_eq!(applied[5].name, "workspace_coordination_projections");
     assert!(!applied[5].applied_at.is_empty());
+    assert_eq!(applied[6].version, 7);
+    assert_eq!(applied[6].name, "trusted_mcp_audit_provenance");
+    assert!(!applied[6].applied_at.is_empty());
 }
 
 #[test]
@@ -173,6 +176,10 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0006".to_string(),
                 "workspace_coordination_projections".to_string()
             ),
+            (
+                "migration.v0007".to_string(),
+                "trusted_mcp_audit_provenance".to_string()
+            ),
         ]
     );
 }
@@ -184,7 +191,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0007', 'from-the-future', '2099-01-01T00:00:00Z')",
+         VALUES ('migration.v0008', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -200,7 +207,7 @@ fn refuses_db_from_a_newer_binary() {
 }
 
 #[test]
-fn store_reopens_database_at_shipped_schema_v4_and_applies_v5_and_v6() {
+fn store_reopens_database_at_shipped_schema_v4_and_applies_through_v7() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("orbit.db");
 
@@ -219,6 +226,32 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_v5_and_v6() {
                 ('migration.v0002', 'learnings_index_workspace_scope', '2026-07-02T00:00:00Z'),
                 ('migration.v0003', 'flat_crew_model', '2026-07-03T00:00:00Z'),
                 ('migration.v0004', 'job_run_archive_stage', '2026-07-04T00:00:00Z');
+            CREATE TABLE audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                execution_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                command TEXT NOT NULL,
+                subcommand TEXT,
+                tool_name TEXT,
+                target_type TEXT,
+                target_id TEXT,
+                role TEXT NOT NULL,
+                status TEXT NOT NULL,
+                exit_code INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL,
+                working_directory TEXT NOT NULL,
+                arguments_json TEXT,
+                stdout_truncated TEXT,
+                stderr_truncated TEXT,
+                error_message TEXT,
+                host TEXT,
+                pid INTEGER NOT NULL,
+                session_id TEXT,
+                task_id TEXT,
+                job_run_id TEXT,
+                activity_id TEXT,
+                step_index INTEGER
+            );
             CREATE TABLE job_runs (id TEXT PRIMARY KEY, archived_at TEXT);
             INSERT INTO job_runs(id, archived_at) VALUES ('preserved-run', NULL);
         "#,
@@ -227,12 +260,12 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_v5_and_v6() {
     drop(conn);
 
     let store = crate::Store::open(&path).expect("reopen shipped v4 store");
-    assert_eq!(store.schema_version().expect("schema version"), 6);
+    assert_eq!(store.schema_version().expect("schema version"), 7);
     let applied = store.applied_migrations().expect("applied migrations");
-    assert_eq!(applied.last().map(|migration| migration.version), Some(6));
+    assert_eq!(applied.last().map(|migration| migration.version), Some(7));
     assert_eq!(
         applied.last().map(|migration| migration.name.as_str()),
-        Some("workspace_coordination_projections")
+        Some("trusted_mcp_audit_provenance")
     );
     let connection = store.connection();
     let conn = connection.lock().expect("connection");
@@ -247,6 +280,90 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_v5_and_v6() {
         )
         .expect("preserved v4 record");
     assert_eq!(preserved, 1);
+}
+
+#[test]
+fn store_reopens_shipped_v6_audit_rows_and_applies_v7_additively() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("orbit.db");
+    let conn = Connection::open(&path).expect("open raw store connection");
+    conn.execute_batch(
+        r#"
+            CREATE TABLE schema_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO schema_meta VALUES
+                ('migration.v0001', 'baseline', '2026-07-01T00:00:00Z'),
+                ('migration.v0002', 'learnings_index_workspace_scope', '2026-07-02T00:00:00Z'),
+                ('migration.v0003', 'flat_crew_model', '2026-07-03T00:00:00Z'),
+                ('migration.v0004', 'job_run_archive_stage', '2026-07-04T00:00:00Z'),
+                ('migration.v0005', 'host_registry_core', '2026-07-05T00:00:00Z'),
+                ('migration.v0006', 'workspace_coordination_projections', '2026-07-06T00:00:00Z');
+            CREATE TABLE audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                execution_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                command TEXT NOT NULL,
+                subcommand TEXT,
+                tool_name TEXT,
+                target_type TEXT,
+                target_id TEXT,
+                role TEXT NOT NULL,
+                status TEXT NOT NULL,
+                exit_code INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL,
+                working_directory TEXT NOT NULL,
+                arguments_json TEXT,
+                stdout_truncated TEXT,
+                stderr_truncated TEXT,
+                error_message TEXT,
+                host TEXT,
+                pid INTEGER NOT NULL,
+                session_id TEXT,
+                task_id TEXT,
+                job_run_id TEXT,
+                activity_id TEXT,
+                step_index INTEGER
+            );
+            INSERT INTO audit_events(
+                execution_id, timestamp, command, role, status, exit_code,
+                duration_ms, working_directory, host, pid, session_id, task_id,
+                job_run_id, activity_id, step_index
+            ) VALUES (
+                'exec-v6', '2026-07-06T00:00:00Z', 'tool', 'codex', 'success', 0,
+                1, '/repo', 'legacy-process-host', 42, 'legacy-session', 'ORB-10228',
+                'jrun-v6', 'agent_implement', 3
+            );
+        "#,
+    )
+    .expect("seed shipped v6 database");
+    drop(conn);
+
+    let store = crate::Store::open(&path).expect("open and migrate v6 store");
+    assert_eq!(store.schema_version().expect("schema version"), 7);
+    let rows = store
+        .list_audit_events(&crate::AuditEventFilter::default())
+        .expect("read migrated audit rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].host.as_deref(), Some("legacy-process-host"));
+    assert_eq!(rows[0].session_id.as_deref(), Some("legacy-session"));
+    assert_eq!(rows[0].job_run_id.as_deref(), Some("jrun-v6"));
+    assert_eq!(rows[0].workspace_id, None);
+    assert!(rows[0].effective_capabilities.is_empty());
+    assert_eq!(rows[0].mcp_call_id, None);
+    drop(store);
+
+    let reopened = crate::Store::open(&path).expect("reopen migrated store");
+    assert_eq!(reopened.schema_version().expect("schema version"), 7);
+    assert_eq!(
+        reopened
+            .list_audit_events(&crate::AuditEventFilter::default())
+            .expect("read after reopen")
+            .len(),
+        1
+    );
 }
 
 #[test]

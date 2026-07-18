@@ -21,11 +21,18 @@ Required invariants:
 - A denied command uses `status: denied` and a non-zero exit code.
 - Error messages are redacted before insertion.
 - Command rows do not embed full provider request/response bodies.
+- Legacy `host`, `session_id`, and `job_run_id` retain their meanings: executing-process hostname, legacy session correlation, and canonical run correlation respectively.
+- MCP rows may add `workspace_id`, caller/process machine and display-host IDs, transport, the complete effective capability set, `origin_session_id`, `mcp_call_id`, and `lease_id`.
+- `mcp_call_id` is generated once before preflight and is shared by the call's denial or dispatch outcome. Two calls in one origin session have distinct call IDs.
+- MCP capability authorization and filters use set membership. There is no authorizing member, ordinal, ceiling, or max-capability field.
+- External MCP JSON may populate only the legacy workspace address selector. Trusted audit identity and correlation come from the adapter/runtime and authenticated managed envelope; standalone MCP role is `unverified`.
+- A trusted leased-run ID fills an empty `job_run_id` or must match it; audit adds `lease_id`, not another run column.
 
 Failure modes:
 
 - If the command exits through an early return, the RAII guard still writes one row.
 - If audit insertion fails during `Drop`, the CLI prints a warning and does not mask the command result.
+- If a tool implementation succeeds but its runtime audit insertion fails, the call fails closed and does not surface a successful result. The non-fatal `Drop` rule applies only to guard-side RAII persistence.
 - If runtime initialization fails before the guard exists, no command audit row is written.
 
 ### V2 Activity/Job Audit Event

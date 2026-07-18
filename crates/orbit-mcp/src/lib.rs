@@ -126,7 +126,16 @@ pub trait McpHost: Send + Sync + 'static {
 /// transport error. The function is async and expects to be driven by a tokio
 /// runtime (see `tokio::runtime::Runtime::block_on`).
 pub async fn serve_stdio(host: Arc<dyn McpHost>) -> Result<(), OrbitError> {
-    let server = OrbitToolServer::new(host);
+    serve_stdio_with_context(host, ToolSessionContext::trusted_local(None, None, None)).await
+}
+
+/// Serve stdio MCP with adapter-validated trusted context. The external
+/// initialize payload can replace only the legacy `workspace` selector.
+pub async fn serve_stdio_with_context(
+    host: Arc<dyn McpHost>,
+    trusted_context: ToolSessionContext,
+) -> Result<(), OrbitError> {
+    let server = OrbitToolServer::new_with_context(host, trusted_context);
     let running = server
         .serve(stdio())
         .await

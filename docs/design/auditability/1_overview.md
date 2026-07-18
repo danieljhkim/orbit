@@ -3,7 +3,7 @@ summary: "Auditability — Overview"
 type: design
 title: "Auditability — Overview"
 owner: codex
-last_updated: 2026-05-16
+last_updated: 2026-07-18
 status: Draft
 feature: auditability
 doc_role: overview
@@ -34,23 +34,27 @@ Orbit runs fleets of agents against user-owned repositories, so auditability is 
 
 The CLI audit middleware and runtime tool-dispatch paths write persistent `AuditEvent` records for most top-level commands and tool calls. These compact rows back `orbit audit list`, `orbit audit show`, `orbit audit stats`, and export commands. They carry command/target metadata, actor role, status, timing, working directory, host, process id, and optional argument/error fields, but not full provider transcripts.
 
-### 2.2 Activity/job run traces are file-backed JSONL trees
+### 2.2 MCP command rows distinguish trusted caller and process provenance
+
+MCP audit keeps legacy meanings stable: `host` is still the executing-process hostname, `session_id` is unchanged, and `job_run_id` remains canonical run correlation. Additive fields identify validated workspace, caller/process machines and display hosts, transport, the complete effective capability set, origin session, unique MCP call, and lease. Standalone calls are `unverified`; client JSON cannot populate trusted columns. [ORB-10228]
+
+### 2.3 Activity/job run traces are file-backed JSONL trees
 
 The v2 activity/job runtime emits `V2AuditEvent` envelopes for run, step, activity, fan-out, loop, filesystem, denial, and CLI-backend lifecycle events under `.orbit/state/audit/v2_loop/`. This layer is the workflow replay spine: it carries `run_id`, `event_id`, `parent_event_id`, `agent_identity`, and optional `workspace_path`. `orbit run events`, `orbit run trace`, `orbit run show -s`, and `orbit run logs -s` expose the same activity DAG `step.id` source of truth after [T20260426-0705] and [T20260426-0709].
 
-### 2.3 Agent-loop audit events preserve provider and tool detail
+### 2.4 Agent-loop audit events preserve provider and tool detail
 
 The HTTP loop engine emits `LoopAuditEvent` records for sessions, HTTP requests/responses, tool requests/results, iteration boundaries, and policy denials. Loop JSONL materializes under `.orbit/state/audit/loop/` only once a run emits loop-level events; large request, response, input, and output bodies are stored as redacted content-addressed blobs under `.orbit/state/audit/blobs/`.
 
-### 2.4 Invocation metrics are adjacent, not a replacement
+### 2.5 Invocation metrics are adjacent, not a replacement
 
 The invocation store records token usage, tool-call counts, task IDs, agent, model, job run, and activity IDs for metrics and scoreboards. It helps answer cost and usage questions, but it summarizes rather than preserves transcript structure. V2 job metrics began persisting beside audit in [T20260426-0526].
 
-### 2.5 Redaction happens before durable payload storage
+### 2.6 Redaction happens before durable payload storage
 
 Blob writes apply pattern-based redaction at write time, and CLI error audit paths scrub sensitive live environment values before persistence. Readers should not need to re-scrub normal audit artifacts. The detailed contract lives in [specs/redaction-retention.md](./specs/redaction-retention.md).
 
-### 2.6 Process tracing has a global JSONL feed
+### 2.7 Process tracing has a global JSONL feed
 
 The default tracing subscriber appends redacted structured events to `~/.orbit/state/logs/orbit.jsonl` after [T20260426-2343] and [T20260426-2349]. The feed is global because logging initializes before workspace resolution. After [T20260427-0023], filesystem policy denials, proc-spawn allowlist denials, and friction record submissions also project stable `tracing::warn!` events beside their canonical stores. First-class friction artifacts now live under `.orbit/frictions/` and surface in `Knowledge > Frictions` for scan and triage without re-entering the task lifecycle.
 

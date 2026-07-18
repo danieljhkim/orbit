@@ -12,6 +12,7 @@ Every Orbit operation that touches code, task state, persistent runtime state, e
 |-----------------|------------------------|----------------|
 | Top-level CLI command | Command audit row | command, subcommand, role, status, duration, cwd |
 | Orbit tool mutation | Command audit row or targeted runtime row | tool/action name, target type/id, actor, status |
+| MCP tool preflight or dispatch | Command audit row | tool, status, trusted workspace/caller/process, transport, full capability set, origin session, unique call id, optional run/lease |
 | Task lifecycle update | Command/tool audit plus task history | task id, actor, status transition or document field changed |
 | Task lock reservation/check/release | Targeted command audit row | reservation target, files payload, status, conflict/denial state |
 | Activity/job run | V2 envelope JSONL | run id, agent identity, run start/finish |
@@ -33,6 +34,8 @@ Every Orbit operation that touches code, task state, persistent runtime state, e
 - Live tracing projections must be additional to canonical audit, error, log, or scoreboard writes.
 - A task-state mutation must leave task history or document metadata in addition to any audit row.
 - New operation classes must update this matrix in the same PR that introduces the operation.
+- Registry-backed and in-process MCP tools must have parity for preflight denial, runtime success, and tool failure, with one trusted call context across the path.
+- MCP initialize/tool JSON cannot become trusted audit identity, capability, transport, or correlation; malicious-payload wire tests must pin this boundary.
 
 ## Known Gaps
 

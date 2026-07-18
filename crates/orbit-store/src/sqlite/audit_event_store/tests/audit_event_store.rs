@@ -2,6 +2,8 @@
 use super::super::*;
 use crate::Store;
 use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
+use orbit_common::types::{McpCapability, McpTransport};
+use std::collections::BTreeSet;
 
 fn sample_params() -> AuditEventInsertParams {
     AuditEventInsertParams {
@@ -23,6 +25,16 @@ fn sample_params() -> AuditEventInsertParams {
         host: Some("test-host".to_string()),
         pid: 1234,
         session_id: Some("session-abc".to_string()),
+        workspace_id: Some("ws_orbit".to_string()),
+        caller_machine_id: Some("hm_caller".to_string()),
+        caller_host_id: Some("caller-host".to_string()),
+        process_machine_id: Some("hm_process".to_string()),
+        process_host_id: Some("process-host".to_string()),
+        transport: Some(McpTransport::SshMcp),
+        effective_capabilities: BTreeSet::from([McpCapability::Agent, McpCapability::Runner]),
+        origin_session_id: Some("mcp-session-abc".to_string()),
+        mcp_call_id: Some("mcall-abc".to_string()),
+        lease_id: Some("lease-abc".to_string()),
         task_id: Some("T20260428-7".to_string()),
         job_run_id: Some("jrun-xyz".to_string()),
         activity_id: Some("agent_implement".to_string()),
@@ -60,6 +72,17 @@ fn insert_then_read_round_trips_correlation_fields() {
     assert_eq!(event.job_run_id.as_deref(), Some("jrun-xyz"));
     assert_eq!(event.activity_id.as_deref(), Some("agent_implement"));
     assert_eq!(event.step_index, Some(2));
+    assert_eq!(event.workspace_id.as_deref(), Some("ws_orbit"));
+    assert_eq!(event.caller_machine_id.as_deref(), Some("hm_caller"));
+    assert_eq!(event.process_machine_id.as_deref(), Some("hm_process"));
+    assert_eq!(event.transport, Some(McpTransport::SshMcp));
+    assert_eq!(
+        event.effective_capabilities,
+        BTreeSet::from([McpCapability::Agent, McpCapability::Runner])
+    );
+    assert_eq!(event.origin_session_id.as_deref(), Some("mcp-session-abc"));
+    assert_eq!(event.mcp_call_id.as_deref(), Some("mcall-abc"));
+    assert_eq!(event.lease_id.as_deref(), Some("lease-abc"));
 
     let by_id = store
         .get_audit_event(event.id)
@@ -69,6 +92,72 @@ fn insert_then_read_round_trips_correlation_fields() {
     assert_eq!(by_id.job_run_id.as_deref(), Some("jrun-xyz"));
     assert_eq!(by_id.activity_id.as_deref(), Some("agent_implement"));
     assert_eq!(by_id.step_index, Some(2));
+    assert_eq!(by_id.workspace_id.as_deref(), Some("ws_orbit"));
+    assert_eq!(by_id.mcp_call_id.as_deref(), Some("mcall-abc"));
+}
+
+#[test]
+fn list_audit_events_filters_trusted_provenance_and_capability_membership() {
+    let store = Store::open_in_memory().expect("open store");
+    store
+        .insert_audit_event_record(&sample_params())
+        .expect("insert audit event");
+
+    let filters = [
+        AuditEventFilter {
+            workspace_id: Some("ws_orbit".to_string()),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            caller_machine_id: Some("hm_caller".to_string()),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            process_machine_id: Some("hm_process".to_string()),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            transport: Some(McpTransport::SshMcp),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            capability: Some(McpCapability::Runner),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            origin_session_id: Some("mcp-session-abc".to_string()),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            mcp_call_id: Some("mcall-abc".to_string()),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            job_run_id: Some("jrun-xyz".to_string()),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            lease_id: Some("lease-abc".to_string()),
+            ..AuditEventFilter::default()
+        },
+    ];
+    for filter in filters {
+        assert_eq!(
+            store
+                .list_audit_events(&filter)
+                .expect("filter audit events")
+                .len(),
+            1
+        );
+    }
+
+    let absent = store
+        .list_audit_events(&AuditEventFilter {
+            capability: Some(McpCapability::Operator),
+            ..AuditEventFilter::default()
+        })
+        .expect("filter absent capability");
+    assert!(absent.is_empty());
 }
 
 #[test]
@@ -148,7 +237,22 @@ fn migration_adds_correlation_columns_to_legacy_table() {
         .expect("query pragma")
         .collect::<Result<_, _>>()
         .expect("collect pragma rows");
-    for expected in ["task_id", "job_run_id", "activity_id", "step_index"] {
+    for expected in [
+        "task_id",
+        "job_run_id",
+        "activity_id",
+        "step_index",
+        "workspace_id",
+        "caller_machine_id",
+        "caller_host_id",
+        "process_machine_id",
+        "process_host_id",
+        "transport",
+        "capabilities_json",
+        "origin_session_id",
+        "mcp_call_id",
+        "lease_id",
+    ] {
         assert!(
             columns.iter().any(|c| c == expected),
             "expected column `{expected}` in {columns:?}"
@@ -165,6 +269,8 @@ fn migration_adds_correlation_columns_to_legacy_table() {
         .expect("collect index rows");
     assert!(indexes.iter().any(|i| i == "idx_audit_events_task_id"));
     assert!(indexes.iter().any(|i| i == "idx_audit_events_job_run_id"));
+    assert!(indexes.iter().any(|i| i == "idx_audit_events_workspace_id"));
+    assert!(indexes.iter().any(|i| i == "idx_audit_events_mcp_call_id"));
 
     let preserved: i64 = conn
         .query_row(
@@ -186,6 +292,15 @@ fn migration_adds_correlation_columns_to_legacy_table() {
         task_id.is_none(),
         "legacy row should have NULL task_id post-migration",
     );
+    let new_fields: (Option<String>, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT workspace_id, capabilities_json, mcp_call_id FROM audit_events \
+             WHERE execution_id = 'exec-legacy'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("read legacy row additions");
+    assert_eq!(new_fields, (None, None, None));
 }
 
 #[test]

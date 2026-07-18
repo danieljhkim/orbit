@@ -50,6 +50,55 @@ impl Execute for AuditShowArgs {
                 "Host:              {}",
                 event.host.as_deref().unwrap_or("-")
             );
+            println!(
+                "Workspace ID:      {}",
+                event.workspace_id.as_deref().unwrap_or("-")
+            );
+            println!(
+                "Caller machine:    {}",
+                event.caller_machine_id.as_deref().unwrap_or("-")
+            );
+            println!(
+                "Caller host:       {}",
+                event.caller_host_id.as_deref().unwrap_or("-")
+            );
+            println!(
+                "Process machine:   {}",
+                event.process_machine_id.as_deref().unwrap_or("-")
+            );
+            println!(
+                "Process host ID:   {}",
+                event.process_host_id.as_deref().unwrap_or("-")
+            );
+            println!(
+                "Transport:         {}",
+                event
+                    .transport
+                    .map(|value| value.to_string())
+                    .as_deref()
+                    .unwrap_or("-")
+            );
+            println!(
+                "Capabilities:      {}",
+                event
+                    .effective_capabilities
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            println!(
+                "Origin session:    {}",
+                event.origin_session_id.as_deref().unwrap_or("-")
+            );
+            println!(
+                "MCP call:          {}",
+                event.mcp_call_id.as_deref().unwrap_or("-")
+            );
+            println!(
+                "Lease:             {}",
+                event.lease_id.as_deref().unwrap_or("-")
+            );
             if let Some(ref err) = event.error_message {
                 println!("Error:             {err}");
             }
