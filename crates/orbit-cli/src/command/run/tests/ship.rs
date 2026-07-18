@@ -10,6 +10,8 @@ fn ship_args(task_ids: &[&str], mode: ShipMode, base: Option<&str>) -> ShipComma
         task_ids: task_ids.iter().map(|value| value.to_string()).collect(),
         mode: Some(mode),
         base: base.map(str::to_string),
+        review: false,
+        review_crew: None,
         json: false,
     }
 }
@@ -85,6 +87,30 @@ fn explicit_ship_preserves_local_mode_and_base_override() {
             "base_branch": "main",
             "task_ids": ["T20260425-2010"],
         })
+    );
+}
+
+#[test]
+fn ship_threads_explicit_review_controls() {
+    let mut args = ship_args(&["T20260425-2010"], ShipMode::Pr, None);
+    args.review = true;
+    args.review_crew = Some("opus-review".to_string());
+
+    let plan = build_plan(&args, "agent-main").expect("build review plan");
+
+    assert_eq!(plan.input["review"], true);
+    assert_eq!(plan.input["review_crew"], "opus-review");
+}
+
+#[test]
+fn ship_rejects_enabled_review_without_explicit_crew() {
+    let mut args = ship_args(&[], ShipMode::Pr, None);
+    args.review = true;
+
+    let error = build_plan(&args, "agent-main").expect_err("review crew is required");
+    assert!(
+        error.to_string().contains("non-blank explicit review crew"),
+        "unexpected error: {error}"
     );
 }
 

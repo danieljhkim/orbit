@@ -619,7 +619,15 @@ async fn ship_endpoint_submits_task_auto_pipeline_run() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     write_replay_job(&runtime, "task_auto_pipeline");
 
-    let response = request_ship(runtime.clone(), Some(json!({ "mode": "pr" }))).await;
+    let response = request_ship(
+        runtime.clone(),
+        Some(json!({
+            "mode": "pr",
+            "review": true,
+            "review_crew": "opus-review",
+        })),
+    )
+    .await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let payload = body_json(response).await;
@@ -632,6 +640,15 @@ async fn ship_endpoint_submits_task_auto_pipeline_run() {
     let run_id = payload["run_id"].as_str().expect("run id");
     let stored = runtime.show_job_run(run_id).expect("stored ship run");
     assert_eq!(stored.job_id, "task_auto_pipeline");
+    assert_eq!(
+        stored.input,
+        Some(json!({
+            "mode": "pr",
+            "base_branch": "main",
+            "review": true,
+            "review_crew": "opus-review",
+        }))
+    );
 }
 
 #[tokio::test]
@@ -646,6 +663,21 @@ async fn ship_endpoint_rejects_unknown_mode() {
         payload["error"]
             .as_str()
             .is_some_and(|message| message.contains("unknown ship mode"))
+    );
+}
+
+#[tokio::test]
+async fn ship_endpoint_rejects_enabled_review_without_explicit_crew() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request_ship(runtime, Some(json!({ "review": true }))).await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = body_json(response).await;
+    assert!(
+        payload["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("non-blank explicit review crew"))
     );
 }
 

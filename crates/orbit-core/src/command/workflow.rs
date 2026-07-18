@@ -123,10 +123,15 @@ pub fn resolved_ship_mode(workspace: &orbit_common::types::Workspace) -> ShipMod
 /// An empty `task_ids` slice selects auto mode (the pipeline discovers
 /// backlog tasks itself). Explicit ids are validated for duplicates and
 /// emptiness so every submission surface rejects the same malformed input.
+/// Review controls are omitted from the resulting document when disabled to
+/// preserve the historical ship input exactly. Enabling review requires a
+/// non-blank explicit crew so review never inherits implementation routing.
 pub fn build_ship_input(
     mode: ShipMode,
     base_branch: &str,
     task_ids: &[String],
+    review: bool,
+    review_crew: Option<&str>,
 ) -> Result<Value, OrbitError> {
     if base_branch.trim().is_empty() {
         return Err(OrbitError::InvalidInput(
@@ -160,6 +165,21 @@ pub fn build_ship_input(
         map.insert(
             "task_ids".to_string(),
             Value::Array(task_ids.iter().cloned().map(Value::String).collect()),
+        );
+    }
+    if review {
+        let review_crew = review_crew
+            .map(str::trim)
+            .filter(|crew| !crew.is_empty())
+            .ok_or_else(|| {
+                OrbitError::InvalidInput(
+                    "ship review requires a non-blank explicit review crew".to_string(),
+                )
+            })?;
+        map.insert("review".to_string(), Value::Bool(true));
+        map.insert(
+            "review_crew".to_string(),
+            Value::String(review_crew.to_string()),
         );
     }
     Ok(Value::Object(map))
@@ -326,16 +346,19 @@ mod ship_input_tests {
 
     #[test]
     fn build_ship_input_auto_mode_omits_task_ids() {
-        let input = build_ship_input(ShipMode::Pr, "main", &[]).expect("input builds");
+        let input = build_ship_input(ShipMode::Pr, "main", &[], false, None).expect("input builds");
         assert_eq!(input["mode"], "pr");
         assert_eq!(input["base_branch"], "main");
         assert!(input.get("task_ids").is_none());
+        assert!(input.get("review").is_none());
+        assert!(input.get("review_crew").is_none());
     }
 
     #[test]
     fn build_ship_input_explicit_tasks_and_local_mode() {
         let task_ids = vec!["T1".to_string(), "T2".to_string()];
-        let input = build_ship_input(ShipMode::Local, "agent-main", &task_ids).expect("builds");
+        let input = build_ship_input(ShipMode::Local, "agent-main", &task_ids, false, None)
+            .expect("builds");
         assert_eq!(input["mode"], "local");
         assert_eq!(input["base_branch"], "agent-main");
         assert_eq!(input["task_ids"], serde_json::json!(["T1", "T2"]));
@@ -344,12 +367,33 @@ mod ship_input_tests {
     #[test]
     fn build_ship_input_rejects_duplicates_blank_ids_and_empty_base() {
         let dup = vec!["T1".to_string(), "T1".to_string()];
-        assert!(build_ship_input(ShipMode::Pr, "main", &dup).is_err());
+        assert!(build_ship_input(ShipMode::Pr, "main", &dup, false, None).is_err());
 
         let blank = vec!["  ".to_string()];
-        assert!(build_ship_input(ShipMode::Pr, "main", &blank).is_err());
+        assert!(build_ship_input(ShipMode::Pr, "main", &blank, false, None).is_err());
 
-        assert!(build_ship_input(ShipMode::Pr, "  ", &[]).is_err());
+        assert!(build_ship_input(ShipMode::Pr, "  ", &[], false, None).is_err());
+    }
+
+    #[test]
+    fn build_ship_input_includes_explicit_review_controls() {
+        let input = build_ship_input(ShipMode::Pr, "main", &[], true, Some("opus-review"))
+            .expect("review input builds");
+
+        assert_eq!(input["review"], true);
+        assert_eq!(input["review_crew"], "opus-review");
+    }
+
+    #[test]
+    fn build_ship_input_rejects_enabled_review_without_non_blank_crew() {
+        for review_crew in [None, Some(""), Some("   ")] {
+            let error = build_ship_input(ShipMode::Pr, "main", &[], true, review_crew)
+                .expect_err("enabled review requires a crew");
+            assert!(
+                error.to_string().contains("non-blank explicit review crew"),
+                "unexpected error: {error}"
+            );
+        }
     }
 
     #[test]
