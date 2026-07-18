@@ -10,7 +10,7 @@ summary: Accepted ADR log for the coupled Host Registry and MCP Bridge v1 contra
 tags: [host-registry, mcp-bridge, multi-host, placement]
 paths: ["crates/orbit-registry/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10302, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10302, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Host Registry — Decisions
@@ -46,7 +46,7 @@ logical workspace/owner separately from machine-local checkout bindings.
 
 ## ADR-0227 — Stable machine identity, registry, and out-of-band hub pin
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze the host identity boundary; [ORB-10255] implemented the durable registry core; [ORB-10267] added operator administration (register/list/rename/retire), current-machine `host.toml` rename coordination, and the hub-global `registry_revision`.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze the host identity boundary; [ORB-10255] implemented the durable registry core; [ORB-10267] added operator administration (register/list/rename/retire), current-machine `host.toml` rename coordination, and the hub-global `registry_revision`; [ORB-10268] enforced the machine-global trust and exact hub/store pin at the MCP boundary.
 
 ### Context
 
@@ -68,7 +68,7 @@ and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
 
 ## ADR-0228 — Local placement broker with capability-set filtering
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] added the `orbit.host.list` and `orbit.workspace.list` canonical discovery tools (hub placement, operator capability, workspace-unscoped) reading one sanitized path-free registry snapshot.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] added the `orbit.host.list` and `orbit.workspace.list` canonical discovery tools (hub placement, operator capability, workspace-unscoped) reading one sanitized path-free registry snapshot; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface.
 
 ### Context
 
@@ -219,6 +219,10 @@ service. Keep runtime profile/ship construction in `orbit-core`, persistence in
   CLI enumeration renders the same single-transaction sanitized snapshot as discovery.
   Remote registration and
   post-link/register cache refresh remain deferred to E3; poll-driven refresh to I/J.
+- [ORB-10268] — implemented Unit E1's strict machine-global hub trust document and
+  fixed checkoutless hub MCP endpoint, including repeated exact store-stamp checks,
+  stable workspace-only payloads, canonical placement/capability filtering, and
+  trusted one-call/one-audit provenance.
 - [ORB-10302] — implemented Unit C4: moved the host/workspace/cache/service domain
   and its tests into `orbit-registry`, retired the replicated-registry scaffold,
   and preserved core/store/common ownership boundaries ([ADR-0235]).

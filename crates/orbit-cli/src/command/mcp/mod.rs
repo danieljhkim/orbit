@@ -6,7 +6,9 @@
 //! JSON schemas.
 
 mod command;
+mod config;
 mod host;
+mod hub;
 mod setup;
 
 pub use command::{McpCommand, McpSubcommand};

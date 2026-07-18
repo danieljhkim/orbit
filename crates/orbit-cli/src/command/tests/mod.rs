@@ -7,6 +7,7 @@ mod sweep;
 
 use clap::{Parser, error::ErrorKind};
 
+use orbit_common::types::McpCapability;
 use orbit_graph_cli::Command as GraphSubcommand;
 
 use super::{
@@ -52,6 +53,42 @@ fn cli_parses_mcp_serve() {
         },
         _ => panic!("expected top-level mcp command"),
     }
+}
+
+#[test]
+fn cli_parses_hub_mcp_serve_with_one_exact_capability() {
+    let cli = Cli::parse_from([
+        "orbit",
+        "mcp",
+        "serve",
+        "--hub",
+        "--capabilities",
+        "operator",
+    ]);
+    match cli.command {
+        Commands::Mcp(command) => match command.command {
+            McpSubcommand::Serve(args) => {
+                assert!(args.hub);
+                assert_eq!(args.capabilities, Some(McpCapability::Operator));
+            }
+            _ => panic!("expected mcp serve"),
+        },
+        _ => panic!("expected top-level mcp command"),
+    }
+}
+
+#[test]
+fn cli_rejects_mcp_capability_without_hub_and_unknown_values() {
+    assert_cli_rejects(
+        &["orbit", "mcp", "serve", "--capabilities", "agent"],
+        ErrorKind::MissingRequiredArgument,
+        "--hub",
+    );
+    assert_cli_rejects(
+        &["orbit", "mcp", "serve", "--hub", "--capabilities", "admin"],
+        ErrorKind::ValueValidation,
+        "admin",
+    );
 }
 
 #[test]

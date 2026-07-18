@@ -2,6 +2,8 @@
 
 // Content moved from inline #[cfg(test)] mod tests in mcp/mod.rs per ORB-00221.
 
+mod e1;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use orbit_common::types::{

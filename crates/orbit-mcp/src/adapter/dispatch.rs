@@ -27,11 +27,13 @@ impl OrbitToolServer {
         // ORB-00391: the v1 orbit-knowledge graph builtins were decommissioned,
         // so the in-process orbit-graph (v2) adapter owns its known graph
         // names and their local-derived policies.
-        definitions.extend(
-            self.graph_tools
-                .definitions()
-                .map_err(|error| OrbitError::InvalidInput(error.to_string()))?,
-        );
+        if self.host.in_process_graph_tools_enabled() {
+            definitions.extend(
+                self.graph_tools
+                    .definitions()
+                    .map_err(|error| OrbitError::InvalidInput(error.to_string()))?,
+            );
+        }
         validate_mcp_tool_definitions(&definitions)
             .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
         Ok(definitions)

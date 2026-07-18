@@ -18,6 +18,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
+use rusqlite::Connection;
 use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
 
@@ -38,6 +39,14 @@ struct McpWorkspace {
 
 impl McpWorkspace {
     fn init() -> Self {
+        Self::init_with_mode(None)
+    }
+
+    fn init_hub() -> Self {
+        Self::init_with_mode(Some("hub"))
+    }
+
+    fn init_with_mode(host_mode: Option<&str>) -> Self {
         let temp = tempdir().expect("tempdir");
         let home = temp.path().join("home");
         let work = temp.path().join("work");
@@ -51,13 +60,17 @@ impl McpWorkspace {
             .expect("initialize Git checkout");
         assert!(output.status.success(), "git init failed: {output:?}");
 
+        let mut init_args = vec![
+            "init",
+            "--non-interactive",
+            "--host-name",
+            "mcp-roundtrip-host",
+        ];
+        if let Some(mode) = host_mode {
+            init_args.extend(["--host-mode", mode]);
+        }
         let output = Self::orbit_command(&work, &home)
-            .args([
-                "init",
-                "--non-interactive",
-                "--host-name",
-                "mcp-roundtrip-host",
-            ])
+            .args(init_args)
             .output()
             .expect("run global init");
         assert!(
@@ -66,6 +79,19 @@ impl McpWorkspace {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+
+        if host_mode == Some("hub") {
+            let output = Self::orbit_command(&work, &home)
+                .args(["host", "register"])
+                .output()
+                .expect("register hub identity");
+            assert!(
+                output.status.success(),
+                "hub registration failed\nstdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
 
         let output = Self::orbit_command(&work, &home)
             .args(["workspace", "init", "--name", "mcp-roundtrip"])
@@ -360,6 +386,131 @@ fn mcp_serve_lists_canonical_agent_surface_outside_any_checkout() {
         message.contains("requires a workspace selector")
             && message.contains("_meta.orbit.workspace")
     }));
+}
+
+#[test]
+fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
+    let workspace = McpWorkspace::init_hub();
+    let scratch = workspace.home.join("hub-scratch");
+    std::fs::create_dir_all(&scratch).expect("create hub launch dir");
+    let child = McpWorkspace::orbit_command(&scratch, &workspace.home)
+        .args(["mcp", "serve", "--hub", "--capabilities", "agent"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn checkoutless hub MCP server");
+    let mut client = McpClient::new(child);
+    let initialized = client.request(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "hub-roundtrip", "version": "0" },
+            "_meta": { "orbit": { "workspace": "ws_mcp-roundtrip" } },
+        }),
+    );
+    assert_eq!(initialized["result"]["serverInfo"]["name"], "orbit-mcp");
+    client.notify("notifications/initialized");
+
+    let listed = client.request("tools/list", Value::Null);
+    let names = listed["result"]["tools"]
+        .as_array()
+        .expect("hub tools array")
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("hub tool name"))
+        .collect::<Vec<_>>();
+    assert!(
+        names.contains(&"orbit_task_add"),
+        "missing task surface: {names:?}"
+    );
+    assert!(!names.iter().any(|name| name.starts_with("orbit_graph_")));
+    assert!(!names.contains(&"orbit_host_list"));
+    assert!(!names.contains(&"orbit_friction_update"));
+
+    let created = client.call_tool_ok(
+        "orbit_task_add",
+        json!({
+            "workspace": "ws_mcp-roundtrip",
+            "title": "Checkoutless hub round trip",
+            "description": "Created through fixed hub mode",
+            "model": "codex"
+        }),
+    );
+    assert_eq!(created["title"], "Checkoutless hub round trip");
+    let graph_denied = client.call_tool_err(
+        "orbit_graph_search",
+        json!({"workspace": "ws_mcp-roundtrip", "query": "must-not-run"}),
+    );
+    assert!(
+        graph_denied["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("placement is 'local-derived'")),
+        "graph denial must retain canonical placement evidence: {graph_denied}"
+    );
+    let wire_payload = serde_json::to_string(&(listed, created)).expect("serialize wire payload");
+    assert!(!wire_payload.contains(workspace.work.to_string_lossy().as_ref()));
+    assert!(!wire_payload.contains(workspace.home.to_string_lossy().as_ref()));
+    drop(client);
+
+    let connection =
+        Connection::open(workspace.home.join(".orbit/orbit.db")).expect("open hub audit store");
+    let audit = connection
+        .query_row(
+            "SELECT COUNT(*), workspace_id, caller_machine_id, process_machine_id, transport, capabilities_json, mcp_call_id
+             FROM audit_events WHERE tool_name = 'orbit.task.add'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            },
+        )
+        .expect("hub task audit");
+    assert_eq!(audit.0, 1, "one D2 audit row per accepted call");
+    assert_eq!(audit.1.as_deref(), Some("ws_mcp-roundtrip"));
+    assert_eq!(
+        audit.2, audit.3,
+        "local hub caller and process identities match"
+    );
+    assert!(audit.2.as_deref().is_some_and(|id| id.starts_with("hm_")));
+    assert_eq!(audit.4.as_deref(), Some("local"));
+    assert_eq!(audit.5.as_deref(), Some("[\"agent\"]"));
+    assert!(
+        audit
+            .6
+            .as_deref()
+            .is_some_and(|id| id.starts_with("mcall-"))
+    );
+
+    let graph_audit = connection
+        .query_row(
+            "SELECT COUNT(*), status, mcp_call_id
+             FROM audit_events WHERE tool_name = 'orbit.graph.search'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .expect("hub graph denial audit");
+    assert_eq!(graph_audit.0, 1, "one D2 audit row per denied call");
+    assert_eq!(graph_audit.1, "denied");
+    assert!(
+        graph_audit
+            .2
+            .as_deref()
+            .is_some_and(|id| id.starts_with("mcall-"))
+    );
 }
 
 #[test]

@@ -10,7 +10,7 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-registry/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10302, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10302, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Host Registry — Design
@@ -19,7 +19,9 @@ This doc specifies the **target** design. Host identity, the logical workspace
 catalog, registry core/projections, operator administration, sanitized discovery,
 the satellite-cache format, and their dedicated `orbit-registry` domain boundary
 have landed through C4; remote registration,
-transport, placement, and later phases remain pending. The folder is Accepted. It covers host identity, the registry, the
+spoke transport, placement, and later phases remain pending. E1's strict hub trust
+document and fixed checkoutless hub MCP endpoint have landed [ORB-10268]. The folder
+is Accepted. It covers host identity, the registry, the
 coordination-plane/workspace-ownership split, execution placement (including the
 hub→satellite protocol), the per-record data-placement split, and the revision to
 routine sweep ownership. It leaves client→hub transport to the
@@ -171,6 +173,10 @@ one-way edge is the cycle-prevention boundary in [ADR-0235].
 `mcp.toml` is the client's trust policy for its one hub route. They stay separate:
 registry state must never grant a capability, and a repo checkout must never mutate
 the registry — the same non-elevation rule the MCP bridge imposes on plugin config.
+The E1 implementation [ORB-10268] loads that trust file only from the machine-global
+root and verifies the hub server's store stamp against `host.toml` before listing or
+dispatch, so neither repository configuration nor a shadow coordination database
+can redirect the authority boundary.
 
 ## 3. Coordination Plane and Workspace Ownership
 

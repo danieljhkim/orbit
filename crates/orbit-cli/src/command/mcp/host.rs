@@ -755,7 +755,7 @@ fn record_mcp_preflight_failure(
     }
 }
 
-fn mcp_preflight_failure_params(
+pub(super) fn mcp_preflight_failure_params(
     name: &str,
     session_context: &ToolSessionContext,
     err: &OrbitError,

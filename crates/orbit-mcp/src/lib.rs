@@ -70,6 +70,15 @@ pub fn graph_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPol
 /// implementation without first crossing the latter host seam.
 pub trait McpHost: Send + Sync + 'static {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError>;
+
+    /// Whether the adapter may install its local-checkout graph implementations.
+    /// The ordinary broker enables them by default. A checkoutless hub server
+    /// disables them structurally so adapter-owned local-derived tools cannot
+    /// be merged back into its hub-only surface.
+    fn in_process_graph_tools_enabled(&self) -> bool {
+        true
+    }
+
     fn call_tool(
         &self,
         name: &str,

@@ -10,7 +10,7 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-registry/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10302, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10302, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Orbit MCP Bridge — Design
@@ -21,7 +21,9 @@ capability, scope, and trusted-session metadata they depend on have landed. C4
 places identity, catalog, cache, and the store-backed registry service in the
 dedicated `orbit-registry` domain crate ([ORB-10302], [ADR-0235]). The local
 checkout-aware broker, exact-worktree runtime cache, and effective-capability
-filtering landed in [ORB-10262]; remote transport remains pending. It replaces both
+filtering landed in [ORB-10262]. Strict machine-global trust configuration and the
+fixed checkoutless hub endpoint landed in [ORB-10268]; the spoke SSH connector and
+handshake remain pending. It replaces both
 Bridge's HTTP parity layer and the earlier
 per-workspace-authority draft with a local broker that has one remote destination:
 the coordination hub. It covers client→hub transport and local tool placement. The
@@ -137,6 +139,16 @@ Hub mode:
 The `--hub` spelling is the public conceptual shape; implementation may use an
 internal subcommand if that better preserves CLI compatibility. Orbit constructs
 the fixed remote command; `mcp.toml` cannot inject arbitrary shell text.
+
+[ORB-10268] implements this public spelling directly. Startup requires local hub
+mode and verifies that the opened global store is stamped with the exact local
+`machine_id` before stdio begins; listing and every call repeat that authority
+check. The endpoint filters the canonical registry by exactly one `hub` placement
+and one scalar capability, disables the in-process graph re-merge, accepts only
+stable logical workspace IDs, and invokes the checkout-independent coordination
+executor without constructing `OrbitRuntime` or opening any connector. Local calls
+may derive caller identity from the hub; an SSH-carried call without authenticated
+caller identity fails closed rather than being attributed to the hub.
 
 ### 2.3 Hub-local short circuit
 
@@ -344,6 +356,14 @@ Rules:
 - Hub rename does not break the mapping because `machine_id` is stable.
 - On the hub machine, no `[hub]` transport entry is required; dispatch short-
   circuits locally.
+
+[ORB-10268] freezes the on-disk boundary as one optional `[hub]` table under the
+machine-global Orbit root. The whole document and table reject unknown fields;
+transport is exactly `ssh`; aliases are argument-safe OpenSSH host aliases; and the
+allowed list is non-empty, duplicate-free, and typed as `agent|operator|runner`.
+Repository, cwd, and environment decoys cannot override this file. A spoke missing
+the route, requesting a capability outside the exact set, or pointing at itself
+fails before any transport is opened.
 
 There is no target per workspace and no owner target. Adding a workspace or moving
 ownership requires no MCP transport change.
