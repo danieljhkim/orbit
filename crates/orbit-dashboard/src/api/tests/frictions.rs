@@ -102,6 +102,127 @@ async fn resolve_requires_localhost_origin() {
 }
 
 #[tokio::test]
+async fn create_persists_and_echoes_fields() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request(
+        runtime.clone(),
+        Method::POST,
+        "/frictions".to_string(),
+        Some("http://localhost:7878"),
+        Some(json!({
+            "body": "# Slow tool\nThe CLI hung for a minute.",
+            "tags": ["tooling"],
+            "model": TEST_CODEX_MODEL,
+        })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let created = body_json(response).await;
+    let id = created["id"]
+        .as_str()
+        .expect("created friction id")
+        .to_string();
+    assert_eq!(
+        created["body"],
+        json!("# Slow tool\nThe CLI hung for a minute.")
+    );
+    assert_eq!(created["tags"], json!(["tooling"]));
+    assert_eq!(created["status"], "open");
+
+    // Persisted: readable through the existing GET surface.
+    let response = request(runtime, Method::GET, format!("/frictions/{id}"), None, None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let fetched = body_json(response).await;
+    assert_eq!(fetched["id"], json!(id));
+    assert_eq!(
+        fetched["body"],
+        json!("# Slow tool\nThe CLI hung for a minute.")
+    );
+    assert_eq!(fetched["tags"], json!(["tooling"]));
+}
+
+#[tokio::test]
+async fn create_requires_localhost_origin() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    for (origin, label) in [(None, "missing"), (Some("http://example.com"), "foreign")] {
+        let response = request(
+            runtime.clone(),
+            Method::POST,
+            "/frictions".to_string(),
+            origin,
+            Some(json!({
+                "body": "# Snag\nDetails.",
+                "model": TEST_CODEX_MODEL,
+            })),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{label}");
+    }
+}
+
+#[tokio::test]
+async fn create_empty_body_is_rejected_with_error_text() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request(
+        runtime,
+        Method::POST,
+        "/frictions".to_string(),
+        Some("http://localhost:7878"),
+        Some(json!({
+            "body": "   ",
+            "model": TEST_CODEX_MODEL,
+        })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = body_json(response).await;
+    let error = payload["error"].as_str().expect("error text");
+    assert!(
+        error.contains("body"),
+        "error should name the offending `body` field: {error}"
+    );
+}
+
+#[tokio::test]
+async fn create_round_trips_tags_and_during_task() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request(
+        runtime.clone(),
+        Method::POST,
+        "/frictions".to_string(),
+        Some("http://localhost:7878"),
+        Some(json!({
+            "body": "# Blocked\nCould not run the tool.",
+            "tags": ["tooling", "docs"],
+            "during_task": "ORB-10260",
+            "model": TEST_CODEX_MODEL,
+        })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let created = body_json(response).await;
+    let id = created["id"]
+        .as_str()
+        .expect("created friction id")
+        .to_string();
+    assert_eq!(created["tags"], json!(["docs", "tooling"]));
+    assert_eq!(created["during_task"], json!("ORB-10260"));
+
+    let response = request(runtime, Method::GET, format!("/frictions/{id}"), None, None).await;
+    let fetched = body_json(response).await;
+    assert_eq!(fetched["tags"], json!(["docs", "tooling"]));
+    assert_eq!(fetched["during_task"], json!("ORB-10260"));
+}
+
+#[tokio::test]
 async fn path_traversal_id_is_rejected() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
 
