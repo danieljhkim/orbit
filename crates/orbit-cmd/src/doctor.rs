@@ -4,7 +4,9 @@
 //! surfaces with whole-workspace checks: config validity, store database
 //! integrity and schema-ledger version, free disk space on the volume
 //! holding `.orbit`, semantic/graph index staleness, leftover lock files
-//! from crashed holders, and orphaned `running`/`pending` job runs.
+//! from crashed holders, orphaned `running`/`pending` job runs, and task
+//! relation/dependency targets that no longer resolve in the registry
+//! (grandfathered relations that block index rebuilds — ORB-10305).
 //!
 //! Every check degrades rather than errors: subsystems that are absent in a
 //! fresh workspace report [`WorkspaceDoctorStatus::Skipped`], and probe
@@ -94,6 +96,7 @@ impl DoctorCommands for OrbitRuntime {
             doctor_check_graph_index(self),
             doctor_check_stale_locks(self),
             doctor_check_job_runs(self),
+            doctor_check_task_relations(self),
         ])
     }
 
@@ -334,6 +337,58 @@ fn doctor_check_job_runs(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
         WorkspaceDoctorStatus::Warning,
         segments.join("; "),
     )
+}
+
+/// Task relation/dependency targets that no longer resolve to a registered
+/// task bundle — the "grandfathered" relations that make a generated task
+/// index fail to rebuild against its relation validator, forcing an unbounded
+/// bundle-scan fallback (ORB-10305 / ORB-10246). Scoped to the current
+/// workspace; surfacing them here lets an operator fix or remove the offending
+/// relation before the validator trips over it at rebuild time.
+fn doctor_check_task_relations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
+    let workspace_id = match runtime.workspace_id() {
+        Ok(id) => id,
+        Err(error) => {
+            return check(
+                "task-relations",
+                WorkspaceDoctorStatus::Warning,
+                format!("cannot resolve workspace id to audit relations: {error}"),
+            );
+        }
+    };
+    match runtime.audit_dangling_relations(Some(&workspace_id)) {
+        Err(error) => check(
+            "task-relations",
+            WorkspaceDoctorStatus::Warning,
+            format!("cannot audit task relations: {error}"),
+        ),
+        Ok(dangling) if dangling.is_empty() => check(
+            "task-relations",
+            WorkspaceDoctorStatus::Ok,
+            "no unresolved relation/dependency targets".to_string(),
+        ),
+        Ok(dangling) => {
+            let detail = dangling
+                .iter()
+                .map(|target| {
+                    format!(
+                        "{} ({}) -> {}",
+                        target.source_task_id, target.relation_type, target.target_task_id
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            check(
+                "task-relations",
+                WorkspaceDoctorStatus::Warning,
+                format!(
+                    "{} unresolved relation/dependency target(s) will block index rebuild \
+                     until fixed or removed: {detail}",
+                    dangling.len()
+                ),
+            )
+        }
+    }
 }
 
 /// Free/total space thresholds for the volume containing `path`.

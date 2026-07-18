@@ -20,8 +20,9 @@ use super::schema::{
     apply_schema, assert_registry_user_version, reject_unsupported_registry_schema,
 };
 use super::types::{
-    AllocatorSeedOutcome, BindWorkspaceParams, ProjectionRebuildResult, RegisterWorkspaceParams,
-    TaskBundleBinding, TaskIndexFilter, WorkspaceBinding, WorkspaceCheckoutBinding,
+    AllocatorSeedOutcome, BindWorkspaceParams, DanglingRelationTarget, ProjectionRebuildResult,
+    RegisterWorkspaceParams, TaskBundleBinding, TaskIndexFilter, WorkspaceBinding,
+    WorkspaceCheckoutBinding,
 };
 use super::util::{
     normalize_path, now_string, parse_relation_type_name, path_to_string, relation_type_name,
@@ -580,6 +581,75 @@ impl TaskRegistryStore {
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
         validate_relation_targets_exist(&conn, &workspace_id, None, relations)
+    }
+
+    /// Audit the coordination registry for relation edges whose target is a
+    /// valid `ORB-` task id with no registered task bundle — the "grandfathered"
+    /// relations that make [`validate_relation_targets_exist`] reject an index
+    /// rebuild (ORB-10305). Scans indexed relation rows across the whole
+    /// registry, or a single workspace when `workspace_id` is set, so these
+    /// targets can be surfaced (and cleaned) proactively instead of only when a
+    /// rebuild trips over them.
+    ///
+    /// Mirrors the validator's resolution semantics: only `ORB-` targets can be
+    /// unresolved; friction / learning / ADR targets that `produces`/`resolves`
+    /// edges legitimately allow to dangle are excluded.
+    pub fn dangling_relation_targets(
+        &self,
+        workspace_id: Option<&str>,
+    ) -> Result<Vec<DanglingRelationTarget>, OrbitError> {
+        let workspace_id = workspace_id.map(validate_workspace_id).transpose()?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+
+        let mut sql = String::from(
+            "SELECT r.workspace_id, r.source_task_id, r.relation_type, r.target_task_id
+             FROM task_bundle_relations r
+             LEFT JOIN task_bundle_bindings b ON b.task_id = r.target_task_id
+             WHERE b.task_id IS NULL",
+        );
+        let mut values: Vec<String> = Vec::new();
+        if let Some(workspace_id) = &workspace_id {
+            sql.push_str(" AND r.workspace_id = ?1");
+            values.push(workspace_id.clone());
+        }
+        sql.push_str(
+            " ORDER BY r.workspace_id, r.source_task_id, r.relation_type, r.target_task_id",
+        );
+
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let rows = stmt
+            .query_map(params_from_iter(values.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+        let mut dangling = Vec::new();
+        for row in rows {
+            let (workspace_id, source_task_id, relation_type, target_task_id) =
+                row.map_err(|e| OrbitError::Store(e.to_string()))?;
+            // The validator only rejects `ORB-` targets; non-`ORB-` targets
+            // (friction / learning / ADR) are allowed to dangle, so skip them.
+            if !is_valid_orb_task_id(&target_task_id) {
+                continue;
+            }
+            dangling.push(DanglingRelationTarget {
+                workspace_id,
+                source_task_id,
+                relation_type,
+                target_task_id,
+            });
+        }
+        Ok(dangling)
     }
 
     pub fn indexed_task_ids_filtered(

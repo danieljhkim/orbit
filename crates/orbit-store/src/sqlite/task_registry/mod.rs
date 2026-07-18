@@ -25,9 +25,9 @@ const REGISTRY_SCHEMA_VERSION: u32 = 4;
 pub use store::TaskRegistryStore;
 pub(crate) use store::parse_orb_task_number;
 pub use types::{
-    AllocatorSeedOutcome, BindWorkspaceParams, ProjectionRebuildResult, RegisterWorkspaceParams,
-    TaskBundleBinding, TaskIndexFilter, WorkspaceBinding, WorkspaceCheckoutBinding,
-    WorkspaceConfig,
+    AllocatorSeedOutcome, BindWorkspaceParams, DanglingRelationTarget, ProjectionRebuildResult,
+    RegisterWorkspaceParams, TaskBundleBinding, TaskIndexFilter, WorkspaceBinding,
+    WorkspaceCheckoutBinding, WorkspaceConfig,
 };
 pub use workspace_config::{
     assign_workspace_id, home_task_workspace_dir, read_workspace_config,

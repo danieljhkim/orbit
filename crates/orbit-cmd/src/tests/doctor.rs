@@ -33,7 +33,7 @@ fn healthy_fresh_workspace_has_no_failures() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let results = runtime.doctor_workspace().expect("doctor");
 
-    assert_eq!(results.len(), 7, "one row per check: {results:?}");
+    assert_eq!(results.len(), 8, "one row per check: {results:?}");
     assert!(
         results
             .iter()
@@ -63,6 +63,11 @@ fn healthy_fresh_workspace_has_no_failures() {
     );
     assert_eq!(
         status_of(&results, "job-runs").status,
+        WorkspaceDoctorStatus::Ok
+    );
+    // No tasks yet → no unresolved relation/dependency targets.
+    assert_eq!(
+        status_of(&results, "task-relations").status,
         WorkspaceDoctorStatus::Ok
     );
 }
