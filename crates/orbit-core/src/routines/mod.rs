@@ -15,6 +15,7 @@ pub mod host;
 pub mod loader;
 pub mod status;
 pub mod sweep;
+pub mod validation;
 
 pub use clock::{ClockInstallReport, install_clock};
 pub use due::{DueDecision, due_decision, parse_cron};
@@ -31,6 +32,11 @@ pub use status::{
     routine_statuses,
 };
 pub use sweep::{RoutineSweepReport, SweepOptions, SweepOutcome, run_sweep, run_sweep_at};
+pub use validation::{
+    DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS,
+    RoutineDiagnosticSeverity, RoutinePinValidation, RoutineRegistryStatus, RoutineRegistryView,
+    RoutineValidationDiagnostic, load_routine_registry_view, validate_routine_pins,
+};
 
 #[cfg(test)]
 mod tests;

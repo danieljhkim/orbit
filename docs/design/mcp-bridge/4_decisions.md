@@ -121,7 +121,8 @@ pre-start loss permits redelivery, while post-start uncertainty is
 
 ## ADR-0231 — Committed-routine ownership with host-local cursors
 
-**Status:** Accepted · 2026-07 · [ORB-10245] fixed routine execution ownership.
+**Status:** Accepted · 2026-07 · [ORB-10245] fixed routine execution ownership;
+[ORB-10270] supplied the registry/cache validation and reassignment evidence.
 
 ### Context
 

@@ -525,8 +525,11 @@ of that routine.** Consequences:
 - [ORB-10258] — implemented origin-aware routine loading (§6 items 1–2; Unit R1 under
   ORB-10246): committed definitions fail closed without a non-empty host pin,
   `.orbit/routines/local/` definitions are implicit to the loading host and reject
-  remote pins, and cross-origin name collisions fail deterministically. Registry-cache
-  pin validation (§6 item 3) and reassignment baselines (§6 item 5) remain deferred to R2.
+  remote pins, and cross-origin name collisions fail deterministically.
+- [ORB-10270] — implemented Unit R2: routine list/show/sweep now validate committed pins
+  through the hub snapshot or classified spoke cache before scheduler mutation; expose
+  stable cache/host diagnostics; preserve offline exact-local eligibility; and prove the
+  A-to-B reassignment boundary (A unchanged, B baseline, next natural slot only).
 - [ORB-10302] — repurposed `orbit-registry` as the host/workspace domain crate,
   moved its domain tests with the implementations, retained runtime profile/ship
   hashing in `orbit-core`, and preserved store ownership of persistence

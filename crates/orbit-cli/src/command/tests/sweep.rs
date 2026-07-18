@@ -2,7 +2,9 @@
 //! filtering that keeps the once-a-minute clock from growing its log, and the
 //! stable `--json` shape machine consumers depend on.
 
-use orbit_core::routines::{RoutineSweepReport, SweepOutcome};
+use orbit_core::routines::{
+    RoutinePinValidation, RoutineRegistryStatus, RoutineSweepReport, SweepOutcome,
+};
 
 use crate::command::sweep::{format_report_line, outcome_json, report_is_noteworthy};
 
@@ -15,6 +17,10 @@ fn report(action: &'static str) -> RoutineSweepReport {
         reason: None,
         slot: None,
         run_id: None,
+        validation: RoutinePinValidation {
+            eligible: true,
+            diagnostics: Vec::new(),
+        },
     }
 }
 
@@ -50,6 +56,13 @@ fn format_report_line_includes_slot_and_run() {
 fn json_shape_is_stable() {
     let outcome = SweepOutcome {
         host_id: "dk-mac".to_string(),
+        machine_id: "hm_dk_mac".to_string(),
+        registry: RoutineRegistryStatus {
+            source: "standalone",
+            state: "current",
+            age_seconds: None,
+            diagnostics: Vec::new(),
+        },
         lock_busy: false,
         reports: vec![RoutineSweepReport {
             routine: "nightly".to_string(),
@@ -59,6 +72,10 @@ fn json_shape_is_stable() {
             reason: None,
             slot: Some("2026-01-01T00:01:00+00:00".to_string()),
             run_id: Some("run-1".to_string()),
+            validation: RoutinePinValidation {
+                eligible: true,
+                diagnostics: Vec::new(),
+            },
         }],
         load_errors: Vec::new(),
     };
@@ -67,6 +84,8 @@ fn json_shape_is_stable() {
     let object = value.as_object().expect("json object");
     for key in [
         "host_id",
+        "machine_id",
+        "registry",
         "dry_run",
         "lock_busy",
         "fired",
@@ -80,7 +99,14 @@ fn json_shape_is_stable() {
     let first = &value["reports"][0];
     let report_obj = first.as_object().expect("report object");
     for key in [
-        "routine", "source", "origin", "action", "reason", "slot", "run_id",
+        "routine",
+        "source",
+        "origin",
+        "action",
+        "reason",
+        "slot",
+        "run_id",
+        "validation",
     ] {
         assert!(report_obj.contains_key(key), "missing report key {key}");
     }

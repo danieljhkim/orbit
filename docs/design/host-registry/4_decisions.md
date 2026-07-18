@@ -127,7 +127,8 @@ pre-start loss permits redelivery, while post-start uncertainty is
 
 ## ADR-0231 — Committed-routine ownership with host-local cursors
 
-**Status:** Accepted · 2026-07 · [ORB-10245] fixed routine execution ownership.
+**Status:** Accepted · 2026-07 · [ORB-10245] fixed routine execution ownership;
+[ORB-10270] supplied the registry/cache validation and reassignment evidence.
 
 ### Context
 
@@ -199,8 +200,10 @@ service. Keep runtime profile/ship construction in `orbit-core`, persistence in
 - [ORB-10258] — implemented the enforcement half of ADR-0231 (Unit R1 of ORB-10246):
   origin-aware routine loading. Committed definitions fail closed without a non-empty host
   pin; `.orbit/routines/local/` definitions are implicit to the loading host and may not
-  name another host; cross-origin name collisions fail deterministically. Registry-cache
-  pin validation and reassignment-baseline semantics remain deferred to R2.
+  name another host; cross-origin name collisions fail deterministically.
+- [ORB-10270] — completed ADR-0231 enforcement (Unit R2): registry/cache-aware validation
+  runs before scheduler mutation, degraded cache evidence remains warning-only with exact
+  local fallback, and reassignment preserves A while B baselines without backfill.
 - [ORB-10267] — implemented Unit C3 of ORB-10246: operator host administration
   (`orbit host register/list/rename/retire`), hub-side workspace `link` and machine-local
   `role` (owner/replica) operations, the `orbit.host.list`/`orbit.workspace.list` canonical

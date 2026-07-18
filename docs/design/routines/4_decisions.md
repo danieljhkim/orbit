@@ -253,6 +253,9 @@ consult `workflow.auto_ship` or the cross-workspace sweep path.
 - [ORB-10021] — implemented routines v1; allocated and accepted ADR-0204..ADR-0208.
 - [ORB-10129] — shipped the default triage routine; allocated and accepted ADR-0215.
 - [ORB-10207] — seeded disabled defaults and allocated/accepted ADR-0223 for workspace ship.
+- [ORB-10270] — completed ADR-0231's runtime enforcement: committed pins resolve through
+  current registry or classified spoke-cache data before scheduler mutation, diagnostics
+  remain explicit under degradation, and reassignment starts with a fresh baseline.
 - [ORB-10138] — exposed per-routine scheduler health over the dashboard HTTP API
   (`GET /api/routines`), realizing the single-host half of the §7 cross-host-visibility
   vision. Read-only projection of `routine_statuses`; no new ADR (no new architectural

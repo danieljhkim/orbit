@@ -58,6 +58,14 @@ pub(crate) fn format_report_line(report: &RoutineSweepReport) -> String {
     if let Some(run_id) = &report.run_id {
         line.push_str(&format!(" — run {run_id}"));
     }
+    for diagnostic in &report.validation.diagnostics {
+        line.push_str(&format!(
+            " — {}[{}]: {}",
+            severity_label(diagnostic.severity),
+            diagnostic.code,
+            diagnostic.message
+        ));
+    }
     line
 }
 
@@ -79,7 +87,10 @@ impl SweepCommand {
             println!("sweep: another pass holds the lock on this host; exiting");
             return Ok(());
         }
-        if outcome.reports.is_empty() && outcome.load_errors.is_empty() {
+        if outcome.reports.is_empty()
+            && outcome.load_errors.is_empty()
+            && outcome.registry.diagnostics.is_empty()
+        {
             println!("sweep[{}]: no routines configured", outcome.host_id);
             return Ok(());
         }
@@ -88,8 +99,23 @@ impl SweepCommand {
         let show_all = self.verbose || self.dry_run;
         let mut shown = 0usize;
         for report in &outcome.reports {
-            if show_all || report_is_noteworthy(report.action) {
+            if show_all
+                || report_is_noteworthy(report.action)
+                || !report.validation.diagnostics.is_empty()
+            {
                 println!("{}", format_report_line(report));
+                shown += 1;
+            }
+        }
+        if outcome.reports.is_empty() {
+            for diagnostic in &outcome.registry.diagnostics {
+                println!(
+                    "sweep[{}]: {}[{}]: {}",
+                    outcome.host_id,
+                    severity_label(diagnostic.severity),
+                    diagnostic.code,
+                    diagnostic.message
+                );
                 shown += 1;
             }
         }
@@ -121,6 +147,8 @@ impl SweepCommand {
 pub(crate) fn outcome_json(outcome: &SweepOutcome, dry_run: bool) -> serde_json::Value {
     json!({
         "host_id": outcome.host_id,
+        "machine_id": outcome.machine_id,
+        "registry": &outcome.registry,
         "dry_run": dry_run,
         "lock_busy": outcome.lock_busy,
         "fired": outcome
@@ -136,6 +164,7 @@ pub(crate) fn outcome_json(outcome: &SweepOutcome, dry_run: bool) -> serde_json:
             "reason": r.reason,
             "slot": r.slot,
             "run_id": r.run_id,
+            "validation": &r.validation,
         })).collect::<Vec<_>>(),
         "load_errors": outcome.load_errors.iter().map(|e| json!({
             "source_workspace": e.source_workspace,
@@ -143,4 +172,8 @@ pub(crate) fn outcome_json(outcome: &SweepOutcome, dry_run: bool) -> serde_json:
             "message": e.message,
         })).collect::<Vec<_>>(),
     })
+}
+
+fn severity_label(severity: orbit_core::routines::RoutineDiagnosticSeverity) -> &'static str {
+    severity.as_str()
 }

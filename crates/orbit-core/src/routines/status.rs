@@ -5,13 +5,17 @@
 
 use std::path::Path;
 
-use chrono::Local;
+use chrono::{Duration, Local, Utc};
 use orbit_common::types::OrbitError;
 use orbit_store::{RoutineFireRecord, Store};
 
 use super::due::{parse_cron, truncate_to_minute};
 use super::host::load_host_identity;
 use super::loader::{LoadedRoutine, RoutineLoadError, collect_routines, discover_workspaces};
+use super::validation::{
+    DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS, RoutinePinValidation,
+    RoutineRegistryStatus, load_routine_registry_view, validate_routine_pins,
+};
 
 /// Full effective state of one routine on this host.
 #[derive(Debug, Clone)]
@@ -20,6 +24,8 @@ pub struct RoutineStatus {
     pub routine: LoadedRoutine,
     /// Whether this host's `host_id` appears in the routine's `hosts`.
     pub pinned_to_host: bool,
+    /// Registry-aware pin eligibility and additive diagnostics.
+    pub validation: RoutinePinValidation,
     /// Host-local pause, when one is set (RFC 3339 pause timestamp).
     pub paused_at: Option<String>,
     /// Next scheduled slot (RFC 3339, host-local), when computable.
@@ -41,6 +47,10 @@ impl RoutineStatus {
 pub struct RoutineStatusReport {
     /// This host's identity.
     pub host_id: String,
+    /// Stable machine identity used by registry-resolved pins.
+    pub machine_id: String,
+    /// Registry source/state used by this projection.
+    pub registry: RoutineRegistryStatus,
     /// Per-routine status rows, in discovery order.
     pub statuses: Vec<RoutineStatus>,
     /// Fail-closed load failures (these routines are absent).
@@ -49,16 +59,25 @@ pub struct RoutineStatusReport {
 
 /// Collect the status of every routine visible from the global registry.
 pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, OrbitError> {
-    let host_id = load_host_identity(global_root)?.host_id;
+    let identity = load_host_identity(global_root)?;
     let store = Store::open(&global_root.join("orbit.db"))?;
+    let now_utc = Utc::now();
+    let registry_view = load_routine_registry_view(
+        global_root,
+        &store,
+        &identity,
+        now_utc,
+        Duration::seconds(DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS),
+    )?;
+    let registry = registry_view.status();
 
     let discovered = discover_workspaces(global_root)?;
     let mut load_errors = discovered.errors.clone();
-    let mut collection = collect_routines(&discovered.entries, &host_id);
+    let mut collection = collect_routines(&discovered.entries, &identity.host_id);
     load_errors.append(&mut collection.errors);
 
     let pauses = store.routine_pauses()?;
-    let now = Local::now();
+    let now = now_utc.with_timezone(&Local);
 
     let mut statuses = Vec::with_capacity(collection.routines.len());
     for routine in collection.routines {
@@ -71,10 +90,19 @@ pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, Orbit
         let paused_at = pauses
             .get(&routine.definition.name)
             .map(|pause| pause.paused_at.clone());
-        let pinned_to_host = routine.definition.hosts.iter().any(|host| host == &host_id);
+        let validation = validate_routine_pins(
+            &identity,
+            routine.origin,
+            &routine.definition.hosts,
+            &registry_view,
+            now_utc,
+            Duration::seconds(DEFAULT_QUIET_HOST_AFTER_SECONDS),
+        );
+        let pinned_to_host = validation.eligible;
         statuses.push(RoutineStatus {
             routine,
             pinned_to_host,
+            validation,
             paused_at,
             next_due,
             last_fire,
@@ -82,7 +110,9 @@ pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, Orbit
     }
 
     Ok(RoutineStatusReport {
-        host_id,
+        host_id: identity.host_id,
+        machine_id: identity.machine_id,
+        registry,
         statuses,
         load_errors,
     })

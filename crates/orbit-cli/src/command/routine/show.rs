@@ -35,6 +35,8 @@ impl RoutineShowArgs {
         if self.json {
             crate::output::json::print_pretty(&json!({
                 "host_id": report.host_id,
+                "machine_id": report.machine_id,
+                "registry": &report.registry,
                 "name": definition.name,
                 "description": definition.description,
                 "source": status.routine.source_workspace,
@@ -43,6 +45,7 @@ impl RoutineShowArgs {
                 "enabled": definition.enabled,
                 "hosts": definition.hosts,
                 "pinned_to_host": status.pinned_to_host,
+                "validation": &status.validation,
                 "paused_at": status.paused_at,
                 "effective": status.effective(),
                 "cron": definition.trigger.cron,
@@ -102,6 +105,24 @@ impl RoutineShowArgs {
                 .map(|at| format!("yes (since {at})"))
                 .unwrap_or_else(|| "no".to_string())
         );
+        println!(
+            "Registry: {}/{}{}",
+            report.registry.source,
+            report.registry.state,
+            report
+                .registry
+                .age_seconds
+                .map(|age| format!(" ({age}s old)"))
+                .unwrap_or_default()
+        );
+        for diagnostic in &status.validation.diagnostics {
+            println!(
+                "Validation [{}:{}]: {}",
+                diagnostic.severity.as_str(),
+                diagnostic.code,
+                diagnostic.message
+            );
+        }
         println!(
             "Effective on this host: {}",
             if status.effective() { "yes" } else { "no" }

@@ -90,6 +90,7 @@ fragmentation this feature exists to end.
 |---------|------|------|
 | Routine definition type + fail-closed YAML parse | `crates/orbit-common/src/types/routine.rs` | [ORB-10021] |
 | Discovery, due computation, dispatch, status | `crates/orbit-core/src/routines/` | [ORB-10021] |
+| Registry-aware pin validation and reassignment baseline | `crates/orbit-core/src/routines/validation.rs` + `sweep.rs` | [ORB-10270] |
 | Host-local scheduler state (fires, pauses) | `crates/orbit-store/src/sqlite/routine_store/` | [ORB-10021] |
 | Sweep advisory lock (flock, host-global) | `crates/orbit-store/src/sqlite/routine_store/mod.rs` | [ORB-10021] |
 | `orbit sweep` CLI entrypoint | `crates/orbit-cli/src/command/sweep.rs` | [ORB-10021] |
@@ -105,6 +106,9 @@ fragmentation this feature exists to end.
 - [ORB-10001] — authored this design-doc folder (proposal; no implementation).
 - [ORB-10021] — implemented routines v1 (types, store, sweep, CLI, clock units).
 - [ORB-10207] — seeded opt-in defaults and the workspace-local ship-sweep wrapper.
+- [ORB-10270] — added registry/cache-aware pin diagnostics and safe host reassignment:
+  the old host preserves its cursor/fire/pause state, while the new host baselines on first
+  observation and starts at the next natural slot without backfill.
 - [ORB-00374] — removed the `shell` activity variant and `run_shell` dispatch (fail-closed);
   routines inherit this constraint.
 

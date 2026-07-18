@@ -32,6 +32,7 @@ impl RoutineListArgs {
                         "enabled": status.routine.definition.enabled,
                         "hosts": status.routine.definition.hosts,
                         "pinned_to_host": status.pinned_to_host,
+                        "validation": &status.validation,
                         "paused_at": status.paused_at,
                         "effective": status.effective(),
                         "cron": status.routine.definition.trigger.cron,
@@ -47,6 +48,8 @@ impl RoutineListArgs {
                 .collect();
             crate::output::json::print_pretty(&json!({
                 "host_id": report.host_id,
+                "machine_id": report.machine_id,
+                "registry": &report.registry,
                 "routines": statuses,
                 "load_errors": report.load_errors.iter().map(|e| json!({
                     "source_workspace": e.source_workspace,
@@ -104,7 +107,28 @@ impl RoutineListArgs {
             );
         }
         println!("host: {}", report.host_id);
+        println!(
+            "registry: {}/{}{}",
+            report.registry.source,
+            report.registry.state,
+            report
+                .registry
+                .age_seconds
+                .map(|age| format!(" ({age}s old)"))
+                .unwrap_or_default()
+        );
         println!("{table}");
+        for status in &report.statuses {
+            for diagnostic in &status.validation.diagnostics {
+                eprintln!(
+                    "{} [{}:{}]: {}",
+                    status.routine.definition.name,
+                    diagnostic.severity.as_str(),
+                    diagnostic.code,
+                    diagnostic.message
+                );
+            }
+        }
         for error in &report.load_errors {
             let path = error
                 .path
