@@ -136,7 +136,7 @@ fn git_commit_batch_uses_templated_single_task_message() {
     task.implemented_by = Some("claude".to_string());
     task.external_refs = vec![external_ref("eng", "1234")];
     task.execution_summary =
-        "## Summary\n- Fixed deterministic batch commit messages.\n\n## Validation\n- cargo test"
+        "Outcome: success\n\n## Summary\n- Fixed deterministic batch commit messages.\n\n## Validation\n- cargo test"
             .to_string();
     let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
     let input = json!({

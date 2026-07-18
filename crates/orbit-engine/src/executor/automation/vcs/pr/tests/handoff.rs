@@ -199,6 +199,109 @@ fn recovered_rebase_continues_remaining_handoff_phases_without_replay() {
     assert_eq!(task.github_pr_number(), Some("42"));
 }
 
+/// ORB-10313: every resumable PR checkpoint reloads durable state through
+/// `load_handoff_context`, so `pr_open` fails closed on a failed, missing, or
+/// unknown execution outcome before any GitHub call, external-ref write, or
+/// promotion — and the task stays outside review.
+#[test]
+fn pr_open_blocks_non_success_outcomes_before_external_calls() {
+    for (summary, fragment) in [
+        (
+            "Outcome: failed\n\nChanges:\n- Critical scope unimplemented.",
+            "failed",
+        ),
+        ("Changes:\n- No outcome line at all.", "Changes:"),
+        ("Outcome: partial\n\nChanges:\n- Partly done.", "partial"),
+    ] {
+        let workspace = pr_workspace();
+        let host = PrOpenTestHost::new(
+            vec![batch_task("ORB-10313-PR", "Gated delivery", summary)],
+            workspace.repo.clone(),
+        );
+
+        let error = pr_open(&host, &pr_open_input(&workspace.repo, vec!["ORB-10313-PR"]))
+            .expect_err("non-success outcome must block PR handoff");
+        assert!(error.to_string().contains("ORB-10313-PR"), "{error}");
+        assert!(error.to_string().contains(fragment), "{error}");
+        assert!(host.tool_calls().is_empty(), "zero GitHub calls");
+        assert!(
+            host.automation_updates().is_empty(),
+            "zero external-ref writes and zero promotion updates"
+        );
+        let task = host.get_task("ORB-10313-PR").expect("task");
+        assert_eq!(
+            task.status,
+            TaskStatus::InProgress,
+            "task remains outside review"
+        );
+        assert!(task.external_refs.is_empty());
+    }
+}
+
+/// The same durable gate covers `pr_prepare`, so a resumed prepare revalidates
+/// the outcome before it inspects Git or writes any checkpoint.
+#[test]
+fn pr_prepare_blocks_non_success_outcome_before_git_inspection() {
+    let workspace = pr_workspace();
+    let host = PrOpenTestHost::new(
+        vec![batch_task(
+            "ORB-10313-PREP",
+            "Prepare gated",
+            "Outcome: failed\nChanges:\n- unfinished",
+        )],
+        workspace.repo.clone(),
+    );
+    let input = json!({
+        "workspace_path": workspace.repo,
+        "job_run_id": "batch-1",
+        "completed_task_ids": ["ORB-10313-PREP"],
+        "base": "agent-main",
+        "base_sync": "local",
+    });
+
+    let error =
+        prepare_pr_handoff(&host, &input).expect_err("prepare must revalidate durable outcome");
+    assert!(error.to_string().contains("ORB-10313-PREP"), "{error}");
+    assert!(error.to_string().contains("failed"), "{error}");
+    assert!(host.tool_calls().is_empty());
+    assert!(host.automation_updates().is_empty());
+}
+
+/// The no-diff promotion path also runs through `load_handoff_context`, so a
+/// failed outcome cannot bypass the gate even when the task carries the
+/// no-diff-expected tag.
+#[test]
+fn pr_promote_no_diff_blocks_non_success_outcome() {
+    let workspace = no_diff_pr_workspace();
+    let mut task = batch_task(
+        "ORB-10313-ND",
+        "No-diff gated",
+        "Outcome: failed\nChanges:\n- Nothing safe to promote.",
+    );
+    task.tags
+        .push(orbit_common::types::NO_DIFF_EXPECTED_TAG.to_string());
+    let host = PrOpenTestHost::new(vec![task], workspace.repo.clone())
+        .with_activity_implementer("codex", "codex");
+
+    let error = pr_promote(
+        &host,
+        &json!({
+            "workspace_path": workspace.repo,
+            "job_run_id": "batch-1",
+            "completed_task_ids": ["ORB-10313-ND"],
+            "no_diff_expected": true,
+        }),
+    )
+    .expect_err("failed outcome must block no-diff promotion");
+    assert!(error.to_string().contains("ORB-10313-ND"), "{error}");
+    assert!(error.to_string().contains("failed"), "{error}");
+    assert!(host.tool_calls().is_empty());
+    assert!(host.automation_updates().is_empty());
+    let task = host.get_task("ORB-10313-ND").expect("task");
+    assert_eq!(task.status, TaskStatus::InProgress);
+    assert!(task.external_refs.is_empty());
+}
+
 fn generic_push_input(repo: &std::path::Path) -> Value {
     json!({
         "workspace_path": repo,
