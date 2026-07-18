@@ -295,8 +295,9 @@ pub enum DispatchError {
     CliInvocationPermanent(String),
 
     /// A linked-worktree provider invocation changed the registered primary
-    /// checkout. This is a hard integrity boundary: retry and recovery could
-    /// compound or misattribute the delta, so the job must fail closed.
+    /// checkout. Ordinary retries must not compound or misattribute the delta.
+    /// An explicitly configured recovery activity may inspect the diagnostic
+    /// once before the executor's single post-recovery attempt (ORB-10306).
     #[error("worktree integrity violation `{code}`: {diagnostic}")]
     WorktreeIntegrity {
         code: &'static str,
@@ -351,6 +352,16 @@ impl DispatchError {
                 | DispatchError::CliInvocationPermanent(_)
                 | DispatchError::WorktreeIntegrity { .. }
         )
+    }
+
+    /// Whether an error that bypasses normal retry may still reach an
+    /// explicitly configured recovery activity.
+    ///
+    /// Worktree integrity failures carry the structured checkout diagnostic a
+    /// recovery agent needs to establish whether reconciliation is safe. All
+    /// other non-retryable classes retain their fail-fast behavior.
+    pub fn allows_recovery(&self) -> bool {
+        matches!(self, DispatchError::WorktreeIntegrity { .. })
     }
 }
 

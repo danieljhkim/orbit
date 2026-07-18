@@ -65,7 +65,11 @@ pub(super) fn run_step_with_retry(
             Ok(outcome) => Ok(outcome),
             Err(err) if err.is_non_retryable() => {
                 emit_denied_if_applicable(&err, &step.id, &ctx.audit, ctx.task_id());
-                Err(err)
+                if err.allows_recovery() {
+                    recover_or_return_original(step, ctx, err, 1, 1)
+                } else {
+                    Err(err)
+                }
             }
             Err(err) => recover_or_return_original(step, ctx, err, 1, 1),
         };
@@ -91,7 +95,11 @@ pub(super) fn run_step_with_retry(
             }
             Err(err) if err.is_non_retryable() => {
                 emit_denied_if_applicable(&err, &step.id, &ctx.audit, ctx.task_id());
-                return Err(err);
+                return if err.allows_recovery() {
+                    recover_or_return_original(step, ctx, err, attempt + 1, max_attempts)
+                } else {
+                    Err(err)
+                };
             }
             Err(err) => {
                 last_err = Some(err);
