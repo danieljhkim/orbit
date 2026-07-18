@@ -3,7 +3,7 @@ summary: "Auditability — Decisions"
 type: design
 title: "Auditability — Decisions"
 owner: codex
-last_updated: 2026-05-17
+last_updated: 2026-07-18
 status: Draft
 feature: auditability
 doc_role: decisions
@@ -224,15 +224,16 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-017 — Command-audit rows carry task / run / activity correlation IDs
 
-**Status:** Accepted · 2026-04 · [T20260428-7]
+**Status:** Accepted for CLI; MCP precedence superseded · 2026-07 · [ORB-10228]
 
 **Context.** SQLite command-audit rows recorded tool invocations but had no direct link to the task, job run, activity, or step that caused them.
 
-**Decision.** Add nullable `task_id`, `job_run_id`, `activity_id`, and `step_index` columns, populate them at runtime tool dispatch from caller JSON first and engine env vars second, index task/run ids, and render the fields in dashboard detail rows.
+**Decision.** Add nullable `task_id`, `job_run_id`, `activity_id`, and `step_index` columns. CLI retains caller-JSON-first compatibility. For MCP, [ORB-10228] explicitly supersedes that precedence: caller JSON is never trusted audit correlation; an authenticated managed envelope supplies task/run/activity/step, and optional trusted `leased_run.run_id` may fill or must match canonical `job_run_id`.
 
 **Consequences.**
 - Operators can drill from a tool row to the originating task and run context without out-of-band correlation.
-- Cost: historical rows remain NULL, and caller-asserted JSON values are weaker evidence than engine-supplied env context.
+- MCP standalone calls keep these fields NULL unless trusted lease correlation supplies `job_run_id`; managed envelope identity wins over client claims.
+- Cost: historical rows remain NULL, and CLI caller-asserted JSON remains weaker evidence than engine-supplied or MCP trusted context.
 
 ## ADR-018 — Scoreboard tool-call totals project from command audit
 
@@ -363,6 +364,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[T20260427-52]** — Deprecate `agent` in normal tool-call JSON, infer agent family from `model`, and reject inconsistent legacy pairs.
 - **[T20260428-4]** — Record audit events for MCP tool invocations by moving ownership into the runtime, adding the entry-point discriminator, and bracketing MCP preflight.
 - **[T20260428-7]** — Correlate command-audit rows with originating run/task/activity by adding nullable correlation columns and surfacing them on the dashboard.
+- **[ORB-10228]** — Supersede ADR-017 caller-JSON precedence for MCP; add trusted caller/process provenance, capability sets, and call/lease correlation.
 - **[T20260428-11]** — Derive compact scoreboard all/failed tool-call counts from command-audit tool-run rows.
 - **[T20260428-17]** — Split local Orbit task-review scoring from PR review-comment scoring and surface both in compact scoreboards.
 - **[T20260430-4]** — Count local task-review score by review-thread creations, not replies, and rename the task-review summary field to `threads`.

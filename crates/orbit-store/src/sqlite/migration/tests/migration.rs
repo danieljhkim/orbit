@@ -127,6 +127,32 @@ fn coordination_migrations_create_typed_tables_without_touching_existing_records
                 ('migration.v0002', 'learnings_index_workspace_scope', '2026-07-02T00:00:00Z'),
                 ('migration.v0003', 'flat_crew_model', '2026-07-03T00:00:00Z'),
                 ('migration.v0004', 'job_run_archive_stage', '2026-07-04T00:00:00Z');
+            CREATE TABLE audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                execution_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                command TEXT NOT NULL,
+                subcommand TEXT,
+                tool_name TEXT,
+                target_type TEXT,
+                target_id TEXT,
+                role TEXT NOT NULL,
+                status TEXT NOT NULL,
+                exit_code INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL,
+                working_directory TEXT NOT NULL,
+                arguments_json TEXT,
+                stdout_truncated TEXT,
+                stderr_truncated TEXT,
+                error_message TEXT,
+                host TEXT,
+                pid INTEGER NOT NULL,
+                session_id TEXT,
+                task_id TEXT,
+                job_run_id TEXT,
+                activity_id TEXT,
+                step_index INTEGER
+            );
             CREATE TABLE existing_records (id TEXT PRIMARY KEY, value TEXT NOT NULL);
             INSERT INTO existing_records VALUES ('keep-me', 'unchanged');
         "#,
@@ -161,7 +187,7 @@ fn coordination_migrations_create_typed_tables_without_touching_existing_records
         )
         .expect("existing row");
     assert_eq!(preserved, "unchanged");
-    assert_eq!(current_schema_version(&conn).expect("version"), 6);
+    assert_eq!(current_schema_version(&conn).expect("version"), 7);
     for table in [
         "workspace_ownership",
         "host_workspace_presence",

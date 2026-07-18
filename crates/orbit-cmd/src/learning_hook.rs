@@ -720,6 +720,16 @@ fn emit_learning_injected_audit(
         host: std::env::var("HOSTNAME").ok(),
         pid: std::process::id(),
         session_id: session_id.map(ToOwned::to_owned),
+        workspace_id: None,
+        caller_machine_id: None,
+        caller_host_id: None,
+        process_machine_id: None,
+        process_host_id: None,
+        transport: None,
+        effective_capabilities: Default::default(),
+        origin_session_id: None,
+        mcp_call_id: None,
+        lease_id: None,
         task_id: std::env::var("ORBIT_TASK_ID")
             .ok()
             .filter(|value| !value.is_empty()),
