@@ -5,6 +5,74 @@ use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::{TaskPriority, TaskType};
 
 #[test]
+fn hub_migration_publishes_complete_tree_and_is_idempotent() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let legacy = temp.path().join("legacy");
+    fs::create_dir_all(legacy.join("2026-07")).expect("legacy month");
+    fs::write(legacy.join("tags.yaml"), "tooling: Tools\n").expect("taxonomy");
+    fs::write(legacy.join("2026-07/F001.md"), "record\n").expect("record");
+
+    let canonical = prepare_hub_friction_root(temp.path(), "ws_test", Some(&legacy))
+        .expect("publish migration");
+    assert_eq!(
+        fs::read(canonical.join("2026-07/F001.md")).unwrap(),
+        b"record\n"
+    );
+    assert_eq!(
+        prepare_hub_friction_root(temp.path(), "ws_test", Some(&legacy)).unwrap(),
+        canonical
+    );
+    assert_eq!(
+        readable_hub_friction_root(temp.path(), "ws_test", Some(&legacy)).unwrap(),
+        canonical
+    );
+}
+
+#[test]
+fn hub_migration_accepts_identical_interrupted_publish_and_commits_marker() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let legacy = temp.path().join("legacy");
+    let canonical = canonical_hub_friction_root(temp.path(), "ws_test").unwrap();
+    fs::create_dir_all(&legacy).unwrap();
+    fs::create_dir_all(&canonical).unwrap();
+    fs::write(legacy.join("tags.yaml"), "same\n").unwrap();
+    fs::write(canonical.join("tags.yaml"), "same\n").unwrap();
+
+    assert_eq!(
+        readable_hub_friction_root(temp.path(), "ws_test", Some(&legacy)).unwrap(),
+        legacy
+    );
+    prepare_hub_friction_root(temp.path(), "ws_test", Some(&legacy)).unwrap();
+    assert_eq!(
+        readable_hub_friction_root(temp.path(), "ws_test", Some(&legacy)).unwrap(),
+        canonical
+    );
+}
+
+#[test]
+fn hub_migration_conflict_fails_closed_and_preserves_legacy_reads() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let legacy = temp.path().join("legacy");
+    let canonical = canonical_hub_friction_root(temp.path(), "ws_test").unwrap();
+    fs::create_dir_all(&legacy).unwrap();
+    fs::create_dir_all(&canonical).unwrap();
+    fs::write(legacy.join("tags.yaml"), "legacy\n").unwrap();
+    fs::write(canonical.join("tags.yaml"), "different\n").unwrap();
+
+    let error = prepare_hub_friction_root(temp.path(), "ws_test", Some(&legacy))
+        .expect_err("conflict must fail");
+    assert!(error.to_string().contains("migration conflict"));
+    assert_eq!(
+        readable_hub_friction_root(temp.path(), "ws_test", Some(&legacy)).unwrap(),
+        legacy
+    );
+    assert_eq!(
+        fs::read(canonical.join("tags.yaml")).unwrap(),
+        b"different\n"
+    );
+}
+
+#[test]
 fn id_allocation_resets_across_month_boundary() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();

@@ -10,7 +10,7 @@ use orbit_mcp::McpHost;
 
 use crate::command::Execute;
 
-use super::host::{EmptyMcpHost, RuntimeMcpHost};
+use super::host::BrokerMcpHost;
 use super::setup::{InitArgs, RemoveArgs};
 
 #[derive(Args)]
@@ -60,30 +60,22 @@ pub struct ServeArgs {}
 
 impl ServeArgs {
     pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
-        let (host, workspace_id): (Arc<dyn McpHost>, Option<String>) =
-            match OrbitRuntime::try_initialize_existing(root_override)? {
-                Some(runtime) => {
-                    let workspace_id = runtime.workspace_id()?;
-                    (Arc::new(RuntimeMcpHost::new(runtime)), Some(workspace_id))
-                }
-                None => {
-                    let cwd = std::env::current_dir()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_else(|_| "<unknown>".to_string());
-                    eprintln!(
-                        "orbit mcp serve: no initialized Orbit workspace discovered from {cwd}; serving empty tool surface"
-                    );
-                    (Arc::new(EmptyMcpHost), None)
-                }
-            };
+        if root_override.is_some() {
+            return Err(OrbitError::InvalidInput(
+                "orbit mcp serve does not accept a workspace root override; select a workspace per initialize or tool call"
+                    .to_string(),
+            ));
+        }
+        let global_root = resolve_global_root()?;
+        let host: Arc<dyn McpHost> = Arc::new(BrokerMcpHost::new(global_root.clone()));
 
-        let (machine_id, host_id) = match inspect_host_identity(&resolve_global_root()?)? {
+        let (machine_id, host_id) = match inspect_host_identity(&global_root)? {
             HostIdentityState::Present(identity) => {
                 (Some(identity.machine_id), Some(identity.host_id))
             }
             HostIdentityState::Legacy { .. } | HostIdentityState::Absent => (None, None),
         };
-        let trusted_context = ToolSessionContext::trusted_local(workspace_id, machine_id, host_id);
+        let trusted_context = ToolSessionContext::trusted_local(None, machine_id, host_id);
 
         let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

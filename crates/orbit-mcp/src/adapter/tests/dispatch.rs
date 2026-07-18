@@ -92,26 +92,26 @@ async fn missing_policy_is_excluded_and_rejected_before_dispatch() {
 }
 
 #[tokio::test]
-async fn d2_context_membership_does_not_filter_tool_list_or_call() {
+async fn d3_context_membership_filters_tool_list_and_call() {
     let agent_server = OrbitToolServer::new(Arc::new(CapabilityHost));
     let agent_context = agent_server.session_context();
     assert!(agent_context.has_capability(McpCapability::Agent));
     assert!(!agent_context.has_capability(McpCapability::Operator));
     let agent_names = agent_server
-        .combined_tool_schemas()
+        .visible_tool_schemas()
         .expect("agent tool list")
         .into_iter()
         .map(|schema| schema.name)
         .collect::<Vec<_>>();
-    for expected in ["demo.agent", "demo.operator", "demo.runner"] {
-        assert!(agent_names.iter().any(|name| name == expected));
-    }
+    assert!(agent_names.iter().any(|name| name == "demo.agent"));
+    assert!(!agent_names.iter().any(|name| name == "demo.operator"));
+    assert!(!agent_names.iter().any(|name| name == "demo.runner"));
 
     let called = agent_server
         .call_tool_request(CallToolRequestParams::new("demo_operator"))
         .await
-        .expect("D2 does not reject calls from policy metadata");
-    assert_eq!(called.is_error, Some(false));
+        .expect("capability denial is a structured tool error");
+    assert_eq!(called.is_error, Some(true));
 
     let mut operator_context = ToolSessionContext::trusted_local(None, None, None);
     operator_context.effective_capabilities = [McpCapability::Operator].into_iter().collect();
@@ -120,12 +120,37 @@ async fn d2_context_membership_does_not_filter_tool_list_or_call() {
     let operator_server =
         OrbitToolServer::new_with_context(Arc::new(CapabilityHost), operator_context);
     let operator_names = operator_server
-        .combined_tool_schemas()
+        .visible_tool_schemas()
         .expect("operator tool list")
         .into_iter()
         .map(|schema| schema.name)
         .collect::<Vec<_>>();
-    assert_eq!(operator_names, agent_names);
+    assert!(operator_names.iter().any(|name| name == "demo.operator"));
+    assert!(!operator_names.iter().any(|name| name == "demo.agent"));
+    assert!(!operator_names.iter().any(|name| name == "demo.runner"));
+}
+
+#[tokio::test]
+async fn managed_empty_capability_set_is_never_upgraded_and_runner_is_non_hierarchical() {
+    let empty =
+        OrbitToolServer::new_with_context(Arc::new(CapabilityHost), ToolSessionContext::default());
+    assert!(empty.visible_tool_schemas().expect("empty list").is_empty());
+    let denied = empty
+        .call_tool_request(CallToolRequestParams::new("demo_agent"))
+        .await
+        .expect("empty capability denial is structured");
+    assert_eq!(denied.is_error, Some(true));
+
+    let mut runner_context = ToolSessionContext::default();
+    runner_context.effective_capabilities = [McpCapability::Runner].into_iter().collect();
+    let runner = OrbitToolServer::new_with_context(Arc::new(CapabilityHost), runner_context);
+    let names = runner
+        .visible_tool_schemas()
+        .expect("runner list")
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["demo.runner"]);
 }
 
 #[tokio::test]

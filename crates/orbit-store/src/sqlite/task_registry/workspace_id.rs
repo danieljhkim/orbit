@@ -52,9 +52,12 @@ pub(super) fn sanitize_slug(raw: &str) -> String {
 
 pub(super) fn validate_workspace_id(raw: &str) -> Result<String, OrbitError> {
     let trimmed = raw.trim();
+    if is_valid_logical_workspace_id(trimmed) {
+        return Ok(trimmed.to_string());
+    }
     let Some((slug, suffix)) = trimmed.rsplit_once('-') else {
         return Err(OrbitError::InvalidInput(format!(
-            "workspace_id '{trimmed}' must use <slug>-<6char> form"
+            "workspace_id '{trimmed}' must use canonical ws_<name> or legacy <slug>-<6char> form"
         )));
     };
     if !is_valid_workspace_slug(slug)
@@ -65,10 +68,21 @@ pub(super) fn validate_workspace_id(raw: &str) -> Result<String, OrbitError> {
             .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
     {
         return Err(OrbitError::InvalidInput(format!(
-            "workspace_id '{trimmed}' must use <slug>-<6char> form"
+            "workspace_id '{trimmed}' must use canonical ws_<name> or legacy <slug>-<6char> form"
         )));
     }
     Ok(trimmed.to_string())
+}
+
+fn is_valid_logical_workspace_id(value: &str) -> bool {
+    let Some(name) = value.strip_prefix("ws_") else {
+        return false;
+    };
+    !name.is_empty()
+        && name
+            .as_bytes()
+            .iter()
+            .all(|byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_'))
 }
 
 fn is_valid_workspace_slug(slug: &str) -> bool {

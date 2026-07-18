@@ -5,17 +5,369 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use orbit_common::types::{
-    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolPolicyError,
-    McpToolScope, mcp_advertised_tool_name, mcp_capability_placement_matrix,
-    validate_mcp_tool_definitions,
+    LearningInjectionState, McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy,
+    McpToolPolicyError, McpToolScope, ToolSessionContext, mcp_advertised_tool_name,
+    mcp_capability_placement_matrix, validate_mcp_tool_definitions,
 };
-use orbit_core::OrbitRuntime;
+use orbit_core::command::tool::ToolEntryPoint;
+use orbit_core::{LearningSearchParams, OrbitError, OrbitRuntime};
 use orbit_mcp::McpHost;
 use serde::Deserialize;
+use serde_json::{Value, json};
 
 use super::host::{
-    RuntimeMcpHost, canonical_mcp_tool_definitions, is_mcp_tool_exposed, safe_mcp_tool_names,
+    BrokerMcpHost, audited_mcp_call_with_session_context, canonical_mcp_tool_definitions,
+    ensure_mcp_tool_exposed, is_mcp_tool_exposed, normalize_trusted_call_context,
+    safe_mcp_tool_names,
 };
+
+#[test]
+fn broker_checkoutless_task_call_uses_stable_id_and_one_trusted_audit() {
+    use chrono::Utc;
+    use orbit_common::types::{AuditEventStatus, Workspace, WorkspaceRegistry, WorkspaceStatus};
+
+    let root = tempfile::tempdir().expect("global root");
+    let workspace = Workspace {
+        id: "ws_checkoutless".to_string(),
+        name: "Checkoutless".to_string(),
+        owner_machine_id: None,
+        git_remote: None,
+        ship_mode: None,
+        base_branch: "agent-main".to_string(),
+        status: WorkspaceStatus::Active,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    orbit_core::workspace_registry::save_registry_to(
+        &WorkspaceRegistry {
+            workspaces: vec![workspace],
+            ..Default::default()
+        },
+        &orbit_core::workspace_registry::registry_path_for(root.path()),
+    )
+    .expect("workspace registry");
+    orbit_core::runtime::HubCoordinationExecutor::register_workspace(
+        root.path(),
+        "ws_checkoutless",
+        "checkoutless",
+    )
+    .expect("task workspace");
+
+    let host = BrokerMcpHost::new(root.path().to_path_buf());
+    let mut context = ToolSessionContext::trusted_local(
+        Some("ws_checkoutless".to_string()),
+        Some("hm_hub".to_string()),
+        Some("hub".to_string()),
+    );
+    context.origin_session_id = Some("mcp-session-checkoutless".to_string());
+    context.mcp_call_id = Some("mcall-checkoutless-add".to_string());
+    let task = host
+        .call_tool(
+            "orbit.task.add",
+            json!({
+                "workspace": "ws_checkoutless",
+                "title": "No checkout",
+                "description": "Coordinate at hub",
+                "model": "codex"
+            }),
+            context,
+        )
+        .expect("checkoutless task add");
+    assert_eq!(task["title"], "No checkout");
+    let id = task["id"].as_str().expect("task id");
+    let mut update_context = ToolSessionContext::trusted_local(
+        Some("ws_checkoutless".to_string()),
+        Some("hm_hub".to_string()),
+        Some("hub".to_string()),
+    );
+    update_context.mcp_call_id = Some("mcall-checkoutless-update".to_string());
+    host.call_tool(
+        "orbit.task.update",
+        json!({"workspace": "ws_checkoutless", "id": id, "description": "Updated at hub", "model": "codex"}),
+        update_context,
+    )
+    .expect("checkoutless task update");
+    let mut show_context = ToolSessionContext::trusted_local(
+        Some("ws_checkoutless".to_string()),
+        Some("hm_hub".to_string()),
+        Some("hub".to_string()),
+    );
+    show_context.mcp_call_id = Some("mcall-checkoutless-show".to_string());
+    let shown = host
+        .call_tool(
+            "orbit.task.show",
+            json!({"workspace": "ws_checkoutless", "id": id}),
+            show_context,
+        )
+        .expect("checkoutless task show");
+    assert_eq!(shown["description"], "Updated at hub");
+    assert!(!root.path().join(".orbit").exists());
+
+    let audit_path =
+        orbit_core::config::resolved_audit_db_path(root.path(), root.path()).expect("audit path");
+    let connection = rusqlite::Connection::open(audit_path).expect("audit store");
+    let rows = connection
+        .query_row(
+            "SELECT COUNT(*), status, workspace_id, transport, mcp_call_id
+             FROM audit_events WHERE tool_name = ?1 AND mcp_call_id = ?2",
+            rusqlite::params!["orbit.task.add", "mcall-checkoutless-add"],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .expect("audit row");
+    assert_eq!(rows.0, 1);
+    assert_eq!(rows.1, AuditEventStatus::Success.to_string());
+    assert_eq!(rows.2.as_deref(), Some("ws_checkoutless"));
+    assert_eq!(rows.3.as_deref(), Some("local"));
+    assert_eq!(rows.4.as_deref(), Some("mcall-checkoutless-add"));
+}
+
+#[test]
+fn broker_with_context_requires_local_checkout_before_dispatch() {
+    use chrono::Utc;
+    use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
+
+    let root = tempfile::tempdir().expect("global root");
+    orbit_core::workspace_registry::save_registry_to(
+        &WorkspaceRegistry {
+            workspaces: vec![Workspace {
+                id: "ws_checkoutless".to_string(),
+                name: "Checkoutless".to_string(),
+                owner_machine_id: None,
+                git_remote: None,
+                ship_mode: None,
+                base_branch: "agent-main".to_string(),
+                status: WorkspaceStatus::Active,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }],
+            ..Default::default()
+        },
+        &orbit_core::workspace_registry::registry_path_for(root.path()),
+    )
+    .expect("workspace registry");
+    let host = BrokerMcpHost::new(root.path().to_path_buf());
+    let error = host
+        .call_tool(
+            "orbit.task.show",
+            json!({"workspace": "ws_checkoutless", "id": "ORB-00001", "with_context": true}),
+            ToolSessionContext::trusted_local(
+                Some("ws_checkoutless".to_string()),
+                Some("hm_hub".to_string()),
+                Some("hub".to_string()),
+            ),
+        )
+        .expect_err("local-derived enrichment requires checkout");
+    assert!(
+        error
+            .to_string()
+            .contains("no single validated exact local checkout")
+    );
+    assert!(
+        !root
+            .path()
+            .join("tasks/workspaces/ws_checkoutless/ORB-00001")
+            .exists()
+    );
+}
+
+#[test]
+fn broker_spoke_hub_denial_writes_no_local_coordination_state() {
+    use chrono::Utc;
+    use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
+    use orbit_core::routines::{HostMode, NewHostIdentity, ensure_host_identity};
+
+    let root = tempfile::tempdir().expect("global root");
+    ensure_host_identity(root.path(), || {
+        Ok(NewHostIdentity {
+            host_id: "spoke".to_string(),
+            mode: HostMode::Spoke,
+        })
+    })
+    .expect("spoke identity");
+    orbit_core::workspace_registry::save_registry_to(
+        &WorkspaceRegistry {
+            workspaces: vec![Workspace {
+                id: "ws_remote".to_string(),
+                name: "Remote".to_string(),
+                owner_machine_id: Some("hm_remote_owner".to_string()),
+                git_remote: None,
+                ship_mode: None,
+                base_branch: "agent-main".to_string(),
+                status: WorkspaceStatus::Active,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }],
+            ..Default::default()
+        },
+        &orbit_core::workspace_registry::registry_path_for(root.path()),
+    )
+    .expect("workspace registry");
+    let host = BrokerMcpHost::new(root.path().to_path_buf());
+    let mut context = ToolSessionContext::trusted_local(
+        Some("ws_remote".to_string()),
+        Some("hm_spoke".to_string()),
+        Some("spoke".to_string()),
+    );
+    context.mcp_call_id = Some("mcall-spoke-denied".to_string());
+    let error = host
+        .call_tool(
+            "orbit.task.add",
+            json!({
+                "workspace": "ws_remote",
+                "title": "Must not land locally",
+                "description": "Denied on spoke",
+                "model": "codex"
+            }),
+            context,
+        )
+        .expect_err("spoke has no hub transport");
+    assert!(error.to_string().contains("no MCP hub transport"));
+    assert!(!root.path().join("tasks").exists());
+    assert!(!root.path().join("frictions").exists());
+}
+
+#[test]
+fn broker_capability_denial_precedes_coordination_store_open() {
+    use chrono::Utc;
+    use orbit_common::types::{McpCapability, Workspace, WorkspaceRegistry, WorkspaceStatus};
+
+    let root = tempfile::tempdir().expect("global root");
+    orbit_core::workspace_registry::save_registry_to(
+        &WorkspaceRegistry {
+            workspaces: vec![Workspace {
+                id: "ws_checkoutless".to_string(),
+                name: "Checkoutless".to_string(),
+                owner_machine_id: None,
+                git_remote: None,
+                ship_mode: None,
+                base_branch: "agent-main".to_string(),
+                status: WorkspaceStatus::Active,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }],
+            ..Default::default()
+        },
+        &orbit_core::workspace_registry::registry_path_for(root.path()),
+    )
+    .expect("workspace registry");
+    let host = BrokerMcpHost::new(root.path().to_path_buf());
+    let mut context = ToolSessionContext::trusted_local(
+        Some("ws_checkoutless".to_string()),
+        Some("hm_hub".to_string()),
+        Some("hub".to_string()),
+    );
+    context.effective_capabilities = BTreeSet::from([McpCapability::Runner]);
+    let error = host
+        .call_tool(
+            "orbit.task.add",
+            json!({
+                "workspace": "ws_checkoutless",
+                "title": "Denied",
+                "description": "Must not write",
+                "model": "codex"
+            }),
+            context,
+        )
+        .expect_err("runner capability is not task-authority");
+    assert!(error.to_string().contains("MCP capability denied"));
+    assert!(!root.path().join("tasks").exists());
+}
+
+struct RuntimeMcpHost {
+    runtime: OrbitRuntime,
+}
+
+impl McpHost for RuntimeMcpHost {
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        self.runtime.list_mcp_tool_definitions()
+    }
+
+    fn call_tool(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        audited_mcp_call_with_session_context(
+            &self.runtime,
+            name,
+            input,
+            normalize_trusted_call_context(session_context),
+        )
+    }
+
+    fn call_in_process_tool(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+        dispatch: &mut dyn FnMut(Value, ToolSessionContext) -> Result<Value, OrbitError>,
+    ) -> Result<Value, OrbitError> {
+        let session_context = normalize_trusted_call_context(session_context);
+        let dispatch_context = session_context.clone();
+        self.runtime
+            .execute_in_process_tool_dispatch(
+                name,
+                input,
+                ToolEntryPoint::Mcp,
+                session_context,
+                |input| {
+                    ensure_mcp_tool_exposed(name)?;
+                    dispatch(input, dispatch_context)
+                },
+            )
+            .map(|outcome| outcome.value)
+    }
+
+    fn learning_candidates_for_path(
+        &self,
+        path: &str,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        let rows = self.runtime.search_learnings(LearningSearchParams {
+            path: Some(path.to_string()),
+            tag: None,
+            query: None,
+            limit: None,
+        })?;
+        Ok(Value::Array(
+            rows.into_iter()
+                .map(|row| {
+                    json!({
+                        "id": row.learning.id,
+                        "summary": row.learning.summary,
+                        "priority": row.learning.priority,
+                        "updated_at": row.learning.updated_at.to_rfc3339(),
+                    })
+                })
+                .collect(),
+        ))
+    }
+
+    fn get_session_learning_state(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LearningInjectionState>, OrbitError> {
+        self.runtime.get_session_learning_state(session_id)
+    }
+
+    fn upsert_session_learning_state(
+        &self,
+        session_id: &str,
+        state: &LearningInjectionState,
+    ) -> Result<(), OrbitError> {
+        self.runtime
+            .upsert_session_learning_state(session_id, state)
+    }
+}
 
 const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.docs.index",
@@ -457,7 +809,8 @@ mod audited_mcp_call_tests {
     use orbit_mcp::McpHost;
     use serde_json::json;
 
-    use super::super::host::{RuntimeMcpHost, audited_mcp_call};
+    use super::super::host::audited_mcp_call;
+    use super::RuntimeMcpHost;
 
     // ORB-00289: the previous `create_task` helper + the three
     // `task_delete_*_over_mcp` tests asserted that `orbit.task.delete` was

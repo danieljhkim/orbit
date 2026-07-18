@@ -10,7 +10,7 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-registry/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10267, ORB-10302, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10302, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Orbit MCP Bridge — Design
@@ -19,8 +19,9 @@ This document specifies the **target** design. The host-registry identity,
 workspace, registry core/projections, C3 discovery tools, and typed placement,
 capability, scope, and trusted-session metadata they depend on have landed. C4
 places identity, catalog, cache, and the store-backed registry service in the
-dedicated `orbit-registry` domain crate ([ORB-10302], [ADR-0235]); the
-checkout-aware broker and transport surfaces here remain pending. It replaces both
+dedicated `orbit-registry` domain crate ([ORB-10302], [ADR-0235]). The local
+checkout-aware broker, exact-worktree runtime cache, and effective-capability
+filtering landed in [ORB-10262]; remote transport remains pending. It replaces both
 Bridge's HTTP parity layer and the earlier
 per-workspace-authority draft with a local broker that has one remote destination:
 the coordination hub. It covers client→hub transport and local tool placement. The
@@ -140,9 +141,12 @@ the fixed remote command; `mcp.toml` cannot inject arbitrary shell text.
 ### 2.3 Hub-local short circuit
 
 When the current machine's role is hub, hub-class calls dispatch directly through
-the local `OrbitRuntime`/global coordination runtime. The broker does not SSH to
-itself or add a second MCP serialization boundary. Placement and capability
-preflight remain identical to the remote path.
+the checkout-independent coordination executor keyed by stable `workspace_id`.
+That executor opens only global task/friction coordination stores: it does not
+construct `OrbitRuntime`, `WorkspacePaths`, a checkout, owner stores, or local
+model/scoreboard configuration. The broker does not SSH to itself or add a
+second MCP serialization boundary. Placement and capability preflight remain
+identical to the remote path.
 
 ## 3. Workspace, Role, and Session Resolution
 
@@ -381,6 +385,17 @@ through the hub. Current knowledge does **not** flow across owners in v1: the hu
 serves it only when the hub owns that workspace, and never proxies to a spoke owner.
 Every other machine reads a pulled Git replica explicitly or routes actionable work
 as a task to the owner. Graph/docs remain local.
+
+Hub friction state is partitioned at
+`<global_root>/frictions/workspaces/<workspace_id>`. Legacy checkout-local state
+is copied to a staging tree and atomically published before a separate completion
+marker commits the migration. Identical repeats are idempotent, differing trees
+fail closed, and reads remain on the legacy tree until the marker exists.
+
+`orbit.task.artifact.put` completes capability, workspace, and placement
+preflight before opening the caller-local source. It reads at most the typed
+content limit and sends `{path, media_type, content}` bytes to hub execution;
+caller-local paths never cross the coordination boundary.
 
 ### 6.2 Knowledge creation
 
@@ -641,10 +656,13 @@ schemas.
 
 ### Phase 2 — placement-aware local broker
 
-- Add `hub`, `owner`, `local-derived`, and `composite` metadata.
-- Preserve exact session checkout/worktree paths for graph/docs.
-- Enforce owner and replica-mode preflight without spoke-to-spoke discovery.
-- Add capability filtering independent of placement.
+- Implemented by [ORB-10262]: consume canonical `hub`, `owner`, `local-derived`,
+  and `composite` metadata; preserve exact session checkout/worktree paths for
+  graph dispatch and runtime-cache identity; enforce owner/replica preflight
+  without spoke-to-spoke discovery; and filter `tools/list`/`tools/call` by the
+  non-hierarchical effective capability set. Hub task, artifact, review-thread,
+  verdict, and friction calls use the stable-ID checkoutless coordination
+  executor; `task.show(with_context=true)` remains explicitly local-derived.
 
 ### Phase 3 — singular hub link
 

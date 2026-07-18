@@ -103,3 +103,43 @@ fn artifact_put_rejects_agent_identity_field() {
 
     assert!(error.to_string().contains("use `model`"));
 }
+
+#[test]
+fn artifact_put_read_failure_never_calls_host() {
+    let host = RecordingHost::default();
+    let ctx = ToolContext {
+        orbit_host: Some(Arc::new(host.clone())),
+        ..Default::default()
+    };
+    let error = OrbitTaskArtifactPutTool
+        .execute(
+            &ctx,
+            json!({"id": "ORB-00001", "source_path": "/definitely/missing"}),
+        )
+        .expect_err("missing source must fail locally");
+
+    assert!(error.to_string().contains("read artifact source"));
+    assert!(host.call.lock().expect("host call").is_none());
+}
+
+#[test]
+fn artifact_put_size_failure_never_calls_host() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let source = dir.path().join("large.bin");
+    std::fs::write(
+        &source,
+        vec![0_u8; (MAX_ARTIFACT_CONTENT_BYTES + 1) as usize],
+    )
+    .expect("write oversized source");
+    let host = RecordingHost::default();
+    let ctx = ToolContext {
+        orbit_host: Some(Arc::new(host.clone())),
+        ..Default::default()
+    };
+    let error = OrbitTaskArtifactPutTool
+        .execute(&ctx, json!({"id": "ORB-00001", "source_path": source}))
+        .expect_err("oversized source must fail locally");
+
+    assert!(error.to_string().contains("content limit"));
+    assert!(host.call.lock().expect("host call").is_none());
+}
