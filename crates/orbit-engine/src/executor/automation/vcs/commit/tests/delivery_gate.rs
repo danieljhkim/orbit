@@ -1,8 +1,8 @@
 //! ORB-10313 regression: `commit_batch_changes` must fail closed on the durable
 //! execution outcome before it resolves the checkout, stages files, mutates the
-//! index, or creates a commit. A `failed`, missing, or unknown outcome — like an
+//! index, or creates a commit. An explicit `Outcome: failed` line — like an
 //! empty/placeholder summary — leaves HEAD, the index, and the worktree exactly
-//! as they were.
+//! as they were, while other meaningful summaries remain deliverable.
 
 use std::fs;
 use std::path::Path;
@@ -59,7 +59,7 @@ fn assert_delivery_blocked(summary: &str, expected_fragment: &str) {
 
     let host = CommitTestHost::new(vec![task_with_summary(summary)], workspace.to_path_buf());
     let error = git_commit(&host, &batch_input(workspace))
-        .expect_err("non-success outcome must block delivery");
+        .expect_err("explicit failed outcome must block delivery");
     let message = error.to_string();
     assert!(
         message.contains(GATED_TASK_ID),
@@ -110,48 +110,34 @@ fn commit_batch_blocks_failed_outcome_before_any_git_mutation() {
 }
 
 #[test]
-fn commit_batch_blocks_missing_outcome_before_any_git_mutation() {
-    assert_delivery_blocked(
-        "Changes:\n- Did work but never stated an outcome.",
-        "Changes:",
-    );
-}
-
-#[test]
-fn commit_batch_blocks_unknown_outcome_before_any_git_mutation() {
-    assert_delivery_blocked(
-        "Outcome: partial\n\nChanges:\n- Some of the work landed.",
-        "partial",
-    );
-}
-
-#[test]
 fn commit_batch_blocks_empty_summary_before_any_git_mutation() {
-    // Empty/placeholder rejection remains intact under the stricter predicate.
+    // Empty/placeholder rejection remains intact under the failed-outcome gate.
     assert_delivery_blocked("   \n", "meaningful persisted execution_summary");
 }
 
 #[test]
-fn commit_batch_succeeds_on_success_outcome() {
-    let temp = initialized_git_repo();
-    let workspace = temp.path();
-    fs::create_dir_all(workspace.join("src")).unwrap();
-    fs::write(workspace.join("src/change.txt"), "delivered\n").unwrap();
+fn commit_batch_allows_meaningful_non_failed_outcomes() {
+    for summary in [
+        "Outcome: success\n\nChanges:\n- Landed the scoped work.",
+        "Changes:\n- Did work without a machine-readable outcome.",
+        "Outcome: partial\n\nChanges:\n- Reported a non-failure outcome.",
+    ] {
+        let temp = initialized_git_repo();
+        let workspace = temp.path();
+        fs::create_dir_all(workspace.join("src")).unwrap();
+        fs::write(workspace.join("src/change.txt"), "delivered\n").unwrap();
 
-    let host = CommitTestHost::new(
-        vec![task_with_summary(
-            "Outcome: success\n\nChanges:\n- Landed the scoped work.",
-        )],
-        workspace.to_path_buf(),
-    );
-    let result = git_commit(&host, &batch_input(workspace)).expect("success outcome delivers");
-    assert_eq!(result["committed"], json!(true));
-    assert_eq!(result["task_id"], json!(GATED_TASK_ID));
-    assert_eq!(
-        git_output(workspace, &["rev-list", "--count", "HEAD"])
-            .expect("commit count")
-            .trim(),
-        "2",
-        "the success outcome produces exactly one delivery commit"
-    );
+        let host = CommitTestHost::new(vec![task_with_summary(summary)], workspace.to_path_buf());
+        let result = git_commit(&host, &batch_input(workspace))
+            .expect("a meaningful summary without explicit failure delivers");
+        assert_eq!(result["committed"], json!(true));
+        assert_eq!(result["task_id"], json!(GATED_TASK_ID));
+        assert_eq!(
+            git_output(workspace, &["rev-list", "--count", "HEAD"])
+                .expect("commit count")
+                .trim(),
+            "2",
+            "the allowed outcome produces exactly one delivery commit"
+        );
+    }
 }
