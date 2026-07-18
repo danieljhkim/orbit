@@ -7,6 +7,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::{HeaderValue, Method, Request, StatusCode, header};
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::TaskArtifact;
+use orbit_common::types::task_artifacts::{TaskRelation, TaskRelationType};
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{OrbitRuntime, TaskComplexity, TaskStatus};
 use serde_json::{Value, json};
@@ -23,6 +24,28 @@ fn post_json(uri: &str, body: Value) -> Request<Body> {
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(body.to_string()))
         .expect("request")
+}
+
+fn patch_json(uri: &str, body: Value) -> Request<Body> {
+    Request::builder()
+        .method(Method::PATCH)
+        .uri(uri)
+        .header(header::ORIGIN, "http://localhost:7878")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("request")
+}
+
+fn seed_backlog_task(runtime: &OrbitRuntime, title: &str) -> orbit_core::Task {
+    runtime
+        .add_task(TaskAddParams {
+            title: title.to_string(),
+            description: format!("Fixture task: {title}."),
+            status: Some(TaskStatus::Backlog),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("seed backlog task")
 }
 
 fn seed_task_with_artifact(runtime: &OrbitRuntime) -> orbit_core::Task {
@@ -846,4 +869,145 @@ async fn create_task_only_accepts_creation_legal_statuses_and_ignores_comment() 
     let body = body_json(created).await;
     assert_eq!(body["status"], json!("backlog"));
     assert_eq!(body["comments"], json!([]));
+}
+
+/// ORB-10253: `POST /api/tasks` accepts a `relations` array of {type, target}
+/// objects and persists them on the created task (mirroring the native MCP
+/// wire shape). Previously `create_task_action` hardcoded `relations: Vec::new()`.
+#[tokio::test]
+async fn create_task_persists_relations_from_body() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let target = seed_backlog_task(&runtime, "Relation target");
+    let app = router().with_state(crate::state::DashboardState::single(Arc::new(runtime)));
+
+    let response = app
+        .oneshot(post_json(
+            "/tasks",
+            json!({
+                "title": "task with relations",
+                "description": "records a typed relation on create",
+                "status": "backlog",
+                "relations": [{ "type": "related_to", "target": target.id }],
+            }),
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(
+        body["relations"],
+        json!([{ "type": "related_to", "target": target.id }])
+    );
+}
+
+/// ORB-10253: a present `relations` array on `PATCH /api/tasks/:id` replaces the
+/// existing relation set. Previously `update_task_action` hardcoded
+/// `relations: None`, so relations could never be edited over HTTP.
+#[tokio::test]
+async fn update_task_replaces_relation_set() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let first = seed_backlog_task(&runtime, "First relation target");
+    let second = seed_backlog_task(&runtime, "Second relation target");
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Task with an initial relation".to_string(),
+            description: "relation set will be replaced over HTTP".to_string(),
+            status: Some(TaskStatus::Backlog),
+            workspace_path: Some(".".to_string()),
+            relations: vec![TaskRelation {
+                relation_type: TaskRelationType::RelatedTo,
+                target: first.id.clone(),
+            }],
+            ..Default::default()
+        })
+        .expect("seed task with relation");
+    let app = router().with_state(crate::state::DashboardState::single(Arc::new(runtime)));
+
+    let response = app
+        .oneshot(patch_json(
+            &format!("/tasks/{}", task.id),
+            json!({ "relations": [{ "type": "related_to", "target": second.id }] }),
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(
+        body["relations"],
+        json!([{ "type": "related_to", "target": second.id }]),
+        "present relations array replaces the set (drops the prior target)"
+    );
+}
+
+/// ORB-10253: an empty `relations` array on `PATCH /api/tasks/:id` clears the
+/// relation set, while an absent field leaves it unchanged (covered implicitly
+/// by every other PATCH test that omits `relations`).
+#[tokio::test]
+async fn update_task_clears_relations_with_empty_array() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let target = seed_backlog_task(&runtime, "Relation target to be cleared");
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Task whose relations get cleared".to_string(),
+            description: "empty array clears the relation set".to_string(),
+            status: Some(TaskStatus::Backlog),
+            workspace_path: Some(".".to_string()),
+            relations: vec![TaskRelation {
+                relation_type: TaskRelationType::RelatedTo,
+                target: target.id.clone(),
+            }],
+            ..Default::default()
+        })
+        .expect("seed task with relation");
+    let app = router().with_state(crate::state::DashboardState::single(Arc::new(runtime)));
+
+    let response = app
+        .oneshot(patch_json(
+            &format!("/tasks/{}", task.id),
+            json!({ "relations": [] }),
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["relations"], json!([]), "empty array clears relations");
+}
+
+/// ORB-10253: an invalid relation target must surface Orbit's own validation
+/// error as a 4xx — never a silent drop. A malformed target fails
+/// `validate_task_relations_for_source` and reaches the client through
+/// `map_runtime_error` as a 400.
+#[tokio::test]
+async fn create_task_rejects_invalid_relation_target() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let app = router().with_state(crate::state::DashboardState::single(Arc::new(runtime)));
+
+    let response = app
+        .oneshot(post_json(
+            "/tasks",
+            json!({
+                "title": "task with a bad relation",
+                "description": "malformed relation target must be rejected",
+                "status": "backlog",
+                "relations": [{ "type": "related_to", "target": "not-a-task-id" }],
+            }),
+        ))
+        .await
+        .expect("response");
+
+    assert!(
+        response.status().is_client_error(),
+        "invalid relation target must be a 4xx, got {}",
+        response.status()
+    );
+    let body = body_json(response).await;
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|m| m.contains("not-a-task-id")),
+        "error must carry Orbit's validation text: {body}"
+    );
 }

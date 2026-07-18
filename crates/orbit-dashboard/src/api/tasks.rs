@@ -5,6 +5,7 @@ use axum::body::Body;
 use axum::extract::Path;
 use axum::http::{HeaderName, HeaderValue, header};
 use axum::response::{IntoResponse, Json, Response};
+use orbit_common::types::task_artifacts::TaskRelation;
 use orbit_common::types::validate_relative_artifact_path;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{
@@ -55,6 +56,8 @@ pub(super) struct CreateTaskBody {
     acceptance_criteria: Vec<String>,
     #[serde(default)]
     dependencies: Vec<String>,
+    #[serde(default)]
+    relations: Vec<TaskRelation>,
     #[serde(default)]
     tags: Vec<String>,
     #[serde(default)]
@@ -109,6 +112,8 @@ pub(super) struct UpdateTaskBody {
     acceptance_criteria: Option<Vec<String>>,
     #[serde(default)]
     dependencies: Option<Vec<String>>,
+    #[serde(default)]
+    relations: Option<Vec<TaskRelation>>,
     #[serde(default)]
     tags: Option<Vec<String>>,
     #[serde(default)]
@@ -299,7 +304,7 @@ pub(super) async fn create_task_action(
         description: body.description,
         acceptance_criteria: body.acceptance_criteria,
         dependencies: body.dependencies,
-        relations: Vec::new(),
+        relations: body.relations,
         tags: body.tags,
         plan: body.plan,
         comment: None,
@@ -340,7 +345,7 @@ pub(super) async fn update_task_action(
         description: body.description,
         acceptance_criteria: body.acceptance_criteria,
         dependencies: body.dependencies,
-        relations: None,
+        relations: body.relations,
         tags: body.tags,
         plan: body.plan,
         execution_summary: body.execution_summary,
