@@ -6,7 +6,7 @@ use serde_json::json;
 use super::super::git_commit;
 use super::test_support::*;
 
-use super::super::super::git::git_output;
+use super::super::super::git::{git_output, git_success};
 
 #[test]
 fn git_commit_uses_scoped_identity_without_mutating_local_human_config() {
@@ -198,6 +198,48 @@ fn git_commit_batch_errors_on_empty_stage() {
     // commit was created beyond the repo's initial commit.
     let log = git_output(workspace, &["rev-list", "--count", "HEAD"]).expect("count commits");
     assert_eq!(log.trim(), "1", "no commit should have been created");
+}
+
+#[test]
+fn git_commit_empty_diff_never_stages_or_resets_registered_primary_checkout() {
+    let assigned = initialized_git_repo();
+    let primary = initialized_git_repo();
+    fs::write(
+        primary.path().join("README.md"),
+        "primary operator change\n",
+    )
+    .unwrap();
+    git_success(primary.path(), &["add", "README.md"]).expect("stage primary change");
+    let primary_index_before = git_stdout_bytes(
+        primary.path(),
+        &["diff", "--cached", "--binary", "HEAD", "--"],
+        "snapshot primary index before",
+    );
+
+    let task = task_with_file("T1", "Empty task", "src/missing.txt", "codex");
+    let host = CommitTestHost::new(vec![task], primary.path().to_path_buf());
+    let input = json!({
+        "scope": "all",
+        "job_run_id": "batch-1",
+        "workspace_path": assigned.path().to_string_lossy().to_string(),
+    });
+
+    let error = git_commit(&host, &input).expect_err("empty assigned worktree must error");
+    let message = error.to_string();
+    assert!(
+        message.contains("outside the assigned worktree"),
+        "{message}"
+    );
+    assert!(message.contains("attribution may be unknown"), "{message}");
+    assert_eq!(
+        git_stdout_bytes(
+            primary.path(),
+            &["diff", "--cached", "--binary", "HEAD", "--"],
+            "snapshot primary index after",
+        ),
+        primary_index_before,
+        "git_commit must not stage or reset the registered primary checkout"
+    );
 }
 
 #[test]

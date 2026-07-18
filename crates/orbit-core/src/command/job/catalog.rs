@@ -648,6 +648,37 @@ spec:
     }
 
     #[test]
+    fn task_shipment_implementers_pin_workspace_and_repo_roots_to_the_worktree() {
+        for job_name in ["task_local_pipeline", "task_pr_pipeline"] {
+            let yaml = DEFAULT_JOB_FILES
+                .iter()
+                .find_map(|(name, yaml)| (*name == job_name).then_some(*yaml))
+                .unwrap_or_else(|| panic!("default job {job_name} exists"));
+            let asset =
+                load_job_asset(yaml).unwrap_or_else(|error| panic!("parse {job_name}: {error}"));
+            let implement_bundle = asset
+                .spec
+                .steps
+                .iter()
+                .find(|step| step.id == "implement_bundle")
+                .expect("implement bundle");
+            let JobV2StepBody::Loop { loop_ } = &implement_bundle.body else {
+                panic!("{job_name} implement bundle must be a loop");
+            };
+            let JobV2StepBody::TargetRef(implement) = &loop_.steps[0].body else {
+                panic!("{job_name} implement step must reference agent_implement");
+            };
+            let input = implement.default_input.as_ref().expect("implement input");
+            for field in ["workspace_path", "repo_root"] {
+                assert_eq!(
+                    input[field], "{{ steps.worktree.output.workspace_path }}",
+                    "{job_name} must pin {field} to the exact assigned worktree"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn independent_review_job_requires_structured_exact_head_verdict() {
         let yaml = DEFAULT_JOB_FILES
             .iter()

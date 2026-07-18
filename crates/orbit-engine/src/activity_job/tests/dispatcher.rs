@@ -61,6 +61,10 @@ fn dispatch_error_retryability_classification_table() {
             step_id: "s".into(),
         },
         DispatchError::CliInvocationPermanent("agent config: bad model".into()),
+        DispatchError::WorktreeIntegrity {
+            code: "worktree_escape",
+            diagnostic: r#"{"task_id":"ORB-1"}"#.into(),
+        },
     ];
     for err in &permanent {
         assert!(err.is_non_retryable(), "expected non-retryable: {err:?}");

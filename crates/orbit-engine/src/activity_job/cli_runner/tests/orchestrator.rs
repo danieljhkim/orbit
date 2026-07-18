@@ -2,6 +2,9 @@
 
 use std::collections::HashMap;
 use std::ffi::OsString;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,7 +12,7 @@ use orbit_agent::loop_engine::audit::AuditSink;
 use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
 use orbit_common::types::activity_job::{AgentRole, V2AuditEventKind};
 use orbit_store::Store;
-use tempfile::tempdir;
+use tempfile::{TempDir, tempdir};
 
 use super::super::super::agent_role::{apply_resolved_settings, resolve_agent_settings};
 use super::super::super::audit_writer::V2AuditWriter;
@@ -588,6 +591,7 @@ fn run_cli_backend_returns_error_when_declared_workspace_path_missing() {
         task_context: Some(serde_json::json!({
             "workspace_path": missing.display().to_string()
         })),
+        workspace_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
     let input = serde_json::json!({
@@ -646,6 +650,7 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
         task_context: Some(serde_json::json!({
             "workspace_path": workspace_string.clone()
         })),
+        workspace_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -669,6 +674,369 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
         })
         .expect("cli.invocation.started cwd");
     assert_eq!(cwd, workspace_string);
+}
+
+#[test]
+fn fake_ship_implementers_run_and_write_only_in_the_assigned_worktree() {
+    for provider in ["claude", "codex"] {
+        for pipeline in ["task_local_pipeline", "task_pr_pipeline"] {
+            let fixture = linked_worktree_fixture();
+            let script = fixture.root().join(provider);
+            let assigned = fixture.assigned.display().to_string();
+            write_executable(
+                &script,
+                &format!(
+                    r#"#!/bin/sh
+cat > /dev/null
+test "$(pwd -P)" = '{assigned}' || exit 41
+test "$(git rev-parse --show-toplevel)" = '{assigned}' || exit 42
+printf '%s\n' '{pipeline}:{provider}' > observed-relative-write.txt
+printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{}},"error":null}}'
+"#
+                ),
+            );
+            let mut host = TestHost::with_command(script.display().to_string());
+            host.workspace_root = Some(fixture.primary.clone());
+            let spec = test_agent_loop_spec_for(provider, Duration::from_secs(5));
+            let audit = test_audit(&format!("run-{pipeline}-{provider}"), provider);
+            let input = serde_json::json!({
+                "prompt": "implement in the assigned worktree",
+                "task_id": format!("ORB-{pipeline}-{provider}"),
+                "workspace_path": assigned,
+                "repo_root": fixture.assigned,
+            });
+
+            let outcome = run_cli_backend(
+                &host,
+                &spec,
+                &format!("run-{pipeline}-{provider}"),
+                audit,
+                &input,
+                None,
+            )
+            .unwrap_or_else(|error| panic!("{pipeline}/{provider} invocation: {error}"));
+
+            assert!(outcome.success, "{pipeline}/{provider} should succeed");
+            assert_eq!(
+                fs::read_to_string(fixture.assigned.join("observed-relative-write.txt"))
+                    .expect("assigned relative write"),
+                format!("{pipeline}:{provider}\n")
+            );
+            assert!(
+                !fixture.primary.join("observed-relative-write.txt").exists(),
+                "{pipeline}/{provider} must not write the registered primary checkout"
+            );
+        }
+    }
+}
+
+#[test]
+fn unchanged_pre_dirty_primary_does_not_block_valid_worktree_implementation() {
+    let fixture = linked_worktree_fixture();
+    fs::write(
+        fixture.primary.join("README.md"),
+        "pre-existing primary dirtiness\n",
+    )
+    .expect("dirty primary");
+    let primary_before = git_bytes(&fixture.primary, &["diff", "--binary", "HEAD", "--"]);
+    let script = fixture.root().join("codex");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf 'assigned only\\n' > assigned.txt\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+
+    let outcome = run_cli_backend(
+        &host,
+        &test_agent_loop_spec(Duration::from_secs(5)),
+        "run-pre-dirty-primary",
+        test_audit("run-pre-dirty-primary", "codex"),
+        &worktree_input(&fixture, "ORB-PRE-DIRTY"),
+        None,
+    )
+    .expect("unchanged dirty primary is allowed");
+
+    assert!(outcome.success);
+    assert!(fixture.assigned.join("assigned.txt").exists());
+    assert_eq!(
+        git_bytes(&fixture.primary, &["diff", "--binary", "HEAD", "--"]),
+        primary_before,
+        "the guard must leave pre-existing primary dirtiness byte-for-byte unchanged"
+    );
+}
+
+#[test]
+fn primary_escape_is_typed_non_retryable_and_preserves_both_checkouts() {
+    let fixture = linked_worktree_fixture();
+    let escaped = fixture.primary.join("escaped.txt");
+    let script = fixture.root().join("claude");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\nprintf 'escaped\\n' > '{}'\ngit -C '{}' add -- escaped.txt\nprintf '%s\\n' '{{\"schemaVersion\":1,\"status\":\"success\",\"result\":{{}},\"error\":null}}'\n",
+            escaped.display(),
+            fixture.primary.display()
+        ),
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+    let audit = test_audit("run-deliberate-escape", "claude");
+
+    let error = run_cli_backend(
+        &host,
+        &test_agent_loop_spec_for("claude", Duration::from_secs(5)),
+        "run-deliberate-escape",
+        audit.clone(),
+        &worktree_input(&fixture, "ORB-ESCAPE"),
+        None,
+    )
+    .expect_err("primary write must fail closed");
+
+    assert_worktree_integrity_error(
+        &error,
+        "worktree_escape",
+        ("ORB-ESCAPE", "run-deliberate-escape", "claude"),
+        &fixture,
+        "escaped.txt",
+    );
+    assert!(error.is_non_retryable());
+    assert!(
+        escaped.exists(),
+        "diagnosis must not clean the primary delta"
+    );
+    assert!(
+        !fixture.assigned.join("escaped.txt").exists(),
+        "diagnosis must not copy the primary delta"
+    );
+    assert_eq!(
+        String::from_utf8(git_bytes(
+            &fixture.primary,
+            &["diff", "--cached", "--name-only", "HEAD", "--"]
+        ))
+        .expect("utf8 staged paths")
+        .trim(),
+        "escaped.txt",
+        "diagnosis must not reset the provider-mutated primary index"
+    );
+    assert!(
+        audit
+            .events_snapshot()
+            .expect("audit events")
+            .iter()
+            .any(|event| matches!(event.kind, V2AuditEventKind::CliInvocationFinished { .. })),
+        "terminal provider audit must precede the integrity failure"
+    );
+}
+
+#[test]
+fn changes_in_both_checkouts_report_ambiguous_integrity_violation() {
+    let fixture = linked_worktree_fixture();
+    let escaped = fixture.primary.join("ambiguous-primary.txt");
+    let script = fixture.root().join("codex");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\nprintf 'assigned\\n' > ambiguous-assigned.txt\nprintf 'primary\\n' > '{}'\nprintf '%s\\n' '{{\"schemaVersion\":1,\"status\":\"success\",\"result\":{{}},\"error\":null}}'\n",
+            escaped.display()
+        ),
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+
+    let error = run_cli_backend(
+        &host,
+        &test_agent_loop_spec(Duration::from_secs(5)),
+        "run-ambiguous-integrity",
+        test_audit("run-ambiguous-integrity", "codex"),
+        &worktree_input(&fixture, "ORB-AMBIGUOUS"),
+        None,
+    )
+    .expect_err("dual-checkout mutation must fail closed");
+
+    assert_worktree_integrity_error(
+        &error,
+        "worktree_integrity_ambiguous",
+        ("ORB-AMBIGUOUS", "run-ambiguous-integrity", "codex"),
+        &fixture,
+        "ambiguous-primary.txt",
+    );
+    assert!(fixture.assigned.join("ambiguous-assigned.txt").exists());
+    assert!(escaped.exists());
+}
+
+#[test]
+fn primary_escape_is_checked_after_nonzero_exit_and_timeout() {
+    for (terminal, trailer, timeout) in [
+        ("nonzero", "exit 23", Duration::from_secs(5)),
+        ("timeout", "sleep 10", Duration::from_secs(1)),
+    ] {
+        let fixture = linked_worktree_fixture();
+        let escaped_name = format!("{terminal}-primary.txt");
+        let escaped = fixture.primary.join(&escaped_name);
+        let script = fixture.root().join("codex");
+        write_executable(
+            &script,
+            &format!(
+                "#!/bin/sh\ncat > /dev/null\nprintf '{terminal}\\n' > '{}'\n{trailer}\n",
+                escaped.display()
+            ),
+        );
+        let mut host = TestHost::with_command(script.display().to_string());
+        host.workspace_root = Some(fixture.primary.clone());
+        let run_id = format!("run-{terminal}-escape");
+        let task_id = format!("ORB-{}", terminal.to_ascii_uppercase());
+
+        let error = run_cli_backend(
+            &host,
+            &test_agent_loop_spec(timeout),
+            &run_id,
+            test_audit(&run_id, "codex"),
+            &worktree_input(&fixture, &task_id),
+            None,
+        )
+        .unwrap_err();
+
+        assert_worktree_integrity_error(
+            &error,
+            "worktree_escape",
+            (&task_id, &run_id, "codex"),
+            &fixture,
+            &escaped_name,
+        );
+        assert!(escaped.exists(), "{terminal} delta must remain for rescue");
+    }
+}
+
+struct LinkedWorktreeFixture {
+    temp: TempDir,
+    primary: PathBuf,
+    assigned: PathBuf,
+}
+
+impl LinkedWorktreeFixture {
+    fn root(&self) -> &Path {
+        self.temp.path()
+    }
+}
+
+fn linked_worktree_fixture() -> LinkedWorktreeFixture {
+    let temp = tempdir().expect("fixture tempdir");
+    let primary = temp.path().join("primary");
+    let assigned = temp.path().join("assigned");
+    fs::create_dir_all(&primary).expect("create primary");
+    git_ok(&primary, &["init"]);
+    git_ok(&primary, &["config", "user.name", "Orbit Test"]);
+    git_ok(
+        &primary,
+        &["config", "user.email", "orbit-test@example.invalid"],
+    );
+    fs::write(primary.join("README.md"), "base\n").expect("write initial file");
+    git_ok(&primary, &["add", "README.md"]);
+    git_ok(&primary, &["commit", "-m", "initial"]);
+    git_ok(
+        &primary,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "orbit-integrity-test",
+            assigned.to_str().expect("utf8 assigned path"),
+        ],
+    );
+
+    LinkedWorktreeFixture {
+        primary: primary.canonicalize().expect("canonical primary"),
+        assigned: assigned.canonicalize().expect("canonical assigned"),
+        temp,
+    }
+}
+
+fn git_ok(repo: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .expect("run git");
+    assert!(
+        output.status.success(),
+        "git {} in {} failed: {}",
+        args.join(" "),
+        repo.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn git_bytes(repo: &Path, args: &[&str]) -> Vec<u8> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .expect("run git");
+    assert!(
+        output.status.success(),
+        "git {} in {} failed: {}",
+        args.join(" "),
+        repo.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output.stdout
+}
+
+fn test_audit(run_id: &str, provider: &str) -> Arc<V2AuditWriter> {
+    let sink: Arc<dyn AuditSink> = Arc::new(RecordingSink::default());
+    Arc::new(V2AuditWriter::new(
+        run_id,
+        format!("{provider}:test-model"),
+        sink,
+    ))
+}
+
+fn worktree_input(fixture: &LinkedWorktreeFixture, task_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "prompt": "implement",
+        "task_id": task_id,
+        "workspace_path": fixture.assigned,
+        "repo_root": fixture.assigned,
+    })
+}
+
+fn assert_worktree_integrity_error(
+    error: &DispatchError,
+    expected_code: &str,
+    identity: (&str, &str, &str),
+    fixture: &LinkedWorktreeFixture,
+    changed_path: &str,
+) {
+    let (task_id, run_id, provider) = identity;
+    assert!(
+        matches!(
+            error,
+            DispatchError::WorktreeIntegrity { code, .. } if *code == expected_code
+        ),
+        "unexpected integrity error: {error:?}"
+    );
+    let rendered = error.to_string();
+    for expected in [
+        expected_code,
+        task_id,
+        run_id,
+        provider,
+        &fixture.assigned.display().to_string(),
+        &fixture.primary.display().to_string(),
+        changed_path,
+        "assigned_before",
+        "assigned_after",
+        "primary_before",
+        "primary_after",
+    ] {
+        assert!(
+            rendered.contains(expected),
+            "integrity diagnostic missing {expected:?}: {rendered}"
+        );
+    }
 }
 
 #[test]
@@ -700,6 +1068,7 @@ fn run_cli_backend_passes_provider_config_to_codex_runtime_args() {
         provider_config,
         sandbox: None,
         task_context: None,
+        workspace_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -771,6 +1140,7 @@ fn run_cli_backend_passes_model_to_grok_and_captures_well_formed_stdout() {
         provider_config: HashMap::new(),
         sandbox: None,
         task_context: None,
+        workspace_root: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -846,6 +1216,7 @@ fi
         provider_config: HashMap::new(),
         sandbox: None,
         task_context: None,
+        workspace_root: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());

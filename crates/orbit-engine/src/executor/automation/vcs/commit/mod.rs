@@ -198,7 +198,9 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
         }
         return Err(OrbitError::Execution(format!(
             "commit_batch_changes: no staged changes to commit for task '{}' in worktree '{}'; \
-             the implement step produced an empty diff",
+             the implement step produced an empty diff. Changes may have been written outside \
+             the assigned worktree, or attribution may be unknown; Orbit did not inspect, stage, \
+             reset, or reconcile any other checkout",
             task.id,
             workspace_path.display()
         )));

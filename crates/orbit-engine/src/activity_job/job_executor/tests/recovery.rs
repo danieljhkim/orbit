@@ -321,6 +321,34 @@ fn non_retryable_failure_skips_recovery_and_audit_event() {
 }
 
 #[test]
+fn worktree_integrity_failure_skips_recovery_and_audit_event() {
+    let integrity_error = DispatchError::WorktreeIntegrity {
+        code: "worktree_escape",
+        diagnostic: r#"{"task_id":"ORB-10296","run_id":"run-integrity"}"#.to_string(),
+    };
+    let host = RecoveryHost::new([
+        ("flaky", vec![Err(integrity_error)]),
+        ("recover", vec![Ok(json!({"recovered": true}))]),
+    ]);
+    let job = recovery_job(Some("recover"), None, "flaky", None, 3);
+    let writer = std::sync::Arc::new(test_writer("run-integrity"));
+
+    let err = execute_job(&job, Value::Null, "run-integrity", writer.clone(), &host)
+        .expect_err("worktree integrity must bypass recovery");
+
+    assert!(matches!(
+        err,
+        DispatchError::WorktreeIntegrity {
+            code: "worktree_escape",
+            ..
+        }
+    ));
+    assert_eq!(host.action_count("flaky"), 1, "must not retry");
+    assert_eq!(host.action_count("recover"), 0, "must not recover");
+    assert!(recovery_events(&writer.events_snapshot().unwrap()).is_empty());
+}
+
+#[test]
 fn no_recovery_activity_preserves_success_and_failure_paths() {
     let original_error = retryable_error("flaky", "still failing");
     let failing_host = RecoveryHost::new([("flaky", vec![Err(original_error.clone())])]);

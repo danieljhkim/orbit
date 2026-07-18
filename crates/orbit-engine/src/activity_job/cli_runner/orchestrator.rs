@@ -14,7 +14,7 @@ use super::super::audit_writer::V2AuditWriter;
 use super::super::dispatcher::{
     DispatchError, DispatchInvocationTrace, DispatchOutcome, V2RuntimeHost,
 };
-use super::super::workspace::resolve_subprocess_cwd;
+use super::super::workspace::{WorktreeBoundaryGuard, resolve_subprocess_cwd};
 use super::argv::{
     apply_provider_static_arg_fixups, audit_argv_for_dispatch, neutralize_inner_sandbox,
 };
@@ -147,6 +147,20 @@ pub fn run_cli_backend(
 
     let stdin_blob_ref = audit.write_blob(&invocation.stdin);
 
+    // L-0095: Provider cwd is advisory; enforce the linked-worktree postcondition.
+    // Snapshot both sides of a linked-worktree invocation immediately before
+    // provider spawn. `tool_ctx.workspace_root` is the registered primary
+    // checkout; `subprocess_cwd` is the canonical assigned worktree. Direct
+    // invocations where those resolve to the same checkout remain unchanged.
+    let mut worktree_boundary = WorktreeBoundaryGuard::capture(
+        input,
+        task_ctx.as_ref(),
+        run_id,
+        &provider,
+        subprocess_cwd.as_deref(),
+        tool_ctx.workspace_root.as_deref(),
+    )?;
+
     let model_redacted = agent.model_name().map(|m| redaction.apply_str(m));
     audit.emit_lossy(V2AuditEventKind::CliInvocationStarted {
         provider: provider.clone(),
@@ -176,35 +190,41 @@ pub fn run_cli_backend(
         child_env.push(("ORBIT_TASK_ID".to_string(), task_id.to_string()));
         child_env.push(("ORBIT_ACTIVE_TASK_ID".to_string(), task_id.to_string()));
     }
-    let (stdout, stderr, exit_code, duration, timed_out) =
-        spawn_with_timeout(SpawnWithTimeoutRequest {
-            program: &invocation.program,
-            args: &subprocess_args,
-            stdin_bytes: &invocation.stdin,
-            env: &child_env,
-            cwd: subprocess_cwd.as_deref(),
-            timeout: wall_clock_timeout,
-            sandbox: sandbox.as_ref(),
-            trace: SpawnTraceContext {
-                provider: &provider,
-                job_run_id: run_id,
-                task_id: task_id_from_input(input),
-                cwd: subprocess_cwd_string.as_deref(),
-            },
-            #[cfg(test)]
-            output_capture_limit: None,
-        })
-        .map_err(|err| {
+    let spawn_result = spawn_with_timeout(SpawnWithTimeoutRequest {
+        program: &invocation.program,
+        args: &subprocess_args,
+        stdin_bytes: &invocation.stdin,
+        env: &child_env,
+        cwd: subprocess_cwd.as_deref(),
+        timeout: wall_clock_timeout,
+        sandbox: sandbox.as_ref(),
+        trace: SpawnTraceContext {
+            provider: &provider,
+            job_run_id: run_id,
+            task_id: task_id_from_input(input),
+            cwd: subprocess_cwd_string.as_deref(),
+        },
+        #[cfg(test)]
+        output_capture_limit: None,
+    });
+
+    let (stdout, stderr, exit_code, duration, timed_out) = match spawn_result {
+        Ok(result) => result,
+        Err(err) => {
+            if let Some(boundary) = worktree_boundary.take() {
+                boundary.verify()?;
+            }
             // Spawn-layer classification (ORB-10006): executable missing /
             // permission denied fail fast; resource exhaustion (EAGAIN,
             // ENOMEM, ...) and other transient host failures stay retryable
             // at the step layer.
-            if err.permanent {
+            return Err(if err.permanent {
                 DispatchError::CliInvocationPermanent(err.message)
             } else {
                 DispatchError::CliInvocationFailed(err.message)
-            }
-        })?;
+            });
+        }
+    };
 
     let stdout_blob_ref = audit.write_blob(stdout.bytes());
     let stderr_blob_ref = audit.write_blob(stderr.bytes());
@@ -218,6 +238,14 @@ pub fn run_cli_backend(
         harness_version: None,
         timed_out,
     });
+
+    // Verify the write boundary after recording the terminal provider event
+    // but before its success/failure classification can reach the DAG. The
+    // integrity error deliberately takes precedence over exit zero, nonzero,
+    // and timeout outcomes.
+    if let Some(boundary) = worktree_boundary {
+        boundary.verify()?;
+    }
 
     // Provider output is not the system of record for artifact-backed
     // activities: task state, review threads, git state, and deterministic
