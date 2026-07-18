@@ -156,7 +156,7 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
         runtimes: discovered
             .entries
             .iter()
-            .map(|(workspace, runtime)| (workspace.orbit_dir.clone(), runtime))
+            .map(|(_, runtime)| (runtime.shared_root(), runtime))
             .collect(),
     };
 

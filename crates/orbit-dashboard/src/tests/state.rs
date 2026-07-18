@@ -5,19 +5,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
-use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
+use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 use orbit_core::OrbitRuntime;
 
 use crate::state::{DashboardState, WsEntry};
 use crate::{default_workspace_for_cwd, default_workspace_selection};
 
-fn workspace(id: &str, root: &str, status: WorkspaceStatus) -> Workspace {
+fn workspace(id: &str, status: WorkspaceStatus) -> Workspace {
     let now = Utc::now();
     Workspace {
         id: id.to_string(),
         name: id.to_string(),
-        root: PathBuf::from(root),
-        orbit_dir: PathBuf::from(root).join(".orbit"),
+        owner_machine_id: None,
         git_remote: None,
         ship_mode: None,
         base_branch: "main".to_string(),
@@ -25,6 +24,14 @@ fn workspace(id: &str, root: &str, status: WorkspaceStatus) -> Workspace {
         created_at: now,
         updated_at: now,
     }
+}
+
+fn checkout(id: &str, root: &str) -> WorkspaceCheckout {
+    WorkspaceCheckout::owner(
+        id.to_string(),
+        PathBuf::from(root),
+        PathBuf::from(root).join(".orbit"),
+    )
 }
 
 #[test]
@@ -61,11 +68,16 @@ fn global_mode_rejects_inactive_and_unknown_workspaces() {
 fn default_workspace_for_cwd_picks_longest_active_prefix() {
     let registry = WorkspaceRegistry {
         workspaces: vec![
-            workspace("outer", "/repos", WorkspaceStatus::Active),
-            workspace("inner", "/repos/inner", WorkspaceStatus::Active),
-            workspace("stale", "/repos/inner/sub", WorkspaceStatus::Invalid),
+            workspace("outer", WorkspaceStatus::Active),
+            workspace("inner", WorkspaceStatus::Active),
+            workspace("stale", WorkspaceStatus::Invalid),
         ],
-        path_overrides: Default::default(),
+        checkouts: vec![
+            checkout("outer", "/repos"),
+            checkout("inner", "/repos/inner"),
+            checkout("stale", "/repos/inner/sub"),
+        ],
+        ..Default::default()
     };
 
     // Deepest active workspace wins; the still-deeper inactive one is ignored.
@@ -84,10 +96,14 @@ fn default_workspace_for_cwd_picks_longest_active_prefix() {
 fn default_workspace_selection_root_override_beats_cwd() {
     let registry = WorkspaceRegistry {
         workspaces: vec![
-            workspace("outer", "/repos", WorkspaceStatus::Active),
-            workspace("inner", "/repos/inner", WorkspaceStatus::Active),
+            workspace("outer", WorkspaceStatus::Active),
+            workspace("inner", WorkspaceStatus::Active),
         ],
-        path_overrides: Default::default(),
+        checkouts: vec![
+            checkout("outer", "/repos"),
+            checkout("inner", "/repos/inner"),
+        ],
+        ..Default::default()
     };
 
     // cwd would resolve to "outer", but an explicit --root pointing at
@@ -107,8 +123,9 @@ fn default_workspace_selection_root_override_beats_cwd() {
 #[test]
 fn default_workspace_selection_unmatched_root_override_falls_back_to_none() {
     let registry = WorkspaceRegistry {
-        workspaces: vec![workspace("outer", "/repos", WorkspaceStatus::Active)],
-        path_overrides: Default::default(),
+        workspaces: vec![workspace("outer", WorkspaceStatus::Active)],
+        checkouts: vec![checkout("outer", "/repos")],
+        ..Default::default()
     };
 
     // An unmatched --root falls back to "All workspaces" (None) even though
@@ -142,8 +159,7 @@ fn default_workspace_selection_resolves_relative_root_override_against_cwd() {
         workspaces: vec![Workspace {
             id: "my_workspace".to_string(),
             name: "my_workspace".to_string(),
-            root: canonical_ws_root.clone(),
-            orbit_dir: canonical_ws_root.join(".orbit"),
+            owner_machine_id: None,
             git_remote: None,
             ship_mode: None,
             base_branch: "main".to_string(),
@@ -151,7 +167,12 @@ fn default_workspace_selection_resolves_relative_root_override_against_cwd() {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }],
-        path_overrides: Default::default(),
+        checkouts: vec![WorkspaceCheckout::owner(
+            "my_workspace".to_string(),
+            canonical_ws_root.clone(),
+            canonical_ws_root.join(".orbit"),
+        )],
+        ..Default::default()
     };
 
     // Relative root_override, resolved against a cwd that is the parent of
@@ -170,8 +191,9 @@ fn default_workspace_selection_resolves_relative_root_override_against_cwd() {
 #[test]
 fn default_workspace_selection_no_root_override_falls_back_to_cwd() {
     let registry = WorkspaceRegistry {
-        workspaces: vec![workspace("outer", "/repos", WorkspaceStatus::Active)],
-        path_overrides: Default::default(),
+        workspaces: vec![workspace("outer", WorkspaceStatus::Active)],
+        checkouts: vec![checkout("outer", "/repos")],
+        ..Default::default()
     };
 
     assert_eq!(

@@ -180,8 +180,8 @@ enum ExplicitRootMode {
 /// Checks path_overrides in the global registry for a matching workspace.
 fn resolve_from_path_override(cwd: &Path) -> Option<PathBuf> {
     let registry = workspace_registry::load_registry().ok()?;
-    let ws = workspace_registry::find_workspace_by_path(&registry, cwd)?;
-    Some(ws.orbit_dir.clone())
+    let checkout = workspace_registry::find_checkout_by_path(&registry, cwd)?;
+    Some(checkout.orbit_dir.clone())
 }
 
 fn find_main_worktree_orbit_dir(cwd: &Path) -> Option<PathBuf> {

@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use orbit_common::types::{
-    JobRunState, OrbitError, RoutineDefinition, Workspace, WorkspaceRegistry, WorkspaceStatus,
-    parse_routine_yaml,
+    JobRunState, OrbitError, RoutineDefinition, Workspace, WorkspaceCheckout, WorkspaceRegistry,
+    WorkspaceStatus, parse_routine_yaml,
 };
 use orbit_store::{RoutineFireIntentParams, RoutineFireState, Store};
 use tempfile::tempdir;
@@ -537,8 +537,7 @@ fn run_sweep_at_dry_run_discovers_loads_and_fails_closed() {
     registry.workspaces.push(Workspace {
         id: "ws-1".to_string(),
         name: "polaris".to_string(),
-        root: ws_root.clone(),
-        orbit_dir: ws_orbit.clone(),
+        owner_machine_id: None,
         git_remote: None,
         ship_mode: None,
         base_branch: "agent-main".to_string(),
@@ -546,6 +545,11 @@ fn run_sweep_at_dry_run_discovers_loads_and_fails_closed() {
         created_at: Utc::now(),
         updated_at: Utc::now(),
     });
+    registry.checkouts.push(WorkspaceCheckout::owner(
+        "ws-1".to_string(),
+        ws_root,
+        ws_orbit,
+    ));
     workspace_registry::save_registry_to(
         &registry,
         &workspace_registry::registry_path_for(&global),

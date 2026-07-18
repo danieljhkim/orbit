@@ -54,12 +54,12 @@ impl Execute for WorkspaceTeardownArgs {
         let registry_path = workspace_registry::registry_path_for(&global_root);
         if registry_path.exists() {
             let mut registry = workspace_registry::load_registry_from(&registry_path)?;
-            let ws = registry.workspaces.iter().find(|w| {
-                let ws_canonical =
-                    std::fs::canonicalize(&w.orbit_dir).unwrap_or_else(|_| w.orbit_dir.clone());
+            let checkout = registry.checkouts.iter().find(|checkout| {
+                let ws_canonical = std::fs::canonicalize(&checkout.orbit_dir)
+                    .unwrap_or_else(|_| checkout.orbit_dir.clone());
                 ws_canonical == orbit_canonical
             });
-            if let Some(ws_id) = ws.map(|w| w.id.clone()) {
+            if let Some(ws_id) = checkout.map(|checkout| checkout.workspace_id.clone()) {
                 let ws = workspace_registry::remove_workspace(&mut registry, &ws_id)?;
                 workspace_registry::save_registry_to(&registry, &registry_path)?;
                 removed.push(format!(
