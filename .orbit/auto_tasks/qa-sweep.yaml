@@ -3,7 +3,7 @@ name: qa-sweep
 description: Hands-on validation of recent workspace changes
 enabled: true
 schedule:
-  cron: 8 5 * * *
+  cron: 50 * * * *
 template:
   title: Perform QA validation
   description: |
