@@ -295,7 +295,10 @@ pub fn task_with_file(id: &str, title: &str, path: &str, implemented_by: &str) -
         acceptance_criteria: Vec::new(),
         tags: Vec::new(),
         plan: String::new(),
-        execution_summary: String::new(),
+        // ORB-10313: the delivery gate requires a durable success outcome; the
+        // batch-commit path reads it before touching the checkout. Individual
+        // tests override this to exercise failed/missing/unknown outcomes.
+        execution_summary: "Outcome: success".to_string(),
         context_files: vec![format!("file:{path}")],
         created_by: None,
         planned_by: None,

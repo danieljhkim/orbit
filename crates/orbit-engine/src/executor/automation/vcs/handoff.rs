@@ -13,6 +13,50 @@ use super::pr::meaningful_execution_summary;
 
 const FAILED_HANDOFF_ACTOR: &str = "system";
 
+/// The only durable execution-summary first line that authorizes delivery.
+const DELIVERY_SUCCESS_LINE: &str = "Outcome: success";
+
+/// Durable delivery gate (ORB-10313 / friction F2026-07-091).
+///
+/// A batch commit or any PR handoff phase may only proceed when the task's
+/// persisted execution summary reports success on its first nonblank line —
+/// exactly `Outcome: success`. This reads the durable task record, never the
+/// advisory agent response envelope, so it stays the delivery source of truth.
+///
+/// Empty and placeholder summaries keep their existing rejection. A `failed`,
+/// missing, malformed, or unknown outcome fails closed with a typed error
+/// naming the task and the rejected value, so Git mutation and task promotion
+/// never run on a failed or unchecked delivery.
+pub(super) fn require_delivery_success(task: &Task) -> Result<(), OrbitError> {
+    let Some(summary) = meaningful_execution_summary(&task.execution_summary) else {
+        return Err(OrbitError::Execution(format!(
+            "task '{}' requires a meaningful persisted execution_summary before delivery",
+            task.id
+        )));
+    };
+
+    let first_line = summary
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    if first_line == DELIVERY_SUCCESS_LINE {
+        return Ok(());
+    }
+
+    let rejected_outcome = first_line
+        .strip_prefix("Outcome:")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(first_line);
+    Err(OrbitError::Execution(format!(
+        "task '{}' cannot be delivered: its persisted execution_summary must begin with \
+         '{DELIVERY_SUCCESS_LINE}', but the first nonblank line reported outcome '{rejected_outcome}'; \
+         durable delivery fails closed unless the task record reports success",
+        task.id
+    )))
+}
+
 pub(super) struct HandoffContext {
     pub(super) batch_id: String,
     pub(super) workspace_path: PathBuf,
@@ -53,12 +97,7 @@ pub(super) fn load_handoff_context<H: TaskHost + ?Sized>(
                 task.id, task.status
             )));
         }
-        if meaningful_execution_summary(&task.execution_summary).is_none() {
-            return Err(OrbitError::Execution(format!(
-                "{action}: task '{}' requires a meaningful persisted execution_summary before PR handoff",
-                task.id
-            )));
-        }
+        require_delivery_success(&task)?;
         tasks.push(task);
     }
 
