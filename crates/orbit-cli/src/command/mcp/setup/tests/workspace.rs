@@ -1,18 +1,17 @@
 use tempfile::tempdir;
 
-use super::super::test_support::{ENV_LOCK, EnvVarGuard};
 use super::super::workspace::resolve_workspace_layout_for_cwd;
+use crate::tests::env_isolation::EnvGuard;
 use orbit_core::OrbitError;
 
 #[test]
 fn resolve_workspace_layout_skips_global_home_orbit_during_walk_up() {
-    let _lock = ENV_LOCK.lock().expect("lock env");
     let home = tempdir().expect("home tempdir");
     let global_orbit = home.path().join(".orbit");
     std::fs::create_dir_all(&global_orbit).expect("seed global orbit");
     let nested = home.path().join("uninitialized-project");
     std::fs::create_dir_all(&nested).expect("create nested cwd");
-    let _home_guard = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
+    let _env = EnvGuard::acquire().home(home.path());
 
     let err =
         resolve_workspace_layout_for_cwd(&nested).expect_err("walk-up to $HOME/.orbit should fail");

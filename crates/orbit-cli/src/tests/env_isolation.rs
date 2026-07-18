@@ -1,0 +1,154 @@
+//! Crate-wide test isolation for process-global `HOME`/`USERPROFILE`/cwd.
+//!
+//! Workspace-init and the adjacent init/MCP-setup tests exercise
+//! [`WorkspaceInitArgs`](crate::command::workspace) and
+//! [`InitCommand`](crate::InitCommand), which read process-global state — `HOME`
+//! / `USERPROFILE` to locate the machine-global workspace registry, and the
+//! current working directory to derive a default workspace name. Historically
+//! each test module carried its own `Mutex` plus ad-hoc save/restore logic, so
+//! tests in *different* modules were never serialized against one another. A
+//! racing test could restore the operator's real `HOME` while another nameless
+//! `.tmpXXXXXX` workspace was still current, persisting `ws_.tmpXXXXXX` into the
+//! operator's real `~/.orbit/workspaces.json` (this exact shape,
+//! `/tmp/.tmp99JQFP`, broke global task lookup — ORB-10293).
+//!
+//! This module owns the single crate-wide lock and the one RAII guard every
+//! such test shares. Acquiring [`EnvGuard`] serializes all env-mutating tests
+//! against each other, so no race is possible; dropping it restores every
+//! mutation — on normal completion *and* on panic/unwind — before releasing the
+//! lock.
+
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
+
+/// The one crate-wide lock. A single shared lock (not per-module) is what makes
+/// parallel execution safe: no two env-mutating tests can run at once, so the
+/// operator's real registry can never be observed through a half-restored
+/// `HOME`.
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+/// Restores a single environment variable to a captured previous value.
+fn restore_var(key: &str, previous: Option<OsString>) {
+    match previous {
+        Some(value) => unsafe { std::env::set_var(key, value) },
+        None => unsafe { std::env::remove_var(key) },
+    }
+}
+
+/// RAII guard that serializes and isolates process-global `HOME`/`USERPROFILE`
+/// and the current working directory for a single test.
+///
+/// Acquire it first thing in a test, then chain [`EnvGuard::home`] /
+/// [`EnvGuard::cwd`] to point the process at isolated fixtures. Every mutation
+/// is captured once and reverted when the guard drops, so a panicking test
+/// cannot leak an isolated `HOME` into a sibling test. The lock is released only
+/// after restoration completes.
+pub(crate) struct EnvGuard {
+    home: Option<Option<OsString>>,
+    userprofile: Option<Option<OsString>>,
+    cwd: Option<PathBuf>,
+    // Declared last so it drops last: the lock is held until every restoration
+    // in `Drop` has run.
+    _lock: MutexGuard<'static, ()>,
+}
+
+impl EnvGuard {
+    /// Acquire the crate-wide env lock without mutating anything yet.
+    ///
+    /// Recovers from a poisoned lock instead of propagating it: a prior test
+    /// that panicked will have restored the environment through this guard's
+    /// `Drop`, so the unit payload carries no state and poison must not cascade
+    /// spurious failures into unrelated tests.
+    pub(crate) fn acquire() -> Self {
+        let lock = ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        Self {
+            home: None,
+            userprofile: None,
+            cwd: None,
+            _lock: lock,
+        }
+    }
+
+    /// Point `HOME` and `USERPROFILE` at `home`, capturing the prior values the
+    /// first time either is set.
+    pub(crate) fn home(mut self, home: &Path) -> Self {
+        if self.home.is_none() {
+            self.home = Some(std::env::var_os("HOME"));
+        }
+        if self.userprofile.is_none() {
+            self.userprofile = Some(std::env::var_os("USERPROFILE"));
+        }
+        unsafe {
+            std::env::set_var("HOME", home);
+            std::env::set_var("USERPROFILE", home);
+        }
+        self
+    }
+
+    /// Switch the current working directory to `dir`, capturing the prior cwd
+    /// the first time it is set.
+    pub(crate) fn cwd(mut self, dir: &Path) -> Self {
+        if self.cwd.is_none() {
+            self.cwd = Some(std::env::current_dir().expect("capture cwd"));
+        }
+        std::env::set_current_dir(dir).expect("enter isolated cwd");
+        self
+    }
+
+    /// Run `f` with `HOME`/`USERPROFILE` temporarily pointed at `home`,
+    /// restoring the values this guard currently exposes afterward — even if
+    /// `f` panics.
+    ///
+    /// Used by tests that must exercise a nested isolated-home scope (a
+    /// validation home layered over a live home) without re-acquiring the lock
+    /// this guard already holds.
+    pub(crate) fn with_home<R>(&self, home: &Path, f: impl FnOnce() -> R) -> R {
+        let _scope = HomeScope::set(home);
+        f()
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        // Restore cwd before HOME so nothing observes a mismatched pair, then
+        // let `_lock` release the crate-wide lock via its own drop.
+        if let Some(previous) = self.cwd.take() {
+            let _ = std::env::set_current_dir(previous);
+        }
+        if let Some(previous) = self.userprofile.take() {
+            restore_var("USERPROFILE", previous);
+        }
+        if let Some(previous) = self.home.take() {
+            restore_var("HOME", previous);
+        }
+    }
+}
+
+/// A nested, lock-free `HOME`/`USERPROFILE` override that restores on drop.
+/// Valid only while an [`EnvGuard`] already holds the crate-wide lock.
+struct HomeScope {
+    home: Option<OsString>,
+    userprofile: Option<OsString>,
+}
+
+impl HomeScope {
+    fn set(home: &Path) -> Self {
+        let scope = Self {
+            home: std::env::var_os("HOME"),
+            userprofile: std::env::var_os("USERPROFILE"),
+        };
+        unsafe {
+            std::env::set_var("HOME", home);
+            std::env::set_var("USERPROFILE", home);
+        }
+        scope
+    }
+}
+
+impl Drop for HomeScope {
+    fn drop(&mut self) {
+        restore_var("USERPROFILE", self.userprofile.take());
+        restore_var("HOME", self.home.take());
+    }
+}
