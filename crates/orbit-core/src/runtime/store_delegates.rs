@@ -20,6 +20,7 @@ use orbit_store::{
     TaskReservationStoreBackend, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
     ToolStoreBackend,
 };
+use std::collections::BTreeMap;
 
 use crate::context::OrbitStores;
 
@@ -223,6 +224,10 @@ impl TaskRecords<'_> {
 
     pub(crate) fn list(&self) -> Result<Vec<Task>, OrbitError> {
         self.store.list_tasks()
+    }
+
+    pub(crate) fn status_index(&self) -> Result<BTreeMap<String, TaskStatus>, OrbitError> {
+        self.store.task_status_index()
     }
 
     pub(crate) fn list_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {

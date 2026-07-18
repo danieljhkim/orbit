@@ -1,7 +1,7 @@
 use clap::{ArgAction, Args};
 use orbit_core::{
     ExternalRef, OrbitError, OrbitRuntime, TaskPriority, TaskStatus, TaskType,
-    build_task_status_index, task_dependencies_ready, task_selectors_contain_path,
+    task_dependencies_ready, task_selectors_contain_path,
 };
 use serde_json::Value;
 
@@ -83,7 +83,7 @@ impl Execute for TaskListArgs {
         let ready = self.ready;
 
         let tasks_matching_tags = runtime.list_tasks_by_tags(&tags)?;
-        let status_by_id = build_task_status_index(&runtime.list_tasks()?);
+        let status_by_id = runtime.task_status_index()?;
         let active_statuses = [TaskStatus::Backlog, TaskStatus::InProgress];
         let status_filter =
             default_task_list_status_filter(all, &status, job_run_id.as_deref(), &active_statuses);

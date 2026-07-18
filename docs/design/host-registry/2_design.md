@@ -10,7 +10,7 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Design
@@ -194,6 +194,28 @@ warning-only when the cache is absent or stale. Scheduling keeps working offline
 Neither role is ever selected per-task: coordination has one writer by construction,
 and two owners for one workspace is the split-brain the system already rejected
 ([ADR-0200]).
+
+**Concrete task coordination schema ([ORB-10249]).** The hub task registry's
+`workspace_bindings` table is a path-free logical record: `workspace_id`, slug,
+optional repository fingerprint, and timestamps. Machine-local paths live only in
+the optional one-to-one `workspace_checkout_bindings` table (`workspace_id`,
+`repo_root`, `workspace_path`, `orbit_dir`, timestamps). Allocator, canonical task
+bundle, workspace index, tag, and relation rows reference the logical
+`workspace_id`; none requires a checkout row. Canonical bundles remain in the
+hub's coordination tree, so a checkoutless workspace can create, read, update, and
+schedule tasks without a fabricated repository path. Checkout-local projections
+resolve the optional checkout binding first and fail before filesystem mutation,
+naming the workspace when absent.
+
+Task IDs remain globally unique. Every ORB-valued dependency or typed-relation
+target resolves through the whole coordination registry, while task list/index
+queries remain workspace-scoped. The global status projection supplies dependency
+readiness across workspaces without opening either checkout. Missing ORB targets
+are rejected before task allocation or bundle/index mutation with both target ID
+and source workspace in the error. Schema v4 migrates each legacy path-coupled row
+into one logical record plus one checkout binding without changing task IDs,
+canonical bundle paths, payloads, relations, workspace associations, or allocator
+state; repeated open/reindex is idempotent.
 
 ## 4. Execution Placement
 

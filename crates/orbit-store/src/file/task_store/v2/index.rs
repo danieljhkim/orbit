@@ -1,6 +1,12 @@
 use super::*;
 
 impl TaskV2Store {
+    pub(crate) fn task_status_index(
+        &self,
+    ) -> Result<std::collections::BTreeMap<String, TaskStatus>, OrbitError> {
+        self.registry.global_task_status_index()
+    }
+
     pub(super) fn indexed_tasks(
         &self,
         filter: TaskIndexFilter,

@@ -872,18 +872,6 @@ pub fn validate_task_dependencies(
     current_task_id: Option<&str>,
     dependencies: &[OrbitId],
 ) -> Result<(), OrbitError> {
-    let task_ids = tasks
-        .iter()
-        .map(|task| task.id.clone())
-        .collect::<BTreeSet<_>>();
-    for dependency in dependencies {
-        if !task_ids.contains(dependency) {
-            return Err(OrbitError::InvalidInput(format!(
-                "task dependency '{dependency}' does not resolve in this workspace"
-            )));
-        }
-    }
-
     let Some(current_task_id) = current_task_id else {
         return Ok(());
     };

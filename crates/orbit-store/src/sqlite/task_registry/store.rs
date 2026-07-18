@@ -4,24 +4,28 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use orbit_common::types::{
-    NotFoundKind, ORB_TASK_ID_MAX, OrbitError, TaskEnvelopeV2, TaskRelationType,
-    format_orb_task_id, normalize_task_tags, validate_orb_task_id,
+    NotFoundKind, ORB_TASK_ID_MAX, OrbitError, TaskEnvelopeV2, TaskRelation, TaskRelationEdge,
+    TaskRelationType, TaskStatus, format_orb_task_id, is_valid_orb_task_id, normalize_task_tags,
+    validate_orb_task_id, validate_task_relations_for_source,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params, params_from_iter};
 
 use super::projection::create_projection_symlink;
 use super::queries::{
-    decode_task_bundle_binding, decode_workspace_binding, task_bundle_by_id,
-    task_ids_for_workspace, workspace_by_id, workspace_by_orbit_dir, write_task_index_rows,
+    decode_task_bundle_binding, decode_workspace_checkout_binding, task_bundle_by_id,
+    task_ids_for_workspace, workspace_by_id, workspace_by_orbit_dir, workspace_checkout_by_id,
+    write_task_index_rows,
 };
 use super::schema::{
     apply_schema, assert_registry_user_version, reject_unsupported_registry_schema,
 };
 use super::types::{
-    AllocatorSeedOutcome, BindWorkspaceParams, ProjectionRebuildResult, TaskBundleBinding,
-    TaskIndexFilter, WorkspaceBinding,
+    AllocatorSeedOutcome, BindWorkspaceParams, ProjectionRebuildResult, RegisterWorkspaceParams,
+    TaskBundleBinding, TaskIndexFilter, WorkspaceBinding, WorkspaceCheckoutBinding,
 };
-use super::util::{normalize_path, now_string, path_to_string, relation_type_name};
+use super::util::{
+    normalize_path, now_string, parse_relation_type_name, path_to_string, relation_type_name,
+};
 use super::workspace_id::{next_workspace_id_candidate, sanitize_slug, validate_workspace_id};
 
 #[derive(Clone)]
@@ -65,7 +69,7 @@ impl TaskRegistryStore {
     pub fn bind_workspace(
         &self,
         params: BindWorkspaceParams,
-    ) -> Result<WorkspaceBinding, OrbitError> {
+    ) -> Result<WorkspaceCheckoutBinding, OrbitError> {
         let repo_root = normalize_path(&params.repo_root);
         let workspace_path = normalize_path(&params.workspace_path);
         let orbit_dir = normalize_path(&params.orbit_dir);
@@ -103,32 +107,80 @@ impl TaskRegistryStore {
             Some(id) => id,
             None => next_workspace_id_candidate(&tx, &slug, &workspace_path)?,
         };
-        if workspace_by_id(&tx, &workspace_id)?.is_some() {
+        if let Some(existing) = workspace_checkout_by_id(&tx, &workspace_id)? {
             return Err(OrbitError::Store(format!(
-                "workspace id '{workspace_id}' is already bound to a different orbit dir"
+                "workspace id '{workspace_id}' already has a local checkout at '{}'",
+                existing.orbit_dir.display()
             )));
         }
 
         let now = now_string();
+        if workspace_by_id(&tx, &workspace_id)?.is_none() {
+            tx.execute(
+                "INSERT INTO workspace_bindings (
+                    workspace_id, slug, repo_fingerprint, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?4)",
+                params![workspace_id, slug, params.repo_fingerprint, now],
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        }
         tx.execute(
-            "INSERT INTO workspace_bindings (
-                workspace_id, slug, repo_root, workspace_path, orbit_dir, repo_fingerprint,
-                created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+            "INSERT INTO workspace_checkout_bindings (
+                workspace_id, repo_root, workspace_path, orbit_dir, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
             params![
                 workspace_id,
-                slug,
                 path_to_string(&repo_root),
                 path_to_string(&workspace_path),
                 path_to_string(&orbit_dir),
-                params.repo_fingerprint,
                 now,
             ],
         )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
 
-        let binding = workspace_by_id(&tx, &workspace_id)?
-            .ok_or_else(|| OrbitError::Store("failed to read inserted workspace binding".into()))?;
+        let binding = workspace_checkout_by_id(&tx, &workspace_id)?.ok_or_else(|| {
+            OrbitError::Store("failed to read inserted workspace checkout binding".into())
+        })?;
+        tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
+        Ok(binding)
+    }
+
+    /// Register a logical workspace in the coordination registry without
+    /// inventing a machine-local checkout path.
+    pub fn register_workspace(
+        &self,
+        params: RegisterWorkspaceParams,
+    ) -> Result<WorkspaceBinding, OrbitError> {
+        let workspace_id = validate_workspace_id(&params.workspace_id)?;
+        let slug = sanitize_slug(&params.slug);
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        if let Some(existing) = workspace_by_id(&tx, &workspace_id)? {
+            if existing.slug != slug || existing.repo_fingerprint != params.repo_fingerprint {
+                return Err(OrbitError::InvalidInput(format!(
+                    "logical workspace '{workspace_id}' is already registered with different metadata"
+                )));
+            }
+            tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
+            return Ok(existing);
+        }
+
+        let now = now_string();
+        tx.execute(
+            "INSERT INTO workspace_bindings(
+                workspace_id, slug, repo_fingerprint, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?4)",
+            params![workspace_id, slug, params.repo_fingerprint, now],
+        )
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let binding = workspace_by_id(&tx, &workspace_id)?.ok_or_else(|| {
+            OrbitError::Store("failed to read inserted logical workspace binding".into())
+        })?;
         tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
         Ok(binding)
     }
@@ -322,6 +374,15 @@ impl TaskRegistryStore {
             )));
         }
 
+        validate_relations_in_registry(
+            &tx,
+            &workspace_id,
+            &envelope.id,
+            &envelope.relations,
+            std::slice::from_ref(&envelope.id),
+            &[],
+        )?;
+
         tx.execute(
             "DELETE FROM task_bundle_tags WHERE task_id = ?1",
             [&envelope.id],
@@ -365,6 +426,25 @@ impl TaskRegistryStore {
                 "task index rebuild for workspace '{}' expected registered ids {:?}, got {:?}",
                 workspace_id, registered, requested
             )));
+        }
+
+        let replacement_edges = envelopes
+            .iter()
+            .flat_map(|envelope| task_relation_edges(envelope))
+            .collect::<Vec<_>>();
+        let replacement_sources = envelopes
+            .iter()
+            .map(|envelope| envelope.id.clone())
+            .collect::<Vec<_>>();
+        for envelope in envelopes {
+            validate_relations_in_registry(
+                &tx,
+                &workspace_id,
+                &envelope.id,
+                &envelope.relations,
+                &replacement_sources,
+                &replacement_edges,
+            )?;
         }
 
         tx.execute(
@@ -431,6 +511,75 @@ impl TaskRegistryStore {
             )
             .map_err(|e| OrbitError::Store(e.to_string()))?;
         usize::try_from(count).map_err(|e| OrbitError::Store(e.to_string()))
+    }
+
+    /// Status projection for every task in the coordination registry. Task
+    /// lists remain workspace-scoped; dependency readiness is global because
+    /// ORB task IDs are globally unique.
+    pub fn global_task_status_index(&self) -> Result<BTreeMap<String, TaskStatus>, OrbitError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let mut stmt = conn
+            .prepare("SELECT task_id, status FROM task_bundle_index ORDER BY task_id ASC")
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let mut statuses = BTreeMap::new();
+        for row in rows {
+            let (task_id, raw_status) = row.map_err(|e| OrbitError::Store(e.to_string()))?;
+            let status = raw_status.parse::<TaskStatus>().map_err(|e| {
+                OrbitError::Store(format!(
+                    "invalid indexed status '{raw_status}' for task '{task_id}': {e}"
+                ))
+            })?;
+            statuses.insert(task_id, status);
+        }
+        Ok(statuses)
+    }
+
+    /// Validate task relations against every workspace in the coordination
+    /// registry without mutating allocator, bundle, or index state.
+    pub fn validate_task_relations(
+        &self,
+        workspace_id: &str,
+        source_task_id: &str,
+        relations: &[TaskRelation],
+    ) -> Result<(), OrbitError> {
+        let workspace_id = validate_workspace_id(workspace_id)?;
+        validate_orb_task_id(source_task_id)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        validate_relations_in_registry(
+            &conn,
+            &workspace_id,
+            source_task_id,
+            relations,
+            &[source_task_id.to_string()],
+            &[],
+        )
+    }
+
+    /// Preflight relation targets for a task whose globally allocated source ID
+    /// does not exist yet. This runs before allocation so a missing target
+    /// cannot consume an ID or write a partial bundle.
+    pub fn validate_new_task_relation_targets(
+        &self,
+        workspace_id: &str,
+        relations: &[TaskRelation],
+    ) -> Result<(), OrbitError> {
+        let workspace_id = validate_workspace_id(workspace_id)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        validate_relation_targets_exist(&conn, &workspace_id, None, relations)
     }
 
     pub fn indexed_task_ids_filtered(
@@ -569,7 +718,7 @@ impl TaskRegistryStore {
         repo_root: &Path,
         workspace_path: &Path,
         orbit_dir: &Path,
-    ) -> Result<Vec<WorkspaceBinding>, OrbitError> {
+    ) -> Result<Vec<WorkspaceCheckoutBinding>, OrbitError> {
         let repo_root = normalize_path(repo_root);
         let workspace_path = normalize_path(workspace_path);
         let orbit_dir = normalize_path(orbit_dir);
@@ -579,9 +728,8 @@ impl TaskRegistryStore {
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
         let mut stmt = conn
             .prepare(
-                "SELECT workspace_id, slug, repo_root, workspace_path, orbit_dir,
-                    repo_fingerprint, created_at, updated_at
-                 FROM workspace_bindings
+                "SELECT workspace_id, repo_root, workspace_path, orbit_dir, created_at, updated_at
+                 FROM workspace_checkout_bindings
                  WHERE repo_root = ?1 OR workspace_path = ?2 OR orbit_dir = ?3
                  ORDER BY updated_at DESC, workspace_id ASC",
             )
@@ -593,7 +741,7 @@ impl TaskRegistryStore {
                     path_to_string(&workspace_path),
                     path_to_string(&orbit_dir),
                 ],
-                decode_workspace_binding,
+                decode_workspace_checkout_binding,
             )
             .map_err(|e| OrbitError::Store(e.to_string()))?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -606,6 +754,15 @@ impl TaskRegistryStore {
         workspace_id: &str,
     ) -> Result<ProjectionRebuildResult, OrbitError> {
         let workspace_id = validate_workspace_id(workspace_id)?;
+        let checkout = self.require_workspace_checkout(&workspace_id)?;
+        if normalize_path(workspace_orbit_dir) != normalize_path(&checkout.orbit_dir) {
+            return Err(OrbitError::InvalidInput(format!(
+                "workspace '{}' checkout is bound to '{}', not '{}'",
+                workspace_id,
+                checkout.orbit_dir.display(),
+                workspace_orbit_dir.display()
+            )));
+        }
         let projection_dir = workspace_orbit_dir.join("tasks");
         fs::create_dir_all(&projection_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
 
@@ -658,7 +815,7 @@ impl TaskRegistryStore {
         &self.workspaces_dir
     }
 
-    /// Look up a workspace binding by id. Public wrapper over the internal query
+    /// Look up a logical workspace by id. Public wrapper over the internal query
     /// so migration tooling can resolve a target workspace without opening the
     /// SQLite connection directly.
     pub fn find_workspace_binding(
@@ -671,6 +828,32 @@ impl TaskRegistryStore {
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
         workspace_by_id(&conn, &workspace_id)
+    }
+
+    /// Look up the machine-local checkout for a logical workspace, if this
+    /// machine has one.
+    pub fn find_workspace_checkout(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<WorkspaceCheckoutBinding>, OrbitError> {
+        let workspace_id = validate_workspace_id(workspace_id)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        workspace_checkout_by_id(&conn, &workspace_id)
+    }
+
+    /// Resolve a checkout before a task operation touches checkout-local files.
+    pub fn require_workspace_checkout(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceCheckoutBinding, OrbitError> {
+        self.find_workspace_checkout(workspace_id)?.ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "workspace '{workspace_id}' has no local checkout binding; link or initialize a checkout before running this file operation"
+            ))
+        })
     }
 
     /// Look up a task-bundle binding by task id. Task ids are a global primary
@@ -793,6 +976,93 @@ fn set_allocator_next_number(conn: &Connection, value: u32) -> Result<(), OrbitE
     )
     .map_err(|e| OrbitError::Store(e.to_string()))?;
     Ok(())
+}
+
+fn validate_relations_in_registry(
+    conn: &Connection,
+    source_workspace_id: &str,
+    source_task_id: &str,
+    relations: &[TaskRelation],
+    replaced_sources: &[String],
+    replacement_edges: &[TaskRelationEdge],
+) -> Result<(), OrbitError> {
+    validate_relation_targets_exist(conn, source_workspace_id, Some(source_task_id), relations)?;
+
+    let replaced_sources = replaced_sources.iter().collect::<BTreeSet<_>>();
+    let mut stmt = conn
+        .prepare(
+            "SELECT source_task_id, relation_type, target_task_id
+             FROM task_bundle_relations
+             ORDER BY source_task_id, relation_type, target_task_id",
+        )
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    let mut existing_edges = Vec::new();
+    for row in rows {
+        let (source, relation_type, target) = row.map_err(|e| OrbitError::Store(e.to_string()))?;
+        if replaced_sources.contains(&source) || !is_valid_orb_task_id(&target) {
+            continue;
+        }
+        existing_edges.push(TaskRelationEdge {
+            source,
+            relation_type: parse_relation_type_name(&relation_type).map_err(OrbitError::Store)?,
+            target,
+        });
+    }
+    existing_edges.extend(
+        replacement_edges
+            .iter()
+            .filter(|edge| edge.source != source_task_id)
+            .cloned(),
+    );
+    validate_task_relations_for_source(source_task_id, relations, &existing_edges)
+}
+
+fn validate_relation_targets_exist(
+    conn: &Connection,
+    source_workspace_id: &str,
+    source_task_id: Option<&str>,
+    relations: &[TaskRelation],
+) -> Result<(), OrbitError> {
+    if workspace_by_id(conn, source_workspace_id)?.is_none() {
+        return Err(OrbitError::not_found(
+            NotFoundKind::Workspace,
+            source_workspace_id.to_string(),
+        ));
+    }
+    for relation in relations {
+        if is_valid_orb_task_id(&relation.target)
+            && source_task_id != Some(relation.target.as_str())
+            && task_bundle_by_id(conn, &relation.target)?.is_none()
+        {
+            return Err(OrbitError::InvalidInput(format!(
+                "task relation target '{}' from workspace '{}' does not resolve in the coordination registry",
+                relation.target, source_workspace_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn task_relation_edges(envelope: &TaskEnvelopeV2) -> Vec<TaskRelationEdge> {
+    envelope
+        .relations
+        .iter()
+        .filter(|relation| is_valid_orb_task_id(&relation.target))
+        .map(|relation| TaskRelationEdge {
+            source: envelope.id.clone(),
+            relation_type: relation.relation_type,
+            target: relation.target.clone(),
+        })
+        .collect()
 }
 
 /// Parse the numeric suffix of a canonical `ORB-00000` task id.

@@ -1123,7 +1123,7 @@ fn task_update_tool_clears_source_task_id_with_empty_string() {
 }
 
 #[test]
-fn task_update_tool_stores_unresolved_source_task_id() {
+fn task_update_tool_rejects_unresolved_source_task_id_atomically() {
     // ORB-00255 retired `source_task_id` from the `orbit.task.add` schema,
     // so an unresolved ID must travel via `orbit.task.update`.
     let (_root, runtime, _repo_root) = test_runtime();
@@ -1148,7 +1148,7 @@ fn task_update_tool_stores_unresolved_source_task_id() {
         Some(&Value::Null),
         "retired add-side source_task_id must be ignored"
     );
-    let output = runtime
+    let error = runtime
         .execute_tool_command(
             "orbit.task.update",
             json!({
@@ -1158,12 +1158,14 @@ fn task_update_tool_stores_unresolved_source_task_id() {
             Some("codex".to_string()),
             Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
-        .expect("update stores a loose source reference");
+        .expect_err("global task relation target must resolve");
 
-    assert_eq!(
-        output.get("source_task_id").and_then(Value::as_str),
-        Some(unresolved_from_update)
-    );
+    assert!(error.to_string().contains(unresolved_from_update));
+    assert!(error.to_string().contains("coordination registry"));
+    let unchanged = runtime
+        .get_task(update_target["id"].as_str().expect("task id"))
+        .expect("read unchanged task");
+    assert_eq!(unchanged.source_task_id(), None);
 }
 
 #[test]

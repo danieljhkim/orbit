@@ -1,10 +1,43 @@
 // Migrated from backend/factory.rs per ORB-00231
-use orbit_common::types::{TaskPriority, TaskStatus, TaskType};
+use orbit_common::types::{
+    TaskPriority, TaskRelation, TaskRelationType, TaskStatus, TaskType, task_dependencies_ready,
+};
 use tempfile::TempDir;
 
 use super::super::*;
 use crate::backend::TaskCreateParams;
-use crate::sqlite::task_registry::{BindWorkspaceParams, TaskRegistryStore, task_registry_path};
+use crate::sqlite::task_registry::{
+    BindWorkspaceParams, RegisterWorkspaceParams, TaskRegistryStore, task_registry_path,
+};
+
+fn task_params(title: &str, status: TaskStatus) -> TaskCreateParams {
+    TaskCreateParams {
+        actor: "codex".to_string(),
+        parent_id: None,
+        title: title.to_string(),
+        description: "coordination task".to_string(),
+        acceptance_criteria: vec!["round trips".to_string()],
+        dependencies: Vec::new(),
+        relations: Vec::new(),
+        tags: Vec::new(),
+        plan: "1. Execute".to_string(),
+        execution_summary: String::new(),
+        context_files: Vec::new(),
+        workspace_path: None,
+        repo_root: None,
+        created_by: Some("codex".to_string()),
+        planned_by: Some("codex".to_string()),
+        implemented_by: None,
+        status,
+        priority: TaskPriority::Medium,
+        complexity: None,
+        task_type: TaskType::Feature,
+        external_refs: Vec::new(),
+        source_task_id: None,
+        crew: None,
+        comments: Vec::new(),
+    }
+}
 
 #[test]
 fn workspace_task_backends_exposes_create_get_and_list_trait_surface() {
@@ -73,6 +106,77 @@ fn workspace_task_backends_exposes_create_get_and_list_trait_surface() {
         "Trait-created v2 task"
     );
     assert_eq!(backends.task.list_tasks().expect("list tasks").len(), 1);
+}
+
+#[test]
+fn coordination_backends_create_and_schedule_across_checkoutless_workspaces() {
+    let temp = TempDir::new().expect("tempdir");
+    let registry =
+        TaskRegistryStore::open(&task_registry_path(temp.path())).expect("open registry");
+    for (workspace_id, slug) in [
+        ("logical-alpha-aaaaaa", "Logical Alpha"),
+        ("logical-beta-bbbbbb", "Logical Beta"),
+    ] {
+        registry
+            .register_workspace(RegisterWorkspaceParams {
+                workspace_id: workspace_id.to_string(),
+                slug: slug.to_string(),
+                repo_fingerprint: None,
+            })
+            .expect("register logical workspace");
+        assert!(
+            registry
+                .find_workspace_checkout(workspace_id)
+                .expect("find checkout")
+                .is_none()
+        );
+    }
+
+    let beta = coordination_task_backends(registry.clone(), "logical-beta-bbbbbb".into());
+    let target = beta
+        .task
+        .create_task(task_params("Completed remote target", TaskStatus::Done))
+        .expect("create target without checkout");
+    let alpha = coordination_task_backends(registry.clone(), "logical-alpha-aaaaaa".into());
+    let mut source_params = task_params("Ready cross-workspace source", TaskStatus::Backlog);
+    source_params.dependencies = vec![target.id.clone()];
+    source_params.relations.push(TaskRelation {
+        relation_type: TaskRelationType::RelatedTo,
+        target: target.id.clone(),
+    });
+    let source = alpha
+        .task
+        .create_task(source_params)
+        .expect("create cross-workspace source without checkout");
+
+    let statuses = alpha.task.task_status_index().expect("global statuses");
+    assert!(task_dependencies_ready(&source, &statuses));
+    assert_eq!(alpha.task.list_tasks().expect("alpha list").len(), 1);
+    assert_eq!(beta.task.list_tasks().expect("beta list").len(), 1);
+    assert_eq!(
+        alpha
+            .task
+            .get_task(&source.id)
+            .expect("query source")
+            .expect("source exists")
+            .dependencies(),
+        vec![target.id]
+    );
+
+    let allocator_before = registry.allocator_next_number().expect("allocator before");
+    let mut missing = task_params("Missing dependency", TaskStatus::Backlog);
+    missing.dependencies = vec!["ORB-09999".into()];
+    let error = alpha
+        .task
+        .create_task(missing)
+        .expect_err("missing global target must fail");
+    assert!(error.to_string().contains("ORB-09999"));
+    assert!(error.to_string().contains("logical-alpha-aaaaaa"));
+    assert_eq!(
+        registry.allocator_next_number().expect("allocator after"),
+        allocator_before
+    );
+    assert_eq!(alpha.task.list_tasks().expect("alpha list after").len(), 1);
 }
 
 #[test]

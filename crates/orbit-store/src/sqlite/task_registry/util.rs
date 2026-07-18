@@ -49,3 +49,17 @@ pub(super) fn relation_type_name(relation_type: TaskRelationType) -> &'static st
         TaskRelationType::Resolves => "resolves",
     }
 }
+
+pub(super) fn parse_relation_type_name(raw: &str) -> Result<TaskRelationType, String> {
+    match raw {
+        "blocked_by" => Ok(TaskRelationType::BlockedBy),
+        "child_of" => Ok(TaskRelationType::ChildOf),
+        "spawned_from" => Ok(TaskRelationType::SpawnedFrom),
+        "regression_from" => Ok(TaskRelationType::RegressionFrom),
+        "supersedes" => Ok(TaskRelationType::Supersedes),
+        "related_to" => Ok(TaskRelationType::RelatedTo),
+        "produces" => Ok(TaskRelationType::Produces),
+        "resolves" => Ok(TaskRelationType::Resolves),
+        other => Err(format!("unknown task relation type '{other}'")),
+    }
+}

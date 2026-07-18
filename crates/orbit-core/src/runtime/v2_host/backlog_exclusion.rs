@@ -2,8 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use orbit_common::types::{
-    Task, TaskStatus, TaskType, build_task_status_index, prune_missing_context_files,
-    task_dependencies_ready,
+    Task, TaskStatus, TaskType, prune_missing_context_files, task_dependencies_ready,
 };
 use orbit_common::utility::path::workspace_relative_paths_overlap;
 use orbit_common::utility::selector::canonical_selector_in_workspace;
@@ -140,7 +139,12 @@ pub(super) fn list_backlog_tasks(
             .cloned()
             .map(|task| (task.id.clone(), task))
             .collect();
-        let status_by_id = build_task_status_index(&all_tasks);
+        let status_by_id = runtime.task_status_index().map_err(|err| {
+            DispatchError::DeterministicActionFailed {
+                action: action.to_string(),
+                message: format!("load global task status projection: {err}"),
+            }
+        })?;
         let workspace_root = runtime.paths().repo_root.as_path();
         let lock_holders = active_task_lock_holders(task_lookup.values(), workspace_root);
         let mut backlog: Vec<Task> = all_tasks

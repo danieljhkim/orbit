@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
-use orbit_common::types::{
-    OrbitError, Role, build_task_status_index, optional_string_list_alias, unmet_task_dependencies,
-};
+use orbit_common::types::{OrbitError, Role, optional_string_list_alias, unmet_task_dependencies};
 use orbit_engine::DispatchError;
 use orbit_engine::{StateExecutionContext, execute_deterministic_action};
 use orbit_tools::ToolContext;
@@ -352,7 +350,7 @@ fn unmet_dependency_ids_for_input(
     };
     let task_ids = parse_task_ids(&serde_json::json!({ "task_ids": raw_task_ids }))?;
     let tasks = runtime.stores().tasks().list()?;
-    let status_by_id = build_task_status_index(&tasks);
+    let status_by_id = runtime.task_status_index()?;
     let task_by_id = tasks
         .into_iter()
         .map(|task| (task.id.clone(), task))
