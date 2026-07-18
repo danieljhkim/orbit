@@ -14,7 +14,9 @@ use super::super::audit_writer::V2AuditWriter;
 use super::super::dispatcher::{
     DispatchError, DispatchInvocationTrace, DispatchOutcome, V2RuntimeHost,
 };
-use super::super::workspace::{WorktreeBoundaryGuard, resolve_subprocess_cwd};
+use super::super::workspace::{
+    WorktreeBoundaryGuard, resolve_subprocess_cwd, validate_declared_worktree_pair,
+};
 use super::argv::{
     apply_provider_static_arg_fixups, audit_argv_for_dispatch, neutralize_inner_sandbox,
 };
@@ -63,6 +65,16 @@ pub fn run_cli_backend(
     );
     tool_ctx.agent_name = Some(provider.clone());
     tool_ctx.model_name = spec.model.as_deref().map(str::to_string);
+    // A shipment pipeline renders the assigned checkout twice: once as the
+    // child cwd and once inside the agent contract. Validate that pair against
+    // the registered primary before sandbox construction or provider spawn.
+    let declared_worktree_pair = validate_declared_worktree_pair(
+        input,
+        task_ctx.as_ref(),
+        run_id,
+        &provider,
+        tool_ctx.workspace_root.as_deref(),
+    )?;
     // Resolve the subprocess cwd before sandbox compilation so the host can
     // re-allow the active worktree subpath after the policy deny rules. The
     // sandbox's `denyModify .orbit/**` rule otherwise blocks every non-codex
@@ -159,6 +171,7 @@ pub fn run_cli_backend(
         &provider,
         subprocess_cwd.as_deref(),
         tool_ctx.workspace_root.as_deref(),
+        declared_worktree_pair.as_ref(),
     )?;
 
     let model_redacted = agent.model_name().map(|m| redaction.apply_str(m));

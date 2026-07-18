@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,9 +10,13 @@ use std::time::Duration;
 
 use orbit_agent::loop_engine::audit::AuditSink;
 use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
-use orbit_common::types::activity_job::{AgentRole, V2AuditEventKind};
+use orbit_common::types::activity_job::{
+    AgentRole, JobV2StepBody, V2AuditEventKind, load_job_asset,
+};
 use orbit_store::Store;
 use tempfile::{TempDir, tempdir};
+
+use crate::template::{self, TemplateContext};
 
 use super::super::super::agent_role::{apply_resolved_settings, resolve_agent_settings};
 use super::super::super::audit_writer::V2AuditWriter;
@@ -676,13 +680,23 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
     assert_eq!(cwd, workspace_string);
 }
 
+const TASK_LOCAL_PIPELINE_YAML: &str =
+    include_str!("../../../../../../.orbit/resources/jobs/task_local_pipeline.yaml");
+const TASK_PR_PIPELINE_YAML: &str =
+    include_str!("../../../../../../.orbit/resources/jobs/task_pr_pipeline.yaml");
+
 #[test]
-fn fake_ship_implementers_run_and_write_only_in_the_assigned_worktree() {
-    for provider in ["claude", "codex"] {
-        for pipeline in ["task_local_pipeline", "task_pr_pipeline"] {
+fn actual_ship_pipeline_implementers_run_for_each_provider_and_stay_in_the_worktree() {
+    let mut rendered_assets = BTreeSet::new();
+    for pipeline_yaml in [TASK_LOCAL_PIPELINE_YAML, TASK_PR_PIPELINE_YAML] {
+        for provider in ["claude", "codex"] {
             let fixture = linked_worktree_fixture();
             let script = fixture.root().join(provider);
             let assigned = fixture.assigned.display().to_string();
+            let task_id = format!("ORB-ASSET-{provider}");
+            let (pipeline, input) =
+                rendered_implement_input_from_asset(pipeline_yaml, &fixture.assigned, &task_id);
+            rendered_assets.insert(pipeline.clone());
             write_executable(
                 &script,
                 &format!(
@@ -699,12 +713,6 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{}},"error":null
             host.workspace_root = Some(fixture.primary.clone());
             let spec = test_agent_loop_spec_for(provider, Duration::from_secs(5));
             let audit = test_audit(&format!("run-{pipeline}-{provider}"), provider);
-            let input = serde_json::json!({
-                "prompt": "implement in the assigned worktree",
-                "task_id": format!("ORB-{pipeline}-{provider}"),
-                "workspace_path": assigned,
-                "repo_root": fixture.assigned,
-            });
 
             let outcome = run_cli_backend(
                 &host,
@@ -728,6 +736,187 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{}},"error":null
             );
         }
     }
+    assert_eq!(
+        rendered_assets,
+        BTreeSet::from([
+            "task_local_pipeline".to_string(),
+            "task_pr_pipeline".to_string(),
+        ]),
+        "the matrix must load and render both committed shipment assets"
+    );
+}
+
+#[test]
+fn declared_repo_root_mismatch_fails_typed_before_provider_spawn() {
+    let fixture = linked_worktree_fixture();
+    let marker = fixture.root().join("provider-started");
+    let script = fixture.root().join("codex");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\nprintf started > '{}'\nexit 0\n",
+            marker.display()
+        ),
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+    let audit = test_audit("run-repo-root-mismatch", "codex");
+    let mut input = worktree_input(&fixture, "ORB-PAIR-MISMATCH");
+    input["repo_root"] = serde_json::json!(fixture.primary);
+
+    let error = run_cli_backend(
+        &host,
+        &test_agent_loop_spec(Duration::from_secs(5)),
+        "run-repo-root-mismatch",
+        audit.clone(),
+        &input,
+        None,
+    )
+    .expect_err("mismatched declared pair must fail closed");
+
+    assert_worktree_mismatch(
+        &error,
+        "ORB-PAIR-MISMATCH",
+        "run-repo-root-mismatch",
+        "different Git checkouts",
+    );
+    assert_pre_spawn_failure(&audit, &marker);
+
+    input["repo_root"] = serde_json::Value::Null;
+    let null_error = run_cli_backend(
+        &host,
+        &test_agent_loop_spec(Duration::from_secs(5)),
+        "run-null-repo-root",
+        audit.clone(),
+        &input,
+        None,
+    )
+    .expect_err("a declared null repo_root must not erase the worktree pair");
+    assert_worktree_mismatch(
+        &null_error,
+        "ORB-PAIR-MISMATCH",
+        "run-null-repo-root",
+        "repo_root must be a non-empty string",
+    );
+    assert_pre_spawn_failure(&audit, &marker);
+}
+
+#[test]
+fn declared_non_git_checkout_fails_typed_before_provider_spawn() {
+    let fixture = linked_worktree_fixture();
+    let non_git = fixture.root().join("not-a-repository");
+    fs::create_dir(&non_git).expect("create non-Git directory");
+    let marker = fixture.root().join("provider-started");
+    let script = fixture.root().join("codex");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\nprintf started > '{}'\nexit 0\n",
+            marker.display()
+        ),
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+    let audit = test_audit("run-non-git-pair", "codex");
+    let input = serde_json::json!({
+        "task_id": "ORB-NON-GIT",
+        "workspace_path": non_git,
+        "repo_root": non_git,
+    });
+
+    let error = run_cli_backend(
+        &host,
+        &test_agent_loop_spec(Duration::from_secs(5)),
+        "run-non-git-pair",
+        audit.clone(),
+        &input,
+        None,
+    )
+    .expect_err("non-Git declared pair must fail closed");
+
+    assert_worktree_mismatch(
+        &error,
+        "ORB-NON-GIT",
+        "run-non-git-pair",
+        "not a Git checkout",
+    );
+    assert_pre_spawn_failure(&audit, &marker);
+}
+
+#[test]
+fn declared_checkout_from_different_repository_fails_before_provider_spawn() {
+    let assigned_fixture = linked_worktree_fixture();
+    let registered_fixture = linked_worktree_fixture();
+    let marker = assigned_fixture.root().join("provider-started");
+    let script = assigned_fixture.root().join("codex");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\nprintf started > '{}'\nexit 0\n",
+            marker.display()
+        ),
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(registered_fixture.primary.clone());
+    let audit = test_audit("run-different-common-dir", "codex");
+
+    let error = run_cli_backend(
+        &host,
+        &test_agent_loop_spec(Duration::from_secs(5)),
+        "run-different-common-dir",
+        audit.clone(),
+        &worktree_input(&assigned_fixture, "ORB-DIFFERENT-REPO"),
+        None,
+    )
+    .expect_err("different repositories must fail closed");
+
+    assert_worktree_mismatch(
+        &error,
+        "ORB-DIFFERENT-REPO",
+        "run-different-common-dir",
+        "different Git common dirs",
+    );
+    assert_pre_spawn_failure(&audit, &marker);
+}
+
+#[test]
+fn declared_checkout_cannot_collapse_to_registered_primary() {
+    let fixture = linked_worktree_fixture();
+    let marker = fixture.root().join("provider-started");
+    let script = fixture.root().join("codex");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\nprintf started > '{}'\nexit 0\n",
+            marker.display()
+        ),
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+    let audit = test_audit("run-primary-collapse", "codex");
+    let input = serde_json::json!({
+        "task_id": "ORB-PRIMARY-COLLAPSE",
+        "workspace_path": fixture.primary,
+        "repo_root": fixture.primary,
+    });
+
+    let error = run_cli_backend(
+        &host,
+        &test_agent_loop_spec(Duration::from_secs(5)),
+        "run-primary-collapse",
+        audit.clone(),
+        &input,
+        None,
+    )
+    .expect_err("assigned checkout must not collapse to primary");
+
+    assert_worktree_mismatch(
+        &error,
+        "ORB-PRIMARY-COLLAPSE",
+        "run-primary-collapse",
+        "collapses to the registered primary",
+    );
+    assert_pre_spawn_failure(&audit, &marker);
 }
 
 #[test]
@@ -764,6 +953,96 @@ fn unchanged_pre_dirty_primary_does_not_block_valid_worktree_implementation() {
         primary_before,
         "the guard must leave pre-existing primary dirtiness byte-for-byte unchanged"
     );
+}
+
+#[test]
+fn unchanged_pre_dirty_path_is_excluded_from_escape_diagnostic() {
+    let fixture = linked_worktree_fixture();
+    fs::write(
+        fixture.primary.join("README.md"),
+        "pre-existing primary dirtiness\n",
+    )
+    .expect("dirty primary before capture");
+    let escaped = fixture.primary.join("escaped-after-capture.txt");
+    let script = fixture.root().join("codex");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\nprintf 'escaped\\n' > '{}'\nprintf '%s\\n' '{{\"schemaVersion\":1,\"status\":\"success\",\"result\":{{}},\"error\":null}}'\n",
+            escaped.display()
+        ),
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+
+    let error = run_cli_backend(
+        &host,
+        &test_agent_loop_spec(Duration::from_secs(5)),
+        "run-predirty-attribution",
+        test_audit("run-predirty-attribution", "codex"),
+        &worktree_input(&fixture, "ORB-PREDIRTY-ATTRIBUTION"),
+        None,
+    )
+    .expect_err("new primary delta must fail closed");
+
+    let diagnostic = worktree_integrity_diagnostic(&error);
+    assert_eq!(
+        diagnostic["changed_paths"],
+        serde_json::json!(["escaped-after-capture.txt"]),
+        "unchanged pre-existing dirtiness must not be attributed to this invocation"
+    );
+    assert_eq!(
+        diagnostic["primary_before"]["path_states"]["README.md"],
+        diagnostic["primary_after"]["path_states"]["README.md"],
+        "the diagnostic must retain identical before/after identity for the pre-dirty path"
+    );
+    assert!(
+        diagnostic["primary_after"]["path_states"]["escaped-after-capture.txt"]
+            ["untracked_content_sha256"]
+            .is_string(),
+        "the new untracked path needs its own content identity"
+    );
+}
+
+#[test]
+fn staged_only_primary_delta_reports_its_path_and_index_identity() {
+    let fixture = linked_worktree_fixture();
+    let script = fixture.root().join("codex");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\nprintf 'staged-only\\n' > '{}/README.md'\ngit -C '{}' add -- README.md\nprintf '%s\\n' '{{\"schemaVersion\":1,\"status\":\"success\",\"result\":{{}},\"error\":null}}'\n",
+            fixture.primary.display(),
+            fixture.primary.display()
+        ),
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+
+    let error = run_cli_backend(
+        &host,
+        &test_agent_loop_spec(Duration::from_secs(5)),
+        "run-staged-only-attribution",
+        test_audit("run-staged-only-attribution", "codex"),
+        &worktree_input(&fixture, "ORB-STAGED-ONLY"),
+        None,
+    )
+    .expect_err("staged primary delta must fail closed");
+
+    let diagnostic = worktree_integrity_diagnostic(&error);
+    assert_eq!(
+        diagnostic["changed_paths"],
+        serde_json::json!(["README.md"])
+    );
+    let after = &diagnostic["primary_after"]["path_states"]["README.md"];
+    assert!(after["index_entry_sha256"].is_string());
+    assert!(after["staged_patch_sha256"].is_string());
+    assert!(
+        after["worktree_patch_sha256"].is_null(),
+        "a fully staged edit has no index-to-worktree patch"
+    );
+    assert_eq!(after["worktree_present"], true);
+    assert!(after["untracked_content_sha256"].is_null());
 }
 
 #[test]
@@ -869,7 +1148,7 @@ fn changes_in_both_checkouts_report_ambiguous_integrity_violation() {
 fn primary_escape_is_checked_after_nonzero_exit_and_timeout() {
     for (terminal, trailer, timeout) in [
         ("nonzero", "exit 23", Duration::from_secs(5)),
-        ("timeout", "sleep 10", Duration::from_secs(1)),
+        ("timeout", "sleep 10", Duration::from_secs(2)),
     ] {
         let fixture = linked_worktree_fixture();
         let escaped_name = format!("{terminal}-primary.txt");
@@ -994,6 +1273,91 @@ fn test_audit(run_id: &str, provider: &str) -> Arc<V2AuditWriter> {
     ))
 }
 
+fn rendered_implement_input_from_asset(
+    yaml: &str,
+    assigned_root: &Path,
+    task_id: &str,
+) -> (String, serde_json::Value) {
+    let asset = load_job_asset(yaml).expect("committed shipment asset parses");
+    assert!(
+        matches!(
+            asset.name.as_str(),
+            "task_local_pipeline" | "task_pr_pipeline"
+        ),
+        "unexpected shipment asset {}",
+        asset.name
+    );
+    let implement_bundle = asset
+        .spec
+        .steps
+        .iter()
+        .find(|step| step.id == "implement_bundle")
+        .expect("shipment asset has implement_bundle");
+    let JobV2StepBody::Loop { loop_ } = &implement_bundle.body else {
+        panic!("{} implement_bundle must be a loop", asset.name);
+    };
+    let implement_one = loop_
+        .steps
+        .iter()
+        .find(|step| step.id == "implement_one")
+        .expect("shipment asset has implement_one");
+    let JobV2StepBody::TargetRef(implement) = &implement_one.body else {
+        panic!("{} implement_one must reference an activity", asset.name);
+    };
+    assert_eq!(implement.target, "activity:agent_implement");
+    let template_input = implement
+        .default_input
+        .as_ref()
+        .expect("agent_implement default input");
+    for field in ["workspace_path", "repo_root"] {
+        assert_eq!(
+            template_input[field], "{{ steps.worktree.output.workspace_path }}",
+            "{} must source {field} from the committed worktree output",
+            asset.name
+        );
+    }
+
+    let assigned = assigned_root.display().to_string();
+    let mut steps = HashMap::new();
+    steps.insert(
+        "worktree".to_string(),
+        serde_json::json!({ "output": { "workspace_path": assigned } }),
+    );
+    let context = TemplateContext {
+        item: Some(serde_json::json!(task_id)),
+        steps,
+        ..TemplateContext::default()
+    };
+    let rendered = render_asset_value(template_input, &context);
+    assert_eq!(rendered["task_id"], task_id);
+    assert_eq!(rendered["workspace_path"], assigned);
+    assert_eq!(rendered["repo_root"], assigned);
+    (asset.name, rendered)
+}
+
+fn render_asset_value(value: &serde_json::Value, context: &TemplateContext) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(template_value) if template_value.contains("{{") => {
+            serde_json::Value::String(
+                template::render(template_value, context).expect("render committed asset input"),
+            )
+        }
+        serde_json::Value::Array(values) => serde_json::Value::Array(
+            values
+                .iter()
+                .map(|value| render_asset_value(value, context))
+                .collect(),
+        ),
+        serde_json::Value::Object(values) => serde_json::Value::Object(
+            values
+                .iter()
+                .map(|(key, value)| (key.clone(), render_asset_value(value, context)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 fn worktree_input(fixture: &LinkedWorktreeFixture, task_id: &str) -> serde_json::Value {
     serde_json::json!({
         "prompt": "implement",
@@ -1001,6 +1365,56 @@ fn worktree_input(fixture: &LinkedWorktreeFixture, task_id: &str) -> serde_json:
         "workspace_path": fixture.assigned,
         "repo_root": fixture.assigned,
     })
+}
+
+fn worktree_integrity_diagnostic(error: &DispatchError) -> serde_json::Value {
+    let DispatchError::WorktreeIntegrity { diagnostic, .. } = error else {
+        panic!("expected WorktreeIntegrity, got {error:?}");
+    };
+    serde_json::from_str(diagnostic).expect("worktree integrity diagnostic is JSON")
+}
+
+fn assert_worktree_mismatch(
+    error: &DispatchError,
+    task_id: &str,
+    run_id: &str,
+    reason_fragment: &str,
+) {
+    assert!(
+        matches!(
+            error,
+            DispatchError::WorktreeIntegrity {
+                code: "worktree_mismatch",
+                ..
+            }
+        ),
+        "unexpected mismatch error: {error:?}"
+    );
+    assert!(error.is_non_retryable());
+    let diagnostic = worktree_integrity_diagnostic(error);
+    assert_eq!(diagnostic["code"], "worktree_mismatch");
+    assert_eq!(diagnostic["task_id"], task_id);
+    assert_eq!(diagnostic["run_id"], run_id);
+    assert_eq!(diagnostic["provider"], "codex");
+    assert!(
+        diagnostic["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains(reason_fragment)),
+        "unexpected mismatch reason: {}",
+        diagnostic["reason"]
+    );
+}
+
+fn assert_pre_spawn_failure(audit: &V2AuditWriter, marker: &Path) {
+    assert!(!marker.exists(), "provider process must not have started");
+    assert!(
+        !audit
+            .events_snapshot()
+            .expect("audit events")
+            .iter()
+            .any(|event| matches!(event.kind, V2AuditEventKind::CliInvocationStarted { .. })),
+        "mismatch must be rejected before cli.invocation.started"
+    );
 }
 
 fn assert_worktree_integrity_error(
