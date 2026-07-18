@@ -1,7 +1,7 @@
 ---
 title: Design Doc Conventions
 owner: daniel
-last_updated: 2026-07-16
+last_updated: 2026-07-17
 status: Accepted
 ---
 
@@ -204,6 +204,7 @@ Retired features stay listed with their `_archive/` path as a historical record.
 | Policy & Sandboxing | [docs/design/policy-sandbox/](./policy-sandbox/) | claude |
 | Project Learnings | [docs/design/project-learnings/](./project-learnings/) | claude |
 | Remote Access | [docs/design/remote-access/](./remote-access/) | claude |
+| Resident Orchestrator | [docs/design/resident-orchestrator/](./resident-orchestrator/) | codex |
 | Routines | [docs/design/routines/](./routines/) | claude |
 | Task Artifacts | [docs/design/task-artifacts/](./task-artifacts/) | codex |
 | Task Sync (archived) | [docs/design/_archive/task-sync/](./_archive/task-sync/) | claude |
