@@ -38,14 +38,17 @@ fn document_update_rewrites_v2_documents_and_envelope() {
     assert_eq!(task.execution_summary, "Updated summary");
     assert_eq!(task.priority, TaskPriority::Low);
     assert_eq!(task.pr_status.as_deref(), Some("approved"));
-    assert!(
-        store
-            .get_task_history("ORB-00000")
-            .expect("get history")
-            .expect("task exists")
-            .iter()
-            .any(|entry| entry.event == "renamed")
-    );
+    let renamed = store
+        .get_task_history("ORB-00000")
+        .expect("get history")
+        .expect("task exists")
+        .into_iter()
+        .find(|entry| entry.event == "renamed")
+        .expect("renamed event");
+    // ORB-10311: the rename note carries both the previous and replacement titles.
+    let note = renamed.note.expect("renamed note");
+    assert!(note.contains("Original"), "{note}");
+    assert!(note.contains("Renamed"), "{note}");
     assert_eq!(
         store
             .list_tasks_by_tags(&["task-artifacts".to_string()])

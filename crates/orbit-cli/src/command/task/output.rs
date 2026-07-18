@@ -5,6 +5,13 @@ use orbit_common::types::{ArtifactManifestFileV2, TaskArtifact};
 use orbit_core::{OrbitError, OrbitRuntime, TaskStatus, resolve_task_dependencies};
 use serde_json::{Value, json};
 
+/// Legacy bare `commented` history entries duplicate the authoritative Comments
+/// list, so human-facing history rendering omits them (ORB-10311). Raw JSON/MCP
+/// history projections keep every event for backward compatibility.
+pub(crate) fn is_human_visible_history_event(event: &str) -> bool {
+    event != "commented"
+}
+
 pub(crate) fn task_to_signal_json(task: &orbit_core::Task) -> Value {
     json!({
         "id": task.id,
@@ -320,6 +327,9 @@ pub(super) fn print_single_task_field(
         "history" => {
             use crate::output::color::dimmed;
             for entry in runtime.get_task_history(&task.id)? {
+                if !is_human_visible_history_event(&entry.event) {
+                    continue;
+                }
                 if let Some(note) = &entry.note {
                     println!(
                         "{} {}: {} ({})",

@@ -392,6 +392,26 @@ fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
     }
 }
 
+#[test]
+fn dashboard_recent_history_filters_before_limiting() {
+    // ORB-10311: the recent-history panel must exclude legacy bare `commented`
+    // stubs *before* applying the five-row limit, so meaningful status/workflow
+    // events cannot be displaced by comment noise. Asserted against the embedded
+    // asset source (the dashboard has no JS test runner).
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+
+    let filter_at = tasks
+        .find(r#".filter((h) => h && h.event !== "commented")"#)
+        .expect("recent history must drop legacy `commented` stubs");
+    let slice_at = tasks
+        .find("meaningful.slice(-5).reverse()")
+        .expect("recent history must apply the five-row limit to the filtered list");
+    assert!(
+        filter_at < slice_at,
+        "the `commented`-stub filter must run before the recent-history slice"
+    );
+}
+
 async fn response_body(response: Response) -> String {
     let bytes = match to_bytes(response.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,

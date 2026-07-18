@@ -1,6 +1,6 @@
 use chrono::Utc;
 use orbit_common::types::{
-    OrbitError, Task, TaskComment, TaskHistoryEntry, TaskStatus, normalize_attribution_label,
+    OrbitError, Task, TaskComment, TaskStatus, normalize_attribution_label,
     normalize_optional_attribution_label,
 };
 
@@ -94,18 +94,12 @@ pub(super) fn build_task_comments(
     }])
 }
 
-pub(super) fn task_comment_history_entries(comments: &[TaskComment]) -> Vec<TaskHistoryEntry> {
-    comments
-        .iter()
-        .map(|comment| TaskHistoryEntry {
-            at: comment.at,
-            by: comment.by.clone(),
-            event: "commented".to_string(),
-            note: None,
-            from_status: None,
-            to_status: None,
-        })
-        .collect()
+/// Render an optional task field value for a history note, giving unset values a
+/// clear textual marker instead of an empty string (ORB-10311).
+pub(super) fn describe_optional_field_value(value: Option<&str>) -> String {
+    value
+        .map(str::to_string)
+        .unwrap_or_else(|| "(none)".to_string())
 }
 
 pub(super) fn effective_actor_label(

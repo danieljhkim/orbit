@@ -9,7 +9,7 @@ use crate::runtime::TaskRecordUpdateParams;
 
 use super::helpers::{
     SYSTEM_ACTOR_LABEL, TaskAttributionInput, assemble_task_attribution, build_task_comments,
-    task_comment_history_entries,
+    describe_optional_field_value,
 };
 use super::params::TaskUpdateParams;
 use super::paths::{
@@ -176,10 +176,13 @@ impl OrbitRuntime {
             .map(ToOwned::to_owned);
         let append_comments =
             build_task_comments(params.comment.clone(), effective_label.as_str())?;
-        let source_task_id_changed = params
+        // ORB-10311: a persisted task comment no longer emits a bare `commented`
+        // history stub; the comment itself (append_comments) is the record.
+        let source_task_id_replacement = params
             .source_task_id
             .as_ref()
-            .is_some_and(|source_task_id| task.source_task_id() != source_task_id.as_deref());
+            .map(|value| value.as_deref())
+            .filter(|replacement| task.source_task_id() != *replacement);
 
         let mut append_history: Vec<TaskHistoryEntry> = if dropped_context_files.is_empty() {
             Vec::new()
@@ -189,13 +192,19 @@ impl OrbitRuntime {
                 &dropped_context_files,
             )]
         };
-        append_history.extend(task_comment_history_entries(&append_comments));
-        if source_task_id_changed {
+        if let Some(replacement) = source_task_id_replacement {
+            // ORB-10311: record the explicit previous and replacement source
+            // ids (with a clear marker for the unset case) so the change is
+            // auditable from history alone.
             append_history.push(TaskHistoryEntry {
                 at: chrono::Utc::now(),
                 by: effective_label.clone(),
                 event: "updated".to_string(),
-                note: Some("source_task_id changed".to_string()),
+                note: Some(format!(
+                    "source_task_id changed: {} → {}",
+                    describe_optional_field_value(task.source_task_id()),
+                    describe_optional_field_value(replacement),
+                )),
                 from_status: None,
                 to_status: None,
             });
