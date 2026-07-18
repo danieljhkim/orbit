@@ -1,48 +1,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use tempfile::tempdir;
 
 use crate::InitCommand;
 use crate::command::init::collect_role_settings_for_init;
+use crate::tests::env_isolation::EnvGuard;
 use orbit_common::utility::fs::create_dir_symlink;
 use orbit_core::config::agent_detect::DetectedAgents;
-
-static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-struct ScopedHome {
-    previous_home: Option<std::ffi::OsString>,
-    previous_userprofile: Option<std::ffi::OsString>,
-}
-
-impl ScopedHome {
-    fn set(path: &Path) -> Self {
-        let guard = Self {
-            previous_home: std::env::var_os("HOME"),
-            previous_userprofile: std::env::var_os("USERPROFILE"),
-        };
-        unsafe {
-            std::env::set_var("HOME", path);
-            std::env::set_var("USERPROFILE", path);
-        }
-        guard
-    }
-}
-
-impl Drop for ScopedHome {
-    fn drop(&mut self) {
-        restore_env("HOME", self.previous_home.take());
-        restore_env("USERPROFILE", self.previous_userprofile.take());
-    }
-}
-
-fn restore_env(name: &str, value: Option<std::ffi::OsString>) {
-    match value {
-        Some(value) => unsafe { std::env::set_var(name, value) },
-        None => unsafe { std::env::remove_var(name) },
-    }
-}
 
 fn seed_discovery_sentinel(home: &Path, agent_dir: &str) -> (PathBuf, PathBuf) {
     let target = home.join("live-sentinels").join(agent_dir).join("orbit");
@@ -68,7 +33,7 @@ fn assert_discovery_sentinel(link: &Path, target: &Path) {
 /// hanging is the proof).
 #[test]
 fn non_interactive_short_circuits_before_prompts() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
+    let _env = EnvGuard::acquire();
     let home = tempdir().expect("home tempdir");
     let detected = DetectedAgents::default();
     let result = collect_role_settings_for_init(Some(home.path()), false, true, &detected);
@@ -79,7 +44,7 @@ fn non_interactive_short_circuits_before_prompts() {
 /// skipped — `orbit init` is idempotent over an existing global root.
 #[test]
 fn existing_config_short_circuits_before_prompts() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
+    let _env = EnvGuard::acquire();
     let root = tempdir().expect("orbit root");
     let config_path = root.path().join("config.toml");
     fs::write(&config_path, "# pre-existing\n").expect("preseed");
@@ -94,17 +59,15 @@ fn existing_config_short_circuits_before_prompts() {
 /// produces a fresh config.toml with generated crew tables.
 #[test]
 fn non_interactive_init_isolates_temporary_root_skill_discovery() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let live_home = tempdir().expect("live home tempdir");
     let validation_home = tempdir().expect("validation home tempdir");
     let validation_root = tempdir().expect("validation root tempdir");
 
-    let _live_home = ScopedHome::set(live_home.path());
+    let env = EnvGuard::acquire().home(live_home.path());
     let (agents_link, agents_target) = seed_discovery_sentinel(live_home.path(), ".agents");
     let (claude_link, claude_target) = seed_discovery_sentinel(live_home.path(), ".claude");
 
-    let outcome = {
-        let _validation_home = ScopedHome::set(validation_home.path());
+    let outcome = env.with_home(validation_home.path(), || {
         InitCommand {
             force: false,
             non_interactive: true,
@@ -112,7 +75,7 @@ fn non_interactive_init_isolates_temporary_root_skill_discovery() {
             host_mode: None,
         }
         .execute_without_runtime(Some(&validation_root.path().join(".orbit")))
-    };
+    });
 
     outcome.expect("init succeeded");
 
@@ -199,9 +162,8 @@ fn init_host(
 /// once, and a repeat init preserves the generated machine_id unchanged.
 #[test]
 fn non_interactive_host_name_and_mode_create_then_repeat_is_stable() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let home = tempdir().expect("home tempdir");
-    let _home = ScopedHome::set(home.path());
+    let _env = EnvGuard::acquire().home(home.path());
     let root = home.path().join(".orbit");
 
     init_host(&root, Some("dk-mac"), Some("hub")).expect("first init");
@@ -225,9 +187,8 @@ fn non_interactive_host_name_and_mode_create_then_repeat_is_stable() {
 /// A legacy `host_id`-only file migrates in place on init.
 #[test]
 fn init_migrates_legacy_host_toml() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let home = tempdir().expect("home tempdir");
-    let _home = ScopedHome::set(home.path());
+    let _env = EnvGuard::acquire().home(home.path());
     let root = home.path().join(".orbit");
     fs::create_dir_all(&root).expect("mkdir .orbit");
     fs::write(root.join("host.toml"), "host_id = \"legacy-host\"\n").expect("seed legacy");
@@ -244,9 +205,8 @@ fn init_migrates_legacy_host_toml() {
 /// A fresh host initialized non-interactively without --host-name fails closed.
 #[test]
 fn non_interactive_missing_host_name_fails_closed() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let home = tempdir().expect("home tempdir");
-    let _home = ScopedHome::set(home.path());
+    let _env = EnvGuard::acquire().home(home.path());
     let root = home.path().join(".orbit");
 
     let error = init_host(&root, None, None).expect_err("missing host name must fail closed");
@@ -260,9 +220,8 @@ fn non_interactive_missing_host_name_fails_closed() {
 /// An invalid `--host-mode` fails closed before any identity is written.
 #[test]
 fn invalid_host_mode_fails_closed() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let home = tempdir().expect("home tempdir");
-    let _home = ScopedHome::set(home.path());
+    let _env = EnvGuard::acquire().home(home.path());
     let root = home.path().join(".orbit");
 
     let error =
