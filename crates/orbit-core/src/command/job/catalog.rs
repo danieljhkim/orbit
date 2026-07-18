@@ -48,6 +48,10 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../../assets/jobs/task_pr_pipeline.yaml"),
     ),
     (
+        "task_review_pipeline",
+        include_str!("../../../assets/jobs/task_review_pipeline.yaml"),
+    ),
+    (
         "task_triage_pipeline",
         include_str!("../../../assets/jobs/task_triage_pipeline.yaml"),
     ),
@@ -511,67 +515,190 @@ spec:
     }
 
     #[test]
-    fn leaf_ship_review_is_opt_in_and_uses_only_the_explicit_review_crew() {
+    fn pr_review_materializes_one_exact_head_child_with_the_explicit_crew() {
+        let yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(name, yaml)| (*name == "task_pr_pipeline").then_some(*yaml))
+            .expect("task PR pipeline exists");
+        let asset = load_job_asset(yaml).expect("task PR pipeline parses");
+        let defaults = asset.spec.default_input.as_ref().expect("default input");
+        assert_eq!(defaults["review"], false);
+        assert_eq!(defaults["review_crew"], Value::Null);
+        assert!(
+            asset
+                .spec
+                .steps
+                .iter()
+                .all(|step| step.id != "review_bundle"),
+            "the implementation run must not inline the independent reviewer"
+        );
+
+        let review_steps = asset
+            .spec
+            .steps
+            .iter()
+            .filter(|step| {
+                matches!(
+                    &step.body,
+                    JobV2StepBody::TargetRef(target)
+                        if target.target == "activity:invoke_and_wait"
+                            && target
+                                .default_input
+                                .as_ref()
+                                .and_then(|input| input.get("job_name"))
+                                .and_then(Value::as_str)
+                                == Some("task_review_pipeline")
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(review_steps.len(), 1, "exactly one review Run is submitted");
+        let review = review_steps[0];
+        assert_eq!(review.id, "independent_review");
+        assert_eq!(review.retry, None);
+        assert_eq!(review.recovery_activity, None);
+        assert_eq!(
+            review.when.as_deref(),
+            Some(
+                "{{ input.review }} == true && {{ steps.commit.output.skipped_no_diff_expected }} != true"
+            )
+        );
+        let JobV2StepBody::TargetRef(target) = &review.body else {
+            panic!("independent review must use invoke_and_wait");
+        };
+        assert_eq!(target.target, "activity:invoke_and_wait");
+        let input = target
+            .default_input
+            .as_ref()
+            .expect("review dispatch input");
+        assert_eq!(input["job_name"], "task_review_pipeline");
+        assert_eq!(input["dedupe_run_input_field"], "parent_run_id");
+        let run_input = &input["run_input"];
+        assert_eq!(run_input["crew"], "{{ input.review_crew }}");
+        assert_eq!(
+            run_input["parent_run_id"],
+            "{{ steps.worktree.output.job_run_id }}"
+        );
+        assert_eq!(run_input["task_ids"], "{{ input.task_ids }}");
+        assert_eq!(
+            run_input["workspace_path"],
+            "{{ steps.worktree.output.workspace_path }}"
+        );
+        assert_eq!(
+            run_input["candidate_head"],
+            "{{ steps.push.output.branch }}"
+        );
+        assert_eq!(
+            run_input["candidate_head_sha"],
+            "{{ steps.push.output.local_sha }}"
+        );
+        assert_eq!(
+            run_input["pr_number"],
+            "{{ steps.pr_open.output.pr_number }}"
+        );
+
+        let step_ids = asset
+            .spec
+            .steps
+            .iter()
+            .map(|step| step.id.as_str())
+            .collect::<Vec<_>>();
+        let review_index = step_ids
+            .iter()
+            .position(|id| *id == "independent_review")
+            .expect("review index");
+        for prerequisite in ["push", "pr_open", "promote_tasks"] {
+            assert!(
+                step_ids
+                    .iter()
+                    .position(|id| *id == prerequisite)
+                    .expect("phase")
+                    < review_index,
+                "review must run after {prerequisite}"
+            );
+        }
+
         for job_name in ["task_pr_pipeline", "task_local_pipeline"] {
             let yaml = DEFAULT_JOB_FILES
                 .iter()
                 .find_map(|(name, yaml)| (*name == job_name).then_some(*yaml))
                 .unwrap_or_else(|| panic!("default job {job_name} exists"));
-            let asset = load_job_asset(yaml)
-                .unwrap_or_else(|err| panic!("default job {job_name} should parse: {err}"));
-            let defaults = asset
-                .spec
-                .default_input
-                .as_ref()
-                .unwrap_or_else(|| panic!("default job {job_name} has default input"));
-            assert_eq!(defaults["review"], false);
-            assert_eq!(defaults["review_crew"], Value::Null);
-
-            let review = asset
-                .spec
-                .steps
-                .iter()
-                .find(|step| step.id == "review_bundle")
-                .unwrap_or_else(|| panic!("default job {job_name} has review_bundle"));
-            assert_eq!(review.when.as_deref(), Some("{{ input.review }} == true"));
-            let JobV2StepBody::TargetRef(review_target) = &review.body else {
-                panic!("default job {job_name} review_bundle must reference agent_review");
-            };
-            assert_eq!(review_target.target, "activity:agent_review");
-            let review_input = review_target
-                .default_input
-                .as_ref()
-                .expect("review_bundle input");
-            assert_eq!(review_input["crew"], "{{ input.review_crew }}");
-
+            let asset = load_job_asset(yaml).expect("leaf job parses");
             let implement = asset
                 .spec
                 .steps
                 .iter()
                 .find(|step| step.id == "implement_bundle")
-                .unwrap_or_else(|| panic!("default job {job_name} has implement_bundle"));
+                .expect("implement bundle");
             let JobV2StepBody::Loop { loop_ } = &implement.body else {
-                panic!("default job {job_name} implement_bundle must be a loop");
+                panic!("implement bundle must be a loop");
             };
-            let implement_one = loop_
-                .steps
-                .iter()
-                .find(|step| step.id == "implement_one")
-                .expect("implement_bundle has implement_one");
-            let JobV2StepBody::TargetRef(implement_target) = &implement_one.body else {
-                panic!("default job {job_name} implement_one must reference agent_implement");
+            let JobV2StepBody::TargetRef(implement_target) = &loop_.steps[0].body else {
+                panic!("implement step must reference agent_implement");
             };
-            assert_eq!(implement_target.target, "activity:agent_implement");
             assert!(
                 implement_target
                     .default_input
                     .as_ref()
-                    .expect("implement_one input")
+                    .expect("implement input")
                     .get("crew")
                     .is_none(),
-                "default job {job_name} must not apply review_crew to implementation"
+                "review crew must not reach {job_name} implementation"
             );
         }
+    }
+
+    #[test]
+    fn independent_review_job_requires_structured_exact_head_verdict() {
+        let yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(name, yaml)| (*name == "task_review_pipeline").then_some(*yaml))
+            .expect("review pipeline exists");
+        let asset = load_job_asset(yaml).expect("review pipeline parses");
+        assert_eq!(asset.spec.steps.len(), 2);
+        let JobV2StepBody::TargetRef(review) = &asset.spec.steps[0].body else {
+            panic!("review step must be an activity reference");
+        };
+        assert_eq!(review.target, "activity:agent_review");
+        let review_input = review.default_input.as_ref().expect("review input");
+        for field in [
+            "task_ids",
+            "workspace_path",
+            "crew",
+            "parent_run_id",
+            "candidate_head",
+            "candidate_head_sha",
+            "pr_number",
+        ] {
+            assert!(review_input.get(field).is_some(), "missing {field}");
+        }
+        let JobV2StepBody::TargetRef(guard) = &asset.spec.steps[1].body else {
+            panic!("verdict guard must be an activity reference");
+        };
+        assert_eq!(guard.target, "activity:independent_review_guard");
+    }
+
+    #[test]
+    fn local_review_fails_before_worktree_or_implementation() {
+        let yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(name, yaml)| (*name == "task_local_pipeline").then_some(*yaml))
+            .expect("local pipeline exists");
+        let asset = load_job_asset(yaml).expect("local pipeline parses");
+        let first = asset.spec.steps.first().expect("local pipeline has steps");
+        assert_eq!(first.id, "reject_unsupported_review");
+        assert_eq!(first.when.as_deref(), Some("{{ input.review }} == true"));
+        assert!(matches!(
+            &first.body,
+            JobV2StepBody::TargetRef(target)
+                if target.target == "activity:pipeline_success_guard"
+        ));
+        assert!(
+            asset
+                .spec
+                .steps
+                .iter()
+                .all(|step| step.id != "review_bundle")
+        );
     }
 
     #[test]
@@ -600,11 +727,6 @@ spec:
             vec![
                 ("worktree", "activity:worktree_setup", None),
                 (
-                    "review_bundle",
-                    "activity:agent_review",
-                    Some("step_failure_recovery")
-                ),
-                (
                     "commit",
                     "activity:git_commit",
                     Some("step_failure_recovery")
@@ -625,6 +747,12 @@ spec:
                     "promote_tasks",
                     "activity:pr_promote",
                     Some("step_failure_recovery")
+                ),
+                ("independent_review", "activity:invoke_and_wait", None),
+                (
+                    "require_independent_review_success",
+                    "activity:pipeline_success_guard",
+                    None
                 ),
                 (
                     "promote_no_diff",
@@ -952,6 +1080,16 @@ spec:
                 "task_triage_pipeline",
                 "triage",
                 "steps.triage.output.dispositions",
+            ),
+            (
+                "task_review_pipeline",
+                "independent_review",
+                "steps.independent_review.output.verdict",
+            ),
+            (
+                "task_review_pipeline",
+                "independent_review",
+                "steps.independent_review.output.reviewed_head_sha",
             ),
         ]);
 

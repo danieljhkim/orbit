@@ -281,6 +281,33 @@ impl V2RuntimeHost for OrbitRuntime {
         )
     }
 
+    fn explicit_agent_crew_config_for_input(
+        &self,
+        input: &serde_json::Value,
+    ) -> Result<Option<AgentRoleConfig>, DispatchError> {
+        let Some(explicit) = input
+            .get("crew")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(None);
+        };
+        let crew = self
+            .resolve_crew_for_task(Some(explicit), None)
+            .map_err(|error| {
+                DispatchError::JobValidation(format!(
+                    "explicit activity crew '{explicit}' cannot be resolved: {error}"
+                ))
+            })?;
+        Ok(Some(
+            crate::runtime::engine::environment_host::typed_role_config_from_assignment(
+                AgentRole::Reviewer,
+                &crew.assignment,
+            ),
+        ))
+    }
+
     fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {
         match provider {
             "anthropic" => {

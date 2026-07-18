@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-07-16
+last_updated: 2026-07-18
 status: Draft
 feature: activity-job
 doc_role: design
@@ -143,6 +143,8 @@ After [ORB-10232], `task_pr_pipeline` exposes the PR handoff as ordered durable 
 `pr_prepare` is the pre-rewrite authority boundary. It records the exact head SHA, base SHA, and observed remote task-branch SHA before `git_rebase` may rewrite history. `git_push` classifies the remote ref as missing, current, fast-forwardable, remote-ahead, or diverged. Missing and fast-forwardable refs use normal push; current refs are reused; remote-ahead refs fail closed. Divergence may use force-with-lease only when the persisted preparation SHA still exactly matches the observed remote SHA and `git_rebase` reports a performed or recovery-reused rewrite. The underlying tool emits a branch-scoped `--force-with-lease=refs/heads/<branch>:<expected-sha>`, so a concurrent remote update rejects the push instead of overwriting it. This is [ADR-0225].
 
 PR creation is restartable within its own checkpoint. `pr_open` first looks up the open PR by head branch; only the explicit no-PR result permits `github.pr.create`. If creation succeeds but PR view or local step-output persistence fails, the retry finds that same external PR and returns it as reused. `pr_promote` then idempotently applies the GitHub PR external ref and the per-task implementation attribution before moving tasks to `review`.
+
+After [ORB-10266], explicit-task PR shipment with independent review enabled preflights the selected review crew and the deployed auto/gate/PR/review assets before inserting the implementation run. `task_pr_pipeline` materializes exactly one `task_review_pipeline` child only after push, PR publication, and task promotion, snapshotting the parent run, tasks, workspace, explicit crew, candidate branch, pushed SHA, and PR identity. Parent retry/resume reuses the child whose persisted `parent_run_id` matches; multiple matches fail closed, and the dispatch step has no recovery retry that could create a second reviewer. The read-only reviewer returns a structured verdict and reviewed SHA; a deterministic guard requires that SHA to equal the published candidate before either the child or waiting parent can succeed. Review-disabled shipment is unchanged, while review-enabled local, auto-discovery, missing-crew, same-assignment, unknown-crew, and unmaterializable configurations fail before implementation. This is [ADR-0233].
 
 The seeded `list_backlog_tasks` deterministic activity starts `task_auto_pipeline`. Automatic mode admits tasks by `status: backlog`. It emits `task_count`, `task_ids`, `tasks`, singleton `bundles`, and an `excluded` array for admitted backlog tasks filtered because their context files overlap `in-progress` or `review` locks. `excluded` covers only lock overlap; status-based admission and `max_tasks` truncation stay silent, and explicit `task_ids` mode omits it. This attribution contract was added in [T20260421-0542-2].
 

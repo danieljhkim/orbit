@@ -9,6 +9,8 @@ use axum::http::{Method, Request, StatusCode, header};
 use axum::response::Response;
 use chrono::Utc;
 use orbit_common::utility::blob_store::BlobStore;
+use orbit_core::command::job::JobRunListParams;
+use orbit_core::command::task::TaskAddParams;
 use orbit_core::{JobRunState, OrbitRuntime, V2AuditEventInsertParams};
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -595,6 +597,49 @@ fn run_detail_uses_v2_audit_steps_when_step_bundle_is_empty() {
     assert_eq!(steps[0]["duration_ms"], 2_000);
 }
 
+#[test]
+fn independent_review_run_detail_projects_crew_and_exact_head_lineage() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let scheduled_at = Utc::now();
+    let run = orbit_core::JobRun {
+        run_id: "jrun-independent-review".to_string(),
+        job_id: "task_review_pipeline".to_string(),
+        attempt: 1,
+        state: JobRunState::Success,
+        scheduled_at,
+        started_at: Some(scheduled_at),
+        finished_at: Some(scheduled_at),
+        duration_ms: Some(1),
+        created_at: scheduled_at,
+        pid: None,
+        pid_start_time: None,
+        input: Some(json!({
+            "task_ids": ["ORB-10266"],
+            "workspace_path": "/tmp/review-worktree",
+            "crew": "opus",
+            "parent_run_id": "jrun-parent",
+            "candidate_head": "orbit/ORB-10266-branch",
+            "candidate_head_sha": "abc123",
+            "pr_number": "633",
+        })),
+        retry_source_run_id: None,
+        knowledge_metrics: None,
+        resolved_crew: Some("opus".to_string()),
+        crew_model: Some("opus".to_string()),
+        steps: Vec::new(),
+    };
+
+    let detail = job_run_detail_to_json(&runtime, &run);
+    assert_eq!(detail["run"]["job_id"], "task_review_pipeline");
+    assert_eq!(detail["run"]["resolved_crew"], "opus");
+    let lineage = &detail["run"]["review_lineage"];
+    assert_eq!(lineage["parent_run_id"], "jrun-parent");
+    assert_eq!(lineage["task_ids"], json!(["ORB-10266"]));
+    assert_eq!(lineage["workspace_path"], "/tmp/review-worktree");
+    assert_eq!(lineage["candidate_head_sha"], "abc123");
+    assert_eq!(lineage["pr_number"], "633");
+}
+
 async fn request_ship(runtime: OrbitRuntime, body: Option<Value>) -> Response {
     let mut builder = Request::builder()
         .method(Method::POST)
@@ -614,17 +659,211 @@ async fn request_ship(runtime: OrbitRuntime, body: Option<Value>) -> Response {
         .expect("response")
 }
 
+fn review_ship_runtime() -> (tempfile::TempDir, OrbitRuntime, String) {
+    let root = tempfile::tempdir().expect("tempdir");
+    let global_root = root.path().join("global");
+    let orbit_root = root.path().join("repo/.orbit");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    std::fs::create_dir_all(&orbit_root).expect("create orbit root");
+    std::fs::write(
+        orbit_root.join("config.toml"),
+        r#"
+[workflow]
+base_branch = "main"
+default_crew = "sol"
+
+[crews.sol]
+model = "gpt-5.6-sol"
+provider = "codex"
+backend = "cli"
+
+[crews.opus]
+model = "opus"
+provider = "claude"
+backend = "cli"
+"#,
+    )
+    .expect("write config");
+    let runtime = OrbitRuntime::from_roots(&global_root, &orbit_root).expect("build runtime");
+    seed_review_ship_assets(&runtime);
+    let task_id = runtime
+        .add_task(TaskAddParams {
+            title: "review ship endpoint fixture".to_string(),
+            description: "persist explicit review controls".to_string(),
+            plan: "submit only".to_string(),
+            status: Some(orbit_core::TaskStatus::Backlog),
+            crew: Some("sol".to_string()),
+            ..TaskAddParams::default()
+        })
+        .expect("add review fixture task")
+        .id;
+    (root, runtime, task_id)
+}
+
+fn seed_review_ship_assets(runtime: &OrbitRuntime) {
+    let jobs = runtime.global_root().join("resources/jobs");
+    let activities = runtime.global_root().join("resources/activities");
+    std::fs::create_dir_all(&jobs).expect("create jobs");
+    std::fs::create_dir_all(&activities).expect("create activities");
+
+    let forwarding_stub = |name: &str| {
+        format!(
+            r#"schemaVersion: 2
+kind: Job
+metadata:
+  name: {name}
+spec:
+  state: enabled
+  kind: workflow
+  default_input:
+    review: false
+    review_crew: null
+  steps:
+    - id: nap
+      default_input:
+        seconds: 0
+        review: "{{{{ input.review }}}}"
+        review_crew: "{{{{ input.review_crew }}}}"
+      spec:
+        type: deterministic
+        action: sleep
+        config: {{}}
+"#
+        )
+    };
+    std::fs::write(
+        jobs.join("task_auto_pipeline.yaml"),
+        forwarding_stub("task_auto_pipeline"),
+    )
+    .expect("write auto job");
+    std::fs::write(
+        jobs.join("task_gate_pipeline.yaml"),
+        forwarding_stub("task_gate_pipeline"),
+    )
+    .expect("write gate job");
+    std::fs::write(
+        jobs.join("task_pr_pipeline.yaml"),
+        r#"schemaVersion: 2
+kind: Job
+metadata:
+  name: task_pr_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  steps:
+    - id: push
+      spec: { type: deterministic, action: sleep, config: {} }
+    - id: pr_open
+      spec: { type: deterministic, action: sleep, config: {} }
+    - id: promote_tasks
+      spec: { type: deterministic, action: sleep, config: {} }
+    - id: independent_review
+      when: "{{ input.review }} == true && {{ steps.commit.output.skipped_no_diff_expected }} != true"
+      target: activity:invoke_and_wait
+      default_input:
+        job_name: task_review_pipeline
+        run_input:
+          task_ids: "{{ input.task_ids }}"
+          workspace_path: "{{ input.workspace_path }}"
+          crew: "{{ input.review_crew }}"
+          parent_run_id: "{{ input.parent_run_id }}"
+          candidate_head: "{{ input.candidate_head }}"
+          candidate_head_sha: "{{ input.candidate_head_sha }}"
+          pr_number: "{{ input.pr_number }}"
+        dedupe_run_input_field: parent_run_id
+    - id: require_independent_review_success
+      target: activity:pipeline_success_guard
+      default_input: { result: "{{ steps.independent_review.output }}" }
+"#,
+    )
+    .expect("write PR job");
+    std::fs::write(
+        jobs.join("task_review_pipeline.yaml"),
+        r#"schemaVersion: 2
+kind: Job
+metadata:
+  name: task_review_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  steps:
+    - id: independent_review
+      target: activity:agent_review
+      default_input:
+        task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ input.workspace_path }}"
+        crew: "{{ input.crew }}"
+        parent_run_id: "{{ input.parent_run_id }}"
+        candidate_head: "{{ input.candidate_head }}"
+        candidate_head_sha: "{{ input.candidate_head_sha }}"
+        pr_number: "{{ input.pr_number }}"
+    - id: guard
+      target: activity:independent_review_guard
+"#,
+    )
+    .expect("write review job");
+    std::fs::write(
+        activities.join("agent_review.yaml"),
+        r#"schemaVersion: 2
+kind: Activity
+metadata:
+  name: agent_review
+spec:
+  type: agent_loop
+  description: fixture
+  output_schema_json:
+    type: object
+    required: [verdict, reviewed_head_sha]
+  instruction: fixture
+  require_response_envelope: true
+"#,
+    )
+    .expect("write review activity");
+    std::fs::write(
+        activities.join("independent_review_guard.yaml"),
+        r#"schemaVersion: 2
+kind: Activity
+metadata:
+  name: independent_review_guard
+spec:
+  type: deterministic
+  description: fixture
+  action: independent_review_guard
+  config: {}
+"#,
+    )
+    .expect("write guard activity");
+    for name in ["invoke_and_wait", "pipeline_success_guard"] {
+        std::fs::write(
+            activities.join(format!("{name}.yaml")),
+            format!(
+                r#"schemaVersion: 2
+kind: Activity
+metadata:
+  name: {name}
+spec:
+  type: deterministic
+  description: fixture
+  action: {name}
+  config: {{}}
+"#
+            ),
+        )
+        .expect("write orchestration activity");
+    }
+}
+
 #[tokio::test]
 async fn ship_endpoint_submits_task_auto_pipeline_run() {
-    let runtime = OrbitRuntime::in_memory().expect("build runtime");
-    write_replay_job(&runtime, "task_auto_pipeline");
+    let (_root, runtime, task_id) = review_ship_runtime();
 
     let response = request_ship(
         runtime.clone(),
         Some(json!({
+            "task_ids": [task_id],
             "mode": "pr",
             "review": true,
-            "review_crew": "opus-review",
+            "review_crew": "opus",
         })),
     )
     .await;
@@ -645,8 +884,9 @@ async fn ship_endpoint_submits_task_auto_pipeline_run() {
         Some(json!({
             "mode": "pr",
             "base_branch": "main",
+            "task_ids": [task_id],
             "review": true,
-            "review_crew": "opus-review",
+            "review_crew": "opus",
         }))
     );
 }
@@ -670,7 +910,11 @@ async fn ship_endpoint_rejects_unknown_mode() {
 async fn ship_endpoint_rejects_enabled_review_without_explicit_crew() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
 
-    let response = request_ship(runtime, Some(json!({ "review": true }))).await;
+    let response = request_ship(
+        runtime,
+        Some(json!({ "task_ids": ["ORB-99999"], "review": true })),
+    )
+    .await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let payload = body_json(response).await;
@@ -803,6 +1047,35 @@ async fn ship_endpoint_rejects_unknown_workspace_with_404_json() {
             .as_str()
             .is_some_and(|m| m.contains("unknown workspace: ghost"))
     );
+}
+
+#[tokio::test]
+async fn ship_endpoint_review_false_preserves_implementation_only_input() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    write_replay_job(&runtime, "task_auto_pipeline");
+
+    let response = request_ship(
+        runtime.clone(),
+        Some(json!({
+            "mode": "pr",
+            "review": false,
+        })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_json(response).await;
+    let run_id = payload["run_id"].as_str().expect("run id");
+    let run = runtime
+        .list_job_runs(JobRunListParams::default())
+        .expect("list submitted runs")
+        .into_iter()
+        .find(|run| run.run_id == run_id)
+        .expect("submitted run exists");
+    let input = run.input.expect("persisted run input");
+    assert_eq!(input["mode"], "pr");
+    assert!(input.get("review").is_none());
+    assert!(input.get("review_crew").is_none());
 }
 
 #[tokio::test]

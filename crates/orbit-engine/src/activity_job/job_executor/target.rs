@@ -11,11 +11,10 @@ pub(super) fn run_target(
     let tctx = ctx.template_ctx();
     let rendered_input = render_input(t.default_input.as_ref(), &ctx.input, &tctx)?;
 
-    // Role override (ADR-029) — `step.role` (TargetStep) wins over
-    // `activity.role` (AgentLoopSpec) when both are set. We only need to
-    // synthesize a substitute spec when the matched arm is AgentLoop *and*
-    // an effective role is present.
-    let role_override = role_overridden_spec(t, ctx);
+    // Agent settings override — `step.role` (TargetStep) wins over
+    // `activity.role` (AgentLoopSpec) when both are set; without either role,
+    // a rendered explicit `crew` may select the modern flat assignment.
+    let role_override = role_overridden_spec(t, ctx, &rendered_input)?;
     match (&t.spec, &t.session) {
         (ActivityV2Spec::AgentLoop(inline_spec), Some(binding)) => {
             let agent_spec_owned = role_override.clone();
@@ -191,18 +190,31 @@ pub(super) fn replay_active() -> bool {
     std::env::var("ORBIT_V2_REPLAY").is_ok() || std::env::var("ORBIT_V2_REPLAY_FIXTURE").is_ok()
 }
 
-/// Build a role-overridden clone of an [`AgentLoopSpec`] when the step or
-/// inline activity declares a role and the host has a matching
-/// `[agent.<role>]` entry. Returns `None` for non-`AgentLoop` specs and for
-/// the path where no effective role is set — the caller can then dispatch
-/// against the inline spec without paying for a clone.
-pub(super) fn role_overridden_spec(t: &TargetStep, ctx: &ExecCtx<'_>) -> Option<AgentLoopSpec> {
+/// Build a crew-overridden clone of an [`AgentLoopSpec`]. A declared activity
+/// role uses the role-labelled path; otherwise an explicit rendered `crew`
+/// input may select the modern flat crew assignment without inventing a role.
+pub(super) fn role_overridden_spec(
+    t: &TargetStep,
+    ctx: &ExecCtx<'_>,
+    rendered_input: &Value,
+) -> Result<Option<AgentLoopSpec>, DispatchError> {
     let ActivityV2Spec::AgentLoop(inline_spec) = &t.spec else {
-        return None;
+        return Ok(None);
     };
-    let effective_role = t.role.or(inline_spec.role)?;
-    let resolved = resolve_agent_settings(effective_role, ctx.host, inline_spec, &ctx.input);
+    let resolved = match t.role.or(inline_spec.role) {
+        Some(effective_role) => {
+            resolve_agent_settings(effective_role, ctx.host, inline_spec, &ctx.input)
+        }
+        None => {
+            let Some(resolved) =
+                resolve_explicit_crew_settings(ctx.host, inline_spec, rendered_input)?
+            else {
+                return Ok(None);
+            };
+            resolved
+        }
+    };
     let mut spec = inline_spec.clone();
     apply_resolved_settings(&mut spec, &resolved);
-    Some(spec)
+    Ok(Some(spec))
 }
