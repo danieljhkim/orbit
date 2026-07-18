@@ -10,18 +10,19 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10258, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10258, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Design
 
-This doc specifies the **target** design; the Phase 1 host identity and workspace
-registry foundations have landed, while later phases remain pending. The folder is
-Accepted. It covers host identity, the registry, the coordination-plane/workspace-
-ownership split, execution placement (including the hub→satellite protocol), the
-per-record data-placement split, and the revision to routine sweep ownership. It
-leaves client→hub transport to the [MCP bridge](../mcp-bridge/2_design.md)
-([ORB-00424]) and everything speculative to [3_vision.md](./3_vision.md).
+This doc specifies the **target** design; the Phase 1 host identity, workspace
+registry, and host-registry core foundations have landed, while later phases remain
+pending. The folder is Accepted. It covers host identity, the registry, the
+coordination-plane/workspace-ownership split, execution placement (including the
+hub→satellite protocol), the per-record data-placement split, and the revision to
+routine sweep ownership. It leaves client→hub transport to the
+[MCP bridge](../mcp-bridge/2_design.md) ([ORB-00424]) and everything speculative to
+[3_vision.md](./3_vision.md).
 
 ## 1. Host Identity (`host.toml`)
 
@@ -72,7 +73,7 @@ The registry is the main host's inventory of known machines — a `hosts` table 
 main host's global store (`~/.orbit/orbit.db`), not a per-machine file. A registry
 nobody can enumerate isn't a registry.
 
-Per entry: `machine_id` (key), `host_id` (unique among non-retired entries),
+Per entry: `machine_id` (key), `host_id` (globally reserved across active and retired entries),
 `labels` (free-form: providers installed such as `claude`/`codex`, OS), a
 **workspace presence map** (below), `status` (`active` | `retired`),
 `registered_at`, `last_seen`.
@@ -112,6 +113,31 @@ Per entry: `machine_id` (key), `host_id` (unique among non-retired entries),
 - **Retire.** Retired hosts stay in the registry so old provenance, pins, and
   bindings keep resolving; dispatch and pins targeting a retired host fail
   validation with the retirement visible in the error.
+
+**Concrete registry-core schema ([ORB-10255]).** Store migration v5 adds two
+hub-global tables without changing any existing row or standalone path:
+
+- `hosts` is keyed by immutable `machine_id` and carries the current globally
+  reserved `host_id`, canonical label-set JSON, `active|retired` status,
+  `registered_at`, `updated_at`, optional `retired_at`, and optional
+  `last_seen_at`. Initial registration is an explicit observation, so it seeds
+  `last_seen_at`; a compatible repeated registration is a true no-op and does not
+  move any timestamp. Later poll/heartbeat updates remain C2 work and must be
+  explicit — audit traffic is never a liveness input.
+- `host_aliases` is keyed by the historical human name and carries only its stable
+  `machine_id`, creation timestamp, and warning text. Database triggers make alias
+  rows update/delete-proof and enforce current-name/alias disjointness across the
+  two tables; a retired row's current name remains unique as well.
+
+Typed store operations take an immediate transaction before collision preflight.
+Registration is idempotent only for the same active `machine_id`, `host_id`, and
+label set; it cannot rename, relabel, or reactivate. Rename changes the current name
+and inserts the old one as a tombstone in one transaction, so chained renames keep
+the full history. Retirement changes lifecycle state without deleting either table.
+Resolution returns an explicit active, alias-with-warning, retired, unknown, or
+fail-closed collision projection. `HostRegistryService` binds these operations to
+B1's `HostIdentity` declaration without adding CLI/MCP administration or local
+`host.toml` rename coordination; those remain C3.
 
 **Boundary with `~/.orbit/mcp.toml`.** The registry is server-side *inventory*;
 `mcp.toml` is the client's trust policy for its one hub route. They stay separate:
@@ -400,6 +426,9 @@ of that routine.** Consequences:
   strict fail-closed loading (Phase 1 / Unit B1 under ORB-10246).
 - [ORB-10248] — implemented the versioned path-free workspace catalog and
   machine-local owner/replica checkout bindings (§3; Phase 1 / Unit B2).
+- [ORB-10255] — implemented the append-only v5 host/alias schema and typed C1
+  registry core: compatible idempotent registration, collision refusal, permanent
+  rename chains, retirement, active enumeration, and fail-closed name resolution.
 - [ORB-10258] — implemented origin-aware routine loading (§6 items 1–2; Unit R1 under
   ORB-10246): committed definitions fail closed without a non-empty host pin,
   `.orbit/routines/local/` definitions are implicit to the loading host and reject

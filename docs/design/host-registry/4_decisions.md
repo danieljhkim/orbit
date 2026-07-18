@@ -10,7 +10,7 @@ summary: Accepted ADR log for the coupled Host Registry and MCP Bridge v1 contra
 tags: [host-registry, mcp-bridge, multi-host, placement]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10258, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10258, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Decisions
@@ -45,7 +45,7 @@ logical workspace/owner separately from machine-local checkout bindings.
 
 ## ADR-0227 — Stable machine identity, registry, and out-of-band hub pin
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze the host identity boundary.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze the host identity boundary; [ORB-10255] implemented the durable registry core.
 
 ### Context
 
@@ -60,6 +60,9 @@ and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
 ### Consequences
 
 - Names resolve at binding time and persisted records retain stable identity.
+- Current and historical names remain reserved across active and retired lifecycle
+  states; explicit rename appends a permanent alias and registration cannot rename
+  or reactivate.
 - Cost: bootstrap transfers hub identity out of band, and registry/trust drift needs explicit diagnosis.
 
 ## ADR-0228 — Local placement broker with capability-set filtering
@@ -165,6 +168,9 @@ for its non-Orbit constellation domains.
 - [ORB-10245] — accepted the coupled contract and recorded this ADR set.
 - [ORB-10248] — implemented the versioned logical-workspace/local-checkout split.
 - [ORB-10249] — implemented path-free task coordination and global task-relation/readiness lookup.
+- [ORB-10255] — implemented ADR-0227's append-only SQLite host/alias core with
+  compatible idempotent registration, permanent rename history, typed resolution,
+  and non-deleting retirement.
 - [ORB-10258] — implemented the enforcement half of ADR-0231 (Unit R1 of ORB-10246):
   origin-aware routine loading. Committed definitions fail closed without a non-empty host
   pin; `.orbit/routines/local/` definitions are implicit to the loading host and may not
