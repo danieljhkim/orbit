@@ -21,7 +21,8 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value as JsonValue, json};
 
 const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
-const DEFAULT_WORKFLOW_CREW: &str = "claude";
+const DEFAULT_WORKFLOW_CREW: &str = "opus";
+const LEGACY_DEFAULT_WORKFLOW_CREW: &str = "claude";
 const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,7 +242,7 @@ fn default_admission_crews() -> BTreeMap<String, Crew> {
             name: DEFAULT_WORKFLOW_CREW.to_string(),
             assignment: CrewRoleAssignment {
                 model: String::new(),
-                provider: DEFAULT_WORKFLOW_CREW.to_string(),
+                provider: "claude".to_string(),
                 backend: String::new(),
             },
             description: None,
@@ -425,16 +426,21 @@ pub(super) fn resolve_default_crew(
     let selected = if let Some(configured) = configured.filter(|value| !value.trim().is_empty()) {
         Some(configured)
     } else if let Some(raw_env) = env_default.filter(|value| !value.trim().is_empty()) {
-        Some(
-            Provider::parse(raw_env)
-                .map_err(|error| {
-                    OrbitError::InvalidInput(format!(
-                        "{CONSTELLATION_DEFAULT_PROVIDER_ENV} has invalid value: {error}"
-                    ))
-                })?
-                .as_str()
-                .to_string(),
-        )
+        let provider = Provider::parse(raw_env).map_err(|error| {
+            OrbitError::InvalidInput(format!(
+                "{CONSTELLATION_DEFAULT_PROVIDER_ENV} has invalid value: {error}"
+            ))
+        })?;
+        let preferred = match provider.as_str() {
+            "claude" => "opus",
+            "codex" => "sol",
+            provider => provider,
+        };
+        Some(if crews.contains_key(preferred) {
+            preferred.to_string()
+        } else {
+            provider.as_str().to_string()
+        })
     } else {
         None
     };
@@ -444,6 +450,9 @@ pub(super) fn resolve_default_crew(
     }
     if crews.contains_key(DEFAULT_WORKFLOW_CREW) {
         return Ok(Some(DEFAULT_WORKFLOW_CREW.to_string()));
+    }
+    if crews.contains_key(LEGACY_DEFAULT_WORKFLOW_CREW) {
+        return Ok(Some(LEGACY_DEFAULT_WORKFLOW_CREW.to_string()));
     }
     if crews.is_empty() {
         return Ok(None);

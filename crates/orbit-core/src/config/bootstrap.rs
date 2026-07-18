@@ -44,7 +44,15 @@ fn render_seeded_config(
     }
 
     // ADR-0193: freeze agent detection at init; runtime config loading never probes PATH/env.
-    body.push_str(&render_workflow_default_crew(detected, role_settings));
+    let workflow_default = render_workflow_default_crew(detected, role_settings);
+    if !workflow_default.is_empty() {
+        // L-0100: generated TOML keys must be inserted inside their intended table.
+        let marker = "[workflow]\n";
+        let insertion = body.find(marker).ok_or_else(|| {
+            OrbitError::InvalidInput("default config template is missing [workflow]".to_string())
+        })? + marker.len();
+        body.insert_str(insertion, &workflow_default);
+    }
     body.push('\n');
     body.push_str(&render_crews(detected, role_settings)?);
     body.push_str(&render_duel(detected)?);
@@ -56,19 +64,21 @@ fn render_workflow_default_crew(
     role_settings: Option<&BTreeMap<String, RawAgentRoleConfig>>,
 ) -> String {
     let default_crew = if role_settings.is_some() {
-        "custom"
+        Some("custom")
     } else {
         default_crew_name(detected)
     };
-    format!("default_crew = \"{default_crew}\"\n")
+    default_crew.map_or_else(String::new, |name| format!("default_crew = \"{name}\"\n"))
 }
 
 fn render_crews(
     detected: &DetectedAgents,
     role_settings: Option<&BTreeMap<String, RawAgentRoleConfig>>,
 ) -> Result<String, OrbitError> {
+    let available_families = available_crew_families(detected);
     let mut crews: BTreeMap<String, RawCrewEntry> = default_crews()
         .into_iter()
+        .filter(|(_, crew)| available_families.contains(&crew.assignment.provider.as_str()))
         .map(|(name, crew)| {
             (
                 name,
@@ -107,55 +117,50 @@ fn render_crews(
         );
     }
 
-    let qa = role_settings
+    if let Some(qa) = role_settings
         .and_then(|roles| roles.get("qa").cloned())
-        .unwrap_or_else(|| default_qa_crew(detected));
-    crews.insert(
-        "qa".to_string(),
-        RawCrewEntry {
-            provider: qa.provider,
-            model: qa.model,
-            backend: qa.backend,
-            description: None,
-            tags: Vec::new(),
-            planner: None,
-            implementer: None,
-            reviewer: None,
-        },
-    );
+        .or_else(|| default_qa_crew(detected))
+    {
+        crews.insert(
+            "qa".to_string(),
+            RawCrewEntry {
+                provider: qa.provider,
+                model: qa.model,
+                backend: qa.backend,
+                description: None,
+                tags: Vec::new(),
+                planner: None,
+                implementer: None,
+                reviewer: None,
+            },
+        );
+    }
 
     let mut rendered = String::new();
     for (name, entry) in crews {
         rendered.push_str(&render_crew_table(&name, &entry)?);
     }
+    if rendered.is_empty() {
+        // Preserve an explicitly empty registry so runtime loading does not
+        // substitute built-in crews for a host where init detected none.
+        rendered.push_str("[crews]\n");
+    }
     Ok(rendered)
 }
 
-fn default_qa_crew(detected: &DetectedAgents) -> RawAgentRoleConfig {
-    let (provider, backend, model) = if detected.codex_cli || detected.openai_api_key {
-        (
-            "codex",
-            super::agent_detect::default_backend("codex", detected),
-            orbit_common::model_defaults::CODEX_DEFAULT_MODEL,
-        )
-    } else if detected.claude_cli || detected.anthropic_api_key {
-        (
-            "claude",
-            super::agent_detect::default_backend("claude", detected),
-            orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK,
-        )
+fn default_qa_crew(detected: &DetectedAgents) -> Option<RawAgentRoleConfig> {
+    let (provider, model) = if detected.codex_cli {
+        ("codex", orbit_common::model_defaults::CODEX_DEFAULT_MODEL)
+    } else if detected.claude_cli {
+        ("claude", orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK)
     } else {
-        (
-            "codex",
-            "cli",
-            orbit_common::model_defaults::CODEX_DEFAULT_MODEL,
-        )
+        return None;
     };
-    RawAgentRoleConfig {
+    Some(RawAgentRoleConfig {
         provider: Some(provider.to_string()),
-        backend: Some(backend.to_string()),
+        backend: Some("cli".to_string()),
         model: Some(model.to_string()),
-    }
+    })
 }
 
 fn render_crew_table(name: &str, entry: &RawCrewEntry) -> Result<String, OrbitError> {

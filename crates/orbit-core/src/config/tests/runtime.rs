@@ -22,6 +22,37 @@ fn single_family_crew(name: &str) -> Crew {
     }
 }
 
+#[test]
+fn built_in_crews_use_standard_model_specific_names() {
+    let crews = default_crews();
+    assert_eq!(
+        crews.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec![
+            "fable", "gemini", "grok", "luna", "opus", "sol", "sonnet", "terra"
+        ]
+    );
+    for (name, provider, model) in [
+        ("opus", "claude", "opus"),
+        ("sonnet", "claude", "sonnet"),
+        ("fable", "claude", "fable"),
+        ("sol", "codex", "gpt-5.6-sol"),
+        ("terra", "codex", "gpt-5.6-terra"),
+        ("luna", "codex", "gpt-5.6-luna"),
+        ("gemini", "gemini", "pro"),
+        ("grok", "grok", "grok-build"),
+    ] {
+        let assignment = &crews.get(name).expect("built-in crew").assignment;
+        assert_eq!(assignment.provider, provider);
+        assert_eq!(assignment.model, model);
+        assert_eq!(assignment.backend, "cli");
+    }
+    assert!(!crews.contains_key("claude"));
+    assert!(!crews.contains_key("codex"));
+
+    let config = RuntimeConfig::default_for_data_root(Path::new(".orbit"));
+    assert_eq!(config.default_crew.as_deref(), Some("opus"));
+}
+
 fn load_config(body: &str) -> Result<RuntimeConfig, OrbitError> {
     let global = tempdir().expect("global tempdir");
     let workspace = tempdir().expect("workspace tempdir");
@@ -392,7 +423,8 @@ fn workflow_default_crew_no_crews_defined_is_noop() {
 fn workflow_default_crew_uses_environment_then_claude_system_default() {
     use super::super::registry::resolve_default_crew;
     let crews = BTreeMap::from([
-        ("claude".to_string(), single_family_crew("claude")),
+        ("opus".to_string(), single_family_crew("claude")),
+        ("sol".to_string(), single_family_crew("codex")),
         ("gemini".to_string(), single_family_crew("gemini")),
     ]);
 
@@ -400,9 +432,13 @@ fn workflow_default_crew_uses_environment_then_claude_system_default() {
         .expect("deprecated environment alias resolves");
     assert_eq!(env.as_deref(), Some("gemini"));
 
+    let codex = resolve_default_crew(None, &crews, Some("codex"))
+        .expect("provider environment maps to standard crew");
+    assert_eq!(codex.as_deref(), Some("sol"));
+
     let system =
         resolve_default_crew(None, &crews, None).expect("canonical system default resolves");
-    assert_eq!(system.as_deref(), Some("claude"));
+    assert_eq!(system.as_deref(), Some("opus"));
 
     let error = resolve_default_crew(None, &crews, Some("bogus"))
         .expect_err("selected invalid environment value must not fall back");

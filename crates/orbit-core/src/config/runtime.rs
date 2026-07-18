@@ -3,7 +3,8 @@ use std::fs;
 use std::path::Path;
 
 use orbit_common::model_defaults::{
-    CLAUDE_DEFAULT_WEAK, CODEX_DEFAULT_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
+    CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK, CLAUDE_FABLE_MODEL, CODEX_LUNA_MODEL,
+    CODEX_SOL_MODEL, CODEX_TERRA_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
 };
 use orbit_common::types::{Crew, CrewRoleAssignment, OrbitError, all_agent_families};
 use orbit_common::utility::redaction::redact_home_dir;
@@ -251,42 +252,26 @@ impl RuntimeConfig {
 
 pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
     let mut crews = BTreeMap::new();
-    crews.insert(
-        "claude".to_string(),
-        Crew {
-            name: "claude".to_string(),
-            assignment: crew_role(CLAUDE_DEFAULT_WEAK, "claude", "cli"),
-            description: None,
-            tags: Vec::new(),
-        },
-    );
-    crews.insert(
-        "codex".to_string(),
-        Crew {
-            name: "codex".to_string(),
-            assignment: crew_role(CODEX_DEFAULT_MODEL, "codex", "cli"),
-            description: None,
-            tags: Vec::new(),
-        },
-    );
-    crews.insert(
-        "gemini".to_string(),
-        Crew {
-            name: "gemini".to_string(),
-            assignment: crew_role(GEMINI_CREW_MODEL, "gemini", "cli"),
-            description: None,
-            tags: Vec::new(),
-        },
-    );
-    crews.insert(
-        "grok".to_string(),
-        Crew {
-            name: "grok".to_string(),
-            assignment: crew_role(GROK_DEFAULT_MODEL, "grok", "cli"),
-            description: None,
-            tags: Vec::new(),
-        },
-    );
+    for (name, model, provider) in [
+        ("opus", CLAUDE_DEFAULT_STRONG, "claude"),
+        ("sonnet", CLAUDE_DEFAULT_WEAK, "claude"),
+        ("fable", CLAUDE_FABLE_MODEL, "claude"),
+        ("sol", CODEX_SOL_MODEL, "codex"),
+        ("terra", CODEX_TERRA_MODEL, "codex"),
+        ("luna", CODEX_LUNA_MODEL, "codex"),
+        ("gemini", GEMINI_CREW_MODEL, "gemini"),
+        ("grok", GROK_DEFAULT_MODEL, "grok"),
+    ] {
+        crews.insert(
+            name.to_string(),
+            Crew {
+                name: name.to_string(),
+                assignment: crew_role(model, provider, "cli"),
+                description: None,
+                tags: Vec::new(),
+            },
+        );
+    }
     crews
 }
 
@@ -334,11 +319,6 @@ fn crews_from_raw(
                 "[crews] contains duplicate name '{trimmed}' after whitespace normalization"
             )));
         }
-    }
-    if crews.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "[crews] must define at least one crew".to_string(),
-        ));
     }
     Ok(crews)
 }

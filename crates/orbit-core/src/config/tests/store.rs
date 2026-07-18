@@ -123,7 +123,7 @@ fn set_validate_and_save_round_trips() {
 fn set_preserves_comments_and_unrelated_formatting() {
     let dir = tempdir().expect("tempdir");
     let path = config_path(dir.path());
-    let original = "# top comment\n[workflow]\n# base branch comment\nbase_branch = \"main\"\ndefault_crew = \"codex\" # inline comment\n";
+    let original = "# top comment\n[workflow]\n# base branch comment\nbase_branch = \"main\"\ndefault_crew = \"sol\" # inline comment\n";
     fs::write(&path, original).expect("write config");
 
     let mut store = ConfigStore::open(ConfigScope::Workspace, &path).expect("open store");
@@ -137,7 +137,7 @@ fn set_preserves_comments_and_unrelated_formatting() {
     assert!(saved.contains("# top comment"), "saved:\n{saved}");
     assert!(saved.contains("# base branch comment"), "saved:\n{saved}");
     assert!(
-        saved.contains("default_crew = \"codex\" # inline comment"),
+        saved.contains("default_crew = \"sol\" # inline comment"),
         "saved:\n{saved}"
     );
     assert!(

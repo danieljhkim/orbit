@@ -224,7 +224,9 @@ pub(crate) fn collect_role_settings_for_init(
         .map_err(|err| OrbitError::Io(format!("agent prompts failed: {err}")))?;
     let qa = collect_qa_crew_setting(detected, &mut prompter)
         .map_err(|err| OrbitError::Io(format!("QA crew prompt failed: {err}")))?;
-    collected.insert("qa".to_string(), qa);
+    if let Some(qa) = qa {
+        collected.insert("qa".to_string(), qa);
+    }
     Ok(Some(collected))
 }
 

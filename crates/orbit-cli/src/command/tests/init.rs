@@ -124,20 +124,65 @@ fn non_interactive_init_isolates_temporary_root_skill_discovery() {
             "unexpected uncommented agent section: {line}",
         );
     }
-    assert!(contents.contains("[crews.claude]"));
-    assert!(contents.contains("[crews.codex]"));
-    assert!(contents.contains("[crews.gemini]"));
-    assert!(contents.contains("[crews.grok]"));
-    assert!(contents.contains("[crews.qa]"));
     let config = toml::from_str::<toml::Value>(&contents).expect("seeded config parses");
-    let codex = config
-        .get("crews")
-        .and_then(|crews| crews.get("codex"))
-        .expect("codex crew is seeded");
+    let crews = config.get("crews").and_then(toml::Value::as_table);
+    let expected = [
+        ("opus", "claude", "opus"),
+        ("sonnet", "claude", "sonnet"),
+        ("fable", "claude", "fable"),
+        ("sol", "codex", "gpt-5.6-sol"),
+        ("terra", "codex", "gpt-5.6-terra"),
+        ("luna", "codex", "gpt-5.6-luna"),
+        ("gemini", "gemini", "pro"),
+        ("grok", "grok", "grok-build"),
+        ("qa", "", ""),
+    ];
+    if let Some(crews) = crews {
+        assert!(!crews.contains_key("claude"));
+        assert!(!crews.contains_key("codex"));
+        for (name, crew) in crews {
+            let (_, provider, model) = expected
+                .iter()
+                .find(|(expected_name, _, _)| expected_name == name)
+                .unwrap_or_else(|| panic!("unexpected seeded crew {name}"));
+            assert_eq!(
+                crew.get("backend").and_then(toml::Value::as_str),
+                Some("cli"),
+            );
+            if name == "qa" {
+                let (provider, model) = if crews.contains_key("sol") {
+                    ("codex", "gpt-5.6-terra")
+                } else {
+                    ("claude", "sonnet")
+                };
+                assert_eq!(
+                    crew.get("provider").and_then(toml::Value::as_str),
+                    Some(provider),
+                );
+                assert_eq!(crew.get("model").and_then(toml::Value::as_str), Some(model),);
+            } else {
+                assert_eq!(
+                    crew.get("provider").and_then(toml::Value::as_str),
+                    Some(*provider),
+                );
+                assert_eq!(
+                    crew.get("model").and_then(toml::Value::as_str),
+                    Some(*model),
+                );
+            }
+        }
+    }
+    let default_crew = config
+        .get("workflow")
+        .and_then(|workflow| workflow.get("default_crew"))
+        .and_then(toml::Value::as_str);
     assert_eq!(
-        codex.get("model").and_then(toml::Value::as_str),
-        Some("gpt-5.6-terra"),
+        default_crew.is_some(),
+        crews.is_some_and(|crews| !crews.is_empty()),
     );
+    if let Some(default_crew) = default_crew {
+        assert!(crews.is_some_and(|crews| crews.contains_key(default_crew)));
+    }
     drop(validation_root);
     drop(validation_home);
     assert_discovery_sentinel(&agents_link, &agents_target);
