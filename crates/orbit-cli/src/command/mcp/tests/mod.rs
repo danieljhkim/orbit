@@ -409,7 +409,7 @@ mod audited_mcp_call_tests {
     };
     use orbit_common::types::{
         AuditEventStatus, LearningInjectionCaps, LearningInjectionState, LearningReminder,
-        LearningScope, ToolSessionContext,
+        LearningScope, McpCapability, McpTransport, ToolSessionContext,
     };
     use orbit_core::LearningEvidence;
     use orbit_core::{LearningCreateParams, OrbitError, OrbitRuntime};
@@ -430,6 +430,12 @@ mod audited_mcp_call_tests {
 
     #[test]
     fn preflight_failure_for_unknown_tool_records_failure_audit_row() {
+        let _guard = EnvGuard::set(&[
+            ("ORBIT_AGENT_NAME", None),
+            ("ORBIT_AGENT_MODEL", None),
+            ("ORBIT_MANAGED_RUN_CONTEXT", None),
+            ("ORBIT_RUN_ID", None),
+        ]);
         let runtime = OrbitRuntime::in_memory().expect("build test runtime");
         // The runtime is the source of truth for the audit store; the
         // wrapper writes to the same backing store the MCP host shares.
@@ -447,7 +453,15 @@ mod audited_mcp_call_tests {
         assert_eq!(row.command, "tool");
         assert_eq!(row.subcommand.as_deref(), Some("run-mcp"));
         assert_eq!(row.tool_name.as_deref(), Some("orbit.state.get"));
-        assert_eq!(row.status, AuditEventStatus::Failure);
+        assert_eq!(row.status, AuditEventStatus::Denied);
+        assert_eq!(row.role, "unverified");
+        assert_eq!(row.transport, Some(McpTransport::Local));
+        assert_eq!(
+            row.effective_capabilities,
+            [McpCapability::Agent].into_iter().collect()
+        );
+        assert!(row.origin_session_id.is_some());
+        assert!(row.mcp_call_id.is_some());
         assert_eq!(row.exit_code, 1);
         assert!(row.error_message.is_some());
         assert!(
@@ -459,6 +473,12 @@ mod audited_mcp_call_tests {
 
     #[test]
     fn happy_path_dispatch_records_one_audit_row_via_runtime() {
+        let _guard = EnvGuard::set(&[
+            ("ORBIT_AGENT_NAME", None),
+            ("ORBIT_AGENT_MODEL", None),
+            ("ORBIT_MANAGED_RUN_CONTEXT", None),
+            ("ORBIT_RUN_ID", None),
+        ]);
         // ORB-00202: migrated from deleted `orbit.task.search` to
         // `orbit.search`, the unified replacement.
         let runtime = OrbitRuntime::in_memory().expect("build test runtime");
@@ -483,6 +503,9 @@ mod audited_mcp_call_tests {
         assert_eq!(events.len(), 1, "exactly one audit row for happy path");
         assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));
         assert_eq!(events[0].status, AuditEventStatus::Success);
+        assert_eq!(events[0].role, "unverified");
+        assert_eq!(events[0].transport, Some(McpTransport::Local));
+        assert!(events[0].mcp_call_id.is_some());
     }
 
     #[test]
@@ -503,10 +526,17 @@ mod audited_mcp_call_tests {
                 assert_eq!(input["query"], "dispatch");
                 Ok(json!({ "matches": [] }))
             };
+        let mut success_context = ToolSessionContext::trusted_local(
+            Some("ws_orbit".to_string()),
+            Some("hm_local".to_string()),
+            Some("local-host".to_string()),
+        );
+        success_context.origin_session_id = Some("mcp-session-graph".to_string());
+        success_context.mcp_call_id = Some("mcall-graph-success".to_string());
         host.call_in_process_tool(
             "orbit.graph.search",
             json!({ "query": "dispatch", "model": "codex" }),
-            Default::default(),
+            success_context,
             &mut success_dispatch,
         )
         .expect("allowlisted graph call succeeds");
@@ -515,10 +545,17 @@ mod audited_mcp_call_tests {
             |_input: serde_json::Value, _session_context: ToolSessionContext| {
                 Err(OrbitError::InvalidInput("invalid selector".to_string()))
             };
+        let mut failure_context = ToolSessionContext::trusted_local(
+            Some("ws_orbit".to_string()),
+            Some("hm_local".to_string()),
+            Some("local-host".to_string()),
+        );
+        failure_context.origin_session_id = Some("mcp-session-graph".to_string());
+        failure_context.mcp_call_id = Some("mcall-graph-failure".to_string());
         host.call_in_process_tool(
             "orbit.graph.show",
             json!({ "selector": "invalid", "model": "codex" }),
-            Default::default(),
+            failure_context,
             &mut failure_dispatch,
         )
         .expect_err("graph implementation failure propagates");
@@ -534,9 +571,17 @@ mod audited_mcp_call_tests {
             let row = &events[0];
             assert_eq!(row.subcommand.as_deref(), Some("run-mcp"));
             assert_eq!(row.tool_name.as_deref(), Some(name));
-            assert_eq!(row.role, "codex");
+            assert_eq!(row.role, "unverified");
             assert_eq!(row.status, expected_status);
             assert!(row.duration_ms >= 1);
+            assert_eq!(row.workspace_id.as_deref(), Some("ws_orbit"));
+            assert_eq!(row.caller_machine_id.as_deref(), Some("hm_local"));
+            assert_eq!(row.process_machine_id.as_deref(), Some("hm_local"));
+            assert_eq!(row.transport, Some(McpTransport::Local));
+            assert_eq!(row.origin_session_id.as_deref(), Some("mcp-session-graph"));
+            assert!(row.mcp_call_id.as_deref().is_some_and(|call_id| {
+                call_id == "mcall-graph-success" || call_id == "mcall-graph-failure"
+            }));
         }
     }
 
@@ -568,7 +613,7 @@ mod audited_mcp_call_tests {
             .expect("list graph preflight audit event");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));
-        assert_eq!(events[0].status, AuditEventStatus::Failure);
+        assert_eq!(events[0].status, AuditEventStatus::Denied);
     }
 
     #[test]
@@ -692,7 +737,7 @@ mod audited_mcp_call_tests {
             .expect("list audit events");
         assert_eq!(events.len(), 1, "preflight failure produced one audit row");
         assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));
-        assert_eq!(events[0].status, AuditEventStatus::Failure);
+        assert_eq!(events[0].status, AuditEventStatus::Denied);
     }
 
     #[test]

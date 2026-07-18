@@ -5,8 +5,10 @@
 //! leftover from pre-two-root binaries, not a mirror of the canonical global
 //! `~/.orbit/orbit.db`. The CLI and runtime always use the global store.
 
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, Utc};
-use orbit_common::types::{AuditEvent, AuditEventStatus, OrbitError};
+use orbit_common::types::{AuditEvent, AuditEventStatus, McpCapability, McpTransport, OrbitError};
 use rusqlite::params;
 
 use crate::{Store, now_string, parse_timestamp};
@@ -31,6 +33,16 @@ pub struct AuditEventInsertParams {
     pub host: Option<String>,
     pub pid: u32,
     pub session_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub caller_machine_id: Option<String>,
+    pub caller_host_id: Option<String>,
+    pub process_machine_id: Option<String>,
+    pub process_host_id: Option<String>,
+    pub transport: Option<McpTransport>,
+    pub effective_capabilities: BTreeSet<McpCapability>,
+    pub origin_session_id: Option<String>,
+    pub mcp_call_id: Option<String>,
+    pub lease_id: Option<String>,
     pub task_id: Option<String>,
     pub job_run_id: Option<String>,
     pub activity_id: Option<String>,
@@ -44,6 +56,15 @@ pub struct AuditEventFilter {
     pub target_type: Option<String>,
     pub status: Option<AuditEventStatus>,
     pub role: Option<String>,
+    pub workspace_id: Option<String>,
+    pub caller_machine_id: Option<String>,
+    pub process_machine_id: Option<String>,
+    pub transport: Option<McpTransport>,
+    pub capability: Option<McpCapability>,
+    pub origin_session_id: Option<String>,
+    pub mcp_call_id: Option<String>,
+    pub job_run_id: Option<String>,
+    pub lease_id: Option<String>,
     pub limit: usize,
 }
 
@@ -102,6 +123,82 @@ pub struct AuditRoleAggregate {
     pub cli: i64,
 }
 
+fn audit_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEvent> {
+    let ts_raw: String = row.get(2)?;
+    let status_raw: String = row.get(9)?;
+    let timestamp = parse_timestamp(&ts_raw)?;
+    let status = status_raw
+        .parse::<AuditEventStatus>()
+        .map_err(|error| invalid_text(9, &status_raw, error))?;
+    let transport_raw: Option<String> = row.get(25)?;
+    let transport = transport_raw
+        .as_deref()
+        .map(str::parse::<McpTransport>)
+        .transpose()
+        .map_err(|error| invalid_text(25, transport_raw.as_deref().unwrap_or_default(), error))?;
+    let capabilities_raw: Option<String> = row.get(26)?;
+    let effective_capabilities = capabilities_raw
+        .as_deref()
+        .map(serde_json::from_str::<BTreeSet<McpCapability>>)
+        .transpose()
+        .map_err(|error| {
+            invalid_text(
+                26,
+                capabilities_raw.as_deref().unwrap_or_default(),
+                error.to_string(),
+            )
+        })?
+        .unwrap_or_default();
+
+    Ok(AuditEvent {
+        id: row.get(0)?,
+        execution_id: row.get(1)?,
+        timestamp,
+        command: row.get(3)?,
+        subcommand: row.get(4)?,
+        tool_name: row.get(5)?,
+        target_type: row.get(6)?,
+        target_id: row.get(7)?,
+        role: row.get(8)?,
+        status,
+        exit_code: row.get(10)?,
+        duration_ms: row.get(11)?,
+        working_directory: row.get(12)?,
+        arguments_json: row.get(13)?,
+        stdout_truncated: row.get(14)?,
+        stderr_truncated: row.get(15)?,
+        error_message: row.get(16)?,
+        host: row.get(17)?,
+        pid: row.get(18)?,
+        session_id: row.get(19)?,
+        workspace_id: row.get(20)?,
+        caller_machine_id: row.get(21)?,
+        caller_host_id: row.get(22)?,
+        process_machine_id: row.get(23)?,
+        process_host_id: row.get(24)?,
+        transport,
+        effective_capabilities,
+        origin_session_id: row.get(27)?,
+        mcp_call_id: row.get(28)?,
+        lease_id: row.get(29)?,
+        task_id: row.get(30)?,
+        job_run_id: row.get(31)?,
+        activity_id: row.get(32)?,
+        step_index: row.get(33)?,
+    })
+}
+
+fn invalid_text(index: usize, raw: &str, error: impl Into<String>) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        index,
+        rusqlite::types::Type::Text,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{} ({raw})", error.into()),
+        )),
+    )
+}
+
 impl Store {
     pub fn insert_audit_event_record(
         &self,
@@ -112,15 +209,20 @@ impl Store {
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
 
+        let capabilities_json = serde_json::to_string(&params.effective_capabilities)
+            .map_err(|error| OrbitError::Store(format!("serialize MCP capability set: {error}")))?;
+
         conn.execute(
             r#"INSERT INTO audit_events(
                 execution_id, timestamp, command, subcommand, tool_name,
                 target_type, target_id, role, status, exit_code,
                 duration_ms, working_directory, arguments_json,
                 stdout_truncated, stderr_truncated, error_message,
-                host, pid, session_id, task_id, job_run_id, activity_id,
-                step_index
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)"#,
+                host, pid, session_id, workspace_id, caller_machine_id,
+                caller_host_id, process_machine_id, process_host_id, transport,
+                capabilities_json, origin_session_id, mcp_call_id, lease_id,
+                task_id, job_run_id, activity_id, step_index
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)"#,
             rusqlite::params![
                 params.execution_id,
                 now_string(),
@@ -141,6 +243,16 @@ impl Store {
                 params.host,
                 params.pid,
                 params.session_id,
+                params.workspace_id,
+                params.caller_machine_id,
+                params.caller_host_id,
+                params.process_machine_id,
+                params.process_host_id,
+                params.transport.map(|transport| transport.to_string()),
+                capabilities_json,
+                params.origin_session_id,
+                params.mcp_call_id,
+                params.lease_id,
                 params.task_id,
                 params.job_run_id,
                 params.activity_id,
@@ -181,6 +293,46 @@ impl Store {
             conditions.push(format!("role = ?{}", param_values.len() + 1));
             param_values.push(Box::new(role.clone()));
         }
+        if let Some(ref workspace_id) = filter.workspace_id {
+            conditions.push(format!("workspace_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(workspace_id.clone()));
+        }
+        if let Some(ref machine_id) = filter.caller_machine_id {
+            conditions.push(format!("caller_machine_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(machine_id.clone()));
+        }
+        if let Some(ref machine_id) = filter.process_machine_id {
+            conditions.push(format!("process_machine_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(machine_id.clone()));
+        }
+        if let Some(transport) = filter.transport {
+            conditions.push(format!("transport = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(transport.to_string()));
+        }
+        if let Some(capability) = filter.capability {
+            conditions.push(format!(
+                "EXISTS (SELECT 1 FROM json_each(COALESCE(capabilities_json, '[]')) \
+                 WHERE json_each.value = ?{})",
+                param_values.len() + 1
+            ));
+            param_values.push(Box::new(capability.to_string()));
+        }
+        if let Some(ref origin_session_id) = filter.origin_session_id {
+            conditions.push(format!("origin_session_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(origin_session_id.clone()));
+        }
+        if let Some(ref mcp_call_id) = filter.mcp_call_id {
+            conditions.push(format!("mcp_call_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(mcp_call_id.clone()));
+        }
+        if let Some(ref job_run_id) = filter.job_run_id {
+            conditions.push(format!("job_run_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(job_run_id.clone()));
+        }
+        if let Some(ref lease_id) = filter.lease_id {
+            conditions.push(format!("lease_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(lease_id.clone()));
+        }
 
         let where_clause = if conditions.is_empty() {
             String::new()
@@ -198,8 +350,10 @@ impl Store {
             "SELECT id, execution_id, timestamp, command, subcommand, tool_name, \
              target_type, target_id, role, status, exit_code, duration_ms, \
              working_directory, arguments_json, stdout_truncated, stderr_truncated, \
-             error_message, host, pid, session_id, task_id, job_run_id, activity_id, \
-             step_index \
+             error_message, host, pid, session_id, workspace_id, caller_machine_id, \
+             caller_host_id, process_machine_id, process_host_id, transport, \
+             capabilities_json, origin_session_id, mcp_call_id, lease_id, task_id, \
+             job_run_id, activity_id, step_index \
              FROM audit_events {where_clause} ORDER BY id DESC LIMIT ?{}",
             param_values.len() + 1
         );
@@ -214,46 +368,7 @@ impl Store {
             param_values.iter().map(|b| b.as_ref()).collect();
 
         let rows = stmt
-            .query_map(param_refs.as_slice(), |row| {
-                let ts_raw: String = row.get(2)?;
-                let status_raw: String = row.get(9)?;
-
-                let timestamp = parse_timestamp(&ts_raw)?;
-                let status: AuditEventStatus = status_raw.parse().map_err(|e: String| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        status_raw.len(),
-                        rusqlite::types::Type::Text,
-                        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
-                    )
-                })?;
-
-                Ok(AuditEvent {
-                    id: row.get(0)?,
-                    execution_id: row.get(1)?,
-                    timestamp,
-                    command: row.get(3)?,
-                    subcommand: row.get(4)?,
-                    tool_name: row.get(5)?,
-                    target_type: row.get(6)?,
-                    target_id: row.get(7)?,
-                    role: row.get(8)?,
-                    status,
-                    exit_code: row.get(10)?,
-                    duration_ms: row.get(11)?,
-                    working_directory: row.get(12)?,
-                    arguments_json: row.get(13)?,
-                    stdout_truncated: row.get(14)?,
-                    stderr_truncated: row.get(15)?,
-                    error_message: row.get(16)?,
-                    host: row.get(17)?,
-                    pid: row.get(18)?,
-                    session_id: row.get(19)?,
-                    task_id: row.get(20)?,
-                    job_run_id: row.get(21)?,
-                    activity_id: row.get(22)?,
-                    step_index: row.get(23)?,
-                })
-            })
+            .query_map(param_refs.as_slice(), audit_event_from_row)
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         rows.collect::<Result<Vec<_>, _>>()
@@ -268,53 +383,16 @@ impl Store {
                 "SELECT id, execution_id, timestamp, command, subcommand, tool_name, \
                  target_type, target_id, role, status, exit_code, duration_ms, \
                  working_directory, arguments_json, stdout_truncated, stderr_truncated, \
-                 error_message, host, pid, session_id, task_id, job_run_id, activity_id, \
-                 step_index \
+                 error_message, host, pid, session_id, workspace_id, caller_machine_id, \
+                 caller_host_id, process_machine_id, process_host_id, transport, \
+                 capabilities_json, origin_session_id, mcp_call_id, lease_id, task_id, \
+                 job_run_id, activity_id, step_index \
                  FROM audit_events WHERE id = ?1",
             )
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         let result = stmt
-            .query_row(params![id], |row| {
-                let ts_raw: String = row.get(2)?;
-                let status_raw: String = row.get(9)?;
-
-                let timestamp = parse_timestamp(&ts_raw)?;
-                let status: AuditEventStatus = status_raw.parse().map_err(|e: String| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        status_raw.len(),
-                        rusqlite::types::Type::Text,
-                        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
-                    )
-                })?;
-
-                Ok(AuditEvent {
-                    id: row.get(0)?,
-                    execution_id: row.get(1)?,
-                    timestamp,
-                    command: row.get(3)?,
-                    subcommand: row.get(4)?,
-                    tool_name: row.get(5)?,
-                    target_type: row.get(6)?,
-                    target_id: row.get(7)?,
-                    role: row.get(8)?,
-                    status,
-                    exit_code: row.get(10)?,
-                    duration_ms: row.get(11)?,
-                    working_directory: row.get(12)?,
-                    arguments_json: row.get(13)?,
-                    stdout_truncated: row.get(14)?,
-                    stderr_truncated: row.get(15)?,
-                    error_message: row.get(16)?,
-                    host: row.get(17)?,
-                    pid: row.get(18)?,
-                    session_id: row.get(19)?,
-                    task_id: row.get(20)?,
-                    job_run_id: row.get(21)?,
-                    activity_id: row.get(22)?,
-                    step_index: row.get(23)?,
-                })
-            })
+            .query_row(params![id], audit_event_from_row)
             .optional()
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 

@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use orbit_common::types::{McpCapability, McpTransport};
 use orbit_core::{AuditEvent, AuditEventStatus};
 use serde_json::json;
 
@@ -29,6 +30,16 @@ fn audit_list_json_projection_shape_is_stable() {
         host: Some("host.local".to_string()),
         pid: 1234,
         session_id: Some("session-1".to_string()),
+        workspace_id: Some("ws-orbit".to_string()),
+        caller_machine_id: Some("hm-caller".to_string()),
+        caller_host_id: Some("caller.local".to_string()),
+        process_machine_id: Some("hm-process".to_string()),
+        process_host_id: Some("process.local".to_string()),
+        transport: Some(McpTransport::Local),
+        effective_capabilities: [McpCapability::Agent].into_iter().collect(),
+        origin_session_id: Some("origin-session-1".to_string()),
+        mcp_call_id: Some("mcall-1".to_string()),
+        lease_id: Some("lease-1".to_string()),
         task_id: Some("ORB-00276".to_string()),
         job_run_id: Some("jrun-1".to_string()),
         activity_id: Some("implement".to_string()),
@@ -58,6 +69,16 @@ fn audit_list_json_projection_shape_is_stable() {
             "host": "host.local",
             "pid": 1234,
             "session_id": "session-1",
+            "workspace_id": "ws-orbit",
+            "caller_machine_id": "hm-caller",
+            "caller_host_id": "caller.local",
+            "process_machine_id": "hm-process",
+            "process_host_id": "process.local",
+            "transport": "local",
+            "effective_capabilities": ["agent"],
+            "origin_session_id": "origin-session-1",
+            "mcp_call_id": "mcall-1",
+            "lease_id": "lease-1",
             "task_id": "ORB-00276",
             "job_run_id": "jrun-1",
             "activity_id": "implement",

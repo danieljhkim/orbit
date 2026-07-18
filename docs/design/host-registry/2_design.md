@@ -100,9 +100,12 @@ Per entry: `machine_id` (key), `host_id` (globally reserved across active and re
   **not** derived from existing audit rows: the audit `host` column records the
   hostname of the process executing the call, which for SSH-carried MCP is the hub
   itself. Instead, MCP session metadata (see the `mcp-session-context`
-  feature) gains caller `machine_id`/`host_id`, stamped onto audit rows as
-  *caller-host provenance* — a new field, distinct from the existing process-host
-  column.
+  feature) carries separate caller/process `machine_id` and display `host_id`
+  values, stamped onto audit rows as additive provenance. The legacy audit `host`
+  remains the executing-process hostname; neither it nor the new process fields are
+  overwritten with caller identity. External MCP JSON cannot supply these trusted
+  values. The local adapter establishes them before preflight, while an authenticated
+  managed envelope wins over caller claims ([ORB-10228]).
 - **Rename.** `orbit host rename` updates `host_id` on the entry (keyed by
   `machine_id`) and the local `host.toml`, and keeps the old name as a **tombstone
   alias** mapping to the same `machine_id`: stale human-authored references resolve

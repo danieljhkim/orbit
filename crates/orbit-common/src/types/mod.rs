@@ -159,9 +159,9 @@ pub use task_artifacts::{
 };
 pub use task_plan::{TaskPlan, TaskPlanCheckpoint, TaskPlanSuccessCriterion, parse_task_plan};
 pub use tool::{
-    ExecutionResult, McpCapability, McpCapabilityPlacementMatrix, McpToolDefinition,
-    McpToolPlacement, McpToolPolicy, McpToolPolicyError, StoredTool, ToolParam, ToolSchema,
-    ToolSessionContext, mcp_advertised_tool_name, mcp_capability_placement_matrix,
+    ExecutionResult, McpCapability, McpCapabilityPlacementMatrix, McpLeasedRun, McpToolDefinition,
+    McpToolPlacement, McpToolPolicy, McpToolPolicyError, McpTransport, StoredTool, ToolParam,
+    ToolSchema, ToolSessionContext, mcp_advertised_tool_name, mcp_capability_placement_matrix,
     validate_mcp_tool_definitions,
 };
 pub use tool_input::{

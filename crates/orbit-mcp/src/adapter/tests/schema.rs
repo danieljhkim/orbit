@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use orbit_common::types::{ToolParam, ToolSessionContext};
+use orbit_common::types::{McpCapability, McpTransport, ToolParam, ToolSessionContext};
 use rmcp::model::{ClientCapabilities, Implementation, InitializeRequestParams, Meta};
 
 use super::super::dispatch::session_context_from_initialize;
@@ -154,13 +154,33 @@ fn initialize_params_with_meta(meta: Value) -> InitializeRequestParams {
 fn initialize_meta_extracts_orbit_workspace_session_context() {
     let params = initialize_params_with_meta(json!({
         "orbit": {
-            "workspace": " /repo/main "
-        }
+            "workspace": " /repo/main ",
+            "workspace_id": "spoofed-workspace",
+            "caller_machine_id": "spoofed-caller",
+            "process_machine_id": "spoofed-process",
+            "transport": "ssh-mcp",
+            "effective_capabilities": ["operator", "runner"],
+            "origin_session_id": "spoofed-session",
+            "mcp_call_id": "spoofed-call",
+            "leased_run": {"run_id": "spoofed-run", "lease_id": "spoofed-lease"},
+            "role": "admin",
+            "model": "spoofed-model",
+            "task_id": "spoofed-task"
+        },
+        "orbit.workspace_id": "also-spoofed"
     }));
 
     let session_context = session_context_from_initialize(&params, &Meta::new());
 
     assert_eq!(session_context.workspace.as_deref(), Some("/repo/main"));
+    assert_eq!(session_context.workspace_id, None);
+    assert_eq!(session_context.caller_machine_id, None);
+    assert_eq!(session_context.process_machine_id, None);
+    assert_eq!(session_context.transport, None);
+    assert!(session_context.effective_capabilities.is_empty());
+    assert_eq!(session_context.origin_session_id, None);
+    assert_eq!(session_context.mcp_call_id, None);
+    assert_eq!(session_context.leased_run, None);
 }
 
 #[test]
@@ -205,7 +225,14 @@ fn initialize_params_meta_wins_over_transport_meta() {
 async fn mcp_session_context_reaches_tool_calls_without_workspace_input() {
     let host = Arc::new(SessionContextHost::default());
     let server = OrbitToolServer::new(host.clone());
-    server.replace_session_context(ToolSessionContext::with_workspace("/repo/main"));
+    let mut trusted_context = ToolSessionContext::trusted_local(
+        Some("ws_orbit".to_string()),
+        Some("hm_local".to_string()),
+        Some("local-host".to_string()),
+    );
+    trusted_context.workspace = Some("/repo/main".to_string());
+    trusted_context.origin_session_id = Some("mcp-session-shared".to_string());
+    server.replace_session_context(trusted_context);
 
     let explicit = server
         .call_tool_request(request_with_args(
@@ -228,6 +255,20 @@ async fn mcp_session_context_reaches_tool_calls_without_workspace_input() {
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[1].2.workspace.as_deref(), Some("/repo/main"));
     assert!(calls[1].1.get("workspace").is_none());
+    assert_eq!(calls[0].2.workspace_id.as_deref(), Some("ws_orbit"));
+    assert_eq!(calls[0].2.transport, Some(McpTransport::Local));
+    assert_eq!(
+        calls[0].2.effective_capabilities,
+        [McpCapability::Agent].into_iter().collect()
+    );
+    assert_eq!(
+        calls[0].2.origin_session_id.as_deref(),
+        Some("mcp-session-shared")
+    );
+    assert_eq!(calls[1].2.origin_session_id, calls[0].2.origin_session_id);
+    assert!(calls[0].2.mcp_call_id.is_some());
+    assert!(calls[1].2.mcp_call_id.is_some());
+    assert_ne!(calls[0].2.mcp_call_id, calls[1].2.mcp_call_id);
 }
 
 // --- ORB-00102 tests: object_list schema + loud fallback + e2e via MCP adapter ---

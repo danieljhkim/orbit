@@ -4,7 +4,7 @@ summary: Query and interpret Orbit invocation, run, step, and activity audit his
 tags: [operations, audit, observability, debugging]
 paths: ["crates/orbit-core/src/runtime/run_audit.rs", "crates/orbit-common/src/types/audit_event.rs"]
 related_features: [auditability, activity-job]
-related_artifacts: [ORB-10014]
+related_artifacts: [ORB-10014, ORB-10227, ORB-10228]
 ---
 
 # Inspect the Audit Trail
@@ -21,13 +21,19 @@ Audit events are stored in SQLite, not the JSONL process log. The global store
   record a failure row; and
 - `v2_audit_events`: the run → step → activity envelope tree, keyed by `run_id`.
 
-Audit write failures are non-fatal: the run continues and is flagged incomplete rather than
-crashing.
+Audit-write handling depends on the boundary. A CLI RAII guard that fails while unwinding
+warns without masking the command result. A tool implementation that succeeds but cannot
+persist its runtime audit row fails the tool call closed and does not surface a successful
+result ([ORB-10227]). A tool that already failed keeps its implementation error authoritative.
 
 ## Query audit events
 
 ```sh
 orbit audit list --since 1h --status failure     # recent failures
+orbit audit list --transport local --capability agent
+orbit audit list --origin-session <id> --mcp-call <id>
+orbit audit list --workspace <id> --caller-machine <id> --process-machine <id>
+orbit audit list --run <jrun-id> --lease <lease-id>
 orbit audit list --json --limit 100              # full event objects
 orbit audit show <id>
 orbit audit stats --since 7d
@@ -39,7 +45,15 @@ Per-invocation fields include `id`, `execution_id`, `timestamp`, `command`, `sub
 `tool_name`, `target_type`, `target_id`, `role`, `status` (`success|failure|denied`),
 `exit_code`, `duration_ms`, `working_directory`, `arguments_json`, `stdout_truncated`,
 `stderr_truncated`, `error_message`, `host`, `pid`, `session_id`, `task_id`, `job_run_id`,
-`activity_id`, and `step_index`.
+`activity_id`, and `step_index`. MCP rows add optional `workspace_id`, caller/process
+`machine_id` and display `host_id`, `transport`, the complete `effective_capabilities` set,
+`origin_session_id`, `mcp_call_id`, and `lease_id`.
+
+Compatibility matters when interpreting those fields: legacy `host` is always the hostname of
+the executing process, not the caller; `session_id` is unchanged; and `job_run_id` remains the
+canonical run correlation. `origin_session_id` groups MCP calls while `mcp_call_id` identifies
+one call. Standalone MCP rows have role `unverified`, local transport, and exactly the `agent`
+capability. Trusted managed-envelope identity may replace `unverified`; client JSON may not.
 
 ## Find recent failures and causes
 

@@ -1,18 +1,107 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolSessionContext {
+    /// Legacy caller-supplied workspace address. This value is deliberately
+    /// untrusted until an adapter/runtime resolves it to [`Self::workspace_id`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+    /// Stable logical workspace identity after trusted local resolution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_machine_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_host_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_machine_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_host_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<McpTransport>,
+    /// Complete effective session grants. This is a set, never a scalar
+    /// ceiling; callers authorize by membership.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub effective_capabilities: BTreeSet<McpCapability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leased_run: Option<McpLeasedRun>,
 }
 
 impl ToolSessionContext {
     pub fn with_workspace(workspace: impl Into<String>) -> Self {
         Self {
             workspace: Some(workspace.into()),
+            ..Self::default()
+        }
+    }
+
+    /// Construct the trusted defaults for the local standalone MCP adapter.
+    pub fn trusted_local(
+        workspace_id: Option<String>,
+        machine_id: Option<String>,
+        host_id: Option<String>,
+    ) -> Self {
+        Self {
+            workspace: None,
+            workspace_id,
+            caller_machine_id: machine_id.clone(),
+            caller_host_id: host_id.clone(),
+            process_machine_id: machine_id,
+            process_host_id: host_id,
+            transport: Some(McpTransport::Local),
+            effective_capabilities: BTreeSet::from([McpCapability::Agent]),
+            origin_session_id: None,
+            mcp_call_id: None,
+            leased_run: None,
+        }
+    }
+
+    pub fn has_capability(&self, capability: McpCapability) -> bool {
+        self.effective_capabilities.contains(&capability)
+    }
+}
+
+/// Correlation supplied only by a trusted runner/broker seam.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpLeasedRun {
+    pub run_id: String,
+    pub lease_id: String,
+}
+
+/// Transport that delivered an MCP call to the executing process.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum McpTransport {
+    Local,
+    SshMcp,
+}
+
+impl Display for McpTransport {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Local => "local",
+            Self::SshMcp => "ssh-mcp",
+        })
+    }
+}
+
+impl FromStr for McpTransport {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "local" => Ok(Self::Local),
+            "ssh-mcp" => Ok(Self::SshMcp),
+            other => Err(format!("unknown MCP transport: {other}")),
         }
     }
 }
@@ -50,6 +139,29 @@ pub enum McpCapability {
     Agent,
     Operator,
     Runner,
+}
+
+impl Display for McpCapability {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Agent => "agent",
+            Self::Operator => "operator",
+            Self::Runner => "runner",
+        })
+    }
+}
+
+impl FromStr for McpCapability {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "agent" => Ok(Self::Agent),
+            "operator" => Ok(Self::Operator),
+            "runner" => Ok(Self::Runner),
+            other => Err(format!("unknown MCP capability: {other}")),
+        }
+    }
 }
 
 /// Typed placement and authorization metadata for one MCP tool.

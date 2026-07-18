@@ -54,7 +54,7 @@ a conservative title/status fallback.
 | [Groundhog](./design/groundhog/1_overview.md) | Groundhog is Orbit's checkpoint-oriented execution mode for HTTP-backed coding agents. | Draft | codex |
 | [Host Registry](./design/host-registry/1_overview.md) | First-class, validated machine identity plus a main-host inventory, enabling pull-based orchestrator-selected execution placement and a strict per-record data-placement split. | Accepted | claude |
 | [Orbit MCP Bridge](./design/mcp-bridge/1_overview.md) | One canonical local Orbit MCP front door that routes coordination to a single hub, keeps owner-authored knowledge and derived indexes local, and removes Bridge's duplicated Orbit parity layer. | Accepted | codex |
-| [MCP Session Context](./design/mcp-session-context/1_overview.md) | MCP session context lets an MCP client announce the canonical Orbit workspace once during session initialization so workspace-taking tools can behave more like CLI commands without falling back to unsafe process cwd inference. | Draft | codex |
+| [MCP Session Context](./design/mcp-session-context/1_overview.md) | MCP session context is the trusted transport envelope carried from an Orbit MCP adapter or broker to tool dispatch. | Accepted | codex |
 | [Orbit Core](./design/orbit-core/1_overview.md) | Crate boundary and public-surface contract of orbit-core after the ORB-10016 orbit-cmd extraction. | Accepted | claude |
 | [Orbit Docs](./design/orbit-docs/1_overview.md) | Orbit Docs — what the human-authored docs corpus is, why it exists alongside learnings and ADRs, and how agents retrieve from it. | Draft | claude |
 | [Orbit Docs Plugin](./design/orbit-docs-plugin/1_scope.md) | Scope: extract docs + search into a plugin-style feature crate | Draft | — |

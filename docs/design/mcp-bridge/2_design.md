@@ -191,10 +191,12 @@ worktree roots never do.
 {
   "workspace": "/local/path/or/ws_id",
   "workspace_id": "ws_orbit",
-  "caller_host": {
-    "machine_id": "hm_9f2c81d4",
-    "host_id": "dk-mac"
-  },
+  "caller_machine_id": "hm_9f2c81d4",
+  "caller_host_id": "dk-mac",
+  "process_machine_id": "hm_9f2c81d4",
+  "process_host_id": "dk-mac",
+  "transport": "local",
+  "effective_capabilities": ["agent"],
   "origin_session_id": "mcp-...",
   "mcp_call_id": "mcall-...",
   "leased_run": {
@@ -204,11 +206,22 @@ worktree roots never do.
 }
 ```
 
-Only `workspace` comes from the external client's initialize metadata. The broker
-derives stable workspace/caller identity from local registries and generates the
-session/call IDs. `leased_run` is optional and is injected by the runner when it
-launches an executor's broker; it is not accepted from model-authored tool input.
-The nested hub session receives the derived context.
+Only `workspace` comes from the external client's initialize metadata and remains an
+untrusted address selector until local validation. The adapter/broker derives stable
+workspace and caller/process identity, transport, and the complete canonical sorted
+effective capability set, then generates the origin session and exactly one call ID
+per call before preflight. `leased_run` is optional and is injected by the runner
+when it launches an executor's broker; it is not accepted from model-authored tool
+input. The nested hub session receives the derived context. Capability is always a
+set authorized by membership; no scalar ceiling, ordinal, maximum, or selected
+authorizing member is valid.
+
+Standalone, un-enveloped stdio uses trusted `transport=local`, exactly `{agent}`,
+and audit role `unverified`. Caller JSON cannot supply trusted role, agent/model,
+workspace ID, identity, transport, capability, session/call/lease IDs, or
+task/run/activity/step correlation. Ambient engine provenance is ignored unless the
+existing managed-run marker authenticates the envelope, at which point that managed
+identity wins. [ORB-10228]
 
 In the v1 same-user SSH model, caller `machine_id` is provenance rather than a
 separate authorization credential: SSH authenticates the OS user and the hub
@@ -543,9 +556,14 @@ Hub-class calls record one canonical action audit on the hub with:
 
 - tool name and workspace ID;
 - process host (hub) and caller host (originating broker) machine IDs/names;
-- transport (`local` or `ssh-mcp`) and capability;
+- transport (`local` or `ssh-mcp`) and the complete effective capability set;
 - caller model provenance, origin session ID, and `mcp_call_id`; and
-- success/failure before the result crosses the hub link.
+- success/failure or preflight denial before the result crosses the hub link.
+
+The legacy audit `host`, `session_id`, and `job_run_id` retain their meanings.
+`origin_session_id` is additive, and every outcome for one call shares its one
+`mcp_call_id`. A trusted leased run fills empty `job_run_id` or must match it; only
+`lease_id` is added, never a duplicate run column.
 
 Local-derived and locally owned calls audit locally. Composite knowledge creation
 has two correlated events: hub ID allocation and owner finalize. The broker does

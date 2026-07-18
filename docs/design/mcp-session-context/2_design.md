@@ -3,19 +3,19 @@ summary: "MCP Session Context — Design"
 type: design
 title: "MCP Session Context — Design"
 owner: codex
-last_updated: 2026-05-22
-status: Draft
+last_updated: 2026-07-18
+status: Accepted
 feature: mcp-session-context
 doc_role: design
 tags: ["mcp-session-context", "mcp", "workspace"]
 paths: ["crates/orbit-mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-cli/src/command/mcp/**"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ADR-0181", "ADR-0149"]
+related_artifacts: ["ORB-00256", "ORB-10228", "ADR-0181", "ADR-0149"]
 ---
 
 # MCP Session Context — Design
 
-MCP session context is a narrow metadata channel from the MCP initialize request to Orbit built-in tools. Its first field is the canonical workspace path used by workspace-taking tools.
+MCP session context separates the caller-supplied workspace address from provenance established at a trusted Orbit adapter, broker, or managed runtime boundary.
 
 ---
 
@@ -33,13 +33,15 @@ Clients announce workspace with:
 }
 ```
 
-`orbit-mcp` also accepts the compatibility key `_meta["orbit.workspace"]`. Empty strings are ignored, so a client that does not announce workspace behaves the same as an older client.
+`orbit-mcp` also accepts the compatibility key `_meta["orbit.workspace"]`. Empty strings are ignored. All other initialize metadata is ignored for trusted purposes, including workspace ID, caller/process identity, transport, capabilities, origin/call IDs, lease, role, agent/model identity, and task/run/activity/step correlation.
 
 ## 2. Storage And Thread-Through
 
-`OrbitToolServer` stores a `ToolSessionContext` in an `RwLock` for the lifetime of the stdio session. Each `tools/call` snapshots that context and passes it to `McpHost::call_tool`.
+`OrbitToolServer` stores a `ToolSessionContext` in an `RwLock` for the lifetime of the stdio session. Each `tools/call` snapshots that context, generates exactly one unique `mcp_call_id` before name/exposure preflight, and passes the same snapshot through registry-backed or graph dispatch.
 
-The CLI `RuntimeMcpHost` forwards the context into `OrbitRuntime::execute_tool_command_dispatch_with_session_context`, which places it on `ToolContext`. Orbit built-ins read it from `ToolContext`, not from environment variables or cwd.
+The CLI `RuntimeMcpHost` forwards the context into `OrbitRuntime::execute_tool_command_dispatch_with_session_context`, which places it on `ToolContext` and audit. Unknown/unexposed denial, runtime success/failure, and graph success/failure retain the same per-call context.
+
+The trusted fields are `workspace_id`, caller/process `machine_id` and display `host_id`, `transport`, the complete sorted `effective_capabilities` set, `origin_session_id`, `mcp_call_id`, and optional typed `leased_run {run_id, lease_id}`. A standalone stdio session is always `transport=local`, has exactly `{agent}`, and audits as `role=unverified`. Ambient `ORBIT_*` identity/correlation is ignored unless `ORBIT_MANAGED_RUN_CONTEXT` authenticates the existing managed envelope.
 
 ## 3. Workspace Resolution
 
@@ -57,14 +59,21 @@ When explicit input and session context differ, Orbit logs an info-level event a
 
 This means existing explicit-workspace clients continue to work, while MCP clients with session context can call `orbit.task.add` without a `workspace` field.
 
-## 5. Concerns & Honest Limitations
+## 5. Audit compatibility
+
+Legacy audit `host` remains the executing process hostname and `session_id` retains its old meaning. Caller/process machine and display-host fields are additive. `origin_session_id` does not replace `session_id`. `job_run_id` remains the only run column: a trusted lease run populates it when empty or must match it; `lease_id` is additive. Migration v7 adds nullable columns and capability-set JSON without rewriting v1-v6 rows.
+
+The trusted context carries the entire effective capability set so later authorization and `tools/list` filtering can test membership directly. [ORB-10228] propagates and audits the set but deliberately leaves enforcement to the placement/capability broker units; no arbitrary member, ordinal, maximum, or scalar ceiling represents authority.
+
+## 6. Concerns & Honest Limitations
 
 The session context currently covers stdio sessions; future HTTP or multi-session transports must preserve the same per-session isolation rather than promoting the value to process-global state.
 
-The channel carries a workspace path, not a workspace id. That keeps it compatible with the existing task-add API, but callers still depend on the workspace's `.orbit/config.yaml` binding to select the durable `workspace_id` from [ADR-0149].
+The external channel carries a workspace address, not a trusted workspace ID. The local adapter may validate that address and separately populate `workspace_id`; explicit resolution, broker routing, and hub negotiation remain later MCP Bridge units.
 
 ## Task References
 
 - [ORB-00256] implemented the initial session context channel and workspace resolver.
+- [ORB-10228] implemented trusted provenance, anti-spoofing, capability-set propagation and audit, call correlation, and audit migration v7.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

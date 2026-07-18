@@ -65,6 +65,24 @@ pub(super) struct AuditQuery {
     pub(super) status: Option<String>,
     #[serde(default)]
     pub(super) role: Option<String>,
+    #[serde(default)]
+    pub(super) workspace_id: Option<String>,
+    #[serde(default)]
+    pub(super) caller_machine: Option<String>,
+    #[serde(default)]
+    pub(super) process_machine: Option<String>,
+    #[serde(default)]
+    pub(super) transport: Option<String>,
+    #[serde(default)]
+    pub(super) capability: Option<String>,
+    #[serde(default)]
+    pub(super) origin_session: Option<String>,
+    #[serde(default)]
+    pub(super) mcp_call: Option<String>,
+    #[serde(default)]
+    pub(super) job_run_id: Option<String>,
+    #[serde(default)]
+    pub(super) lease: Option<String>,
     /// Filters audit events by orbit invocation id. The SQLite `audit_events`
     /// schema has no `run_id` column; `run_id` here is a backward-compat alias
     /// of `execution_id` (T20260427-26). When both are supplied, `execution_id`
