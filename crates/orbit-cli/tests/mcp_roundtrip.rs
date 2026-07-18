@@ -44,6 +44,13 @@ impl McpWorkspace {
         std::fs::create_dir_all(&home).expect("create home");
         std::fs::create_dir_all(&work).expect("create work");
 
+        let output = Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(&work)
+            .output()
+            .expect("initialize Git checkout");
+        assert!(output.status.success(), "git init failed: {output:?}");
+
         let output = Self::orbit_command(&work, &home)
             .args([
                 "init",
@@ -280,8 +287,8 @@ fn mcp_serve_tools_list_matches_production_snapshot() {
         assert!(!names.contains(&hidden), "{hidden} leaked into: {names:?}");
     }
     assert!(
-        names.contains(&"orbit_friction_update"),
-        "D2 policy metadata must not narrow the current MCP surface: {names:?}"
+        !names.contains(&"orbit_friction_update"),
+        "operator-only tool leaked onto the default agent surface: {names:?}"
     );
 
     // Snapshot guard for the full production agent surface: names AND input
@@ -312,6 +319,47 @@ fn mcp_serve_tools_list_matches_production_snapshot() {
          with `ORBIT_MCP_UPDATE_SNAPSHOT=1 cargo test -p orbit-cli --test mcp_roundtrip` and \
          call the release breaking."
     );
+}
+
+#[test]
+fn mcp_serve_lists_canonical_agent_surface_outside_any_checkout() {
+    let workspace = McpWorkspace::init();
+    let scratch = workspace.home.join("scratch");
+    std::fs::create_dir_all(&scratch).expect("create non-workspace launch dir");
+    let child = McpWorkspace::orbit_command(&scratch, &workspace.home)
+        .args(["mcp", "serve"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn checkout-independent MCP server");
+    let mut client = McpClient::new(child);
+    client.request(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "outside-checkout", "version": "0" }
+        }),
+    );
+    client.notify("notifications/initialized");
+
+    let listed = client.request("tools/list", Value::Null);
+    let names = listed["result"]["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"orbit_task_show"));
+    assert!(names.contains(&"orbit_graph_search"));
+    assert!(!names.contains(&"orbit_host_list"));
+
+    let missing = client.call_tool_err("orbit_task_show", json!({ "id": "ORB-00001" }));
+    assert!(missing["message"].as_str().is_some_and(|message| {
+        message.contains("requires a workspace selector")
+            && message.contains("_meta.orbit.workspace")
+    }));
 }
 
 #[test]
@@ -347,20 +395,30 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
         items.iter().any(|task| task["id"] == json!(task_id)),
         "created task missing from list: {items:?}"
     );
+    let listed_by_stable_id = client.call_tool_ok(
+        "orbit_task_list",
+        json!({ "workspace": "ws_mcp-roundtrip" }),
+    );
+    assert!(listed_by_stable_id["items"].as_array().is_some());
 
-    // D2 constructs and propagates capability membership but does not yet
-    // enforce policy metadata. Preserve the currently callable surface until
-    // the D3/E1 broker enforcement boundary lands.
+    // D3 enforces the non-hierarchical default agent capability. The agent may
+    // create friction, but the operator-only triage mutation stays hidden and
+    // returns the same typed denial when called by its canonical alias.
     let friction = client.call_tool_ok(
         "orbit_friction_add",
         json!({ "body": "MCP D2 exposure regression", "model": "codex" }),
     );
     let friction_id = friction["id"].as_str().expect("friction id").to_string();
-    let updated = client.call_tool_ok(
+    let denied = client.call_tool_err(
         "orbit_friction_update",
         json!({ "id": friction_id, "status": "triaged", "model": "codex" }),
     );
-    assert_eq!(updated["status"], "triaged");
+    assert_eq!(denied["code"], "invalid_input");
+    assert!(
+        denied["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("capability denied"))
+    );
 
     // Learning create → show → lexical federated search (no embedding
     // companion installed, so `orbit.search` must serve the lexical path).

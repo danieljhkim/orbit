@@ -15,9 +15,10 @@ use orbit_common::types::activity_job::{
 };
 use orbit_common::types::{
     ActivityV2, Crew, CrewRoleAssignment, EXECUTION_PROFILE_SCHEMA_VERSION, ExecutionProfileCrewV1,
-    ExecutionProfileShipV1, ExecutionProfileV1, JobV2, OrbitError, Workspace,
+    ExecutionProfileShipV1, ExecutionProfileV1, JobV2, OrbitError, RegistrySnapshotV1, Workspace,
 };
 use orbit_engine::{dispatch_error_to_orbit, resolve_job_catalog_refs_for_execution, validate_job};
+use orbit_store::Store;
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -39,6 +40,27 @@ const UNSUPPORTED_PROFILE_ENV_OVERRIDES: [&str; 5] = [
     "ORBIT_V2_CATALOG_DIR",
     "ORBIT_BACKEND",
 ];
+
+/// Read the path-free coordination registry without constructing a workspace
+/// runtime. Long-running brokers use this for global discovery tools and must
+/// not manufacture a checkout merely to open the hub registry.
+pub fn registry_snapshot_at(
+    global_root: &std::path::Path,
+) -> Result<RegistrySnapshotV1, OrbitError> {
+    let database = crate::config::resolved_audit_db_path(global_root, global_root)?;
+    HostRegistryService::new(Store::open(&database)?).snapshot()
+}
+
+/// Persist a broker denial into the global coordination audit database when a
+/// workspace runtime is deliberately unavailable (for example a global tool
+/// or a checkoutless preflight denial).
+pub fn record_global_audit_event_at(
+    global_root: &std::path::Path,
+    params: &orbit_store::AuditEventInsertParams,
+) -> Result<(), OrbitError> {
+    let database = crate::config::resolved_audit_db_path(global_root, global_root)?;
+    Store::open(&database)?.insert_audit_event_record(params)
+}
 
 impl OrbitRuntime {
     /// Build the frozen owner payload from the exact runtime/config/catalog

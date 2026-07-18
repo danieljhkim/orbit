@@ -904,6 +904,25 @@ fn workspace_id_for_orbit_dir_returns_id_from_config() {
 }
 
 #[test]
+fn workspace_id_for_orbit_dir_accepts_canonical_logical_registry_id() {
+    let temp = TempDir::new().expect("tempdir");
+    let orbit_dir = temp.path().join(".orbit");
+    write_workspace_config(
+        &orbit_dir,
+        &WorkspaceConfig {
+            schema_version: 1,
+            workspace_id: "ws_orbit-main".into(),
+        },
+    )
+    .expect("write config");
+
+    assert_eq!(
+        workspace_id_for_orbit_dir(&orbit_dir).expect("workspace id"),
+        "ws_orbit-main"
+    );
+}
+
+#[test]
 fn workspace_id_for_orbit_dir_missing_file_names_path_and_key() {
     let temp = TempDir::new().expect("tempdir");
     let orbit_dir = temp.path().join(".orbit");

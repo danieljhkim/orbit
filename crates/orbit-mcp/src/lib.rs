@@ -77,6 +77,19 @@ pub trait McpHost: Send + Sync + 'static {
         session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError>;
 
+    /// Observe a transport-level capability denial. The default preserves the
+    /// denial unchanged; audited brokers may record it without executing the
+    /// tool or constructing a workspace runtime.
+    fn reject_tool_call(
+        &self,
+        _name: &str,
+        _input: &Value,
+        _session_context: &ToolSessionContext,
+        denial: OrbitError,
+    ) -> OrbitError {
+        denial
+    }
+
     /// Apply host policy and auditing around a tool implemented inside this
     /// adapter. The secure default rejects the call; hosts must explicitly
     /// admit adapter-owned tools and invoke `dispatch` inside their boundary.

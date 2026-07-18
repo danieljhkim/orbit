@@ -10,7 +10,7 @@ summary: Accepted ADR log for the coupled MCP Bridge and Host Registry v1 contra
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-registry/**", "crates/orbit-core/src/command/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10267, ORB-10302, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10302, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Orbit MCP Bridge — Decisions
@@ -62,7 +62,7 @@ and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
 
 ## ADR-0228 — Local placement broker with capability-set filtering
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] registered the first operator-only, hub-placement canonical discovery tools (`orbit.host.list`, `orbit.workspace.list`) in the canonical registry and the versioned conformance fixture.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] registered the first operator-only, hub-placement canonical discovery tools (`orbit.host.list`, `orbit.workspace.list`) in the canonical registry and the versioned conformance fixture; [ORB-10262] implemented the local exact-checkout broker and capability enforcement.
 
 ### Context
 
@@ -189,8 +189,10 @@ adapter, runtime profile/ship construction in `orbit-core`, persistence in
   canonical builtin registry and the versioned conformance fixture, with every pre-existing tool
   defaulting to typed `workspace-required`. Each discovery tool is backed by one sanitized,
   path-free registry snapshot. C3 proves the real runtime/store action path with no session
-  workspace or checkout binding for the enumerated workspace; D3 still owns construction of the
-  checkoutless broker plus effective-session `tools/list` omission and `tools/call` denial.
+  workspace or checkout binding for the enumerated workspace.
+- [ORB-10262] — replaced startup cwd discovery and `EmptyMcpHost` with the canonical
+  schema-listing broker, exact-checkout resolution/cache identity, placement preflight, and
+  effective-session `tools/list` omission plus hidden-name `tools/call` denial.
 - [ORB-10302] — moved the coupled registry domain into `orbit-registry` and retained
   MCP ownership of serialization/dispatch only ([ADR-0235]).
 

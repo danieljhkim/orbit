@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -499,21 +498,25 @@ fn resolve_worktree(
         None => optional_string(input, "workspace")?,
     };
 
-    // Anchor root for containment: the announced session workspace if present,
-    // otherwise the process working directory. A client-supplied path is ALWAYS
-    // scoped against this root, even when no session workspace was announced —
-    // otherwise an unannounced session lets a client open/read an arbitrary
-    // directory (CWE-22, ORB-00361).
-    let anchor_root = match session_context.workspace.as_deref() {
-        Some(workspace) => canonicalize_dir(absolutize(workspace)?.as_path(), "workspace")?,
-        None => canonicalize_dir(
-            env::current_dir().map_err(OrbitError::from)?.as_path(),
-            "workspace",
-        )?,
-    };
+    // The broker announces the validated exact checkout. Graph dispatch never
+    // falls back to process cwd: doing so aliases worktrees and turns a missing
+    // workspace selector into ambient filesystem authority.
+    let announced = session_context.workspace.as_deref().ok_or_else(|| {
+        OrbitError::InvalidInput(
+            "graph operation requires a validated exact checkout workspace selector; initialize with `_meta.orbit.workspace` or pass `workspace`"
+                .to_string(),
+        )
+    })?;
+    let announced_path = Path::new(announced);
+    if !announced_path.is_absolute() {
+        return Err(OrbitError::InvalidInput(format!(
+            "announced workspace path must be absolute; process cwd is never consulted: {announced}"
+        )));
+    }
+    let anchor_root = canonicalize_dir(announced_path, "workspace")?;
 
     let candidate = match requested.as_deref() {
-        Some(raw) => absolutize(raw)?,
+        Some(raw) => absolutize_against(raw, &anchor_root),
         None => anchor_root.clone(),
     };
     let canonical = canonicalize_dir(candidate.as_path(), "worktree")?;
@@ -528,12 +531,12 @@ fn resolve_worktree(
     Ok(canonical)
 }
 
-fn absolutize(raw: &str) -> Result<PathBuf, OrbitError> {
+fn absolutize_against(raw: &str, anchor: &Path) -> PathBuf {
     let path = Path::new(raw);
     if path.is_absolute() {
-        Ok(path.to_path_buf())
+        path.to_path_buf()
     } else {
-        Ok(env::current_dir().map_err(OrbitError::from)?.join(path))
+        anchor.join(path)
     }
 }
 

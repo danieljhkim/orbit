@@ -403,8 +403,8 @@ async fn tools_list_matches_wire_snapshot() {
         .map(|tool| tool["name"].as_str().expect("tool name"))
         .collect();
     assert!(names.contains(&"orbit_task_add"), "names: {names:?}");
-    assert!(names.contains(&"orbit_host_list"), "names: {names:?}");
-    assert!(names.contains(&"orbit_workspace_list"), "names: {names:?}");
+    assert!(!names.contains(&"orbit_host_list"), "names: {names:?}");
+    assert!(!names.contains(&"orbit_workspace_list"), "names: {names:?}");
     assert!(names.contains(&"orbit_graph_search"), "names: {names:?}");
     let mut sorted = names.clone();
     sorted.sort_unstable();
@@ -444,7 +444,11 @@ async fn tools_list_matches_wire_snapshot() {
 
 #[tokio::test]
 async fn global_registry_discovery_executes_without_a_workspace() {
-    let (mut client, host, _workspace) = start_fixture().await;
+    let workspace = TempDir::new().expect("temp workspace");
+    let host = std::sync::Arc::new(FileStoreHost::new(workspace.path().to_path_buf()));
+    let mut operator = ToolSessionContext::trusted_local(None, None, None);
+    operator.effective_capabilities = [McpCapability::Operator].into_iter().collect();
+    let mut client = WireClient::start(OrbitToolServer::new_with_context(host.clone(), operator));
     client.initialize(None).await;
 
     let hosts = client.call_tool("orbit_host_list", json!({})).await;

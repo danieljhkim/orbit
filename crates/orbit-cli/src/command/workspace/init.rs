@@ -6,10 +6,12 @@ use orbit_cmd::agent_rules::{InjectionAction, inject_agent_rules};
 use orbit_common::types::{
     Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceStatus, validate_machine_id,
 };
+use orbit_common::utility::fs::atomic_write_text;
 use orbit_core::command::init::{InitOptions, init_workspace_at_root, seed_default_orbitignore};
 use orbit_core::routines::{HostIdentityState, HostMode, inspect_host_identity};
 use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
+use serde::Serialize;
 
 use super::role::CliCheckoutRole;
 use super::support::{detect_git_remote, dir_name_or_fallback, ensure_orbit_gitignore_entry};
@@ -263,6 +265,7 @@ impl WorkspaceInitArgs {
             )?;
         }
         workspace_registry::save_registry_to(&registry, registry_path)?;
+        write_workspace_identity(orbit_dir, &id)?;
 
         Ok(WorkspaceInitResult {
             id,
@@ -271,6 +274,21 @@ impl WorkspaceInitArgs {
             orbit_dir: orbit_dir.to_path_buf(),
         })
     }
+}
+
+#[derive(Serialize)]
+struct WorkspaceIdentityDocument<'a> {
+    schema_version: u32,
+    workspace_id: &'a str,
+}
+
+fn write_workspace_identity(orbit_dir: &Path, workspace_id: &str) -> Result<(), OrbitError> {
+    let content = serde_yaml::to_string(&WorkspaceIdentityDocument {
+        schema_version: 1,
+        workspace_id,
+    })
+    .map_err(|error| OrbitError::Store(format!("serialize workspace identity: {error}")))?;
+    atomic_write_text(&orbit_dir.join("config.yaml"), &content).map_err(OrbitError::from)
 }
 
 fn unassigned_checkout(

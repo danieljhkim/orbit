@@ -182,5 +182,6 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[ORB-10200]** — Derive CLI audit metadata and the other cross-cutting command policies from one exhaustive command-operation registry.
 - **[ORB-10225]** — Route in-process graph MCP calls through the safe-surface allowlist and shared runtime audit boundary.
 - **[ORB-10228]** — Add trusted MCP context, anti-spoofing, full capability-set audit, per-call correlation, and additive audit migration v7.
+- **[ORB-10262]** — Enforce MCP capability and exact-checkout placement preflight, retaining one trusted call ID and one denial row before runtime/store mutation, including global checkoutless denials.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

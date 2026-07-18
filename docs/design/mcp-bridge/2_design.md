@@ -10,7 +10,7 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-registry/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10267, ORB-10302, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10302, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Orbit MCP Bridge — Design
@@ -19,8 +19,9 @@ This document specifies the **target** design. The host-registry identity,
 workspace, registry core/projections, C3 discovery tools, and typed placement,
 capability, scope, and trusted-session metadata they depend on have landed. C4
 places identity, catalog, cache, and the store-backed registry service in the
-dedicated `orbit-registry` domain crate ([ORB-10302], [ADR-0235]); the
-checkout-aware broker and transport surfaces here remain pending. It replaces both
+dedicated `orbit-registry` domain crate ([ORB-10302], [ADR-0235]). The local
+checkout-aware broker, exact-worktree runtime cache, and effective-capability
+filtering landed in [ORB-10262]; remote transport remains pending. It replaces both
 Bridge's HTTP parity layer and the earlier
 per-workspace-authority draft with a local broker that has one remote destination:
 the coordination hub. It covers client→hub transport and local tool placement. The
@@ -641,10 +642,11 @@ schemas.
 
 ### Phase 2 — placement-aware local broker
 
-- Add `hub`, `owner`, `local-derived`, and `composite` metadata.
-- Preserve exact session checkout/worktree paths for graph/docs.
-- Enforce owner and replica-mode preflight without spoke-to-spoke discovery.
-- Add capability filtering independent of placement.
+- Implemented by [ORB-10262]: consume canonical `hub`, `owner`, `local-derived`,
+  and `composite` metadata; preserve exact session checkout/worktree paths for
+  graph dispatch and runtime-cache identity; enforce owner/replica preflight
+  without spoke-to-spoke discovery; and filter `tools/list`/`tools/call` by the
+  non-hierarchical effective capability set.
 
 ### Phase 3 — singular hub link
 

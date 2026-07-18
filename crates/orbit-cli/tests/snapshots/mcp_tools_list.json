@@ -489,45 +489,6 @@
     "name": "orbit_friction_tags"
   },
   {
-    "description": "Update triage metadata for an Orbit friction record",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "body": {
-          "description": "Optional replacement markdown body",
-          "type": "string"
-        },
-        "id": {
-          "description": "Friction record id, e.g. F2026-05-001",
-          "type": "string"
-        },
-        "status": {
-          "description": "Optional status: open, triaged, or resolved",
-          "type": "string"
-        },
-        "tags": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Optional replacement taxonomy tags as a string or array; valid tags: build | docs | lifecycle | naming | other | policy | skill-guidance | tooling"
-        }
-      },
-      "required": [
-        "id"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_friction_update"
-  },
-  {
     "description": "Find outbound calls from an orbit-graph symbol selector.",
     "inputSchema": {
       "additionalProperties": true,
@@ -834,15 +795,6 @@
       "type": "object"
     },
     "name": "orbit_graph_trace"
-  },
-  {
-    "description": "List registered hub hosts with sanitized lifecycle, aliases, and workspace-presence freshness (operator, hub placement).",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {},
-      "type": "object"
-    },
-    "name": "orbit_host_list"
   },
   {
     "description": "Create an active project learning. Returns `{ id, created_at }` plus the full record.",
@@ -1768,14 +1720,5 @@
       "type": "object"
     },
     "name": "orbit_task_update"
-  },
-  {
-    "description": "List workspaces with declared owner and sanitized execution-profile freshness (operator, hub placement).",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {},
-      "type": "object"
-    },
-    "name": "orbit_workspace_list"
   }
 ]

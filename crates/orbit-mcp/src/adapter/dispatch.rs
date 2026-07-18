@@ -37,10 +37,35 @@ impl OrbitToolServer {
         Ok(definitions)
     }
 
+    #[cfg(test)]
     pub(super) fn combined_tool_schemas(&self) -> Result<Vec<ToolSchema>, OrbitError> {
         Ok(self
             .combined_tool_definitions()?
             .into_iter()
+            .map(|definition| definition.schema)
+            .collect())
+    }
+
+    /// Return the advertised subset for the trusted effective session grants.
+    ///
+    /// Capability sets are deliberately non-hierarchical. An empty set is a
+    /// hard denial, and a definition is visible only when at least one of its
+    /// adjacent allowed capabilities is present in the session set. Canonical
+    /// name resolution still uses the unfiltered registry so a call to a
+    /// hidden tool reaches the host's audited denial path instead of being
+    /// misclassified as an unknown name.
+    pub(super) fn visible_tool_schemas(&self) -> Result<Vec<ToolSchema>, OrbitError> {
+        let context = self.session_context();
+        Ok(self
+            .combined_tool_definitions()?
+            .into_iter()
+            .filter(|definition| {
+                definition
+                    .policy
+                    .allowed_capabilities()
+                    .iter()
+                    .any(|capability| context.effective_capabilities.contains(capability))
+            })
             .map(|definition| definition.schema)
             .collect())
     }
@@ -127,6 +152,34 @@ impl OrbitToolServer {
             .arguments
             .map(Value::Object)
             .unwrap_or_else(|| Value::Object(Map::new()));
+
+        let definition = self
+            .combined_tool_definitions()
+            .map_err(invalid_definitions_mcp_error)?
+            .into_iter()
+            .find(|definition| definition.schema.name == canonical);
+        if let Some(definition) = definition
+            && !definition
+                .policy
+                .allowed_capabilities()
+                .iter()
+                .any(|capability| session_context.effective_capabilities.contains(capability))
+        {
+            let allowed = definition
+                .policy
+                .allowed_capabilities()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let denial = OrbitError::InvalidInput(format!(
+                "MCP capability denied for tool '{canonical}': the effective session set must contain one of [{allowed}]"
+            ));
+            let denial = self
+                .host
+                .reject_tool_call(&canonical, &input, &session_context, denial);
+            return Ok(tool_error_result(&denial));
+        }
 
         let host = Arc::clone(&self.host);
         let graph_tools = Arc::clone(&self.graph_tools);
@@ -215,7 +268,7 @@ impl ServerHandler for OrbitToolServer {
         _ctx: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
         let mut schemas = self
-            .combined_tool_schemas()
+            .visible_tool_schemas()
             .map_err(invalid_definitions_mcp_error)?;
         schemas.sort_by(|a, b| a.name.cmp(&b.name));
         self.refresh_name_map(&schemas)

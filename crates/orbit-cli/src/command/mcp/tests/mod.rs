@@ -5,17 +5,108 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use orbit_common::types::{
-    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolPolicyError,
-    McpToolScope, mcp_advertised_tool_name, mcp_capability_placement_matrix,
-    validate_mcp_tool_definitions,
+    LearningInjectionState, McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy,
+    McpToolPolicyError, McpToolScope, ToolSessionContext, mcp_advertised_tool_name,
+    mcp_capability_placement_matrix, validate_mcp_tool_definitions,
 };
-use orbit_core::OrbitRuntime;
+use orbit_core::command::tool::ToolEntryPoint;
+use orbit_core::{LearningSearchParams, OrbitError, OrbitRuntime};
 use orbit_mcp::McpHost;
 use serde::Deserialize;
+use serde_json::{Value, json};
 
 use super::host::{
-    RuntimeMcpHost, canonical_mcp_tool_definitions, is_mcp_tool_exposed, safe_mcp_tool_names,
+    audited_mcp_call_with_session_context, canonical_mcp_tool_definitions, ensure_mcp_tool_exposed,
+    is_mcp_tool_exposed, normalize_trusted_call_context, safe_mcp_tool_names,
 };
+
+struct RuntimeMcpHost {
+    runtime: OrbitRuntime,
+}
+
+impl McpHost for RuntimeMcpHost {
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        self.runtime.list_mcp_tool_definitions()
+    }
+
+    fn call_tool(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        audited_mcp_call_with_session_context(
+            &self.runtime,
+            name,
+            input,
+            normalize_trusted_call_context(session_context),
+        )
+    }
+
+    fn call_in_process_tool(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+        dispatch: &mut dyn FnMut(Value, ToolSessionContext) -> Result<Value, OrbitError>,
+    ) -> Result<Value, OrbitError> {
+        let session_context = normalize_trusted_call_context(session_context);
+        let dispatch_context = session_context.clone();
+        self.runtime
+            .execute_in_process_tool_dispatch(
+                name,
+                input,
+                ToolEntryPoint::Mcp,
+                session_context,
+                |input| {
+                    ensure_mcp_tool_exposed(name)?;
+                    dispatch(input, dispatch_context)
+                },
+            )
+            .map(|outcome| outcome.value)
+    }
+
+    fn learning_candidates_for_path(
+        &self,
+        path: &str,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        let rows = self.runtime.search_learnings(LearningSearchParams {
+            path: Some(path.to_string()),
+            tag: None,
+            query: None,
+            limit: None,
+        })?;
+        Ok(Value::Array(
+            rows.into_iter()
+                .map(|row| {
+                    json!({
+                        "id": row.learning.id,
+                        "summary": row.learning.summary,
+                        "priority": row.learning.priority,
+                        "updated_at": row.learning.updated_at.to_rfc3339(),
+                    })
+                })
+                .collect(),
+        ))
+    }
+
+    fn get_session_learning_state(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LearningInjectionState>, OrbitError> {
+        self.runtime.get_session_learning_state(session_id)
+    }
+
+    fn upsert_session_learning_state(
+        &self,
+        session_id: &str,
+        state: &LearningInjectionState,
+    ) -> Result<(), OrbitError> {
+        self.runtime
+            .upsert_session_learning_state(session_id, state)
+    }
+}
 
 const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.docs.index",
@@ -457,7 +548,8 @@ mod audited_mcp_call_tests {
     use orbit_mcp::McpHost;
     use serde_json::json;
 
-    use super::super::host::{RuntimeMcpHost, audited_mcp_call};
+    use super::super::host::audited_mcp_call;
+    use super::RuntimeMcpHost;
 
     // ORB-00289: the previous `create_task` helper + the three
     // `task_delete_*_over_mcp` tests asserted that `orbit.task.delete` was

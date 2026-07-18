@@ -190,9 +190,7 @@ async fn graph_tools_invoke_in_process_fixture() {
     });
     let server = OrbitToolServer::new(host);
     // L-0053: graph MCP tests must pin the worktree to their temp fixture.
-    server.replace_session_context(ToolSessionContext::with_workspace(
-        worktree.path().display().to_string(),
-    ));
+    server.replace_session_context(agent_workspace_context(worktree.path()));
 
     let sync = call_json(
         &server,
@@ -334,9 +332,7 @@ async fn graph_tool_errors_are_structured_mcp_tool_errors() {
     });
     let server = OrbitToolServer::new(host);
     // L-0053: graph MCP tests must pin the worktree to their temp fixture.
-    server.replace_session_context(ToolSessionContext::with_workspace(
-        worktree.path().display().to_string(),
-    ));
+    server.replace_session_context(agent_workspace_context(worktree.path()));
 
     let result = server
         .call_tool_request(request_with_args(
@@ -370,9 +366,7 @@ async fn graph_show_returns_labeled_byte_fallback_for_non_utf8_source() {
     });
     let server = OrbitToolServer::new(host);
     // L-0053: graph MCP tests must pin the worktree to their temp fixture.
-    server.replace_session_context(ToolSessionContext::with_workspace(
-        worktree.path().display().to_string(),
-    ));
+    server.replace_session_context(agent_workspace_context(worktree.path()));
 
     call_json(
         &server,
@@ -437,7 +431,7 @@ async fn graph_show_rejects_out_of_workspace_path_without_session_workspace() {
         payload["message"]
             .as_str()
             .expect("message")
-            .contains("must stay within initialized workspace"),
+            .contains("requires a validated exact checkout workspace selector"),
         "unexpected error message: {payload}"
     );
     // No source bytes were returned and no graph was opened/indexed for the
@@ -473,6 +467,12 @@ fn assert_param_names(schema: &orbit_common::types::ToolSchema, expected: &[&str
         .map(|param| param.name.as_str())
         .collect();
     assert_eq!(names, expected);
+}
+
+fn agent_workspace_context(path: &Path) -> ToolSessionContext {
+    let mut context = ToolSessionContext::trusted_local(None, None, None);
+    context.workspace = Some(path.display().to_string());
+    context
 }
 
 fn with_workspace_params(base: &[&'static str]) -> Vec<&'static str> {
