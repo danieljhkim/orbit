@@ -2,6 +2,16 @@
 
 Project instructions for the clap-based CLI entry point.
 
+## Build Week focus — temporary through 2026-07-21 5:00 PM PT
+
+Deliver the complete `mcp-bridge` CLI behavior with `host-registry` contracts intact. Use `sol` for
+planning, review, and non-trivial work; `terra` only for small, easy, mechanical edits. Keep domain
+logic in `orbit-core`; complete help/operation metadata and applicable human, JSON, error, and
+transport-cleanup tests. Raise doubts, better ideas, risks, or friction immediately—never mask them
+with a shortcut or demo façade.
+
+Remove this temporary section after the Build Week submission.
+
 ## Command tree convention
 
 `crates/orbit-cli/src/command/` follows one rule:
