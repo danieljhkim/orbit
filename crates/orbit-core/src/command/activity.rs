@@ -221,6 +221,9 @@ mod tests {
                 assert!(instruction.contains("not as a perfect inventory"));
                 assert!(instruction.contains("make the smallest compatible change"));
                 assert!(instruction.contains("Stop after commenting"));
+                assert!(instruction.contains("Before the first write"));
+                assert!(instruction.contains("git rev-parse --show-toplevel"));
+                assert!(instruction.contains("worktree_mismatch"));
             }
             other => panic!("expected agent_loop activity, got {other:?}"),
         }

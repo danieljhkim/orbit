@@ -61,6 +61,7 @@ spec:
             default_input:
               task_id: "{{ item }}"
               workspace_path: "{{ steps.worktree.output.workspace_path }}"
+              repo_root: "{{ steps.worktree.output.workspace_path }}"
 
     - id: commit
       recovery_activity: step_failure_recovery

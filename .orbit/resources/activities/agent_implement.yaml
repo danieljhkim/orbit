@@ -54,7 +54,12 @@ spec:
        not linked via `context_files` (past decisions, related review threads);
        skip if the companion binary is not installed.
     4. Use `input.workspace_path` and `input.repo_root` when provided; they
-       override the task snapshot's paths.
+       override the task snapshot's paths. Before the first write, resolve the
+       effective process directory and Git top-level (`pwd -P` and
+       `git rev-parse --show-toplevel`) and verify that both supplied roots
+       resolve to that same canonical checkout. If any root differs, stop
+       without writing and return a failed `worktree_mismatch` diagnostic that
+       names the requested and resolved roots.
     5. Implement only the task's scoped work. Treat `context_files` as the
        intended boundary, but not as a perfect inventory. If you discover an
        unlisted file that must change to make the scoped edits compile, preserve

@@ -294,6 +294,15 @@ pub enum DispatchError {
     #[error("cli invocation failed (permanent): {0}")]
     CliInvocationPermanent(String),
 
+    /// A linked-worktree provider invocation changed the registered primary
+    /// checkout. This is a hard integrity boundary: retry and recovery could
+    /// compound or misattribute the delta, so the job must fail closed.
+    #[error("worktree integrity violation `{code}`: {diagnostic}")]
+    WorktreeIntegrity {
+        code: &'static str,
+        diagnostic: String,
+    },
+
     /// Tool-allowlist denial (§6). Non-retryable — the retry wrapper must not
     /// re-attempt a denied call. Phase 2 formerly translated this to
     /// `Ok(terminated)`; Phase 3 surfaces it structurally so the DAG executor
@@ -340,6 +349,7 @@ impl DispatchError {
                 | DispatchError::UnwiredHttpTransport { .. }
                 | DispatchError::UnresolvedAutoBackend { .. }
                 | DispatchError::CliInvocationPermanent(_)
+                | DispatchError::WorktreeIntegrity { .. }
         )
     }
 }

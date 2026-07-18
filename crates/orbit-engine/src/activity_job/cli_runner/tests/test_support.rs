@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -240,6 +240,7 @@ pub(in crate::activity_job::cli_runner) struct TestHost {
     pub(in crate::activity_job::cli_runner) provider_config: HashMap<String, String>,
     pub(in crate::activity_job::cli_runner) sandbox: Option<ResolvedSandbox>,
     pub(in crate::activity_job::cli_runner) task_context: Option<Value>,
+    pub(in crate::activity_job::cli_runner) workspace_root: Option<PathBuf>,
 }
 
 impl TestHost {
@@ -250,6 +251,7 @@ impl TestHost {
             provider_config: HashMap::new(),
             sandbox: None,
             task_context: None,
+            workspace_root: None,
         }
     }
 }
@@ -324,7 +326,10 @@ impl V2RuntimeHost for TestHost {
         _fs_audit: Option<Arc<dyn FsAuditLogger>>,
         _proc_allowed_programs: Option<&[String]>,
     ) -> ToolContext {
-        ToolContext::default()
+        ToolContext {
+            workspace_root: self.workspace_root.clone(),
+            ..ToolContext::default()
+        }
     }
 }
 

@@ -50,6 +50,7 @@ fn cli_agent_envelope_carries_input_run_id_and_task_context() {
             "workspace_path": "/tmp/orbit-worktree",
             "plan": "implement it"
         })),
+        workspace_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
     let input = serde_json::json!({
