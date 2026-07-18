@@ -443,6 +443,138 @@ spec:
     }
 
     #[test]
+    fn ship_review_controls_propagate_through_auto_and_gate_pipelines() {
+        let auto_yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(name, yaml)| (*name == "task_auto_pipeline").then_some(*yaml))
+            .expect("task auto pipeline default exists");
+        let auto = load_job_asset(auto_yaml).expect("parse task auto pipeline");
+        let auto_defaults = auto
+            .spec
+            .default_input
+            .as_ref()
+            .expect("task auto pipeline default input");
+        assert_eq!(auto_defaults["review"], false);
+        assert_eq!(auto_defaults["review_crew"], Value::Null);
+
+        let auto_dispatch = auto
+            .spec
+            .steps
+            .iter()
+            .find(|step| step.id == "dispatch")
+            .expect("task auto pipeline dispatch step");
+        let JobV2StepBody::FanOut { fan_out, .. } = &auto_dispatch.body else {
+            panic!("task auto pipeline dispatch must be a fan-out");
+        };
+        let JobV2StepBody::TargetRef(auto_target) = &fan_out.worker.body else {
+            panic!("task auto pipeline worker must reference invoke_and_wait");
+        };
+        let auto_run_input = &auto_target
+            .default_input
+            .as_ref()
+            .expect("task auto pipeline dispatch input");
+        assert_eq!(auto_run_input["job_name"], "task_gate_pipeline");
+        let auto_run_input = &auto_run_input["run_input"];
+        assert_eq!(auto_run_input["review"], "{{ input.review }}");
+        assert_eq!(auto_run_input["review_crew"], "{{ input.review_crew }}");
+
+        let gate_yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(name, yaml)| (*name == "task_gate_pipeline").then_some(*yaml))
+            .expect("task gate pipeline default exists");
+        let gate = load_job_asset(gate_yaml).expect("parse task gate pipeline");
+        let gate_defaults = gate
+            .spec
+            .default_input
+            .as_ref()
+            .expect("task gate pipeline default input");
+        assert_eq!(gate_defaults["review"], false);
+        assert_eq!(gate_defaults["review_crew"], Value::Null);
+
+        let gate_dispatch = gate
+            .spec
+            .steps
+            .iter()
+            .find(|step| step.id == "dispatch_child")
+            .expect("task gate pipeline child dispatch step");
+        let JobV2StepBody::TargetRef(gate_target) = &gate_dispatch.body else {
+            panic!("task gate pipeline dispatch must reference invoke_and_wait");
+        };
+        let gate_run_input = &gate_target
+            .default_input
+            .as_ref()
+            .expect("task gate pipeline dispatch input");
+        assert_eq!(gate_run_input["job_name"], "task_{{ input.mode }}_pipeline");
+        let gate_run_input = &gate_run_input["run_input"];
+        assert_eq!(gate_run_input["review"], "{{ input.review }}");
+        assert_eq!(gate_run_input["review_crew"], "{{ input.review_crew }}");
+    }
+
+    #[test]
+    fn leaf_ship_review_is_opt_in_and_uses_only_the_explicit_review_crew() {
+        for job_name in ["task_pr_pipeline", "task_local_pipeline"] {
+            let yaml = DEFAULT_JOB_FILES
+                .iter()
+                .find_map(|(name, yaml)| (*name == job_name).then_some(*yaml))
+                .unwrap_or_else(|| panic!("default job {job_name} exists"));
+            let asset = load_job_asset(yaml)
+                .unwrap_or_else(|err| panic!("default job {job_name} should parse: {err}"));
+            let defaults = asset
+                .spec
+                .default_input
+                .as_ref()
+                .unwrap_or_else(|| panic!("default job {job_name} has default input"));
+            assert_eq!(defaults["review"], false);
+            assert_eq!(defaults["review_crew"], Value::Null);
+
+            let review = asset
+                .spec
+                .steps
+                .iter()
+                .find(|step| step.id == "review_bundle")
+                .unwrap_or_else(|| panic!("default job {job_name} has review_bundle"));
+            assert_eq!(review.when.as_deref(), Some("{{ input.review }} == true"));
+            let JobV2StepBody::TargetRef(review_target) = &review.body else {
+                panic!("default job {job_name} review_bundle must reference agent_review");
+            };
+            assert_eq!(review_target.target, "activity:agent_review");
+            let review_input = review_target
+                .default_input
+                .as_ref()
+                .expect("review_bundle input");
+            assert_eq!(review_input["crew"], "{{ input.review_crew }}");
+
+            let implement = asset
+                .spec
+                .steps
+                .iter()
+                .find(|step| step.id == "implement_bundle")
+                .unwrap_or_else(|| panic!("default job {job_name} has implement_bundle"));
+            let JobV2StepBody::Loop { loop_ } = &implement.body else {
+                panic!("default job {job_name} implement_bundle must be a loop");
+            };
+            let implement_one = loop_
+                .steps
+                .iter()
+                .find(|step| step.id == "implement_one")
+                .expect("implement_bundle has implement_one");
+            let JobV2StepBody::TargetRef(implement_target) = &implement_one.body else {
+                panic!("default job {job_name} implement_one must reference agent_implement");
+            };
+            assert_eq!(implement_target.target, "activity:agent_implement");
+            assert!(
+                implement_target
+                    .default_input
+                    .as_ref()
+                    .expect("implement_one input")
+                    .get("crew")
+                    .is_none(),
+                "default job {job_name} must not apply review_crew to implementation"
+            );
+        }
+    }
+
+    #[test]
     fn pr_pipeline_models_handoff_phases_as_ordered_activity_checkpoints() {
         let yaml = DEFAULT_JOB_FILES
             .iter()

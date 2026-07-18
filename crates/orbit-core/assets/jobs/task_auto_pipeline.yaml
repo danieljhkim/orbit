@@ -37,6 +37,8 @@ spec:
     mode: pr
     base_branch: main
     base_sync: remote
+    review: false
+    review_crew: null
     max_bundles: 10
     concurrency: 5
     max_bundle_size: 5
@@ -70,6 +72,8 @@ spec:
               mode: "{{ input.mode }}"
               base_branch: "{{ input.base_branch }}"
               base_sync: "{{ input.base_sync }}"
+              review: "{{ input.review }}"
+              review_crew: "{{ input.review_crew }}"
       fan_in:
         join:
           mode: all

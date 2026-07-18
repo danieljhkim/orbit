@@ -325,12 +325,17 @@ fn resolve_workspace_ship_input(
         .map(crate::command::workflow::resolved_ship_mode)
         .unwrap_or(crate::command::workflow::ShipMode::Local);
 
-    crate::command::workflow::build_ship_input(mode, runtime.workflow_base_branch(), &[]).map_err(
-        |error| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: format!("resolve workspace ship input: {error}"),
-        },
+    crate::command::workflow::build_ship_input(
+        mode,
+        runtime.workflow_base_branch(),
+        &[],
+        false,
+        None,
     )
+    .map_err(|error| DispatchError::DeterministicActionFailed {
+        action: action.to_string(),
+        message: format!("resolve workspace ship input: {error}"),
+    })
 }
 
 fn unmet_dependency_ids_for_input(

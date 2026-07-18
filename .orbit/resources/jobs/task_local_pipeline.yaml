@@ -8,7 +8,8 @@
 #
 # Optional review step:
 # - `review_bundle` runs after `implement_bundle` when `input.review` is
-#   `true` (default `false`). It invokes `agent_review`, which records
+#   `true` (default `false`) and uses only the required explicit
+#   `input.review_crew`. It invokes `agent_review`, which records
 #   blocking findings as `ReviewThread`s on the participating tasks via
 #   `orbit.task.review_thread.*` and applies fixes in-place. The pipeline
 #   does not gate on agent output; unresolved threads remain on the tasks
@@ -28,6 +29,7 @@ spec:
     base_branch: main
     base_sync: remote
     review: false
+    review_crew: null
   
   steps:
     - id: worktree
@@ -62,6 +64,7 @@ spec:
         task_ids: "{{ input.task_ids }}"
         workspace_path: "{{ steps.worktree.output.workspace_path }}"
         base_branch: "{{ input.base_branch }}"
+        crew: "{{ input.review_crew }}"
 
     - id: commit
       recovery_activity: step_failure_recovery

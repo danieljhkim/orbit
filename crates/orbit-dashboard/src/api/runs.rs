@@ -34,6 +34,12 @@ pub(super) struct ShipBody {
     /// Base branch override; defaults to the workspace's `[workflow] base_branch`.
     #[serde(default)]
     base: Option<String>,
+    /// Whether to run an independent review before shipment.
+    #[serde(default)]
+    review: bool,
+    /// Explicit crew used only for the independent review step.
+    #[serde(default)]
+    review_crew: Option<String>,
 }
 
 /// Submit a `ship` workflow run (`POST /workflows/ship?workspace=<id>`).
@@ -54,6 +60,8 @@ pub(super) async fn ship_workflow_action(
         mode,
         body.base.as_deref(),
         &body.task_ids,
+        body.review,
+        body.review_crew.as_deref(),
         Some("dashboard"),
     ) {
         Ok(invoke) => Json(json!({
