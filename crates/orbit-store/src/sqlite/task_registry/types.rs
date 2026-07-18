@@ -64,6 +64,26 @@ pub struct TaskIndexFilter {
     pub tags: Vec<String>,
 }
 
+/// A relation edge whose target is a valid `ORB-` task id that does not
+/// resolve to any registered task bundle in the coordination registry — the
+/// exact condition
+/// [`validate_relation_targets_exist`](crate::sqlite::task_registry::TaskRegistryStore)
+/// rejects at index-rebuild time. These are the "grandfathered" relations that
+/// make an index rebuild fail its validator and fall back to a full bundle
+/// scan (see ORB-10305 / ORB-10246).
+///
+/// `relation_type` carries the canonical snake_case name as stored in the
+/// registry (`related_to`, `blocked_by`, …); non-`ORB-` targets (friction /
+/// learning / ADR ids that `produces`/`resolves` edges legitimately allow to
+/// dangle) are never reported here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DanglingRelationTarget {
+    pub workspace_id: String,
+    pub source_task_id: String,
+    pub relation_type: String,
+    pub target_task_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectionRebuildResult {
     pub projected: usize,

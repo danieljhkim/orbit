@@ -598,6 +598,176 @@ fn checkoutless_workspaces_coordinate_cross_workspace_relations_without_paths() 
 }
 
 #[test]
+fn dangling_relation_targets_reports_only_grandfathered_orb_targets() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    let workspace = bind(&store, temp.path());
+
+    // A resolvable target and the source both exist in the registry.
+    let target_id = store
+        .allocate_task_id(&workspace.workspace_id)
+        .expect("allocate target");
+    let source_id = store
+        .allocate_task_id(&workspace.workspace_id)
+        .expect("allocate source");
+    for task_id in [target_id.as_str(), source_id.as_str()] {
+        let path = store
+            .canonical_task_bundle_path(&workspace.workspace_id, task_id)
+            .expect("canonical bundle path");
+        fs::create_dir_all(&path).expect("create canonical bundle");
+        store
+            .register_task_bundle(task_id, &workspace.workspace_id, &path)
+            .expect("register bundle");
+    }
+    store
+        .replace_task_index(
+            &workspace.workspace_id,
+            &envelope(&target_id, TaskStatus::Done, Vec::new(), Vec::new()),
+        )
+        .expect("index target");
+    // Source carries a resolvable ORB relation plus a non-ORB `resolves`
+    // target; the audit must flag neither.
+    store
+        .replace_task_index(
+            &workspace.workspace_id,
+            &envelope(
+                &source_id,
+                TaskStatus::Backlog,
+                Vec::new(),
+                vec![
+                    TaskRelation {
+                        relation_type: TaskRelationType::RelatedTo,
+                        target: target_id.clone(),
+                    },
+                    TaskRelation {
+                        relation_type: TaskRelationType::Resolves,
+                        target: "F2026-05-001".into(),
+                    },
+                ],
+            ),
+        )
+        .expect("index source relations");
+
+    assert!(
+        store
+            .dangling_relation_targets(None)
+            .expect("audit clean")
+            .is_empty(),
+        "resolvable + non-ORB targets must not be flagged"
+    );
+
+    // Grandfather a dangling ORB target. The public API forbids adding one (the
+    // validator rejects it at index time), so these only exist as legacy rows —
+    // inject one directly to reproduce that state.
+    let missing_target = "ORB-09999";
+    {
+        let conn = store.conn.lock().expect("lock registry");
+        conn.execute(
+            "INSERT INTO task_bundle_relations(
+                source_task_id, workspace_id, relation_type, target_task_id
+            ) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                source_id,
+                workspace.workspace_id,
+                "related_to",
+                missing_target
+            ],
+        )
+        .expect("seed grandfathered relation");
+    }
+
+    let dangling = store
+        .dangling_relation_targets(None)
+        .expect("audit dangling");
+    assert_eq!(
+        dangling.len(),
+        1,
+        "only the missing ORB target dangles: {dangling:?}"
+    );
+    assert_eq!(dangling[0].source_task_id, source_id);
+    assert_eq!(dangling[0].target_task_id, missing_target);
+    assert_eq!(dangling[0].relation_type, "related_to");
+    assert_eq!(dangling[0].workspace_id, workspace.workspace_id);
+    assert_eq!(
+        store
+            .dangling_relation_targets(Some(&workspace.workspace_id))
+            .expect("scoped audit")
+            .len(),
+        1
+    );
+
+    // A second workspace with its own grandfathered target: the unscoped audit
+    // spans both, each scoped audit sees exactly its own.
+    let repo_two = temp.path().join("repo-two");
+    let orbit_two = repo_two.join(".orbit");
+    fs::create_dir_all(&orbit_two).expect("create second orbit dir");
+    let workspace_two = store
+        .bind_workspace(BindWorkspaceParams {
+            workspace_id: Some("orbit-two-654321".into()),
+            slug: "Orbit Two".into(),
+            repo_root: repo_two.clone(),
+            workspace_path: repo_two.clone(),
+            orbit_dir: orbit_two,
+            repo_fingerprint: None,
+        })
+        .expect("bind second workspace");
+    let source_two = store
+        .allocate_task_id(&workspace_two.workspace_id)
+        .expect("allocate second source");
+    let path_two = store
+        .canonical_task_bundle_path(&workspace_two.workspace_id, &source_two)
+        .expect("second canonical path");
+    fs::create_dir_all(&path_two).expect("create second bundle");
+    store
+        .register_task_bundle(&source_two, &workspace_two.workspace_id, &path_two)
+        .expect("register second source");
+    store
+        .replace_task_index(
+            &workspace_two.workspace_id,
+            &envelope(&source_two, TaskStatus::Backlog, Vec::new(), Vec::new()),
+        )
+        .expect("index second source");
+    {
+        let conn = store.conn.lock().expect("lock registry");
+        conn.execute(
+            "INSERT INTO task_bundle_relations(
+                source_task_id, workspace_id, relation_type, target_task_id
+            ) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                source_two,
+                workspace_two.workspace_id,
+                "blocked_by",
+                "ORB-08888"
+            ],
+        )
+        .expect("seed second grandfathered relation");
+    }
+
+    assert_eq!(
+        store
+            .dangling_relation_targets(None)
+            .expect("audit both")
+            .len(),
+        2,
+        "unscoped audit spans workspaces"
+    );
+    assert_eq!(
+        store
+            .dangling_relation_targets(Some(&workspace_two.workspace_id))
+            .expect("scoped to second")
+            .len(),
+        1
+    );
+    assert_eq!(
+        store
+            .dangling_relation_targets(Some(&workspace.workspace_id))
+            .expect("scoped to first")
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn allocator_reports_exhaustion() {
     let temp = TempDir::new().expect("tempdir");
     let store = store(&temp);
