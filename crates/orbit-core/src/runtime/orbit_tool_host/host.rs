@@ -603,7 +603,11 @@ impl HubCoordinationExecutor {
             .transpose()?;
         let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default();
         let ready = super::input::optional_bool_alias(&input, &["ready"])?;
+        let limit = super::input::task_list_limit(&input)?;
         let status = self.inner.tasks.task.task_status_index()?;
+        // `list_tasks()` returns tasks newest-first (`created_at DESC`, task ID
+        // ascending for ties); the filters preserve that order, so `take(limit)`
+        // yields the newest matching tasks (ORB-10310).
         let tasks = self
             .inner
             .tasks
@@ -614,6 +618,7 @@ impl HubCoordinationExecutor {
             .filter(|task| type_filter.is_none_or(|value| task.task_type == value))
             .filter(|task| task_matches_tags(task, &tags))
             .filter(|task| ready != Some(true) || task_dependencies_ready(task, &status))
+            .take(limit)
             .map(|task| super::json::task_to_json(&task, &status))
             .collect();
         Ok(Value::Array(tasks))

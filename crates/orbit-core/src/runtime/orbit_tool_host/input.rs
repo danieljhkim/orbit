@@ -2,9 +2,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use orbit_common::types::{
-    NotFoundKind, OrbitError, TaskArtifact, TaskComplexity, TaskPriority, TaskRelation, TaskStatus,
-    TaskType, media_type_for_artifact_path, optional_string, optional_string_alias,
-    optional_u32_alias,
+    DEFAULT_TASK_LIST_LIMIT, NotFoundKind, OrbitError, TaskArtifact, TaskComplexity, TaskPriority,
+    TaskRelation, TaskStatus, TaskType, media_type_for_artifact_path, optional_string,
+    optional_string_alias, optional_u32_alias,
 };
 use orbit_store::state_io;
 use orbit_tools::OrbitTaskScope;
@@ -64,6 +64,42 @@ pub(super) fn resolve_state_dir(
 
     state_io::resolve_active_run_state_dir(&orbit_root, &run_id)?
         .ok_or(OrbitError::not_found(NotFoundKind::JobRun, run_id))
+}
+
+/// Resolve the `limit` for a task listing: the caller-supplied value when
+/// present (accepting a JSON number or numeric string), otherwise the
+/// status-neutral default. A zero limit is rejected with a clear input error
+/// (ORB-10310).
+pub(super) fn task_list_limit(input: &Value) -> Result<usize, OrbitError> {
+    let Some(value) = input.get("limit") else {
+        return Ok(DEFAULT_TASK_LIST_LIMIT);
+    };
+    let limit = match value {
+        Value::Null => return Ok(DEFAULT_TASK_LIST_LIMIT),
+        Value::Number(number) => number
+            .as_u64()
+            .ok_or_else(|| {
+                OrbitError::InvalidInput("`limit` must be a positive integer".to_string())
+            })
+            .and_then(|value| {
+                usize::try_from(value)
+                    .map_err(|_| OrbitError::InvalidInput("`limit` is too large".to_string()))
+            })?,
+        Value::String(raw) => raw.trim().parse::<usize>().map_err(|error| {
+            OrbitError::InvalidInput(format!("`limit` must be a positive integer: {error}"))
+        })?,
+        _ => {
+            return Err(OrbitError::InvalidInput(
+                "`limit` must be a positive integer".to_string(),
+            ));
+        }
+    };
+    if limit == 0 {
+        return Err(OrbitError::InvalidInput(
+            "`limit` must be at least 1".to_string(),
+        ));
+    }
+    Ok(limit)
 }
 
 pub(super) fn resolve_step_index(input: &Value) -> Result<u32, OrbitError> {

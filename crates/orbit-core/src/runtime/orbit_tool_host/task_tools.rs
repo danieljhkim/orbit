@@ -127,6 +127,10 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default();
     let ready = optional_bool_alias(&input, &["ready"])?;
     let path = optional_string(&input, "path")?;
+    let limit = super::input::task_list_limit(&input)?;
+    // `list_tasks_filtered` returns tasks newest-first (`created_at DESC`, task
+    // ID ascending for ties); the filters below preserve that order, so the
+    // trailing `take(limit)` yields the newest matching tasks (ORB-10310).
     let all_tasks = runtime.list_tasks_filtered(
         status,
         None,
@@ -136,19 +140,17 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         None,
     )?;
     let status_by_id = runtime.task_status_index()?;
-    let tasks = all_tasks
-        .into_iter()
-        .filter(|task| orbit_common::types::task_matches_tags(task, &tags))
-        .filter(|task| ready != Some(true) || task_dependencies_ready(task, &status_by_id))
-        .filter(|task| {
-            path.as_deref()
-                .is_none_or(|p| crate::task_selectors_contain_path(&task.context_files, p))
-        })
-        .collect::<Vec<_>>();
     Ok(Value::Array(
-        tasks
+        all_tasks
             .into_iter()
+            .filter(|task| orbit_common::types::task_matches_tags(task, &tags))
+            .filter(|task| ready != Some(true) || task_dependencies_ready(task, &status_by_id))
+            .filter(|task| {
+                path.as_deref()
+                    .is_none_or(|p| crate::task_selectors_contain_path(&task.context_files, p))
+            })
             .filter(|task| task_type.is_none_or(|kind| task.task_type == kind))
+            .take(limit)
             .map(|task| task_to_json(&task, &status_by_id))
             .collect::<Vec<_>>(),
     ))

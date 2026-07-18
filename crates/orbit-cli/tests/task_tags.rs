@@ -19,8 +19,10 @@ fn task_cli_roundtrips_filters_and_replaces_tags() {
 
     assert_eq!(both["tags"], json!(["perf", "bench"]));
 
+    // ORB-10310: freshly-added tasks are `proposed`; status-neutral listing must
+    // surface them without `--all` or `--status proposed`.
     let perf_list = workspace.run(
-        &["task", "list", "--all", "--tag", "perf", "--json"],
+        &["task", "list", "--tag", "perf", "--json"],
         None,
         "list perf tasks",
     );
@@ -54,6 +56,52 @@ fn task_cli_roundtrips_filters_and_replaces_tags() {
     );
     let updated: Value = serde_json::from_slice(&updated.stdout).expect("update JSON");
     assert_eq!(updated["tags"], json!(["docs"]));
+}
+
+/// ORB-10310: `orbit task list` is status-neutral and bounded by `--limit`.
+#[test]
+fn task_list_is_status_neutral_and_bounded_by_limit() {
+    let workspace = TestWorkspace::new();
+    // Every task starts in `proposed`; the default listing must include them
+    // all with no `--status`/`--all`.
+    for index in 0..3 {
+        workspace.add_task(&format!("Task {index}"), &[]);
+    }
+
+    let default_list = workspace.run(&["task", "list", "--json"], None, "default list");
+    let default_tasks: Value = serde_json::from_slice(&default_list.stdout).expect("list JSON");
+    assert_eq!(
+        default_tasks.as_array().expect("array").len(),
+        3,
+        "all proposed tasks are listed by default: {default_tasks}"
+    );
+
+    // `--limit` bounds the response.
+    let limited = workspace.run(
+        &["task", "list", "--limit", "2", "--json"],
+        None,
+        "limited list",
+    );
+    let limited_tasks: Value = serde_json::from_slice(&limited.stdout).expect("list JSON");
+    assert_eq!(limited_tasks.as_array().expect("array").len(), 2);
+
+    // A zero limit is a clear input error, not an empty success.
+    let rejected = run_orbit(
+        &workspace.work,
+        &workspace.home,
+        &["task", "list", "--limit", "0"],
+        None,
+    );
+    assert!(
+        !rejected.status.success(),
+        "`--limit 0` must be rejected: {}",
+        String::from_utf8_lossy(&rejected.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("limit"),
+        "error must mention the limit: {}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
 }
 
 fn assert_task_titles(output: &Output, expected: &[&str]) {

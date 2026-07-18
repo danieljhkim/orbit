@@ -51,6 +51,14 @@ use crate::utility::selector::exists_in_workspace;
 /// QA validation tasks file follow-up Orbit tasks).
 pub const NO_DIFF_EXPECTED_TAG: &str = "no-diff-expected";
 
+/// Default maximum number of tasks a status-neutral task listing returns
+/// (ORB-10310). Every discovery surface — the `orbit task list` CLI, the
+/// `orbit.task.list` MCP tool, and the dashboard HTTP task routes — returns the
+/// newest `DEFAULT_TASK_LIST_LIMIT` matching tasks first rather than filtering
+/// on lifecycle status, matching Orbit's existing recent-history convention
+/// (see `HISTORY_DEFAULT_LIMIT` in orbit-dashboard).
+pub const DEFAULT_TASK_LIST_LIMIT: usize = 50;
+
 /// Current lifecycle state of a task.
 ///
 /// See the module-level doc for the full state transition diagram.

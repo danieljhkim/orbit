@@ -54,12 +54,20 @@ impl Tool for OrbitTaskListTool {
                 param_type: "string".to_string(),
                 required: false,
             },
+            ToolParam {
+                name: "limit".to_string(),
+                description:
+                    "Maximum number of tasks to return, newest first (default 50). Must be at least 1."
+                        .to_string(),
+                param_type: "integer".to_string(),
+                required: false,
+            },
         ];
         parameters.extend(super::super::identity_params());
         ToolSchema {
             name: "orbit.task.list".to_string(),
             description:
-                "List Orbit tasks, optionally filtered by status, parent, type, or dependency readiness"
+                "List Orbit tasks newest-first (default limit 50), across every lifecycle status unless a filter is supplied. Optional filters: status, parent, type, tag, dependency readiness, path."
                 .to_string(),
             parameters,
             builtin: true,
