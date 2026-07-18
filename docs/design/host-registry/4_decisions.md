@@ -10,7 +10,7 @@ summary: Accepted ADR log for the coupled Host Registry and MCP Bridge v1 contra
 tags: [host-registry, mcp-bridge, multi-host, placement]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Decisions
@@ -22,7 +22,7 @@ v1 decision set shared with [mcp-bridge](../mcp-bridge/4_decisions.md).
 
 ## ADR-0226 — Singular coordination hub, workspace owner, and per-run placement
 
-**Status:** Accepted · 2026-07 · [ORB-10245] accepted the coupled v1 contract; [ORB-10248] implemented the workspace boundary.
+**Status:** Accepted · 2026-07 · [ORB-10245] accepted the coupled v1 contract; [ORB-10248] implemented the workspace boundary; [ORB-10249] applied it to task coordination.
 
 ### Context
 
@@ -40,6 +40,7 @@ logical workspace/owner separately from machine-local checkout bindings.
 
 - Coordination writes remain hub-routed while knowledge authorship remains owner-bound.
 - Logical workspace lookup never requires or fabricates a checkout path; local path lookup consults checkout bindings only.
+- Task coordination, global relation resolution, and dependency readiness use logical workspace IDs and never require either workspace checkout.
 - Cost: hub downtime stalls coordination for every workspace, and disconnected machines cannot write coordination records.
 
 ## ADR-0227 — Stable machine identity, registry, and out-of-band hub pin
@@ -163,5 +164,6 @@ for its non-Orbit constellation domains.
 - [ORB-00424] — completed design proposal for canonical Orbit MCP and Bridge parity retirement.
 - [ORB-10245] — accepted the coupled contract and recorded this ADR set.
 - [ORB-10248] — implemented the versioned logical-workspace/local-checkout split.
+- [ORB-10249] — implemented path-free task coordination and global task-relation/readiness lookup.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

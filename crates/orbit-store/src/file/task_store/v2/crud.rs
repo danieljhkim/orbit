@@ -13,9 +13,13 @@ impl TaskV2Store {
             ));
         }
         let relations = relations_from_create_params(&params)?;
+        self.registry
+            .validate_new_task_relation_targets(&self.workspace_id, &relations)?;
 
         let now = Utc::now();
         let id = self.registry.allocate_task_id(&self.workspace_id)?;
+        self.registry
+            .validate_task_relations(&self.workspace_id, &id, &relations)?;
         let comments = params
             .comments
             .iter()

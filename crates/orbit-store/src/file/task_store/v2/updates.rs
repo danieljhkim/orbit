@@ -16,6 +16,9 @@ impl TaskV2Store {
             let mut bundle = self.read_existing_bundle(id)?;
             let mut envelope_changed = false;
             let mut title_changed = false;
+            let relations_changed = fields.dependencies.is_some()
+                || fields.source_task_id.is_some()
+                || fields.relations.is_some();
 
             if let Some(value) = &fields.title {
                 if value.trim().is_empty() {
@@ -100,6 +103,14 @@ impl TaskV2Store {
             if let Some(value) = &fields.external_refs {
                 bundle.envelope.external_refs = value.clone();
                 envelope_changed = true;
+            }
+
+            if relations_changed {
+                self.registry.validate_task_relations(
+                    &self.workspace_id,
+                    id,
+                    &bundle.envelope.relations,
+                )?;
             }
 
             if let Some(value) = &fields.description {

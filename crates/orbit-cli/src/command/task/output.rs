@@ -2,9 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{ArtifactManifestFileV2, TaskArtifact};
-use orbit_core::{
-    OrbitError, OrbitRuntime, TaskStatus, build_task_status_index, resolve_task_dependencies,
-};
+use orbit_core::{OrbitError, OrbitRuntime, TaskStatus, resolve_task_dependencies};
 use serde_json::{Value, json};
 
 pub(crate) fn task_to_signal_json(task: &orbit_core::Task) -> Value {
@@ -57,7 +55,7 @@ pub(crate) fn task_to_json_for_runtime(
     runtime: &OrbitRuntime,
     task: &orbit_core::Task,
 ) -> Result<Value, OrbitError> {
-    let status_by_id = build_task_status_index(&runtime.list_tasks()?);
+    let status_by_id = runtime.task_status_index()?;
     task_to_json_with_sidecars(runtime, task, &status_by_id)
 }
 

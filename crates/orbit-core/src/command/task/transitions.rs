@@ -1,7 +1,7 @@
 use chrono::Utc;
 use orbit_common::types::{
     NotFoundKind, OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskRelationType, TaskStatus,
-    build_task_status_index, is_valid_friction_id, unmet_task_dependencies,
+    is_valid_friction_id, unmet_task_dependencies,
 };
 use orbit_store::friction_store::{resolve_friction_by_task, show_friction};
 
@@ -270,7 +270,7 @@ impl OrbitRuntime {
             crew_override.as_deref(),
             task.crew.as_deref(),
         )?;
-        let dependency_status_index = build_task_status_index(&self.list_tasks()?);
+        let dependency_status_index = self.task_status_index()?;
         let unmet_dependencies = unmet_task_dependencies(&task, &dependency_status_index);
         if in_progress_transition_requires_plan(task.status) {
             ensure_task_has_execution_plan(id, task.plan.as_str())?;

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use orbit_common::types::{
     Adr, AdrStatus, ArtifactManifestFileV2, ExecutorDef, ExternalRef, Learning, LearningStatus,
     OrbitError, PolicyDef, ReviewThread, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
@@ -26,6 +28,10 @@ impl TaskStoreBackend for TaskV2Store {
 
     fn list_tasks(&self) -> Result<Vec<Task>, OrbitError> {
         self.list_tasks()
+    }
+
+    fn task_status_index(&self) -> Result<BTreeMap<String, TaskStatus>, OrbitError> {
+        self.task_status_index()
     }
 
     fn list_tasks_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {

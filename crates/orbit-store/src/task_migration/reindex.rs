@@ -35,7 +35,7 @@ pub fn reindex_workspace(
         .find_workspace_binding(workspace_id)?
         .ok_or_else(|| {
             OrbitError::InvalidInput(format!(
-                "workspace '{workspace_id}' is not registered locally"
+                "workspace '{workspace_id}' is not registered in the coordination registry"
             ))
         })?;
     let workspace_id = binding.workspace_id.clone();
@@ -76,7 +76,15 @@ pub fn reindex_workspace(
         registry.bump_allocator_to_at_least(max + 1)?;
     }
 
-    let projection = registry.rebuild_projection(&binding.orbit_dir, &workspace_id)?;
+    let projection = if let Some(checkout) = registry.find_workspace_checkout(&workspace_id)? {
+        registry.rebuild_projection(&checkout.orbit_dir, &workspace_id)?
+    } else {
+        ProjectionRebuildResult {
+            projected: 0,
+            repaired: 0,
+            degraded_reason: None,
+        }
+    };
 
     Ok(ReindexOutcome {
         workspace_id,

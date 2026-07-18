@@ -1,5 +1,5 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime, TaskRelatedDoc, build_task_status_index};
+use orbit_core::{OrbitError, OrbitRuntime, TaskRelatedDoc};
 use serde_json::Value;
 
 use crate::command::Execute;
@@ -31,7 +31,7 @@ pub struct TaskShowArgs {
 impl Execute for TaskShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let task = runtime.get_task(&self.id)?;
-        let status_by_id = build_task_status_index(&runtime.list_tasks()?);
+        let status_by_id = runtime.task_status_index()?;
         let fields = normalize_task_show_fields(&self.fields)?;
 
         if !fields.is_empty() {

@@ -9,10 +9,7 @@ use std::path::Path;
 use clap::Args;
 use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceStatus};
 use orbit_core::workspace_registry;
-use orbit_core::{
-    JobRunState, OrbitError, OrbitRuntime, TaskStatus, build_task_status_index,
-    task_dependencies_ready,
-};
+use orbit_core::{JobRunState, OrbitError, OrbitRuntime, TaskStatus, task_dependencies_ready};
 use serde_json::{Value, json};
 
 use super::ship::ShipMode;
@@ -199,7 +196,7 @@ fn sweep_active_workspace(
     }
 
     let tasks = runtime.list_tasks()?;
-    let status_by_id = build_task_status_index(&tasks);
+    let status_by_id = runtime.task_status_index()?;
     let ready_backlog = tasks
         .iter()
         .filter(|task| {

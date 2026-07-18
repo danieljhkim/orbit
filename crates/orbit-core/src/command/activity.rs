@@ -274,9 +274,8 @@ mod tests {
                     // pipeline / job dispatch
                     "orbit.pipeline.invoke",
                     "orbit.pipeline.wait",
-                    // task lifecycle writes (dispositions are applied by the
-                    // deterministic step, never the agent)
-                    "orbit.task.update",
+                    // task lifecycle writes other than the activity's one
+                    // evidence-gated blocked -> done reconciliation
                     "orbit.task.start",
                     "orbit.task.approve",
                     "orbit.task.reject",
@@ -292,6 +291,7 @@ mod tests {
                 }
                 for allowed in [
                     "orbit.task.show",
+                    "orbit.task.update",
                     "orbit.friction.add",
                     "fs.read",
                     "fs.delete",

@@ -129,11 +129,11 @@ pub use backend::{
     TaskReservationReleaseReason, TaskReservationReleaseResult, TaskReservationReserveParams,
     TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
     TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend, V2AuditEnvelopeStoreBackend,
-    WorkspaceTaskBackends, audit_event_store_sqlite, global_executor_def_store,
-    global_policy_def_store, layered_policy_def_store, session_learning_state_store_sqlite,
-    task_reservation_store_sqlite, tool_store_sqlite, v2_audit_event_store_sqlite,
-    workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
-    workspace_policy_def_store, workspace_task_backends,
+    WorkspaceTaskBackends, audit_event_store_sqlite, coordination_task_backends,
+    global_executor_def_store, global_policy_def_store, layered_policy_def_store,
+    session_learning_state_store_sqlite, task_reservation_store_sqlite, tool_store_sqlite,
+    v2_audit_event_store_sqlite, workspace_adr_backends, workspace_job_run_store,
+    workspace_learning_backend, workspace_policy_def_store, workspace_task_backends,
 };
 pub use file_lock::{LockHolderInfo, read_lock_holder};
 pub use json_schema::{validate_instance_against_schema, validate_schema_document};

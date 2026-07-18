@@ -12,7 +12,7 @@ use tempfile::TempDir;
 
 use crate::file::task_store::v2_bundle::{TaskBundleStoreV2, TaskBundleV2, read_bundle_at};
 use crate::sqlite::task_registry::{
-    BindWorkspaceParams, TaskRegistryStore, WorkspaceBinding, task_registry_path,
+    BindWorkspaceParams, TaskRegistryStore, WorkspaceCheckoutBinding, task_registry_path,
 };
 
 use super::*;
@@ -21,7 +21,7 @@ fn open_registry(global: &Path) -> TaskRegistryStore {
     TaskRegistryStore::open(&task_registry_path(global)).expect("open registry")
 }
 
-fn bind(registry: &TaskRegistryStore, global: &Path, ws_id: &str) -> WorkspaceBinding {
+fn bind(registry: &TaskRegistryStore, global: &Path, ws_id: &str) -> WorkspaceCheckoutBinding {
     let orbit_dir = global.join("repos").join(ws_id).join(".orbit");
     fs::create_dir_all(&orbit_dir).expect("create orbit dir");
     registry
@@ -36,7 +36,10 @@ fn bind(registry: &TaskRegistryStore, global: &Path, ws_id: &str) -> WorkspaceBi
         .expect("bind workspace")
 }
 
-fn bundle_store(registry: &TaskRegistryStore, binding: &WorkspaceBinding) -> TaskBundleStoreV2 {
+fn bundle_store(
+    registry: &TaskRegistryStore,
+    binding: &WorkspaceCheckoutBinding,
+) -> TaskBundleStoreV2 {
     TaskBundleStoreV2::new(
         registry.clone(),
         binding.workspace_id.clone(),
@@ -276,7 +279,12 @@ fn import_into_unregistered_workspace_registers_it() {
     assert_eq!(outcome.workspace_id, ws);
     assert!(outcome.registered_workspace);
     assert!(registry.find_workspace_binding(ws).unwrap().is_some());
+    assert!(
+        registry.find_workspace_checkout(ws).unwrap().is_none(),
+        "migration must not fabricate a detached checkout"
+    );
     assert_eq!(registry.tasks_for_workspace(ws).unwrap().len(), 2);
+    assert!(!dst.path().join("tasks/detached").exists());
 }
 
 #[test]
@@ -492,6 +500,11 @@ fn reindex_reregisters_disk_bundles_and_drops_stale() {
     assert_eq!(registered, vec!["ORB-00000", "ORB-00003"]);
     // Allocator moved past the highest on-disk id.
     assert!(registry.allocator_next_number().unwrap() >= 4);
+
+    let again = reindex_workspace(&registry, ws).expect("reindex again");
+    assert_eq!(again.indexed, outcome.indexed);
+    assert_eq!(again.removed_stale, 0);
+    assert_eq!(registry.allocator_next_number().unwrap(), 4);
 }
 
 fn read_id_map(path: &PathBuf) -> std::collections::BTreeMap<String, String> {

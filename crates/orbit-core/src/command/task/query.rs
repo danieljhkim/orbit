@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use orbit_common::types::{
     ArtifactManifestFileV2, ExternalRef, NotFoundKind, OrbitError, ReviewThread, Task,
     TaskArtifact, TaskComment, TaskHistoryEntry, prune_missing_context_files,
@@ -63,6 +65,14 @@ impl OrbitRuntime {
 
     pub fn list_tasks(&self) -> Result<Vec<Task>, OrbitError> {
         self.stores().tasks().list()
+    }
+
+    /// Returns the coordination registry's global status projection for
+    /// dependency readiness while leaving task listing workspace-scoped.
+    pub fn task_status_index(
+        &self,
+    ) -> Result<BTreeMap<String, orbit_common::types::TaskStatus>, OrbitError> {
+        self.stores().tasks().status_index()
     }
 
     pub fn list_tasks_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {

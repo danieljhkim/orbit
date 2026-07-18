@@ -5,19 +5,18 @@ use chrono::{DateTime, Utc};
 use orbit_common::types::{OrbitError, TaskEnvelopeV2, normalize_task_tags};
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::types::{TaskBundleBinding, WorkspaceBinding};
+use super::types::{TaskBundleBinding, WorkspaceBinding, WorkspaceCheckoutBinding};
 use super::util::{path_to_string, relation_type_name, terminal_month};
 
 pub(super) fn workspace_by_orbit_dir(
     conn: &Connection,
     orbit_dir: &Path,
-) -> Result<Option<WorkspaceBinding>, OrbitError> {
+) -> Result<Option<WorkspaceCheckoutBinding>, OrbitError> {
     conn.query_row(
-        "SELECT workspace_id, slug, repo_root, workspace_path, orbit_dir,
-            repo_fingerprint, created_at, updated_at
-         FROM workspace_bindings WHERE orbit_dir = ?1",
+        "SELECT workspace_id, repo_root, workspace_path, orbit_dir, created_at, updated_at
+         FROM workspace_checkout_bindings WHERE orbit_dir = ?1",
         [path_to_string(orbit_dir)],
-        decode_workspace_binding,
+        decode_workspace_checkout_binding,
     )
     .optional()
     .map_err(|e| OrbitError::Store(e.to_string()))
@@ -28,11 +27,24 @@ pub(super) fn workspace_by_id(
     workspace_id: &str,
 ) -> Result<Option<WorkspaceBinding>, OrbitError> {
     conn.query_row(
-        "SELECT workspace_id, slug, repo_root, workspace_path, orbit_dir,
-            repo_fingerprint, created_at, updated_at
+        "SELECT workspace_id, slug, repo_fingerprint, created_at, updated_at
          FROM workspace_bindings WHERE workspace_id = ?1",
         [workspace_id],
         decode_workspace_binding,
+    )
+    .optional()
+    .map_err(|e| OrbitError::Store(e.to_string()))
+}
+
+pub(super) fn workspace_checkout_by_id(
+    conn: &Connection,
+    workspace_id: &str,
+) -> Result<Option<WorkspaceCheckoutBinding>, OrbitError> {
+    conn.query_row(
+        "SELECT workspace_id, repo_root, workspace_path, orbit_dir, created_at, updated_at
+         FROM workspace_checkout_bindings WHERE workspace_id = ?1",
+        [workspace_id],
+        decode_workspace_checkout_binding,
     )
     .optional()
     .map_err(|e| OrbitError::Store(e.to_string()))
@@ -139,12 +151,22 @@ pub(super) fn decode_workspace_binding(
     Ok(WorkspaceBinding {
         workspace_id: row.get(0)?,
         slug: row.get(1)?,
-        repo_root: PathBuf::from(row.get::<_, String>(2)?),
-        workspace_path: PathBuf::from(row.get::<_, String>(3)?),
-        orbit_dir: PathBuf::from(row.get::<_, String>(4)?),
-        repo_fingerprint: row.get(5)?,
-        created_at: parse_timestamp(&row.get::<_, String>(6)?)?,
-        updated_at: parse_timestamp(&row.get::<_, String>(7)?)?,
+        repo_fingerprint: row.get(2)?,
+        created_at: parse_timestamp(&row.get::<_, String>(3)?)?,
+        updated_at: parse_timestamp(&row.get::<_, String>(4)?)?,
+    })
+}
+
+pub(super) fn decode_workspace_checkout_binding(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<WorkspaceCheckoutBinding> {
+    Ok(WorkspaceCheckoutBinding {
+        workspace_id: row.get(0)?,
+        repo_root: PathBuf::from(row.get::<_, String>(1)?),
+        workspace_path: PathBuf::from(row.get::<_, String>(2)?),
+        orbit_dir: PathBuf::from(row.get::<_, String>(3)?),
+        created_at: parse_timestamp(&row.get::<_, String>(4)?)?,
+        updated_at: parse_timestamp(&row.get::<_, String>(5)?)?,
     })
 }
 

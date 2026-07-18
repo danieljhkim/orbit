@@ -66,7 +66,7 @@ use crate::file::task_store::v2_bundle::{
     TaskBundleV2, copy_artifact_blobs, read_bundle_at, write_bundle_at,
 };
 use crate::sqlite::task_registry::{
-    BindWorkspaceParams, ProjectionRebuildResult, TaskRegistryStore, parse_orb_task_number,
+    ProjectionRebuildResult, RegisterWorkspaceParams, TaskRegistryStore, parse_orb_task_number,
 };
 
 mod archive;
@@ -159,7 +159,7 @@ pub struct ImportedTask {
 pub struct ImportOutcome {
     /// Target workspace the tasks landed in.
     pub workspace_id: String,
-    /// True if import registered a new (previously unknown) workspace binding.
+    /// True if import registered a new (previously unknown) logical workspace.
     pub registered_workspace: bool,
     /// Per-task records.
     pub tasks: Vec<ImportedTask>,
@@ -183,7 +183,7 @@ pub fn export_tasks(
         .find_workspace_binding(workspace_id)?
         .ok_or_else(|| {
             OrbitError::InvalidInput(format!(
-                "workspace '{workspace_id}' is not registered locally"
+                "workspace '{workspace_id}' is not registered in the coordination registry"
             ))
         })?;
     let workspace_id = binding.workspace_id.clone();
@@ -267,9 +267,9 @@ struct StagedBundle {
 /// Resolved import target after workspace resolution.
 struct ImportTarget {
     workspace_id: String,
-    orbit_dir: PathBuf,
-    /// Set when import must register a new binding for this workspace.
-    register: Option<BindWorkspaceParams>,
+    orbit_dir: Option<PathBuf>,
+    /// Set when import must register a new logical workspace record.
+    register: Option<RegisterWorkspaceParams>,
 }
 
 /// Import tasks from a tar.zst archive into the local registry.
@@ -359,9 +359,7 @@ pub fn import_tasks(
     let mut guard = WriteGuard::new(registry);
 
     let registered_workspace = if let Some(params) = &target.register {
-        std::fs::create_dir_all(&target.orbit_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
-        guard.created_workspace_dir = Some(target.orbit_dir.clone());
-        registry.bind_workspace(params.clone())?;
+        registry.register_workspace(params.clone())?;
         true
     } else {
         false
@@ -535,7 +533,7 @@ fn stage_bundles(
     Ok(staged)
 }
 
-/// Resolve where imported tasks should land, and whether a new workspace binding
+/// Resolve where imported tasks should land, and whether a new logical workspace
 /// must be registered.
 fn resolve_target(
     registry: &TaskRegistryStore,
@@ -545,12 +543,14 @@ fn resolve_target(
     if let Some(requested) = target_workspace_id {
         let binding = registry.find_workspace_binding(requested)?.ok_or_else(|| {
             OrbitError::InvalidInput(format!(
-                "target workspace '{requested}' is not registered locally; initialize it first or omit --workspace to register the source workspace"
+                "target workspace '{requested}' is not registered in the coordination registry; register it first or omit --workspace to register the source workspace"
             ))
         })?;
         return Ok(ImportTarget {
             workspace_id: binding.workspace_id,
-            orbit_dir: binding.orbit_dir,
+            orbit_dir: registry
+                .find_workspace_checkout(requested)?
+                .map(|checkout| checkout.orbit_dir),
             register: None,
         });
     }
@@ -558,33 +558,24 @@ fn resolve_target(
     if let Some(binding) = registry.find_workspace_binding(&manifest.source_workspace_id)? {
         return Ok(ImportTarget {
             workspace_id: binding.workspace_id,
-            orbit_dir: binding.orbit_dir,
+            orbit_dir: registry
+                .find_workspace_checkout(&manifest.source_workspace_id)?
+                .map(|checkout| checkout.orbit_dir),
             register: None,
         });
     }
 
-    // Source workspace is unknown locally and no target was named: register a
-    // detached binding pinned to the source id. Its synthetic orbit_dir lives
-    // beside the workspaces tree so the projection has somewhere to land until
-    // the real repo is initialized with this workspace id. The directory is
-    // created in Phase 2 (not here) so a classification failure leaves no leak.
-    let detached_root = registry
-        .workspaces_dir()
-        .parent()
-        .map(|parent| parent.join("detached"))
-        .unwrap_or_else(|| registry.workspaces_dir().join("detached"));
-    let orbit_dir = detached_root.join(&manifest.source_workspace_id);
-    let params = BindWorkspaceParams {
-        workspace_id: Some(manifest.source_workspace_id.clone()),
+    // Source workspace is unknown locally and no target was named: register
+    // only its logical coordination identity. A later checkout link may add a
+    // local projection; migration must never fabricate checkout paths.
+    let params = RegisterWorkspaceParams {
+        workspace_id: manifest.source_workspace_id.clone(),
         slug: manifest.source_workspace_slug.clone(),
-        repo_root: orbit_dir.clone(),
-        workspace_path: orbit_dir.clone(),
-        orbit_dir: orbit_dir.clone(),
         repo_fingerprint: None,
     };
     Ok(ImportTarget {
         workspace_id: manifest.source_workspace_id.clone(),
-        orbit_dir,
+        orbit_dir: None,
         register: Some(params),
     })
 }
@@ -627,7 +618,14 @@ fn rebuild_projection_best_effort(
     registry: &TaskRegistryStore,
     target: &ImportTarget,
 ) -> ProjectionRebuildResult {
-    match registry.rebuild_projection(&target.orbit_dir, &target.workspace_id) {
+    let Some(orbit_dir) = target.orbit_dir.as_deref() else {
+        return ProjectionRebuildResult {
+            projected: 0,
+            repaired: 0,
+            degraded_reason: None,
+        };
+    };
+    match registry.rebuild_projection(orbit_dir, &target.workspace_id) {
         Ok(result) => result,
         Err(err) => ProjectionRebuildResult {
             projected: 0,
@@ -655,8 +653,6 @@ struct WriteGuard<'a> {
     registry: &'a TaskRegistryStore,
     written_dirs: Vec<PathBuf>,
     registered_ids: Vec<String>,
-    /// Synthetic orbit dir created for a freshly registered detached workspace.
-    created_workspace_dir: Option<PathBuf>,
     armed: bool,
 }
 
@@ -666,7 +662,6 @@ impl<'a> WriteGuard<'a> {
             registry,
             written_dirs: Vec::new(),
             registered_ids: Vec::new(),
-            created_workspace_dir: None,
             armed: true,
         }
     }
@@ -690,13 +685,6 @@ impl<'a> WriteGuard<'a> {
             }
         }
         for dir in self.written_dirs.drain(..) {
-            let _ = std::fs::remove_dir_all(&dir);
-        }
-        // The empty detached workspace dir we created (bundle dirs live under a
-        // separate `workspaces/` tree, so this only holds a not-yet-built
-        // projection). The workspace binding row is left in place — an empty
-        // binding is benign and idempotent to re-create on retry.
-        if let Some(dir) = self.created_workspace_dir.take() {
             let _ = std::fs::remove_dir_all(&dir);
         }
         self.armed = false;
