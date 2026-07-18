@@ -1,78 +1,164 @@
 ---
 title: Orbit MCP Bridge — Decisions
 owner: codex
-last_updated: 2026-07-16
+last_updated: 2026-07-17
 status: Accepted
 feature: mcp-bridge
 doc_role: decisions
 type: design
-summary: ADR log for the MCP bridge feature; no ADRs are allocated yet and candidate hub/owner decisions await coupled design acceptance.
+summary: Accepted ADR log for the coupled MCP Bridge and Host Registry v1 contract.
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ADR-0181, ADR-0199, ADR-0200, ADR-0201]
+related_artifacts: [ORB-00424, ORB-10245, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Orbit MCP Bridge — Decisions
 
-ADR log for `mcp-bridge`. Entries are append-only and ordered by ascending global
-ID. **Allocate the global `ADR-NNNN` via `orbit.adr.add` before writing the
-heading** — never hand-author a four-digit number. The store owns ID, status, owner,
-and links; this file is the long-form narrative keyed on that same ID. See
-[CONVENTIONS.md §4](../CONVENTIONS.md#4-adr-template-strict).
+ADR log for `mcp-bridge`. Entries are append-only and ordered by global ID. The
+Orbit ADR store owns allocation, status, and task links; this log records the
+complete seven-decision v1 contract shared with
+[host-registry](../host-registry/4_decisions.md).
 
-**No ADRs allocated yet.** This feature design is Accepted; coupled
-[host-registry](../host-registry/4_decisions.md) remains Draft. After both designs
-are accepted, these candidates appear to clear the real-alternative, forward-
-constraint, and non-trivial-cost bar:
+## ADR-0226 — Singular coordination hub, workspace owner, and per-run placement
 
-1. **Orbit MCP has exactly one cross-machine target: the coordination hub.**
-   Alternative: per-workspace authority/owner routes. Constraint: no spoke-to-spoke
-   connections and no hub proxy to owners. Cost: current knowledge for spoke-owned
-   workspaces is unavailable off-owner except as a Git replica.
-2. **The client-facing MCP process is a local placement broker, not a whole-surface
-   SSH relay.** Alternative: run every tool on the hub. Constraint: tools declare
-   `hub`, `owner`, `local-derived`, or `composite`. Cost: Orbit owns routing,
-   composite operations, and split audit even though there is only one remote link.
-3. **Knowledge is owner-bound; the hub allocates IDs but does not finalize or proxy
-   for spoke owners.** Alternative: all knowledge on the hub or a distributed
-   reservation/finalization protocol. Constraint: an agent non-owner routes
-   authoring as a task to the owner; the explicit human ID-plus-PR path does not
-   enable replica-store writes. Cost: allocation/finalize failure may consume an
-   unused ID, and non-owner current reads do not exist.
-4. **`mcp.toml` grants transport trust to one stable hub `machine_id` only.**
-   Alternative: default/per-workspace targets or transport fields in workspace
-   bindings. Constraint: repo config cannot redirect/elevate, and ownership changes
-   never change MCP transport; the first registration pins an out-of-band-copied
-   hub ID rather than silently trusting the reached process. Cost: the operator must
-   transfer the hub ID during bootstrap, and host-registry/`mcp.toml` drift needs
-   explicit diagnostics.
-5. **Replica knowledge reads are explicit and marked.** Alternative: silently use
-   the local Git checkout whenever current owner state is unreachable. Constraint:
-   search/show never present replica data as current; `kind=all` requires current,
-   explicit replica, or explicit omission. Cost: common cross-machine searches may
-   require an extra consistency choice.
-6. **Capability and placement are orthogonal.** Alternative: assume hub tools are
-   operator-only and local tools are agent-safe. Constraint: `agent`, `operator`,
-   and `runner` filter independently of placement. Cost: conformance coverage spans
-   capability × placement combinations.
-7. **Caller-host and process-host provenance are distinct.** Alternative: retain
-   the executing process hostname only. Constraint: nested hub sessions carry
-   stable caller `machine_id`, and composite knowledge calls correlate hub/local
-   audit. Cost: v1 same-user SSH treats caller identity as trusted provenance, not
-   independently authenticated authorization.
-8. **Owners publish dispatch projections to the hub.** Alternative: the hub reads
-   owner files live or contacts owners during dispatch. Constraint: crew/workflow
-   validation uses one-way published metadata and fails when stale. Cost: another
-   projection lifecycle must be refreshed and diagnosed.
-9. **Bridge retires all Orbit-shaped parity and workflow declarations.**
-   Alternative: retain Bridge permanently as the remote compatibility layer.
-   Constraint: Orbit alone owns `orbit_*` schemas and errors. Cost: clients keep two
-   MCP registrations for Orbit and non-Orbit constellation services.
+**Status:** Accepted · 2026-07 · [ORB-10245] accepted the coupled v1 contract.
+
+### Context
+
+Cross-machine work needs a coordination authority, a knowledge author, and an
+execution destination; making them one authority would scatter task state or make
+ownership implicit.
+
+### Decision
+
+Use exactly one coordination hub for every workspace, declare one workspace owner,
+and select execution placement per run with the owner as the default.
+
+### Consequences
+
+- Coordination writes remain hub-routed while knowledge authorship remains owner-bound.
+- Cost: hub downtime stalls coordination for every workspace, and disconnected machines cannot write coordination records.
+
+## ADR-0227 — Stable machine identity, registry, and out-of-band hub pin
+
+**Status:** Accepted · 2026-07 · [ORB-10245] froze the host identity boundary.
+
+### Context
+
+Hostname-derived strings and per-workspace transport targets can silently redirect a
+machine or elevate repository configuration.
+
+### Decision
+
+Give each machine an immutable generated `machine_id`, keep the registry at the hub,
+and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
+
+### Consequences
+
+- Names resolve at binding time and persisted records retain stable identity.
+- Cost: bootstrap transfers hub identity out of band, and registry/trust drift needs explicit diagnosis.
+
+## ADR-0228 — Local placement broker with capability-set filtering
+
+**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization.
+
+### Context
+
+One remote MCP target must preserve local graph and documentation behavior without
+equating where a tool runs with who may invoke it.
+
+### Decision
+
+Use a local placement broker. Every exposed canonical tool has exactly one of
+`hub`, `owner`, `local-derived`, or `composite` placement and an independently
+filtered non-empty capability set.
+
+### Consequences
+
+- Conformance records placement and allowed capabilities for every exposed tool.
+- Cost: the broker owns route preflight, composite audit, and capability-by-placement coverage.
+
+## ADR-0229 — Owner-authored knowledge with hub-global IDs and explicit replicas
+
+**Status:** Accepted · 2026-07 · [ORB-10245] fixed the one-writer knowledge rule.
+
+### Context
+
+Knowledge needs global IDs without making a hub checkout or a stale replica a second
+author.
+
+### Decision
+
+The hub allocates global IDs, the declared owner authors current knowledge, and Git
+replicas are opt-in reads marked as replicas. The hub never proxies to a spoke owner.
+
+### Consequences
+
+- A non-owner agent routes actionable work as a task to the owner.
+- Cost: finalize failure consumes a valid unused ID, and current spoke-owned knowledge is unavailable off-owner.
+
+## ADR-0230 — Pull-based leases with immutable placement and explicit recovery
+
+**Status:** Accepted · 2026-07 · [ORB-10245] fixed runner delivery semantics.
+
+### Context
+
+A hub-push executor model needs outbound spoke routes and obscures the placement
+selected and leased for a run.
+
+### Decision
+
+Spokes poll the hub for placed runs. Requested and actual placement are immutable;
+pre-start loss permits redelivery, while post-start uncertainty is
+`recovery_required` and needs explicit recovery.
+
+### Consequences
+
+- The hub is a mailbox and never opens a route to a spoke.
+- Cost: pickup latency follows poll cadence and an interrupted started run is not silently reassigned.
+
+## ADR-0231 — Committed-routine ownership with host-local cursors
+
+**Status:** Accepted · 2026-07 · [ORB-10245] fixed routine execution ownership.
+
+### Context
+
+Git-committed routines converge to many checkouts, while scheduler cursor and pause
+state must remain local to the executing host.
+
+### Decision
+
+A committed routine is owned by its registry-validated host pin; unpinned committed
+routines fail closed, and each host retains its own cursor and pause state.
+
+### Consequences
+
+- Reassignment is a reviewed pin change rather than a git-status inference.
+- Cost: handoff starts with no migrated cursor and existing committed routines need explicit pins.
+
+## ADR-0232 — Retire Bridge’s Orbit-shaped contract
+
+**Status:** Accepted · 2026-07 · [ORB-10245] set the cutover boundary.
+
+### Context
+
+Bridge parity duplicates Orbit schemas, errors, and workflow declarations even
+though Orbit is the canonical domain owner.
+
+### Decision
+
+Retire Bridge’s Orbit-shaped contract after Orbit MCP reaches parity; Bridge remains
+for its non-Orbit constellation domains.
+
+### Consequences
+
+- Clients register Orbit and Bridge side by side during migration.
+- Cost: cutover temporarily maintains two registrations and requires deletion of a compatibility layer.
 
 ## Task References
 
-- [ORB-00424] — umbrella proposal for canonical Orbit MCP and eventual Bridge
-  parity retirement.
+- [ORB-00424] — completed design proposal for canonical Orbit MCP and Bridge parity retirement.
+- [ORB-10245] — accepted the coupled contract and recorded this ADR set.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

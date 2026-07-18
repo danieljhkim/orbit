@@ -1,8 +1,8 @@
 ---
 title: Host Registry — Design
 owner: claude
-last_updated: 2026-07-16
-status: Draft
+last_updated: 2026-07-17
+status: Accepted
 feature: host-registry
 doc_role: design
 type: design
@@ -10,13 +10,13 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ADR-0200, ADR-0205, ADR-0208]
+related_artifacts: [ORB-00424, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Design
 
 This doc specifies the **target** design; nothing here has landed and the folder is
-Draft. It covers host identity, the registry, the coordination-plane/workspace-
+Accepted. It covers host identity, the registry, the coordination-plane/workspace-
 ownership split, execution placement (including the hub→satellite protocol), the
 per-record data-placement split, and the revision to routine sweep ownership. It
 leaves client→hub transport to the [MCP bridge](../mcp-bridge/2_design.md)

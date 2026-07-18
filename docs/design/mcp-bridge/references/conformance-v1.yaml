@@ -1,0 +1,112 @@
+schema_version: 1
+contract: orbit-mcp-bridge-v1
+source_of_truth:
+  exposed_tool_list: crates/orbit-cli/src/command/mcp/host.rs
+  canonical_schema_registry: orbit tool registry
+  placement_metadata_owner: orbit-mcp broker
+
+capabilities:
+  allowed_values: [agent, operator, runner]
+  set_rules:
+    - Every exposed tool has exactly one placement and a non-empty allowed_capabilities set.
+    - Placement and capability filtering are independent.
+    - operator does not imply runner; runner does not imply agent.
+
+tools:
+  orbit.task.add: { placement: hub, allowed_capabilities: [agent, operator] }
+  orbit.task.approve: { placement: hub, allowed_capabilities: [agent, operator] }
+  orbit.task.artifact.put: { placement: hub, allowed_capabilities: [agent, operator] }
+  orbit.task.list: { placement: hub, allowed_capabilities: [agent, operator] }
+  orbit.task.review_thread.add: { placement: hub, allowed_capabilities: [agent, operator] }
+  orbit.task.review_thread.list: { placement: hub, allowed_capabilities: [agent, operator] }
+  orbit.task.review_thread.reply: { placement: hub, allowed_capabilities: [agent, operator] }
+  orbit.task.review_thread.resolve: { placement: hub, allowed_capabilities: [agent, operator] }
+  orbit.task.show: { placement: hub, allowed_capabilities: [agent, operator] }
+  orbit.task.start: { placement: hub, allowed_capabilities: [agent, operator] }
+  orbit.task.update: { placement: hub, allowed_capabilities: [agent, operator] }
+  orbit.friction.add: { placement: hub, allowed_capabilities: [agent, operator] }
+  orbit.friction.tags: { placement: hub, allowed_capabilities: [agent, operator] }
+  orbit.friction.update: { placement: hub, allowed_capabilities: [operator] }
+  orbit.graph.sync: { placement: local-derived, allowed_capabilities: [agent, operator] }
+  orbit.graph.search: { placement: local-derived, allowed_capabilities: [agent, operator] }
+  orbit.graph.show: { placement: local-derived, allowed_capabilities: [agent, operator] }
+  orbit.graph.refs: { placement: local-derived, allowed_capabilities: [agent, operator] }
+  orbit.graph.callees: { placement: local-derived, allowed_capabilities: [agent, operator] }
+  orbit.graph.impact: { placement: local-derived, allowed_capabilities: [agent, operator] }
+  orbit.graph.trace: { placement: local-derived, allowed_capabilities: [agent, operator] }
+  orbit.graph.overview: { placement: local-derived, allowed_capabilities: [agent, operator] }
+  orbit.graph.implementors: { placement: local-derived, allowed_capabilities: [agent, operator] }
+  orbit.graph.deps: { placement: local-derived, allowed_capabilities: [agent, operator] }
+  orbit.search: { placement: composite, allowed_capabilities: [agent, operator] }
+  orbit.adr.add: { placement: composite, allowed_capabilities: [agent, operator] }
+  orbit.adr.show: { placement: owner, allowed_capabilities: [agent, operator] }
+  orbit.adr.supersede: { placement: owner, allowed_capabilities: [agent, operator] }
+  orbit.adr.update: { placement: owner, allowed_capabilities: [agent, operator] }
+  orbit.learning.add: { placement: composite, allowed_capabilities: [agent, operator] }
+  orbit.learning.show: { placement: owner, allowed_capabilities: [agent, operator] }
+  orbit.learning.update: { placement: owner, allowed_capabilities: [agent, operator] }
+  orbit.learning.supersede: { placement: owner, allowed_capabilities: [agent, operator] }
+  orbit.auto_task.add: { placement: owner, allowed_capabilities: [agent, operator] }
+  orbit.auto_task.show: { placement: owner, allowed_capabilities: [agent, operator] }
+  orbit.auto_task.update: { placement: owner, allowed_capabilities: [agent, operator] }
+  orbit.auto_task.toggle: { placement: owner, allowed_capabilities: [agent, operator] }
+
+hub_schema_digest:
+  contract_revision: 1
+  inputs:
+    - canonical schema name, description, and input schema for every hub-placed tool
+    - canonical schema name, description, and input schema for every composite tool's hub step
+    - advertised MCP name mapping for each included canonical tool
+    - canonical registry revision
+  mismatch_behavior:
+    - Reject hub routing before dispatch when revision or digest differs.
+    - Local-derived and locally eligible owner calls may continue without a hub route.
+
+run_protocol:
+  capability: runner
+  hub_endpoint_placement: hub
+  allowed_operations: [presence, lease, heartbeat, report]
+  transitions:
+    - from: placed
+      to: leased
+      event: lease_granted
+      invariant: actual placement records the leasing machine_id and never replaces requested placement.
+    - from: leased
+      to: placed
+      event: lease_expired_before_execution
+      invariant: pre-start loss is redeliverable only to the recorded placement; it is not automatic failover.
+    - from: leased
+      to: execution_started
+      event: execution_started
+      invariant: the runner records the start before execution side effects are considered recoverable.
+    - from: execution_started
+      to: recovery_required
+      event: heartbeat_expired_or_outcome_unknown
+      invariant: post-start uncertainty never redelivers automatically and requires explicit recovery.
+    - from: recovery_required
+      to: placed
+      event: explicit_recovery_and_replacement
+      invariant: a shepherd or operator records recovery before a new lease can be issued.
+
+routing_expectations:
+  topology:
+    hub_count: 1
+    coordination_writer: hub
+    workspace_coordination_target: forbidden
+    forbidden_config_forms: ["[hubs.<name>]", "workspace coordination-host"]
+    unsupported: [spoke-to-spoke route, hub-to-owner proxy, replication, failover]
+  hub:
+    route: local short-circuit or the single hub link
+    rejects: [second_hub_target, workspace_specific_coordination_target]
+  owner:
+    local_owner: execute locally in the validated owner checkout
+    hub_owner: execute through the single hub link
+    spoke_owner: reject_current_state_unavailable
+    rejects: [hub_to_owner_proxy, spoke_to_spoke_route]
+  local-derived:
+    route: caller checkout only
+    rejects: [hub_execution, missing_validated_checkout]
+  composite:
+    knowledge_add: hub_allocates_id_then_owner_finalizes
+    search: hub_tasks_plus_local_docs_plus_role_aware_knowledge
+    rejects: [owner_proxy, implicit_replica_as_current]
