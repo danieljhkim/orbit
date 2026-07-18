@@ -169,6 +169,72 @@ fn refresh_rejects_future_snapshot_schema_before_first_write() {
 }
 
 #[test]
+fn first_refresh_rejects_missing_or_invalid_hub_identity_before_write() {
+    for (hub, expected) in [(None, "omits"), (Some("not-a-machine-id"), "invalid")] {
+        let (_dir, service) = service();
+        let error = service
+            .refresh(snapshot(1, hub), Utc::now())
+            .expect_err("an unpinned first refresh must be rejected")
+            .to_string();
+        assert!(error.contains(expected), "unexpected: {error}");
+        assert!(
+            !service.cache_path().exists(),
+            "invalid first refresh must not create a cache"
+        );
+    }
+}
+
+#[test]
+fn persisted_unpinned_cache_is_malformed_on_reload_without_rewrite() {
+    let (_dir, service) = service();
+    let unpinned = RegistryCacheV1 {
+        schema_version: REGISTRY_CACHE_SCHEMA_VERSION,
+        received_at: Utc::now(),
+        snapshot: snapshot(5, None),
+    };
+    let bytes = serde_json::to_vec_pretty(&unpinned).expect("serialize unpinned cache");
+    std::fs::write(service.cache_path(), &bytes).expect("write unpinned cache");
+
+    match service
+        .load(Utc::now(), Duration::minutes(5))
+        .expect("classify unpinned cache")
+    {
+        RegistryCacheState::Malformed { reason } => {
+            assert!(reason.contains("hub_machine_id"), "unexpected: {reason}");
+        }
+        other => panic!("expected Malformed, got {other:?}"),
+    }
+    assert_eq!(
+        std::fs::read(service.cache_path()).expect("reread unpinned cache"),
+        bytes,
+        "load must not rewrite an unpinned cache"
+    );
+}
+
+#[test]
+fn higher_revision_cannot_switch_hubs_from_a_persisted_unpinned_cache() {
+    let (_dir, service) = service();
+    let unpinned = RegistryCacheV1 {
+        schema_version: REGISTRY_CACHE_SCHEMA_VERSION,
+        received_at: Utc::now(),
+        snapshot: snapshot(5, None),
+    };
+    let bytes = serde_json::to_vec_pretty(&unpinned).expect("serialize unpinned cache");
+    std::fs::write(service.cache_path(), &bytes).expect("write unpinned cache");
+
+    let error = service
+        .refresh(snapshot(6, Some("hm_other")), Utc::now())
+        .expect_err("an unpinned cache must not adopt a higher-revision hub")
+        .to_string();
+    assert!(error.contains("malformed"), "unexpected: {error}");
+    assert_eq!(
+        std::fs::read(service.cache_path()).expect("reread after rejected switch"),
+        bytes,
+        "rejected hub switch must preserve the unpinned bytes for diagnosis"
+    );
+}
+
+#[test]
 fn refresh_accepts_higher_revision_and_rejects_lower() {
     let (_dir, service) = service();
     let now = Utc::now();

@@ -280,7 +280,9 @@ identity, revision, records, and authoritative timestamps; read-time-derived
 freshness/age views are not canonical mutations. Equal-revision/equal-canonical
 refresh preserves the cached snapshot and renews only the local receipt, while a
 different hub, lower revision, or stable payload conflict fails without replacing
-prior bytes. Scheduling keeps working offline.
+prior bytes. A missing or invalid hub identity is never a usable cache: first refresh
+fails before writing, and a persisted unpinned snapshot reloads as malformed without
+being rewritten. Scheduling keeps working offline.
 
 Neither role is ever selected per-task: coordination has one writer by construction,
 and two owners for one workspace is the split-brain the system already rejected

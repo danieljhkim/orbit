@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::{
     OrbitError, REGISTRY_CACHE_SCHEMA_VERSION, REGISTRY_SNAPSHOT_SCHEMA_VERSION, RegistryCacheV1,
-    RegistrySnapshotV1,
+    RegistrySnapshotV1, validate_machine_id,
 };
 use orbit_common::utility::fs::{atomic_write_bytes, with_exclusive_file_lock};
 
@@ -151,6 +151,7 @@ impl RegistryCacheService {
         W: FnOnce(&Path, &[u8]) -> io::Result<()>,
     {
         validate_snapshot_schema(snapshot.schema_version)?;
+        validate_snapshot_hub_identity(&snapshot, "incoming")?;
         let prior = self.read_valid_cache()?;
         if let Some(prior) = &prior {
             let outcome = compare_incoming(&prior.snapshot, &snapshot)?;
@@ -266,6 +267,24 @@ fn validate_snapshot_schema(schema_version: u32) -> Result<(), OrbitError> {
     Ok(())
 }
 
+fn validate_snapshot_hub_identity<'a>(
+    snapshot: &'a RegistrySnapshotV1,
+    source: &str,
+) -> Result<&'a str, OrbitError> {
+    let hub_machine_id = snapshot.hub_machine_id.as_deref().ok_or_else(|| {
+        OrbitError::InvalidInput(format!(
+            "registry cache {source} snapshot omits required hub_machine_id"
+        ))
+    })?;
+    validate_machine_id(hub_machine_id).map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "registry cache {source} snapshot has invalid hub_machine_id '{hub_machine_id}': \
+             {error}"
+        ))
+    })?;
+    Ok(hub_machine_id)
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum Comparison {
     AcceptNewer,
@@ -279,22 +298,13 @@ fn compare_incoming(
     prior: &RegistrySnapshotV1,
     incoming: &RegistrySnapshotV1,
 ) -> Result<Comparison, OrbitError> {
-    if let Some(prior_hub) = &prior.hub_machine_id {
-        match &incoming.hub_machine_id {
-            Some(incoming_hub) if incoming_hub == prior_hub => {}
-            Some(incoming_hub) => {
-                return Err(OrbitError::InvalidInput(format!(
-                    "registry cache refresh rejected: incoming hub '{incoming_hub}' differs from \
-                     cached hub '{prior_hub}'"
-                )));
-            }
-            None => {
-                return Err(OrbitError::InvalidInput(format!(
-                    "registry cache refresh rejected: incoming snapshot omits the cached hub \
-                     identity '{prior_hub}'"
-                )));
-            }
-        }
+    let prior_hub = validate_snapshot_hub_identity(prior, "persisted")?;
+    let incoming_hub = validate_snapshot_hub_identity(incoming, "incoming")?;
+    if incoming_hub != prior_hub {
+        return Err(OrbitError::InvalidInput(format!(
+            "registry cache refresh rejected: incoming hub '{incoming_hub}' differs from cached \
+             hub '{prior_hub}'"
+        )));
     }
     if incoming.registry_revision < prior.registry_revision {
         return Err(OrbitError::InvalidInput(format!(
@@ -378,6 +388,11 @@ fn classify(bytes: &[u8], now: DateTime<Utc>, freshness_threshold: Duration) -> 
             };
         }
     };
+    if let Err(error) = validate_snapshot_hub_identity(&cache.snapshot, "persisted") {
+        return RegistryCacheState::Malformed {
+            reason: error.to_string(),
+        };
+    }
     let age_seconds = u64::try_from(
         now.signed_duration_since(cache.received_at)
             .num_seconds()
