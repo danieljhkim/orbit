@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -5,6 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+use super::{McpCapability, McpTransport};
 
 static AUDIT_EXECUTION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -86,14 +89,37 @@ pub struct AuditEvent {
     pub host: Option<String>,
     pub pid: u32,
     pub session_id: Option<String>,
-    /// Orbit task ID (e.g. `T20260428-7`) the invocation was executed under, if
-    /// known. Sourced from the tool input JSON when supplied by the caller, or
-    /// from `ORBIT_TASK_ID` in the agent subprocess env when the engine
-    /// launched the agent.
+    /// Stable logical workspace identity after trusted adapter/runtime
+    /// resolution. The legacy working directory remains unchanged.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub caller_machine_id: Option<String>,
+    #[serde(default)]
+    pub caller_host_id: Option<String>,
+    #[serde(default)]
+    pub process_machine_id: Option<String>,
+    #[serde(default)]
+    pub process_host_id: Option<String>,
+    #[serde(default)]
+    pub transport: Option<McpTransport>,
+    /// Complete effective MCP capability set, canonically ordered by the
+    /// shared enum's `Ord` implementation.
+    #[serde(default)]
+    pub effective_capabilities: BTreeSet<McpCapability>,
+    #[serde(default)]
+    pub origin_session_id: Option<String>,
+    #[serde(default)]
+    pub mcp_call_id: Option<String>,
+    #[serde(default)]
+    pub lease_id: Option<String>,
+    /// Orbit task ID the invocation was executed under, if known. CLI retains
+    /// its legacy input/env precedence; MCP accepts only authenticated managed
+    /// envelope correlation and never model-authored tool JSON.
     #[serde(default)]
     pub task_id: Option<String>,
-    /// Job run ID (the engine's `run_id`) the invocation was executed under.
-    /// Mirrors `ORBIT_RUN_ID` in the agent subprocess env.
+    /// Canonical job run ID. For MCP, a trusted leased-run ID fills an empty
+    /// value or must match authenticated managed-envelope correlation.
     #[serde(default)]
     pub job_run_id: Option<String>,
     /// Activity name the invocation was executed under (e.g. `agent_implement`).

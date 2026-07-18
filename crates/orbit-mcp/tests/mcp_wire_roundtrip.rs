@@ -21,8 +21,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use orbit_common::types::{
-    McpToolDefinition, McpToolPlacement, McpToolPolicy, NotFoundKind, OrbitError, ToolParam,
-    ToolSchema, ToolSessionContext,
+    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, McpTransport, NotFoundKind,
+    OrbitError, ToolParam, ToolSchema, ToolSessionContext,
 };
 use orbit_mcp::{McpHost, OrbitToolServer};
 use rmcp::ServiceExt;
@@ -42,7 +42,7 @@ const SNAPSHOT_RELATIVE_PATH: &str = "tests/snapshots/wire_tools_list.json";
 
 struct FileStoreHost {
     root: PathBuf,
-    calls: Mutex<Vec<(String, Value, Option<String>)>>,
+    calls: Mutex<Vec<(String, Value, ToolSessionContext)>>,
 }
 
 impl FileStoreHost {
@@ -54,7 +54,7 @@ impl FileStoreHost {
         }
     }
 
-    fn recorded_calls(&self) -> Vec<(String, Value, Option<String>)> {
+    fn recorded_calls(&self) -> Vec<(String, Value, ToolSessionContext)> {
         self.calls.lock().expect("calls lock").clone()
     }
 
@@ -180,7 +180,7 @@ impl McpHost for FileStoreHost {
         self.calls.lock().expect("calls lock").push((
             name.to_string(),
             input.clone(),
-            session_context.workspace.clone(),
+            session_context.clone(),
         ));
         match name {
             "orbit.task.add" => self.task_add(&input, session_context.workspace.as_deref()),
@@ -480,7 +480,83 @@ async fn initialize_meta_workspace_reaches_host_session_context() {
 
     let calls = host.recorded_calls();
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].2.as_deref(), Some(announced.as_str()));
+    assert_eq!(calls[0].2.workspace.as_deref(), Some(announced.as_str()));
+}
+
+#[tokio::test]
+async fn malicious_wire_metadata_and_tool_input_cannot_spoof_trusted_context() {
+    let workspace = TempDir::new().expect("temp workspace");
+    let host = std::sync::Arc::new(FileStoreHost::new(workspace.path().to_path_buf()));
+    let mut trusted = ToolSessionContext::trusted_local(
+        Some("ws-orbit".to_string()),
+        Some("hm-process".to_string()),
+        Some("process.local".to_string()),
+    );
+    trusted.origin_session_id = Some("mcp-origin-trusted".to_string());
+    let mut client = WireClient::start(OrbitToolServer::new_with_context(host.clone(), trusted));
+    client
+        .initialize(Some(json!({
+            "orbit": {
+                "workspace": "/caller/address",
+                "workspace_id": "spoofed-workspace",
+                "caller_machine_id": "spoofed-caller",
+                "caller_host_id": "spoofed-caller-host",
+                "process_machine_id": "spoofed-process",
+                "process_host_id": "spoofed-process-host",
+                "transport": "ssh-mcp",
+                "effective_capabilities": ["operator", "runner"],
+                "origin_session_id": "spoofed-session",
+                "mcp_call_id": "spoofed-call",
+                "leased_run": {"run_id": "spoofed-run", "lease_id": "spoofed-lease"},
+                "role": "admin",
+                "agent": "claude",
+                "model": "claude",
+                "task_id": "spoofed-task"
+            }
+        })))
+        .await;
+
+    let called = client
+        .call_tool(
+            "orbit_task_list",
+            json!({
+                "workspace_id": "tool-spoofed-workspace",
+                "caller_machine_id": "tool-spoofed-caller",
+                "transport": "ssh-mcp",
+                "capability": "operator",
+                "origin_session_id": "tool-spoofed-session",
+                "mcp_call_id": "tool-spoofed-call",
+                "lease_id": "tool-spoofed-lease",
+                "role": "admin",
+                "agent": "claude",
+                "model": "claude",
+                "task_id": "tool-spoofed-task",
+                "job_run_id": "tool-spoofed-run"
+            }),
+        )
+        .await;
+    assert_eq!(called["isError"], false, "call failed: {called}");
+
+    let calls = host.recorded_calls();
+    assert_eq!(calls.len(), 1);
+    let context = &calls[0].2;
+    assert_eq!(context.workspace.as_deref(), Some("/caller/address"));
+    assert_eq!(context.workspace_id.as_deref(), Some("ws-orbit"));
+    assert_eq!(context.caller_machine_id.as_deref(), Some("hm-process"));
+    assert_eq!(context.caller_host_id.as_deref(), Some("process.local"));
+    assert_eq!(context.process_machine_id.as_deref(), Some("hm-process"));
+    assert_eq!(context.process_host_id.as_deref(), Some("process.local"));
+    assert_eq!(context.transport, Some(McpTransport::Local));
+    assert_eq!(
+        context.effective_capabilities,
+        [McpCapability::Agent].into_iter().collect()
+    );
+    assert_eq!(
+        context.origin_session_id.as_deref(),
+        Some("mcp-origin-trusted")
+    );
+    assert!(context.mcp_call_id.is_some());
+    assert_eq!(context.leased_run, None);
 }
 
 #[tokio::test]

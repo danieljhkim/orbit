@@ -33,3 +33,60 @@ mod execution_id {
         assert!(ids.iter().all(|id| id.starts_with("exec-")));
     }
 }
+
+mod tool_session_context {
+    use std::collections::BTreeSet;
+
+    use super::super::super::tool::{
+        McpCapability, McpLeasedRun, McpTransport, ToolSessionContext,
+    };
+
+    #[test]
+    fn legacy_workspace_only_json_reads_with_default_additions() {
+        let context: ToolSessionContext =
+            serde_json::from_str(r#"{"workspace":"/repo"}"#).expect("legacy context");
+
+        assert_eq!(context.workspace.as_deref(), Some("/repo"));
+        assert_eq!(context.workspace_id, None);
+        assert_eq!(context.transport, None);
+        assert!(context.effective_capabilities.is_empty());
+        assert_eq!(context.origin_session_id, None);
+        assert_eq!(context.mcp_call_id, None);
+        assert_eq!(context.leased_run, None);
+    }
+
+    #[test]
+    fn trusted_context_serializes_complete_sorted_capability_set() {
+        let mut context = ToolSessionContext::trusted_local(
+            Some("ws_orbit".to_string()),
+            Some("hm_local".to_string()),
+            Some("dk-local".to_string()),
+        );
+        context.effective_capabilities = BTreeSet::from([
+            McpCapability::Runner,
+            McpCapability::Agent,
+            McpCapability::Operator,
+        ]);
+        context.origin_session_id = Some("mcp-session-1".to_string());
+        context.mcp_call_id = Some("mcall-1".to_string());
+        context.leased_run = Some(McpLeasedRun {
+            run_id: "jrun-1".to_string(),
+            lease_id: "lease-1".to_string(),
+        });
+
+        let value = serde_json::to_value(context).expect("serialize context");
+        assert_eq!(value["transport"], "local");
+        assert_eq!(
+            value["effective_capabilities"],
+            serde_json::json!(["agent", "operator", "runner"])
+        );
+    }
+
+    #[test]
+    fn transport_and_capability_parsers_are_typed() {
+        assert_eq!("ssh-mcp".parse(), Ok(McpTransport::SshMcp));
+        assert_eq!("runner".parse(), Ok(McpCapability::Runner));
+        assert!("remote".parse::<McpTransport>().is_err());
+        assert!("admin".parse::<McpCapability>().is_err());
+    }
+}

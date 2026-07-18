@@ -142,18 +142,32 @@ impl OrbitRuntime {
         entry_point: ToolEntryPoint,
         session_context: ToolSessionContext,
     ) -> Result<ToolDispatchOutcome, OrbitError> {
+        let audit_session_context = session_context.clone();
         self.execute_tool_dispatch_with(
             name,
             input,
             agent_override.clone(),
             model_override.clone(),
             entry_point,
+            Some(audit_session_context),
             |input| {
                 self.ensure_tool_agent_facing(name)?;
-                let allowed_tools = read_activity_tools_from_env();
-                let (agent_name, model_name) =
-                    resolve_agent_identity(agent_override, model_override)?;
-                let proc_allowed_programs = read_proc_allowed_programs_from_env();
+                let trusted_env = entry_point != ToolEntryPoint::Mcp || managed_run_context();
+                let allowed_tools = if trusted_env {
+                    read_activity_tools_from_env()
+                } else {
+                    Vec::new()
+                };
+                let (agent_name, model_name) = resolve_agent_identity_for_entry_point(
+                    entry_point,
+                    agent_override,
+                    model_override,
+                )?;
+                let proc_allowed_programs = if trusted_env {
+                    read_proc_allowed_programs_from_env()
+                } else {
+                    Vec::new()
+                };
                 let cwd = std::env::current_dir()
                     .ok()
                     .map(|path| path.to_string_lossy().into_owned());
@@ -184,12 +198,21 @@ impl OrbitRuntime {
         name: &str,
         input: Value,
         entry_point: ToolEntryPoint,
+        session_context: ToolSessionContext,
         dispatch: F,
     ) -> Result<ToolDispatchOutcome, OrbitError>
     where
         F: FnOnce(Value) -> Result<Value, OrbitError>,
     {
-        self.execute_tool_dispatch_with(name, input, None, None, entry_point, dispatch)
+        self.execute_tool_dispatch_with(
+            name,
+            input,
+            None,
+            None,
+            entry_point,
+            Some(session_context),
+            dispatch,
+        )
     }
 
     fn execute_tool_dispatch_with<F>(
@@ -199,22 +222,31 @@ impl OrbitRuntime {
         agent_override: Option<String>,
         model_override: Option<String>,
         entry_point: ToolEntryPoint,
+        session_context: Option<ToolSessionContext>,
         dispatch: F,
     ) -> Result<ToolDispatchOutcome, OrbitError>
     where
         F: FnOnce(Value) -> Result<Value, OrbitError>,
     {
         let start = Instant::now();
-        let role_label =
-            audit_role_label(&input, agent_override.as_deref(), model_override.as_deref());
+        let role_label = audit_role_label_for_entry_point(
+            &input,
+            agent_override.as_deref(),
+            model_override.as_deref(),
+            entry_point,
+        );
         let working_directory = std::env::current_dir()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|_| ".".to_string());
-        let audit_context = resolve_audit_context(&input);
+        let (audit_context, correlation_error) =
+            resolve_audit_context(&input, entry_point, session_context.as_ref());
 
         // Keep the callback inside the audit boundary so setup, policy, and
         // implementation failures all produce a failure-status row.
-        let result = dispatch(input);
+        let result = match correlation_error {
+            Some(error) => Err(error),
+            None => dispatch(input),
+        };
         let duration_ms = (start.elapsed().as_millis() as i64).max(1);
 
         let (status, exit_code, error_message) = match &result {
@@ -223,6 +255,16 @@ impl OrbitRuntime {
                 AuditEventStatus::Denied,
                 1,
                 Some(redact_sensitive_env_text(msg)),
+            ),
+            Err(
+                err @ OrbitError::NotFound {
+                    kind: NotFoundKind::Tool,
+                    ..
+                },
+            ) if entry_point == ToolEntryPoint::Mcp => (
+                AuditEventStatus::Denied,
+                1,
+                Some(redact_sensitive_env_text(&err.to_string())),
             ),
             Err(err) => (
                 AuditEventStatus::Failure,
@@ -250,6 +292,38 @@ impl OrbitRuntime {
             host: std::env::var("HOSTNAME").ok(),
             pid: std::process::id(),
             session_id: None,
+            workspace_id: session_context
+                .as_ref()
+                .and_then(|context| context.workspace_id.clone()),
+            caller_machine_id: session_context
+                .as_ref()
+                .and_then(|context| context.caller_machine_id.clone()),
+            caller_host_id: session_context
+                .as_ref()
+                .and_then(|context| context.caller_host_id.clone()),
+            process_machine_id: session_context
+                .as_ref()
+                .and_then(|context| context.process_machine_id.clone()),
+            process_host_id: session_context
+                .as_ref()
+                .and_then(|context| context.process_host_id.clone()),
+            transport: session_context
+                .as_ref()
+                .and_then(|context| context.transport),
+            effective_capabilities: session_context
+                .as_ref()
+                .map(|context| context.effective_capabilities.clone())
+                .unwrap_or_default(),
+            origin_session_id: session_context
+                .as_ref()
+                .and_then(|context| context.origin_session_id.clone()),
+            mcp_call_id: session_context
+                .as_ref()
+                .and_then(|context| context.mcp_call_id.clone()),
+            lease_id: session_context
+                .as_ref()
+                .and_then(|context| context.leased_run.as_ref())
+                .map(|leased_run| leased_run.lease_id.clone()),
             task_id: audit_context.task_id,
             job_run_id: audit_context.job_run_id,
             activity_id: audit_context.activity_id,
@@ -318,25 +392,20 @@ fn finalize_successful_dispatch(
     }
 }
 
-/// Audit-correlation context resolved at the tool-dispatch seam.
-///
-/// Each field follows the same precedence: caller-asserted value from the
-/// tool input JSON (`task_id`, `job_run_id`, `activity_id`, `step_index`)
-/// wins, falling back to the runtime-asserted env vars exported by the
-/// engine when it spawned the agent (`ORBIT_TASK_ID`, `ORBIT_RUN_ID`,
-/// `ORBIT_ACTIVITY_ID`, `ORBIT_STEP_INDEX`).
-///
-/// Treat input-supplied values as caller-asserted (an MCP client could lie).
-/// Env-supplied values are the engine's ground truth.
+/// Trusted audit-correlation fields at the MCP/CLI dispatch seam.
 #[derive(Debug, Default, Clone)]
-struct AuditContext {
-    task_id: Option<String>,
-    job_run_id: Option<String>,
-    activity_id: Option<String>,
-    step_index: Option<i64>,
+pub struct AuditContext {
+    pub task_id: Option<String>,
+    pub job_run_id: Option<String>,
+    pub activity_id: Option<String>,
+    pub step_index: Option<i64>,
 }
 
-fn resolve_audit_context(input: &Value) -> AuditContext {
+fn resolve_audit_context(
+    input: &Value,
+    entry_point: ToolEntryPoint,
+    session_context: Option<&ToolSessionContext>,
+) -> (AuditContext, Option<OrbitError>) {
     fn input_str(input: &Value, key: &str) -> Option<String> {
         input
             .get(key)
@@ -352,24 +421,73 @@ fn resolve_audit_context(input: &Value) -> AuditContext {
             .filter(|value| !value.is_empty())
     }
 
-    AuditContext {
-        task_id: input_str(input, "task_id").or_else(|| env_str("ORBIT_TASK_ID")),
-        job_run_id: input_str(input, "job_run_id")
-            .or_else(|| input_str(input, "run_id"))
-            .or_else(|| env_str("ORBIT_RUN_ID")),
-        activity_id: input_str(input, "activity_id").or_else(|| env_str("ORBIT_ACTIVITY_ID")),
-        step_index: input
-            .get("step_index")
-            .and_then(Value::as_i64)
-            .or_else(|| env_str("ORBIT_STEP_INDEX").and_then(|s| s.parse().ok())),
+    if entry_point == ToolEntryPoint::Mcp {
+        return trusted_mcp_audit_context(
+            session_context.unwrap_or(&ToolSessionContext::default()),
+        );
+    }
+
+    (
+        AuditContext {
+            task_id: input_str(input, "task_id").or_else(|| env_str("ORBIT_TASK_ID")),
+            job_run_id: input_str(input, "job_run_id")
+                .or_else(|| input_str(input, "run_id"))
+                .or_else(|| env_str("ORBIT_RUN_ID")),
+            activity_id: input_str(input, "activity_id").or_else(|| env_str("ORBIT_ACTIVITY_ID")),
+            step_index: input
+                .get("step_index")
+                .and_then(Value::as_i64)
+                .or_else(|| env_str("ORBIT_STEP_INDEX").and_then(|s| s.parse().ok())),
+        },
+        None,
+    )
+}
+
+/// Resolve MCP audit correlation exclusively from an authenticated managed
+/// envelope and trusted broker context. Model-authored tool JSON is never an
+/// input to this function.
+pub fn trusted_mcp_audit_context(
+    session_context: &ToolSessionContext,
+) -> (AuditContext, Option<OrbitError>) {
+    fn env_str(name: &str) -> Option<String> {
+        std::env::var(name)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    }
+
+    let mut context = if managed_run_context() {
+        AuditContext {
+            task_id: env_str("ORBIT_TASK_ID"),
+            job_run_id: env_str("ORBIT_RUN_ID"),
+            activity_id: env_str("ORBIT_ACTIVITY_ID"),
+            step_index: env_str("ORBIT_STEP_INDEX").and_then(|value| value.parse().ok()),
+        }
+    } else {
+        AuditContext::default()
+    };
+
+    let Some(leased_run) = session_context.leased_run.as_ref() else {
+        return (context, None);
+    };
+    match context.job_run_id.as_deref() {
+        None => {
+            context.job_run_id = Some(leased_run.run_id.clone());
+            (context, None)
+        }
+        Some(job_run_id) if job_run_id == leased_run.run_id => (context, None),
+        Some(job_run_id) => {
+            let error = OrbitError::InvalidInput(format!(
+                "trusted leased run '{}' does not match managed job run '{job_run_id}'",
+                leased_run.run_id
+            ));
+            (context, Some(error))
+        }
     }
 }
 
 fn reservation_owner_from_env() -> Option<ReservationOwnerContext> {
-    let managed_context = std::env::var(ORBIT_MANAGED_RUN_CONTEXT_ENV)
-        .ok()
-        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE"));
-    if !managed_context {
+    if !managed_run_context() {
         return None;
     }
 
@@ -386,6 +504,12 @@ fn reservation_owner_from_env() -> Option<ReservationOwnerContext> {
             ),
             owner_run_id,
         })
+}
+
+fn managed_run_context() -> bool {
+    std::env::var(ORBIT_MANAGED_RUN_CONTEXT_ENV)
+        .ok()
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE"))
 }
 
 fn read_agent_identity_from_env() -> (Option<String>, Option<String>) {
@@ -420,6 +544,17 @@ fn resolve_agent_identity(
     // family in the model slot for tool dispatch so comparisons never depend
     // on self-reported model text.
     Ok((agent.clone(), agent))
+}
+
+fn resolve_agent_identity_for_entry_point(
+    entry_point: ToolEntryPoint,
+    agent_override: Option<String>,
+    model_override: Option<String>,
+) -> Result<(Option<String>, Option<String>), OrbitError> {
+    if entry_point == ToolEntryPoint::Mcp && !managed_run_context() {
+        return Ok((None, None));
+    }
+    resolve_agent_identity(agent_override, model_override)
 }
 
 fn read_proc_allowed_programs_from_env() -> Vec<String> {
@@ -502,6 +637,39 @@ pub fn audit_role_label(
 
     normalize_optional_attribution_label(model.as_deref().or(agent.as_deref()), model.as_deref())
         .unwrap_or_else(|| "agent".to_string())
+}
+
+/// Resolve the audit role with the MCP trust boundary applied. Standalone MCP
+/// calls are always `unverified`; an authenticated managed envelope may use
+/// only its engine-provided identity and never caller JSON/flags.
+pub fn audit_role_label_for_entry_point(
+    input: &Value,
+    agent_override: Option<&str>,
+    model_override: Option<&str>,
+    entry_point: ToolEntryPoint,
+) -> String {
+    if entry_point != ToolEntryPoint::Mcp {
+        return audit_role_label(input, agent_override, model_override);
+    }
+    if !managed_run_context() {
+        return "unverified".to_string();
+    }
+
+    let env_agent = std::env::var("ORBIT_AGENT_NAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let env_model = std::env::var("ORBIT_AGENT_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let agent = normalize_agent_family_for_model(env_agent.as_deref(), env_model.as_deref())
+        .ok()
+        .flatten()
+        .or(env_agent);
+    normalize_optional_attribution_label(
+        agent.as_deref().or(env_model.as_deref()),
+        env_model.as_deref(),
+    )
+    .unwrap_or_else(|| "unverified".to_string())
 }
 
 fn read_input_identity(input: &Value) -> (Option<String>, Option<String>) {
@@ -801,6 +969,7 @@ impl OrbitRuntime {
 #[cfg(test)]
 mod audit_tests {
     use super::*;
+    use orbit_common::types::{McpCapability, McpLeasedRun, McpTransport};
     use std::collections::BTreeSet;
     use std::sync::{Arc, Barrier, Mutex, MutexGuard, OnceLock};
     use std::thread;
@@ -868,7 +1037,7 @@ mod audit_tests {
         assert_eq!(row.tool_name.as_deref(), Some("orbit.search"));
         assert_eq!(row.target_type.as_deref(), Some("tool"));
         assert_eq!(row.target_id.as_deref(), Some("orbit.search"));
-        assert_eq!(row.role, orbit_common::test_fixtures::TEST_CODEX_MODEL);
+        assert_eq!(row.role, "unverified");
         assert_eq!(row.status, AuditEventStatus::Success);
         assert_eq!(row.exit_code, 0);
         assert!(
@@ -921,7 +1090,7 @@ mod audit_tests {
             json!({ "query": "anything" }),
             Some("claude".to_string()),
             Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
-            ToolEntryPoint::Mcp,
+            ToolEntryPoint::Cli,
         );
         assert!(result.is_err(), "identity rejection propagates");
 
@@ -936,7 +1105,7 @@ mod audit_tests {
         let row = &events[0];
         assert_eq!(row.status, AuditEventStatus::Failure);
         assert_eq!(row.exit_code, 1);
-        assert_eq!(row.subcommand.as_deref(), Some("run-mcp"));
+        assert_eq!(row.subcommand.as_deref(), Some("run"));
         assert!(row.error_message.is_some(), "error message captured");
     }
 
@@ -1142,14 +1311,19 @@ mod audit_tests {
     fn audit_context_input_wins_over_env() {
         let _g = env_guard();
         set_audit_context_env("env-task", "env-run", "env-activity", "9");
-        let ctx = resolve_audit_context(&json!({
-            "task_id": "T-input",
-            "job_run_id": "jrun-input",
-            "activity_id": "act-input",
-            "step_index": 3,
-        }));
+        let (ctx, error) = resolve_audit_context(
+            &json!({
+                "task_id": "T-input",
+                "job_run_id": "jrun-input",
+                "activity_id": "act-input",
+                "step_index": 3,
+            }),
+            ToolEntryPoint::Cli,
+            None,
+        );
         clear_audit_context_env();
 
+        assert!(error.is_none());
         assert_eq!(ctx.task_id.as_deref(), Some("T-input"));
         assert_eq!(ctx.job_run_id.as_deref(), Some("jrun-input"));
         assert_eq!(ctx.activity_id.as_deref(), Some("act-input"));
@@ -1160,9 +1334,10 @@ mod audit_tests {
     fn audit_context_falls_back_to_env_when_input_absent() {
         let _g = env_guard();
         set_audit_context_env("T20260428-7", "jrun-from-env", "agent_implement", "2");
-        let ctx = resolve_audit_context(&json!({}));
+        let (ctx, error) = resolve_audit_context(&json!({}), ToolEntryPoint::Cli, None);
         clear_audit_context_env();
 
+        assert!(error.is_none());
         assert_eq!(ctx.task_id.as_deref(), Some("T20260428-7"));
         assert_eq!(ctx.job_run_id.as_deref(), Some("jrun-from-env"));
         assert_eq!(ctx.activity_id.as_deref(), Some("agent_implement"));
@@ -1173,8 +1348,171 @@ mod audit_tests {
     fn audit_context_treats_run_id_alias_as_job_run_id_input() {
         let _g = env_guard();
         clear_audit_context_env();
-        let ctx = resolve_audit_context(&json!({ "run_id": "jrun-aliased" }));
+        let (ctx, error) = resolve_audit_context(
+            &json!({ "run_id": "jrun-aliased" }),
+            ToolEntryPoint::Cli,
+            None,
+        );
+        assert!(error.is_none());
         assert_eq!(ctx.job_run_id.as_deref(), Some("jrun-aliased"));
+    }
+
+    #[test]
+    fn standalone_mcp_ignores_tool_and_ambient_identity_claims() {
+        let _g = env_guard();
+        clear_audit_context_env();
+        set_identity_env("codex", "codex");
+        set_audit_context_env("env-task", "env-run", "env-activity", "7");
+        let context = ToolSessionContext::trusted_local(
+            Some("ws_orbit".to_string()),
+            Some("hm_local".to_string()),
+            Some("local-host".to_string()),
+        );
+        let (audit, error) = resolve_audit_context(
+            &json!({
+                "task_id": "spoofed-task",
+                "job_run_id": "spoofed-run",
+                "activity_id": "spoofed-activity",
+                "step_index": 99,
+                "role": "admin",
+                "agent": "claude",
+                "model": "claude"
+            }),
+            ToolEntryPoint::Mcp,
+            Some(&context),
+        );
+        let role = audit_role_label_for_entry_point(
+            &json!({"role": "admin", "model": "claude"}),
+            Some("claude"),
+            Some("claude"),
+            ToolEntryPoint::Mcp,
+        );
+        clear_audit_context_env();
+        clear_identity_env();
+
+        assert!(error.is_none());
+        assert_eq!(audit.task_id, None);
+        assert_eq!(audit.job_run_id, None);
+        assert_eq!(audit.activity_id, None);
+        assert_eq!(audit.step_index, None);
+        assert_eq!(role, "unverified");
+    }
+
+    #[test]
+    fn managed_mcp_uses_envelope_and_reconciles_matching_lease() {
+        let _g = env_guard();
+        clear_audit_context_env();
+        set_identity_env("codex", "codex");
+        set_audit_context_env("ORB-10228", "jrun-managed", "agent_implement", "2");
+        // SAFETY: tests serialize through `env_guard()` before mutating env.
+        unsafe {
+            std::env::set_var(ORBIT_MANAGED_RUN_CONTEXT_ENV, "1");
+        }
+        let mut context = ToolSessionContext::trusted_local(None, None, None);
+        context.leased_run = Some(McpLeasedRun {
+            run_id: "jrun-managed".to_string(),
+            lease_id: "lease-1".to_string(),
+        });
+        let (audit, error) = trusted_mcp_audit_context(&context);
+        let role = audit_role_label_for_entry_point(
+            &json!({"model": "claude", "task_id": "spoofed"}),
+            None,
+            None,
+            ToolEntryPoint::Mcp,
+        );
+        clear_audit_context_env();
+        clear_identity_env();
+
+        assert!(error.is_none());
+        assert_eq!(audit.task_id.as_deref(), Some("ORB-10228"));
+        assert_eq!(audit.job_run_id.as_deref(), Some("jrun-managed"));
+        assert_eq!(audit.activity_id.as_deref(), Some("agent_implement"));
+        assert_eq!(audit.step_index, Some(2));
+        assert_eq!(role, "codex");
+    }
+
+    #[test]
+    fn trusted_lease_populates_empty_run_and_rejects_mismatch() {
+        let _g = env_guard();
+        clear_audit_context_env();
+        let mut context = ToolSessionContext::trusted_local(None, None, None);
+        context.leased_run = Some(McpLeasedRun {
+            run_id: "jrun-leased".to_string(),
+            lease_id: "lease-1".to_string(),
+        });
+        let (audit, error) = trusted_mcp_audit_context(&context);
+        assert!(error.is_none());
+        assert_eq!(audit.job_run_id.as_deref(), Some("jrun-leased"));
+
+        set_audit_context_env("ORB-10228", "jrun-other", "agent_implement", "0");
+        // SAFETY: tests serialize through `env_guard()` before mutating env.
+        unsafe {
+            std::env::set_var(ORBIT_MANAGED_RUN_CONTEXT_ENV, "1");
+        }
+        let (_, error) = trusted_mcp_audit_context(&context);
+        clear_audit_context_env();
+        assert!(error.is_some());
+    }
+
+    #[test]
+    fn mcp_dispatch_persists_only_trusted_provenance_columns() {
+        let _g = env_guard();
+        clear_audit_context_env();
+        clear_identity_env();
+        let runtime = fresh_runtime();
+        let mut context = ToolSessionContext::trusted_local(
+            Some("ws_orbit".to_string()),
+            Some("hm_local".to_string()),
+            Some("local-host".to_string()),
+        );
+        context.origin_session_id = Some("mcp-session-1".to_string());
+        context.mcp_call_id = Some("mcall-1".to_string());
+        context.leased_run = Some(McpLeasedRun {
+            run_id: "jrun-trusted".to_string(),
+            lease_id: "lease-trusted".to_string(),
+        });
+
+        runtime
+            .execute_tool_command_dispatch_with_session_context(
+                "orbit.task.list",
+                json!({
+                    "workspace_id": "spoofed-workspace",
+                    "caller_machine_id": "spoofed-caller",
+                    "process_machine_id": "spoofed-process",
+                    "transport": "ssh-mcp",
+                    "capability": "operator",
+                    "origin_session_id": "spoofed-session",
+                    "mcp_call_id": "spoofed-call",
+                    "lease_id": "spoofed-lease",
+                    "task_id": "spoofed-task",
+                    "job_run_id": "spoofed-run",
+                    "model": "claude"
+                }),
+                None,
+                None,
+                ToolEntryPoint::Mcp,
+                context,
+            )
+            .expect("standalone MCP call succeeds");
+
+        let rows = runtime
+            .list_audit_events(None, Some("orbit.task.list".to_string()), None, None, 1)
+            .expect("read audit row");
+        let row = &rows[0];
+        assert_eq!(row.role, "unverified");
+        assert_eq!(row.workspace_id.as_deref(), Some("ws_orbit"));
+        assert_eq!(row.caller_machine_id.as_deref(), Some("hm_local"));
+        assert_eq!(row.process_machine_id.as_deref(), Some("hm_local"));
+        assert_eq!(row.transport, Some(McpTransport::Local));
+        assert_eq!(
+            row.effective_capabilities,
+            BTreeSet::from([McpCapability::Agent])
+        );
+        assert_eq!(row.origin_session_id.as_deref(), Some("mcp-session-1"));
+        assert_eq!(row.mcp_call_id.as_deref(), Some("mcall-1"));
+        assert_eq!(row.task_id, None);
+        assert_eq!(row.job_run_id.as_deref(), Some("jrun-trusted"));
+        assert_eq!(row.lease_id.as_deref(), Some("lease-trusted"));
     }
 
     #[test]
@@ -1215,7 +1553,8 @@ mod audit_tests {
     fn audit_context_returns_none_when_neither_source_supplies_values() {
         let _g = env_guard();
         clear_audit_context_env();
-        let ctx = resolve_audit_context(&json!({}));
+        let (ctx, error) = resolve_audit_context(&json!({}), ToolEntryPoint::Cli, None);
+        assert!(error.is_none());
         assert!(ctx.task_id.is_none());
         assert!(ctx.job_run_id.is_none());
         assert!(ctx.activity_id.is_none());

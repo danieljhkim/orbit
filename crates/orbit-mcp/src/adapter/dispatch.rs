@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use orbit_common::types::{
-    McpToolDefinition, OrbitError, ToolSchema, ToolSessionContext, validate_mcp_tool_definitions,
+    McpToolDefinition, OrbitError, ToolSchema, ToolSessionContext, audit_execution_id,
+    validate_mcp_tool_definitions,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::ServerHandler;
@@ -20,7 +21,7 @@ use super::structured::mcp_structured_content;
 use crate::error::tool_error_result;
 
 impl OrbitToolServer {
-    pub(super) fn combined_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+    fn combined_tool_definitions_unfiltered(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
         let mut definitions = self.host.list_mcp_tool_definitions()?;
         definitions.retain(|definition| !self.graph_tools.is_graph_tool(&definition.schema.name));
         // ORB-00391: the v1 orbit-knowledge graph builtins were decommissioned,
@@ -33,6 +34,19 @@ impl OrbitToolServer {
         );
         validate_mcp_tool_definitions(&definitions)
             .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
+        Ok(definitions)
+    }
+
+    pub(super) fn combined_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        let mut definitions = self.combined_tool_definitions_unfiltered()?;
+        let effective_capabilities = self.session_context().effective_capabilities;
+        definitions.retain(|definition| {
+            definition
+                .policy
+                .allowed_capabilities()
+                .iter()
+                .any(|capability| effective_capabilities.contains(capability))
+        });
         Ok(definitions)
     }
 
@@ -85,9 +99,21 @@ impl OrbitToolServer {
             .unwrap_or_default()
     }
 
+    fn session_context_for_call(&self) -> ToolSessionContext {
+        let mut context = self.session_context();
+        context.mcp_call_id = Some(audit_execution_id("mcall"));
+        context
+    }
+
     pub(super) fn canonical_name(&self, advertised: &str) -> Result<String, McpError> {
         let schemas = self
-            .combined_tool_schemas()
+            .combined_tool_definitions_unfiltered()
+            .map(|definitions| {
+                definitions
+                    .into_iter()
+                    .map(|definition| definition.schema)
+                    .collect::<Vec<_>>()
+            })
             .map_err(invalid_definitions_mcp_error)?;
         let map = match build_name_map(&schemas) {
             Ok(map) => map,
@@ -105,6 +131,9 @@ impl OrbitToolServer {
         &self,
         req: CallToolRequestParams,
     ) -> Result<CallToolResult, McpError> {
+        // Generate exactly once before name/exposure preflight. Every dispatch
+        // and denial path below receives this same trusted call context.
+        let session_context = self.session_context_for_call();
         let inbound = req.name.to_string();
         let canonical = self.canonical_name(&inbound)?;
         let input = req
@@ -115,7 +144,6 @@ impl OrbitToolServer {
         let host = Arc::clone(&self.host);
         let graph_tools = Arc::clone(&self.graph_tools);
         let exec_name = canonical.clone();
-        let session_context = self.session_context();
         let input_for_learning = input.clone();
         // Dispatch recognition is deliberately independent of host schemas.
         // Re-exposing a host graph schema must not make
@@ -168,7 +196,14 @@ impl ServerHandler for OrbitToolServer {
         request: InitializeRequestParams,
         context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<InitializeResult, McpError>> + Send + '_ {
-        self.replace_session_context(session_context_from_initialize(&request, &context.meta));
+        let announced = session_context_from_initialize(&request, &context.meta);
+        let mut trusted = self.session_context();
+        // The external initialize request controls only the legacy address
+        // selector. Identity, transport, grants, and correlation remain the
+        // adapter-owned values installed at construction.
+        trusted.workspace = announced.workspace;
+        trusted.mcp_call_id = None;
+        self.replace_session_context(trusted);
         if context.peer.peer_info().is_none() {
             context.peer.set_peer_info(request);
         }
@@ -234,7 +269,10 @@ pub(super) fn session_context_from_initialize(
     let workspace = workspace_from_meta(request.meta.as_ref().map(|meta| &meta.0))
         .or_else(|| workspace_from_meta(Some(&transport_meta.0)));
 
-    ToolSessionContext { workspace }
+    ToolSessionContext {
+        workspace,
+        ..ToolSessionContext::default()
+    }
 }
 
 fn workspace_from_meta(meta: Option<&rmcp::model::JsonObject>) -> Option<String> {

@@ -12,10 +12,12 @@
 use std::time::Instant;
 
 use orbit_common::types::{
-    AuditEventStatus, LearningInjectionState, McpToolDefinition, McpToolPolicyError,
-    ToolSessionContext, audit_execution_id, validate_mcp_tool_definitions,
+    AuditEventStatus, LearningInjectionState, McpCapability, McpToolDefinition, McpToolPolicyError,
+    McpTransport, ToolSessionContext, audit_execution_id, validate_mcp_tool_definitions,
 };
-use orbit_core::command::tool::{ToolEntryPoint, audit_role_label};
+use orbit_core::command::tool::{
+    ToolEntryPoint, audit_role_label_for_entry_point, trusted_mcp_audit_context,
+};
 use orbit_core::{
     AuditEventInsertParams, LearningSearchParams, NotFoundKind, OrbitError, OrbitRuntime,
     redact_sensitive_env_text,
@@ -52,12 +54,47 @@ pub(crate) fn is_mcp_tool_exposed(name: &str) -> bool {
     })
 }
 
-fn ensure_mcp_tool_exposed(name: &str) -> Result<(), OrbitError> {
-    if is_mcp_tool_exposed(name) {
+fn ensure_mcp_tool_exposed(
+    name: &str,
+    session_context: &ToolSessionContext,
+) -> Result<(), OrbitError> {
+    if !is_mcp_tool_exposed(name) {
+        return Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()));
+    }
+    let definitions = canonical_mcp_tool_definitions()
+        .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
+    let definition = definitions
+        .iter()
+        .find(|definition| definition.schema.name == name)
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Tool, name.to_string()))?;
+    if definition
+        .policy
+        .allowed_capabilities()
+        .iter()
+        .any(|capability| session_context.has_capability(*capability))
+    {
         Ok(())
     } else {
-        Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()))
+        Err(OrbitError::PolicyDenied(format!(
+            "MCP tool '{name}' is not exposed to the effective capability set"
+        )))
     }
+}
+
+fn normalize_trusted_call_context(mut context: ToolSessionContext) -> ToolSessionContext {
+    if context.transport.is_none() {
+        context.transport = Some(McpTransport::Local);
+    }
+    if context.effective_capabilities.is_empty() {
+        context.effective_capabilities.insert(McpCapability::Agent);
+    }
+    if context.origin_session_id.is_none() {
+        context.origin_session_id = Some(audit_execution_id("mcp-session"));
+    }
+    if context.mcp_call_id.is_none() {
+        context.mcp_call_id = Some(audit_execution_id("mcall"));
+    }
+    context
 }
 
 /// [`McpHost`] impl that forwards every MCP operation through the full
@@ -83,7 +120,12 @@ impl McpHost for RuntimeMcpHost {
         input: Value,
         session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
-        audited_mcp_call_with_session_context(&self.runtime, name, input, session_context)
+        audited_mcp_call_with_session_context(
+            &self.runtime,
+            name,
+            input,
+            normalize_trusted_call_context(session_context),
+        )
     }
 
     fn call_in_process_tool(
@@ -93,11 +135,19 @@ impl McpHost for RuntimeMcpHost {
         session_context: ToolSessionContext,
         dispatch: &mut dyn FnMut(Value, ToolSessionContext) -> Result<Value, OrbitError>,
     ) -> Result<Value, OrbitError> {
+        let session_context = normalize_trusted_call_context(session_context);
+        let dispatch_context = session_context.clone();
         self.runtime
-            .execute_in_process_tool_dispatch(name, input, ToolEntryPoint::Mcp, |input| {
-                ensure_mcp_tool_exposed(name)?;
-                dispatch(input, session_context)
-            })
+            .execute_in_process_tool_dispatch(
+                name,
+                input,
+                ToolEntryPoint::Mcp,
+                session_context,
+                |input| {
+                    ensure_mcp_tool_exposed(name, &dispatch_context)?;
+                    dispatch(input, dispatch_context)
+                },
+            )
             .map(|outcome| outcome.value)
     }
 
@@ -160,7 +210,12 @@ pub(super) fn audited_mcp_call(
     name: &str,
     input: Value,
 ) -> Result<Value, OrbitError> {
-    audited_mcp_call_with_session_context(runtime, name, input, ToolSessionContext::default())
+    audited_mcp_call_with_session_context(
+        runtime,
+        name,
+        input,
+        normalize_trusted_call_context(ToolSessionContext::default()),
+    )
 }
 
 pub(super) fn audited_mcp_call_with_session_context(
@@ -169,8 +224,9 @@ pub(super) fn audited_mcp_call_with_session_context(
     input: Value,
     session_context: ToolSessionContext,
 ) -> Result<Value, OrbitError> {
-    if let Err(err) = ensure_mcp_tool_exposed(name) {
-        record_mcp_preflight_failure(runtime, name, &input, &err);
+    let session_context = normalize_trusted_call_context(session_context);
+    if let Err(err) = ensure_mcp_tool_exposed(name, &session_context) {
+        record_mcp_preflight_failure(runtime, name, &session_context, &err);
         return Err(err);
     }
 
@@ -189,11 +245,12 @@ pub(super) fn audited_mcp_call_with_session_context(
 fn record_mcp_preflight_failure(
     runtime: &OrbitRuntime,
     name: &str,
-    input: &Value,
+    session_context: &ToolSessionContext,
     err: &OrbitError,
 ) {
     let start = Instant::now();
-    let role = audit_role_label(input, None, None);
+    let role = audit_role_label_for_entry_point(&Value::Null, None, None, ToolEntryPoint::Mcp);
+    let (audit_context, correlation_error) = trusted_mcp_audit_context(session_context);
     let duration_ms = (start.elapsed().as_millis() as i64).max(1);
     let working_directory = std::env::current_dir()
         .map(|path| path.to_string_lossy().into_owned())
@@ -207,40 +264,36 @@ fn record_mcp_preflight_failure(
         target_type: Some("tool".to_string()),
         target_id: Some(name.to_string()),
         role,
-        status: AuditEventStatus::Failure,
+        status: AuditEventStatus::Denied,
         exit_code: 1,
         duration_ms,
         working_directory,
         arguments_json: None,
         stdout_truncated: None,
         stderr_truncated: None,
-        error_message: Some(redact_sensitive_env_text(&err.to_string())),
+        error_message: Some(redact_sensitive_env_text(
+            &correlation_error.as_ref().unwrap_or(err).to_string(),
+        )),
         host: std::env::var("HOSTNAME").ok(),
         pid: std::process::id(),
         session_id: None,
-        task_id: input
-            .get("task_id")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .or_else(|| std::env::var("ORBIT_TASK_ID").ok())
-            .filter(|s| !s.is_empty()),
-        job_run_id: input
-            .get("job_run_id")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .or_else(|| std::env::var("ORBIT_RUN_ID").ok())
-            .filter(|s| !s.is_empty()),
-        activity_id: input
-            .get("activity_id")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .or_else(|| std::env::var("ORBIT_ACTIVITY_ID").ok())
-            .filter(|s| !s.is_empty()),
-        step_index: input.get("step_index").and_then(Value::as_i64).or_else(|| {
-            std::env::var("ORBIT_STEP_INDEX")
-                .ok()
-                .and_then(|s| s.parse().ok())
-        }),
+        workspace_id: session_context.workspace_id.clone(),
+        caller_machine_id: session_context.caller_machine_id.clone(),
+        caller_host_id: session_context.caller_host_id.clone(),
+        process_machine_id: session_context.process_machine_id.clone(),
+        process_host_id: session_context.process_host_id.clone(),
+        transport: session_context.transport,
+        effective_capabilities: session_context.effective_capabilities.clone(),
+        origin_session_id: session_context.origin_session_id.clone(),
+        mcp_call_id: session_context.mcp_call_id.clone(),
+        lease_id: session_context
+            .leased_run
+            .as_ref()
+            .map(|leased_run| leased_run.lease_id.clone()),
+        task_id: audit_context.task_id,
+        job_run_id: audit_context.job_run_id,
+        activity_id: audit_context.activity_id,
+        step_index: audit_context.step_index,
     };
 
     if let Err(write_err) = runtime.record_audit_event(&params) {

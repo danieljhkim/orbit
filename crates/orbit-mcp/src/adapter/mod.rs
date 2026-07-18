@@ -23,7 +23,7 @@ use std::sync::{Arc, RwLock};
 
 use orbit_common::types::{
     LearningInjectionCaps, LearningInjectionState, McpToolDefinition, McpToolPolicyError,
-    ToolSessionContext,
+    ToolSessionContext, audit_execution_id,
 };
 
 use crate::McpHost;
@@ -57,6 +57,17 @@ pub struct OrbitToolServer {
 
 impl OrbitToolServer {
     pub fn new(host: Arc<dyn McpHost>) -> Self {
+        Self::new_with_context(host, ToolSessionContext::trusted_local(None, None, None))
+    }
+
+    pub fn new_with_context(
+        host: Arc<dyn McpHost>,
+        mut trusted_context: ToolSessionContext,
+    ) -> Self {
+        if trusted_context.origin_session_id.is_none() {
+            trusted_context.origin_session_id = Some(audit_execution_id("mcp-session"));
+        }
+        trusted_context.mcp_call_id = None;
         let learning_session_id = std::env::var("ORBIT_SESSION_ID")
             .ok()
             .map(|value| value.trim().to_string())
@@ -71,7 +82,7 @@ impl OrbitToolServer {
             host,
             graph_tools: Arc::new(graph::GraphToolRegistry::new()),
             name_map: RwLock::new(HashMap::new()),
-            session_context: RwLock::new(ToolSessionContext::default()),
+            session_context: RwLock::new(trusted_context),
             learning_session_id,
             learning_caps,
             learning_states: tokio::sync::Mutex::new(learning_states),
@@ -90,11 +101,13 @@ impl OrbitToolServer {
             .unwrap_or_else(|| PROCESS_LEARNING_SESSION_KEY.to_string());
         let mut learning_states = HashMap::new();
         learning_states.insert(key, initial_state);
+        let mut trusted_context = ToolSessionContext::trusted_local(None, None, None);
+        trusted_context.origin_session_id = Some(audit_execution_id("mcp-session"));
         Self {
             host,
             graph_tools: Arc::new(graph::GraphToolRegistry::new()),
             name_map: RwLock::new(HashMap::new()),
-            session_context: RwLock::new(ToolSessionContext::default()),
+            session_context: RwLock::new(trusted_context),
             learning_session_id,
             learning_caps,
             learning_states: tokio::sync::Mutex::new(learning_states),

@@ -45,6 +45,22 @@ impl McpWorkspace {
         std::fs::create_dir_all(&work).expect("create work");
 
         let output = Self::orbit_command(&work, &home)
+            .args([
+                "init",
+                "--non-interactive",
+                "--host-name",
+                "mcp-roundtrip-host",
+            ])
+            .output()
+            .expect("run global init");
+        assert!(
+            output.status.success(),
+            "global init failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let output = Self::orbit_command(&work, &home)
             .args(["workspace", "init", "--name", "mcp-roundtrip"])
             .output()
             .expect("run workspace init");
@@ -432,7 +448,7 @@ fn mcp_graph_calls_persist_success_and_failure_audit_rows() {
     for (tool_name, status) in [
         ("orbit.graph.search", "success"),
         ("orbit.graph.show", "failure"),
-        ("orbit.graph.pack", "failure"),
+        ("orbit.graph.pack", "denied"),
     ] {
         let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
             .args(["audit", "list", "--tool", tool_name, "--json"])
@@ -450,7 +466,14 @@ fn mcp_graph_calls_persist_success_and_failure_audit_rows() {
         assert_eq!(row["tool_name"], tool_name);
         assert_eq!(row["subcommand"], "run-mcp");
         assert_eq!(row["status"], status);
-        assert_eq!(row["role"], "codex");
+        assert_eq!(row["role"], "unverified");
+        assert_eq!(row["transport"], "local");
+        assert_eq!(row["effective_capabilities"], json!(["agent"]));
+        assert!(row["workspace_id"].as_str().is_some());
+        assert!(row["caller_machine_id"].as_str().is_some());
+        assert_eq!(row["caller_machine_id"], row["process_machine_id"]);
+        assert!(row["origin_session_id"].as_str().is_some());
+        assert!(row["mcp_call_id"].as_str().is_some());
         assert!(row["duration_ms"].as_i64().is_some_and(|value| value >= 1));
     }
 }

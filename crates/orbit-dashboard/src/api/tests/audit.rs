@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
+use orbit_common::types::{McpCapability, McpTransport};
 use orbit_core::{
     AuditEventInsertParams, AuditEventStatus, LearningCreateParams, LearningScope, OrbitRuntime,
 };
@@ -47,8 +48,20 @@ fn seed_audit_event(
             host: None,
             pid: std::process::id(),
             session_id: None,
+            workspace_id: Some("ws-orbit".to_string()),
+            caller_machine_id: Some("hm-caller".to_string()),
+            caller_host_id: Some("caller.local".to_string()),
+            process_machine_id: Some("hm-process".to_string()),
+            process_host_id: Some("process.local".to_string()),
+            transport: Some(McpTransport::Local),
+            effective_capabilities: [McpCapability::Agent, McpCapability::Runner]
+                .into_iter()
+                .collect(),
+            origin_session_id: Some("mcp-session".to_string()),
+            mcp_call_id: Some("mcall".to_string()),
+            lease_id: Some("lease".to_string()),
             task_id: None,
-            job_run_id: None,
+            job_run_id: Some("jrun".to_string()),
             activity_id: None,
             step_index: None,
         })
@@ -108,11 +121,51 @@ async fn audit_lists_seeded_events_newest_first_with_projected_fields() {
     assert_eq!(newest["status"], "failure");
     assert_eq!(newest["role"], "editor");
     assert_eq!(newest["error_message"], "boom");
+    assert_eq!(newest["workspace_id"], "ws-orbit");
+    assert_eq!(newest["caller_machine_id"], "hm-caller");
+    assert_eq!(newest["caller_host_id"], "caller.local");
+    assert_eq!(newest["process_machine_id"], "hm-process");
+    assert_eq!(newest["process_host_id"], "process.local");
+    assert_eq!(newest["transport"], "local");
+    assert_eq!(
+        newest["effective_capabilities"],
+        serde_json::json!(["agent", "runner"])
+    );
+    assert_eq!(newest["origin_session_id"], "mcp-session");
+    assert_eq!(newest["mcp_call_id"], "mcall");
+    assert_eq!(newest["lease_id"], "lease");
     assert!(
         newest["timestamp"]
             .as_str()
             .is_some_and(|ts| { chrono::DateTime::parse_from_rfc3339(ts).is_ok() })
     );
+}
+
+#[tokio::test]
+async fn audit_filters_all_trusted_mcp_provenance_fields() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    seed_audit_event(
+        &runtime,
+        "exec-trusted",
+        "orbit.task.list",
+        AuditEventStatus::Success,
+        "unverified",
+        None,
+    );
+
+    let response = request_audit(
+        runtime,
+        concat!(
+            "/audit?workspace_id=ws-orbit&caller_machine=hm-caller",
+            "&process_machine=hm-process&transport=local&capability=runner",
+            "&origin_session=mcp-session&mcp_call=mcall&job_run_id=jrun&lease=lease"
+        ),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("trusted provenance filtered rows");
+    assert_eq!(execution_ids(rows), vec!["exec-trusted"]);
 }
 
 /// Runtime writes are audited end-to-end: creating a learning through the

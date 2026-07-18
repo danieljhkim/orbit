@@ -870,6 +870,53 @@ fn apply_workspace_coordination_projections(conn: &Connection) -> Result<(), Orb
     .map_err(|error| OrbitError::Store(error.to_string()))
 }
 
+/// v7 `trusted_mcp_audit_provenance` migration (ORB-10228): additive trusted
+/// workspace, caller/process, transport, capability-set, session/call, and
+/// lease correlation for command-audit rows. Existing rows remain untouched
+/// and therefore read with NULL/empty additions.
+fn apply_trusted_mcp_audit_provenance(conn: &Connection) -> Result<(), OrbitError> {
+    for sql in [
+        "ALTER TABLE audit_events ADD COLUMN workspace_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN caller_machine_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN caller_host_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN process_machine_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN process_host_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN transport TEXT",
+        "ALTER TABLE audit_events ADD COLUMN capabilities_json TEXT",
+        "ALTER TABLE audit_events ADD COLUMN origin_session_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN mcp_call_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN lease_id TEXT",
+    ] {
+        add_column_if_missing(conn, sql)?;
+    }
+
+    conn.execute_batch(
+        r#"
+            CREATE INDEX IF NOT EXISTS idx_audit_events_workspace_id
+            ON audit_events(workspace_id);
+
+            CREATE INDEX IF NOT EXISTS idx_audit_events_caller_machine_id
+            ON audit_events(caller_machine_id);
+
+            CREATE INDEX IF NOT EXISTS idx_audit_events_process_machine_id
+            ON audit_events(process_machine_id);
+
+            CREATE INDEX IF NOT EXISTS idx_audit_events_transport
+            ON audit_events(transport);
+
+            CREATE INDEX IF NOT EXISTS idx_audit_events_origin_session_id
+            ON audit_events(origin_session_id);
+
+            CREATE INDEX IF NOT EXISTS idx_audit_events_mcp_call_id
+            ON audit_events(mcp_call_id);
+
+            CREATE INDEX IF NOT EXISTS idx_audit_events_lease_id
+            ON audit_events(lease_id);
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
 fn ensure_task_reservations_schema(conn: &Connection) -> Result<(), OrbitError> {
     conn.execute_batch(
         r#"
