@@ -45,6 +45,7 @@ use crate::context::ActorIdentity;
 use crate::context::OrbitContext;
 use crate::context::OrbitStores;
 
+pub use orbit_tool_host::HubCoordinationExecutor;
 pub(crate) use orbit_tool_host::build_orbit_tool_host;
 pub(crate) use resolve::{resolve_bootstrap_roots, resolve_initialize_roots};
 // `pub` for the runtime-less `orbit migrate --dry-run` inspection that moved

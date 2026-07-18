@@ -24,6 +24,7 @@ use orbit_core::command::tool::{
     ToolEntryPoint, audit_role_label_for_entry_point, trusted_mcp_audit_context,
 };
 use orbit_core::routines::{HostIdentityState, HostMode, inspect_host_identity};
+use orbit_core::runtime::HubCoordinationExecutor;
 use orbit_core::{
     AuditEventInsertParams, NotFoundKind, OrbitError, OrbitRuntime, redact_sensitive_env_text,
 };
@@ -93,6 +94,7 @@ struct RuntimeCacheKey {
 
 #[derive(Debug, Clone)]
 struct ExactCheckoutBinding {
+    logical_workspace_id: String,
     key: RuntimeCacheKey,
     role: WorkspaceCheckoutRole,
     owner_machine_id: Option<String>,
@@ -217,7 +219,7 @@ impl BrokerMcpHost {
         let path = Path::new(selector);
         if path.is_absolute() {
             let binding = self.resolve_exact_checkout(path)?;
-            return Ok((binding.key.workspace_id.clone(), Some(binding)));
+            return Ok((binding.logical_workspace_id.clone(), Some(binding)));
         }
         if selector.contains('/') || selector == "." || selector == ".." {
             return Err(OrbitError::InvalidInput(format!(
@@ -239,7 +241,7 @@ impl BrokerMcpHost {
                 };
                 if identity.workspace_id == selector {
                     let binding = self.resolve_exact_checkout(&checkout.repo_root)?;
-                    return Ok((binding.key.workspace_id.clone(), Some(binding)));
+                    return Ok((binding.logical_workspace_id.clone(), Some(binding)));
                 }
             }
         }
@@ -263,7 +265,7 @@ impl BrokerMcpHost {
             .find(|checkout| checkout.workspace_id == workspace.id)
             .ok_or_else(|| self.local_checkout_unavailable(&workspace.id))?;
         let binding = self.resolve_exact_checkout(&checkout.repo_root)?;
-        Ok((binding.key.workspace_id.clone(), Some(binding)))
+        Ok((binding.logical_workspace_id.clone(), Some(binding)))
     }
 
     fn local_checkout_unavailable(&self, workspace_id: &str) -> OrbitError {
@@ -363,6 +365,7 @@ impl BrokerMcpHost {
             )));
         }
         Ok(ExactCheckoutBinding {
+            logical_workspace_id: workspace.id.clone(),
             key: RuntimeCacheKey {
                 workspace_id: identity.workspace_id,
                 repo_root: repo_root.clone(),
@@ -461,6 +464,50 @@ impl BrokerMcpHost {
         }
     }
 
+    fn legacy_friction_root(
+        &self,
+        workspace_id: &str,
+        binding: Option<&ExactCheckoutBinding>,
+    ) -> Option<PathBuf> {
+        if let Some(binding) = binding {
+            return Some(binding.key.shared_root.join("frictions"));
+        }
+        let registry_path = orbit_core::workspace_registry::registry_path_for(&self.global_root);
+        let registry = orbit_core::workspace_registry::load_registry_from(&registry_path).ok()?;
+        registry
+            .checkouts
+            .iter()
+            .find(|checkout| checkout.workspace_id == workspace_id)
+            .map(|checkout| checkout.orbit_dir.join("frictions"))
+    }
+
+    fn record_coordination_outcome(
+        &self,
+        name: &str,
+        context: &ToolSessionContext,
+        result: &Result<Value, OrbitError>,
+    ) {
+        let success_placeholder = OrbitError::Execution(String::new());
+        let error = result.as_ref().err().unwrap_or(&success_placeholder);
+        let mut params = mcp_preflight_failure_params(name, context, error);
+        match result {
+            Ok(_) => {
+                params.status = AuditEventStatus::Success;
+                params.exit_code = 0;
+                params.error_message = None;
+            }
+            Err(error) => {
+                params.status = AuditEventStatus::Failure;
+                params.error_message = Some(redact_sensitive_env_text(&error.to_string()));
+            }
+        }
+        if let Err(error) =
+            orbit_core::host_registry::record_global_audit_event_at(&self.global_root, &params)
+        {
+            tracing::warn!(tool = name, error = %error, "failed to persist global MCP coordination audit");
+        }
+    }
+
     fn resolved_call(
         &self,
         name: &str,
@@ -475,7 +522,9 @@ impl BrokerMcpHost {
             return Err(error);
         }
         if definition.policy.scope() == McpToolScope::Global {
-            return self.global_call(name);
+            let result = self.global_call(name);
+            self.record_coordination_outcome(name, &context, &result);
+            return result;
         }
 
         let selector = match Self::selector(&input, &context) {
@@ -488,9 +537,15 @@ impl BrokerMcpHost {
                 return Err(error);
             }
         };
-        let require_local = definition.policy.placement() != McpToolPlacement::Hub;
-        let (mut workspace_id, mut binding) = match self.resolve_workspace(selector, require_local)
-        {
+        let with_context = name == "orbit.task.show"
+            && input
+                .get("with_context")
+                .or_else(|| input.get("withContext"))
+                .or_else(|| input.get("with-context"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+        let require_local = definition.policy.placement() != McpToolPlacement::Hub || with_context;
+        let (workspace_id, binding) = match self.resolve_workspace(selector, require_local) {
             Ok(resolved) => resolved,
             Err(error) => {
                 self.record_preflight_denial(name, &input, &context, &error);
@@ -498,37 +553,6 @@ impl BrokerMcpHost {
             }
         };
 
-        // The current local hub executor still uses a runtime for hub-domain
-        // calls. Resolve an exact checkout only on hosts where the call may
-        // safely short-circuit locally; checkoutless hub execution is handled
-        // by the coordination executor as its individual tool families move
-        // off OrbitRuntime.
-        if binding.is_none() {
-            let identity = match inspect_host_identity(&self.global_root) {
-                Ok(identity) => identity,
-                Err(error) => {
-                    self.record_preflight_denial(name, &input, &context, &error);
-                    return Err(error);
-                }
-            };
-            let mode = match identity {
-                HostIdentityState::Present(identity) => identity.mode,
-                HostIdentityState::Legacy { .. } | HostIdentityState::Absent => {
-                    HostMode::Standalone
-                }
-            };
-            if mode != HostMode::Spoke {
-                let resolved = match self.resolve_workspace(&workspace_id, true) {
-                    Ok(resolved) => resolved,
-                    Err(error) => {
-                        self.record_preflight_denial(name, &input, &context, &error);
-                        return Err(error);
-                    }
-                };
-                workspace_id = resolved.0;
-                binding = resolved.1;
-            }
-        }
         if let Err(error) = self.preflight_placement(
             definition.policy.placement(),
             &workspace_id,
@@ -536,6 +560,20 @@ impl BrokerMcpHost {
         ) {
             self.record_preflight_denial(name, &input, &context, &error);
             return Err(error);
+        }
+        if definition.policy.placement() == McpToolPlacement::Hub && !with_context {
+            context.workspace_id = Some(workspace_id.clone());
+            context.workspace = Some(workspace_id.clone());
+            if let Some(object) = input.as_object_mut()
+                && object.contains_key("workspace")
+            {
+                object.insert("workspace".to_string(), Value::String(workspace_id.clone()));
+            }
+            let legacy_root = self.legacy_friction_root(&workspace_id, binding.as_ref());
+            let result = HubCoordinationExecutor::new(&self.global_root, workspace_id, legacy_root)
+                .and_then(|executor| executor.execute_tool(name, input, context.clone()));
+            self.record_coordination_outcome(name, &context, &result);
+            return result;
         }
         let binding = match binding {
             Some(binding) => binding,

@@ -10,7 +10,7 @@ use orbit_core::workspace_registry;
 
 use crate::tests::env_isolation::EnvGuard;
 
-use super::super::init::WorkspaceInitArgs;
+use super::super::init::{WorkspaceInitArgs, canonical_workspace_id};
 use super::super::list::format_workspace_list;
 use super::super::role::CliCheckoutRole;
 use super::super::show::format_workspace_show;
@@ -837,7 +837,7 @@ fn nameless_tmp_workspace_registers_only_in_isolated_registry() {
         registry
             .workspaces
             .iter()
-            .any(|w| w.id == format!("ws_{workspace_name}")),
+            .any(|w| w.id == canonical_workspace_id(&workspace_name)),
         "nameless workspace must register in the isolated fixture registry"
     );
 

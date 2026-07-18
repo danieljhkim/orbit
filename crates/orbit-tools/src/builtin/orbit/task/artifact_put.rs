@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+use std::fs::File;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
 use orbit_common::types::{OrbitError, TaskArtifact, ToolParam, ToolSchema};
 use serde_json::{Map, Value, json};
@@ -6,6 +8,10 @@ use serde_json::{Map, Value, json};
 use crate::{OrbitBuiltinAction, Tool, ToolContext};
 
 pub struct OrbitTaskArtifactPutTool;
+
+/// Keep caller-local artifact reads bounded before the byte payload crosses
+/// the coordination boundary. The hub never receives a caller-local path.
+pub(crate) const MAX_ARTIFACT_CONTENT_BYTES: u64 = 1_048_576;
 
 impl Tool for OrbitTaskArtifactPutTool {
     fn schema(&self) -> ToolSchema {
@@ -49,8 +55,7 @@ impl Tool for OrbitTaskArtifactPutTool {
             &["path", "artifact_path", "artifactPath"],
         )?;
         let resolved_source_path = resolve_source_path(ctx, &source_path);
-        let artifact =
-            TaskArtifact::from_source_file(&resolved_source_path, artifact_path.as_deref())?;
+        let artifact = read_bounded_artifact(&resolved_source_path, artifact_path.as_deref())?;
 
         let mut update_input = input.as_object().cloned().unwrap_or_else(Map::new);
         update_input.insert("id".to_string(), Value::String(id));
@@ -75,6 +80,57 @@ impl Tool for OrbitTaskArtifactPutTool {
             OrbitBuiltinAction::TaskUpdate,
         )
     }
+}
+
+fn read_bounded_artifact(
+    source_path: &Path,
+    artifact_path: Option<&str>,
+) -> Result<TaskArtifact, OrbitError> {
+    let mut file = File::open(source_path).map_err(|error| {
+        OrbitError::Io(format!(
+            "read artifact source '{}': {error}",
+            source_path.display()
+        ))
+    })?;
+    let mut content = Vec::new();
+    file.by_ref()
+        .take(MAX_ARTIFACT_CONTENT_BYTES + 1)
+        .read_to_end(&mut content)
+        .map_err(|error| {
+            OrbitError::Io(format!(
+                "read artifact source '{}': {error}",
+                source_path.display()
+            ))
+        })?;
+    if content.len() as u64 > MAX_ARTIFACT_CONTENT_BYTES {
+        return Err(OrbitError::InvalidInput(format!(
+            "artifact source '{}' exceeds the {} byte content limit",
+            source_path.display(),
+            MAX_ARTIFACT_CONTENT_BYTES
+        )));
+    }
+
+    let path = artifact_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            source_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "artifact source '{}' has no file name; provide `path`",
+                source_path.display()
+            ))
+        })?;
+    Ok(TaskArtifact {
+        media_type: orbit_common::types::media_type_for_artifact_path(&path).to_string(),
+        path,
+        content,
+        created_by: None,
+    })
 }
 
 fn resolve_source_path(ctx: &ToolContext, source_path: &str) -> PathBuf {

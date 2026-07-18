@@ -202,7 +202,7 @@ impl WorkspaceInitArgs {
 
         let name = self.name.unwrap_or_else(|| dir_name_or_fallback(cwd));
 
-        let id = format!("ws_{name}");
+        let id = canonical_workspace_id(&name);
         let git_remote = detect_git_remote(cwd);
 
         let mut registry = workspace_registry::load_registry_from(registry_path)?;
@@ -266,6 +266,7 @@ impl WorkspaceInitArgs {
         }
         workspace_registry::save_registry_to(&registry, registry_path)?;
         write_workspace_identity(orbit_dir, &id)?;
+        orbit_core::runtime::HubCoordinationExecutor::register_workspace(global_root, &id, &name)?;
 
         Ok(WorkspaceInitResult {
             id,
@@ -274,6 +275,30 @@ impl WorkspaceInitArgs {
             orbit_dir: orbit_dir.to_path_buf(),
         })
     }
+}
+
+pub(super) fn canonical_workspace_id(name: &str) -> String {
+    let mut canonical = String::new();
+    let mut separator = false;
+    for character in name.chars().flat_map(char::to_lowercase) {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            canonical.push(character);
+            separator = false;
+        } else if !canonical.is_empty() {
+            separator = true;
+        }
+        if separator && !canonical.ends_with('-') {
+            canonical.push('-');
+            separator = false;
+        }
+    }
+    while canonical.ends_with('-') {
+        canonical.pop();
+    }
+    if canonical.is_empty() {
+        canonical.push_str("workspace");
+    }
+    format!("ws_{canonical}")
 }
 
 #[derive(Serialize)]

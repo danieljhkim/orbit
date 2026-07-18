@@ -141,9 +141,12 @@ the fixed remote command; `mcp.toml` cannot inject arbitrary shell text.
 ### 2.3 Hub-local short circuit
 
 When the current machine's role is hub, hub-class calls dispatch directly through
-the local `OrbitRuntime`/global coordination runtime. The broker does not SSH to
-itself or add a second MCP serialization boundary. Placement and capability
-preflight remain identical to the remote path.
+the checkout-independent coordination executor keyed by stable `workspace_id`.
+That executor opens only global task/friction coordination stores: it does not
+construct `OrbitRuntime`, `WorkspacePaths`, a checkout, owner stores, or local
+model/scoreboard configuration. The broker does not SSH to itself or add a
+second MCP serialization boundary. Placement and capability preflight remain
+identical to the remote path.
 
 ## 3. Workspace, Role, and Session Resolution
 
@@ -382,6 +385,17 @@ through the hub. Current knowledge does **not** flow across owners in v1: the hu
 serves it only when the hub owns that workspace, and never proxies to a spoke owner.
 Every other machine reads a pulled Git replica explicitly or routes actionable work
 as a task to the owner. Graph/docs remain local.
+
+Hub friction state is partitioned at
+`<global_root>/frictions/workspaces/<workspace_id>`. Legacy checkout-local state
+is copied to a staging tree and atomically published before a separate completion
+marker commits the migration. Identical repeats are idempotent, differing trees
+fail closed, and reads remain on the legacy tree until the marker exists.
+
+`orbit.task.artifact.put` completes capability, workspace, and placement
+preflight before opening the caller-local source. It reads at most the typed
+content limit and sends `{path, media_type, content}` bytes to hub execution;
+caller-local paths never cross the coordination boundary.
 
 ### 6.2 Knowledge creation
 
@@ -646,7 +660,9 @@ schemas.
   and `composite` metadata; preserve exact session checkout/worktree paths for
   graph dispatch and runtime-cache identity; enforce owner/replica preflight
   without spoke-to-spoke discovery; and filter `tools/list`/`tools/call` by the
-  non-hierarchical effective capability set.
+  non-hierarchical effective capability set. Hub task, artifact, review-thread,
+  verdict, and friction calls use the stable-ID checkoutless coordination
+  executor; `task.show(with_context=true)` remains explicitly local-derived.
 
 ### Phase 3 — singular hub link
 

@@ -192,7 +192,11 @@ adapter, runtime profile/ship construction in `orbit-core`, persistence in
   workspace or checkout binding for the enumerated workspace.
 - [ORB-10262] — replaced startup cwd discovery and `EmptyMcpHost` with the canonical
   schema-listing broker, exact-checkout resolution/cache identity, placement preflight, and
-  effective-session `tools/list` omission plus hidden-name `tools/call` denial.
+  effective-session `tools/list` omission plus hidden-name `tools/call` denial. Hub coordination
+  calls now execute by stable workspace ID without `OrbitRuntime` or a fabricated checkout;
+  task artifacts cross the hub boundary as bounded bytes, review persistence is independent of
+  local scoreboard/model configuration, and canonical friction state uses marker-committed
+  migration under the global workspace partition.
 - [ORB-10302] — moved the coupled registry domain into `orbit-registry` and retained
   MCP ownership of serialization/dispatch only ([ADR-0235]).
 
