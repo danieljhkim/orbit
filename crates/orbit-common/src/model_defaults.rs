@@ -31,6 +31,9 @@ pub const CLAUDE_DEFAULT_STRONG: &str = "opus";
 /// Default "weak" Claude model: the unversioned `sonnet` CLI alias.
 pub const CLAUDE_DEFAULT_WEAK: &str = "sonnet";
 
+/// Claude CLI alias used by the standard Fable crew.
+pub const CLAUDE_FABLE_MODEL: &str = "fable";
+
 /// Default model for the Anthropic **HTTP Messages API** path.
 ///
 /// Unlike the CLI, the Messages API requires a fully-qualified model id and
@@ -38,8 +41,17 @@ pub const CLAUDE_DEFAULT_WEAK: &str = "sonnet";
 /// pinned. Bump it in lockstep with Anthropic's published API model ids.
 pub const ANTHROPIC_HTTP_DEFAULT_MODEL: &str = "claude-sonnet-4-5";
 
-/// Default codex model (strong role and provider default).
-pub const CODEX_DEFAULT_MODEL: &str = "gpt-5.6-terra";
+/// Codex model used by the standard Sol crew.
+pub const CODEX_SOL_MODEL: &str = "gpt-5.6-sol";
+
+/// Codex model used by the standard Terra crew and provider default.
+pub const CODEX_TERRA_MODEL: &str = "gpt-5.6-terra";
+
+/// Codex model used by the standard Luna crew.
+pub const CODEX_LUNA_MODEL: &str = "gpt-5.6-luna";
+
+/// Default codex model (Terra remains the provider and QA default).
+pub const CODEX_DEFAULT_MODEL: &str = CODEX_TERRA_MODEL;
 
 /// Default codex "weak" model used by the executor model pair.
 pub const CODEX_DEFAULT_WEAK: &str = "gpt-5.4-mini";

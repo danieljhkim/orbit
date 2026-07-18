@@ -3,7 +3,7 @@ summary: "Agent Families — Design"
 type: design
 title: "Agent Families — Design"
 owner: human
-last_updated: 2026-07-11
+last_updated: 2026-07-18
 status: Draft
 feature: agent-families
 doc_role: design
@@ -28,7 +28,7 @@ Workspace config defines one concrete assignment under each `[crews.<name>]`: fl
 
 `crates/orbit-core/src/config/raw.rs` owns the TOML shape, and `crates/orbit-core/src/config/runtime.rs` materializes it into `Crew` values from `orbit-common`. Runtime loading rejects incomplete crews and rejects `[workflow].default_crew` when it does not name a defined crew.
 
-The repository default template and `.orbit/config.toml` use `[workflow].default_crew = "codex"` and seed single-family crews named `claude`, `codex`, `gemini`, and `grok`.
+The built-in runtime registry uses model-specific standard crews: Claude provides `opus`, `sonnet`, and `fable`; Codex provides `sol`, `terra`, and `luna`; Gemini provides `gemini`; and Grok provides `grok`. Fresh `orbit init` config filters that registry by detected provider CLIs, always writes `backend = "cli"`, and chooses the first emitted standard crew as `[workflow].default_crew` (`opus`, `sol`, `gemini`, or `grok`). It adds `qa` on Terra when Codex is available, otherwise on Sonnet when Claude is available. With no supported provider CLI, initialization emits neither crews nor a dangling default.
 
 ## 3. Task and Tool Surface
 
@@ -71,5 +71,6 @@ Task-level per-role overrides were deferred; today a task picks an entire crew, 
 - ORB-00042: Onboard Grok (xAI) as a first-class supported agent family.
 - ORB-00058: Introduce per-task crew override for agent model selection.
 - ORB-00072: Make duel-plan agent pool and per-family model configurable via `[duel]`.
+- ORB-10315: Seed model-specific crews only for providers available during initialization.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -149,7 +149,9 @@ fn qa_crew_prompt_offers_only_detected_claude_and_codex_defaults() {
         ..DetectedAgents::default()
     };
     let mut prompter = CannedPrompter::new(["2"]);
-    let qa = collect_qa_crew_setting(&detected, &mut prompter).expect("qa choice");
+    let qa = collect_qa_crew_setting(&detected, &mut prompter)
+        .expect("qa choice")
+        .expect("qa is available");
 
     assert_eq!(qa.provider.as_deref(), Some("claude"));
     assert_eq!(
@@ -170,8 +172,25 @@ fn qa_crew_noninteractive_default_prefers_detected_codex() {
         ..DetectedAgents::default()
     };
     let mut prompter = CannedPrompter::new([""]);
-    let qa = collect_qa_crew_setting(&detected, &mut prompter).expect("qa default");
+    let qa = collect_qa_crew_setting(&detected, &mut prompter)
+        .expect("qa default")
+        .expect("qa is available");
 
     assert_eq!(qa.provider.as_deref(), Some("codex"));
     assert_eq!(qa.model.as_deref(), Some(CODEX_DEFAULT_MODEL));
+}
+
+#[test]
+fn qa_crew_is_omitted_without_claude_or_codex_cli() {
+    let detected = DetectedAgents {
+        anthropic_api_key: true,
+        openai_api_key: true,
+        gemini_cli: true,
+        ..DetectedAgents::default()
+    };
+    let mut prompter = CannedPrompter::new([] as [&str; 0]);
+    let qa = collect_qa_crew_setting(&detected, &mut prompter).expect("qa selection");
+
+    assert!(qa.is_none());
+    assert!(prompter.transcript().is_empty());
 }

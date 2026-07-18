@@ -24,7 +24,7 @@ The workspace identity file `.orbit/config.yaml` is a separate artifact (it stor
 ```toml
 [workflow]
 base_branch = "main"        # default merge-base for ship / duel-plan
-default_crew = "codex"      # fallback crew when a task has no `crew` set
+default_crew = "sol"        # fallback crew when a task has no `crew` set
 ```
 
 - **`base_branch`** — the branch `orbit run ship` and `duel-plan` rebase against and target with PRs. Override per-invocation with `--base <branch>`. If your repo uses a two-branch pattern like this repo does (`main` = release, `agent-main` = dev integration), set `base_branch = "agent-main"`.
@@ -38,22 +38,24 @@ A **crew** is one provider-model-backend assignment. Every activity role (`plann
 
 | Field | Purpose | Values |
 |---|---|---|
-| `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-5.5`, `pro`, `grok-build`) |
+| `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-5.6-sol`, `pro`, `grok-build`) |
 | `provider` | Agent family | `claude`, `codex`, `gemini`, `grok` (the CLI-executable families; see [Provider identity and resolution](#provider-identity-and-resolution) for the full canonical set) |
 | `backend` | How Orbit dispatches the agent | `cli` (today the only supported value for these roles) |
 | `description` | Optional human-facing crew summary | Any non-empty string after trimming |
 | `tags` | Optional discovery labels | Array of strings; normalized, sorted, and deduplicated |
 
-Example — a Codex crew:
+Example — the standard Codex Sol crew:
 
 ```toml
-[crews.codex]
-model = "gpt-5.5"
+[crews.sol]
+model = "gpt-5.6-sol"
 provider = "codex"
 backend = "cli"
 description = "Systems implementation"
 tags = ["implementation", "review"]
 ```
+
+Fresh `orbit init` configuration advertises only detected provider CLIs. Claude seeds `opus`, `sonnet`, and `fable`; Codex seeds `sol`, `terra`, and `luna`; Gemini seeds `gemini`; and Grok seeds `grok`. When Codex or Claude is available, `qa` uses Terra or Sonnet respectively. Every generated entry uses the CLI backend. If no supported provider CLI is detected, init leaves both the crew registry and `workflow.default_crew` unset instead of writing an unusable provider.
 
 You can define any number of crews. Set the workspace-wide fallback with `workflow.default_crew`; assign a specific crew to individual tasks via the [per-task crew override](#per-task-crew-override). Crews are validated at load time: each crew must have non-empty `model`, `provider`, and `backend`; `workflow.default_crew` must name a defined crew.
 
