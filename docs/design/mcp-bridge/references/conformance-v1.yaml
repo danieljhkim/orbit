@@ -33,6 +33,8 @@ tools:
   orbit.friction.add: { placement: hub, allowed_capabilities: [agent, operator] }
   orbit.friction.tags: { placement: hub, allowed_capabilities: [agent, operator] }
   orbit.friction.update: { placement: hub, allowed_capabilities: [operator] }
+  orbit.host.list: { placement: hub, allowed_capabilities: [operator] }
+  orbit.workspace.list: { placement: hub, allowed_capabilities: [operator] }
   orbit.graph.sync: { placement: local-derived, allowed_capabilities: [agent, operator] }
   orbit.graph.search: { placement: local-derived, allowed_capabilities: [agent, operator] }
   orbit.graph.show: { placement: local-derived, allowed_capabilities: [agent, operator] }

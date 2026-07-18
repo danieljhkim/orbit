@@ -10,7 +10,7 @@ summary: Accepted ADR log for the coupled Host Registry and MCP Bridge v1 contra
 tags: [host-registry, mcp-bridge, multi-host, placement]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10258, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Decisions
@@ -45,7 +45,7 @@ logical workspace/owner separately from machine-local checkout bindings.
 
 ## ADR-0227 — Stable machine identity, registry, and out-of-band hub pin
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze the host identity boundary; [ORB-10255] implemented the durable registry core.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze the host identity boundary; [ORB-10255] implemented the durable registry core; [ORB-10267] added operator administration (register/list/rename/retire), current-machine `host.toml` rename coordination, and the hub-global `registry_revision`.
 
 ### Context
 
@@ -67,7 +67,7 @@ and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
 
 ## ADR-0228 — Local placement broker with capability-set filtering
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] added the `orbit.host.list` and `orbit.workspace.list` canonical discovery tools (hub placement, operator capability, workspace-unscoped) reading one sanitized path-free registry snapshot.
 
 ### Context
 
@@ -176,5 +176,15 @@ for its non-Orbit constellation domains.
   pin; `.orbit/routines/local/` definitions are implicit to the loading host and may not
   name another host; cross-origin name collisions fail deterministically. Registry-cache
   pin validation and reassignment-baseline semantics remain deferred to R2.
+- [ORB-10267] — implemented Unit C3 of ORB-10246: operator host administration
+  (`orbit host register/list/rename/retire`), hub-side workspace `link` and machine-local
+  `role` (owner/replica) operations, the `orbit.host.list`/`orbit.workspace.list` canonical
+  discovery tools, one path-free `RegistrySnapshotV1` projection read in a single store
+  transaction, the versioned atomic satellite registry cache, and store schema v8's singleton
+  `hub_registry_metadata` row carrying the hub `machine_id` and the monotonic
+  `registry_revision` (advanced once per snapshot-visible mutation; no-ops do not advance it).
+  Current-machine rename coordinates a staged, reparsed `host.toml` write with the durable
+  registry rename and reports partial outcomes explicitly. Remote registration and
+  post-link/register cache refresh remain deferred to E3; poll-driven refresh to I/J.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

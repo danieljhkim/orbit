@@ -836,6 +836,15 @@
     "name": "orbit_graph_trace"
   },
   {
+    "description": "List registered hub hosts with sanitized lifecycle, aliases, and workspace-presence freshness (operator, hub placement).",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "orbit_host_list"
+  },
+  {
     "description": "Create an active project learning. Returns `{ id, created_at }` plus the full record.",
     "inputSchema": {
       "additionalProperties": true,
@@ -1759,5 +1768,14 @@
       "type": "object"
     },
     "name": "orbit_task_update"
+  },
+  {
+    "description": "List workspaces with declared owner and sanitized execution-profile freshness (operator, hub placement).",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "orbit_workspace_list"
   }
 ]

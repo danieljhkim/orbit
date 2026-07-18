@@ -139,8 +139,11 @@ and inserts the old one as a tombstone in one transaction, so chained renames ke
 the full history. Retirement changes lifecycle state without deleting either table.
 Resolution returns an explicit active, alias-with-warning, retired, unknown, or
 fail-closed collision projection. `HostRegistryService` binds these operations to
-B1's `HostIdentity` declaration without adding CLI/MCP administration or local
-`host.toml` rename coordination; those remain C3.
+B1's `HostIdentity` declaration. CLI/MCP administration and local `host.toml`
+rename coordination landed in C3 ([ORB-10267]): `orbit host register/list/rename/retire`,
+the `orbit.host.list`/`orbit.workspace.list` discovery tools, one path-free
+`RegistrySnapshotV1` projection, the atomic satellite registry cache, and the
+hub-global `registry_revision` (store schema v8).
 
 **Boundary with `~/.orbit/mcp.toml`.** The registry is server-side *inventory*;
 `mcp.toml` is the client's trust policy for its one hub route. They stay separate:

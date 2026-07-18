@@ -88,6 +88,8 @@ pub struct HostIdentity {
 impl HostIdentity {
     /// Deterministic `host.toml` rendering — same identity always serializes to
     /// the same bytes, so a re-migration or repeated init is a no-op write.
+    /// Operator-influenced string values are escaped for a TOML basic string so
+    /// a quote, backslash, or control character cannot corrupt the file.
     fn to_toml(&self) -> String {
         format!(
             "# Machine identity for this Orbit host [ORB-10247]. Created by\n\
@@ -99,11 +101,33 @@ impl HostIdentity {
              host_id = \"{}\"\n\
              mode = \"{}\"\n",
             self.schema_version,
-            self.machine_id,
-            self.host_id,
+            toml_escape_basic(&self.machine_id),
+            toml_escape_basic(&self.host_id),
             self.mode.as_str(),
         )
     }
+}
+
+/// Escape a value for embedding inside a TOML basic (double-quoted) string,
+/// per the TOML spec's basic-string escape set.
+fn toml_escape_basic(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\u{08}' => escaped.push_str("\\b"),
+            '\u{0C}' => escaped.push_str("\\f"),
+            control if (control as u32) < 0x20 || control as u32 == 0x7f => {
+                escaped.push_str(&format!("\\u{:04X}", control as u32));
+            }
+            other => escaped.push(other),
+        }
+    }
+    escaped
 }
 
 /// The three actionable states of `host.toml`. Malformed, incomplete, blank,
@@ -323,11 +347,72 @@ pub fn ensure_host_identity(
 /// Atomically (re)write `host.toml`. The staged-rename write never leaves a
 /// partially overwritten file, so a crash preserves the last valid identity.
 fn write_host_identity(global_root: &Path, identity: &HostIdentity) -> Result<PathBuf, OrbitError> {
+    let text = stage_host_identity_toml(identity)?;
+    write_host_identity_text(global_root, &text)
+}
+
+/// Atomically write already-staged `host.toml` bytes through the crash-safe
+/// atomic-write seam.
+fn write_host_identity_text(global_root: &Path, text: &str) -> Result<PathBuf, OrbitError> {
     let path = host_toml_path(global_root);
-    atomic_write_text(&path, &identity.to_toml()).map_err(|error| {
+    atomic_write_text(&path, text).map_err(|error| {
         OrbitError::Io(format!("failed to write '{}': {error}", path.display()))
     })?;
     Ok(path)
+}
+
+/// Render `host.toml` and reparse the staged bytes before any write, confirming
+/// every field round-trips to the intended identity. A quote, backslash, or
+/// control character that would corrupt the file is caught here — before
+/// mutation — rather than producing an unreadable on-disk identity.
+fn stage_host_identity_toml(identity: &HostIdentity) -> Result<String, OrbitError> {
+    let rendered = identity.to_toml();
+    let parsed: RawHostToml = toml::from_str(&rendered).map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "staged host identity render is not valid TOML: {error}"
+        ))
+    })?;
+    let round_trips = parsed.schema_version == Some(identity.schema_version)
+        && non_blank(&parsed.machine_id).as_deref() == Some(identity.machine_id.as_str())
+        && non_blank(&parsed.host_id).as_deref() == Some(identity.host_id.as_str())
+        && non_blank(&parsed.mode).as_deref() == Some(identity.mode.as_str());
+    if !round_trips {
+        return Err(OrbitError::InvalidInput(
+            "staged host identity render does not round-trip to the intended identity; \
+             refusing to write a corrupt host.toml"
+                .to_string(),
+        ));
+    }
+    Ok(rendered)
+}
+
+/// Rename the current machine's local `host.toml` in place, preserving
+/// `machine_id` and `mode`. The identity must already be `Present`; a legacy or
+/// absent file is a hard error (there is no local identity to rename). The new
+/// render is staged and reparsed before the atomic write, so quotes,
+/// backslashes, and control characters either round-trip safely or fail before
+/// mutation and the last valid file is preserved. Renaming another machine must
+/// never call this — it only ever touches the local file.
+pub fn rename_current_host_identity(
+    global_root: &Path,
+    new_host_id: &str,
+) -> Result<HostIdentity, OrbitError> {
+    let current = load_host_identity(global_root)?;
+    let new_host_id = new_host_id.trim();
+    if new_host_id.is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "host name must not be empty".to_string(),
+        ));
+    }
+    let candidate = HostIdentity {
+        schema_version: current.schema_version,
+        machine_id: current.machine_id.clone(),
+        host_id: new_host_id.to_string(),
+        mode: current.mode,
+    };
+    let staged = stage_host_identity_toml(&candidate)?;
+    write_host_identity_text(global_root, &staged)?;
+    Ok(candidate)
 }
 
 /// Best-effort OS hostname, used as the interactive default host name at init.

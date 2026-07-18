@@ -488,3 +488,91 @@ fn service_profile_publication_uses_hub_receipt_for_freshness() {
         .expect("stale");
     assert_eq!(stale.freshness, ProjectionFreshness::Stale);
 }
+
+#[test]
+fn link_workspace_owner_binds_active_warns_on_alias_and_rejects_bad_resolutions() {
+    let store = Store::open_in_memory().expect("store");
+    let service = HostRegistryService::new(store);
+    service
+        .register_identity(
+            &identity("hm_owner", "owner", HostMode::Spoke),
+            BTreeSet::new(),
+        )
+        .expect("register owner");
+    // A tombstone alias for the owner's previous name.
+    service.rename("hm_owner", "owner2").expect("rename owner");
+    service
+        .register_identity(
+            &identity("hm_gone", "gone", HostMode::Spoke),
+            BTreeSet::new(),
+        )
+        .expect("register gone");
+    service.retire("hm_gone").expect("retire gone");
+    let registry = workspace_registry(vec![
+        workspace("ws_active", None),
+        workspace("ws_alias", None),
+    ]);
+
+    // Active name binds with no warning.
+    let link = service
+        .link_workspace_owner(&registry, "ws_active", "owner2")
+        .expect("link active");
+    assert_eq!(link.ownership.owner_machine_id, "hm_owner");
+    assert!(link.warning.is_none());
+
+    // Tombstone alias resolves to the active owner but warns.
+    let aliased = service
+        .link_workspace_owner(&registry, "ws_alias", "owner")
+        .expect("link via alias");
+    assert_eq!(aliased.ownership.owner_machine_id, "hm_owner");
+    assert!(aliased.warning.is_some(), "alias link must warn");
+
+    // Unknown, retired, and collision-style failures reject before mutation.
+    assert!(
+        service
+            .link_workspace_owner(&registry, "ws_active", "nope")
+            .expect_err("unknown owner")
+            .to_string()
+            .contains("not a registered host")
+    );
+    assert!(
+        service
+            .link_workspace_owner(&registry, "ws_active", "gone")
+            .expect_err("retired owner")
+            .to_string()
+            .contains("retired")
+    );
+}
+
+#[test]
+fn retire_guarding_hub_rejects_self_retirement_before_mutation() {
+    let store = Store::open_in_memory().expect("store");
+    let service = HostRegistryService::new(store);
+    service
+        .register_identity(&identity("hm_hub", "hub", HostMode::Hub), BTreeSet::new())
+        .expect("register hub");
+    service
+        .register_identity(
+            &identity("hm_spoke", "spoke", HostMode::Spoke),
+            BTreeSet::new(),
+        )
+        .expect("register spoke");
+    service
+        .configure_hub_identity("hm_hub")
+        .expect("configure hub");
+
+    let error = service
+        .retire_guarding_hub("hm_hub")
+        .expect_err("hub cannot retire itself")
+        .to_string();
+    assert!(error.contains("hub"), "unexpected: {error}");
+    // The hub is still active — no mutation happened.
+    assert!(matches!(
+        service.resolve("hub").expect("resolve hub"),
+        HostNameResolution::Active { .. }
+    ));
+    // A non-hub machine retires normally.
+    service
+        .retire_guarding_hub("hm_spoke")
+        .expect("retire spoke");
+}

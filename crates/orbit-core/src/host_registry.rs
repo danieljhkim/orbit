@@ -15,9 +15,9 @@ use orbit_common::types::activity_job::{
 use orbit_common::types::{
     ActivityV2, Crew, CrewRoleAssignment, EXECUTION_PROFILE_SCHEMA_VERSION, ExecutionProfileCrewV1,
     ExecutionProfileShipV1, ExecutionProfileV1, HostAlias, HostNameResolution, HostRecord,
-    HostRegistration, HostWorkspacePresence, JobV2, OrbitError, SanitizedExecutionProfile,
-    SanitizedWorkspacePresence, StoredExecutionProfile, Workspace, WorkspaceOwnership,
-    WorkspacePresenceDeclaration, WorkspaceRegistry, WorkspaceStatus,
+    HostRegistration, HostWorkspacePresence, JobV2, OrbitError, RegistrySnapshotV1,
+    SanitizedExecutionProfile, SanitizedWorkspacePresence, StoredExecutionProfile, Workspace,
+    WorkspaceOwnership, WorkspacePresenceDeclaration, WorkspaceRegistry, WorkspaceStatus,
 };
 use orbit_engine::{dispatch_error_to_orbit, resolve_job_catalog_refs_for_execution, validate_job};
 use orbit_store::Store;
@@ -53,6 +53,15 @@ pub struct HostRegistryService {
     store: Store,
 }
 
+/// Result of a hub-side workspace owner link: the recorded singular ownership
+/// plus an optional visible warning when the owner name was resolved through a
+/// permanent tombstone alias.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceLink {
+    pub ownership: WorkspaceOwnership,
+    pub warning: Option<String>,
+}
+
 impl HostRegistryService {
     pub fn new(store: Store) -> Self {
         Self { store }
@@ -79,8 +88,81 @@ impl HostRegistryService {
         self.store.retire_host(machine_id)
     }
 
+    /// Retire a machine, rejecting an attempt to retire the singular configured
+    /// hub machine before any database mutation. In v1 there is exactly one
+    /// hub and it cannot retire itself out of existence.
+    pub fn retire_guarding_hub(&self, machine_id: &str) -> Result<HostRecord, OrbitError> {
+        if let Some(hub) = self.store.hub_machine_id()?
+            && hub == machine_id
+        {
+            return Err(OrbitError::InvalidInput(format!(
+                "machine_id '{machine_id}' is the currently configured hub and cannot retire \
+                 itself in v1"
+            )));
+        }
+        self.store.retire_host(machine_id)
+    }
+
     pub fn resolve(&self, host_id: &str) -> Result<HostNameResolution, OrbitError> {
         self.store.resolve_host_id(host_id)
+    }
+
+    /// Idempotently stamp this machine as the configured hub. Registry
+    /// configuration, not a snapshot-visible mutation.
+    pub fn configure_hub_identity(&self, machine_id: &str) -> Result<(), OrbitError> {
+        self.store.ensure_hub_machine_id(machine_id)
+    }
+
+    /// The configured hub `machine_id`, if any.
+    pub fn hub_machine_id(&self) -> Result<Option<String>, OrbitError> {
+        self.store.hub_machine_id()
+    }
+
+    /// Read the single sanitized, path-free registry snapshot — the sole input
+    /// to the discovery tools and the satellite registry cache.
+    pub fn snapshot(&self) -> Result<RegistrySnapshotV1, OrbitError> {
+        self.store
+            .read_registry_snapshot(Utc::now(), PRESENCE_FRESHNESS_TTL, PROFILE_FRESHNESS_TTL)
+    }
+
+    /// Resolve a human owner name through C1 and record C2's singular owner
+    /// `machine_id`. Active names bind silently; a tombstone alias binds with a
+    /// visible warning; unknown, retired, and collision results fail before any
+    /// ownership mutation. No SSH target, capability grant, coordination host,
+    /// or inferred owner is ever recorded.
+    pub fn link_workspace_owner(
+        &self,
+        registry: &WorkspaceRegistry,
+        workspace_id: &str,
+        owner_host_id: &str,
+    ) -> Result<WorkspaceLink, OrbitError> {
+        let (owner_machine_id, warning) = match self.store.resolve_host_id(owner_host_id)? {
+            HostNameResolution::Active { host } => (host.machine_id, None),
+            HostNameResolution::Alias { host, alias } => (host.machine_id, Some(alias.warning)),
+            HostNameResolution::Retired { host, .. } => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "owner name '{owner_host_id}' resolves to retired machine_id '{}'; a retired \
+                     host cannot own a workspace",
+                    host.machine_id
+                )));
+            }
+            HostNameResolution::Unknown { host_id } => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "owner name '{host_id}' is not a registered host"
+                )));
+            }
+            HostNameResolution::Collision {
+                host_id,
+                machine_ids,
+            } => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "owner name '{host_id}' is ambiguous across machine_ids [{}]; refusing to bind",
+                    machine_ids.join(", ")
+                )));
+            }
+        };
+        let ownership = self.bind_workspace_owner(registry, workspace_id, &owner_machine_id)?;
+        Ok(WorkspaceLink { ownership, warning })
     }
 
     pub fn active_hosts(&self) -> Result<Vec<HostRecord>, OrbitError> {

@@ -7,6 +7,7 @@ pub mod job_run_store;
 pub mod learning_index;
 pub mod migration;
 pub(crate) mod read_pool;
+pub mod registry_snapshot;
 pub mod routine_store;
 pub mod session_learning_state_store;
 pub mod task_registry;

@@ -57,6 +57,7 @@ impl Store {
                     ],
                 )
                 .map_err(|error| host_mutation_error("register", &registration.host_id, error))?;
+            advance_registry_revision(&tx.tx)?;
 
             host_by_machine_id(&tx.tx, &registration.machine_id)?.ok_or_else(|| {
                 OrbitError::Store(format!(
@@ -113,6 +114,7 @@ impl Store {
                     params![old_host_id, machine_id, now, warning],
                 )
                 .map_err(|error| host_mutation_error("preserve alias", &old_host_id, error))?;
+            advance_registry_revision(&tx.tx)?;
 
             host_by_machine_id(&tx.tx, machine_id)?.ok_or_else(|| {
                 OrbitError::Store(format!(
@@ -145,6 +147,7 @@ impl Store {
                     params![machine_id, HostStatus::Retired.as_str(), now],
                 )
                 .map_err(|error| host_mutation_error("retire", &existing.host_id, error))?;
+            advance_registry_revision(&tx.tx)?;
             host_by_machine_id(&tx.tx, machine_id)?.ok_or_else(|| {
                 OrbitError::Store(format!(
                     "retired host_id '{}' but could not read it back",
@@ -293,6 +296,7 @@ impl Store {
                         "bind owner for workspace_id '{workspace_id}': {error}"
                     ))
                 })?;
+            advance_registry_revision(&tx.tx)?;
             ownership_by_workspace(&tx.tx, workspace_id)?.ok_or_else(|| {
                 OrbitError::Store(format!(
                     "bound owner for workspace_id '{workspace_id}' but could not read it back"
@@ -372,6 +376,10 @@ impl Store {
                     params![caller_machine_id, received_at.to_rfc3339()],
                 )
                 .map_err(|error| OrbitError::Store(format!("update host last_seen: {error}")))?;
+            // Presence replacement always restamps the host receipt
+            // (`last_seen_at` / `last_verified`), a freshness-visible change,
+            // so the snapshot-visible revision advances every publish.
+            advance_registry_revision(&tx.tx)?;
             presence_for_machine(&tx.tx, caller_machine_id)
         })
     }
@@ -531,6 +539,10 @@ impl Store {
                     "publish execution profile for workspace_id '{}': {error}",
                     profile.workspace_id
                 )))?;
+            // Profile publication always refreshes the hub receipt
+            // (`received_at`), a freshness-visible change, so the global
+            // revision advances even when the semantic generation is retained.
+            advance_registry_revision(&tx.tx)?;
             stored_profile_by_workspace(&tx.tx, &profile.workspace_id)?.ok_or_else(|| {
                 OrbitError::Store(format!(
                     "published execution profile for workspace_id '{}' but could not read it back",
@@ -590,6 +602,26 @@ impl Store {
             profile: Some(record.profile),
         })
     }
+}
+
+/// Advance the hub-global registry revision by exactly one inside the caller's
+/// write transaction. Callers invoke this only on the snapshot-visible mutation
+/// branch, never on an idempotent no-op return.
+pub(crate) fn advance_registry_revision(conn: &Connection) -> Result<(), OrbitError> {
+    let updated = conn
+        .execute(
+            "UPDATE hub_registry_metadata
+             SET registry_revision = registry_revision + 1, updated_at = ?1
+             WHERE id = 0",
+            params![crate::now_string()],
+        )
+        .map_err(|error| OrbitError::Store(format!("advance registry revision: {error}")))?;
+    if updated != 1 {
+        return Err(OrbitError::Store(
+            "hub registry metadata singleton row is missing".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn require_active_host(conn: &Connection, machine_id: &str) -> Result<HostRecord, OrbitError> {

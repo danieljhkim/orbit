@@ -33,19 +33,29 @@ pub(super) fn format_workspace_list(registry: &WorkspaceRegistry) -> String {
     }
 
     let mut output = format!(
-        "{:<20} {:<12} {:<8} {:<10} ROOT\n",
-        "NAME", "ID", "STATUS", "SHIP MODE"
+        "{:<20} {:<12} {:<8} {:<10} {:<22} {:<8} ROOT\n",
+        "NAME", "ID", "STATUS", "SHIP MODE", "OWNER", "ROLE"
     );
     for workspace in &registry.workspaces {
-        let root = workspace_registry::find_checkout(registry, &workspace.id)
+        let checkout = workspace_registry::find_checkout(registry, &workspace.id);
+        let root = checkout
             .map(|checkout| checkout.repo_root.display().to_string())
             .unwrap_or_else(|| "-".to_string());
+        // Owner and local role are visible in multi-host output and render as
+        // "-" in the standalone case where neither is declared.
+        let owner = workspace.owner_machine_id.as_deref().unwrap_or("-");
+        let role = checkout
+            .and_then(|checkout| checkout.role)
+            .map(|role| role.to_string())
+            .unwrap_or_else(|| "-".to_string());
         output.push_str(&format!(
-            "{:<20} {:<12} {:<8} {:<10} {}\n",
+            "{:<20} {:<12} {:<8} {:<10} {:<22} {:<8} {}\n",
             workspace.name,
             workspace.id,
             workspace.status,
             orbit_core::resolved_ship_mode(workspace).as_input_value(),
+            owner,
+            role,
             root
         ));
     }

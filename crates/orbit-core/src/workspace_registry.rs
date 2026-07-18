@@ -120,6 +120,69 @@ pub fn register_checkout(
     Ok(())
 }
 
+/// Record a machine-local checkout role for an existing logical workspace.
+///
+/// `Owner` requires no replica owner and leaves the logical owner to be
+/// resolved against the local `machine_id` at save/validate time. `Replica`
+/// requires an explicit non-local `owner_machine_id`, which is mirrored onto
+/// both the checkout binding and the logical workspace record so the stable
+/// owner identity stays consistent. This mutates the in-memory registry only;
+/// the caller persists via [`save_registry_to`], which validates a clone and
+/// therefore leaves the previous file byte-valid on any contradiction. Owner
+/// and replica declarations are never inferred from paths, workspace names,
+/// presence, hostnames, or Git remotes.
+pub fn assign_checkout_role(
+    registry: &mut WorkspaceRegistry,
+    id_or_name: &str,
+    role: WorkspaceCheckoutRole,
+    owner_machine_id: Option<&str>,
+) -> Result<(), OrbitError> {
+    let workspace_id = find_workspace(registry, id_or_name)
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Workspace, id_or_name.to_string()))?
+        .id
+        .clone();
+
+    match role {
+        WorkspaceCheckoutRole::Owner => {
+            if owner_machine_id.is_some() {
+                return Err(OrbitError::WorkspaceError(format!(
+                    "workspace '{workspace_id}' owner role does not take an owner machine_id"
+                )));
+            }
+        }
+        WorkspaceCheckoutRole::Replica => {
+            let owner = owner_machine_id.ok_or_else(|| {
+                OrbitError::WorkspaceError(format!(
+                    "workspace '{workspace_id}' replica role requires an owner machine_id"
+                ))
+            })?;
+            if let Some(workspace) = registry
+                .workspaces
+                .iter_mut()
+                .find(|workspace| workspace.id == workspace_id)
+            {
+                workspace.owner_machine_id = Some(owner.to_string());
+            }
+        }
+    }
+
+    let checkout = registry
+        .checkouts
+        .iter_mut()
+        .find(|checkout| checkout.workspace_id == workspace_id)
+        .ok_or_else(|| {
+            OrbitError::WorkspaceError(format!(
+                "workspace '{workspace_id}' has no local checkout binding"
+            ))
+        })?;
+    checkout.role = Some(role);
+    checkout.owner_machine_id = match role {
+        WorkspaceCheckoutRole::Owner => None,
+        WorkspaceCheckoutRole::Replica => owner_machine_id.map(str::to_string),
+    };
+    Ok(())
+}
+
 /// Removes a workspace by id or name. Returns the removed workspace.
 pub fn remove_workspace(
     registry: &mut WorkspaceRegistry,

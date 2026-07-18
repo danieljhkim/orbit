@@ -21,6 +21,7 @@ pub use due::{DueDecision, due_decision, parse_cron};
 pub use host::{
     HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostIdentityOutcome, HostIdentityState, HostMode,
     NewHostIdentity, ensure_host_identity, inspect_host_identity, load_host_identity, os_hostname,
+    rename_current_host_identity,
 };
 pub use loader::{
     LoadedRoutine, RoutineCollection, RoutineLoadError, RoutineOrigin, collect_routines,

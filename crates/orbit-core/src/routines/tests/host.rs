@@ -1,6 +1,7 @@
 use super::super::host::{
     HOST_IDENTITY_SCHEMA_VERSION, HostIdentityOutcome, HostIdentityState, HostMode,
     NewHostIdentity, ensure_host_identity, inspect_host_identity, load_host_identity,
+    rename_current_host_identity,
 };
 
 fn requested(
@@ -155,4 +156,46 @@ fn invalid_mode_is_rejected() {
     assert!(HostMode::parse("hub").is_ok());
     assert!(HostMode::parse("spoke").is_ok());
     HostMode::parse("bogus").expect_err("invalid mode must fail");
+}
+
+#[test]
+fn rename_current_identity_preserves_machine_id_and_mode() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let created = ensure_host_identity(dir.path(), requested("old-name", HostMode::Hub))
+        .expect("create")
+        .identity()
+        .clone();
+
+    let renamed = rename_current_host_identity(dir.path(), "new-name").expect("rename");
+    assert_eq!(renamed.host_id, "new-name");
+    assert_eq!(renamed.machine_id, created.machine_id);
+    assert_eq!(renamed.mode, HostMode::Hub);
+
+    // The on-disk file reflects the rename and remains a complete identity.
+    match inspect_host_identity(dir.path()).expect("inspect") {
+        HostIdentityState::Present(identity) => {
+            assert_eq!(identity.host_id, "new-name");
+            assert_eq!(identity.machine_id, created.machine_id);
+        }
+        other => panic!("expected Present, got {other:?}"),
+    }
+}
+
+#[test]
+fn rename_current_identity_round_trips_quotes_and_rejects_absent_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    ensure_host_identity(dir.path(), requested("start", HostMode::Standalone)).expect("create");
+
+    // A quote-bearing name must round-trip through the TOML staging rather than
+    // corrupt the file.
+    let quoted = rename_current_host_identity(dir.path(), "a\"b").expect("rename with quote");
+    assert_eq!(quoted.host_id, "a\"b");
+    match inspect_host_identity(dir.path()).expect("inspect") {
+        HostIdentityState::Present(identity) => assert_eq!(identity.host_id, "a\"b"),
+        other => panic!("expected Present, got {other:?}"),
+    }
+
+    // Renaming when no identity exists is a hard error, not a silent create.
+    let empty = tempfile::tempdir().expect("tempdir");
+    rename_current_host_identity(empty.path(), "whatever").expect_err("absent file must fail");
 }

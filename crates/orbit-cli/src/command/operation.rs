@@ -150,6 +150,8 @@ impl Commands {
                     WorkspaceSubcommand::Init(_) => ("init", RuntimeNeed::Forbidden),
                     WorkspaceSubcommand::List(_) => ("list", RuntimeNeed::Required),
                     WorkspaceSubcommand::Show(_) => ("show", RuntimeNeed::Required),
+                    WorkspaceSubcommand::Link(_) => ("link", RuntimeNeed::Required),
+                    WorkspaceSubcommand::Role(_) => ("role", RuntimeNeed::Required),
                     WorkspaceSubcommand::Remove(_) => ("remove", RuntimeNeed::Required),
                     WorkspaceSubcommand::Teardown(_) => ("teardown", RuntimeNeed::Required),
                 };
@@ -164,6 +166,22 @@ impl Commands {
                     None,
                     false,
                     dispatch_workspace,
+                )
+            }
+            Commands::Host(command) => {
+                use super::host::HostSubcommand;
+                let subcommand = match &command.command {
+                    HostSubcommand::Register(_) => "register",
+                    HostSubcommand::List(_) => "list",
+                    HostSubcommand::Rename(_) => "rename",
+                    HostSubcommand::Retire(_) => "retire",
+                };
+                CommandOperation::new(
+                    RuntimeNeed::Required,
+                    Some(admin_meta("host", Some(subcommand), Some("host"), None)),
+                    None,
+                    false,
+                    runtime_dispatch!(Host),
                 )
             }
             Commands::Config(command) => {

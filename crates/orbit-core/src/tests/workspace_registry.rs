@@ -10,8 +10,8 @@ use serde_json::{Value, json};
 use tempfile::tempdir;
 
 use super::{
-    find_checkout_by_path, find_workspace, find_workspace_by_path, load_registry_from,
-    load_registry_from_with_writer,
+    assign_checkout_role, find_checkout_by_path, find_workspace, find_workspace_by_path,
+    load_registry_from, load_registry_from_with_writer, save_registry_to,
 };
 
 fn timestamp() -> chrono::DateTime<Utc> {
@@ -382,4 +382,57 @@ fn injected_migration_write_failure_preserves_readable_legacy_registry() {
     let recovered = load_registry_from(&path).expect("legacy source remains migratable");
     assert_eq!(recovered.workspaces[0].id, "ws_orbit");
     assert_eq!(recovered.checkouts[0].workspace_id, "ws_orbit");
+}
+
+#[test]
+fn assign_checkout_role_is_idempotent_and_rejects_owner_of_another_machine_byte_valid() {
+    let root = tempdir().expect("tempdir");
+    write_host_identity(root.path(), "spoke", "hm_local");
+    let path = root.path().join("workspaces.json");
+    write_json(
+        &path,
+        &json!({
+            "schema_version": 1,
+            "workspaces": [logical_workspace("ws_orbit", Some("hm_owner"))],
+            "checkouts": [{
+                "workspace_id": "ws_orbit",
+                "repo_root": "/repos/orbit",
+                "orbit_dir": "/repos/orbit/.orbit",
+                "role": "replica",
+                "owner_machine_id": "hm_owner"
+            }]
+        }),
+    );
+
+    // Re-declaring the same replica role is idempotent and persists cleanly.
+    let mut registry = load_registry_from(&path).expect("load replica");
+    assign_checkout_role(
+        &mut registry,
+        "ws_orbit",
+        WorkspaceCheckoutRole::Replica,
+        Some("hm_owner"),
+    )
+    .expect("replica role");
+    save_registry_to(&registry, &path).expect("save replica");
+
+    // Declaring owner role on this non-owner machine is a contradiction that
+    // fails at save time and leaves the previous file byte-valid.
+    let before = fs::read(&path).expect("read before");
+    let mut contradictory = load_registry_from(&path).expect("reload");
+    assign_checkout_role(
+        &mut contradictory,
+        "ws_orbit",
+        WorkspaceCheckoutRole::Owner,
+        None,
+    )
+    .expect("in-memory mutation is permitted");
+    let error = save_registry_to(&contradictory, &path)
+        .expect_err("owner role on a non-owner machine must fail")
+        .to_string();
+    assert!(error.contains("owner"), "unexpected: {error}");
+    assert_eq!(
+        fs::read(&path).expect("read after"),
+        before,
+        "rejected save must leave the registry file byte-identical"
+    );
 }

@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Decisions
 owner: codex
-last_updated: 2026-07-17
+last_updated: 2026-07-18
 status: Accepted
 feature: mcp-bridge
 doc_role: decisions
@@ -10,7 +10,7 @@ summary: Accepted ADR log for the coupled MCP Bridge and Host Registry v1 contra
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10267, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Orbit MCP Bridge — Decisions
@@ -61,7 +61,7 @@ and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
 
 ## ADR-0228 — Local placement broker with capability-set filtering
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] registered the first operator-only, hub-placement canonical discovery tools (`orbit.host.list`, `orbit.workspace.list`) in the canonical registry and the versioned conformance fixture.
 
 ### Context
 
@@ -160,5 +160,10 @@ for its non-Orbit constellation domains.
 
 - [ORB-00424] — completed design proposal for canonical Orbit MCP and Bridge parity retirement.
 - [ORB-10245] — accepted the coupled contract and recorded this ADR set.
+- [ORB-10267] — registered the `orbit.host.list` and `orbit.workspace.list` operator discovery
+  tools (hub placement, operator capability, workspace-unscoped) in the canonical builtin
+  registry and the versioned conformance fixture, each backed by one sanitized, path-free
+  registry snapshot. Effective-session `tools/list` omission and `tools/call` denial for these
+  operator tools remain owned by D3.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
