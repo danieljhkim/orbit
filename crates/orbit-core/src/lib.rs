@@ -41,7 +41,7 @@
 //! - `skill_catalog` — re-exported skill store for CLI skill lookup
 //!
 //! # Dependency direction
-//! orbit-common, orbit-policy, orbit-exec, orbit-tools, orbit-store, orbit-agent, orbit-engine
+//! orbit-common, orbit-store, orbit-registry, orbit-policy, orbit-exec, orbit-tools, orbit-agent, orbit-engine
 //! → `orbit-core` → orbit-cmd → orbit-cli / orbit-dashboard
 
 pub mod auto_tasks;

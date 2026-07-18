@@ -9,7 +9,9 @@ use toml::Value;
 const MANIFEST: &str = include_str!("../Cargo.toml");
 
 #[test]
-fn only_orbit_common_is_an_internal_dependency() {
+fn only_common_and_store_are_internal_dependencies() {
+    // ADR-0235: the domain points one way into persistence; persistence never
+    // depends back on this crate.
     let manifest = parse_manifest();
     let mut dependency_names = BTreeSet::new();
 
@@ -23,11 +25,11 @@ fn only_orbit_common_is_an_internal_dependency() {
 
     assert_eq!(
         orbit_deps,
-        vec!["orbit-common".to_string()],
-        "orbit-registry must remain consumer-agnostic and depend only on orbit-common internally"
+        vec!["orbit-common".to_string(), "orbit-store".to_string()],
+        "orbit-registry owns the registry domain and may depend only on orbit-common and orbit-store internally"
     );
 
-    for forbidden in ["orbit-store", "orbit-tools", "orbit-policy", "orbit-exec"] {
+    for forbidden in ["orbit-core", "orbit-tools", "orbit-policy", "orbit-exec"] {
         assert!(
             !dependency_names.contains(forbidden),
             "forbidden internal dependency added: {forbidden}"

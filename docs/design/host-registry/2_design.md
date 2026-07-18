@@ -8,16 +8,17 @@ doc_role: design
 type: design
 summary: Target mechanisms for host identity, the main-host registry, the coordination-plane/workspace-ownership split, pull-based execution placement, per-record data placement, and the routine ownership revision.
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
-paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
+paths: ["crates/orbit-registry/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10302, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Host Registry — Design
 
 This doc specifies the **target** design. Host identity, the logical workspace
 catalog, registry core/projections, operator administration, sanitized discovery,
-and the satellite-cache format have landed through C3; remote registration,
+the satellite-cache format, and their dedicated `orbit-registry` domain boundary
+have landed through C4; remote registration,
 transport, placement, and later phases remain pending. The folder is Accepted. It covers host identity, the registry, the
 coordination-plane/workspace-ownership split, execution placement (including the
 hub→satellite protocol), the per-record data-placement split, and the revision to
@@ -70,6 +71,10 @@ bindings, run placement snapshots, leases, audit provenance — stores `machine_
 (with the name alongside for display). A rename therefore cannot silently redirect
 an existing binding; it can only strand *unresolved* human-authored text, which pin
 validation catches (§2, §6).
+
+The implementation lives in `orbit-registry::host_identity`; the temporary
+`orbit-core::routines` re-export preserves existing callers while they migrate
+imports ([ORB-10302], [ADR-0235]).
 
 ## 2. The Registry
 
@@ -157,6 +162,11 @@ the `orbit.host.list`/`orbit.workspace.list` discovery tools, one path-free
 `RegistrySnapshotV1` projection, the atomic satellite registry cache, and the
 hub-global `registry_revision` (store schema v8).
 
+`HostRegistryService` now lives in `orbit-registry::host_registry`. It calls the
+typed `orbit-store` API but owns no SQL, migration, revision-advance, or snapshot
+transaction code. `orbit-store` must not depend back on `orbit-registry`; this
+one-way edge is the cycle-prevention boundary in [ADR-0235].
+
 **Boundary with `~/.orbit/mcp.toml`.** The registry is server-side *inventory*;
 `mcp.toml` is the client's trust policy for its one hub route. They stay separate:
 registry state must never grant a capability, and a repo checkout must never mutate
@@ -228,6 +238,10 @@ replica --owner <machine_id>` writes the remote logical owner and local replica
 mirror together. Persisted hub/spoke input with an owner checkout but no logical
 owner is rejected; loading never backfills ownership from local machine identity.
 
+The catalog/checkout implementation now lives in
+`orbit-registry::workspace_registry`; `orbit-core::workspace_registry` is an
+explicit temporary compatibility re-export, not a second implementation.
+
 **Concrete hub coordination projections ([ORB-10257]).** Additive store migration
 v6 creates three path-separated projections:
 
@@ -261,6 +275,10 @@ an ambiguous projection. These projections are typed service/store foundations;
 administration, dispatch gating, run snapshots, leases, and connectors remain later
 units.
 
+`OrbitRuntime::build_execution_profile_v1`, catalog/runtime validation, and the
+ship-closure hash remain in `orbit-core`; only publication, ownership, presence,
+freshness, and sanitized registry administration belong to `orbit-registry`.
+
 Enforcement reads only local data, so it works offline; what fails offline is the
 MCP write itself, loudly. Two local rules (§5 for the record types they guard):
 
@@ -283,6 +301,11 @@ different hub, lower revision, or stable payload conflict fails without replacin
 prior bytes. A missing or invalid hub identity is never a usable cache: first refresh
 fails before writing, and a persisted unpinned snapshot reloads as malformed without
 being rewritten. Scheduling keeps working offline.
+
+The codec, canonical comparison, freshness, and crash-classification behavior live
+in `orbit-registry::registry_cache`. Shared `RegistryCacheV1` and
+`RegistrySnapshotV1` DTOs stay in `orbit-common`, and `orbit-store` remains the
+sole producer of the transactional sanitized snapshot.
 
 Neither role is ever selected per-task: coordination has one writer by construction,
 and two owners for one workspace is the split-brain the system already rejected
@@ -504,5 +527,9 @@ of that routine.** Consequences:
   `.orbit/routines/local/` definitions are implicit to the loading host and reject
   remote pins, and cross-origin name collisions fail deterministically. Registry-cache
   pin validation (§6 item 3) and reassignment baselines (§6 item 5) remain deferred to R2.
+- [ORB-10302] — repurposed `orbit-registry` as the host/workspace domain crate,
+  moved its domain tests with the implementations, retained runtime profile/ship
+  hashing in `orbit-core`, and preserved store ownership of persistence
+  ([ADR-0235]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

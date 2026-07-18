@@ -8,9 +8,9 @@ doc_role: overview
 type: design
 summary: First-class, validated machine identity plus a main-host inventory, enabling pull-based orchestrator-selected execution placement and a strict per-record data-placement split.
 tags: [host-registry, multi-host, dispatch, routines]
-paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
+paths: ["crates/orbit-registry/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access]
-related_artifacts: [ORB-00424, ORB-10248, ORB-10249, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10248, ORB-10249, ORB-10302, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Host Registry — Overview
@@ -95,9 +95,10 @@ authority — that direction was already rejected ([ADR-0200], the archived
 
 | Concern | File | Task |
 |---------|------|------|
-| Host identity file (`host.toml`) | [crates/orbit-core/src/routines/host.rs](../../../crates/orbit-core/src/routines/host.rs) | — |
+| Host identity file (`host.toml`) | [crates/orbit-registry/src/host_identity.rs](../../../crates/orbit-registry/src/host_identity.rs) | [ORB-10302] |
 | Global/workspace seeding (`orbit init`) | [crates/orbit-core/src/command/init.rs](../../../crates/orbit-core/src/command/init.rs) | — |
-| Versioned logical-workspace catalog + local checkout bindings | [crates/orbit-core/src/workspace_registry.rs](../../../crates/orbit-core/src/workspace_registry.rs) | [ORB-10248] |
+| Versioned logical-workspace catalog + local checkout bindings | [crates/orbit-registry/src/workspace_registry.rs](../../../crates/orbit-registry/src/workspace_registry.rs) | [ORB-10248], [ORB-10302] |
+| Host/workspace registry service + satellite cache | [crates/orbit-registry/src/](../../../crates/orbit-registry/src/) | [ORB-10302] |
 | Logical task coordination registry + single-authority allocator | [crates/orbit-store/src/sqlite/task_registry/](../../../crates/orbit-store/src/sqlite/task_registry/) | [ORB-10249] |
 | MCP surface (`orbit.host.*`, placement) | [mcp-bridge/2_design.md](../mcp-bridge/2_design.md) | [ORB-00424] |
 | Routine sweep host filter | [docs/design/routines/2_design.md](../routines/2_design.md) | — |
@@ -114,5 +115,8 @@ Detailed mechanisms in [2_design.md](./2_design.md); open directions in
   checkout paths and owner/replica bindings.
 - [ORB-10249] — split logical task-registry workspace records from optional
   local checkout bindings and made task relations/readiness global by task ID.
+- [ORB-10302] — established `orbit-registry` as the host/workspace domain crate,
+  retaining execution-profile construction in `orbit-core` and persistence in
+  `orbit-store` ([ADR-0235]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

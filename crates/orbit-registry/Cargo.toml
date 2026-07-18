@@ -15,7 +15,13 @@ workspace = true
 default = []
 
 [dependencies]
+chrono.workspace = true
+hostname.workspace = true
 orbit-common = { path = "../orbit-common" }
+orbit-store = { path = "../orbit-store" }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
-toml.workspace = true
+tempfile.workspace = true
