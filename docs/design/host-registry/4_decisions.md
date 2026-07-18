@@ -180,11 +180,16 @@ for its non-Orbit constellation domains.
   (`orbit host register/list/rename/retire`), hub-side workspace `link` and machine-local
   `role` (owner/replica) operations, the `orbit.host.list`/`orbit.workspace.list` canonical
   discovery tools, one path-free `RegistrySnapshotV1` projection read in a single store
-  transaction, the versioned atomic satellite registry cache, and store schema v8's singleton
+  transaction, typed `workspace-required|global` tool scope metadata, the versioned atomic
+  satellite registry cache (stable canonical payload plus local receipt; derived age/freshness
+  does not create same-revision conflicts), and store schema v8's singleton
   `hub_registry_metadata` row carrying the hub `machine_id` and the monotonic
   `registry_revision` (advanced once per snapshot-visible mutation; no-ops do not advance it).
-  Current-machine rename coordinates a staged, reparsed `host.toml` write with the durable
-  registry rename and reports partial outcomes explicitly. Remote registration and
+  Current-machine rename holds one machine-global lock across exact preflight, a staged,
+  reparsed `host.toml` write, the durable registry rename, and post-error outcome
+  classification. `machine_id` uses the canonical path-free `hm_` namespace, and hub-local
+  CLI enumeration renders the same single-transaction sanitized snapshot as discovery.
+  Remote registration and
   post-link/register cache refresh remain deferred to E3; poll-driven refresh to I/J.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

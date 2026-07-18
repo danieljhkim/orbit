@@ -1,5 +1,6 @@
 use clap::{Args, ValueEnum};
 use orbit_common::types::WorkspaceCheckoutRole;
+use orbit_core::routines::{HostIdentityState, inspect_host_identity};
 use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
 
@@ -21,7 +22,9 @@ impl From<CliCheckoutRole> for WorkspaceCheckoutRole {
 }
 
 #[derive(Args)]
-#[command(about = "Declare this checkout's local role (owner or replica) for a workspace")]
+#[command(
+    about = "Validate or reassert this checkout's declared role (choose its initial role during workspace init)"
+)]
 pub struct WorkspaceRoleArgs {
     /// Logical workspace id or name.
     workspace: String,
@@ -36,6 +39,10 @@ pub struct WorkspaceRoleArgs {
 impl Execute for WorkspaceRoleArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let global_root = runtime.global_root();
+        let local_machine_id = match inspect_host_identity(&global_root)? {
+            HostIdentityState::Present(identity) => Some(identity.machine_id),
+            HostIdentityState::Legacy { .. } | HostIdentityState::Absent => None,
+        };
         let registry_path = workspace_registry::registry_path_for(&global_root);
         let mut registry = workspace_registry::load_registry_from(&registry_path)?;
 
@@ -45,6 +52,7 @@ impl Execute for WorkspaceRoleArgs {
             &self.workspace,
             role,
             self.owner.as_deref(),
+            local_machine_id.as_deref(),
         )?;
         // save_registry_to validates a clone before writing, so a contradictory
         // declaration (owner role on a non-owner machine, replica of self, …)

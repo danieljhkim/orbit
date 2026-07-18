@@ -26,7 +26,7 @@ impl Execute for HostCommand {
 pub enum HostSubcommand {
     /// Register this machine's `host.toml` identity, or an explicit remote host declaration
     Register(HostRegisterArgs),
-    /// List active registered hosts
+    /// List registered hosts, including retired identities
     List(HostListArgs),
     /// Rename a host (and this machine's local `host.toml` when it is the target)
     Rename(HostRenameArgs),

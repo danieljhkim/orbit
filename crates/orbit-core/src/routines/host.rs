@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use orbit_common::types::OrbitError;
+use orbit_common::types::{OrbitError, validate_machine_id};
 use orbit_common::utility::fs::atomic_write_text;
 use serde::Deserialize;
 
@@ -240,9 +240,15 @@ pub fn inspect_host_identity(global_root: &Path) -> Result<HostIdentityState, Or
             }
         }
         Some(version) if version == HOST_IDENTITY_SCHEMA_VERSION => {
-            let machine_id = non_blank(&parsed.machine_id).ok_or_else(|| {
+            let machine_id = parsed.machine_id.as_deref().ok_or_else(|| {
                 OrbitError::InvalidInput(format!(
                     "host identity '{}' is incomplete: missing or blank machine_id",
+                    path.display()
+                ))
+            })?;
+            validate_machine_id(machine_id).map_err(|error| {
+                OrbitError::InvalidInput(format!(
+                    "host identity '{}' has invalid machine_id: {error}",
                     path.display()
                 ))
             })?;
@@ -261,7 +267,7 @@ pub fn inspect_host_identity(global_root: &Path) -> Result<HostIdentityState, Or
             let mode = HostMode::parse(&mode)?;
             Ok(HostIdentityState::Present(HostIdentity {
                 schema_version: version,
-                machine_id,
+                machine_id: machine_id.to_string(),
                 host_id,
                 mode,
             }))
@@ -397,6 +403,19 @@ pub fn rename_current_host_identity(
     global_root: &Path,
     new_host_id: &str,
 ) -> Result<HostIdentity, OrbitError> {
+    rename_current_host_identity_with_writer(global_root, new_host_id, |path, staged| {
+        atomic_write_text(path, staged)
+    })
+}
+
+pub(crate) fn rename_current_host_identity_with_writer<W>(
+    global_root: &Path,
+    new_host_id: &str,
+    writer: W,
+) -> Result<HostIdentity, OrbitError>
+where
+    W: FnOnce(&Path, &str) -> std::io::Result<()>,
+{
     let current = load_host_identity(global_root)?;
     let new_host_id = new_host_id.trim();
     if new_host_id.is_empty() {
@@ -411,8 +430,28 @@ pub fn rename_current_host_identity(
         mode: current.mode,
     };
     let staged = stage_host_identity_toml(&candidate)?;
-    write_host_identity_text(global_root, &staged)?;
-    Ok(candidate)
+    let path = host_toml_path(global_root);
+    match writer(&path, &staged) {
+        Ok(()) => Ok(candidate),
+        Err(error) => match load_host_identity(global_root) {
+            Ok(observed) if observed == candidate => Err(OrbitError::Io(format!(
+                "host identity write reported an error ({error}), but the complete renamed \
+                 host.toml is now readable; its durability is uncertain"
+            ))),
+            Ok(observed) if observed == current => Err(OrbitError::Io(format!(
+                "host identity write failed ({error}); the previous host.toml is preserved"
+            ))),
+            Ok(observed) => Err(OrbitError::Io(format!(
+                "host identity write failed ({error}); reopening found an unexpected complete \
+                 identity for machine '{}' named '{}', so the local outcome is uncertain",
+                observed.machine_id, observed.host_id
+            ))),
+            Err(reopen) => Err(OrbitError::Io(format!(
+                "host identity write failed ({error}); reopening host.toml to classify \
+                 preservation also failed: {reopen}"
+            ))),
+        },
+    }
 }
 
 /// Best-effort OS hostname, used as the interactive default host name at init.

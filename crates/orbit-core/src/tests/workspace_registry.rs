@@ -176,6 +176,38 @@ fn multi_host_legacy_registry_rejects_missing_role_without_rewriting() {
 }
 
 #[test]
+fn multi_host_owner_role_requires_declared_owner_without_rewriting() {
+    for mode in ["hub", "spoke"] {
+        let root = tempdir().expect("tempdir");
+        write_host_identity(root.path(), mode, "hm_local");
+        let path = root.path().join("workspaces.json");
+        let original = write_json(
+            &path,
+            &json!({
+                "schema_version": 1,
+                "workspaces": [logical_workspace("ws_missing_owner", None)],
+                "checkouts": [{
+                    "workspace_id": "ws_missing_owner",
+                    "repo_root": "/repos/missing-owner",
+                    "orbit_dir": "/repos/missing-owner/.orbit",
+                    "role": "owner"
+                }]
+            }),
+        );
+
+        let error = load_registry_from(&path)
+            .expect_err("multi-host owner must already name its stable owner")
+            .to_string();
+        assert!(error.contains("ws_missing_owner"), "unexpected: {error}");
+        assert!(
+            error.contains("no declared owner_machine_id"),
+            "unexpected: {error}"
+        );
+        assert_eq!(fs::read(&path).expect("read unchanged registry"), original);
+    }
+}
+
+#[test]
 fn multi_host_modes_reject_missing_unknown_and_contradictory_roles_by_workspace_id() {
     let cases = [
         (
@@ -348,6 +380,68 @@ fn malformed_and_future_registries_fail_without_rewriting() {
 }
 
 #[test]
+fn persisted_replica_owner_ids_must_be_logical_and_remain_byte_stable_on_rejection() {
+    for (logical_owner, checkout_owner) in [
+        ("/tmp/hub", "/tmp/hub"),
+        ("hm_owner", "ssh\\hub"),
+        ("hm_owner", "hm_owner\ntransport"),
+    ] {
+        let root = tempdir().expect("tempdir");
+        write_host_identity(root.path(), "spoke", "hm_local");
+        let path = root.path().join("workspaces.json");
+        let original = write_json(
+            &path,
+            &json!({
+                "schema_version": 1,
+                "workspaces": [logical_workspace("ws_orbit", Some(logical_owner))],
+                "checkouts": [{
+                    "workspace_id": "ws_orbit",
+                    "repo_root": "/repos/orbit",
+                    "orbit_dir": "/repos/orbit/.orbit",
+                    "role": "replica",
+                    "owner_machine_id": checkout_owner
+                }]
+            }),
+        );
+
+        let error = load_registry_from(&path)
+            .expect_err("transport-shaped persisted owner must fail")
+            .to_string();
+        assert!(
+            error.contains("owner_machine_id") || error.contains("machine_id"),
+            "unexpected: {error}"
+        );
+        assert_eq!(fs::read(&path).expect("read unchanged registry"), original);
+    }
+}
+
+#[test]
+fn invalid_local_machine_id_cannot_be_copied_into_owner_role() {
+    let root = tempdir().expect("tempdir");
+    write_host_identity(root.path(), "hub", "/tmp/hub");
+    let path = root.path().join("workspaces.json");
+    let original = write_json(
+        &path,
+        &json!({
+            "schema_version": 1,
+            "workspaces": [logical_workspace("ws_orbit", None)],
+            "checkouts": [{
+                "workspace_id": "ws_orbit",
+                "repo_root": "/repos/orbit",
+                "orbit_dir": "/repos/orbit/.orbit",
+                "role": "owner"
+            }]
+        }),
+    );
+
+    let error = load_registry_from(&path)
+        .expect_err("invalid local machine_id must fail before owner canonicalization")
+        .to_string();
+    assert!(error.contains("machine_id"), "unexpected: {error}");
+    assert_eq!(fs::read(&path).expect("read unchanged registry"), original);
+}
+
+#[test]
 fn injected_migration_write_failure_preserves_readable_legacy_registry() {
     let root = tempdir().expect("tempdir");
     let path = root.path().join("workspaces.json");
@@ -411,28 +505,146 @@ fn assign_checkout_role_is_idempotent_and_rejects_owner_of_another_machine_byte_
         "ws_orbit",
         WorkspaceCheckoutRole::Replica,
         Some("hm_owner"),
+        Some("hm_local"),
     )
     .expect("replica role");
     save_registry_to(&registry, &path).expect("save replica");
 
-    // Declaring owner role on this non-owner machine is a contradiction that
-    // fails at save time and leaves the previous file byte-valid.
+    // A replica declaration cannot silently replace the hub-declared owner in
+    // either the logical workspace or its mirrored checkout binding.
+    let before_rebind = fs::read(&path).expect("read before rebind");
+    let mut rebind = load_registry_from(&path).expect("reload before rebind");
+    let in_memory_before = rebind.clone();
+    let error = assign_checkout_role(
+        &mut rebind,
+        "ws_orbit",
+        WorkspaceCheckoutRole::Replica,
+        Some("hm_other"),
+        Some("hm_local"),
+    )
+    .expect_err("replica owner rebind must fail before mutation")
+    .to_string();
+    assert!(error.contains("already owned"), "unexpected: {error}");
+    assert_eq!(rebind, in_memory_before);
+    assert_eq!(fs::read(&path).expect("read after rebind"), before_rebind);
+
+    // Declaring owner role on this non-owner machine fails before mutating the
+    // in-memory registry and leaves the previous file byte-valid.
     let before = fs::read(&path).expect("read before");
     let mut contradictory = load_registry_from(&path).expect("reload");
-    assign_checkout_role(
+    let in_memory_before = contradictory.clone();
+    let error = assign_checkout_role(
         &mut contradictory,
         "ws_orbit",
         WorkspaceCheckoutRole::Owner,
         None,
+        Some("hm_local"),
     )
-    .expect("in-memory mutation is permitted");
-    let error = save_registry_to(&contradictory, &path)
-        .expect_err("owner role on a non-owner machine must fail")
-        .to_string();
+    .expect_err("owner role on a non-owner machine must fail before mutation")
+    .to_string();
     assert!(error.contains("owner"), "unexpected: {error}");
+    assert_eq!(contradictory, in_memory_before);
     assert_eq!(
         fs::read(&path).expect("read after"),
         before,
         "rejected save must leave the registry file byte-identical"
     );
+}
+
+#[test]
+fn explicit_owner_role_stamps_the_validated_local_machine_before_save() {
+    let root = tempdir().expect("tempdir");
+    write_host_identity(root.path(), "hub", "hm_local");
+    let path = root.path().join("workspaces.json");
+    let mut registry = WorkspaceRegistry {
+        workspaces: vec![logical_workspace("ws_orbit", None)],
+        checkouts: vec![WorkspaceCheckout {
+            workspace_id: "ws_orbit".to_string(),
+            repo_root: "/repos/orbit".into(),
+            orbit_dir: "/repos/orbit/.orbit".into(),
+            path_overrides: Vec::new(),
+            role: None,
+            owner_machine_id: None,
+        }],
+        ..Default::default()
+    };
+
+    assign_checkout_role(
+        &mut registry,
+        "ws_orbit",
+        WorkspaceCheckoutRole::Owner,
+        None,
+        Some("hm_local"),
+    )
+    .expect("explicit local owner declaration");
+    assert_eq!(
+        registry.workspaces[0].owner_machine_id.as_deref(),
+        Some("hm_local")
+    );
+    save_registry_to(&registry, &path).expect("persist explicit owner declaration");
+
+    let loaded = load_registry_from(&path).expect("reload explicit owner declaration");
+    assert_eq!(
+        loaded.workspaces[0].owner_machine_id.as_deref(),
+        Some("hm_local")
+    );
+    assert_eq!(loaded.checkouts[0].role, Some(WorkspaceCheckoutRole::Owner));
+}
+
+#[test]
+fn replica_role_rejects_transport_shaped_owner_before_any_mutation() {
+    let root = tempdir().expect("tempdir");
+    write_host_identity(root.path(), "spoke", "hm_local");
+    let path = root.path().join("workspaces.json");
+    write_json(
+        &path,
+        &json!({
+            "schema_version": 1,
+            "workspaces": [logical_workspace("ws_orbit", Some("hm_local"))],
+            "checkouts": [{
+                "workspace_id": "ws_orbit",
+                "repo_root": "/repos/orbit",
+                "orbit_dir": "/repos/orbit/.orbit",
+                "role": "owner"
+            }]
+        }),
+    );
+    let original_bytes = fs::read(&path).expect("read original registry");
+
+    for rejected in [
+        "",
+        "dk1",
+        "user@dk1",
+        "ssh:dk1",
+        "hm_ssh:dk1",
+        " /tmp/hub",
+        "/tmp/hub",
+        "ssh\\hub",
+        "hm_owner\nother",
+    ] {
+        let mut registry = load_registry_from(&path).expect("load registry");
+        let before = registry.clone();
+        let error = assign_checkout_role(
+            &mut registry,
+            "ws_orbit",
+            WorkspaceCheckoutRole::Replica,
+            Some(rejected),
+            Some("hm_local"),
+        )
+        .expect_err("transport-shaped owner must fail")
+        .to_string();
+        assert!(
+            error.contains("machine_id") || error.contains("logical registry identifier"),
+            "unexpected error for {rejected:?}: {error}"
+        );
+        assert_eq!(
+            registry, before,
+            "rejected owner {rejected:?} mutated the in-memory registry"
+        );
+        assert_eq!(
+            fs::read(&path).expect("read registry after rejection"),
+            original_bytes,
+            "rejected owner {rejected:?} changed persisted bytes"
+        );
+    }
 }

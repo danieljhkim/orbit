@@ -28,7 +28,7 @@ pub enum WorkspaceSubcommand {
     Show(WorkspaceShowArgs),
     /// Bind a workspace's singular owner by human host name (hub-side)
     Link(WorkspaceLinkArgs),
-    /// Declare this checkout's local role (owner or replica)
+    /// Validate or reassert this checkout's declared local role
     Role(WorkspaceRoleArgs),
     /// Remove a workspace from the registry (does not delete .orbit)
     Remove(WorkspaceRemoveArgs),

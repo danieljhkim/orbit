@@ -15,52 +15,11 @@ use orbit_common::types::{
     HostStatus, OrbitError, ProjectionFreshness, REGISTRY_SNAPSHOT_SCHEMA_VERSION, RegistryAliasV1,
     RegistryHostV1, RegistryPresenceV1, RegistryProfileV1, RegistrySnapshotV1, RegistryWorkspaceV1,
 };
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::Store;
 
 impl Store {
-    /// Idempotently stamp the configured hub `machine_id` into the singleton
-    /// registry-metadata row. The first stamp binds the hub; repeating the same
-    /// identity is a no-op, and a different identity is rejected because v1
-    /// supports exactly one hub. This is registry configuration, not a
-    /// snapshot-visible mutation, so it does not advance `registry_revision`.
-    pub fn ensure_hub_machine_id(&self, machine_id: &str) -> Result<(), OrbitError> {
-        if machine_id.is_empty() {
-            return Err(OrbitError::InvalidInput(
-                "hub machine_id must not be empty".to_string(),
-            ));
-        }
-        self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
-            let current: Option<String> = tx
-                .tx
-                .query_row(
-                    "SELECT hub_machine_id FROM hub_registry_metadata WHERE id = 0",
-                    [],
-                    |row| row.get(0),
-                )
-                .map_err(|error| OrbitError::Store(error.to_string()))?;
-            match current {
-                Some(existing) if existing == machine_id => Ok(()),
-                Some(existing) => Err(OrbitError::InvalidInput(format!(
-                    "hub identity is already configured as machine_id '{existing}'; a second hub is not supported in v1"
-                ))),
-                None => {
-                    tx.tx
-                        .execute(
-                            "UPDATE hub_registry_metadata
-                             SET hub_machine_id = ?1, updated_at = ?2 WHERE id = 0",
-                            params![machine_id, crate::now_string()],
-                        )
-                        .map_err(|error| {
-                            OrbitError::Store(format!("stamp hub machine_id: {error}"))
-                        })?;
-                    Ok(())
-                }
-            }
-        })
-    }
-
     /// The configured hub `machine_id`, or `None` when the hub identity has not
     /// been stamped yet.
     pub fn hub_machine_id(&self) -> Result<Option<String>, OrbitError> {

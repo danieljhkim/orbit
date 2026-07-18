@@ -6,7 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use orbit_common::types::{
     McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolPolicyError,
-    mcp_advertised_tool_name, mcp_capability_placement_matrix, validate_mcp_tool_definitions,
+    McpToolScope, mcp_advertised_tool_name, mcp_capability_placement_matrix,
+    validate_mcp_tool_definitions,
 };
 use orbit_core::OrbitRuntime;
 use orbit_mcp::McpHost;
@@ -265,6 +266,7 @@ fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
 #[derive(Debug, Deserialize)]
 struct McpConformanceFixture {
     capabilities: McpConformanceCapabilities,
+    scopes: McpConformanceScopes,
     tools: BTreeMap<String, McpConformancePolicy>,
 }
 
@@ -274,8 +276,14 @@ struct McpConformanceCapabilities {
 }
 
 #[derive(Debug, Deserialize)]
+struct McpConformanceScopes {
+    allowed_values: BTreeSet<McpToolScope>,
+}
+
+#[derive(Debug, Deserialize)]
 struct McpConformancePolicy {
     placement: McpToolPlacement,
+    scope: McpToolScope,
     allowed_capabilities: BTreeSet<McpCapability>,
 }
 
@@ -283,14 +291,31 @@ struct McpConformancePolicy {
 fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
     assert!(
         serde_yaml::from_str::<McpConformancePolicy>(
-            "{ placement: hub, allowed_capabilities: [unknown] }"
+            "{ placement: hub, scope: workspace-required, allowed_capabilities: [unknown] }"
         )
         .is_err(),
         "unknown capabilities must fail typed fixture parsing"
     );
     assert!(
-        serde_yaml::from_str::<McpConformancePolicy>("{ placement: hub }").is_err(),
+        serde_yaml::from_str::<McpConformancePolicy>(
+            "{ placement: hub, scope: workspace-required }"
+        )
+        .is_err(),
         "missing capability policy must fail typed fixture parsing"
+    );
+    assert!(
+        serde_yaml::from_str::<McpConformancePolicy>(
+            "{ placement: hub, scope: unknown, allowed_capabilities: [operator] }"
+        )
+        .is_err(),
+        "unknown scopes must fail typed fixture parsing"
+    );
+    assert!(
+        serde_yaml::from_str::<McpConformancePolicy>(
+            "{ placement: hub, allowed_capabilities: [operator] }"
+        )
+        .is_err(),
+        "missing scope metadata must fail typed fixture parsing"
     );
 
     let fixture: McpConformanceFixture = serde_yaml::from_str(include_str!(concat!(
@@ -305,6 +330,10 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
             McpCapability::Operator,
             McpCapability::Runner,
         ])
+    );
+    assert_eq!(
+        fixture.scopes.allowed_values,
+        BTreeSet::from([McpToolScope::WorkspaceRequired, McpToolScope::Global])
     );
 
     let definitions =
@@ -364,6 +393,12 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
             "{}",
             definition.schema.name
         );
+        assert_eq!(
+            definition.policy.scope(),
+            expected.scope,
+            "{}",
+            definition.schema.name
+        );
         assert!(
             !expected.allowed_capabilities.is_empty(),
             "{} has an empty capability set",
@@ -392,14 +427,20 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
         runner_only.allowed_capabilities(),
         &BTreeSet::from([McpCapability::Runner])
     );
+    assert_eq!(runner_only.scope(), McpToolScope::WorkspaceRequired);
     let operator_only = McpToolPolicy::operator_only(McpToolPlacement::Hub);
     assert_eq!(
         operator_only.allowed_capabilities(),
         &BTreeSet::from([McpCapability::Operator])
     );
+    assert_eq!(operator_only.scope(), McpToolScope::WorkspaceRequired);
+
+    let global_operator = operator_only.with_scope(McpToolScope::Global);
+    assert_eq!(global_operator.scope(), McpToolScope::Global);
 }
 
 mod audited_mcp_call_tests {
+    use std::collections::BTreeSet;
     use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::Instant;
 
@@ -408,8 +449,8 @@ mod audited_mcp_call_tests {
         ORBIT_SESSION_ID_ENV, run_pretooluse_input,
     };
     use orbit_common::types::{
-        AuditEventStatus, LearningInjectionCaps, LearningInjectionState, LearningReminder,
-        LearningScope, McpCapability, McpTransport, ToolSessionContext,
+        AuditEventStatus, HostRegistration, LearningInjectionCaps, LearningInjectionState,
+        LearningReminder, LearningScope, McpCapability, McpTransport, ToolSessionContext,
     };
     use orbit_core::LearningEvidence;
     use orbit_core::{LearningCreateParams, OrbitError, OrbitRuntime};
@@ -506,6 +547,105 @@ mod audited_mcp_call_tests {
         assert_eq!(events[0].role, "unverified");
         assert_eq!(events[0].transport, Some(McpTransport::Local));
         assert!(events[0].mcp_call_id.is_some());
+    }
+
+    #[test]
+    fn runtime_mcp_host_executes_global_registry_discovery_without_session_workspace() {
+        let _guard = EnvGuard::set(&[
+            ("ORBIT_AGENT_NAME", None),
+            ("ORBIT_AGENT_MODEL", None),
+            ("ORBIT_MANAGED_RUN_CONTEXT", None),
+            ("ORBIT_RUN_ID", None),
+        ]);
+        let runtime = OrbitRuntime::in_memory().expect("build test runtime");
+        let store = runtime.sqlite_store().expect("open real SQLite store");
+        store
+            .register_hub(&HostRegistration {
+                machine_id: "hm_hub".to_string(),
+                host_id: "hub".to_string(),
+                labels: BTreeSet::from(["coordination".to_string()]),
+            })
+            .expect("register hub");
+        store
+            .register_host(&HostRegistration {
+                machine_id: "hm_owner".to_string(),
+                host_id: "owner".to_string(),
+                labels: BTreeSet::from(["execution".to_string()]),
+            })
+            .expect("register owner");
+        store
+            .bind_workspace_owner("ws_checkoutless", "hm_owner")
+            .expect("bind workspace owner without a local checkout");
+        let expected_revision = store.registry_revision().expect("registry revision");
+        assert!(expected_revision > 0);
+
+        let host = RuntimeMcpHost {
+            runtime: runtime.clone(),
+        };
+        let call = |tool_name: &str, call_id: &str| {
+            let mut context = ToolSessionContext::trusted_local(
+                None,
+                Some("hm_hub".to_string()),
+                Some("hub".to_string()),
+            );
+            context.effective_capabilities = BTreeSet::from([McpCapability::Operator]);
+            context.origin_session_id = Some("mcp-session-global-discovery".to_string());
+            context.mcp_call_id = Some(call_id.to_string());
+            host.call_tool(tool_name, json!({}), context)
+                .expect("global registry discovery succeeds")
+        };
+
+        let hosts = call("orbit.host.list", "mcall-host-list");
+        let workspaces = call("orbit.workspace.list", "mcall-workspace-list");
+        for value in [&hosts, &workspaces] {
+            assert_eq!(value["hub_machine_id"], "hm_hub");
+            assert_eq!(value["registry_revision"].as_u64(), Some(expected_revision));
+            let serialized = serde_json::to_string(value).expect("serialize result");
+            for forbidden in ["repo_root", "orbit_dir", "path_overrides", "crews", "model"] {
+                assert!(
+                    !serialized.contains(forbidden),
+                    "global discovery leaked {forbidden}: {serialized}"
+                );
+            }
+        }
+        let host_rows = hosts["hosts"].as_array().expect("host rows");
+        assert_eq!(host_rows.len(), 2);
+        assert!(
+            host_rows
+                .iter()
+                .any(|row| row["machine_id"] == "hm_hub" && row["host_id"] == "hub")
+        );
+        assert!(
+            host_rows
+                .iter()
+                .any(|row| row["machine_id"] == "hm_owner" && row["host_id"] == "owner")
+        );
+        let workspace_rows = workspaces["workspaces"].as_array().expect("workspace rows");
+        assert_eq!(workspace_rows.len(), 1);
+        assert_eq!(workspace_rows[0]["workspace_id"], "ws_checkoutless");
+        assert_eq!(workspace_rows[0]["owner_machine_id"], "hm_owner");
+        assert_eq!(workspace_rows[0]["owner_host_id"], "owner");
+
+        for (tool_name, call_id) in [
+            ("orbit.host.list", "mcall-host-list"),
+            ("orbit.workspace.list", "mcall-workspace-list"),
+        ] {
+            let events = runtime
+                .list_audit_events(None, Some(tool_name.to_string()), None, None, 16)
+                .expect("list discovery audit events");
+            assert_eq!(events.len(), 1, "exactly one audit row for {tool_name}");
+            let row = &events[0];
+            assert_eq!(row.status, AuditEventStatus::Success);
+            assert_eq!(row.workspace_id, None);
+            assert_eq!(row.caller_machine_id.as_deref(), Some("hm_hub"));
+            assert_eq!(row.process_machine_id.as_deref(), Some("hm_hub"));
+            assert_eq!(row.transport, Some(McpTransport::Local));
+            assert_eq!(
+                row.effective_capabilities,
+                BTreeSet::from([McpCapability::Operator])
+            );
+            assert_eq!(row.mcp_call_id.as_deref(), Some(call_id));
+        }
     }
 
     #[test]

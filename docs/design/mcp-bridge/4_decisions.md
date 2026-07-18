@@ -161,9 +161,11 @@ for its non-Orbit constellation domains.
 - [ORB-00424] — completed design proposal for canonical Orbit MCP and Bridge parity retirement.
 - [ORB-10245] — accepted the coupled contract and recorded this ADR set.
 - [ORB-10267] — registered the `orbit.host.list` and `orbit.workspace.list` operator discovery
-  tools (hub placement, operator capability, workspace-unscoped) in the canonical builtin
-  registry and the versioned conformance fixture, each backed by one sanitized, path-free
-  registry snapshot. Effective-session `tools/list` omission and `tools/call` denial for these
-  operator tools remain owned by D3.
+  tools (hub placement, operator capability, typed global/workspace-unscoped scope) in the
+  canonical builtin registry and the versioned conformance fixture, with every pre-existing tool
+  defaulting to typed `workspace-required`. Each discovery tool is backed by one sanitized,
+  path-free registry snapshot. C3 proves the real runtime/store action path with no session
+  workspace or checkout binding for the enumerated workspace; D3 still owns construction of the
+  checkoutless broker plus effective-session `tools/list` omission and `tools/call` denial.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

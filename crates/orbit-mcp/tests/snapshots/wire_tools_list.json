@@ -308,6 +308,15 @@
     "name": "orbit_graph_trace"
   },
   {
+    "description": "List registered hub hosts with sanitized lifecycle, aliases, and workspace-presence freshness (operator, hub placement).",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "orbit_host_list"
+  },
+  {
     "description": "Create a task record in the fixture store.",
     "inputSchema": {
       "additionalProperties": true,
@@ -373,5 +382,14 @@
       "type": "object"
     },
     "name": "orbit_task_show"
+  },
+  {
+    "description": "List workspaces with declared owner and sanitized execution-profile freshness (operator, hub placement).",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "orbit_workspace_list"
   }
 ]

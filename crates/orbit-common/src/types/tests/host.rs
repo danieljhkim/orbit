@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use chrono::{TimeZone, Utc};
 use serde_json::json;
 
-use crate::types::{HostAlias, HostNameResolution, HostRecord, HostStatus};
+use crate::types::{HostAlias, HostNameResolution, HostRecord, HostStatus, validate_machine_id};
 
 fn host() -> HostRecord {
     let timestamp = Utc
@@ -84,4 +84,26 @@ fn status_parse_and_display_round_trip() {
         assert_eq!(status.to_string().parse::<HostStatus>(), Ok(status));
     }
     assert!("unknown".parse::<HostStatus>().is_err());
+}
+
+#[test]
+fn machine_id_validation_keeps_transport_targets_out_of_the_identity_namespace() {
+    for accepted in ["hm_a", "hm_owner", "hm_9f2c81d4", "hm_0123456789abcdef"] {
+        validate_machine_id(accepted).expect("compatible generated/test machine id");
+    }
+    for rejected in [
+        "",
+        "hm_",
+        "dk1",
+        "user@dk1",
+        "ssh:dk1",
+        "hm_ssh:dk1",
+        "hm_path/name",
+        " hm_owner",
+    ] {
+        let error = validate_machine_id(rejected)
+            .expect_err("transport-shaped machine id must fail")
+            .to_string();
+        assert!(error.contains("machine_id"), "unexpected: {error}");
+    }
 }

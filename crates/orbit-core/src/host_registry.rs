@@ -6,6 +6,7 @@
 //! those surfaces belong to the later registry-administration unit.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::activity_job::{
@@ -25,7 +26,7 @@ use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::routines::HostIdentity;
+use crate::routines::{HostIdentity, HostMode, load_host_identity};
 use crate::{OrbitRuntime, resolved_ship_mode};
 
 const PROFILE_FRESHNESS_TTL: Duration = Duration::minutes(10);
@@ -62,6 +63,22 @@ pub struct WorkspaceLink {
     pub warning: Option<String>,
 }
 
+/// Load the machine-local identity and fail closed unless this process is
+/// running on the declared coordination hub. CLI host administration and
+/// workspace ownership binding are hub-local in v1; a spoke must reach these
+/// operations through its configured hub route rather than opening its local
+/// coordination store.
+pub fn require_local_hub_identity(global_root: &Path) -> Result<HostIdentity, OrbitError> {
+    let identity = load_host_identity(global_root)?;
+    if identity.mode != HostMode::Hub {
+        return Err(OrbitError::InvalidInput(format!(
+            "host-registry administration is hub-local in v1; this machine '{}' ({}) is configured as mode '{}'. Run the command on the coordination hub",
+            identity.host_id, identity.machine_id, identity.mode
+        )));
+    }
+    Ok(identity)
+}
+
 impl HostRegistryService {
     pub fn new(store: Store) -> Self {
         Self { store }
@@ -80,8 +97,69 @@ impl HostRegistryService {
         })
     }
 
+    /// Atomically register this machine as the singular coordination hub and
+    /// stamp the hub identity into the sanitized registry snapshot.
+    pub fn register_hub_identity(
+        &self,
+        identity: &HostIdentity,
+        labels: BTreeSet<String>,
+    ) -> Result<HostRecord, OrbitError> {
+        if identity.mode != HostMode::Hub {
+            return Err(OrbitError::InvalidInput(format!(
+                "cannot register machine_id '{}' as the hub while host.toml mode is '{}'",
+                identity.machine_id, identity.mode
+            )));
+        }
+        self.store.register_hub(&HostRegistration {
+            machine_id: identity.machine_id.clone(),
+            host_id: identity.host_id.clone(),
+            labels,
+        })
+    }
+
+    /// Verify that this opened coordination store belongs to the same hub as
+    /// the machine-local `host.toml`. This rejects hub-mode shadow databases
+    /// and unbootstrapped stores before an administration command can mutate
+    /// them. Only [`Self::register_hub_identity`] may bootstrap a missing stamp.
+    pub fn require_configured_local_hub(&self, identity: &HostIdentity) -> Result<(), OrbitError> {
+        if identity.mode != HostMode::Hub {
+            return Err(OrbitError::InvalidInput(format!(
+                "host-registry administration requires hub mode, not '{}'",
+                identity.mode
+            )));
+        }
+        match self.store.hub_machine_id()? {
+            Some(configured) if configured == identity.machine_id => Ok(()),
+            Some(configured) => Err(OrbitError::InvalidInput(format!(
+                "refusing host-registry administration through a shadow coordination store: local hub machine_id '{}' does not match configured hub machine_id '{configured}'",
+                identity.machine_id
+            ))),
+            None => Err(OrbitError::InvalidInput(
+                "the coordination store has no configured hub identity; run `orbit host register` without --machine-id/--host-id on this hub first"
+                    .to_string(),
+            )),
+        }
+    }
+
     pub fn rename(&self, machine_id: &str, new_host_id: &str) -> Result<HostRecord, OrbitError> {
         self.store.rename_host(machine_id, new_host_id)
+    }
+
+    /// Run the exact store-side rename validation without mutating the
+    /// registry. Current-machine administration uses this before replacing
+    /// `host.toml`; [`Self::rename`] repeats it transactionally afterward.
+    pub fn validate_rename(
+        &self,
+        machine_id: &str,
+        new_host_id: &str,
+    ) -> Result<HostRecord, OrbitError> {
+        self.store.validate_host_rename(machine_id, new_host_id)
+    }
+
+    /// Read one machine by immutable ID. This is also the post-error probe for
+    /// classifying an uncertain registry rename commit.
+    pub fn host(&self, machine_id: &str) -> Result<Option<HostRecord>, OrbitError> {
+        self.store.get_host(machine_id)
     }
 
     pub fn retire(&self, machine_id: &str) -> Result<HostRecord, OrbitError> {
@@ -89,28 +167,14 @@ impl HostRegistryService {
     }
 
     /// Retire a machine, rejecting an attempt to retire the singular configured
-    /// hub machine before any database mutation. In v1 there is exactly one
-    /// hub and it cannot retire itself out of existence.
+    /// hub machine atomically with the retirement mutation. In v1 there is
+    /// exactly one hub and it cannot retire itself out of existence.
     pub fn retire_guarding_hub(&self, machine_id: &str) -> Result<HostRecord, OrbitError> {
-        if let Some(hub) = self.store.hub_machine_id()?
-            && hub == machine_id
-        {
-            return Err(OrbitError::InvalidInput(format!(
-                "machine_id '{machine_id}' is the currently configured hub and cannot retire \
-                 itself in v1"
-            )));
-        }
         self.store.retire_host(machine_id)
     }
 
     pub fn resolve(&self, host_id: &str) -> Result<HostNameResolution, OrbitError> {
         self.store.resolve_host_id(host_id)
-    }
-
-    /// Idempotently stamp this machine as the configured hub. Registry
-    /// configuration, not a snapshot-visible mutation.
-    pub fn configure_hub_identity(&self, machine_id: &str) -> Result<(), OrbitError> {
-        self.store.ensure_hub_machine_id(machine_id)
     }
 
     /// The configured hub `machine_id`, if any.

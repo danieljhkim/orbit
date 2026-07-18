@@ -75,7 +75,7 @@ pub use command::search::{
 };
 pub use command::workflow::{ShipMode, build_ship_input, find_workflow, resolved_ship_mode};
 pub use context::ActorIdentity;
-pub use host_registry::{HostRegistryService, WorkspaceLink};
+pub use host_registry::{HostRegistryService, WorkspaceLink, require_local_hub_identity};
 pub use registry_cache::{RegistryCacheOutcome, RegistryCacheService, RegistryCacheState};
 // Shared domain types (owned by orbit-common) that the CLI and dashboard
 // render or construct.

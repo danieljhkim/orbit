@@ -10,14 +10,15 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10267, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Orbit MCP Bridge — Design
 
 This document specifies the **target** design. The host-registry identity,
-workspace, registry-core, and C2 coordination projections it depends on have
-landed; the broker/transport surfaces here remain pending. It replaces both
+workspace, registry core/projections, C3 discovery tools, and typed placement,
+capability, scope, and trusted-session metadata they depend on have landed; the
+checkout-aware broker and transport surfaces here remain pending. It replaces both
 Bridge's HTTP parity layer and the earlier
 per-workspace-authority draft with a local broker that has one remote destination:
 the coordination hub. It covers client→hub transport and local tool placement. The
@@ -233,7 +234,8 @@ trust assumption (§12), not a multi-tenant security boundary.
 
 ### 4.1 Placement is tool-registry metadata
 
-Every MCP-exposed tool definition gains one required placement value:
+Every MCP-exposed tool definition gains one required placement value and one
+typed workspace-resolution scope:
 
 ```rust
 enum ToolPlacement {
@@ -242,11 +244,19 @@ enum ToolPlacement {
     LocalDerived,
     Composite,
 }
+
+enum ToolScope {
+    WorkspaceRequired,
+    Global,
+}
 ```
 
-The value lives beside the canonical schema and safe-surface metadata. It is not a
-second connector allowlist and is never inferred from a name prefix. A tool without
-placement metadata is not exposed by the multi-host broker.
+Both values live beside the canonical schema and safe-surface metadata. Placement is
+not a second connector allowlist and neither property is inferred from a name prefix.
+Existing tools default to `workspace-required`; only registry-wide discovery such as
+`orbit.host.list` and `orbit.workspace.list` is explicitly `global` and may execute
+without selecting or inferring a workspace. A tool without canonical placement/scope
+metadata is not exposed by the multi-host broker.
 
 Initial classification:
 

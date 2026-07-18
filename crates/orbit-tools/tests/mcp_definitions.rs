@@ -3,7 +3,7 @@
 #![allow(clippy::expect_used)]
 
 use orbit_common::types::{
-    McpToolPlacement, McpToolPolicy, McpToolPolicyError, OrbitError, ToolSchema,
+    McpToolPlacement, McpToolPolicy, McpToolPolicyError, McpToolScope, OrbitError, ToolSchema,
 };
 use orbit_tools::{Tool, ToolContext, ToolRegistry, canonical_builtin_mcp_tool_definitions};
 use serde_json::Value;
@@ -35,6 +35,27 @@ fn canonical_builtin_definitions_are_workspace_independent() {
             .iter()
             .all(|definition| definition.schema.builtin)
     );
+}
+
+#[test]
+fn only_registry_discovery_is_global_scope() {
+    let definitions =
+        canonical_builtin_mcp_tool_definitions().expect("builtin MCP definitions are valid");
+    let global_names = definitions
+        .iter()
+        .filter(|definition| definition.policy.scope() == McpToolScope::Global)
+        .map(|definition| definition.schema.name.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        global_names,
+        ["orbit.host.list", "orbit.workspace.list"],
+        "all existing tools must retain the workspace-required default"
+    );
+    assert!(definitions.iter().all(|definition| {
+        global_names.contains(&definition.schema.name.as_str())
+            || definition.policy.scope() == McpToolScope::WorkspaceRequired
+    }));
 }
 
 #[test]

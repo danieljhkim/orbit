@@ -45,15 +45,29 @@ pub struct RegistrySnapshotV1 {
 
 impl RegistrySnapshotV1 {
     /// Compare the canonical hub payload (identity, revision, and sanitized
-    /// content) independently of any locally stamped receipt time. Two
-    /// snapshots with the same payload may renew a cache receipt without a
-    /// rewrite; a different payload at equal revision must be rejected.
+    /// content) independently of any locally stamped receipt time and of the
+    /// read-time-derived freshness/age views. The authoritative timestamps are
+    /// canonical; freshness and age are projections of those timestamps at a
+    /// particular read time and may therefore change without a registry
+    /// mutation or revision advance. Two snapshots with the same canonical
+    /// payload may renew a cache receipt without replacing the cached
+    /// snapshot; a different payload at equal revision must be rejected.
     pub fn canonical_payload_eq(&self, other: &Self) -> bool {
         self.schema_version == other.schema_version
             && self.hub_machine_id == other.hub_machine_id
             && self.registry_revision == other.registry_revision
-            && self.hosts == other.hosts
-            && self.workspaces == other.workspaces
+            && self.hosts.len() == other.hosts.len()
+            && self
+                .hosts
+                .iter()
+                .zip(&other.hosts)
+                .all(|(left, right)| left.canonical_payload_eq(right))
+            && self.workspaces.len() == other.workspaces.len()
+            && self
+                .workspaces
+                .iter()
+                .zip(&other.workspaces)
+                .all(|(left, right)| left.canonical_payload_eq(right))
     }
 }
 
@@ -74,6 +88,26 @@ pub struct RegistryHostV1 {
     pub presence: Vec<RegistryPresenceV1>,
 }
 
+impl RegistryHostV1 {
+    fn canonical_payload_eq(&self, other: &Self) -> bool {
+        self.machine_id == other.machine_id
+            && self.host_id == other.host_id
+            && self.labels == other.labels
+            && self.status == other.status
+            && self.registered_at == other.registered_at
+            && self.updated_at == other.updated_at
+            && self.retired_at == other.retired_at
+            && self.last_seen_at == other.last_seen_at
+            && self.aliases == other.aliases
+            && self.presence.len() == other.presence.len()
+            && self
+                .presence
+                .iter()
+                .zip(&other.presence)
+                .all(|(left, right)| left.canonical_payload_eq(right))
+    }
+}
+
 /// A permanent tombstone alias with its warning metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegistryAliasV1 {
@@ -92,6 +126,12 @@ pub struct RegistryPresenceV1 {
     pub age_seconds: Option<u64>,
 }
 
+impl RegistryPresenceV1 {
+    fn canonical_payload_eq(&self, other: &Self) -> bool {
+        self.workspace_id == other.workspace_id && self.last_verified == other.last_verified
+    }
+}
+
 /// Sanitized per-workspace projection: stable workspace identity, declared
 /// owner identity/display name, and sanitized execution-profile freshness.
 /// Never carries the raw execution-profile payload, crews, or models.
@@ -105,6 +145,15 @@ pub struct RegistryWorkspaceV1 {
     pub profile: RegistryProfileV1,
 }
 
+impl RegistryWorkspaceV1 {
+    fn canonical_payload_eq(&self, other: &Self) -> bool {
+        self.workspace_id == other.workspace_id
+            && self.owner_machine_id == other.owner_machine_id
+            && self.owner_host_id == other.owner_host_id
+            && self.profile.canonical_payload_eq(&other.profile)
+    }
+}
+
 /// Allowlisted execution-profile freshness/generation/age. Built explicitly
 /// from the sanitized projection; the internal `SanitizedExecutionProfile`
 /// (which embeds the raw `ExecutionProfileV1` with crews and models) is never
@@ -116,6 +165,14 @@ pub struct RegistryProfileV1 {
     pub observed_at: Option<DateTime<Utc>>,
     pub received_at: Option<DateTime<Utc>>,
     pub age_seconds: Option<u64>,
+}
+
+impl RegistryProfileV1 {
+    fn canonical_payload_eq(&self, other: &Self) -> bool {
+        self.generation == other.generation
+            && self.observed_at == other.observed_at
+            && self.received_at == other.received_at
+    }
 }
 
 /// The versioned satellite registry cache: one sanitized hub snapshot plus the

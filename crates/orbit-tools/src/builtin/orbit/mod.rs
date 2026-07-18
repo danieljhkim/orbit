@@ -15,8 +15,8 @@ pub mod task;
 pub mod workspace;
 
 use orbit_common::types::{
-    McpToolPlacement, McpToolPolicy, OrbitError, ToolParam, normalize_agent_family_for_model,
-    normalize_optional_attribution_label,
+    McpToolPlacement, McpToolPolicy, McpToolScope, OrbitError, ToolParam,
+    normalize_agent_family_for_model, normalize_optional_attribution_label,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -105,11 +105,11 @@ pub fn register(registry: &mut ToolRegistry) {
     // CLI and is never exposed as a model-callable tool.
     registry.register_mcp(
         host::list::OrbitHostListTool,
-        McpToolPolicy::operator_only(McpToolPlacement::Hub),
+        McpToolPolicy::operator_only(McpToolPlacement::Hub).with_scope(McpToolScope::Global),
     );
     registry.register_mcp(
         workspace::list::OrbitWorkspaceListTool,
-        McpToolPolicy::operator_only(McpToolPlacement::Hub),
+        McpToolPolicy::operator_only(McpToolPlacement::Hub).with_scope(McpToolScope::Global),
     );
     registry.register_mcp(
         task::add::OrbitTaskAddTool,

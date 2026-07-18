@@ -932,7 +932,11 @@ fn apply_hub_registry_metadata(conn: &Connection) -> Result<(), OrbitError> {
                 id                INTEGER PRIMARY KEY CHECK (id = 0),
                 hub_machine_id    TEXT,
                 registry_revision INTEGER NOT NULL DEFAULT 0
-                    CHECK (registry_revision >= 0),
+                    CHECK (
+                        typeof(registry_revision) = 'integer'
+                        AND registry_revision >= 0
+                        AND registry_revision <= 9223372036854775807
+                    ),
                 updated_at        TEXT NOT NULL,
                 CHECK (hub_machine_id IS NULL OR length(hub_machine_id) > 0)
             );

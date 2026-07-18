@@ -1,24 +1,28 @@
 use clap::Args;
-use orbit_core::{HostRegistryService, OrbitError, OrbitRuntime};
+use orbit_core::{HostRegistryService, OrbitError, OrbitRuntime, require_local_hub_identity};
 
 use crate::command::Execute;
 
 #[derive(Args)]
-#[command(about = "List active registered hosts")]
+#[command(about = "List registered hosts from the canonical hub snapshot")]
 pub struct HostListArgs {}
 
 impl Execute for HostListArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let local_hub = require_local_hub_identity(&runtime.global_root())?;
         let service = HostRegistryService::new(runtime.sqlite_store()?);
-        let hosts = service.active_hosts()?;
-        let hub = service.hub_machine_id()?;
-        print!("{}", format_host_list(&hosts, hub.as_deref()));
+        service.require_configured_local_hub(&local_hub)?;
+        let snapshot = service.snapshot()?;
+        print!(
+            "{}",
+            format_host_list(&snapshot.hosts, snapshot.hub_machine_id.as_deref())
+        );
         Ok(())
     }
 }
 
 pub(super) fn format_host_list(
-    hosts: &[orbit_common::types::HostRecord],
+    hosts: &[orbit_common::types::RegistryHostV1],
     hub_machine_id: Option<&str>,
 ) -> String {
     if hosts.is_empty() {

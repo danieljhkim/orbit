@@ -23,7 +23,8 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::{
-    OrbitError, REGISTRY_CACHE_SCHEMA_VERSION, RegistryCacheV1, RegistrySnapshotV1,
+    OrbitError, REGISTRY_CACHE_SCHEMA_VERSION, REGISTRY_SNAPSHOT_SCHEMA_VERSION, RegistryCacheV1,
+    RegistrySnapshotV1,
 };
 use orbit_common::utility::fs::{atomic_write_bytes, with_exclusive_file_lock};
 
@@ -104,56 +105,81 @@ impl RegistryCacheService {
         snapshot: RegistrySnapshotV1,
         now: DateTime<Utc>,
     ) -> Result<RegistryCacheOutcome, OrbitError> {
-        self.refresh_with_writer(snapshot, now, atomic_write_bytes)
+        self.refresh_with_codec(snapshot, now, serialize_cache, atomic_write_bytes)
     }
 
     /// Refresh with an injectable writer seam, used by tests to simulate
     /// write/rename failure and prove prior bytes survive.
-    pub fn refresh_with_writer<W>(
+    #[cfg(test)]
+    fn refresh_with_writer<W>(
         &self,
         snapshot: RegistrySnapshotV1,
         now: DateTime<Utc>,
         writer: W,
     ) -> Result<RegistryCacheOutcome, OrbitError>
     where
+        W: FnOnce(&Path, &[u8]) -> io::Result<()>,
+    {
+        self.refresh_with_codec(snapshot, now, serialize_cache, writer)
+    }
+
+    fn refresh_with_codec<S, W>(
+        &self,
+        snapshot: RegistrySnapshotV1,
+        now: DateTime<Utc>,
+        serializer: S,
+        writer: W,
+    ) -> Result<RegistryCacheOutcome, OrbitError>
+    where
+        S: FnOnce(&RegistryCacheV1) -> Result<Vec<u8>, OrbitError>,
         W: FnOnce(&Path, &[u8]) -> io::Result<()>,
     {
         with_exclusive_file_lock(&self.cache_path, "registry cache", || {
-            self.refresh_locked(snapshot, now, writer)
+            self.refresh_locked(snapshot, now, serializer, writer)
         })
     }
 
-    fn refresh_locked<W>(
+    fn refresh_locked<S, W>(
         &self,
         snapshot: RegistrySnapshotV1,
         now: DateTime<Utc>,
+        serializer: S,
         writer: W,
     ) -> Result<RegistryCacheOutcome, OrbitError>
     where
+        S: FnOnce(&RegistryCacheV1) -> Result<Vec<u8>, OrbitError>,
         W: FnOnce(&Path, &[u8]) -> io::Result<()>,
     {
+        validate_snapshot_schema(snapshot.schema_version)?;
         let prior = self.read_valid_cache()?;
         if let Some(prior) = &prior {
             let outcome = compare_incoming(&prior.snapshot, &snapshot)?;
             if outcome == Comparison::RenewReceiptOnly {
-                self.commit(&snapshot, now, writer)?;
+                // The incoming snapshot may have different freshness/age
+                // views derived at its later read time. Equal revision means
+                // no canonical registry mutation occurred, so receipt renewal
+                // must preserve the prior snapshot bytes and update only the
+                // local receipt stamp.
+                self.commit(&prior.snapshot, now, serializer, writer)?;
                 return Ok(RegistryCacheOutcome::ReceiptRenewed {
                     revision: snapshot.registry_revision,
                 });
             }
         }
         let revision = snapshot.registry_revision;
-        self.commit(&snapshot, now, writer)?;
+        self.commit(&snapshot, now, serializer, writer)?;
         Ok(RegistryCacheOutcome::Written { revision })
     }
 
-    fn commit<W>(
+    fn commit<S, W>(
         &self,
         snapshot: &RegistrySnapshotV1,
         now: DateTime<Utc>,
+        serializer: S,
         writer: W,
     ) -> Result<(), OrbitError>
     where
+        S: FnOnce(&RegistryCacheV1) -> Result<Vec<u8>, OrbitError>,
         W: FnOnce(&Path, &[u8]) -> io::Result<()>,
     {
         let cache = RegistryCacheV1 {
@@ -161,8 +187,7 @@ impl RegistryCacheService {
             received_at: now,
             snapshot: snapshot.clone(),
         };
-        let bytes = serde_json::to_vec_pretty(&cache)
-            .map_err(|error| OrbitError::Store(format!("serialize registry cache: {error}")))?;
+        let bytes = serializer(&cache)?;
         match writer(&self.cache_path, &bytes) {
             Ok(()) => Ok(()),
             Err(error) => Err(self.commit_failure_error(&cache, error)),
@@ -176,13 +201,11 @@ impl RegistryCacheService {
     /// torn read.
     fn commit_failure_error(&self, intended: &RegistryCacheV1, error: io::Error) -> OrbitError {
         match self.read_valid_cache() {
-            Ok(Some(observed)) if observed.snapshot == intended.snapshot => {
-                OrbitError::Store(format!(
-                    "registry cache write reported an error ({error}), but the new snapshot at \
-                     revision {} is now readable; its durability is uncertain",
-                    intended.snapshot.registry_revision
-                ))
-            }
+            Ok(Some(observed)) if observed == *intended => OrbitError::Store(format!(
+                "registry cache write reported an error ({error}), but the complete new cache \
+                     at revision {} is now readable; its durability is uncertain",
+                intended.snapshot.registry_revision
+            )),
             Ok(Some(observed)) => OrbitError::Store(format!(
                 "registry cache write failed ({error}); the prior snapshot at revision {} is \
                  preserved",
@@ -222,6 +245,27 @@ impl RegistryCacheService {
     }
 }
 
+fn serialize_cache(cache: &RegistryCacheV1) -> Result<Vec<u8>, OrbitError> {
+    serde_json::to_vec_pretty(cache)
+        .map_err(|error| OrbitError::Store(format!("serialize registry cache: {error}")))
+}
+
+fn validate_snapshot_schema(schema_version: u32) -> Result<(), OrbitError> {
+    if schema_version > REGISTRY_SNAPSHOT_SCHEMA_VERSION {
+        return Err(OrbitError::InvalidInput(format!(
+            "registry cache refresh rejected: incoming snapshot has unsupported future \
+             schema_version {schema_version}; upgrade Orbit"
+        )));
+    }
+    if schema_version != REGISTRY_SNAPSHOT_SCHEMA_VERSION {
+        return Err(OrbitError::InvalidInput(format!(
+            "registry cache refresh rejected: incoming snapshot schema_version {schema_version} \
+             is unsupported; expected {REGISTRY_SNAPSHOT_SCHEMA_VERSION}"
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum Comparison {
     AcceptNewer,
@@ -235,13 +279,22 @@ fn compare_incoming(
     prior: &RegistrySnapshotV1,
     incoming: &RegistrySnapshotV1,
 ) -> Result<Comparison, OrbitError> {
-    if let (Some(prior_hub), Some(incoming_hub)) = (&prior.hub_machine_id, &incoming.hub_machine_id)
-        && prior_hub != incoming_hub
-    {
-        return Err(OrbitError::InvalidInput(format!(
-            "registry cache refresh rejected: incoming hub '{incoming_hub}' differs from cached \
-             hub '{prior_hub}'"
-        )));
+    if let Some(prior_hub) = &prior.hub_machine_id {
+        match &incoming.hub_machine_id {
+            Some(incoming_hub) if incoming_hub == prior_hub => {}
+            Some(incoming_hub) => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "registry cache refresh rejected: incoming hub '{incoming_hub}' differs from \
+                     cached hub '{prior_hub}'"
+                )));
+            }
+            None => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "registry cache refresh rejected: incoming snapshot omits the cached hub \
+                     identity '{prior_hub}'"
+                )));
+            }
+        }
     }
     if incoming.registry_revision < prior.registry_revision {
         return Err(OrbitError::InvalidInput(format!(
@@ -284,6 +337,37 @@ fn classify(bytes: &[u8], now: DateTime<Utc>, freshness_threshold: Duration) -> 
     if schema_version > u64::from(REGISTRY_CACHE_SCHEMA_VERSION) {
         return RegistryCacheState::UnsupportedFuture {
             schema_version: schema_version as u32,
+        };
+    }
+    if schema_version != u64::from(REGISTRY_CACHE_SCHEMA_VERSION) {
+        return RegistryCacheState::Malformed {
+            reason: format!(
+                "unsupported registry cache schema_version {schema_version}; expected {}",
+                REGISTRY_CACHE_SCHEMA_VERSION
+            ),
+        };
+    }
+    let Some(snapshot_schema_version) = value
+        .get("snapshot")
+        .and_then(|snapshot| snapshot.get("schema_version"))
+        .and_then(serde_json::Value::as_u64)
+    else {
+        return RegistryCacheState::Malformed {
+            reason: "missing or non-integer snapshot.schema_version".to_string(),
+        };
+    };
+    if snapshot_schema_version > u64::from(REGISTRY_SNAPSHOT_SCHEMA_VERSION) {
+        return RegistryCacheState::UnsupportedFuture {
+            schema_version: snapshot_schema_version as u32,
+        };
+    }
+    if snapshot_schema_version != u64::from(REGISTRY_SNAPSHOT_SCHEMA_VERSION) {
+        return RegistryCacheState::Malformed {
+            reason: format!(
+                "unsupported registry snapshot schema_version {snapshot_schema_version}; \
+                 expected {}",
+                REGISTRY_SNAPSHOT_SCHEMA_VERSION
+            ),
         };
     }
     let cache: RegistryCacheV1 = match serde_json::from_value(value) {

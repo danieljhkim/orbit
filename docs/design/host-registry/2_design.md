@@ -10,14 +10,15 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Design
 
-This doc specifies the **target** design; the Phase 1 host identity, workspace
-registry, and host-registry core foundations have landed, while later phases remain
-pending. The folder is Accepted. It covers host identity, the registry, the
+This doc specifies the **target** design. Host identity, the logical workspace
+catalog, registry core/projections, operator administration, sanitized discovery,
+and the satellite-cache format have landed through C3; remote registration,
+transport, placement, and later phases remain pending. The folder is Accepted. It covers host identity, the registry, the
 coordination-plane/workspace-ownership split, execution placement (including the
 hub→satellite protocol), the per-record data-placement split, and the revision to
 routine sweep ownership. It leaves client→hub transport to the
@@ -57,6 +58,9 @@ identity readable and a partially overwritten file is impossible.
 matching, the sweep, `routine status`) fails closed with an actionable error on an
 absent, malformed, incomplete, blank, or future-schema file — it never falls back to
 the OS hostname, and a newer `schema_version` fails without rewriting the file.
+`machine_id` must remain in the generated `hm_` namespace with a path- and
+transport-free ASCII suffix; values shaped like hostnames, SSH destinations, paths,
+or URI targets are rejected before they can enter a registry or workspace role.
 
 **Resolution rule: names are for humans, `machine_id` is what the system stores.**
 Human-authored text — routine `hosts:` pins, the task `host` selector, CLI arguments
@@ -95,6 +99,9 @@ Per entry: `machine_id` (key), `host_id` (globally reserved across active and re
 - **Enumeration.** `orbit.host.list` (operator capability set), parallel to
   `orbit.workspace.list`, returning entries with labels, presence, and freshness so
   the orchestrator can right-size placement the way `orbit.crew.list` supports crew.
+  The hub-local human `orbit host list` command renders the same single-transaction
+  `RegistrySnapshotV1`, including retired identities; a spoke fails closed instead of
+  presenting its local shadow database as the hub inventory.
 - **Liveness.** `last_seen` is updated by registration and by every runner poll
   (§4) — the poll *is* the heartbeat, at the same minute cadence as the sweep. It is
   **not** derived from existing audit rows: the audit `host` column records the
@@ -112,7 +119,12 @@ Per entry: `machine_id` (key), `host_id` (globally reserved across active and re
   with a warning instead of silently failing or being hijacked. A tombstoned or
   retired name can never be claimed by a *different* `machine_id`. The rename
   command reports where the old name still appears in committed text; it does not
-  rewrite other repos.
+  rewrite other repos. A machine-global sibling lock spans current-name preflight,
+  the staged local write, the SQLite rename, and any post-error outcome probe, so
+  concurrent local rename commands cannot each report success with opposing final
+  identities. Invalid names fail before the local file changes; a reported SQLite
+  commit error is classified by reopening the registry rather than being claimed as
+  an unconditional rollback.
 - **Retire.** Retired hosts stay in the registry so old provenance, pins, and
   bindings keep resolving; dispatch and pins targeting a retired host fail
   validation with the retirement visible in the error.
@@ -171,15 +183,17 @@ declared binding, never an inference — a workspace checked out on three machin
 still has exactly one named owner. It is recorded twice, once on each side, both
 locally readable:
 
-- On the **hub**: each workspace registry entry (`~/.orbit/workspaces.json`) gains
-  an `owner` field — the `machine_id` (plus display name) of the owning machine. In
-  the current constellation every entry binds to `dk1`; the field makes that
-  explicit.
-- On each **machine**: a workspace entry in the machine's own registry records its
-  role — `owner`, or `replica` of `{machine_id, host_id}` — set at link time
-  (`orbit workspace link`, resolving names then). The trusted hub `machine_id` →
+- On the **hub**: `workspace_ownership` stores the stable workspace ID and owner
+  `machine_id`. Operator input may use a human `host_id`, but `orbit workspace link`
+  resolves it once; the current display name is joined from the host registry only
+  when rendering discovery and is not a second ownership key.
+- On each **machine**: the logical workspace record mirrors the owner `machine_id`,
+  while its local checkout records `owner` or `replica`. A replica repeats only the
+  same stable owner `machine_id`; no display name or transport target is persisted.
+  `orbit workspace init --role ...` establishes a new checkout and `orbit workspace
+  role` reasserts a compatible local declaration. The trusted hub `machine_id` →
   SSH-target mapping is machine-level state in `~/.orbit/mcp.toml`; workspace role
-  carries no transport target and never grants or redirects access to its owner.
+  never grants or redirects access to its owner.
 
 **Concrete local registry schema ([ORB-10248]).** `~/.orbit/workspaces.json` is
 versioned independently of `host.toml`. Schema v1 has two collections:
@@ -207,6 +221,12 @@ including unversioned input without an explicit role, require stable owner ident
 and reject missing/unknown roles, owner/replica contradictions, and replicas without
 an owner, naming the workspace ID. Malformed/future schemas are read-only failures,
 and a failed staged write leaves the prior file readable.
+
+New multi-host checkouts declare both sides before the first registry write:
+`orbit workspace init` defaults to an explicit local-owner binding, while `--role
+replica --owner <machine_id>` writes the remote logical owner and local replica
+mirror together. Persisted hub/spoke input with an owner checkout but no logical
+owner is rejected; loading never backfills ownership from local machine identity.
 
 **Concrete hub coordination projections ([ORB-10257]).** Additive store migration
 v6 creates three path-separated projections:
@@ -254,7 +274,13 @@ For validation that *does* need registry data on a satellite (routine pin checks
 §6), the satellite keeps a **registry cache**: a snapshot refreshed on every
 successful poll or register. Cache semantics are explicit: enforcement never reads
 it (enforcement is local-only, above); validation reads it and degrades to
-warning-only when the cache is absent or stale. Scheduling keeps working offline.
+warning-only when the cache is absent or stale. The cache stores one sanitized hub
+snapshot plus a machine-local receipt timestamp. Conflict comparison uses stable hub
+identity, revision, records, and authoritative timestamps; read-time-derived
+freshness/age views are not canonical mutations. Equal-revision/equal-canonical
+refresh preserves the cached snapshot and renews only the local receipt, while a
+different hub, lower revision, or stable payload conflict fails without replacing
+prior bytes. Scheduling keeps working offline.
 
 Neither role is ever selected per-task: coordination has one writer by construction,
 and two owners for one workspace is the split-brain the system already rejected

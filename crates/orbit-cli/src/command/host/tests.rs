@@ -1,13 +1,13 @@
 use std::collections::BTreeSet;
 
 use chrono::Utc;
-use orbit_common::types::{HostRecord, HostStatus};
+use orbit_common::types::{HostStatus, RegistryHostV1};
 
 use super::list::format_host_list;
 
-fn host(machine_id: &str, host_id: &str, labels: &[&str]) -> HostRecord {
+fn host(machine_id: &str, host_id: &str, labels: &[&str]) -> RegistryHostV1 {
     let now = Utc::now();
-    HostRecord {
+    RegistryHostV1 {
         machine_id: machine_id.to_string(),
         host_id: host_id.to_string(),
         labels: labels
@@ -19,6 +19,8 @@ fn host(machine_id: &str, host_id: &str, labels: &[&str]) -> HostRecord {
         updated_at: now,
         retired_at: None,
         last_seen_at: None,
+        aliases: Vec::new(),
+        presence: Vec::new(),
     }
 }
 

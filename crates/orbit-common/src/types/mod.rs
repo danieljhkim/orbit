@@ -106,7 +106,11 @@ pub use executor_def::{
     ExecutorDef, ExecutorSandboxKind, ExecutorType, ModelPairOverride, StdoutFormat,
 };
 pub use friction::{FrictionEntry, FrictionFrontmatter, FrictionRecord, FrictionStatus};
-pub use host::{HostAlias, HostNameResolution, HostRecord, HostRegistration, HostStatus};
+pub use host::{
+    HostAlias, HostNameResolution, HostRecord, HostRegistration, HostStatus,
+    REGISTRY_IDENTIFIER_MAX_BYTES, validate_host_id, validate_machine_id,
+    validate_registry_identifier,
+};
 pub use id::OrbitId;
 pub use invocation::{InvocationTrace, TokenUsage, ToolCallTrace};
 pub use job::{
@@ -166,9 +170,9 @@ pub use task_artifacts::{
 pub use task_plan::{TaskPlan, TaskPlanCheckpoint, TaskPlanSuccessCriterion, parse_task_plan};
 pub use tool::{
     ExecutionResult, McpCapability, McpCapabilityPlacementMatrix, McpLeasedRun, McpToolDefinition,
-    McpToolPlacement, McpToolPolicy, McpToolPolicyError, McpTransport, StoredTool, ToolParam,
-    ToolSchema, ToolSessionContext, mcp_advertised_tool_name, mcp_capability_placement_matrix,
-    validate_mcp_tool_definitions,
+    McpToolPlacement, McpToolPolicy, McpToolPolicyError, McpToolScope, McpTransport, StoredTool,
+    ToolParam, ToolSchema, ToolSessionContext, mcp_advertised_tool_name,
+    mcp_capability_placement_matrix, validate_mcp_tool_definitions,
 };
 pub use tool_input::{
     RETIRED_TASK_ADD_INPUT_FIELDS, optional_csv_or_string_list_alias, optional_raw_string,

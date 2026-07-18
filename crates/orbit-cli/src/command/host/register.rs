@@ -1,10 +1,8 @@
 use std::collections::BTreeSet;
 
 use clap::Args;
-use orbit_core::routines::{
-    HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, load_host_identity,
-};
-use orbit_core::{HostRegistryService, OrbitError, OrbitRuntime};
+use orbit_core::routines::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode};
+use orbit_core::{HostRegistryService, OrbitError, OrbitRuntime, require_local_hub_identity};
 
 use crate::command::Execute;
 
@@ -27,10 +25,21 @@ pub struct HostRegisterArgs {
 
 impl Execute for HostRegisterArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let service = HostRegistryService::new(runtime.sqlite_store()?);
+        // This direct administration surface may only open the coordination
+        // store on the hub. Spokes must use the later MCP registration path.
+        let local_hub = require_local_hub_identity(&runtime.global_root())?;
         let labels: BTreeSet<String> = self.labels.into_iter().collect();
 
         let (identity, is_current_machine) = match (self.machine_id, self.host_id) {
+            (Some(machine_id), Some(host_id)) if machine_id == local_hub.machine_id => {
+                if host_id != local_hub.host_id {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "explicit declaration for this hub machine_id '{}' must use host.toml host_id '{}', not '{host_id}'",
+                        local_hub.machine_id, local_hub.host_id
+                    )));
+                }
+                (local_hub.clone(), true)
+            }
             (Some(machine_id), Some(host_id)) => (
                 HostIdentity {
                     schema_version: HOST_IDENTITY_SCHEMA_VERSION,
@@ -42,7 +51,7 @@ impl Execute for HostRegisterArgs {
                 },
                 false,
             ),
-            (None, None) => (load_host_identity(&runtime.global_root())?, true),
+            (None, None) => (local_hub.clone(), true),
             _ => {
                 return Err(OrbitError::InvalidInput(
                     "an explicit host declaration requires both --machine-id and --host-id; omit \
@@ -52,13 +61,15 @@ impl Execute for HostRegisterArgs {
             }
         };
 
-        let record = service.register_identity(&identity, labels)?;
-
-        // When this machine registers itself as a hub, stamp the singular hub
-        // identity so it cannot later retire itself.
-        if is_current_machine && identity.mode == HostMode::Hub {
-            service.configure_hub_identity(&record.machine_id)?;
-        }
+        let service = HostRegistryService::new(runtime.sqlite_store()?);
+        let record = if is_current_machine {
+            // Registration and the singular hub snapshot identity share one
+            // store transaction; neither can commit without the other.
+            service.register_hub_identity(&identity, labels)?
+        } else {
+            service.require_configured_local_hub(&local_hub)?;
+            service.register_identity(&identity, labels)?
+        };
 
         println!(
             "registered host '{}' (machine_id {}), status {}",

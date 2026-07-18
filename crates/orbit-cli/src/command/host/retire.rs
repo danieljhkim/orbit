@@ -1,5 +1,5 @@
 use clap::Args;
-use orbit_core::{HostRegistryService, OrbitError, OrbitRuntime};
+use orbit_core::{HostRegistryService, OrbitError, OrbitRuntime, require_local_hub_identity};
 
 use crate::command::Execute;
 
@@ -14,7 +14,9 @@ pub struct HostRetireArgs {
 
 impl Execute for HostRetireArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let local_hub = require_local_hub_identity(&runtime.global_root())?;
         let service = HostRegistryService::new(runtime.sqlite_store()?);
+        service.require_configured_local_hub(&local_hub)?;
         let machine_id = resolve_machine_id(&service, &self.name)?;
         // The singular configured hub cannot retire itself in v1; the guard
         // rejects it before any database mutation.
