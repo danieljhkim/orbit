@@ -279,6 +279,10 @@ fn mcp_serve_tools_list_matches_production_snapshot() {
     ] {
         assert!(!names.contains(&hidden), "{hidden} leaked into: {names:?}");
     }
+    assert!(
+        names.contains(&"orbit_friction_update"),
+        "D2 policy metadata must not narrow the current MCP surface: {names:?}"
+    );
 
     // Snapshot guard for the full production agent surface: names AND input
     // schemas. Any diff here is a breaking MCP schema change per RELEASING.md.
@@ -343,6 +347,20 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
         items.iter().any(|task| task["id"] == json!(task_id)),
         "created task missing from list: {items:?}"
     );
+
+    // D2 constructs and propagates capability membership but does not yet
+    // enforce policy metadata. Preserve the currently callable surface until
+    // the D3/E1 broker enforcement boundary lands.
+    let friction = client.call_tool_ok(
+        "orbit_friction_add",
+        json!({ "body": "MCP D2 exposure regression", "model": "codex" }),
+    );
+    let friction_id = friction["id"].as_str().expect("friction id").to_string();
+    let updated = client.call_tool_ok(
+        "orbit_friction_update",
+        json!({ "id": friction_id, "status": "triaged", "model": "codex" }),
+    );
+    assert_eq!(updated["status"], "triaged");
 
     // Learning create → show → lexical federated search (no embedding
     // companion installed, so `orbit.search` must serve the lexical path).
