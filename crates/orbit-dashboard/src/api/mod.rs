@@ -326,7 +326,10 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
         )
         .route("/adrs/:id/accept", post(adrs::accept_adr_action))
         .route("/adrs/:id/supersede", post(adrs::supersede_adr_action))
-        .route("/frictions", get(frictions::list_frictions))
+        .route(
+            "/frictions",
+            get(frictions::list_frictions).post(frictions::create_friction_action),
+        )
         .route("/frictions/stats", get(frictions::friction_stats))
         .route(
             "/frictions/:id",
