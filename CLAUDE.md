@@ -2,24 +2,6 @@
 
 Project instructions for agents working on Orbit (loaded as both `AGENTS.md` and `CLAUDE.md`).
 
-## OpenAI Build Week delivery directive — temporary
-
-Through **2026-07-21 5:00 PM PT**, deliver the complete accepted
-[`host-registry`](docs/design/host-registry/) and [`mcp-bridge`](docs/design/mcp-bridge/) designs.
-Be submission-ready Monday; Tuesday is for final verification and submission, not first integration.
-
-- Give 110%: no hidden scope cuts, shortcuts, skipped checks, or demo-only behavior. Read both
-  designs' overview, design, and decisions files; keep their shared contracts integrated.
-- Use only `sol` (default for planning, review, cross-crate, medium/large/complex/ambiguous work)
-  and `terra` (small, easy, low-risk mechanical work).
-- Raise better ideas, doubts, risks, and operational friction immediately with evidence and a
-  recommendation. Never invent unclear semantics or silently work around broken infrastructure.
-- Keep docs/ADRs synchronized, test success and failure paths, pass `make ci-fast` before review,
-  and retain GitHub CI as the merge gate. Preserve concrete Codex/GPT-5.6 evidence for submission.
-
-Primary `/feedback` session ID: `019f6e0f-eb02-73e3-b8ea-dbc8217ba57e`. Remove this section after
-submission.
-
 ## Resident agent
 
 **Hohmann** (`agentbase/hohmann/memory`) is Sol's resident systems engineer for Orbit. The shared
