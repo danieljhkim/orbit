@@ -41,6 +41,8 @@ A **crew** is one provider-model-backend assignment. Every activity role (`plann
 | `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-5.5`, `pro`, `grok-build`) |
 | `provider` | Agent family | `claude`, `codex`, `gemini`, `grok` (the CLI-executable families; see [Provider identity and resolution](#provider-identity-and-resolution) for the full canonical set) |
 | `backend` | How Orbit dispatches the agent | `cli` (today the only supported value for these roles) |
+| `description` | Optional human-facing crew summary | Any non-empty string after trimming |
+| `tags` | Optional discovery labels | Array of strings; normalized, sorted, and deduplicated |
 
 Example — a Codex crew:
 
@@ -49,9 +51,19 @@ Example — a Codex crew:
 model = "gpt-5.5"
 provider = "codex"
 backend = "cli"
+description = "Systems implementation"
+tags = ["implementation", "review"]
 ```
 
 You can define any number of crews. Set the workspace-wide fallback with `workflow.default_crew`; assign a specific crew to individual tasks via the [per-task crew override](#per-task-crew-override). Crews are validated at load time: each crew must have non-empty `model`, `provider`, and `backend`; `workflow.default_crew` must name a defined crew.
+
+Crew metadata is canonical runtime data, not display-only TOML. Orbit trims
+`description` (blank becomes absent), trims each tag, drops blank tags, and stores
+tags in sorted deduplicated order. Legacy crew entries without these fields
+normalize to no description and an empty tag list. Owner execution-profile
+publication carries this complete projection to the hub; publication is stricter
+than legacy dispatch compatibility and fails closed if provider or backend cannot
+be canonicalized to a concrete executable combination.
 
 > **Legacy compatibility.** Orbit still accepts the former `planner` / `implementer` / `reviewer` inline-table shape. It uses the `implementer` assignment for every role and logs an `orbit.config.crew` warning when planner or reviewer differs. Rewrite legacy crews to the flat shape above; cross-provider comparison belongs in the duel system.
 

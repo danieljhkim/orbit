@@ -10,13 +10,15 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
-related_artifacts: [ORB-00424, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10257, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Orbit MCP Bridge — Design
 
-This document specifies the **target** design; nothing here has landed. It replaces
-both Bridge's HTTP parity layer and the earlier
+This document specifies the **target** design. The host-registry identity,
+workspace, registry-core, and C2 coordination projections it depends on have
+landed; the broker/transport surfaces here remain pending. It replaces both
+Bridge's HTTP parity layer and the earlier
 per-workspace-authority draft with a local broker that has one remote destination:
 the coordination hub. It covers client→hub transport and local tool placement. The
 reverse direction — placing a run, leasing it from a spoke, and reporting its result
@@ -484,12 +486,27 @@ Four independent routing choices remain separate:
 
 The hub must validate crew and dispatch without contacting the owner. Therefore the
 workspace owner publishes a small **execution profile** to the hub during register/
-poll and whenever relevant config changes. At minimum it contains:
+poll and whenever relevant config changes. The landed C2 contract ([ORB-10257])
+freezes `ExecutionProfileV1` to `schema_version`, stable workspace/owner IDs, owner
+`observed_at`, `config_digest`, default crew, sorted normalized effective crew
+entries (name, canonical provider, model, concrete backend, description, tags), and
+ship mode/base branch plus `ship_closure_digest`. Hub-owned generation and
+`received_at` remain in the stored envelope rather than the payload.
 
-- config revision/digest and observed-at timestamp;
-- default crew and effective crew entries (name, provider, model, backend,
-  description, tags); and
-- dispatch facts required by `workflow.ship` that are otherwise checkout-local.
+The config digest covers only the canonical crew/mode/base semantics. The
+independent closure digest covers the versioned ship contract,
+execution-selected materialized task-auto/gate/PR/local jobs, and every reachable
+named or recovery activity after execution precedence, inlining, validation, and
+`backend:auto` resolution. Neither projection stores paths, raw assets, environment
+values, secrets, commands, or repository content.
+
+Publication is authenticated as the current owner and compare-and-set against the
+hub generation. An identical semantic payload refreshes observation/receipt
+freshness without advancing generation; a semantic change advances it atomically.
+The hub rejects stale generation, non-owner publication, stale/future/older owner
+observations, execution-affecting environment overrides, and unknown or ambiguous
+provider/backend resolution. Freshness is based on hub `received_at`, never the
+owner's clock.
 
 This is one-way spoke→hub coordination metadata, not repo content and not a live
 proxy. `orbit.crew.list`, task crew validation, and workflow preflight all read the

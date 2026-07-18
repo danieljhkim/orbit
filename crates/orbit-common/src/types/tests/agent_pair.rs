@@ -21,6 +21,8 @@ mod resolution {
             Crew {
                 name: "codex".to_string(),
                 assignment: assignment(TEST_CODEX_MODEL, "codex"),
+                description: None,
+                tags: Vec::new(),
             },
         );
         registry.insert(
@@ -28,6 +30,8 @@ mod resolution {
             Crew {
                 name: "claude".to_string(),
                 assignment: assignment(TEST_CLAUDE_WEAK_MODEL, "claude"),
+                description: None,
+                tags: Vec::new(),
             },
         );
         registry

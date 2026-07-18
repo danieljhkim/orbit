@@ -4,6 +4,7 @@ mod agent_family;
 mod agent_pair;
 mod audit_event;
 mod error;
+mod execution_profile;
 mod executor_def;
 mod friction;
 mod host;

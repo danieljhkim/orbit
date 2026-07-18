@@ -17,6 +17,8 @@ fn single_family_crew(name: &str) -> Crew {
     Crew {
         name: name.to_string(),
         assignment: role,
+        description: None,
+        tags: Vec::new(),
     }
 }
 
@@ -37,6 +39,27 @@ fn assert_invalid_duel_config(body: &str, substrings: &[&str]) {
             "expected {message:?} to contain {substring:?}"
         );
     }
+}
+
+#[test]
+fn crew_description_and_tags_normalize_without_loss() {
+    let config = load_config(
+        r#"
+[workflow]
+default_crew = "sol"
+
+[crews.sol]
+model = "gpt-test"
+provider = "codex"
+backend = "cli"
+description = "  Systems implementation  "
+tags = [" review ", "", "hard", "review"]
+"#,
+    )
+    .expect("config loads");
+    let crew = config.crews.get("sol").expect("sol crew");
+    assert_eq!(crew.description.as_deref(), Some("Systems implementation"));
+    assert_eq!(crew.tags, vec!["hard", "review"]);
 }
 
 #[test]

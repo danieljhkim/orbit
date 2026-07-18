@@ -46,6 +46,9 @@ fn fresh_db_applies_baseline_and_records_ledger() {
     assert_eq!(applied[4].version, 5);
     assert_eq!(applied[4].name, "host_registry_core");
     assert!(!applied[4].applied_at.is_empty());
+    assert_eq!(applied[5].version, 6);
+    assert_eq!(applied[5].name, "workspace_coordination_projections");
+    assert!(!applied[5].applied_at.is_empty());
 }
 
 #[test]
@@ -166,6 +169,10 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0005".to_string(),
                 "host_registry_core".to_string()
             ),
+            (
+                "migration.v0006".to_string(),
+                "workspace_coordination_projections".to_string()
+            ),
         ]
     );
 }
@@ -177,7 +184,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0006', 'from-the-future', '2099-01-01T00:00:00Z')",
+         VALUES ('migration.v0007', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -193,7 +200,7 @@ fn refuses_db_from_a_newer_binary() {
 }
 
 #[test]
-fn store_reopens_database_at_shipped_schema_v4_and_applies_v5() {
+fn store_reopens_database_at_shipped_schema_v4_and_applies_v5_and_v6() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("orbit.db");
 
@@ -220,17 +227,18 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_v5() {
     drop(conn);
 
     let store = crate::Store::open(&path).expect("reopen shipped v4 store");
-    assert_eq!(store.schema_version().expect("schema version"), 5);
+    assert_eq!(store.schema_version().expect("schema version"), 6);
     let applied = store.applied_migrations().expect("applied migrations");
-    assert_eq!(applied.last().map(|migration| migration.version), Some(5));
+    assert_eq!(applied.last().map(|migration| migration.version), Some(6));
     assert_eq!(
         applied.last().map(|migration| migration.name.as_str()),
-        Some("host_registry_core")
+        Some("workspace_coordination_projections")
     );
     let connection = store.connection();
     let conn = connection.lock().expect("connection");
     assert!(table_exists(&conn, "hosts").expect("hosts table"));
     assert!(table_exists(&conn, "host_aliases").expect("aliases table"));
+    assert!(table_exists(&conn, "workspace_ownership").expect("ownership table"));
     let preserved: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM job_runs WHERE id = 'preserved-run'",

@@ -58,12 +58,17 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "host_registry_core",
         apply: super::apply_host_registry_core,
     },
+    Migration {
+        version: 6,
+        name: "workspace_coordination_projections",
+        apply: super::apply_workspace_coordination_projections,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 5;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 6;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 
