@@ -22,6 +22,13 @@ fn workspace_reinit_merges_explicit_registration_updates_without_resetting_autho
     let home = tempdir().expect("home tempdir");
     let global = home.path().join(".orbit");
     std::fs::create_dir_all(&global).expect("create global orbit");
+    // A host identity must exist for workspace init to seed default routines
+    // (which creates `.orbit/routines/`); `orbit init` owns its creation.
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_reinit\"\nhost_id = \"reinit-host\"\nmode = \"standalone\"\n",
+    )
+    .expect("write host identity");
 
     let previous_home = std::env::var_os("HOME");
     let previous_cwd = std::env::current_dir().expect("capture cwd");
@@ -176,7 +183,11 @@ fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() 
     let home = tempdir().expect("home tempdir");
     let global = home.path().join(".orbit");
     std::fs::create_dir_all(&global).expect("create global orbit");
-    std::fs::write(global.join("host.toml"), "host_id = \"init-host\"\n").expect("write host pin");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_inithost\"\nhost_id = \"init-host\"\nmode = \"standalone\"\n",
+    )
+    .expect("write host identity");
 
     let previous_home = std::env::var_os("HOME");
     let previous_cwd = std::env::current_dir().expect("capture cwd");

@@ -1,87 +1,364 @@
-//! Host identity for routine scheduling [ORB-10021].
+//! Host identity for this Orbit machine [ORB-10247].
 //!
-//! `hosts:` pinning in routine definitions matches against a `host_id` that
-//! lives in `~/.orbit/host.toml` — the one genuinely host-local datum in the
-//! routines design (ADR-0205 keeps discovery in the workspace registry;
-//! `host.toml` survives only to carry identity). When the file is absent the
-//! machine hostname is used, so pinning works out of the box on hosts whose
-//! hostnames are already stable names like `dk-server-1`.
+//! `~/.orbit/host.toml` carries the one genuinely host-local datum: a versioned
+//! [`HostIdentity`] with a stable, generated `machine_id`, an operator-chosen
+//! `host_id` display name, and an operating `mode`. First-time creation lives in
+//! global `orbit init` (see `crate::command::init`); a legacy file that carried
+//! only `host_id` (the routines-v1 scheduling pin) is migrated in place, once,
+//! preserving its `host_id` and generating a `machine_id`.
+//!
+//! Loading is strict: after migration an absent, malformed, incomplete, blank,
+//! or future-schema file is a hard error with an actionable message — there is
+//! no silent fallback to the OS hostname (ADR-0227). Routine `hosts:` pinning,
+//! the sweep, and status all resolve through [`HostIdentity::host_id`].
 
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use orbit_common::types::OrbitError;
+use orbit_common::utility::fs::atomic_write_text;
 use serde::Deserialize;
 
 /// File under the global Orbit root carrying the host identity.
 pub const HOST_TOML_FILE: &str = "host.toml";
 
-#[derive(Debug, Deserialize)]
-struct HostToml {
-    host_id: Option<String>,
+/// Current on-disk schema version for [`HostIdentity`]. A file whose
+/// `schema_version` exceeds this fails closed (see [`inspect_host_identity`]).
+pub const HOST_IDENTITY_SCHEMA_VERSION: u32 = 1;
+
+const MACHINE_ID_PREFIX: &str = "hm_";
+
+/// Operating mode of this Orbit host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostMode {
+    /// Self-contained host (the standalone default; no registry/hub role).
+    Standalone,
+    /// Coordination hub for a multi-host constellation.
+    Hub,
+    /// Satellite that polls a hub for placed runs.
+    Spoke,
 }
 
-/// Resolve this machine's routine-scheduling identity: `host_id` from
-/// `<global_root>/host.toml` when present and non-empty, otherwise the
-/// machine hostname.
-pub fn resolve_host_id(global_root: &Path) -> Result<String, OrbitError> {
-    let path = host_toml_path(global_root);
-    if path.exists() {
-        let raw = fs::read_to_string(&path).map_err(|error| {
-            OrbitError::Io(format!("failed to read '{}': {error}", path.display()))
-        })?;
-        let parsed: HostToml = toml::from_str(&raw).map_err(|error| {
-            OrbitError::InvalidInput(format!("invalid host config '{}': {error}", path.display()))
-        })?;
-        if let Some(host_id) = parsed
-            .host_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            return Ok(host_id.to_string());
+impl HostMode {
+    /// The persisted string form (matches the `mode` values in `host.toml`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HostMode::Standalone => "standalone",
+            HostMode::Hub => "hub",
+            HostMode::Spoke => "spoke",
         }
     }
-    hostname_fallback()
+
+    /// Parse an external (CLI / file) mode string, failing closed on anything
+    /// outside the fixed vocabulary.
+    pub fn parse(value: &str) -> Result<Self, OrbitError> {
+        match value.trim() {
+            "standalone" => Ok(HostMode::Standalone),
+            "hub" => Ok(HostMode::Hub),
+            "spoke" => Ok(HostMode::Spoke),
+            other => Err(OrbitError::InvalidInput(format!(
+                "unknown host mode '{other}' (expected 'standalone', 'hub', or 'spoke')"
+            ))),
+        }
+    }
 }
 
-/// Write (or overwrite) the host identity. Returns the file path written.
-pub fn write_host_id(global_root: &Path, host_id: &str) -> Result<PathBuf, OrbitError> {
-    let trimmed = host_id.trim();
-    if trimmed.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "host_id must not be empty".to_string(),
-        ));
+impl std::fmt::Display for HostMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
-    let path = host_toml_path(global_root);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| OrbitError::Io(error.to_string()))?;
+}
+
+/// Versioned machine identity persisted in `~/.orbit/host.toml`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostIdentity {
+    /// On-disk schema version; always [`HOST_IDENTITY_SCHEMA_VERSION`] for a
+    /// value produced by this build.
+    pub schema_version: u32,
+    /// Opaque, generated-once, never-reused stable identity (`hm_<hex>`).
+    pub machine_id: String,
+    /// Operator-chosen, renameable display name; matched against routine
+    /// `hosts:` pins.
+    pub host_id: String,
+    /// Host operating mode.
+    pub mode: HostMode,
+}
+
+impl HostIdentity {
+    /// Deterministic `host.toml` rendering — same identity always serializes to
+    /// the same bytes, so a re-migration or repeated init is a no-op write.
+    fn to_toml(&self) -> String {
+        format!(
+            "# Machine identity for this Orbit host [ORB-10247]. Created by\n\
+             # `orbit init`; `machine_id` is generated once and never edited.\n\
+             # `host_id` is the operator-chosen display name matched against\n\
+             # routine `hosts:` pins.\n\
+             schema_version = {}\n\
+             machine_id = \"{}\"\n\
+             host_id = \"{}\"\n\
+             mode = \"{}\"\n",
+            self.schema_version,
+            self.machine_id,
+            self.host_id,
+            self.mode.as_str(),
+        )
     }
-    let body = format!(
-        "# Host identity for routine scheduling (matched against `hosts:` in\n\
-         # routine definitions). Written by `orbit routine init` [ORB-10021].\n\
-         host_id = \"{trimmed}\"\n"
-    );
-    fs::write(&path, body).map_err(|error| {
-        OrbitError::Io(format!("failed to write '{}': {error}", path.display()))
-    })?;
-    Ok(path)
+}
+
+/// The three actionable states of `host.toml`. Malformed, incomplete, blank,
+/// and future-schema files are returned as `Err` by [`inspect_host_identity`],
+/// never as a variant here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostIdentityState {
+    /// A complete, current-schema identity.
+    Present(HostIdentity),
+    /// A legacy pre-migration file carrying only `host_id`.
+    Legacy {
+        /// The preserved, non-blank legacy `host_id`.
+        host_id: String,
+    },
+    /// No `host.toml` exists yet.
+    Absent,
+}
+
+impl HostIdentityState {
+    /// The host name this state resolves to for routine pinning, if any.
+    pub fn host_id(&self) -> Option<&str> {
+        match self {
+            HostIdentityState::Present(identity) => Some(&identity.host_id),
+            HostIdentityState::Legacy { host_id } => Some(host_id),
+            HostIdentityState::Absent => None,
+        }
+    }
+}
+
+/// Outcome of [`ensure_host_identity`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostIdentityOutcome {
+    /// A fresh identity was created from operator input.
+    Created(HostIdentity),
+    /// A legacy `host_id`-only file was migrated to the current schema.
+    Migrated(HostIdentity),
+    /// A complete current-schema identity already existed; nothing was written.
+    Unchanged(HostIdentity),
+}
+
+impl HostIdentityOutcome {
+    /// The resulting identity, regardless of how it was reached.
+    pub fn identity(&self) -> &HostIdentity {
+        match self {
+            HostIdentityOutcome::Created(identity)
+            | HostIdentityOutcome::Migrated(identity)
+            | HostIdentityOutcome::Unchanged(identity) => identity,
+        }
+    }
+}
+
+/// Operator-supplied fields for a first-time identity creation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewHostIdentity {
+    /// Operator-chosen display name.
+    pub host_id: String,
+    /// Operating mode.
+    pub mode: HostMode,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawHostToml {
+    schema_version: Option<u32>,
+    machine_id: Option<String>,
+    host_id: Option<String>,
+    mode: Option<String>,
 }
 
 fn host_toml_path(global_root: &Path) -> PathBuf {
     global_root.join(HOST_TOML_FILE)
 }
 
-fn hostname_fallback() -> Result<String, OrbitError> {
-    let name = hostname::get()
-        .map_err(|error| OrbitError::Io(format!("failed to resolve hostname: {error}")))?;
-    let name = name.to_string_lossy().trim().to_string();
-    if name.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "machine hostname is empty; set host_id in ~/.orbit/host.toml \
-             via `orbit routine init --host-id <id>`"
-                .to_string(),
-        ));
+fn non_blank(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+/// Classify `host.toml` without mutating it. Returns the actionable
+/// [`HostIdentityState`] for absent / legacy / present files, and a hard error
+/// for malformed, incomplete, blank, or future-schema files (fail closed —
+/// never rewrites the file).
+pub fn inspect_host_identity(global_root: &Path) -> Result<HostIdentityState, OrbitError> {
+    let path = host_toml_path(global_root);
+    if !path.exists() {
+        return Ok(HostIdentityState::Absent);
     }
-    Ok(name)
+    let raw_text = std::fs::read_to_string(&path)
+        .map_err(|error| OrbitError::Io(format!("failed to read '{}': {error}", path.display())))?;
+    let parsed: RawHostToml = toml::from_str(&raw_text).map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "invalid host identity '{}': {error}",
+            path.display()
+        ))
+    })?;
+
+    match parsed.schema_version {
+        None => {
+            // Legacy files carried only `host_id`. A present, non-blank
+            // `host_id` migrates; anything else is unusable.
+            match non_blank(&parsed.host_id) {
+                Some(host_id) => Ok(HostIdentityState::Legacy { host_id }),
+                None => Err(OrbitError::InvalidInput(format!(
+                    "host identity '{}' is incomplete: no schema_version and no host_id; \
+                     run `orbit init` to create one",
+                    path.display()
+                ))),
+            }
+        }
+        Some(version) if version == HOST_IDENTITY_SCHEMA_VERSION => {
+            let machine_id = non_blank(&parsed.machine_id).ok_or_else(|| {
+                OrbitError::InvalidInput(format!(
+                    "host identity '{}' is incomplete: missing or blank machine_id",
+                    path.display()
+                ))
+            })?;
+            let host_id = non_blank(&parsed.host_id).ok_or_else(|| {
+                OrbitError::InvalidInput(format!(
+                    "host identity '{}' is incomplete: missing or blank host_id",
+                    path.display()
+                ))
+            })?;
+            let mode = non_blank(&parsed.mode).ok_or_else(|| {
+                OrbitError::InvalidInput(format!(
+                    "host identity '{}' is incomplete: missing or blank mode",
+                    path.display()
+                ))
+            })?;
+            let mode = HostMode::parse(&mode)?;
+            Ok(HostIdentityState::Present(HostIdentity {
+                schema_version: version,
+                machine_id,
+                host_id,
+                mode,
+            }))
+        }
+        Some(version) if version > HOST_IDENTITY_SCHEMA_VERSION => {
+            Err(OrbitError::InvalidInput(format!(
+                "host identity '{}' has unsupported schema_version {version}; this build \
+                 supports up to {HOST_IDENTITY_SCHEMA_VERSION}. Upgrade Orbit; the file is \
+                 left unchanged",
+                path.display()
+            )))
+        }
+        Some(version) => Err(OrbitError::InvalidInput(format!(
+            "host identity '{}' has invalid schema_version {version}",
+            path.display()
+        ))),
+    }
+}
+
+/// Strictly load a complete, current-schema identity. Absent and legacy files
+/// are errors here (they resolve through `orbit init`); malformed / future
+/// files propagate from [`inspect_host_identity`]. Never falls back to the OS
+/// hostname.
+pub fn load_host_identity(global_root: &Path) -> Result<HostIdentity, OrbitError> {
+    match inspect_host_identity(global_root)? {
+        HostIdentityState::Present(identity) => Ok(identity),
+        HostIdentityState::Legacy { .. } => Err(OrbitError::InvalidInput(format!(
+            "host identity '{}' is a legacy pre-migration file; run `orbit init` to migrate it",
+            host_toml_path(global_root).display()
+        ))),
+        HostIdentityState::Absent => Err(OrbitError::InvalidInput(format!(
+            "no host identity at '{}'; run `orbit init` to create one",
+            host_toml_path(global_root).display()
+        ))),
+    }
+}
+
+/// Ensure a complete, current-schema identity exists, creating or migrating as
+/// needed and returning what happened. `new` supplies the operator's host name
+/// and mode and is invoked **only** when the identity is absent, so callers can
+/// defer prompting until a fresh create is actually required.
+///
+/// Idempotent: a present identity is returned `Unchanged` with no write. A
+/// malformed or future-schema file is never overwritten — the error propagates.
+pub fn ensure_host_identity(
+    global_root: &Path,
+    new: impl FnOnce() -> Result<NewHostIdentity, OrbitError>,
+) -> Result<HostIdentityOutcome, OrbitError> {
+    match inspect_host_identity(global_root)? {
+        HostIdentityState::Present(identity) => Ok(HostIdentityOutcome::Unchanged(identity)),
+        HostIdentityState::Legacy { host_id } => {
+            // Migrate atomically: preserve host_id, generate machine_id, default
+            // to standalone. Rollback leaves the last valid file readable.
+            let identity = HostIdentity {
+                schema_version: HOST_IDENTITY_SCHEMA_VERSION,
+                machine_id: generate_machine_id(),
+                host_id,
+                mode: HostMode::Standalone,
+            };
+            write_host_identity(global_root, &identity)?;
+            Ok(HostIdentityOutcome::Migrated(identity))
+        }
+        HostIdentityState::Absent => {
+            let NewHostIdentity { host_id, mode } = new()?;
+            let host_id = host_id.trim().to_string();
+            if host_id.is_empty() {
+                return Err(OrbitError::InvalidInput(
+                    "host name must not be empty".to_string(),
+                ));
+            }
+            let identity = HostIdentity {
+                schema_version: HOST_IDENTITY_SCHEMA_VERSION,
+                machine_id: generate_machine_id(),
+                host_id,
+                mode,
+            };
+            write_host_identity(global_root, &identity)?;
+            Ok(HostIdentityOutcome::Created(identity))
+        }
+    }
+}
+
+/// Atomically (re)write `host.toml`. The staged-rename write never leaves a
+/// partially overwritten file, so a crash preserves the last valid identity.
+fn write_host_identity(global_root: &Path, identity: &HostIdentity) -> Result<PathBuf, OrbitError> {
+    let path = host_toml_path(global_root);
+    atomic_write_text(&path, &identity.to_toml()).map_err(|error| {
+        OrbitError::Io(format!("failed to write '{}': {error}", path.display()))
+    })?;
+    Ok(path)
+}
+
+/// Best-effort OS hostname, used as the interactive default host name at init.
+/// `None` when the hostname is unavailable or empty.
+pub fn os_hostname() -> Option<String> {
+    hostname::get()
+        .ok()
+        .map(|name| name.to_string_lossy().trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
+static MACHINE_ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Generate an opaque, stable `hm_<hex>` machine id. Called exactly once per
+/// machine (at create / migrate); the persisted value is never regenerated.
+fn generate_machine_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let pid = u64::from(std::process::id());
+    let seq = MACHINE_ID_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let seed =
+        nanos ^ pid.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ seq.wrapping_mul(0xD1B5_4A32_D192_ED03);
+    format!("{MACHINE_ID_PREFIX}{:016x}", splitmix64(seed))
+}
+
+/// SplitMix64 finalizer — folds a seed into a well-distributed 64-bit value.
+fn splitmix64(seed: u64) -> u64 {
+    let mut z = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }

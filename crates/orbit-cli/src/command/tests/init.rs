@@ -108,11 +108,29 @@ fn non_interactive_init_isolates_temporary_root_skill_discovery() {
         InitCommand {
             force: false,
             non_interactive: true,
+            host_name: Some("validation-host".to_string()),
+            host_mode: None,
         }
         .execute_without_runtime(Some(&validation_root.path().join(".orbit")))
     };
 
     outcome.expect("init succeeded");
+
+    // Non-interactive init created the machine identity in the isolated root.
+    let host_toml = validation_root.path().join(".orbit").join("host.toml");
+    let host_contents = fs::read_to_string(&host_toml).expect("read host.toml");
+    assert!(
+        host_contents.contains("schema_version = 1"),
+        "{host_contents}"
+    );
+    assert!(
+        host_contents.contains("host_id = \"validation-host\""),
+        "{host_contents}"
+    );
+    assert!(
+        host_contents.contains("mode = \"standalone\""),
+        "{host_contents}"
+    );
 
     assert_discovery_sentinel(&agents_link, &agents_target);
     assert_discovery_sentinel(&claude_link, &claude_target);
@@ -161,4 +179,94 @@ fn non_interactive_init_isolates_temporary_root_skill_discovery() {
     drop(validation_home);
     assert_discovery_sentinel(&agents_link, &agents_target);
     assert_discovery_sentinel(&claude_link, &claude_target);
+}
+
+fn init_host(
+    root: &Path,
+    host_name: Option<&str>,
+    host_mode: Option<&str>,
+) -> Result<(), orbit_core::OrbitError> {
+    InitCommand {
+        force: false,
+        non_interactive: true,
+        host_name: host_name.map(str::to_string),
+        host_mode: host_mode.map(str::to_string),
+    }
+    .execute_without_runtime(Some(root))
+}
+
+/// Non-interactive `--host-name` + `--host-mode` create the identity exactly
+/// once, and a repeat init preserves the generated machine_id unchanged.
+#[test]
+fn non_interactive_host_name_and_mode_create_then_repeat_is_stable() {
+    let _guard = ENV_LOCK.lock().expect("lock env");
+    let home = tempdir().expect("home tempdir");
+    let _home = ScopedHome::set(home.path());
+    let root = home.path().join(".orbit");
+
+    init_host(&root, Some("dk-mac"), Some("hub")).expect("first init");
+    let host_toml = root.join("host.toml");
+    let first = fs::read_to_string(&host_toml).expect("read host.toml");
+    assert!(first.contains("host_id = \"dk-mac\""), "{first}");
+    assert!(first.contains("mode = \"hub\""), "{first}");
+    let machine_line = first
+        .lines()
+        .find(|line| line.starts_with("machine_id = "))
+        .expect("machine_id line")
+        .to_string();
+    assert!(machine_line.contains("hm_"), "{machine_line}");
+
+    // Repeated init: no prompt, no rewrite, identical machine_id.
+    init_host(&root, Some("ignored-on-repeat"), Some("spoke")).expect("repeat init");
+    let second = fs::read_to_string(&host_toml).expect("re-read host.toml");
+    assert_eq!(first, second, "repeat init must not rewrite host.toml");
+}
+
+/// A legacy `host_id`-only file migrates in place on init.
+#[test]
+fn init_migrates_legacy_host_toml() {
+    let _guard = ENV_LOCK.lock().expect("lock env");
+    let home = tempdir().expect("home tempdir");
+    let _home = ScopedHome::set(home.path());
+    let root = home.path().join(".orbit");
+    fs::create_dir_all(&root).expect("mkdir .orbit");
+    fs::write(root.join("host.toml"), "host_id = \"legacy-host\"\n").expect("seed legacy");
+
+    // No --host-name needed: migration preserves the legacy name.
+    init_host(&root, None, None).expect("migrating init");
+    let migrated = fs::read_to_string(root.join("host.toml")).expect("read migrated");
+    assert!(migrated.contains("schema_version = 1"), "{migrated}");
+    assert!(migrated.contains("host_id = \"legacy-host\""), "{migrated}");
+    assert!(migrated.contains("mode = \"standalone\""), "{migrated}");
+    assert!(migrated.contains("machine_id = \"hm_"), "{migrated}");
+}
+
+/// A fresh host initialized non-interactively without --host-name fails closed.
+#[test]
+fn non_interactive_missing_host_name_fails_closed() {
+    let _guard = ENV_LOCK.lock().expect("lock env");
+    let home = tempdir().expect("home tempdir");
+    let _home = ScopedHome::set(home.path());
+    let root = home.path().join(".orbit");
+
+    let error = init_host(&root, None, None).expect_err("missing host name must fail closed");
+    assert!(error.to_string().contains("--host-name"), "{error}");
+    assert!(
+        !root.join("host.toml").exists(),
+        "no identity should be written on the failure path"
+    );
+}
+
+/// An invalid `--host-mode` fails closed before any identity is written.
+#[test]
+fn invalid_host_mode_fails_closed() {
+    let _guard = ENV_LOCK.lock().expect("lock env");
+    let home = tempdir().expect("home tempdir");
+    let _home = ScopedHome::set(home.path());
+    let root = home.path().join(".orbit");
+
+    let error =
+        init_host(&root, Some("dk-mac"), Some("bogus")).expect_err("invalid mode must fail");
+    assert!(error.to_string().contains("unknown host mode"), "{error}");
+    assert!(!root.join("host.toml").exists());
 }

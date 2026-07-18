@@ -10,7 +10,7 @@ use orbit_common::types::OrbitError;
 use orbit_store::{RoutineFireRecord, Store};
 
 use super::due::{parse_cron, truncate_to_minute};
-use super::host::resolve_host_id;
+use super::host::load_host_identity;
 use super::loader::{LoadedRoutine, RoutineLoadError, collect_routines, discover_workspaces};
 
 /// Full effective state of one routine on this host.
@@ -49,7 +49,7 @@ pub struct RoutineStatusReport {
 
 /// Collect the status of every routine visible from the global registry.
 pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, OrbitError> {
-    let host_id = resolve_host_id(global_root)?;
+    let host_id = load_host_identity(global_root)?.host_id;
     let store = Store::open(&global_root.join("orbit.db"))?;
 
     let discovered = discover_workspaces(global_root)?;

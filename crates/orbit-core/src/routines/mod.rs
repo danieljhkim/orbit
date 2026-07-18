@@ -18,7 +18,10 @@ pub mod sweep;
 
 pub use clock::{ClockInstallReport, install_clock};
 pub use due::{DueDecision, due_decision, parse_cron};
-pub use host::{resolve_host_id, write_host_id};
+pub use host::{
+    HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostIdentityOutcome, HostIdentityState, HostMode,
+    NewHostIdentity, ensure_host_identity, inspect_host_identity, load_host_identity, os_hostname,
+};
 pub use loader::{LoadedRoutine, RoutineCollection, RoutineLoadError, collect_routines};
 pub use status::{
     RoutineStatus, RoutineStatusReport, pause_routine, recent_fires, resume_routine,

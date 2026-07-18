@@ -1,7 +1,7 @@
 ---
 title: Host Registry — Design
 owner: claude
-last_updated: 2026-07-17
+last_updated: 2026-07-18
 status: Accepted
 feature: host-registry
 doc_role: design
@@ -10,7 +10,7 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10247, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Design
@@ -25,19 +25,36 @@ leaves client→hub transport to the [MCP bridge](../mcp-bridge/2_design.md)
 ## 1. Host Identity (`host.toml`)
 
 `~/.orbit/host.toml` remains the one genuinely host-local datum ([ADR-0205]), widened
-from a scheduling pin to general machine identity:
+from a scheduling pin to a versioned machine identity ([ORB-10247]):
 
 ```toml
 # ~/.orbit/host.toml
-host_id    = "dk-mac"        # human name; unique across the registry
-machine_id = "hm_9f2c81d4"   # generated once at init; never edited or reused
+schema_version = 1           # on-disk version; a higher value fails closed
+machine_id     = "hm_9f2c81d4"   # generated once at init; never edited or reused
+host_id        = "dk-mac"        # human name; unique across the registry
+mode           = "standalone"    # standalone | hub | spoke
 ```
 
 **Initialization moves to `orbit init`.** Global seeding prompts for a host name
-(default: OS hostname; refuses to prompt when stdin is not a TTY) and generates
-`machine_id` if absent. Non-interactive callers pass `--host-name <name>`. `orbit
-routine init` continues to work but no longer owns the file — it reads the existing
-identity and errors if none exists, replacing today's silent hostname fallback.
+(default: OS hostname; refuses to prompt when stdin is not a TTY), asks for the
+operating `mode` (default `standalone`), and generates `machine_id` if absent.
+Non-interactive callers pass `--host-name <name>` (and optionally `--host-mode`); a
+fresh host initialized non-interactively without `--host-name` fails closed rather
+than defaulting silently. `orbit routine init` continues to work but no longer owns
+the file — it reads the existing identity (limiting its own mutation to clock
+installation) and errors if none exists, replacing today's silent hostname fallback.
+
+**Migration is once and idempotent.** A legacy `host.toml` carrying only `host_id`
+(the routines-v1 scheduling pin) is upgraded in place on `orbit init`: `host_id` is
+preserved, `mode` defaults to `standalone`, and `machine_id` is generated once and
+never regenerated. A repeated init preserves the `machine_id` and writes nothing.
+The write is atomic (staged rename), so rollback always leaves the last valid
+identity readable and a partially overwritten file is impossible.
+
+**Loading is strict.** After migration, identity resolution (routine `hosts:`
+matching, the sweep, `routine status`) fails closed with an actionable error on an
+absent, malformed, incomplete, blank, or future-schema file — it never falls back to
+the OS hostname, and a newer `schema_version` fails without rewriting the file.
 
 **Resolution rule: names are for humans, `machine_id` is what the system stores.**
 Human-authored text — routine `hosts:` pins, the task `host` selector, CLI arguments
@@ -328,5 +345,8 @@ of that routine.** Consequences:
 - [ORB-00424] — proposed the local/remote Orbit MCP unification (SSH-carried stdio,
   capability sets) that carries client→hub traffic; this design adds the
   hub→satellite half as a pull-based runner protocol.
+- [ORB-10247] — implemented the versioned `HostIdentity` (§1): `schema_version` /
+  `machine_id` / `host_id` / `mode`, `orbit init` ownership, legacy migration, and
+  strict fail-closed loading (Phase 1 / Unit B1 under ORB-10246).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
