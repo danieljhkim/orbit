@@ -23,11 +23,12 @@ use crate::state::DashboardState;
 /// frontend can render the selected workspace's location directly, without
 /// needing to know the server's home directory (ORB-00037).
 pub(super) async fn list_workspaces(State(state): State<DashboardState>) -> Response {
-    // Reflect native registry mutations (add/remove/rebind) before listing.
-    state.refresh();
-    let default = state.default_workspace();
+    // Refresh and pin one snapshot so the listing and its `is_default` flags all
+    // reflect the same generation (add/remove/rebind observed atomically).
+    let pinned = state.pin();
+    let default = pinned.default_workspace();
     let home = home_dir();
-    let values: Vec<Value> = state
+    let values: Vec<Value> = pinned
         .entries()
         .iter()
         .map(|entry| {
@@ -37,7 +38,7 @@ pub(super) async fn list_workspaces(State(state): State<DashboardState>) -> Resp
                 "root": abbreviate_home(&entry.repo_root, home.as_deref()),
                 "orbit_dir": abbreviate_home(&entry.orbit_dir, home.as_deref()),
                 "status": if entry.active { "active" } else { "invalid" },
-                "is_default": default.as_deref() == Some(entry.id.as_str()),
+                "is_default": default == Some(entry.id.as_str()),
             })
         })
         .collect();
@@ -53,13 +54,14 @@ pub(super) async fn list_workspaces(State(state): State<DashboardState>) -> Resp
 /// any that fail to open — the aggregate view stays available even when one
 /// workspace is broken.
 pub(super) async fn list_all_tasks(State(state): State<DashboardState>) -> Response {
-    // Reflect native registry mutations before aggregating across workspaces.
-    state.refresh();
+    // Refresh and pin one snapshot so every task's workspace tag (id, name,
+    // root) and the runtime it was listed from come from the same generation —
+    // never old metadata spliced onto a runtime resolved from a newer binding.
+    let pinned = state.pin();
     let home = home_dir();
     let mut all = Vec::new();
-    let entries = state.entries();
-    for entry in entries.iter().filter(|entry| entry.active) {
-        let Ok(runtime) = state.runtime_for(&entry.id) else {
+    for entry in pinned.entries().iter().filter(|entry| entry.active) {
+        let Ok(runtime) = pinned.runtime_for(&entry.id) else {
             continue;
         };
         let values = match list_tasks_json(&runtime) {

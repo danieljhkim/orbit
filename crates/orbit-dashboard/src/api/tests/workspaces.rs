@@ -2,7 +2,8 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier, Mutex};
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
@@ -12,6 +13,9 @@ use orbit_core::command::task::TaskAddParams;
 use orbit_core::{ActorIdentity, OrbitRuntime, TaskStatus};
 use serde_json::json;
 use tower::ServiceExt;
+use tracing_subscriber::Registry;
+use tracing_subscriber::fmt::MakeWriter;
+use tracing_subscriber::layer::SubscriberExt;
 
 use super::super::*;
 use super::test_support::body_json;
@@ -820,4 +824,233 @@ fn concurrent_refresh_and_reads_stay_consistent() {
     // The static binding is never evicted, so the cache handle is stable.
     let alpha1 = state.runtime_for("alpha").expect("alpha");
     assert!(Arc::ptr_eq(&alpha0, &alpha1), "idempotent runtime cache");
+}
+
+/// Dashboard task titles for a runtime, read through the shared JSON projection
+/// (the same one `/api/tasks/all` uses) so a runtime's binding is observable.
+fn runtime_task_titles(runtime: &OrbitRuntime) -> Vec<String> {
+    super::super::tasks::list_tasks_json(runtime)
+        .expect("list tasks json")
+        .iter()
+        .map(|t| t["title"].as_str().expect("title").to_string())
+        .collect()
+}
+
+/// Barrier-controlled rebind-during-build: a runtime built against the old
+/// binding, paused mid-flight while the registry is rebound and refreshed, must
+/// NOT republish as current when it finally reaches the cache. The new-binding
+/// runtime stays authoritative, the old build is returned only to its own
+/// request, and `open_runtimes` (which every aggregate/health response and
+/// `/api/tasks/all` derives from) surfaces exactly the new checkout — never the
+/// stale one. Covers finding P1 (stale runtime publication) deterministically.
+#[test]
+fn stale_build_during_rebind_never_republishes_as_current() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (_alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    write_registry(&global_root, &[("alpha", &alpha_repo)]);
+    let state = registry_state(&global_root);
+
+    // The racing thread performs the *first* build, so leave the cache cold.
+    let paused = Arc::new(Barrier::new(2));
+    let release = Arc::new(Barrier::new(2));
+    let fired = Arc::new(AtomicBool::new(false));
+    {
+        let paused = paused.clone();
+        let release = release.clone();
+        let fired = fired.clone();
+        state.set_pre_publish_hook(Arc::new(move |_id: &str| {
+            // Only the first build (the racing old-binding build) pauses; the
+            // main thread's later new-binding build passes straight through.
+            if !fired.swap(true, Ordering::SeqCst) {
+                paused.wait();
+                release.wait();
+            }
+        }));
+    }
+
+    let new_runtime = std::thread::scope(|scope| {
+        let racer = {
+            let state = &state;
+            scope.spawn(move || state.runtime_for("alpha").expect("old-binding build"))
+        };
+
+        // Wait until the racer has built the old-binding runtime and parked
+        // itself just before publication.
+        paused.wait();
+
+        // Rebind alpha to a fresh checkout and refresh: a new generation, and
+        // the cold cache means nothing is evicted.
+        let (_v2_orbit, v2_repo) = seed_workspace(&global_root, tmp.path(), "alpha_v2");
+        write_registry(&global_root, &[("alpha", &v2_repo)]);
+        state.refresh();
+
+        // Resolve the new binding — builds and publishes the new-generation
+        // runtime while the racer is still parked.
+        let new_runtime = state.runtime_for("alpha").expect("new-binding build");
+
+        // Release the racer; it now attempts to publish its stale old build.
+        release.wait();
+        let old_runtime = racer.join().expect("join racer");
+
+        assert!(
+            !Arc::ptr_eq(&old_runtime, &new_runtime),
+            "old build is a distinct runtime, returned only to its own request"
+        );
+        // The stale build must not have overwritten the new cache entry.
+        let current = state.runtime_for("alpha").expect("current");
+        assert!(
+            Arc::ptr_eq(&current, &new_runtime),
+            "stale old-generation build must never republish as current"
+        );
+        // The old build serves the old checkout; current serves the new one.
+        assert!(
+            runtime_task_titles(&old_runtime).contains(&"alpha task".to_string()),
+            "old build binds the original checkout"
+        );
+        assert!(
+            runtime_task_titles(&current).contains(&"alpha_v2 task".to_string()),
+            "current binds the rebound checkout"
+        );
+        new_runtime
+    });
+
+    // open_runtimes joins by exact binding, so the stale runtime is filtered
+    // out entirely: exactly one alpha runtime, and it is the new checkout's.
+    let open = state.open_runtimes();
+    let alpha_open: Vec<_> = open.iter().filter(|(id, _)| id == "alpha").collect();
+    assert_eq!(alpha_open.len(), 1, "one coherent alpha runtime open");
+    assert!(
+        Arc::ptr_eq(&alpha_open[0].1, &new_runtime),
+        "open_runtimes surfaces only the current-binding runtime"
+    );
+    assert!(
+        runtime_task_titles(&alpha_open[0].1).contains(&"alpha_v2 task".to_string()),
+        "the open runtime is never tagged as the wrong (old) checkout"
+    );
+}
+
+/// Detailed `/healthz` derives its checks and its `workspaces_open` count from a
+/// single pinned generation: a native removal drops the workspace from both in
+/// one coherent step, never probing or counting a lingering checkout. Covers the
+/// detailed-health arm of finding P1.
+#[tokio::test]
+async fn detailed_healthz_reflects_refresh_in_one_coherent_generation() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (_alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    let (_beta_orbit, beta_repo) = seed_workspace(&global_root, tmp.path(), "beta");
+    write_registry(
+        &global_root,
+        &[("alpha", &alpha_repo), ("beta", &beta_repo)],
+    );
+    let state = registry_state(&global_root);
+
+    // Build + cache both runtimes so detailed health has them open.
+    assert_eq!(route_status(&state, "alpha").await, StatusCode::OK);
+    assert_eq!(route_status(&state, "beta").await, StatusCode::OK);
+
+    let log_dir = tempfile::tempdir().expect("log tempdir");
+    let log_path = log_dir.path().join("orbit.jsonl");
+
+    let before =
+        body_json(crate::health::detailed_response(&state, Ok(log_path.clone())).await).await;
+    assert_eq!(before["workspaces_open"], json!(2));
+    assert_eq!(health_workspaces(&before), HashSet::from(["alpha", "beta"]));
+
+    // Native remove of beta; detailed health refreshes and must drop beta from
+    // both the count and the per-workspace checks together.
+    write_registry(&global_root, &[("alpha", &alpha_repo)]);
+
+    let after = body_json(crate::health::detailed_response(&state, Ok(log_path)).await).await;
+    assert_eq!(after["workspaces_open"], json!(1));
+    assert_eq!(health_workspaces(&after), HashSet::from(["alpha"]));
+}
+
+/// The distinct workspace names named by a detailed `/healthz` body's checks.
+fn health_workspaces(body: &serde_json::Value) -> HashSet<&str> {
+    body["checks"]
+        .as_array()
+        .expect("checks array")
+        .iter()
+        .filter_map(|check| check["workspace"].as_str())
+        .collect()
+}
+
+#[derive(Clone, Default)]
+struct SharedBuf(Arc<Mutex<Vec<u8>>>);
+
+impl<'a> MakeWriter<'a> for SharedBuf {
+    type Writer = SharedBufWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        SharedBufWriter(self.0.clone())
+    }
+}
+
+struct SharedBufWriter(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for SharedBufWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("buffer lock").extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// A malformed refresh keeps the last valid snapshot AND emits a credential-safe
+/// diagnostic: the captured warning names the registry path and Orbit's error
+/// but never echoes the registry file's contents, so a tokenized `git_remote`
+/// on disk cannot leak into logs. Covers finding P2's diagnostic-safety arm.
+#[test]
+fn malformed_refresh_emits_credential_safe_diagnostic() {
+    const SECRET: &str = "ghp_SUPERSECRETtoken0xDEADBEEF";
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (_alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    write_registry(&global_root, &[("alpha", &alpha_repo)]);
+    let state = registry_state(&global_root);
+    assert_eq!(state.entries().len(), 1);
+
+    // Corrupt the registry with malformed JSON that still embeds a secret-looking
+    // token, exactly as a tokenized git_remote would appear on disk.
+    let registry_path = global_root.join("workspaces.json");
+    std::fs::write(
+        &registry_path,
+        format!("{{ \"git_remote\": \"https://x-access-token:{SECRET}@github.com/o/r\", INVALID"),
+    )
+    .expect("corrupt registry");
+
+    let buf = SharedBuf::default();
+    let subscriber = Registry::default().with(
+        tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_writer(buf.clone()),
+    );
+    tracing::subscriber::with_default(subscriber, || {
+        // Fail-soft: keeps the last valid snapshot and emits the diagnostic.
+        state.refresh();
+    });
+
+    let logged = String::from_utf8(buf.0.lock().expect("buffer lock").clone()).expect("utf8 log");
+    assert!(
+        logged.contains("retaining last valid workspace set"),
+        "the keep-last-valid diagnostic must be emitted, got {logged:?}"
+    );
+    assert!(
+        logged.contains("workspaces.json"),
+        "the diagnostic must name the registry path, got {logged:?}"
+    );
+    assert!(
+        !logged.contains(SECRET),
+        "the diagnostic must never echo registry contents/secrets, got {logged:?}"
+    );
+    // Keep-last-valid: the previous snapshot is untouched.
+    assert_eq!(state.entries().len(), 1);
+    assert_eq!(state.entries()[0].id, "alpha");
 }

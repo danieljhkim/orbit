@@ -13,9 +13,24 @@
 //! ORB-10029); it is retained for [`crate::serve`] (callers embedding an
 //! already-built `OrbitRuntime`) and for every existing handler test, which
 //! builds an in-memory runtime and wants a trivial single-workspace harness.
+//!
+//! ## Concurrency model (ORB-10294)
+//!
+//! The registered workspace set is an immutable [`Snapshot`] stamped with a
+//! monotonic **generation**, swapped atomically on [`DashboardState::refresh`].
+//! The runtime cache is a *non-authoritative* memo: every read and every
+//! publication is validated against an exact binding (`id` + `repo_root` +
+//! `orbit_dir`) taken from a **pinned** snapshot generation, so a runtime built
+//! for an older snapshot can never be returned as current nor overwrite a newer
+//! binding. Each request boundary pins one snapshot ([`DashboardState::pin`] →
+//! [`Pinned`]) and derives default selection, entry metadata, runtime
+//! resolution, and the open-runtime set from that single generation, so a
+//! concurrent add/remove/rebind is observed as one coherent old-or-new view —
+//! never old metadata spliced onto a newer runtime.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::extract::FromRequestParts;
@@ -28,6 +43,17 @@ use serde_json::json;
 
 /// Synthetic workspace id used by [`DashboardState::single`].
 pub(crate) const SINGLE_WORKSPACE_ID: &str = "default";
+
+/// Generation assigned to the snapshot a [`DashboardState`] is constructed with.
+/// Successful refreshes allocate strictly-increasing generations above it.
+const INITIAL_GENERATION: u64 = 0;
+
+/// A `#[cfg(test)]` seam invoked in `resolve_runtime` after a runtime is built
+/// but *before* it is published to the cache. Lets a test deterministically
+/// pause a build, mutate the registry, and refresh, then release the build to
+/// prove an older-snapshot runtime cannot republish as current.
+#[cfg(test)]
+pub(crate) type PrePublishHook = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// One registered workspace the dashboard can serve.
 ///
@@ -47,7 +73,13 @@ pub(crate) struct WsEntry {
 /// dropdown's default selection. A refresh ([`DashboardState::refresh`])
 /// replaces the whole `Arc<Snapshot>` in one step, so a reader either sees the
 /// old view or the new one — never a half-applied update.
+///
+/// `generation` is a monotonic identity assigned when the snapshot is published.
+/// It lets the runtime cache reject an older-snapshot build that would otherwise
+/// overwrite a newer binding, and lets a pinned request prove which generation
+/// it is reading (see the module-level concurrency model).
 pub(crate) struct Snapshot {
+    generation: u64,
     entries: Vec<WsEntry>,
     default_workspace: Option<String>,
 }
@@ -78,9 +110,10 @@ impl RegistrySource {
         }
     }
 
-    /// Reload the authoritative registry into a fresh [`Snapshot`]. Stale-path
-    /// workspaces are marked inactive (never deleted) via `validate_workspaces`.
-    fn load(&self) -> Result<Snapshot, OrbitError> {
+    /// Reload the authoritative registry into a fresh (generation-less) snapshot
+    /// view. Stale-path workspaces are marked inactive (never deleted) via
+    /// `validate_workspaces`. The caller stamps the generation at publication.
+    fn load(&self) -> Result<SnapshotData, OrbitError> {
         let mut registry = workspace_registry::load_registry_from(&self.registry_path)?;
         workspace_registry::validate_workspaces(&mut registry);
         let default_workspace = crate::default_workspace_selection(
@@ -97,19 +130,30 @@ impl RegistrySource {
                 active: workspace.status == WorkspaceStatus::Active,
             })
             .collect();
-        Ok(Snapshot {
+        Ok(SnapshotData {
             entries,
             default_workspace,
         })
     }
 }
 
-/// A built runtime plus the binding it was constructed from. The binding lets a
-/// refresh evict a runtime whose workspace was rebound (root/orbit-dir changed)
-/// and lets `runtime_for` detect a stale cache entry and rebuild.
+/// A loaded-but-unpublished snapshot: the workspace set and default selection
+/// without a generation. [`StateInner::publish_snapshot`] stamps a generation
+/// and wraps it in an `Arc<Snapshot>`.
+struct SnapshotData {
+    entries: Vec<WsEntry>,
+    default_workspace: Option<String>,
+}
+
+/// A built runtime plus the binding *and generation* it was constructed for.
+/// The binding lets a refresh evict a runtime whose workspace was rebound
+/// (root/orbit-dir changed) and lets every cache read reject a stale entry; the
+/// generation lets publication refuse to overwrite a newer binding with an
+/// older-snapshot build.
 struct CachedRuntime {
     repo_root: PathBuf,
     orbit_dir: PathBuf,
+    generation: u64,
     runtime: Arc<OrbitRuntime>,
 }
 
@@ -128,6 +172,166 @@ struct StateInner {
     /// atomic step relative to other refreshes. Never held across runtime
     /// construction.
     refresh_lock: Mutex<()>,
+    /// Allocates strictly-increasing generations for published snapshots.
+    generation_counter: AtomicU64,
+    /// Test seam: paused just before a freshly-built runtime is published.
+    #[cfg(test)]
+    on_pre_publish: Mutex<Option<PrePublishHook>>,
+}
+
+impl StateInner {
+    fn lock_snapshot(&self) -> std::sync::MutexGuard<'_, Arc<Snapshot>> {
+        self.snapshot.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn lock_runtimes(&self) -> std::sync::MutexGuard<'_, HashMap<String, CachedRuntime>> {
+        // Recover from poisoning: the cache is an idempotent build cache, so a
+        // panic in another thread cannot leave it logically inconsistent.
+        self.runtimes.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Cheap clone of the live snapshot `Arc`, taken under (and released with)
+    /// the snapshot lock so callers hold no lock while reading it.
+    fn snapshot(&self) -> Arc<Snapshot> {
+        self.lock_snapshot().clone()
+    }
+
+    /// Stamp `data` with the next generation and wrap it for publication.
+    fn publish_snapshot(&self, data: SnapshotData) -> Snapshot {
+        Snapshot {
+            generation: self.generation_counter.fetch_add(1, Ordering::Relaxed),
+            entries: data.entries,
+            default_workspace: data.default_workspace,
+        }
+    }
+
+    /// Resolve (and lazily build + cache) the runtime for `id` against a single
+    /// pinned `snapshot`. The pinned snapshot is the sole authority for the
+    /// binding: the cache is validated against it, never trusted by id alone.
+    ///
+    /// Building happens outside every lock. Publication (`publish_runtime`)
+    /// refuses to overwrite a newer-generation binding, so a runtime built for
+    /// an older snapshot is returned only to *this* request's pinned view and
+    /// never becomes the current cache entry.
+    fn resolve_runtime(
+        &self,
+        snapshot: &Snapshot,
+        id: &str,
+    ) -> Result<Arc<OrbitRuntime>, WsRejection> {
+        let (repo_root, orbit_dir) = {
+            let entry = snapshot
+                .entries
+                .iter()
+                .find(|entry| entry.id == id)
+                .ok_or_else(|| WsRejection::unknown(id))?;
+            if !entry.active {
+                return Err(WsRejection::inactive(id));
+            }
+            (entry.repo_root.clone(), entry.orbit_dir.clone())
+        };
+        let generation = snapshot.generation;
+
+        // Fast path: a cached runtime whose binding still matches this snapshot.
+        if let Some(runtime) = self.cached_matching(id, &repo_root, &orbit_dir) {
+            return Ok(runtime);
+        }
+
+        // Build outside the lock (no lock held across construction).
+        let runtime = OrbitRuntime::from_roots(&self.global_root, &orbit_dir)
+            .map_err(|e| WsRejection::build_failed(id, &e))?
+            .with_actor(ActorIdentity::human("human"));
+        let runtime = Arc::new(runtime);
+
+        // Test seam: pause between build and publish so a test can rebind +
+        // refresh and prove this (now older-generation) build cannot republish.
+        #[cfg(test)]
+        self.invoke_pre_publish_hook(id);
+
+        Ok(self.publish_runtime(id, repo_root, orbit_dir, generation, runtime))
+    }
+
+    /// Publish a freshly-built runtime under the cache lock with binding +
+    /// generation discipline, returning the runtime that is authoritative for
+    /// the caller's pinned generation.
+    fn publish_runtime(
+        &self,
+        id: &str,
+        repo_root: PathBuf,
+        orbit_dir: PathBuf,
+        generation: u64,
+        runtime: Arc<OrbitRuntime>,
+    ) -> Arc<OrbitRuntime> {
+        let mut cache = self.lock_runtimes();
+        if let Some(existing) = cache.get(id) {
+            // Same binding: a concurrent build already won; it is idempotent.
+            if existing.repo_root == repo_root && existing.orbit_dir == orbit_dir {
+                return existing.runtime.clone();
+            }
+            // Different binding at an equal-or-newer generation than ours means
+            // a newer snapshot already published here; an older-snapshot build
+            // must never overwrite it. Return it for this request's pinned old
+            // generation only (a differing binding cannot share our generation,
+            // since one generation has one binding per id).
+            if generation < existing.generation {
+                return runtime;
+            }
+        }
+        cache.insert(
+            id.to_string(),
+            CachedRuntime {
+                repo_root,
+                orbit_dir,
+                generation,
+                runtime: runtime.clone(),
+            },
+        );
+        runtime
+    }
+
+    /// Return the cached runtime for `id` iff its binding matches `(repo_root,
+    /// orbit_dir)`; a mismatch (rebound workspace or a stale publication) reports
+    /// absent so the caller rebuilds against the pinned snapshot.
+    fn cached_matching(
+        &self,
+        id: &str,
+        repo_root: &Path,
+        orbit_dir: &Path,
+    ) -> Option<Arc<OrbitRuntime>> {
+        let cache = self.lock_runtimes();
+        cache.get(id).and_then(|cached| {
+            (cached.repo_root == repo_root && cached.orbit_dir == orbit_dir)
+                .then(|| cached.runtime.clone())
+        })
+    }
+
+    /// The open (built + cached) runtimes whose binding matches `snapshot`, in
+    /// snapshot order. Joining by exact binding — not by id — is what prevents a
+    /// stale cache entry from being surfaced or tagged as the wrong checkout.
+    fn open_runtimes_for(&self, snapshot: &Snapshot) -> Vec<(String, Arc<OrbitRuntime>)> {
+        let cache = self.lock_runtimes();
+        snapshot
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                cache.get(&entry.id).and_then(|cached| {
+                    (cached.repo_root == entry.repo_root && cached.orbit_dir == entry.orbit_dir)
+                        .then(|| (entry.id.clone(), cached.runtime.clone()))
+                })
+            })
+            .collect()
+    }
+
+    #[cfg(test)]
+    fn invoke_pre_publish_hook(&self, id: &str) {
+        let hook = self
+            .on_pre_publish
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(hook) = hook {
+            hook(id);
+        }
+    }
 }
 
 /// Axum application state: the set of servable workspaces plus a lazy runtime
@@ -156,12 +360,13 @@ impl DashboardState {
             CachedRuntime {
                 repo_root: PathBuf::new(),
                 orbit_dir: PathBuf::new(),
+                generation: INITIAL_GENERATION,
                 runtime,
             },
         );
         Self::from_parts(
             PathBuf::new(),
-            Snapshot {
+            SnapshotData {
                 entries: vec![entry],
                 default_workspace: Some(SINGLE_WORKSPACE_ID.to_string()),
             },
@@ -183,7 +388,7 @@ impl DashboardState {
     ) -> Self {
         Self::from_parts(
             global_root,
-            Snapshot {
+            SnapshotData {
                 entries,
                 default_workspace,
             },
@@ -213,26 +418,36 @@ impl DashboardState {
 
     fn from_parts(
         global_root: PathBuf,
-        snapshot: Snapshot,
+        snapshot: SnapshotData,
         runtimes: HashMap<String, CachedRuntime>,
         source: Option<RegistrySource>,
     ) -> Self {
+        let initial = Snapshot {
+            generation: INITIAL_GENERATION,
+            entries: snapshot.entries,
+            default_workspace: snapshot.default_workspace,
+        };
         Self {
             inner: Arc::new(StateInner {
                 global_root,
-                snapshot: Mutex::new(Arc::new(snapshot)),
+                snapshot: Mutex::new(Arc::new(initial)),
                 runtimes: Mutex::new(runtimes),
                 source,
                 refresh_lock: Mutex::new(()),
+                // Next successful refresh allocates INITIAL_GENERATION + 1.
+                generation_counter: AtomicU64::new(INITIAL_GENERATION + 1),
+                #[cfg(test)]
+                on_pre_publish: Mutex::new(None),
             }),
         }
     }
 
     /// The currently-servable workspace entries (a cheap clone of the live
-    /// snapshot). Call [`DashboardState::refresh`] first at a request boundary
-    /// to reflect on-disk registry mutations.
+    /// snapshot). Test-only convenience: production reads go through
+    /// [`DashboardState::pin`] so metadata and runtime share one generation.
+    #[cfg(test)]
     pub(crate) fn entries(&self) -> Vec<WsEntry> {
-        self.snapshot().entries.clone()
+        self.inner.snapshot().entries.clone()
     }
 
     /// Global orbit root (`~/.orbit`) this server was launched against. Empty
@@ -243,8 +458,43 @@ impl DashboardState {
         &self.inner.global_root
     }
 
+    /// Test-only convenience: the live default selection. Production reads the
+    /// pinned default via [`Pinned::default_workspace`].
+    #[cfg(test)]
     pub(crate) fn default_workspace(&self) -> Option<String> {
-        self.snapshot().default_workspace.clone()
+        self.inner.snapshot().default_workspace.clone()
+    }
+
+    /// Resolve (and lazily build + cache) the runtime for workspace `id` against
+    /// the *live* snapshot. Test-only convenience: production resolves through
+    /// [`Pinned::runtime_for`] so metadata and runtime share one generation.
+    #[cfg(test)]
+    pub(crate) fn runtime_for(&self, id: &str) -> Result<Arc<OrbitRuntime>, WsRejection> {
+        let snapshot = self.inner.snapshot();
+        self.inner.resolve_runtime(&snapshot, id)
+    }
+
+    /// Snapshot of the runtimes this server currently has open (built and
+    /// cached) whose binding matches the live snapshot, in registry order.
+    /// Test-only convenience: production health reads the pinned open set via
+    /// [`Pinned::open_runtimes`].
+    #[cfg(test)]
+    pub(crate) fn open_runtimes(&self) -> Vec<(String, Arc<OrbitRuntime>)> {
+        let snapshot = self.inner.snapshot();
+        self.inner.open_runtimes_for(&snapshot)
+    }
+
+    /// Refresh from the authoritative registry, then pin the resulting snapshot
+    /// as one immutable [`Pinned`] view. Every derived read — default selection,
+    /// entry metadata, runtime resolution, and the open-runtime set — sees the
+    /// same generation, so a concurrent add/remove/rebind is observed as one
+    /// coherent old-or-new response, never a mix.
+    pub(crate) fn pin(&self) -> Pinned {
+        self.refresh();
+        Pinned {
+            inner: self.inner.clone(),
+            snapshot: self.inner.snapshot(),
+        }
     }
 
     /// Reload the registered workspace set from the authoritative registry and
@@ -258,7 +508,7 @@ impl DashboardState {
     /// - **Keep-last-valid.** A malformed or unreadable registry leaves the
     ///   current snapshot untouched and emits a credential-safe diagnostic.
     /// - **No build under lock.** Eviction only drops cache entries; runtimes
-    ///   are (re)built lazily in `runtime_for`, never here and never while a
+    ///   are (re)built lazily in `resolve_runtime`, never here and never while a
     ///   registry/cache lock is held.
     pub(crate) fn refresh(&self) {
         let Some(source) = self.inner.source.as_ref() else {
@@ -266,28 +516,29 @@ impl DashboardState {
         };
         // Serialize concurrent refreshes so the swap + eviction below is one
         // atomic step. Held across the registry read but never across runtime
-        // construction (which only happens in `runtime_for`, off this lock).
+        // construction (which only happens in `resolve_runtime`, off this lock).
         let _serialize = self
             .inner
             .refresh_lock
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        let snapshot = match source.load() {
-            Ok(snapshot) => snapshot,
+        let data = match source.load() {
+            Ok(data) => data,
             Err(error) => {
                 // A malformed or partially-written registry must never replace
                 // a good in-memory snapshot. The diagnostic names the registry
                 // path and Orbit's own error message; it deliberately never
                 // echoes the file's contents, so a tokenized `git_remote` in
                 // the registry cannot leak into logs.
-                tracing::warn!(
-                    registry = %source.registry_path.display(),
-                    error = %error,
-                    "workspace registry refresh failed; retaining last valid workspace set"
-                );
+                let diagnostic = RefreshFailure::new(&source.registry_path, &error);
+                diagnostic.warn();
                 return;
             }
         };
+        // Publish a generation-stamped snapshot. Newer generation than any cache
+        // entry built before this point, so `publish_runtime` treats an
+        // in-flight older build as stale.
+        let snapshot = self.inner.publish_snapshot(data);
         // Bindings still servable after the swap; used to evict runtimes whose
         // workspace was removed, went inactive, or was rebound.
         let live: Vec<(String, PathBuf, PathBuf)> = snapshot
@@ -303,10 +554,10 @@ impl DashboardState {
             })
             .collect();
         {
-            let mut guard = self.lock_snapshot();
+            let mut guard = self.inner.lock_snapshot();
             *guard = Arc::new(snapshot);
         }
-        let mut cache = self.lock_runtimes();
+        let mut cache = self.inner.lock_runtimes();
         cache.retain(|id, cached| {
             live.iter().any(|(live_id, repo_root, orbit_dir)| {
                 live_id == id && *repo_root == cached.repo_root && *orbit_dir == cached.orbit_dir
@@ -314,114 +565,73 @@ impl DashboardState {
         });
     }
 
-    /// Resolve (and lazily build + cache) the runtime for workspace `id`.
-    ///
-    /// Building happens outside the cache lock; a concurrent build for the same
-    /// binding is harmless (idempotent) and the first cached value wins. A
-    /// cache entry whose binding no longer matches the live snapshot (the
-    /// workspace was rebound) is rebuilt and replaced.
+    /// Install the `#[cfg(test)]` pre-publish hook (see [`PrePublishHook`]).
+    #[cfg(test)]
+    pub(crate) fn set_pre_publish_hook(&self, hook: PrePublishHook) {
+        *self
+            .inner
+            .on_pre_publish
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(hook);
+    }
+}
+
+/// A request-pinned view of dashboard state: one immutable [`Snapshot`]
+/// generation plus shared access to the runtime cache. Every read and every
+/// runtime resolution is evaluated against this single snapshot, so one response
+/// never mixes old entry metadata with a runtime resolved from a newer binding.
+pub(crate) struct Pinned {
+    inner: Arc<StateInner>,
+    snapshot: Arc<Snapshot>,
+}
+
+impl Pinned {
+    /// The pinned generation's servable workspace entries.
+    pub(crate) fn entries(&self) -> &[WsEntry] {
+        &self.snapshot.entries
+    }
+
+    /// The pinned generation's default-workspace selection.
+    pub(crate) fn default_workspace(&self) -> Option<&str> {
+        self.snapshot.default_workspace.as_deref()
+    }
+
+    /// Resolve the runtime for `id` against the pinned snapshot's exact binding.
     pub(crate) fn runtime_for(&self, id: &str) -> Result<Arc<OrbitRuntime>, WsRejection> {
-        // Resolve the binding from the live snapshot, then release the snapshot
-        // lock before touching the runtime cache or building a runtime.
-        let (repo_root, orbit_dir) = {
-            let snapshot = self.lock_snapshot();
-            let entry = snapshot
-                .entries
-                .iter()
-                .find(|entry| entry.id == id)
-                .ok_or_else(|| WsRejection::unknown(id))?;
-            if !entry.active {
-                return Err(WsRejection::inactive(id));
-            }
-            (entry.repo_root.clone(), entry.orbit_dir.clone())
-        };
-
-        // Fast path: a cached runtime whose binding still matches.
-        if let Some(runtime) = self.cached_matching(id, &repo_root, &orbit_dir) {
-            return Ok(runtime);
-        }
-
-        // Build outside the lock (no lock held across construction).
-        let runtime = OrbitRuntime::from_roots(&self.inner.global_root, &orbit_dir)
-            .map_err(|e| WsRejection::build_failed(id, &e))?
-            .with_actor(ActorIdentity::human("human"));
-        let runtime = Arc::new(runtime);
-
-        let mut cache = self.lock_runtimes();
-        // A concurrent build for the same binding wins; a stale binding is
-        // replaced with the freshly-built runtime.
-        if let Some(existing) = cache.get(id)
-            && existing.repo_root == repo_root
-            && existing.orbit_dir == orbit_dir
-        {
-            return Ok(existing.runtime.clone());
-        }
-        cache.insert(
-            id.to_string(),
-            CachedRuntime {
-                repo_root,
-                orbit_dir,
-                runtime: runtime.clone(),
-            },
-        );
-        Ok(runtime)
+        self.inner.resolve_runtime(&self.snapshot, id)
     }
 
-    /// Return the cached runtime for `id` iff its binding matches `(repo_root,
-    /// orbit_dir)`; a mismatch (rebound workspace) reports absent so the caller
-    /// rebuilds.
-    fn cached_matching(
-        &self,
-        id: &str,
-        repo_root: &Path,
-        orbit_dir: &Path,
-    ) -> Option<Arc<OrbitRuntime>> {
-        let cache = self.lock_runtimes();
-        cache.get(id).and_then(|cached| {
-            (cached.repo_root == repo_root && cached.orbit_dir == orbit_dir)
-                .then(|| cached.runtime.clone())
-        })
-    }
-
-    /// Snapshot of the runtimes this server currently has open (built and
-    /// cached), in registry order. In single mode this is the one pre-built
-    /// runtime; in global mode only workspaces that have actually been
-    /// served appear — health checks probe what the process holds open
-    /// rather than force-building every registered workspace.
+    /// Open runtimes whose binding matches the pinned snapshot, in snapshot
+    /// order — the coherent open set for this request's generation.
     pub(crate) fn open_runtimes(&self) -> Vec<(String, Arc<OrbitRuntime>)> {
-        let snapshot = self.snapshot();
-        let cache = self.lock_runtimes();
-        snapshot
-            .entries
-            .iter()
-            .filter_map(|entry| {
-                cache
-                    .get(&entry.id)
-                    .map(|cached| (entry.id.clone(), cached.runtime.clone()))
-            })
-            .collect()
+        self.inner.open_runtimes_for(&self.snapshot)
+    }
+}
+
+/// The structured, credential-safe diagnostic emitted when a registry refresh
+/// fails. It carries only the registry *path* and Orbit's own error text —
+/// never the file contents — so a tokenized `git_remote` in the registry cannot
+/// leak into logs. Extracted so its fields are unit-testable without a
+/// subscriber and so the `warn!` call site emits exactly these two values.
+pub(crate) struct RefreshFailure {
+    registry: String,
+    error: String,
+}
+
+impl RefreshFailure {
+    fn new(registry_path: &Path, error: &OrbitError) -> Self {
+        Self {
+            registry: registry_path.display().to_string(),
+            error: error.to_string(),
+        }
     }
 
-    /// Cheap clone of the live snapshot `Arc`, taken under (and released with)
-    /// the snapshot lock so callers hold no lock while reading it.
-    fn snapshot(&self) -> Arc<Snapshot> {
-        self.lock_snapshot().clone()
-    }
-
-    fn lock_snapshot(&self) -> std::sync::MutexGuard<'_, Arc<Snapshot>> {
-        self.inner
-            .snapshot
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn lock_runtimes(&self) -> std::sync::MutexGuard<'_, HashMap<String, CachedRuntime>> {
-        // Recover from poisoning: the cache is an idempotent build cache, so a
-        // panic in another thread cannot leave it logically inconsistent.
-        self.inner
-            .runtimes
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+    fn warn(&self) {
+        tracing::warn!(
+            registry = %self.registry,
+            error = %self.error,
+            "workspace registry refresh failed; retaining last valid workspace set"
+        );
     }
 }
 
@@ -486,17 +696,19 @@ impl FromRequestParts<DashboardState> for Ws {
         parts: &mut Parts,
         state: &DashboardState,
     ) -> Result<Self, Self::Rejection> {
-        // Reconcile with the on-disk registry so a native add/remove/rebind
-        // since the last request is honored before we resolve and route.
-        state.refresh();
+        // Refresh and pin one snapshot so selection and runtime resolution share
+        // a generation: a native add/remove/rebind since the last request is
+        // honored, and the resolved runtime always matches the pinned binding.
+        let pinned = state.pin();
         let requested = parts.uri.query().and_then(workspace_from_query);
         let id = match requested {
             Some(id) => id,
-            None => state
+            None => pinned
                 .default_workspace()
+                .map(str::to_string)
                 .ok_or_else(WsRejection::no_default)?,
         };
-        Ok(Ws(state.runtime_for(&id)?))
+        Ok(Ws(pinned.runtime_for(&id)?))
     }
 }
 
