@@ -365,14 +365,12 @@ mod ship_mode_resolution_tests {
     use super::*;
     use chrono::Utc;
     use orbit_common::types::{Workspace, WorkspaceStatus};
-    use std::path::PathBuf;
 
     fn workspace(git_remote: Option<&str>, ship_mode: Option<&str>) -> Workspace {
         Workspace {
             id: "ws_test".to_string(),
             name: "test".to_string(),
-            root: PathBuf::from("/tmp/test"),
-            orbit_dir: PathBuf::from("/tmp/test/.orbit"),
+            owner_machine_id: None,
             git_remote: git_remote.map(str::to_string),
             ship_mode: ship_mode.map(str::to_string),
             base_branch: "agent-main".to_string(),

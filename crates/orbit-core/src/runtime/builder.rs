@@ -197,10 +197,10 @@ fn registered_repo_root(global_root: &Path, workspace_root: &Path) -> Option<Pat
     let registry = workspace_registry::load_registry_from(&registry_path).ok()?;
     let workspace_root_canonical =
         std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
-    registry.workspaces.iter().find_map(|workspace| {
-        let orbit_dir_canonical = std::fs::canonicalize(&workspace.orbit_dir)
-            .unwrap_or_else(|_| workspace.orbit_dir.clone());
-        (orbit_dir_canonical == workspace_root_canonical).then(|| workspace.root.clone())
+    registry.checkouts.iter().find_map(|checkout| {
+        let orbit_dir_canonical = std::fs::canonicalize(&checkout.orbit_dir)
+            .unwrap_or_else(|_| checkout.orbit_dir.clone());
+        (orbit_dir_canonical == workspace_root_canonical).then(|| checkout.repo_root.clone())
     })
 }
 

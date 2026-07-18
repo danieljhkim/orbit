@@ -10,7 +10,7 @@ summary: First-class, validated machine identity plus a main-host inventory, ena
 tags: [host-registry, multi-host, dispatch, routines]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access]
-related_artifacts: [ORB-00424, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10248, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
 
 # Host Registry — Overview
@@ -97,7 +97,7 @@ authority — that direction was already rejected ([ADR-0200], the archived
 |---------|------|------|
 | Host identity file (`host.toml`) | [crates/orbit-core/src/routines/host.rs](../../../crates/orbit-core/src/routines/host.rs) | — |
 | Global/workspace seeding (`orbit init`) | [crates/orbit-core/src/command/init.rs](../../../crates/orbit-core/src/command/init.rs) | — |
-| Workspace registry (gains `owner` field) | [crates/orbit-core/src/workspace_registry.rs](../../../crates/orbit-core/src/workspace_registry.rs) | — |
+| Versioned logical-workspace catalog + local checkout bindings | [crates/orbit-core/src/workspace_registry.rs](../../../crates/orbit-core/src/workspace_registry.rs) | [ORB-10248] |
 | Task ID single-authority allocator | [crates/orbit-store/src/sqlite/task_registry/](../../../crates/orbit-store/src/sqlite/task_registry/) | — |
 | MCP surface (`orbit.host.*`, placement) | [mcp-bridge/2_design.md](../mcp-bridge/2_design.md) | [ORB-00424] |
 | Routine sweep host filter | [docs/design/routines/2_design.md](../routines/2_design.md) | — |
@@ -110,5 +110,7 @@ Detailed mechanisms in [2_design.md](./2_design.md); open directions in
 - [ORB-00424] — proposed the local/remote Orbit MCP unification this registry
   complements (one canonical contract, one hub target, local owner/derived
   placement, Bridge parity retired).
+- [ORB-10248] — split the versioned workspace catalog from machine-local
+  checkout paths and owner/replica bindings.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

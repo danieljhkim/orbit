@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use clap::Args;
 use orbit_cmd::agent_rules::{InjectionAction, inject_agent_rules};
-use orbit_common::types::{Workspace, WorkspaceStatus};
+use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceStatus};
 use orbit_core::command::init::{InitOptions, init_workspace_at_root, seed_default_orbitignore};
 use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -162,13 +162,29 @@ impl WorkspaceInitArgs {
                 existing.base_branch = base_branch;
             }
             existing.updated_at = Utc::now();
+            if let Some(checkout) = registry
+                .checkouts
+                .iter_mut()
+                .find(|checkout| checkout.workspace_id == id)
+            {
+                checkout.repo_root = cwd.to_path_buf();
+                checkout.orbit_dir = orbit_dir.to_path_buf();
+            } else {
+                workspace_registry::register_checkout(
+                    &mut registry,
+                    WorkspaceCheckout::owner(
+                        id.clone(),
+                        cwd.to_path_buf(),
+                        orbit_dir.to_path_buf(),
+                    ),
+                )?;
+            }
         } else {
             let now = Utc::now();
             let ws = Workspace {
                 id: id.clone(),
                 name: name.clone(),
-                root: cwd.to_path_buf(),
-                orbit_dir: orbit_dir.to_path_buf(),
+                owner_machine_id: None,
                 git_remote,
                 ship_mode: self.ship_mode,
                 base_branch: self.base_branch.unwrap_or_else(|| "main".to_string()),
@@ -177,6 +193,10 @@ impl WorkspaceInitArgs {
                 updated_at: now,
             };
             workspace_registry::register_workspace(&mut registry, ws)?;
+            workspace_registry::register_checkout(
+                &mut registry,
+                WorkspaceCheckout::owner(id.clone(), cwd.to_path_buf(), orbit_dir.to_path_buf()),
+            )?;
         }
         workspace_registry::save_registry_to(&registry, registry_path)?;
 

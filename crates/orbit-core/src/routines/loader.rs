@@ -73,15 +73,15 @@ pub fn discover_workspaces(global_root: &Path) -> Result<DiscoveredWorkspaces, O
     workspace_registry::save_registry_to(&registry, &registry_path)?;
 
     let mut discovered = DiscoveredWorkspaces::default();
-    for workspace in registry.workspaces {
-        if workspace.status != WorkspaceStatus::Active || !workspace.orbit_dir.exists() {
+    for (workspace, checkout) in workspace_registry::local_workspaces(&registry) {
+        if workspace.status != WorkspaceStatus::Active || !checkout.orbit_dir.exists() {
             continue;
         }
-        match OrbitRuntime::from_roots(global_root, &workspace.orbit_dir) {
-            Ok(runtime) => discovered.entries.push((workspace, runtime)),
+        match OrbitRuntime::from_roots(global_root, &checkout.orbit_dir) {
+            Ok(runtime) => discovered.entries.push((workspace.clone(), runtime)),
             Err(error) => discovered.errors.push(RoutineLoadError {
                 source_workspace: workspace.name.clone(),
-                path: Some(workspace.orbit_dir.clone()),
+                path: Some(checkout.orbit_dir.clone()),
                 message: format!("failed to open workspace runtime: {error}"),
             }),
         }
@@ -111,7 +111,7 @@ fn load_source_workspace(
     runtime: &OrbitRuntime,
     collection: &mut RoutineCollection,
 ) {
-    let routines_dir = workspace.orbit_dir.join(ROUTINES_DIR);
+    let routines_dir = runtime.shared_root().join(ROUTINES_DIR);
     if !routines_dir.is_dir() {
         // A source with no routines directory is simply an empty source.
         return;
@@ -178,7 +178,7 @@ fn load_routine_file(
     Ok(LoadedRoutine {
         definition,
         source_workspace: workspace.name.clone(),
-        source_orbit_dir: workspace.orbit_dir.clone(),
+        source_orbit_dir: runtime.shared_root(),
         path: path.to_path_buf(),
     })
 }

@@ -1,11 +1,16 @@
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    NotFoundKind, OrbitError, Workspace, WorkspaceRegistry, WorkspaceStatus,
+    NotFoundKind, OrbitError, WORKSPACE_REGISTRY_SCHEMA_VERSION, Workspace, WorkspaceCheckout,
+    WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
 };
-
 use orbit_common::utility::fs::atomic_write_text;
+use serde::Deserialize;
+use serde_json::Value;
+
+use crate::routines::{HostIdentityState, HostMode, inspect_host_identity};
 
 /// Returns the global Orbit directory: `~/.orbit/`.
 pub fn global_orbit_dir() -> Result<PathBuf, OrbitError> {
@@ -31,12 +36,25 @@ pub fn load_registry() -> Result<WorkspaceRegistry, OrbitError> {
 
 /// Loads the workspace registry from a specific path (for testing).
 pub fn load_registry_from(path: &Path) -> Result<WorkspaceRegistry, OrbitError> {
+    load_registry_from_with_writer(path, |registry, destination| {
+        write_registry(registry, destination)
+    })
+}
+
+fn load_registry_from_with_writer(
+    path: &Path,
+    writer: impl FnOnce(&WorkspaceRegistry, &Path) -> Result<(), OrbitError>,
+) -> Result<WorkspaceRegistry, OrbitError> {
     if !path.exists() {
         return Ok(WorkspaceRegistry::default());
     }
     let content = std::fs::read_to_string(path).map_err(|e| OrbitError::Io(e.to_string()))?;
-    serde_json::from_str(&content)
-        .map_err(|e| OrbitError::WorkspaceError(format!("invalid registry: {e}")))
+    let context = registry_host_context(path)?;
+    let (registry, migrated) = parse_registry(&content, &context)?;
+    if migrated {
+        writer(&registry, path)?;
+    }
+    Ok(registry)
 }
 
 /// Saves the workspace registry atomically.
@@ -46,9 +64,10 @@ pub fn save_registry(registry: &WorkspaceRegistry) -> Result<(), OrbitError> {
 
 /// Saves the workspace registry to a specific path (for testing).
 pub fn save_registry_to(registry: &WorkspaceRegistry, path: &Path) -> Result<(), OrbitError> {
-    let content = serde_json::to_string_pretty(registry)
-        .map_err(|e| OrbitError::WorkspaceError(format!("failed to serialize registry: {e}")))?;
-    atomic_write_text(path, &content).map_err(Into::into)
+    let context = registry_host_context(path)?;
+    let mut canonical = registry.clone();
+    validate_registry(&mut canonical, &context)?;
+    write_registry(&canonical, path)
 }
 
 /// Registers a new workspace. Errors if a workspace with the same id or name already exists.
@@ -72,6 +91,35 @@ pub fn register_workspace(
     Ok(())
 }
 
+/// Registers a machine-local checkout for an existing logical workspace.
+pub fn register_checkout(
+    registry: &mut WorkspaceRegistry,
+    checkout: WorkspaceCheckout,
+) -> Result<(), OrbitError> {
+    if !registry
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.id == checkout.workspace_id)
+    {
+        return Err(OrbitError::not_found(
+            NotFoundKind::Workspace,
+            checkout.workspace_id,
+        ));
+    }
+    if registry
+        .checkouts
+        .iter()
+        .any(|existing| existing.workspace_id == checkout.workspace_id)
+    {
+        return Err(OrbitError::WorkspaceError(format!(
+            "local checkout for workspace '{}' already exists",
+            checkout.workspace_id
+        )));
+    }
+    registry.checkouts.push(checkout);
+    Ok(())
+}
+
 /// Removes a workspace by id or name. Returns the removed workspace.
 pub fn remove_workspace(
     registry: &mut WorkspaceRegistry,
@@ -83,10 +131,9 @@ pub fn remove_workspace(
         .position(|w| w.id == id_or_name || w.name == id_or_name)
         .ok_or_else(|| OrbitError::not_found(NotFoundKind::Workspace, id_or_name.to_string()))?;
     let removed = registry.workspaces.remove(idx);
-    // Also remove any path overrides pointing to this workspace
     registry
-        .path_overrides
-        .retain(|_, ws_id| ws_id != &removed.id);
+        .checkouts
+        .retain(|checkout| checkout.workspace_id != removed.id);
     Ok(removed)
 }
 
@@ -101,31 +148,65 @@ pub fn find_workspace<'a>(
         .find(|w| w.id == id_or_name || w.name == id_or_name)
 }
 
-/// Finds the workspace for a given path using longest prefix match on `path_overrides`.
-pub fn find_workspace_by_path<'a>(
+/// Finds the local checkout for a workspace ID or name.
+pub fn find_checkout<'a>(
+    registry: &'a WorkspaceRegistry,
+    id_or_name: &str,
+) -> Option<&'a WorkspaceCheckout> {
+    let workspace = find_workspace(registry, id_or_name)?;
+    registry
+        .checkouts
+        .iter()
+        .find(|checkout| checkout.workspace_id == workspace.id)
+}
+
+/// Iterates logical workspaces that have a machine-local checkout binding.
+pub fn local_workspaces(
+    registry: &WorkspaceRegistry,
+) -> impl Iterator<Item = (&Workspace, &WorkspaceCheckout)> {
+    registry.checkouts.iter().filter_map(|checkout| {
+        registry
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == checkout.workspace_id)
+            .map(|workspace| (workspace, checkout))
+    })
+}
+
+/// Finds the local checkout for a path using longest-prefix matching across
+/// its repository root and explicit path overrides.
+pub fn find_checkout_by_path<'a>(
     registry: &'a WorkspaceRegistry,
     cwd: &Path,
-) -> Option<&'a Workspace> {
-    let mut best_match: Option<(&PathBuf, &String)> = None;
+) -> Option<&'a WorkspaceCheckout> {
+    let mut best_match: Option<(&WorkspaceCheckout, usize)> = None;
 
-    for (override_path, ws_id) in &registry.path_overrides {
-        if cwd.starts_with(override_path) {
-            match best_match {
-                Some((current_best, _))
-                    if override_path.as_os_str().len() > current_best.as_os_str().len() =>
-                {
-                    best_match = Some((override_path, ws_id));
-                }
-                None => {
-                    best_match = Some((override_path, ws_id));
-                }
-                _ => {}
+    for checkout in &registry.checkouts {
+        for candidate in std::iter::once(&checkout.repo_root).chain(&checkout.path_overrides) {
+            if !cwd.starts_with(candidate) {
+                continue;
+            }
+            let candidate_len = candidate.as_os_str().len();
+            if best_match.is_none_or(|(_, current_len)| candidate_len > current_len) {
+                best_match = Some((checkout, candidate_len));
             }
         }
     }
 
-    let (_, ws_id) = best_match?;
-    registry.workspaces.iter().find(|w| &w.id == ws_id)
+    best_match.map(|(checkout, _)| checkout)
+}
+
+/// Finds the logical workspace for a path, but only through a machine-local
+/// checkout binding. Checkoutless catalog entries can never match a path.
+pub fn find_workspace_by_path<'a>(
+    registry: &'a WorkspaceRegistry,
+    cwd: &Path,
+) -> Option<&'a Workspace> {
+    let checkout = find_checkout_by_path(registry, cwd)?;
+    registry
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == checkout.workspace_id)
 }
 
 /// Sets a path override binding a directory to a workspace.
@@ -134,24 +215,36 @@ pub fn set_path_override(
     path: PathBuf,
     workspace_id: &str,
 ) -> Result<(), OrbitError> {
-    // Verify the workspace exists
-    if !registry.workspaces.iter().any(|w| w.id == workspace_id) {
-        return Err(OrbitError::not_found(
-            NotFoundKind::Workspace,
-            workspace_id.to_string(),
-        ));
+    let checkout = registry
+        .checkouts
+        .iter_mut()
+        .find(|checkout| checkout.workspace_id == workspace_id)
+        .ok_or_else(|| {
+            OrbitError::WorkspaceError(format!(
+                "workspace '{workspace_id}' has no local checkout binding"
+            ))
+        })?;
+    if !checkout.path_overrides.contains(&path) {
+        checkout.path_overrides.push(path);
+        checkout.path_overrides.sort();
     }
-    registry
-        .path_overrides
-        .insert(path, workspace_id.to_string());
     Ok(())
 }
 
-/// Validates all workspaces in the registry, marking those whose root no longer exists as invalid.
+/// Validates local checkout paths, marking their logical workspace invalid
+/// when the local repository root no longer exists. Checkoutless logical
+/// workspaces retain their catalog status.
 pub fn validate_workspaces(registry: &mut WorkspaceRegistry) {
     let now = Utc::now();
     for ws in &mut registry.workspaces {
-        if ws.root.exists() {
+        let Some(checkout) = registry
+            .checkouts
+            .iter()
+            .find(|checkout| checkout.workspace_id == ws.id)
+        else {
+            continue;
+        };
+        if checkout.repo_root.exists() {
             if ws.status == WorkspaceStatus::Invalid {
                 ws.status = WorkspaceStatus::Active;
                 ws.updated_at = now;
@@ -162,6 +255,337 @@ pub fn validate_workspaces(registry: &mut WorkspaceRegistry) {
         }
     }
 }
+
+#[derive(Debug, Clone)]
+struct RegistryHostContext {
+    mode: HostMode,
+    machine_id: Option<String>,
+}
+
+fn registry_host_context(path: &Path) -> Result<RegistryHostContext, OrbitError> {
+    let global_root = path.parent().ok_or_else(|| {
+        OrbitError::WorkspaceError(format!(
+            "registry path '{}' has no parent directory",
+            path.display()
+        ))
+    })?;
+    match inspect_host_identity(global_root)? {
+        HostIdentityState::Present(identity) => Ok(RegistryHostContext {
+            mode: identity.mode,
+            machine_id: Some(identity.machine_id),
+        }),
+        // Pre-host-identity installations are the legacy standalone case.
+        HostIdentityState::Legacy { .. } | HostIdentityState::Absent => Ok(RegistryHostContext {
+            mode: HostMode::Standalone,
+            machine_id: None,
+        }),
+    }
+}
+
+fn parse_registry(
+    content: &str,
+    context: &RegistryHostContext,
+) -> Result<(WorkspaceRegistry, bool), OrbitError> {
+    let value: Value = serde_json::from_str(content)
+        .map_err(|error| invalid_registry(format!("malformed JSON: {error}")))?;
+    let Some(version_value) = value.get("schema_version") else {
+        let mut migrated = migrate_legacy_registry(value, context)?;
+        validate_registry(&mut migrated, context)?;
+        return Ok((migrated, true));
+    };
+    let version = version_value.as_u64().ok_or_else(|| {
+        invalid_registry("schema_version must be a non-negative integer".to_string())
+    })?;
+    if version > u64::from(WORKSPACE_REGISTRY_SCHEMA_VERSION) {
+        return Err(invalid_registry(format!(
+            "unsupported schema_version {version}; this build supports up to {WORKSPACE_REGISTRY_SCHEMA_VERSION}. Upgrade Orbit; the file is left unchanged"
+        )));
+    }
+    if version != u64::from(WORKSPACE_REGISTRY_SCHEMA_VERSION) {
+        return Err(invalid_registry(format!(
+            "invalid schema_version {version}; expected {WORKSPACE_REGISTRY_SCHEMA_VERSION}"
+        )));
+    }
+
+    validate_role_tokens(&value)?;
+    let mut registry: WorkspaceRegistry =
+        serde_json::from_value(value).map_err(|error| invalid_registry(error.to_string()))?;
+    let changed = validate_registry(&mut registry, context)?;
+    Ok((registry, changed))
+}
+
+fn validate_role_tokens(value: &Value) -> Result<(), OrbitError> {
+    let Some(checkouts) = value.get("checkouts").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    for checkout in checkouts {
+        let workspace_id = checkout
+            .get("workspace_id")
+            .and_then(Value::as_str)
+            .unwrap_or("<unknown>");
+        let Some(role) = checkout.get("role") else {
+            continue;
+        };
+        match role.as_str() {
+            Some("owner" | "replica") => {}
+            Some(other) => {
+                return Err(invalid_registry(format!(
+                    "workspace '{workspace_id}' has unknown checkout role '{other}'"
+                )));
+            }
+            None => {
+                return Err(invalid_registry(format!(
+                    "workspace '{workspace_id}' has a non-string checkout role"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_registry(
+    registry: &mut WorkspaceRegistry,
+    context: &RegistryHostContext,
+) -> Result<bool, OrbitError> {
+    if registry.schema_version != WORKSPACE_REGISTRY_SCHEMA_VERSION {
+        return Err(invalid_registry(format!(
+            "schema_version {} is not supported by this build",
+            registry.schema_version
+        )));
+    }
+
+    let mut changed = false;
+    let mut workspace_ids = HashSet::new();
+    let mut workspace_names = HashSet::new();
+    for workspace in &registry.workspaces {
+        if !workspace_ids.insert(workspace.id.clone()) {
+            return Err(invalid_registry(format!(
+                "duplicate workspace id '{}'",
+                workspace.id
+            )));
+        }
+        if !workspace_names.insert(workspace.name.clone()) {
+            return Err(invalid_registry(format!(
+                "duplicate workspace name '{}'",
+                workspace.name
+            )));
+        }
+    }
+
+    let mut checkout_ids = HashSet::new();
+    for checkout in &mut registry.checkouts {
+        let workspace = registry
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == checkout.workspace_id)
+            .ok_or_else(|| {
+                invalid_registry(format!(
+                    "checkout references unknown workspace '{}'",
+                    checkout.workspace_id
+                ))
+            })?;
+        if !checkout_ids.insert(checkout.workspace_id.clone()) {
+            return Err(invalid_registry(format!(
+                "workspace '{}' has more than one local checkout binding",
+                checkout.workspace_id
+            )));
+        }
+
+        if checkout.role.is_none() {
+            if context.mode == HostMode::Standalone {
+                checkout.role = Some(WorkspaceCheckoutRole::Owner);
+                changed = true;
+            } else {
+                return Err(invalid_registry(format!(
+                    "workspace '{}' is missing a local checkout role in {} mode",
+                    checkout.workspace_id, context.mode
+                )));
+            }
+        }
+
+        match checkout.role {
+            Some(WorkspaceCheckoutRole::Owner) => {
+                if checkout.owner_machine_id.is_some() {
+                    return Err(invalid_registry(format!(
+                        "workspace '{}' has contradictory owner role and replica owner_machine_id",
+                        checkout.workspace_id
+                    )));
+                }
+                if let Some(machine_id) = context.machine_id.as_deref() {
+                    match workspace.owner_machine_id.as_deref() {
+                        Some(owner) if owner != machine_id => {
+                            return Err(invalid_registry(format!(
+                                "workspace '{}' declares local owner role, but logical owner is machine '{owner}' instead of local machine '{machine_id}'",
+                                checkout.workspace_id
+                            )));
+                        }
+                        None => {
+                            workspace.owner_machine_id = Some(machine_id.to_string());
+                            changed = true;
+                        }
+                        Some(_) => {}
+                    }
+                } else if context.mode != HostMode::Standalone {
+                    return Err(invalid_registry(format!(
+                        "workspace '{}' cannot validate owner role without a local machine_id",
+                        checkout.workspace_id
+                    )));
+                }
+            }
+            Some(WorkspaceCheckoutRole::Replica) => {
+                if context.mode == HostMode::Standalone {
+                    return Err(invalid_registry(format!(
+                        "workspace '{}' cannot use replica role in standalone mode",
+                        checkout.workspace_id
+                    )));
+                }
+                let binding_owner = checkout.owner_machine_id.as_deref().ok_or_else(|| {
+                    invalid_registry(format!(
+                        "workspace '{}' has replica role without owner_machine_id",
+                        checkout.workspace_id
+                    ))
+                })?;
+                let logical_owner = workspace.owner_machine_id.as_deref().ok_or_else(|| {
+                    invalid_registry(format!(
+                        "workspace '{}' has replica role but its logical record has no owner_machine_id",
+                        checkout.workspace_id
+                    ))
+                })?;
+                if binding_owner != logical_owner {
+                    return Err(invalid_registry(format!(
+                        "workspace '{}' replica owner '{binding_owner}' contradicts logical owner '{logical_owner}'",
+                        checkout.workspace_id
+                    )));
+                }
+                if context.machine_id.as_deref() == Some(binding_owner) {
+                    return Err(invalid_registry(format!(
+                        "workspace '{}' declares replica role of the local machine '{binding_owner}'",
+                        checkout.workspace_id
+                    )));
+                }
+            }
+            None => unreachable!("missing checkout role handled above"),
+        }
+
+        let before = checkout.path_overrides.len();
+        checkout.path_overrides.sort();
+        checkout.path_overrides.dedup();
+        changed |= checkout.path_overrides.len() != before;
+    }
+    if context.mode != HostMode::Standalone {
+        for workspace in &registry.workspaces {
+            if workspace.owner_machine_id.is_none() {
+                return Err(invalid_registry(format!(
+                    "workspace '{}' is missing owner_machine_id in {} mode",
+                    workspace.id, context.mode
+                )));
+            }
+        }
+    }
+    Ok(changed)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyWorkspaceRegistry {
+    #[serde(default)]
+    workspaces: Vec<LegacyWorkspace>,
+    #[serde(default)]
+    path_overrides: BTreeMap<PathBuf, String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyWorkspace {
+    id: String,
+    name: String,
+    root: PathBuf,
+    orbit_dir: PathBuf,
+    #[serde(default)]
+    git_remote: Option<String>,
+    #[serde(default)]
+    ship_mode: Option<String>,
+    #[serde(default = "legacy_default_base_branch")]
+    base_branch: String,
+    #[serde(default = "legacy_default_status")]
+    status: WorkspaceStatus,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+fn migrate_legacy_registry(
+    value: Value,
+    context: &RegistryHostContext,
+) -> Result<WorkspaceRegistry, OrbitError> {
+    let legacy: LegacyWorkspaceRegistry = serde_json::from_value(value)
+        .map_err(|error| invalid_registry(format!("invalid legacy registry: {error}")))?;
+    let valid_ids: HashSet<String> = legacy
+        .workspaces
+        .iter()
+        .map(|workspace| workspace.id.clone())
+        .collect();
+    let mut overrides_by_workspace: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
+    for (path, workspace_id) in legacy.path_overrides {
+        if valid_ids.contains(&workspace_id) {
+            overrides_by_workspace
+                .entry(workspace_id)
+                .or_default()
+                .push(path);
+        }
+    }
+
+    let mut registry = WorkspaceRegistry::default();
+    for legacy_workspace in legacy.workspaces {
+        let workspace_id = legacy_workspace.id.clone();
+        registry.workspaces.push(Workspace {
+            id: legacy_workspace.id,
+            name: legacy_workspace.name,
+            owner_machine_id: context.machine_id.clone(),
+            git_remote: legacy_workspace.git_remote,
+            ship_mode: legacy_workspace.ship_mode,
+            base_branch: legacy_workspace.base_branch,
+            status: legacy_workspace.status,
+            created_at: legacy_workspace.created_at,
+            updated_at: legacy_workspace.updated_at,
+        });
+        registry.checkouts.push(WorkspaceCheckout {
+            workspace_id: workspace_id.clone(),
+            repo_root: legacy_workspace.root,
+            orbit_dir: legacy_workspace.orbit_dir,
+            // Only standalone mode has a compatibility rule for legacy
+            // checkouts that predate explicit roles. Multi-host modes must
+            // fail closed instead of inferring ownership from a local path.
+            role: (context.mode == HostMode::Standalone).then_some(WorkspaceCheckoutRole::Owner),
+            owner_machine_id: None,
+            path_overrides: overrides_by_workspace
+                .remove(&workspace_id)
+                .unwrap_or_default(),
+        });
+    }
+    Ok(registry)
+}
+
+fn write_registry(registry: &WorkspaceRegistry, path: &Path) -> Result<(), OrbitError> {
+    let content = serde_json::to_string_pretty(registry)
+        .map_err(|e| OrbitError::WorkspaceError(format!("failed to serialize registry: {e}")))?;
+    atomic_write_text(path, &content).map_err(Into::into)
+}
+
+fn invalid_registry(message: String) -> OrbitError {
+    OrbitError::WorkspaceError(format!("invalid registry: {message}"))
+}
+
+fn legacy_default_base_branch() -> String {
+    "main".to_string()
+}
+
+fn legacy_default_status() -> WorkspaceStatus {
+    WorkspaceStatus::Active
+}
+
+#[cfg(test)]
+#[path = "tests/workspace_registry.rs"]
+mod tests;
 
 fn home_dir() -> Result<PathBuf, OrbitError> {
     dirs_or_fallback()

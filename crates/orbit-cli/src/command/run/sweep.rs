@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use clap::Args;
-use orbit_common::types::{Workspace, WorkspaceStatus};
+use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceStatus};
 use orbit_core::workspace_registry;
 use orbit_core::{
     JobRunState, OrbitError, OrbitRuntime, TaskStatus, build_task_status_index,
@@ -115,10 +115,16 @@ impl ShipSweepCommand {
         workspace_registry::save_registry_to(&registry, &registry_path)?;
 
         let mode_override = self.mode.map(ShipMode::to_core);
-        let reports: Vec<SweepReport> = registry
-            .workspaces
-            .iter()
-            .map(|ws| sweep_workspace(&global_root, ws, mode_override, self.dry_run))
+        let reports: Vec<SweepReport> = workspace_registry::local_workspaces(&registry)
+            .map(|(workspace, checkout)| {
+                sweep_workspace(
+                    &global_root,
+                    workspace,
+                    checkout,
+                    mode_override,
+                    self.dry_run,
+                )
+            })
             .collect();
 
         let failed = reports.iter().filter(|r| r.action == "error").count();
@@ -153,10 +159,11 @@ impl ShipSweepCommand {
 fn sweep_workspace(
     global_root: &Path,
     ws: &Workspace,
+    checkout: &WorkspaceCheckout,
     mode_override: Option<orbit_core::ShipMode>,
     dry_run: bool,
 ) -> SweepReport {
-    if ws.status != WorkspaceStatus::Active || !ws.orbit_dir.exists() {
+    if ws.status != WorkspaceStatus::Active || !checkout.orbit_dir.exists() {
         return SweepReport::skipped(ws, "workspace_inactive", 0);
     }
     // An explicit `--mode` override wins for every workspace; otherwise resolve
@@ -165,25 +172,28 @@ fn sweep_workspace(
     // pipeline instead of failing `pr_open` — only workspaces that carry an
     // explicit `ship_mode = "pr"` ship via PR.
     let mode = mode_override.unwrap_or_else(|| orbit_core::resolved_ship_mode(ws));
-    sweep_active_workspace(global_root, ws, mode, dry_run).unwrap_or_else(|error| SweepReport {
-        workspace_id: ws.id.clone(),
-        workspace_name: ws.name.clone(),
-        action: "error",
-        reason: Some(error.to_string()),
-        ready_backlog: 0,
-        mode: None,
-        run_id: None,
-        run_state: None,
+    sweep_active_workspace(global_root, ws, checkout, mode, dry_run).unwrap_or_else(|error| {
+        SweepReport {
+            workspace_id: ws.id.clone(),
+            workspace_name: ws.name.clone(),
+            action: "error",
+            reason: Some(error.to_string()),
+            ready_backlog: 0,
+            mode: None,
+            run_id: None,
+            run_state: None,
+        }
     })
 }
 
 fn sweep_active_workspace(
     global_root: &Path,
     ws: &Workspace,
+    checkout: &WorkspaceCheckout,
     mode: orbit_core::ShipMode,
     dry_run: bool,
 ) -> Result<SweepReport, OrbitError> {
-    let runtime = OrbitRuntime::from_roots(global_root, &ws.orbit_dir)?;
+    let runtime = OrbitRuntime::from_roots(global_root, &checkout.orbit_dir)?;
     if !runtime.workflow_auto_ship() {
         return Ok(SweepReport::skipped(ws, "auto_ship_disabled", 0));
     }

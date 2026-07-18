@@ -1,10 +1,12 @@
-use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+/// Current on-disk schema version for `~/.orbit/workspaces.json`.
+pub const WORKSPACE_REGISTRY_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -34,11 +36,14 @@ impl FromStr for WorkspaceStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Workspace {
     pub id: String,
     pub name: String,
-    pub root: PathBuf,
-    pub orbit_dir: PathBuf,
+    /// Stable owner identity. Standalone registries created before host
+    /// identity existed may omit this; hub and spoke registries may not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_machine_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_remote: Option<String>,
     /// Explicit ship-pipeline mode for this workspace: `"pr"` or `"local"`.
@@ -64,12 +69,67 @@ fn default_status() -> WorkspaceStatus {
     WorkspaceStatus::Active
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// This machine's role for a local checkout of a logical workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceCheckoutRole {
+    /// This machine owns the canonical checkout.
+    Owner,
+    /// This checkout is a replica of a workspace owned by another machine.
+    Replica,
+}
+
+/// Machine-local filesystem binding for a logical [`Workspace`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceCheckout {
+    pub workspace_id: String,
+    pub repo_root: PathBuf,
+    pub orbit_dir: PathBuf,
+    /// Missing only while loading a legacy/partially migrated standalone
+    /// registry; registry validation canonicalizes it to `owner`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<WorkspaceCheckoutRole>,
+    /// Required only for replicas and always names the stable owner machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_machine_id: Option<String>,
+    /// Additional roots (for example linked worktrees) that resolve to this
+    /// local checkout. These never appear on the logical workspace record.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_overrides: Vec<PathBuf>,
+}
+
+impl WorkspaceCheckout {
+    pub fn owner(workspace_id: String, repo_root: PathBuf, orbit_dir: PathBuf) -> Self {
+        Self {
+            workspace_id,
+            repo_root,
+            orbit_dir,
+            role: Some(WorkspaceCheckoutRole::Owner),
+            owner_machine_id: None,
+            path_overrides: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceRegistry {
+    pub schema_version: u32,
     #[serde(default)]
     pub workspaces: Vec<Workspace>,
     #[serde(default)]
-    pub path_overrides: HashMap<PathBuf, String>,
+    pub checkouts: Vec<WorkspaceCheckout>,
+}
+
+impl Default for WorkspaceRegistry {
+    fn default() -> Self {
+        Self {
+            schema_version: WORKSPACE_REGISTRY_SCHEMA_VERSION,
+            workspaces: Vec::new(),
+            checkouts: Vec::new(),
+        }
+    }
 }
 
 /// Derived directory layout for a workspace.
