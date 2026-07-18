@@ -104,7 +104,7 @@ fn ship_threads_explicit_review_controls() {
 
 #[test]
 fn ship_rejects_enabled_review_without_explicit_crew() {
-    let mut args = ship_args(&[], ShipMode::Pr, None);
+    let mut args = ship_args(&["T20260425-2010"], ShipMode::Pr, None);
     args.review = true;
 
     let error = build_plan(&args, "agent-main").expect_err("review crew is required");

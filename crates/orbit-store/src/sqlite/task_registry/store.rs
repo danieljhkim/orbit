@@ -430,7 +430,7 @@ impl TaskRegistryStore {
 
         let replacement_edges = envelopes
             .iter()
-            .flat_map(|envelope| task_relation_edges(envelope))
+            .flat_map(task_relation_edges)
             .collect::<Vec<_>>();
         let replacement_sources = envelopes
             .iter()
