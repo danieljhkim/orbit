@@ -801,6 +801,93 @@ async fn list_tasks_includes_complexity_when_set() {
     );
 }
 
+fn seed_task_with_status(
+    runtime: &OrbitRuntime,
+    title: &str,
+    status: TaskStatus,
+) -> orbit_core::Task {
+    runtime
+        .add_task(TaskAddParams {
+            title: title.to_string(),
+            description: format!("Fixture task: {title}."),
+            status: Some(status),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("seed task")
+}
+
+/// ORB-10310: `GET /tasks` is status-neutral — `done` and `archived` tasks
+/// (previously excluded by the hard-coded dashboard status subset) are now
+/// discoverable, and the list is ordered newest-first.
+#[tokio::test]
+async fn list_tasks_includes_done_and_archived_statuses_newest_first() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let proposed = seed_task_with_status(&runtime, "Proposed task", TaskStatus::Proposed);
+    let done = seed_task_with_status(&runtime, "Done task", TaskStatus::Done);
+    let to_archive = seed_task_with_status(&runtime, "Archived task", TaskStatus::Backlog);
+    runtime.archive_task(&to_archive.id).expect("archive task");
+
+    let response = request(runtime, "/tasks").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("tasks list is array");
+
+    for expected in [&proposed.id, &done.id, &to_archive.id] {
+        assert!(
+            rows.iter().any(|row| row["id"].as_str() == Some(expected)),
+            "task {expected} must be discoverable regardless of status: {rows:?}"
+        );
+    }
+    let archived_row = rows
+        .iter()
+        .find(|row| row["id"].as_str() == Some(to_archive.id.as_str()))
+        .expect("archived task present");
+    assert_eq!(archived_row["status"], json!("archived"));
+
+    let created_ats = rows
+        .iter()
+        .map(|row| row["created_at"].as_str().expect("created_at").to_string())
+        .collect::<Vec<_>>();
+    for pair in created_ats.windows(2) {
+        assert!(
+            pair[0] >= pair[1],
+            "tasks must be ordered newest-first: {created_ats:?}"
+        );
+    }
+}
+
+/// ORB-10310: `GET /tasks` bounds the response to the default limit (50),
+/// keeping the newest matching tasks.
+#[tokio::test]
+async fn list_tasks_is_bounded_to_default_limit() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let mut oldest = None;
+    for index in 0..55 {
+        let task = seed_task_with_status(
+            &runtime,
+            &format!("Bounded dashboard task {index:02}"),
+            TaskStatus::Backlog,
+        );
+        if index == 0 {
+            oldest = Some(task.id);
+        }
+    }
+
+    let response = request(runtime, "/tasks").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("tasks list is array");
+    assert_eq!(rows.len(), 50, "default limit bounds the response to 50");
+    let oldest = oldest.expect("seeded at least one task");
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row["id"].as_str() == Some(oldest.as_str())),
+        "the oldest task must fall outside the newest 50"
+    );
+}
+
 /// ORB-00042: `workspace` is a selector and lives in the query string, never
 /// the body. A stray `workspace` body key (the historical bridge mis-key) must
 /// be a loud 400 pointing at `?workspace=`, not silently dropped.

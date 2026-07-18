@@ -296,14 +296,15 @@ async fn tasks_resolve_dependency_statuses_from_all_tasks() {
         rows.iter()
             .any(|task| task["id"].as_str() == Some(&rejected.id))
     );
+    // ORB-10310: task listing is status-neutral, so `done` and `archived`
+    // dependency tasks now appear in the list too. Their status still resolves
+    // from the global index (asserted below), independent of list membership.
     assert!(
-        !rows
-            .iter()
+        rows.iter()
             .any(|task| task["id"].as_str() == Some(&done.id))
     );
     assert!(
-        !rows
-            .iter()
+        rows.iter()
             .any(|task| task["id"].as_str() == Some(&archived.id))
     );
 

@@ -9,24 +9,14 @@ use orbit_common::types::task_artifacts::TaskRelation;
 use orbit_common::types::validate_relative_artifact_path;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{
-    ExternalRef, OrbitRuntime, Task, TaskComplexity, TaskCreateStatus, TaskPriority, TaskStatus,
-    TaskType,
+    DEFAULT_TASK_LIST_LIMIT, ExternalRef, OrbitRuntime, Task, TaskComplexity, TaskCreateStatus,
+    TaskPriority, TaskStatus, TaskType,
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 
 use super::{bad_request, map_runtime_error, server_error, validate_id};
 use crate::projections::{task_locks_json, task_to_json_with_sidecars};
-
-const DASHBOARD_TASK_STATUSES: &[TaskStatus] = &[
-    TaskStatus::InProgress,
-    TaskStatus::Review,
-    TaskStatus::Blocked,
-    TaskStatus::Proposed,
-    TaskStatus::Backlog,
-    TaskStatus::Someday,
-    TaskStatus::Rejected,
-];
 
 struct ArtifactResponsePolicy {
     content_type: &'static str,
@@ -170,11 +160,13 @@ pub(super) async fn list_task_locks(Ws(runtime): Ws) -> Response {
     }
 }
 
+/// The dashboard task list: status-neutral, newest-first, and bounded
+/// (ORB-10310). `list_tasks` already orders by `created_at DESC` with task ID
+/// ascending for ties, so truncating keeps the newest matching tasks and no
+/// lifecycle status (including `done`/`archived`) is excluded by default.
 fn list_dashboard_tasks(runtime: &OrbitRuntime) -> Result<Vec<Task>, orbit_core::OrbitError> {
-    let mut tasks = Vec::new();
-    for status in DASHBOARD_TASK_STATUSES {
-        tasks.extend(runtime.list_tasks_filtered(Some(*status), None, None, None, None, None)?);
-    }
+    let mut tasks = runtime.list_tasks()?;
+    tasks.truncate(DEFAULT_TASK_LIST_LIMIT);
     Ok(tasks)
 }
 

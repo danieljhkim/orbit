@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use axum::extract::State;
 use axum::response::{IntoResponse, Json, Response};
+use orbit_core::DEFAULT_TASK_LIST_LIMIT;
 use serde_json::{Value, json};
 
 use super::server_error;
@@ -78,6 +79,29 @@ pub(super) async fn list_all_tasks(State(state): State<DashboardState>) -> Respo
             all.push(value);
         }
     }
+    // Each workspace already contributes its newest tasks; re-sort the union so
+    // the aggregate is globally newest-first and bounded to the same default
+    // limit as every other task-listing surface (ORB-10310). `created_at` is a
+    // fixed-format UTC RFC 3339 string, so lexical order is chronological; task
+    // ID breaks timestamp ties ascending.
+    all.sort_by(|a, b| {
+        let created = |value: &Value| {
+            value
+                .get("created_at")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        let id = |value: &Value| {
+            value
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        created(b).cmp(&created(a)).then_with(|| id(a).cmp(&id(b)))
+    });
+    all.truncate(DEFAULT_TASK_LIST_LIMIT);
     Json(Value::Array(all)).into_response()
 }
 

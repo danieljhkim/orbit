@@ -1345,6 +1345,193 @@ fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
 }
 
 #[test]
+fn task_list_tool_is_status_neutral_recent_first_and_bounded() {
+    // ORB-10310: `orbit.task.list` must return every lifecycle status by
+    // default (no hidden `backlog,in-progress` subset), newest-first.
+    let (_root, runtime, repo_root) = test_runtime();
+    let statuses = [
+        TaskStatus::Proposed,
+        TaskStatus::Backlog,
+        TaskStatus::InProgress,
+        TaskStatus::Review,
+        TaskStatus::Done,
+    ];
+    let mut created = Vec::new();
+    for (index, status) in statuses.iter().enumerate() {
+        created.push(create_task(
+            &runtime,
+            &repo_root,
+            &format!("Task {index} in {status}"),
+            "status-neutral listing fixture",
+            *status,
+            &[],
+        ));
+    }
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({}),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task list tool succeeds");
+    let listed = output.as_array().expect("task array");
+    assert_eq!(
+        listed.len(),
+        created.len(),
+        "every status must be listed by default: {listed:?}"
+    );
+    for task in &created {
+        assert!(
+            listed.iter().any(|value| value["id"] == json!(task.id)),
+            "task {} ({}) missing from status-neutral list",
+            task.id,
+            task.status
+        );
+    }
+    let created_ats = listed
+        .iter()
+        .map(|value| {
+            value["created_at"]
+                .as_str()
+                .expect("created_at")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    for pair in created_ats.windows(2) {
+        assert!(
+            pair[0] >= pair[1],
+            "list must be newest-first by created_at: {created_ats:?}"
+        );
+    }
+}
+
+#[test]
+fn task_list_tool_default_limit_returns_newest_fifty() {
+    // ORB-10310: the status-neutral default is bounded to the 50 newest tasks.
+    let (_root, runtime, repo_root) = test_runtime();
+    let mut created = Vec::new();
+    for index in 0..55 {
+        created.push(create_task(
+            &runtime,
+            &repo_root,
+            &format!("Bounded task {index:02}"),
+            "default-limit fixture",
+            TaskStatus::Backlog,
+            &[],
+        ));
+    }
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({}),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task list tool succeeds");
+    let listed = output.as_array().expect("task array");
+    assert_eq!(
+        listed.len(),
+        50,
+        "default limit must bound the response to 50"
+    );
+    // The 50 returned are the newest; the five oldest are excluded.
+    let listed_ids = listed
+        .iter()
+        .map(|value| value["id"].as_str().expect("id").to_string())
+        .collect::<std::collections::HashSet<_>>();
+    for oldest in &created[..5] {
+        assert!(
+            !listed_ids.contains(&oldest.id),
+            "oldest task {} must fall outside the newest 50",
+            oldest.id
+        );
+    }
+}
+
+#[test]
+fn task_list_tool_limit_override_and_zero_rejection() {
+    let (_root, runtime, repo_root) = test_runtime();
+    for index in 0..3 {
+        create_task(
+            &runtime,
+            &repo_root,
+            &format!("Override task {index}"),
+            "limit-override fixture",
+            TaskStatus::Backlog,
+            &[],
+        );
+    }
+
+    let limited = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({ "limit": 2 }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task list tool succeeds");
+    assert_eq!(limited.as_array().expect("task array").len(), 2);
+
+    let message = invalid_input_message(runtime.execute_tool_command(
+        "orbit.task.list",
+        json!({ "limit": 0 }),
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    ));
+    assert!(message.contains("at least 1"), "{message}");
+}
+
+#[test]
+fn task_list_tool_applies_status_filter_before_limit() {
+    // ORB-10310: an explicit filter must be applied before ordering + limiting,
+    // so a `limit: 1` on a status filter returns the newest *matching* task,
+    // never a newer non-matching one.
+    let (_root, runtime, repo_root) = test_runtime();
+    create_task(
+        &runtime,
+        &repo_root,
+        "Older review task",
+        "filter-before-limit fixture",
+        TaskStatus::Review,
+        &[],
+    );
+    let newer_review = create_task(
+        &runtime,
+        &repo_root,
+        "Newer review task",
+        "filter-before-limit fixture",
+        TaskStatus::Review,
+        &[],
+    );
+    // Created last, so newest overall — but not a review, so the status filter
+    // must exclude it even though the limit is 1.
+    create_task(
+        &runtime,
+        &repo_root,
+        "Newest backlog task",
+        "filter-before-limit fixture",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({ "status": "review", "limit": 1 }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task list tool succeeds");
+    let listed = output.as_array().expect("task array");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["id"], json!(newer_review.id));
+    assert_eq!(listed[0]["status"], json!("review"));
+}
+
+#[test]
 fn task_update_tool_recovers_mcp_encoded_acceptance_array() {
     let (_root, runtime, repo_root) = test_runtime();
     let task = create_task(
