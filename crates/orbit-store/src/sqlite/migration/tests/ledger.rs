@@ -52,6 +52,9 @@ fn fresh_db_applies_baseline_and_records_ledger() {
     assert_eq!(applied[6].version, 7);
     assert_eq!(applied[6].name, "trusted_mcp_audit_provenance");
     assert!(!applied[6].applied_at.is_empty());
+    assert_eq!(applied[7].version, 8);
+    assert_eq!(applied[7].name, "hub_registry_metadata");
+    assert!(!applied[7].applied_at.is_empty());
 }
 
 #[test]
@@ -180,6 +183,10 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0007".to_string(),
                 "trusted_mcp_audit_provenance".to_string()
             ),
+            (
+                "migration.v0008".to_string(),
+                "hub_registry_metadata".to_string()
+            ),
         ]
     );
 }
@@ -191,7 +198,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0008', 'from-the-future', '2099-01-01T00:00:00Z')",
+         VALUES ('migration.v0009', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -207,7 +214,7 @@ fn refuses_db_from_a_newer_binary() {
 }
 
 #[test]
-fn store_reopens_database_at_shipped_schema_v4_and_applies_through_v7() {
+fn store_reopens_database_at_shipped_schema_v4_and_applies_through_latest() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("orbit.db");
 
@@ -260,12 +267,12 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_through_v7() {
     drop(conn);
 
     let store = crate::Store::open(&path).expect("reopen shipped v4 store");
-    assert_eq!(store.schema_version().expect("schema version"), 7);
+    assert_eq!(store.schema_version().expect("schema version"), 8);
     let applied = store.applied_migrations().expect("applied migrations");
-    assert_eq!(applied.last().map(|migration| migration.version), Some(7));
+    assert_eq!(applied.last().map(|migration| migration.version), Some(8));
     assert_eq!(
         applied.last().map(|migration| migration.name.as_str()),
-        Some("trusted_mcp_audit_provenance")
+        Some("hub_registry_metadata")
     );
     let connection = store.connection();
     let conn = connection.lock().expect("connection");
@@ -342,7 +349,7 @@ fn store_reopens_shipped_v6_audit_rows_and_applies_v7_additively() {
     drop(conn);
 
     let store = crate::Store::open(&path).expect("open and migrate v6 store");
-    assert_eq!(store.schema_version().expect("schema version"), 7);
+    assert_eq!(store.schema_version().expect("schema version"), 8);
     let rows = store
         .list_audit_events(&crate::AuditEventFilter::default())
         .expect("read migrated audit rows");
@@ -356,7 +363,7 @@ fn store_reopens_shipped_v6_audit_rows_and_applies_v7_additively() {
     drop(store);
 
     let reopened = crate::Store::open(&path).expect("reopen migrated store");
-    assert_eq!(reopened.schema_version().expect("schema version"), 7);
+    assert_eq!(reopened.schema_version().expect("schema version"), 8);
     assert_eq!(
         reopened
             .list_audit_events(&crate::AuditEventFilter::default())

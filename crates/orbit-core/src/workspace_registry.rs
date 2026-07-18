@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
     NotFoundKind, OrbitError, WORKSPACE_REGISTRY_SCHEMA_VERSION, Workspace, WorkspaceCheckout,
-    WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
+    WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus, validate_machine_id,
 };
 use orbit_common::utility::fs::atomic_write_text;
 use serde::Deserialize;
@@ -117,6 +117,117 @@ pub fn register_checkout(
         )));
     }
     registry.checkouts.push(checkout);
+    Ok(())
+}
+
+/// Record a machine-local checkout role for an existing logical workspace.
+///
+/// `Owner` requires no replica owner and leaves the logical owner to be
+/// declared explicitly from the validated local `machine_id`. `Replica`
+/// requires an explicit non-local `owner_machine_id`, which is mirrored onto
+/// both the checkout binding and the logical workspace record so the stable
+/// owner identity stays consistent. The optional local identity exists only
+/// for pre-host-identity standalone compatibility. This mutates the in-memory
+/// registry only; the caller persists via [`save_registry_to`], which validates a clone and
+/// therefore leaves the previous file byte-valid on any contradiction. Owner
+/// and replica declarations are never inferred from paths, workspace names,
+/// presence, hostnames, or Git remotes.
+pub fn assign_checkout_role(
+    registry: &mut WorkspaceRegistry,
+    id_or_name: &str,
+    role: WorkspaceCheckoutRole,
+    owner_machine_id: Option<&str>,
+    local_machine_id: Option<&str>,
+) -> Result<(), OrbitError> {
+    let workspace = find_workspace(registry, id_or_name)
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Workspace, id_or_name.to_string()))?;
+    let workspace_id = workspace.id.clone();
+    let declared_owner = workspace.owner_machine_id.clone();
+    let checkout_index = registry
+        .checkouts
+        .iter()
+        .position(|checkout| checkout.workspace_id == workspace_id)
+        .ok_or_else(|| {
+            OrbitError::WorkspaceError(format!(
+                "workspace '{workspace_id}' has no local checkout binding"
+            ))
+        })?;
+
+    match role {
+        WorkspaceCheckoutRole::Owner => {
+            if owner_machine_id.is_some() {
+                return Err(OrbitError::WorkspaceError(format!(
+                    "workspace '{workspace_id}' owner role does not take an owner machine_id"
+                )));
+            }
+            if let Some(local_machine_id) = local_machine_id {
+                validate_machine_id(local_machine_id)?;
+                if let Some(existing_owner) = declared_owner.as_deref()
+                    && existing_owner != local_machine_id
+                {
+                    return Err(OrbitError::WorkspaceError(format!(
+                        "workspace '{workspace_id}' is declared owned by machine \
+                         '{existing_owner}'; local machine '{local_machine_id}' cannot assign \
+                         itself the owner role"
+                    )));
+                }
+                if declared_owner.is_none()
+                    && let Some(workspace) = registry
+                        .workspaces
+                        .iter_mut()
+                        .find(|workspace| workspace.id == workspace_id)
+                {
+                    workspace.owner_machine_id = Some(local_machine_id.to_string());
+                }
+            }
+        }
+        WorkspaceCheckoutRole::Replica => {
+            let owner = owner_machine_id.ok_or_else(|| {
+                OrbitError::WorkspaceError(format!(
+                    "workspace '{workspace_id}' replica role requires an owner machine_id"
+                ))
+            })?;
+            validate_machine_id(owner)?;
+            if local_machine_id == Some(owner) {
+                return Err(OrbitError::WorkspaceError(format!(
+                    "workspace '{workspace_id}' cannot declare the local machine '{owner}' as \
+                     its replica owner"
+                )));
+            }
+            if let Some(existing_owner) = declared_owner.as_deref()
+                && existing_owner != owner
+            {
+                return Err(OrbitError::WorkspaceError(format!(
+                    "workspace '{workspace_id}' is already owned by machine '{existing_owner}'; \
+                     refusing to rebind it to '{owner}' while assigning a replica role"
+                )));
+            }
+            if let Some(existing_owner) = registry.checkouts[checkout_index]
+                .owner_machine_id
+                .as_deref()
+                && existing_owner != owner
+            {
+                return Err(OrbitError::WorkspaceError(format!(
+                    "workspace '{workspace_id}' checkout already mirrors owner machine \
+                     '{existing_owner}'; refusing contradictory owner '{owner}'"
+                )));
+            }
+            if let Some(workspace) = registry
+                .workspaces
+                .iter_mut()
+                .find(|workspace| workspace.id == workspace_id)
+            {
+                workspace.owner_machine_id = Some(owner.to_string());
+            }
+        }
+    }
+
+    let checkout = &mut registry.checkouts[checkout_index];
+    checkout.role = Some(role);
+    checkout.owner_machine_id = match role {
+        WorkspaceCheckoutRole::Owner => None,
+        WorkspaceCheckoutRole::Replica => owner_machine_id.map(str::to_string),
+    };
     Ok(())
 }
 
@@ -370,6 +481,14 @@ fn validate_registry(
                 workspace.name
             )));
         }
+        if let Some(owner_machine_id) = workspace.owner_machine_id.as_deref() {
+            validate_machine_id(owner_machine_id).map_err(|error| {
+                invalid_registry(format!(
+                    "workspace '{}' has invalid owner_machine_id: {error}",
+                    workspace.id
+                ))
+            })?;
+        }
     }
 
     let mut checkout_ids = HashSet::new();
@@ -419,9 +538,16 @@ fn validate_registry(
                                 checkout.workspace_id
                             )));
                         }
-                        None => {
+                        None if context.mode == HostMode::Standalone => {
                             workspace.owner_machine_id = Some(machine_id.to_string());
                             changed = true;
+                        }
+                        None => {
+                            return Err(invalid_registry(format!(
+                                "workspace '{}' declares local owner role but has no declared \
+                                 owner_machine_id in {} mode",
+                                checkout.workspace_id, context.mode
+                            )));
                         }
                         Some(_) => {}
                     }
@@ -442,6 +568,12 @@ fn validate_registry(
                 let binding_owner = checkout.owner_machine_id.as_deref().ok_or_else(|| {
                     invalid_registry(format!(
                         "workspace '{}' has replica role without owner_machine_id",
+                        checkout.workspace_id
+                    ))
+                })?;
+                validate_machine_id(binding_owner).map_err(|error| {
+                    invalid_registry(format!(
+                        "workspace '{}' has invalid replica owner_machine_id: {error}",
                         checkout.workspace_id
                     ))
                 })?;

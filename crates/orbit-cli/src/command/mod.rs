@@ -9,6 +9,7 @@ pub mod executor;
 pub mod friction;
 pub mod graph;
 pub mod hook;
+pub mod host;
 pub mod init;
 pub mod job;
 pub mod learning;
@@ -57,6 +58,7 @@ pub trait Execute {
 Environment:
   init        Initialize the global Orbit root (~/.orbit)
   workspace   Manage workspaces
+  host        Register and manage hub hosts
   config      Show or update Orbit configuration
   semantic    Manage local orbit-search indexing
   migrate     Apply or inspect pending .orbit layout/schema migrations
@@ -109,6 +111,7 @@ pub enum Commands {
     // ── Environment ──
     Init(init::InitCommand),
     Workspace(workspace::WorkspaceCommand),
+    Host(host::HostCommand),
     Config(config::ConfigCommand),
     Semantic(semantic::SemanticCommand),
     Migrate(migrate::MigrateCommand),

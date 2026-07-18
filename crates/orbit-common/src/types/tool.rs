@@ -132,6 +132,21 @@ pub enum McpToolPlacement {
     Composite,
 }
 
+/// Whether an MCP tool requires a logical workspace in its trusted session.
+///
+/// Existing tools are workspace-scoped by default. Registry-wide discovery is
+/// the narrow exception: a global tool operates without selecting or inferring
+/// a workspace.
+#[derive(
+    Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum McpToolScope {
+    #[default]
+    WorkspaceRequired,
+    Global,
+}
+
 /// A capability that may be granted to an MCP session.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "lowercase")]
@@ -169,6 +184,8 @@ impl FromStr for McpCapability {
 pub struct McpToolPolicy {
     placement: McpToolPlacement,
     allowed_capabilities: BTreeSet<McpCapability>,
+    #[serde(default)]
+    scope: McpToolScope,
 }
 
 impl McpToolPolicy {
@@ -188,6 +205,7 @@ impl McpToolPolicy {
         Ok(Self {
             placement,
             allowed_capabilities: capabilities,
+            scope: McpToolScope::WorkspaceRequired,
         })
     }
 
@@ -197,6 +215,17 @@ impl McpToolPolicy {
 
     pub fn allowed_capabilities(&self) -> &BTreeSet<McpCapability> {
         &self.allowed_capabilities
+    }
+
+    pub fn scope(&self) -> McpToolScope {
+        self.scope
+    }
+
+    /// Override the default workspace requirement for a deliberately global
+    /// tool. Keeping this schema-adjacent prevents name-based scope inference.
+    pub fn with_scope(mut self, scope: McpToolScope) -> Self {
+        self.scope = scope;
+        self
     }
 
     pub fn validate(&self) -> Result<(), McpToolPolicyError> {
@@ -212,6 +241,7 @@ impl McpToolPolicy {
         Self {
             placement,
             allowed_capabilities: BTreeSet::from([McpCapability::Agent, McpCapability::Operator]),
+            scope: McpToolScope::WorkspaceRequired,
         }
     }
 
@@ -220,6 +250,7 @@ impl McpToolPolicy {
         Self {
             placement,
             allowed_capabilities: BTreeSet::from([McpCapability::Operator]),
+            scope: McpToolScope::WorkspaceRequired,
         }
     }
 }

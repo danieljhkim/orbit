@@ -3,11 +3,15 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use clap::Args;
 use orbit_cmd::agent_rules::{InjectionAction, inject_agent_rules};
-use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceStatus};
+use orbit_common::types::{
+    Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceStatus, validate_machine_id,
+};
 use orbit_core::command::init::{InitOptions, init_workspace_at_root, seed_default_orbitignore};
+use orbit_core::routines::{HostIdentityState, HostMode, inspect_host_identity};
 use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
 
+use super::role::CliCheckoutRole;
 use super::support::{detect_git_remote, dir_name_or_fallback, ensure_orbit_gitignore_entry};
 
 #[derive(Args)]
@@ -25,6 +29,14 @@ pub struct WorkspaceInitArgs {
     /// effective mode defaults to `local` (only PR-gated workspaces set `pr`).
     #[arg(long, value_name = "MODE")]
     pub ship_mode: Option<String>,
+    /// Explicit local checkout role. Omit for the compatible local-owner
+    /// default; use `replica --owner hm_...` to bootstrap a replica atomically.
+    #[arg(long, value_enum)]
+    pub role: Option<CliCheckoutRole>,
+    /// Stable owner machine_id. Required with `--role replica` and rejected
+    /// for the local-owner role.
+    #[arg(long)]
+    pub owner: Option<String>,
     /// Seed the local task-id allocator so the next task id is N (e.g. hand this
     /// machine a disjoint id range like 10000+). The counter only moves forward;
     /// a value below the current position is refused.
@@ -136,6 +148,44 @@ impl WorkspaceInitArgs {
         if let Some(mode) = self.ship_mode.as_deref() {
             orbit_core::ShipMode::parse(mode)?;
         }
+        let (local_machine_id, local_mode) = match inspect_host_identity(global_root)? {
+            HostIdentityState::Present(identity) => (Some(identity.machine_id), identity.mode),
+            HostIdentityState::Legacy { .. } | HostIdentityState::Absent => {
+                (None, HostMode::Standalone)
+            }
+        };
+        let explicit_role = self.role.map(WorkspaceCheckoutRole::from);
+        match (explicit_role, self.owner.as_deref()) {
+            (None, Some(_)) => {
+                return Err(OrbitError::InvalidInput(
+                    "--owner requires `--role replica`".to_string(),
+                ));
+            }
+            (Some(WorkspaceCheckoutRole::Owner), Some(_)) => {
+                return Err(OrbitError::InvalidInput(
+                    "--role owner does not take --owner".to_string(),
+                ));
+            }
+            (Some(WorkspaceCheckoutRole::Replica), None) => {
+                return Err(OrbitError::InvalidInput(
+                    "--role replica requires --owner <machine_id>".to_string(),
+                ));
+            }
+            (Some(WorkspaceCheckoutRole::Replica), Some(owner)) => {
+                if local_mode == HostMode::Standalone {
+                    return Err(OrbitError::InvalidInput(
+                        "--role replica is unavailable in standalone mode".to_string(),
+                    ));
+                }
+                validate_machine_id(owner)?;
+                if local_machine_id.as_deref() == Some(owner) {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "--role replica owner '{owner}' is this local machine; declare owner role instead"
+                    )));
+                }
+            }
+            _ => {}
+        }
 
         init_workspace_at_root(
             orbit_dir,
@@ -154,6 +204,7 @@ impl WorkspaceInitArgs {
         let git_remote = detect_git_remote(cwd);
 
         let mut registry = workspace_registry::load_registry_from(registry_path)?;
+        let mut checkout_added = false;
         if let Some(existing) = registry.workspaces.iter_mut().find(|w| w.id == id) {
             if let Some(ship_mode) = self.ship_mode {
                 existing.ship_mode = Some(ship_mode);
@@ -172,18 +223,17 @@ impl WorkspaceInitArgs {
             } else {
                 workspace_registry::register_checkout(
                     &mut registry,
-                    WorkspaceCheckout::owner(
-                        id.clone(),
-                        cwd.to_path_buf(),
-                        orbit_dir.to_path_buf(),
-                    ),
+                    unassigned_checkout(&id, cwd, orbit_dir),
                 )?;
+                checkout_added = true;
             }
         } else {
             let now = Utc::now();
             let ws = Workspace {
                 id: id.clone(),
                 name: name.clone(),
+                // The explicit role assignment below writes owner identity
+                // and checkout role together before this registry is saved.
                 owner_machine_id: None,
                 git_remote,
                 ship_mode: self.ship_mode,
@@ -195,7 +245,21 @@ impl WorkspaceInitArgs {
             workspace_registry::register_workspace(&mut registry, ws)?;
             workspace_registry::register_checkout(
                 &mut registry,
-                WorkspaceCheckout::owner(id.clone(), cwd.to_path_buf(), orbit_dir.to_path_buf()),
+                unassigned_checkout(&id, cwd, orbit_dir),
+            )?;
+            checkout_added = true;
+        }
+
+        // A new checkout defaults compatibly to the local owner. An explicit
+        // replica declaration supplies its stable owner in this same in-memory
+        // mutation, so no transient local-owner binding is ever persisted.
+        if checkout_added || explicit_role.is_some() {
+            workspace_registry::assign_checkout_role(
+                &mut registry,
+                &id,
+                explicit_role.unwrap_or(WorkspaceCheckoutRole::Owner),
+                self.owner.as_deref(),
+                local_machine_id.as_deref(),
             )?;
         }
         workspace_registry::save_registry_to(&registry, registry_path)?;
@@ -206,6 +270,21 @@ impl WorkspaceInitArgs {
             root: cwd.to_path_buf(),
             orbit_dir: orbit_dir.to_path_buf(),
         })
+    }
+}
+
+fn unassigned_checkout(
+    workspace_id: &str,
+    repo_root: &Path,
+    orbit_dir: &Path,
+) -> WorkspaceCheckout {
+    WorkspaceCheckout {
+        workspace_id: workspace_id.to_string(),
+        repo_root: repo_root.to_path_buf(),
+        orbit_dir: orbit_dir.to_path_buf(),
+        role: None,
+        owner_machine_id: None,
+        path_overrides: Vec::new(),
     }
 }
 

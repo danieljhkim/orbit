@@ -12,6 +12,7 @@ use crate::tests::env_isolation::EnvGuard;
 
 use super::super::init::WorkspaceInitArgs;
 use super::super::list::format_workspace_list;
+use super::super::role::CliCheckoutRole;
 use super::super::show::format_workspace_show;
 
 #[test]
@@ -34,6 +35,8 @@ fn workspace_reinit_merges_explicit_registration_updates_without_resetting_autho
         name: Some("reinit-merge".to_string()),
         base_branch: base_branch.map(str::to_string),
         ship_mode: ship_mode.map(str::to_string),
+        role: None,
+        owner: None,
         task_id_start: None,
         mcp: false,
         hooks: false,
@@ -136,6 +139,136 @@ policy:
 }
 
 #[test]
+fn multi_host_workspace_init_persists_an_explicit_local_owner() {
+    for mode in ["hub", "spoke"] {
+        let workspace = tempdir().expect("workspace tempdir");
+        let home = tempdir().expect("home tempdir");
+        let global = home.path().join(".orbit");
+        std::fs::create_dir_all(&global).expect("create global orbit");
+        std::fs::write(
+            global.join("host.toml"),
+            format!(
+                "schema_version = 1\nmachine_id = \"hm_local\"\nhost_id = \"local\"\nmode = \"{mode}\"\n"
+            ),
+        )
+        .expect("write host identity");
+
+        let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+        WorkspaceInitArgs {
+            name: Some(format!("{mode}-owner")),
+            base_branch: Some("agent-main".to_string()),
+            ship_mode: Some("pr".to_string()),
+            role: None,
+            owner: None,
+            task_id_start: None,
+            mcp: false,
+            hooks: false,
+            inject_agent_rules: false,
+            refresh_defaults: false,
+        }
+        .execute_without_runtime(None)
+        .expect("explicit multi-host workspace init");
+
+        let registry = workspace_registry::load_registry_from(&global.join("workspaces.json"))
+            .expect("reload multi-host registry");
+        assert_eq!(
+            registry.workspaces[0].owner_machine_id.as_deref(),
+            Some("hm_local")
+        );
+        assert_eq!(
+            registry.checkouts[0].role,
+            Some(orbit_common::types::WorkspaceCheckoutRole::Owner)
+        );
+    }
+}
+
+#[test]
+fn spoke_workspace_init_can_atomically_declare_a_remote_owner_replica() {
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_spoke\"\nhost_id = \"spoke\"\nmode = \"spoke\"\n",
+    )
+    .expect("write host identity");
+
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+    WorkspaceInitArgs {
+        name: Some("replica".to_string()),
+        base_branch: Some("agent-main".to_string()),
+        ship_mode: Some("pr".to_string()),
+        role: Some(CliCheckoutRole::Replica),
+        owner: Some("hm_owner".to_string()),
+        task_id_start: None,
+        mcp: false,
+        hooks: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+    }
+    .execute_without_runtime(None)
+    .expect("atomic replica workspace init");
+
+    let registry = workspace_registry::load_registry_from(&global.join("workspaces.json"))
+        .expect("reload replica registry");
+    assert_eq!(
+        registry.workspaces[0].owner_machine_id.as_deref(),
+        Some("hm_owner")
+    );
+    assert_eq!(
+        registry.checkouts[0].role,
+        Some(CliCheckoutRole::Replica.into())
+    );
+    assert_eq!(
+        registry.checkouts[0].owner_machine_id.as_deref(),
+        Some("hm_owner")
+    );
+}
+
+#[test]
+fn invalid_replica_init_fails_before_workspace_artifacts_or_registry_mutation() {
+    for (mode, rejected_owner, expected) in [
+        ("spoke", "hm_spoke", "local machine"),
+        ("spoke", "ssh:hub", "machine_id"),
+        ("standalone", "hm_owner", "standalone mode"),
+    ] {
+        let workspace = tempdir().expect("workspace tempdir");
+        let home = tempdir().expect("home tempdir");
+        let global = home.path().join(".orbit");
+        std::fs::create_dir_all(&global).expect("create global orbit");
+        std::fs::write(
+            global.join("host.toml"),
+            format!(
+                "schema_version = 1\nmachine_id = \"hm_spoke\"\nhost_id = \"spoke\"\nmode = \"{mode}\"\n"
+            ),
+        )
+        .expect("write host identity");
+
+        let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+        let error = WorkspaceInitArgs {
+            name: Some("invalid-replica".to_string()),
+            base_branch: Some("agent-main".to_string()),
+            ship_mode: Some("pr".to_string()),
+            role: Some(CliCheckoutRole::Replica),
+            owner: Some(rejected_owner.to_string()),
+            task_id_start: None,
+            mcp: false,
+            hooks: false,
+            inject_agent_rules: false,
+            refresh_defaults: false,
+        }
+        .execute_without_runtime(None)
+        .expect_err("invalid replica declaration must fail before bootstrap")
+        .to_string();
+        assert!(error.contains(expected), "unexpected: {error}");
+        assert!(!workspace.path().join(".orbit").exists());
+        assert!(!workspace.path().join(".gitignore").exists());
+        assert!(!global.join("workspaces.json").exists());
+    }
+}
+
+#[test]
 fn workspace_list_and_show_report_effective_ship_mode() {
     let now = Utc::now();
     let workspace = Workspace {
@@ -185,6 +318,8 @@ fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() 
         name: Some("routine-seed-test".to_string()),
         base_branch: Some("agent-main".to_string()),
         ship_mode: Some("pr".to_string()),
+        role: None,
+        owner: None,
         task_id_start: None,
         mcp: false,
         hooks: false,
@@ -279,6 +414,8 @@ fn workspace_init_seeds_auto_detected_mcp_configs() {
         name: None,
         base_branch: Some("main".to_string()),
         ship_mode: None,
+        role: None,
+        owner: None,
         task_id_start: None,
         mcp: true,
         hooks: false,
@@ -327,6 +464,8 @@ fn workspace_init_skips_mcp_by_default() {
         name: None,
         base_branch: Some("main".to_string()),
         ship_mode: None,
+        role: None,
+        owner: None,
         task_id_start: None,
         mcp: false,
         hooks: false,
@@ -367,6 +506,8 @@ fn workspace_init_under_home_with_global_orbit_creates_repo_orbit() {
         name: None,
         base_branch: Some("main".to_string()),
         ship_mode: None,
+        role: None,
+        owner: None,
         task_id_start: None,
         mcp: false,
         hooks: false,
@@ -400,6 +541,8 @@ fn workspace_init_appends_orbit_to_existing_gitignore() {
         name: None,
         base_branch: Some("main".to_string()),
         ship_mode: None,
+        role: None,
+        owner: None,
         task_id_start: None,
         mcp: false,
         hooks: false,
@@ -429,6 +572,8 @@ fn workspace_init_does_not_duplicate_existing_orbit_gitignore_entry() {
         name: None,
         base_branch: Some("main".to_string()),
         ship_mode: None,
+        role: None,
+        owner: None,
         task_id_start: None,
         mcp: false,
         hooks: false,
@@ -458,6 +603,8 @@ fn workspace_init_from_git_subdir_gitignores_repo_orbit_dir() {
         name: None,
         base_branch: Some("main".to_string()),
         ship_mode: None,
+        role: None,
+        owner: None,
         task_id_start: None,
         mcp: false,
         hooks: false,
@@ -487,6 +634,8 @@ fn workspace_init_with_root_override_uses_custom_registry() {
         name: Some("custom-root".to_string()),
         base_branch: None,
         ship_mode: None,
+        role: None,
+        owner: None,
         task_id_start: None,
         mcp: false,
         hooks: false,
@@ -541,6 +690,8 @@ fn workspace_init_seeds_default_orbitignore_when_missing() {
         name: None,
         base_branch: Some("main".to_string()),
         ship_mode: None,
+        role: None,
+        owner: None,
         task_id_start: None,
         mcp: false,
         hooks: false,
@@ -572,6 +723,8 @@ fn workspace_init_preserves_existing_orbitignore() {
         name: None,
         base_branch: Some("main".to_string()),
         ship_mode: None,
+        role: None,
+        owner: None,
         task_id_start: None,
         mcp: false,
         hooks: false,
@@ -604,6 +757,8 @@ fn workspace_init_with_root_override_does_not_modify_repo_gitignore() {
         name: Some("custom-root-git".to_string()),
         base_branch: Some("main".to_string()),
         ship_mode: None,
+        role: None,
+        owner: None,
         task_id_start: None,
         mcp: false,
         hooks: false,
@@ -660,6 +815,8 @@ fn nameless_tmp_workspace_registers_only_in_isolated_registry() {
             name: None,
             base_branch: Some("main".to_string()),
             ship_mode: None,
+            role: None,
+            owner: None,
             task_id_start: None,
             mcp: false,
             hooks: false,

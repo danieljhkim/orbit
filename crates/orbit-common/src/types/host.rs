@@ -5,6 +5,63 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use super::OrbitError;
+
+/// Maximum encoded length for a stable registry identifier.
+pub const REGISTRY_IDENTIFIER_MAX_BYTES: usize = 128;
+
+/// Validate a path-free, normalized identifier stored in public registry
+/// records. Transport targets and filesystem paths are never identities.
+pub fn validate_registry_identifier(field: &str, value: &str) -> Result<(), OrbitError> {
+    if value.is_empty() {
+        return Err(OrbitError::InvalidInput(format!(
+            "{field} must not be empty"
+        )));
+    }
+    if value.trim() != value {
+        return Err(OrbitError::InvalidInput(format!(
+            "{field} must not contain leading or trailing whitespace"
+        )));
+    }
+    if value.len() > REGISTRY_IDENTIFIER_MAX_BYTES {
+        return Err(OrbitError::InvalidInput(format!(
+            "{field} must not exceed {REGISTRY_IDENTIFIER_MAX_BYTES} bytes"
+        )));
+    }
+    if value.chars().any(char::is_control) || value.contains(['/', '\\']) {
+        return Err(OrbitError::InvalidInput(format!(
+            "{field} must be a logical registry identifier, not a path"
+        )));
+    }
+    Ok(())
+}
+
+/// Validate the stable machine key used in host and workspace role records.
+pub fn validate_machine_id(machine_id: &str) -> Result<(), OrbitError> {
+    validate_registry_identifier("machine_id", machine_id)?;
+    let Some(suffix) = machine_id.strip_prefix("hm_") else {
+        return Err(OrbitError::InvalidInput(
+            "machine_id must use the canonical 'hm_' namespace".to_string(),
+        ));
+    };
+    if suffix.is_empty()
+        || !suffix
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(OrbitError::InvalidInput(
+            "machine_id must contain 'hm_' followed by ASCII letters, digits, '_' or '-'"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Validate a human-readable host name stored by the hub registry.
+pub fn validate_host_id(host_id: &str) -> Result<(), OrbitError> {
+    validate_registry_identifier("host_id", host_id)
+}
+
 /// Durable lifecycle state of a registered Orbit host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

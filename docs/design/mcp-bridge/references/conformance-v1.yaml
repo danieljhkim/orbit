@@ -10,52 +10,63 @@ source_of_truth:
   placement_metadata_owner:
     - crates/orbit-tools/src/builtin/orbit/mod.rs::register
     - crates/orbit-mcp/src/adapter/graph.rs::graph_tool_definitions
+  scope_metadata_owner:
+    - crates/orbit-tools/src/builtin/orbit/mod.rs::register
+    - crates/orbit-mcp/src/adapter/graph.rs::graph_tool_definitions
 
 capabilities:
   allowed_values: [agent, operator, runner]
   set_rules:
-    - Every exposed tool has exactly one placement and a non-empty allowed_capabilities set.
+    - Every exposed tool has exactly one placement, one scope, and a non-empty allowed_capabilities set.
     - Placement and capability filtering are independent.
     - operator does not imply runner; runner does not imply agent.
 
+scopes:
+  allowed_values: [workspace-required, global]
+  rules:
+    - Existing tools default to workspace-required.
+    - Only registry-wide discovery tools are global and may execute without a workspace selector.
+
 tools:
-  orbit.task.add: { placement: hub, allowed_capabilities: [agent, operator] }
-  orbit.task.approve: { placement: hub, allowed_capabilities: [agent, operator] }
-  orbit.task.artifact.put: { placement: hub, allowed_capabilities: [agent, operator] }
-  orbit.task.list: { placement: hub, allowed_capabilities: [agent, operator] }
-  orbit.task.review_thread.add: { placement: hub, allowed_capabilities: [agent, operator] }
-  orbit.task.review_thread.list: { placement: hub, allowed_capabilities: [agent, operator] }
-  orbit.task.review_thread.reply: { placement: hub, allowed_capabilities: [agent, operator] }
-  orbit.task.review_thread.resolve: { placement: hub, allowed_capabilities: [agent, operator] }
-  orbit.task.show: { placement: hub, allowed_capabilities: [agent, operator] }
-  orbit.task.start: { placement: hub, allowed_capabilities: [agent, operator] }
-  orbit.task.update: { placement: hub, allowed_capabilities: [agent, operator] }
-  orbit.friction.add: { placement: hub, allowed_capabilities: [agent, operator] }
-  orbit.friction.tags: { placement: hub, allowed_capabilities: [agent, operator] }
-  orbit.friction.update: { placement: hub, allowed_capabilities: [operator] }
-  orbit.graph.sync: { placement: local-derived, allowed_capabilities: [agent, operator] }
-  orbit.graph.search: { placement: local-derived, allowed_capabilities: [agent, operator] }
-  orbit.graph.show: { placement: local-derived, allowed_capabilities: [agent, operator] }
-  orbit.graph.refs: { placement: local-derived, allowed_capabilities: [agent, operator] }
-  orbit.graph.callees: { placement: local-derived, allowed_capabilities: [agent, operator] }
-  orbit.graph.impact: { placement: local-derived, allowed_capabilities: [agent, operator] }
-  orbit.graph.trace: { placement: local-derived, allowed_capabilities: [agent, operator] }
-  orbit.graph.overview: { placement: local-derived, allowed_capabilities: [agent, operator] }
-  orbit.graph.implementors: { placement: local-derived, allowed_capabilities: [agent, operator] }
-  orbit.graph.deps: { placement: local-derived, allowed_capabilities: [agent, operator] }
-  orbit.search: { placement: composite, allowed_capabilities: [agent, operator] }
-  orbit.adr.add: { placement: composite, allowed_capabilities: [agent, operator] }
-  orbit.adr.show: { placement: owner, allowed_capabilities: [agent, operator] }
-  orbit.adr.supersede: { placement: owner, allowed_capabilities: [agent, operator] }
-  orbit.adr.update: { placement: owner, allowed_capabilities: [agent, operator] }
-  orbit.learning.add: { placement: composite, allowed_capabilities: [agent, operator] }
-  orbit.learning.show: { placement: owner, allowed_capabilities: [agent, operator] }
-  orbit.learning.update: { placement: owner, allowed_capabilities: [agent, operator] }
-  orbit.learning.supersede: { placement: owner, allowed_capabilities: [agent, operator] }
-  orbit.auto_task.add: { placement: owner, allowed_capabilities: [agent, operator] }
-  orbit.auto_task.show: { placement: owner, allowed_capabilities: [agent, operator] }
-  orbit.auto_task.update: { placement: owner, allowed_capabilities: [agent, operator] }
-  orbit.auto_task.toggle: { placement: owner, allowed_capabilities: [agent, operator] }
+  orbit.task.add: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.task.approve: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.task.artifact.put: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.task.list: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.task.review_thread.add: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.task.review_thread.list: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.task.review_thread.reply: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.task.review_thread.resolve: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.task.show: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.task.start: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.task.update: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.friction.add: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.friction.tags: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.friction.update: { placement: hub, scope: workspace-required, allowed_capabilities: [operator] }
+  orbit.host.list: { placement: hub, scope: global, allowed_capabilities: [operator] }
+  orbit.workspace.list: { placement: hub, scope: global, allowed_capabilities: [operator] }
+  orbit.graph.sync: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.graph.search: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.graph.show: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.graph.refs: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.graph.callees: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.graph.impact: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.graph.trace: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.graph.overview: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.graph.implementors: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.graph.deps: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.search: { placement: composite, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.adr.add: { placement: composite, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.adr.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.adr.supersede: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.adr.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.learning.add: { placement: composite, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.learning.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.learning.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.learning.supersede: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.auto_task.add: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.auto_task.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.auto_task.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.auto_task.toggle: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
 
 hub_schema_digest:
   contract_revision: 1

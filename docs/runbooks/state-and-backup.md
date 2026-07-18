@@ -43,8 +43,10 @@ precedence). Path layout is defined in
 | Path | What it is | Authoritative or regenerable |
 |---|---|---|
 | `config.toml` | global runtime config (created by `orbit init`) | authoritative |
-| `workspaces.json` | registry of workspaces on this machine | authoritative |
-| `orbit.db` (+ `-wal`, `-shm`) | **the** store DB: audit events (`audit_events`, `v2_audit_events`), job runs + checkpoints (`job_runs`, `job_run_steps`), task reservations, ADR/learning indexes, `schema_meta` migration ledger | **authoritative** (history is not derivable) |
+| `workspaces.json` | registry of workspaces on this machine (logical workspaces + local checkouts, including declared owner and `owner`/`replica` role) | authoritative |
+| `host.toml` | this machine's stable identity (`machine_id`, `host_id`, `mode`); renamed in place by `orbit host rename` | authoritative |
+| `registry-cache.json` | satellite cache of one sanitized hub registry snapshot (hosts, aliases, ownership, sanitized freshness) + local receipt time | regenerable (validation-only; refreshed on poll/register) |
+| `orbit.db` (+ `-wal`, `-shm`) | **the** store DB: audit events (`audit_events`, `v2_audit_events`), job runs + checkpoints (`job_runs`, `job_run_steps`), task reservations, ADR/learning indexes, host registry (`hosts`, `host_aliases`, `workspace_ownership`, `host_workspace_presence`, `workspace_execution_profiles`, `hub_registry_metadata`), `schema_meta` migration ledger | **authoritative** (history is not derivable) |
 | `tasks/index.sqlite` | global task-ID allocator + registry index | regenerable (`orbit task reindex`) |
 | `tasks/workspaces/<ws-id>/<task-id>/` | canonical task bundles (survive repo moves) | **authoritative** |
 | `resources/`, `skills/` | default activity/job/executor/policy defs, skills | regenerable (`orbit init` reseeds) |

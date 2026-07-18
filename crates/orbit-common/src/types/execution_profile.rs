@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::activity_job::{Backend, Provider};
-use super::{Crew, OrbitError};
+use super::{Crew, OrbitError, validate_machine_id};
 
 pub const EXECUTION_PROFILE_SCHEMA_VERSION: u32 = 1;
 pub const EXECUTION_CONFIG_DIGEST_DOMAIN: &[u8] = b"orbit.execution-profile.config.v1\0";
@@ -162,7 +162,7 @@ impl ExecutionProfileV1 {
             )));
         }
         validate_logical_id("workspace_id", &self.workspace_id)?;
-        validate_logical_id("owner_machine_id", &self.owner_machine_id)?;
+        validate_machine_id(&self.owner_machine_id)?;
         let default_crew = required_trimmed("default_crew", &self.default_crew)?;
         if default_crew != self.default_crew {
             return Err(OrbitError::InvalidInput(

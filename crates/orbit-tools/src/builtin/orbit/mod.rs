@@ -4,6 +4,7 @@ pub mod docs;
 pub mod duel;
 pub mod friction;
 pub mod groundhog;
+pub mod host;
 pub mod learning;
 pub mod pipeline;
 pub mod review_thread;
@@ -11,10 +12,11 @@ pub mod search;
 pub mod semantic;
 pub mod state;
 pub mod task;
+pub mod workspace;
 
 use orbit_common::types::{
-    McpToolPlacement, McpToolPolicy, OrbitError, ToolParam, normalize_agent_family_for_model,
-    normalize_optional_attribution_label,
+    McpToolPlacement, McpToolPolicy, McpToolScope, OrbitError, ToolParam,
+    normalize_agent_family_for_model, normalize_optional_attribution_label,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -97,6 +99,17 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register_mcp(
         friction::update::OrbitFrictionUpdateTool,
         McpToolPolicy::operator_only(McpToolPlacement::Hub),
+    );
+    // Canonical sanitized discovery (ORB-10267): hub placement, operator-only,
+    // workspace-unscoped. Destructive host/workspace administration stays on the
+    // CLI and is never exposed as a model-callable tool.
+    registry.register_mcp(
+        host::list::OrbitHostListTool,
+        McpToolPolicy::operator_only(McpToolPlacement::Hub).with_scope(McpToolScope::Global),
+    );
+    registry.register_mcp(
+        workspace::list::OrbitWorkspaceListTool,
+        McpToolPolicy::operator_only(McpToolPlacement::Hub).with_scope(McpToolScope::Global),
     );
     registry.register_mcp(
         task::add::OrbitTaskAddTool,

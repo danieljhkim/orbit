@@ -79,6 +79,22 @@ pub enum WorkspaceCheckoutRole {
     Replica,
 }
 
+impl WorkspaceCheckoutRole {
+    /// The persisted lowercase string form.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WorkspaceCheckoutRole::Owner => "owner",
+            WorkspaceCheckoutRole::Replica => "replica",
+        }
+    }
+}
+
+impl std::fmt::Display for WorkspaceCheckoutRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Machine-local filesystem binding for a logical [`Workspace`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

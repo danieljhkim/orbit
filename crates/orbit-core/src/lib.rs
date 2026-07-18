@@ -51,6 +51,7 @@ pub mod context;
 pub mod host_registry;
 pub mod metrics;
 mod paths;
+pub mod registry_cache;
 pub mod routines;
 pub mod runtime;
 pub mod workspace_registry;
@@ -74,7 +75,8 @@ pub use command::search::{
 };
 pub use command::workflow::{ShipMode, build_ship_input, find_workflow, resolved_ship_mode};
 pub use context::ActorIdentity;
-pub use host_registry::HostRegistryService;
+pub use host_registry::{HostRegistryService, WorkspaceLink, require_local_hub_identity};
+pub use registry_cache::{RegistryCacheOutcome, RegistryCacheService, RegistryCacheState};
 // Shared domain types (owned by orbit-common) that the CLI and dashboard
 // render or construct.
 pub use auto_tasks::{AutoTaskAddParams, AutoTaskUpdateParams};

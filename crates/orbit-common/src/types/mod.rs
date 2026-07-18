@@ -44,6 +44,7 @@ pub mod learning;
 pub mod metrics;
 pub mod policy_decision;
 pub mod policy_def;
+pub mod registry_snapshot;
 pub mod resource;
 pub mod role;
 pub mod routine;
@@ -105,7 +106,11 @@ pub use executor_def::{
     ExecutorDef, ExecutorSandboxKind, ExecutorType, ModelPairOverride, StdoutFormat,
 };
 pub use friction::{FrictionEntry, FrictionFrontmatter, FrictionRecord, FrictionStatus};
-pub use host::{HostAlias, HostNameResolution, HostRecord, HostRegistration, HostStatus};
+pub use host::{
+    HostAlias, HostNameResolution, HostRecord, HostRegistration, HostStatus,
+    REGISTRY_IDENTIFIER_MAX_BYTES, validate_host_id, validate_machine_id,
+    validate_registry_identifier,
+};
 pub use id::OrbitId;
 pub use invocation::{InvocationTrace, TokenUsage, ToolCallTrace};
 pub use job::{
@@ -124,6 +129,11 @@ pub use policy_decision::PolicyDecision;
 pub use policy_def::{
     DEFAULT_POLICY_NAME, FsCheckResult, FsOperation, FsProfile, PolicyDef, ResolvedFsProfile,
     UNRESTRICTED_FS_PROFILE,
+};
+pub use registry_snapshot::{
+    REGISTRY_CACHE_SCHEMA_VERSION, REGISTRY_SNAPSHOT_SCHEMA_VERSION, RegistryAliasV1,
+    RegistryCacheV1, RegistryHostV1, RegistryPresenceV1, RegistryProfileV1, RegistrySnapshotV1,
+    RegistryWorkspaceV1,
 };
 pub use resource::{
     EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorResource, ExecutorResourceSpec,
@@ -160,9 +170,9 @@ pub use task_artifacts::{
 pub use task_plan::{TaskPlan, TaskPlanCheckpoint, TaskPlanSuccessCriterion, parse_task_plan};
 pub use tool::{
     ExecutionResult, McpCapability, McpCapabilityPlacementMatrix, McpLeasedRun, McpToolDefinition,
-    McpToolPlacement, McpToolPolicy, McpToolPolicyError, McpTransport, StoredTool, ToolParam,
-    ToolSchema, ToolSessionContext, mcp_advertised_tool_name, mcp_capability_placement_matrix,
-    validate_mcp_tool_definitions,
+    McpToolPlacement, McpToolPolicy, McpToolPolicyError, McpToolScope, McpTransport, StoredTool,
+    ToolParam, ToolSchema, ToolSessionContext, mcp_advertised_tool_name,
+    mcp_capability_placement_matrix, validate_mcp_tool_definitions,
 };
 pub use tool_input::{
     RETIRED_TASK_ADD_INPUT_FIELDS, optional_csv_or_string_list_alias, optional_raw_string,

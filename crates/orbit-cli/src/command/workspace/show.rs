@@ -50,6 +50,17 @@ pub(super) fn format_workspace_show(workspace: &Workspace, checkout: &WorkspaceC
         orbit_core::resolved_ship_mode(workspace).as_input_value(),
         workspace.status,
     );
+    output.push_str(&format!(
+        "owner:       {}\nrole:        {}\n",
+        workspace.owner_machine_id.as_deref().unwrap_or("-"),
+        checkout
+            .role
+            .map(|role| role.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+    ));
+    if let Some(replica_owner) = &checkout.owner_machine_id {
+        output.push_str(&format!("owner_mirror: {replica_owner}\n"));
+    }
     if let Some(remote) = &workspace.git_remote {
         output.push_str(&format!("git_remote:  {remote}\n"));
     }

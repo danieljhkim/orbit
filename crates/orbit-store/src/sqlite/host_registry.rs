@@ -15,7 +15,8 @@ use orbit_common::types::{
     ExecutionProfileV1, HostAlias, HostNameResolution, HostRecord, HostRegistration, HostStatus,
     HostWorkspacePresence, OrbitError, ProjectionFreshness, SanitizedExecutionProfile,
     SanitizedWorkspacePresence, StoredExecutionProfile, WorkspaceOwnership,
-    WorkspacePresenceDeclaration,
+    WorkspacePresenceDeclaration, validate_host_id, validate_machine_id,
+    validate_registry_identifier,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
@@ -33,43 +34,85 @@ impl Store {
     pub fn register_host(&self, registration: &HostRegistration) -> Result<HostRecord, OrbitError> {
         validate_registration(registration)?;
         self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
-            if let Some(existing) = host_by_machine_id(&tx.tx, &registration.machine_id)? {
-                ensure_compatible_registration(&existing, registration)?;
-                return Ok(existing);
+            let (host, inserted) = register_host_in_transaction(&tx.tx, registration)?;
+            if inserted {
+                advance_registry_revision(&tx.tx)?;
+            }
+            Ok(host)
+        })
+    }
+
+    /// Atomically register the singular hub host and stamp its immutable
+    /// `machine_id` into the registry snapshot metadata. A fresh host row and
+    /// the first hub stamp are one snapshot-visible mutation and therefore
+    /// advance `registry_revision` exactly once. Repeating the same declaration
+    /// is a no-op; a different configured hub fails before inserting a host.
+    pub fn register_hub(&self, registration: &HostRegistration) -> Result<HostRecord, OrbitError> {
+        validate_registration(registration)?;
+        self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+            let configured_hub: Option<String> = tx
+                .tx
+                .query_row(
+                    "SELECT hub_machine_id FROM hub_registry_metadata WHERE id = 0",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|error| OrbitError::Store(error.to_string()))?;
+            if let Some(existing) = configured_hub.as_deref()
+                && existing != registration.machine_id
+            {
+                return Err(OrbitError::InvalidInput(format!(
+                    "hub identity is already configured as machine_id '{existing}'; a second hub is not supported in v1"
+                )));
             }
 
-            ensure_name_available(&tx.tx, &registration.host_id)?;
-            let now = crate::now_string();
-            let labels_json = serde_json::to_string(&registration.labels)
-                .map_err(|error| OrbitError::Store(error.to_string()))?;
-            tx.tx
-                .execute(
-                    "INSERT INTO hosts(
-                        machine_id, host_id, labels_json, status, registered_at,
-                        updated_at, retired_at, last_seen_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?5, NULL, ?5)",
-                    params![
-                        registration.machine_id,
-                        registration.host_id,
-                        labels_json,
-                        HostStatus::Active.as_str(),
-                        now,
-                    ],
-                )
-                .map_err(|error| host_mutation_error("register", &registration.host_id, error))?;
+            let (host, inserted) = register_host_in_transaction(&tx.tx, registration)?;
+            let stamped = if configured_hub.is_none() {
+                let updated = tx
+                    .tx
+                    .execute(
+                        "UPDATE hub_registry_metadata
+                         SET hub_machine_id = ?1, updated_at = ?2 WHERE id = 0",
+                        params![registration.machine_id, crate::now_string()],
+                    )
+                    .map_err(|error| OrbitError::Store(format!("stamp hub machine_id: {error}")))?;
+                if updated != 1 {
+                    return Err(OrbitError::Store(
+                        "hub registry metadata singleton row is missing".to_string(),
+                    ));
+                }
+                true
+            } else {
+                false
+            };
 
-            host_by_machine_id(&tx.tx, &registration.machine_id)?.ok_or_else(|| {
-                OrbitError::Store(format!(
-                    "registered host_id '{}' but could not read it back",
-                    registration.host_id
-                ))
-            })
+            if inserted || stamped {
+                advance_registry_revision(&tx.tx)?;
+            }
+            Ok(host)
         })
     }
 
     /// Rename an active machine and atomically preserve its old name as a
     /// permanent tombstone alias. Renaming to its current name is a no-op;
     /// every other current, retired, or alias name is unavailable.
+    pub fn validate_host_rename(
+        &self,
+        machine_id: &str,
+        new_host_id: &str,
+    ) -> Result<HostRecord, OrbitError> {
+        validate_machine_id(machine_id)?;
+        validate_host_id(new_host_id)?;
+        let conn = self.read()?;
+        validate_host_rename_in_connection(&conn, machine_id, new_host_id)
+    }
+
+    /// Rename an active machine and atomically preserve its old name as a
+    /// permanent tombstone alias. Renaming to its current name is a no-op;
+    /// every other current, retired, or alias name is unavailable. Callers
+    /// coordinating a machine-local identity file may first call
+    /// [`Self::validate_host_rename`]; this transaction deliberately repeats
+    /// the same validation so a concurrent registry change still fails closed.
     pub fn rename_host(
         &self,
         machine_id: &str,
@@ -78,21 +121,10 @@ impl Store {
         validate_machine_id(machine_id)?;
         validate_host_id(new_host_id)?;
         self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
-            let existing = host_by_machine_id(&tx.tx, machine_id)?.ok_or_else(|| {
-                OrbitError::InvalidInput(format!(
-                    "cannot rename unknown host machine_id '{machine_id}'"
-                ))
-            })?;
-            if existing.status == HostStatus::Retired {
-                return Err(OrbitError::InvalidInput(format!(
-                    "host_id '{}' is retired and cannot be renamed",
-                    existing.host_id
-                )));
-            }
+            let existing = validate_host_rename_in_connection(&tx.tx, machine_id, new_host_id)?;
             if existing.host_id == new_host_id {
                 return Ok(existing);
             }
-            ensure_name_available(&tx.tx, new_host_id)?;
 
             let old_host_id = existing.host_id;
             let now = crate::now_string();
@@ -113,6 +145,7 @@ impl Store {
                     params![old_host_id, machine_id, now, warning],
                 )
                 .map_err(|error| host_mutation_error("preserve alias", &old_host_id, error))?;
+            advance_registry_revision(&tx.tx)?;
 
             host_by_machine_id(&tx.tx, machine_id)?.ok_or_else(|| {
                 OrbitError::Store(format!(
@@ -124,7 +157,9 @@ impl Store {
     }
 
     /// Retire a machine without deleting its identity or aliases. Repeating a
-    /// retirement returns the existing row without moving lifecycle times.
+    /// retirement returns the existing row without moving lifecycle times. The
+    /// configured v1 hub guard is read and enforced inside the same immediate
+    /// transaction as the lifecycle mutation.
     pub fn retire_host(&self, machine_id: &str) -> Result<HostRecord, OrbitError> {
         validate_machine_id(machine_id)?;
         self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
@@ -136,6 +171,19 @@ impl Store {
             if existing.status == HostStatus::Retired {
                 return Ok(existing);
             }
+            let configured_hub: Option<String> = tx
+                .tx
+                .query_row(
+                    "SELECT hub_machine_id FROM hub_registry_metadata WHERE id = 0",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|error| OrbitError::Store(error.to_string()))?;
+            if configured_hub.as_deref() == Some(machine_id) {
+                return Err(OrbitError::InvalidInput(format!(
+                    "machine_id '{machine_id}' is the currently configured hub and cannot retire itself in v1"
+                )));
+            }
             let now = crate::now_string();
             tx.tx
                 .execute(
@@ -145,6 +193,7 @@ impl Store {
                     params![machine_id, HostStatus::Retired.as_str(), now],
                 )
                 .map_err(|error| host_mutation_error("retire", &existing.host_id, error))?;
+            advance_registry_revision(&tx.tx)?;
             host_by_machine_id(&tx.tx, machine_id)?.ok_or_else(|| {
                 OrbitError::Store(format!(
                     "retired host_id '{}' but could not read it back",
@@ -267,7 +316,7 @@ impl Store {
         workspace_id: &str,
         owner_machine_id: &str,
     ) -> Result<WorkspaceOwnership, OrbitError> {
-        validate_registry_text("workspace_id", workspace_id)?;
+        validate_registry_identifier("workspace_id", workspace_id)?;
         validate_machine_id(owner_machine_id)?;
         self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
             require_active_host(&tx.tx, owner_machine_id)?;
@@ -293,6 +342,7 @@ impl Store {
                         "bind owner for workspace_id '{workspace_id}': {error}"
                     ))
                 })?;
+            advance_registry_revision(&tx.tx)?;
             ownership_by_workspace(&tx.tx, workspace_id)?.ok_or_else(|| {
                 OrbitError::Store(format!(
                     "bound owner for workspace_id '{workspace_id}' but could not read it back"
@@ -305,7 +355,7 @@ impl Store {
         &self,
         workspace_id: &str,
     ) -> Result<Option<WorkspaceOwnership>, OrbitError> {
-        validate_registry_text("workspace_id", workspace_id)?;
+        validate_registry_identifier("workspace_id", workspace_id)?;
         let conn = self.read()?;
         ownership_by_workspace(&conn, workspace_id)
     }
@@ -322,7 +372,7 @@ impl Store {
         validate_machine_id(caller_machine_id)?;
         let mut workspace_ids = BTreeSet::new();
         for declaration in declarations {
-            validate_registry_text("workspace_id", &declaration.workspace_id)?;
+            validate_registry_identifier("workspace_id", &declaration.workspace_id)?;
             if !workspace_ids.insert(declaration.workspace_id.as_str()) {
                 return Err(OrbitError::InvalidInput(format!(
                     "presence declaration repeats workspace_id '{}'",
@@ -333,7 +383,22 @@ impl Store {
         }
 
         self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
-            require_active_host(&tx.tx, caller_machine_id)?;
+            let host = require_active_host(&tx.tx, caller_machine_id)?;
+            let mut intended = declarations
+                .iter()
+                .map(|declaration| HostWorkspacePresence {
+                    machine_id: caller_machine_id.to_string(),
+                    workspace_id: declaration.workspace_id.clone(),
+                    root: declaration.root.clone(),
+                    last_verified: declaration.last_verified,
+                })
+                .collect::<Vec<_>>();
+            intended.sort_by(|left, right| left.workspace_id.cmp(&right.workspace_id));
+            let current = presence_for_machine(&tx.tx, caller_machine_id)?;
+            if host.last_seen_at == Some(received_at) && current == intended {
+                return Ok(current);
+            }
+
             tx.tx
                 .execute(
                     "DELETE FROM host_workspace_presence WHERE machine_id = ?1",
@@ -372,6 +437,10 @@ impl Store {
                     params![caller_machine_id, received_at.to_rfc3339()],
                 )
                 .map_err(|error| OrbitError::Store(format!("update host last_seen: {error}")))?;
+            // A changed declaration or receipt (`last_seen_at` /
+            // `last_verified`) is freshness-visible. An exact replay returned
+            // above without rewriting rows or advancing the revision.
+            advance_registry_revision(&tx.tx)?;
             presence_for_machine(&tx.tx, caller_machine_id)
         })
     }
@@ -393,7 +462,7 @@ impl Store {
         freshness_ttl: Duration,
     ) -> Result<SanitizedWorkspacePresence, OrbitError> {
         validate_machine_id(machine_id)?;
-        validate_registry_text("workspace_id", workspace_id)?;
+        validate_registry_identifier("workspace_id", workspace_id)?;
         validate_nonnegative_duration("presence freshness TTL", freshness_ttl)?;
         let conn = self.read()?;
         let owner_machine_id = ownership_by_workspace(&conn, workspace_id)?
@@ -492,6 +561,12 @@ impl Store {
                     profile.workspace_id
                 )));
             }
+            if let Some(existing) = existing.as_ref()
+                && existing.profile == *profile
+                && existing.received_at == received_at
+            {
+                return Ok(existing.clone());
+            }
 
             let generation = match existing.as_ref() {
                 None => 1,
@@ -531,6 +606,10 @@ impl Store {
                     "publish execution profile for workspace_id '{}': {error}",
                     profile.workspace_id
                 )))?;
+            // A changed profile observation or hub receipt (`received_at`) is
+            // freshness-visible, so it advances the global revision even when
+            // semantic generation is retained. An exact replay returned above.
+            advance_registry_revision(&tx.tx)?;
             stored_profile_by_workspace(&tx.tx, &profile.workspace_id)?.ok_or_else(|| {
                 OrbitError::Store(format!(
                     "published execution profile for workspace_id '{}' but could not read it back",
@@ -544,7 +623,7 @@ impl Store {
         &self,
         workspace_id: &str,
     ) -> Result<Option<StoredExecutionProfile>, OrbitError> {
-        validate_registry_text("workspace_id", workspace_id)?;
+        validate_registry_identifier("workspace_id", workspace_id)?;
         let conn = self.read()?;
         stored_profile_by_workspace(&conn, workspace_id)
     }
@@ -555,7 +634,7 @@ impl Store {
         now: DateTime<Utc>,
         freshness_ttl: Duration,
     ) -> Result<SanitizedExecutionProfile, OrbitError> {
-        validate_registry_text("workspace_id", workspace_id)?;
+        validate_registry_identifier("workspace_id", workspace_id)?;
         validate_nonnegative_duration("execution profile freshness TTL", freshness_ttl)?;
         let conn = self.read()?;
         let owner_machine_id = ownership_by_workspace(&conn, workspace_id)?
@@ -590,6 +669,79 @@ impl Store {
             profile: Some(record.profile),
         })
     }
+}
+
+fn register_host_in_transaction(
+    conn: &Connection,
+    registration: &HostRegistration,
+) -> Result<(HostRecord, bool), OrbitError> {
+    if let Some(existing) = host_by_machine_id(conn, &registration.machine_id)? {
+        ensure_compatible_registration(&existing, registration)?;
+        return Ok((existing, false));
+    }
+
+    ensure_name_available(conn, &registration.host_id)?;
+    let now = crate::now_string();
+    let labels_json = serde_json::to_string(&registration.labels)
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+    conn.execute(
+        "INSERT INTO hosts(
+            machine_id, host_id, labels_json, status, registered_at,
+            updated_at, retired_at, last_seen_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?5, NULL, ?5)",
+        params![
+            registration.machine_id,
+            registration.host_id,
+            labels_json,
+            HostStatus::Active.as_str(),
+            now,
+        ],
+    )
+    .map_err(|error| host_mutation_error("register", &registration.host_id, error))?;
+
+    let host = host_by_machine_id(conn, &registration.machine_id)?.ok_or_else(|| {
+        OrbitError::Store(format!(
+            "registered host_id '{}' but could not read it back",
+            registration.host_id
+        ))
+    })?;
+    Ok((host, true))
+}
+
+/// Advance the hub-global registry revision by exactly one inside the caller's
+/// write transaction. Callers invoke this only on the snapshot-visible mutation
+/// branch, never on an idempotent no-op return.
+pub(crate) fn advance_registry_revision(conn: &Connection) -> Result<(), OrbitError> {
+    let updated = conn
+        .execute(
+            "UPDATE hub_registry_metadata
+             SET registry_revision = registry_revision + 1, updated_at = ?1
+             WHERE id = 0
+               AND typeof(registry_revision) = 'integer'
+               AND registry_revision < 9223372036854775807",
+            params![crate::now_string()],
+        )
+        .map_err(|error| OrbitError::Store(format!("advance registry revision: {error}")))?;
+    if updated != 1 {
+        let state: Option<(String, i64)> = conn
+            .query_row(
+                "SELECT typeof(registry_revision), registry_revision
+                 FROM hub_registry_metadata WHERE id = 0",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        if let Some((storage_class, revision)) = state {
+            return Err(OrbitError::Store(format!(
+                "cannot advance registry revision beyond SQLite INTEGER range (storage class {storage_class}, current value {revision})"
+            )));
+        }
+        return Err(OrbitError::Store(
+            "hub registry metadata singleton row is missing".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn require_active_host(conn: &Connection, machine_id: &str) -> Result<HostRecord, OrbitError> {
@@ -783,39 +935,7 @@ fn validate_registration(registration: &HostRegistration) -> Result<(), OrbitErr
     validate_machine_id(&registration.machine_id)?;
     validate_host_id(&registration.host_id)?;
     for label in &registration.labels {
-        validate_registry_text("host label", label)?;
-    }
-    Ok(())
-}
-
-fn validate_machine_id(machine_id: &str) -> Result<(), OrbitError> {
-    validate_registry_text("machine_id", machine_id)
-}
-
-fn validate_host_id(host_id: &str) -> Result<(), OrbitError> {
-    validate_registry_text("host_id", host_id)
-}
-
-fn validate_registry_text(field: &str, value: &str) -> Result<(), OrbitError> {
-    if value.is_empty() {
-        return Err(OrbitError::InvalidInput(format!(
-            "{field} must not be empty"
-        )));
-    }
-    if value.trim() != value {
-        return Err(OrbitError::InvalidInput(format!(
-            "{field} must not contain leading or trailing whitespace"
-        )));
-    }
-    if value.len() > 128 {
-        return Err(OrbitError::InvalidInput(format!(
-            "{field} must not exceed 128 bytes"
-        )));
-    }
-    if value.chars().any(char::is_control) || value.contains(['/', '\\']) {
-        return Err(OrbitError::InvalidInput(format!(
-            "{field} must be a logical registry identifier, not a path"
-        )));
+        validate_registry_identifier("host label", label)?;
     }
     Ok(())
 }
@@ -845,6 +965,28 @@ fn ensure_compatible_registration(
         )));
     }
     Ok(())
+}
+
+fn validate_host_rename_in_connection(
+    conn: &Connection,
+    machine_id: &str,
+    new_host_id: &str,
+) -> Result<HostRecord, OrbitError> {
+    let existing = host_by_machine_id(conn, machine_id)?.ok_or_else(|| {
+        OrbitError::InvalidInput(format!(
+            "cannot rename unknown host machine_id '{machine_id}'"
+        ))
+    })?;
+    if existing.status == HostStatus::Retired {
+        return Err(OrbitError::InvalidInput(format!(
+            "host_id '{}' is retired and cannot be renamed",
+            existing.host_id
+        )));
+    }
+    if existing.host_id != new_host_id {
+        ensure_name_available(conn, new_host_id)?;
+    }
+    Ok(existing)
 }
 
 fn ensure_name_available(conn: &Connection, host_id: &str) -> Result<(), OrbitError> {

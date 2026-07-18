@@ -21,8 +21,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use orbit_common::types::{
-    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, McpTransport, NotFoundKind,
-    OrbitError, ToolParam, ToolSchema, ToolSessionContext,
+    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolScope, McpTransport,
+    NotFoundKind, OrbitError, ToolParam, ToolSchema, ToolSessionContext,
 };
 use orbit_mcp::{McpHost, OrbitToolServer};
 use rmcp::ServiceExt;
@@ -138,35 +138,59 @@ impl McpHost for FileStoreHost {
                 builtin: true,
             }
         }
-        let schemas = vec![
-            schema(
-                "orbit.task.add",
-                "Create a task record in the fixture store.",
-                vec![
-                    param("title", "Task title", "string", true),
-                    param("type", "Optional task type", "string", false),
-                    param("tags", "Optional tags", "string_list", false),
-                ],
+        let definitions = vec![
+            (
+                schema(
+                    "orbit.task.add",
+                    "Create a task record in the fixture store.",
+                    vec![
+                        param("title", "Task title", "string", true),
+                        param("type", "Optional task type", "string", false),
+                        param("tags", "Optional tags", "string_list", false),
+                    ],
+                ),
+                McpToolPolicy::agent_and_operator(McpToolPlacement::Hub),
             ),
-            schema(
-                "orbit.task.show",
-                "Show one task record from the fixture store.",
-                vec![param("id", "Task id", "string", true)],
+            (
+                schema(
+                    "orbit.task.show",
+                    "Show one task record from the fixture store.",
+                    vec![param("id", "Task id", "string", true)],
+                ),
+                McpToolPolicy::agent_and_operator(McpToolPlacement::Hub),
             ),
-            schema(
-                "orbit.task.list",
-                "List every task record in the fixture store.",
-                Vec::new(),
+            (
+                schema(
+                    "orbit.task.list",
+                    "List every task record in the fixture store.",
+                    Vec::new(),
+                ),
+                McpToolPolicy::agent_and_operator(McpToolPlacement::Hub),
+            ),
+            (
+                schema(
+                    "orbit.host.list",
+                    "List registered hub hosts with sanitized lifecycle, aliases, and workspace-presence freshness (operator, hub placement).",
+                    Vec::new(),
+                ),
+                McpToolPolicy::operator_only(McpToolPlacement::Hub)
+                    .with_scope(McpToolScope::Global),
+            ),
+            (
+                schema(
+                    "orbit.workspace.list",
+                    "List workspaces with declared owner and sanitized execution-profile freshness (operator, hub placement).",
+                    Vec::new(),
+                ),
+                McpToolPolicy::operator_only(McpToolPlacement::Hub)
+                    .with_scope(McpToolScope::Global),
             ),
         ];
-        schemas
+        definitions
             .into_iter()
-            .map(|schema| {
-                McpToolDefinition::new(
-                    schema,
-                    McpToolPolicy::agent_and_operator(McpToolPlacement::Hub),
-                )
-                .map_err(|error| OrbitError::InvalidInput(error.to_string()))
+            .map(|(schema, policy)| {
+                McpToolDefinition::new(schema, policy)
+                    .map_err(|error| OrbitError::InvalidInput(error.to_string()))
             })
             .collect()
     }
@@ -186,6 +210,16 @@ impl McpHost for FileStoreHost {
             "orbit.task.add" => self.task_add(&input, session_context.workspace.as_deref()),
             "orbit.task.show" => self.task_show(&input),
             "orbit.task.list" => Ok(Value::Array(self.list_tasks())),
+            "orbit.host.list" => Ok(json!({
+                "hub_machine_id": "hm-wire-hub",
+                "registry_revision": 7,
+                "hosts": [],
+            })),
+            "orbit.workspace.list" => Ok(json!({
+                "hub_machine_id": "hm-wire-hub",
+                "registry_revision": 7,
+                "workspaces": [],
+            })),
             other => Err(OrbitError::not_found(NotFoundKind::Tool, other.to_string())),
         }
     }
@@ -369,6 +403,8 @@ async fn tools_list_matches_wire_snapshot() {
         .map(|tool| tool["name"].as_str().expect("tool name"))
         .collect();
     assert!(names.contains(&"orbit_task_add"), "names: {names:?}");
+    assert!(names.contains(&"orbit_host_list"), "names: {names:?}");
+    assert!(names.contains(&"orbit_workspace_list"), "names: {names:?}");
     assert!(names.contains(&"orbit_graph_search"), "names: {names:?}");
     let mut sorted = names.clone();
     sorted.sort_unstable();
@@ -403,6 +439,38 @@ async fn tools_list_matches_wire_snapshot() {
          BREAKING (see RELEASING.md). If the change is intentional, regenerate the snapshot \
          with `ORBIT_MCP_UPDATE_SNAPSHOT=1 cargo test -p orbit-mcp --test mcp_wire_roundtrip` \
          and call the release breaking."
+    );
+}
+
+#[tokio::test]
+async fn global_registry_discovery_executes_without_a_workspace() {
+    let (mut client, host, _workspace) = start_fixture().await;
+    client.initialize(None).await;
+
+    let hosts = client.call_tool("orbit_host_list", json!({})).await;
+    assert_eq!(hosts["isError"], false, "host discovery failed: {hosts}");
+    assert_eq!(structured(&hosts)["hub_machine_id"], "hm-wire-hub");
+    assert_eq!(structured(&hosts)["registry_revision"], 7);
+    assert_eq!(structured(&hosts)["hosts"], json!([]));
+
+    let workspaces = client.call_tool("orbit_workspace_list", json!({})).await;
+    assert_eq!(
+        workspaces["isError"], false,
+        "workspace discovery failed: {workspaces}"
+    );
+    assert_eq!(structured(&workspaces)["hub_machine_id"], "hm-wire-hub");
+    assert_eq!(structured(&workspaces)["registry_revision"], 7);
+    assert_eq!(structured(&workspaces)["workspaces"], json!([]));
+
+    let calls = host.recorded_calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].0, "orbit.host.list");
+    assert_eq!(calls[1].0, "orbit.workspace.list");
+    assert!(
+        calls
+            .iter()
+            .all(|(_, _, context)| context.workspace.is_none()),
+        "global discovery must not require or infer a workspace"
     );
 }
 
