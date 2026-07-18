@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use orbit_common::types::{
-    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, OrbitError,
-    ToolSessionContext,
-};
+use orbit_common::types::{McpToolDefinition, OrbitError, ToolSessionContext};
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
 
@@ -12,35 +9,6 @@ use super::super::name_map::sanitize_tool_name;
 use super::super::test_support::{EchoArrayHost, StubHost, tool_schema};
 
 struct MissingPolicyHost;
-
-struct CapabilityHost;
-
-impl crate::McpHost for CapabilityHost {
-    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
-        [
-            ("demo.agent", McpCapability::Agent),
-            ("demo.operator", McpCapability::Operator),
-            ("demo.runner", McpCapability::Runner),
-        ]
-        .into_iter()
-        .map(|(name, capability)| {
-            let policy = McpToolPolicy::new(McpToolPlacement::Hub, [capability])
-                .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
-            McpToolDefinition::new(tool_schema(name), policy)
-                .map_err(|error| OrbitError::InvalidInput(error.to_string()))
-        })
-        .collect()
-    }
-
-    fn call_tool(
-        &self,
-        name: &str,
-        _input: Value,
-        _session_context: ToolSessionContext,
-    ) -> Result<Value, OrbitError> {
-        Ok(json!({ "tool": name }))
-    }
-}
 
 impl crate::McpHost for MissingPolicyHost {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
@@ -89,34 +57,6 @@ async fn missing_policy_is_excluded_and_rejected_before_dispatch() {
             .message
             .contains("invalid canonical MCP tool definitions")
     );
-}
-
-#[test]
-fn tools_list_filters_by_effective_capability_membership() {
-    let agent_server = OrbitToolServer::new(Arc::new(CapabilityHost));
-    let agent_names = agent_server
-        .combined_tool_schemas()
-        .expect("agent tool list")
-        .into_iter()
-        .map(|schema| schema.name)
-        .collect::<Vec<_>>();
-    assert!(agent_names.iter().any(|name| name == "demo.agent"));
-    assert!(!agent_names.iter().any(|name| name == "demo.operator"));
-    assert!(!agent_names.iter().any(|name| name == "demo.runner"));
-
-    let mut operator_context = ToolSessionContext::trusted_local(None, None, None);
-    operator_context.effective_capabilities = [McpCapability::Operator].into_iter().collect();
-    let operator_server =
-        OrbitToolServer::new_with_context(Arc::new(CapabilityHost), operator_context);
-    let operator_names = operator_server
-        .combined_tool_schemas()
-        .expect("operator tool list")
-        .into_iter()
-        .map(|schema| schema.name)
-        .collect::<Vec<_>>();
-    assert!(!operator_names.iter().any(|name| name == "demo.agent"));
-    assert!(operator_names.iter().any(|name| name == "demo.operator"));
-    assert!(!operator_names.iter().any(|name| name == "demo.runner"));
 }
 
 #[tokio::test]

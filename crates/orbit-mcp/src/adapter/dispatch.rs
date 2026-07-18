@@ -21,7 +21,7 @@ use super::structured::mcp_structured_content;
 use crate::error::tool_error_result;
 
 impl OrbitToolServer {
-    fn combined_tool_definitions_unfiltered(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+    pub(super) fn combined_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
         let mut definitions = self.host.list_mcp_tool_definitions()?;
         definitions.retain(|definition| !self.graph_tools.is_graph_tool(&definition.schema.name));
         // ORB-00391: the v1 orbit-knowledge graph builtins were decommissioned,
@@ -34,19 +34,6 @@ impl OrbitToolServer {
         );
         validate_mcp_tool_definitions(&definitions)
             .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
-        Ok(definitions)
-    }
-
-    pub(super) fn combined_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
-        let mut definitions = self.combined_tool_definitions_unfiltered()?;
-        let effective_capabilities = self.session_context().effective_capabilities;
-        definitions.retain(|definition| {
-            definition
-                .policy
-                .allowed_capabilities()
-                .iter()
-                .any(|capability| effective_capabilities.contains(capability))
-        });
         Ok(definitions)
     }
 
@@ -107,7 +94,7 @@ impl OrbitToolServer {
 
     pub(super) fn canonical_name(&self, advertised: &str) -> Result<String, McpError> {
         let schemas = self
-            .combined_tool_definitions_unfiltered()
+            .combined_tool_definitions()
             .map(|definitions| {
                 definitions
                     .into_iter()

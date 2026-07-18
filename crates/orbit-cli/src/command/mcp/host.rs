@@ -54,30 +54,11 @@ pub(crate) fn is_mcp_tool_exposed(name: &str) -> bool {
     })
 }
 
-fn ensure_mcp_tool_exposed(
-    name: &str,
-    session_context: &ToolSessionContext,
-) -> Result<(), OrbitError> {
-    if !is_mcp_tool_exposed(name) {
-        return Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()));
-    }
-    let definitions = canonical_mcp_tool_definitions()
-        .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
-    let definition = definitions
-        .iter()
-        .find(|definition| definition.schema.name == name)
-        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Tool, name.to_string()))?;
-    if definition
-        .policy
-        .allowed_capabilities()
-        .iter()
-        .any(|capability| session_context.has_capability(*capability))
-    {
+fn ensure_mcp_tool_exposed(name: &str) -> Result<(), OrbitError> {
+    if is_mcp_tool_exposed(name) {
         Ok(())
     } else {
-        Err(OrbitError::PolicyDenied(format!(
-            "MCP tool '{name}' is not exposed to the effective capability set"
-        )))
+        Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()))
     }
 }
 
@@ -144,7 +125,7 @@ impl McpHost for RuntimeMcpHost {
                 ToolEntryPoint::Mcp,
                 session_context,
                 |input| {
-                    ensure_mcp_tool_exposed(name, &dispatch_context)?;
+                    ensure_mcp_tool_exposed(name)?;
                     dispatch(input, dispatch_context)
                 },
             )
@@ -225,7 +206,7 @@ pub(super) fn audited_mcp_call_with_session_context(
     session_context: ToolSessionContext,
 ) -> Result<Value, OrbitError> {
     let session_context = normalize_trusted_call_context(session_context);
-    if let Err(err) = ensure_mcp_tool_exposed(name, &session_context) {
+    if let Err(err) = ensure_mcp_tool_exposed(name) {
         record_mcp_preflight_failure(runtime, name, &session_context, &err);
         return Err(err);
     }

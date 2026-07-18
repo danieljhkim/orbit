@@ -31,7 +31,7 @@ Before [ORB-00256], every MCP call to `orbit.task.add` had to pass `workspace`. 
 
 **Session context** is transport-owned metadata, not model-authored tool input. `initialize.params._meta.orbit.workspace` is the only external metadata accepted, and it remains an untrusted address selector until a local adapter/runtime validates it. Trusted `workspace_id`, machine/host identity, transport, capabilities, session/call IDs, and lease correlation are injected only at Orbit seams.
 
-**Capability** is a complete canonical `BTreeSet<McpCapability>`, never a scalar ceiling. Listing and dispatch authorize by set membership.
+**Capability** is carried as a complete canonical `BTreeSet<McpCapability>`, never a scalar ceiling. [ORB-10228] establishes and audits that trusted set; capability-aware listing and dispatch are enforced by later broker units.
 
 **Correlation** keeps existing authorities intact: `AuditEvent.session_id` is unchanged; `origin_session_id` is additive; and `leased_run.run_id` populates or must match canonical `job_run_id`, with only `lease_id` added to audit.
 

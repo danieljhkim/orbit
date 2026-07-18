@@ -63,7 +63,7 @@ This means existing explicit-workspace clients continue to work, while MCP clien
 
 Legacy audit `host` remains the executing process hostname and `session_id` retains its old meaning. Caller/process machine and display-host fields are additive. `origin_session_id` does not replace `session_id`. `job_run_id` remains the only run column: a trusted lease run populates it when empty or must match it; `lease_id` is additive. Migration v7 adds nullable columns and capability-set JSON without rewriting v1-v6 rows.
 
-Authorization and `tools/list` filtering test membership in the entire effective capability set. No arbitrary member, ordinal, maximum, or scalar ceiling represents authority.
+The trusted context carries the entire effective capability set so later authorization and `tools/list` filtering can test membership directly. [ORB-10228] propagates and audits the set but deliberately leaves enforcement to the placement/capability broker units; no arbitrary member, ordinal, maximum, or scalar ceiling represents authority.
 
 ## 6. Concerns & Honest Limitations
 
@@ -74,6 +74,6 @@ The external channel carries a workspace address, not a trusted workspace ID. Th
 ## Task References
 
 - [ORB-00256] implemented the initial session context channel and workspace resolver.
-- [ORB-10228] implemented trusted provenance, anti-spoofing, capability-set membership, call correlation, and audit migration v7.
+- [ORB-10228] implemented trusted provenance, anti-spoofing, capability-set propagation and audit, call correlation, and audit migration v7.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
