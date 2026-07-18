@@ -94,7 +94,7 @@ pub use duel::{
     PlanningRoleAssignment, PlanningRoles, ReviewerStats, RoleAssignment, RoleSlot, Roles, Scores,
     Severity, TaskClass, TaskScope, ValidIssuesBySeverity, Verdict,
 };
-pub use error::{NotFoundKind, OrbitError};
+pub use error::{ArtifactOrigin, ArtifactOriginMode, NotFoundKind, OrbitError};
 pub use event::OrbitEvent;
 pub use execution_profile::{
     EXECUTION_CONFIG_DIGEST_DOMAIN, EXECUTION_PROFILE_SCHEMA_VERSION, ExecutionProfileCrewV1,

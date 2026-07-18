@@ -258,8 +258,27 @@ pub(super) fn map_runtime_error(e: orbit_core::OrbitError) -> Response {
         orbit_core::OrbitError::AdrInvalidTransition(message) => {
             bad_request(format!("Invalid ADR status transition: {message}"))
         }
+        error @ orbit_core::OrbitError::RemoteArtifactUnavailable { .. } => {
+            artifact_conflict(error, "remote_artifact_unavailable")
+        }
+        error @ orbit_core::OrbitError::ArtifactNotLocal { .. } => {
+            artifact_conflict(error, "artifact_not_local")
+        }
         other => server_error(other),
     }
+}
+
+fn artifact_conflict(error: orbit_core::OrbitError, code: &'static str) -> Response {
+    let artifact_origin = error.artifact_origin().cloned();
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": error.to_string(),
+            "code": code,
+            "artifact_origin": artifact_origin,
+        })),
+    )
+        .into_response()
 }
 
 pub(super) fn bad_request(message: String) -> Response {

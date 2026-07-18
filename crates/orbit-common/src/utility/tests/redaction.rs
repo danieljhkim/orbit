@@ -1,8 +1,8 @@
 use std::ffi::{OsStr, OsString};
 
 use super::super::redaction::{
-    backfill_login_identity, is_high_confidence_single_token_credential, is_sensitive_env_name,
-    os_login_name, redact_all,
+    backfill_login_identity, credential_safe_location, is_high_confidence_single_token_credential,
+    is_sensitive_env_name, os_login_name, redact_all,
 };
 
 fn values_for(vars: &[(OsString, OsString)], key: &str) -> Vec<OsString> {
@@ -26,6 +26,18 @@ fn redact_all_scrubs_key_query_params_case_insensitively() {
     assert!(!redacted.contains("second-secret"));
     assert!(redacted.contains("?key=[REDACTED_AUTH]&alt=sse"));
     assert!(redacted.contains("&KEY=[REDACTED_AUTH]"));
+}
+
+#[test]
+fn credential_safe_location_rejects_urls_and_scrubs_path_credentials() {
+    assert_eq!(
+        credential_safe_location("https://orbit-user:secret@example.test/repo"),
+        "[REDACTED_LOCATION]"
+    );
+    let safe =
+        credential_safe_location("/tmp/worktrees/token=Bearer abc123def456ghi789SECRETTOKEN/orbit");
+    assert!(!safe.contains("abc123def456ghi789SECRETTOKEN"));
+    assert!(safe.contains("[REDACTED_AUTH]"));
 }
 
 #[test]
@@ -228,4 +240,25 @@ fn redact_all_error_is_idempotent() {
         once, twice,
         "redaction must be idempotent so read-time re-application is safe"
     );
+}
+
+#[test]
+fn redact_all_error_sanitizes_artifact_origin_locations() {
+    use super::super::redaction::redact_all_error;
+    use crate::types::{ArtifactOrigin, ArtifactOriginMode, NotFoundKind, OrbitError};
+
+    let error = OrbitError::artifact_not_local(
+        NotFoundKind::Adr,
+        "ADR-0234",
+        ArtifactOrigin {
+            mode: ArtifactOriginMode::Federated,
+            worktree_root: "https://orbit-user:secret@example.test/repo".to_string(),
+            branch: Some("Bearer abc123def456ghi789SECRETTOKEN".to_string()),
+        },
+    );
+    let redacted = redact_all_error(error);
+    let origin = redacted.artifact_origin().expect("artifact origin");
+
+    assert_eq!(origin.worktree_root, "[REDACTED_LOCATION]");
+    assert_eq!(origin.branch.as_deref(), Some("[REDACTED_LOCATION]"));
 }

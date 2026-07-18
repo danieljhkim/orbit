@@ -1,9 +1,113 @@
 // Migrated from file/adr_store/api.rs per ORB-00231
 use std::fs;
+use std::path::{Path, PathBuf};
 
-use tempfile::tempdir;
+use tempfile::{TempDir, tempdir};
 
 use super::super::*;
+use crate::IdAllocatorConfig;
+
+struct TwoWorktreeFixture {
+    _temp: TempDir,
+    semantic_db: PathBuf,
+    local_root: PathBuf,
+    sibling_root: PathBuf,
+    local: AdrFileStore,
+    sibling: AdrFileStore,
+}
+
+impl TwoWorktreeFixture {
+    fn new() -> Self {
+        let temp = tempdir().expect("tempdir");
+        let shared_root = temp.path().join("hub/.orbit");
+        let local_root = temp.path().join("local");
+        let sibling_root = temp.path().join("sibling");
+        fs::create_dir_all(&shared_root).expect("shared root");
+        fs::create_dir_all(&local_root).expect("local root");
+        fs::create_dir_all(&sibling_root).expect("sibling root");
+        let semantic_db = shared_root.join("state/semantic.db");
+        let local = Self::store(&shared_root, &local_root);
+        let sibling = Self::store(&shared_root, &sibling_root);
+        Self {
+            _temp: temp,
+            semantic_db,
+            local_root,
+            sibling_root,
+            local,
+            sibling,
+        }
+    }
+
+    fn store(shared_root: &Path, worktree_root: &Path) -> AdrFileStore {
+        let adr_root = worktree_root.join(".orbit/adrs");
+        let allocator = IdAllocator::open(IdAllocatorConfig::new(
+            shared_root.join("state/semantic.db"),
+            shared_root.join("state/.id_alloc.lock"),
+            shared_root.to_path_buf(),
+            worktree_root.to_path_buf(),
+            adr_root.clone(),
+            worktree_root.join(".orbit/learnings"),
+        ))
+        .expect("allocator");
+        AdrFileStore::new_with_index_and_allocator(
+            adr_root,
+            Store::open_in_memory().expect("index"),
+            allocator,
+        )
+    }
+
+    fn add_sibling(&self, title: &str, body: &str, status: AdrStatus) -> Adr {
+        let adr = self
+            .sibling
+            .add_adr(create_params(title, body))
+            .expect("add sibling ADR");
+        if status == AdrStatus::Accepted {
+            self.sibling
+                .update_adr_status(&adr.id, AdrStatus::Accepted)
+                .expect("accept sibling ADR");
+            self.sibling
+                .get_adr(&adr.id)
+                .expect("read accepted")
+                .expect("accepted exists")
+        } else {
+            adr
+        }
+    }
+
+    fn bundle_dir(root: &Path, adr: &Adr) -> PathBuf {
+        root.join(".orbit/adrs")
+            .join(adr.status.cli_name())
+            .join(&adr.id)
+    }
+
+    fn copy_to_local(&self, adr: &Adr, body: &str) {
+        let source = Self::bundle_dir(&self.sibling_root, adr);
+        let target = Self::bundle_dir(&self.local_root, adr);
+        fs::create_dir_all(&target).expect("local bundle dir");
+        fs::copy(source.join("adr.yaml"), target.join("adr.yaml")).expect("copy ADR yaml");
+        fs::write(target.join("body.md"), body).expect("write local body");
+    }
+
+    fn allocation_bytes(&self, id: &str) -> Vec<u8> {
+        serde_json::to_vec(
+            &self
+                .local
+                .id_allocator
+                .adr_allocation(id)
+                .expect("allocation read")
+                .expect("allocation exists"),
+        )
+        .expect("serialize allocation")
+    }
+
+    fn bundle_bytes(root: &Path, adr: &Adr) -> (Vec<u8>, Vec<u8>) {
+        let dir = Self::bundle_dir(root, adr);
+        (
+            fs::read(dir.join("adr.yaml")).expect("read yaml bytes"),
+            fs::read(dir.join("body.md")).expect("read body bytes"),
+        )
+    }
+}
 
 fn create_params(title: &str, body: &str) -> AdrCreateParams {
     AdrCreateParams {
@@ -15,6 +119,224 @@ fn create_params(title: &str, body: &str) -> AdrCreateParams {
         paths: Vec::new(),
         body: body.to_string(),
     }
+}
+
+#[test]
+fn two_worktrees_resolve_all_four_states_for_proposed_and_accepted_adrs() {
+    let fixture = TwoWorktreeFixture::new();
+
+    for status in [AdrStatus::Proposed, AdrStatus::Accepted] {
+        let body = format!("exact sibling body for {}", status.cli_name());
+        let adr = fixture.add_sibling("Federated", &body, status);
+        let allocation_before = fixture.allocation_bytes(&adr.id);
+
+        let AdrArtifactResolution::Federated(federated) = fixture
+            .local
+            .resolve_adr_artifact(&adr.id)
+            .expect("federated resolution")
+        else {
+            panic!("expected federated ADR")
+        };
+        assert_eq!(federated.adr.status, status);
+        assert_eq!(federated.body, body);
+        assert_eq!(
+            federated.artifact_origin.mode,
+            ArtifactOriginMode::Federated
+        );
+        assert_eq!(fixture.allocation_bytes(&adr.id), allocation_before);
+
+        let local_body = format!("exact local body for {}", status.cli_name());
+        fixture.copy_to_local(&adr, &local_body);
+        let AdrArtifactResolution::Local(local) = fixture
+            .local
+            .resolve_adr_artifact(&adr.id)
+            .expect("local resolution")
+        else {
+            panic!("expected local ADR")
+        };
+        assert_eq!(local.adr.status, status);
+        assert_eq!(local.body, local_body);
+        assert_eq!(local.artifact_origin.mode, ArtifactOriginMode::Local);
+        assert_eq!(fixture.allocation_bytes(&adr.id), allocation_before);
+
+        fixture
+            .local
+            .update_adr_document(
+                &adr.id,
+                &AdrDocumentUpdateParams {
+                    title: Some("Landed and editable".to_string()),
+                    ..Default::default()
+                },
+            )
+            .expect("landed local ADR is editable");
+        if status == AdrStatus::Proposed {
+            fixture
+                .local
+                .update_adr_status(&adr.id, AdrStatus::Accepted)
+                .expect("landed local ADR is acceptable");
+        }
+        assert_eq!(fixture.allocation_bytes(&adr.id), allocation_before);
+
+        let unavailable = fixture.add_sibling("Unavailable", "body", status);
+        fs::remove_file(
+            TwoWorktreeFixture::bundle_dir(&fixture.sibling_root, &unavailable).join("body.md"),
+        )
+        .expect("remove body");
+        assert!(matches!(
+            fixture
+                .local
+                .resolve_adr_artifact(&unavailable.id)
+                .expect("unavailable resolution"),
+            AdrArtifactResolution::RemoteArtifactUnavailable(_)
+        ));
+
+        let unknown = if status == AdrStatus::Proposed {
+            "ADR-9001"
+        } else {
+            "ADR-9002"
+        };
+        assert_eq!(
+            fixture
+                .local
+                .resolve_adr_artifact(unknown)
+                .expect("not found resolution"),
+            AdrArtifactResolution::NotFound
+        );
+    }
+}
+
+#[test]
+fn remote_resolution_rejects_stale_missing_unreadable_and_removed_bundles() {
+    let fixture = TwoWorktreeFixture::new();
+
+    let stale = fixture.add_sibling("Stale path", "body", AdrStatus::Proposed);
+    rusqlite::Connection::open(&fixture.semantic_db)
+        .expect("open allocator db")
+        .execute(
+            "UPDATE id_allocations SET body_path = 'stale/ADR-0001/body.md' WHERE id = ?1",
+            [&stale.id],
+        )
+        .expect("stale body path");
+    assert_remote_unavailable(&fixture, &stale.id);
+
+    let missing_yaml = fixture.add_sibling("Missing yaml", "body", AdrStatus::Accepted);
+    fs::remove_file(
+        TwoWorktreeFixture::bundle_dir(&fixture.sibling_root, &missing_yaml).join("adr.yaml"),
+    )
+    .expect("remove yaml");
+    assert_remote_unavailable(&fixture, &missing_yaml.id);
+
+    let missing_body = fixture.add_sibling("Missing body", "body", AdrStatus::Proposed);
+    fs::remove_file(
+        TwoWorktreeFixture::bundle_dir(&fixture.sibling_root, &missing_body).join("body.md"),
+    )
+    .expect("remove body");
+    assert_remote_unavailable(&fixture, &missing_body.id);
+
+    let unreadable = fixture.add_sibling("Unreadable", "body", AdrStatus::Accepted);
+    let unreadable_path =
+        TwoWorktreeFixture::bundle_dir(&fixture.sibling_root, &unreadable).join("body.md");
+    fs::remove_file(&unreadable_path).expect("remove readable body");
+    fs::create_dir(&unreadable_path).expect("replace body with unreadable directory");
+    assert_remote_unavailable(&fixture, &unreadable.id);
+
+    let removed = fixture.add_sibling("Removed worktree", "body", AdrStatus::Proposed);
+    fs::remove_dir_all(&fixture.sibling_root).expect("remove sibling worktree");
+    assert_remote_unavailable(&fixture, &removed.id);
+}
+
+fn assert_remote_unavailable(fixture: &TwoWorktreeFixture, id: &str) {
+    assert!(matches!(
+        fixture
+            .local
+            .resolve_adr_artifact(id)
+            .expect("resolve unavailable"),
+        AdrArtifactResolution::RemoteArtifactUnavailable(_)
+    ));
+}
+
+#[test]
+fn sibling_only_mutations_fail_before_changing_bundles_or_allocations() {
+    let fixture = TwoWorktreeFixture::new();
+    let remote_old = fixture.add_sibling("Remote old", "old body", AdrStatus::Proposed);
+    let remote_new = fixture.add_sibling("Remote new", "new body", AdrStatus::Accepted);
+    let old_bundle = TwoWorktreeFixture::bundle_bytes(&fixture.sibling_root, &remote_old);
+    let new_bundle = TwoWorktreeFixture::bundle_bytes(&fixture.sibling_root, &remote_new);
+    let old_allocation = fixture.allocation_bytes(&remote_old.id);
+    let new_allocation = fixture.allocation_bytes(&remote_new.id);
+
+    for error in [
+        fixture.local.update_adr_document(
+            &remote_old.id,
+            &AdrDocumentUpdateParams {
+                title: Some("must not write".to_string()),
+                ..Default::default()
+            },
+        ),
+        fixture
+            .local
+            .update_adr_status(&remote_old.id, AdrStatus::Accepted),
+        fixture.local.supersede_adr(&remote_old.id, &remote_new.id),
+    ] {
+        assert!(matches!(error, Err(OrbitError::ArtifactNotLocal { .. })));
+    }
+
+    let local_old = fixture
+        .local
+        .add_adr(create_params("Local old", "local old body"))
+        .expect("local old");
+    let local_new = fixture
+        .local
+        .add_adr(create_params("Local new", "local new body"))
+        .expect("local new");
+    fixture
+        .local
+        .update_adr_status(&local_new.id, AdrStatus::Accepted)
+        .expect("accept local new");
+    let local_old_before = TwoWorktreeFixture::bundle_bytes(&fixture.local_root, &local_old);
+    let local_new_before = TwoWorktreeFixture::bundle_bytes(
+        &fixture.local_root,
+        &fixture
+            .local
+            .get_adr(&local_new.id)
+            .expect("read local new")
+            .expect("local new exists"),
+    );
+
+    assert!(matches!(
+        fixture.local.supersede_adr(&local_old.id, &remote_new.id),
+        Err(OrbitError::ArtifactNotLocal { .. })
+    ));
+    assert!(matches!(
+        fixture.local.supersede_adr(&remote_old.id, &local_new.id),
+        Err(OrbitError::ArtifactNotLocal { .. })
+    ));
+
+    assert_eq!(
+        TwoWorktreeFixture::bundle_bytes(&fixture.sibling_root, &remote_old),
+        old_bundle
+    );
+    assert_eq!(
+        TwoWorktreeFixture::bundle_bytes(&fixture.sibling_root, &remote_new),
+        new_bundle
+    );
+    assert_eq!(fixture.allocation_bytes(&remote_old.id), old_allocation);
+    assert_eq!(fixture.allocation_bytes(&remote_new.id), new_allocation);
+    assert_eq!(
+        TwoWorktreeFixture::bundle_bytes(&fixture.local_root, &local_old),
+        local_old_before
+    );
+    assert_eq!(
+        TwoWorktreeFixture::bundle_bytes(
+            &fixture.local_root,
+            &fixture
+                .local
+                .get_adr(&local_new.id)
+                .expect("read local new after")
+                .expect("local new exists after"),
+        ),
+        local_new_before
+    );
 }
 
 #[test]

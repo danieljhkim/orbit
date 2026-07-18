@@ -1,5 +1,19 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactOriginMode {
+    Local,
+    Federated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactOrigin {
+    pub mode: ArtifactOriginMode,
+    pub worktree_root: String,
+    pub branch: Option<String>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -46,6 +60,18 @@ pub enum OrbitError {
     TaskApprovalRequired(String),
     #[error("Invalid ADR status transition: {0}")]
     AdrInvalidTransition(String),
+    #[error("{kind} artifact unavailable for {id}")]
+    RemoteArtifactUnavailable {
+        kind: NotFoundKind,
+        id: String,
+        artifact_origin: ArtifactOrigin,
+    },
+    #[error("{kind} artifact is not local to the current worktree: {id}")]
+    ArtifactNotLocal {
+        kind: NotFoundKind,
+        id: String,
+        artifact_origin: ArtifactOrigin,
+    },
     #[error("companion not installed: {0}")]
     CompanionNotInstalled(String),
     #[error("invalid input: {0}")]
@@ -100,6 +126,42 @@ impl OrbitError {
                 message: message.into(),
                 did_you_mean,
             }
+        }
+    }
+
+    pub fn remote_artifact_unavailable(
+        kind: NotFoundKind,
+        id: impl Into<String>,
+        artifact_origin: ArtifactOrigin,
+    ) -> Self {
+        Self::RemoteArtifactUnavailable {
+            kind,
+            id: id.into(),
+            artifact_origin,
+        }
+    }
+
+    pub fn artifact_not_local(
+        kind: NotFoundKind,
+        id: impl Into<String>,
+        artifact_origin: ArtifactOrigin,
+    ) -> Self {
+        Self::ArtifactNotLocal {
+            kind,
+            id: id.into(),
+            artifact_origin,
+        }
+    }
+
+    pub fn artifact_origin(&self) -> Option<&ArtifactOrigin> {
+        match self {
+            Self::RemoteArtifactUnavailable {
+                artifact_origin, ..
+            }
+            | Self::ArtifactNotLocal {
+                artifact_origin, ..
+            } => Some(artifact_origin),
+            _ => None,
         }
     }
 

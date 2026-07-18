@@ -180,6 +180,10 @@ impl IdAllocator {
         self.allocate(IdAllocationKind::Adr)
     }
 
+    pub fn worktree_root(&self) -> &Path {
+        &self.inner.worktree_root
+    }
+
     pub fn allocate_learning(&self) -> Result<IdAllocation, OrbitError> {
         self.allocate(IdAllocationKind::Learning)
     }

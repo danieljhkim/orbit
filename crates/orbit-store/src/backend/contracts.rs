@@ -1,10 +1,11 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, ArtifactManifestFileV2, AuditEvent, Crew, ExecutorDef, ExternalRef, JobRun,
-    JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence, LearningInjectionState,
-    LearningScope, LegacyValidation, OrbitError, OrbitId, PipelineState, PolicyDef, ReviewThread,
-    StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority,
-    TaskRelation, TaskStatus, TaskType, normalize_task_tags, task_matches_tags,
+    Adr, AdrStatus, ArtifactManifestFileV2, ArtifactOrigin, AuditEvent, Crew, ExecutorDef,
+    ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence,
+    LearningInjectionState, LearningScope, LegacyValidation, OrbitError, OrbitId, PipelineState,
+    PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity,
+    TaskHistoryEntry, TaskPriority, TaskRelation, TaskStatus, TaskType, normalize_task_tags,
+    task_matches_tags,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -28,6 +29,21 @@ pub struct AdrCreateParams {
     pub tags: Vec<String>,
     pub paths: Vec<String>,
     pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdrArtifact {
+    pub adr: Adr,
+    pub body: String,
+    pub artifact_origin: ArtifactOrigin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdrArtifactResolution {
+    Local(AdrArtifact),
+    Federated(AdrArtifact),
+    RemoteArtifactUnavailable(ArtifactOrigin),
+    NotFound,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -386,7 +402,7 @@ pub trait TaskStoreBackend: Send + Sync {
 pub trait AdrStoreBackend: Send + Sync {
     fn add_adr(&self, params: AdrCreateParams) -> Result<Adr, OrbitError>;
     fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError>;
-    fn get_adr_federated(&self, id: &str) -> Result<Option<Adr>, OrbitError>;
+    fn resolve_adr_artifact(&self, id: &str) -> Result<AdrArtifactResolution, OrbitError>;
     fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError>;
     fn list_adrs_filtered(&self, filter: AdrListFilter<'_>) -> Result<Vec<Adr>, OrbitError>;
     fn list_adr_entries_filtered(

@@ -155,6 +155,59 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
     let local_orbit_entries = sorted_child_names(&linked_orbit);
     assert_eq!(local_orbit_entries, vec!["adrs", "learnings"]);
 
+    let federated_show = run_orbit_json(
+        &main_repo,
+        &home,
+        &[
+            "tool",
+            "run",
+            "orbit.adr.show",
+            "--input",
+            &format!(r#"{{"id":"{adr_id}","model":"codex"}}"#),
+        ],
+        None,
+    );
+    assert_eq!(federated_show["id"], adr_id);
+    assert!(
+        federated_show["body"]
+            .as_str()
+            .expect("federated body")
+            .contains("Linked worktree write")
+    );
+    assert_eq!(federated_show["artifact_origin"]["mode"], "federated");
+    assert_eq!(
+        federated_show["artifact_origin"]["worktree_root"],
+        linked_worktree.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        federated_show["artifact_origin"]["branch"],
+        "orbit-worktree-artifacts"
+    );
+    assert!(federated_show["artifact_origin"].get("body_path").is_none());
+
+    let rejected_update = run_orbit_output(
+        &main_repo,
+        &home,
+        &[
+            "tool",
+            "run",
+            "orbit.adr.update",
+            "--input",
+            &format!(r#"{{"id":"{adr_id}","title":"must not mutate","model":"codex"}}"#),
+        ],
+        None,
+    );
+    assert!(!rejected_update.status.success());
+    let rejected_payload: Value =
+        serde_json::from_slice(&rejected_update.stdout).expect("structured update error");
+    assert_eq!(rejected_payload["code"], "artifact_not_local");
+    assert_eq!(rejected_payload["artifact_origin"]["mode"], "federated");
+    assert!(
+        rejected_payload["artifact_origin"]
+            .get("body_path")
+            .is_none()
+    );
+
     run_git(
         &main_repo,
         &[
@@ -214,18 +267,22 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
         None,
     );
     assert!(!show_output.status.success());
-    let output_text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&show_output.stdout),
-        String::from_utf8_lossy(&show_output.stderr)
+    let unavailable_payload: Value =
+        serde_json::from_slice(&show_output.stdout).expect("structured unavailable error");
+    assert_eq!(unavailable_payload["code"], "remote_artifact_unavailable");
+    assert_eq!(unavailable_payload["artifact_origin"]["mode"], "federated");
+    assert_eq!(
+        unavailable_payload["artifact_origin"]["worktree_root"],
+        linked_worktree.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        unavailable_payload["artifact_origin"]["branch"],
+        "orbit-worktree-artifacts"
     );
     assert!(
-        output_text.contains("worktree_root="),
-        "output: {output_text}"
-    );
-    assert!(
-        output_text.contains("orbit-worktree-artifacts"),
-        "output: {output_text}"
+        unavailable_payload["artifact_origin"]
+            .get("body_path")
+            .is_none()
     );
 }
 

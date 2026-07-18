@@ -32,6 +32,11 @@ pub fn error_payload(error: &OrbitError) -> Value {
     {
         object.insert("did_you_mean".to_string(), json!(did_you_mean));
     }
+    if let Some(artifact_origin) = error.artifact_origin()
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert("artifact_origin".to_string(), json!(artifact_origin));
+    }
     payload
 }
 
@@ -66,6 +71,8 @@ fn error_code(error: &OrbitError) -> &'static str {
         OrbitError::WorkspaceError(_) => "workspace_error",
         OrbitError::Io(_) => "io_error",
         OrbitError::AdrInvalidTransition(_) => "adr_invalid_transition",
+        OrbitError::RemoteArtifactUnavailable { .. } => "remote_artifact_unavailable",
+        OrbitError::ArtifactNotLocal { .. } => "artifact_not_local",
         OrbitError::Migration(_) => "migration_failed",
     }
 }

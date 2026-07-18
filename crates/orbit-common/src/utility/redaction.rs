@@ -31,7 +31,7 @@ use std::{
 use regex::Regex;
 use serde_json::Value;
 
-use crate::types::OrbitError;
+use crate::types::{ArtifactOrigin, OrbitError};
 
 const REDACTED_ENV_VALUE: &str = "[REDACTED_ENV]";
 static DEFAULT_PATTERN_REDACTOR: OnceLock<PatternRedactor> = OnceLock::new();
@@ -98,6 +98,24 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         OrbitError::AdrInvalidTransition(m) => {
             OrbitError::AdrInvalidTransition(redact_sensitive_env_text(&m))
         }
+        OrbitError::RemoteArtifactUnavailable {
+            kind,
+            id,
+            artifact_origin,
+        } => OrbitError::RemoteArtifactUnavailable {
+            kind,
+            id: redact_sensitive_env_text(&id),
+            artifact_origin: redact_artifact_origin(artifact_origin, redact_sensitive_env_text),
+        },
+        OrbitError::ArtifactNotLocal {
+            kind,
+            id,
+            artifact_origin,
+        } => OrbitError::ArtifactNotLocal {
+            kind,
+            id: redact_sensitive_env_text(&id),
+            artifact_origin: redact_artifact_origin(artifact_origin, redact_sensitive_env_text),
+        },
         OrbitError::CompanionNotInstalled(m) => {
             OrbitError::CompanionNotInstalled(redact_sensitive_env_text(&m))
         }
@@ -156,6 +174,24 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
         },
         OrbitError::TaskApprovalRequired(m) => OrbitError::TaskApprovalRequired(redact_all(&m)),
         OrbitError::AdrInvalidTransition(m) => OrbitError::AdrInvalidTransition(redact_all(&m)),
+        OrbitError::RemoteArtifactUnavailable {
+            kind,
+            id,
+            artifact_origin,
+        } => OrbitError::RemoteArtifactUnavailable {
+            kind,
+            id: redact_all(&id),
+            artifact_origin: redact_artifact_origin(artifact_origin, redact_all),
+        },
+        OrbitError::ArtifactNotLocal {
+            kind,
+            id,
+            artifact_origin,
+        } => OrbitError::ArtifactNotLocal {
+            kind,
+            id: redact_all(&id),
+            artifact_origin: redact_artifact_origin(artifact_origin, redact_all),
+        },
         OrbitError::CompanionNotInstalled(m) => OrbitError::CompanionNotInstalled(redact_all(&m)),
         OrbitError::InvalidInput(m) => OrbitError::InvalidInput(redact_all(&m)),
         OrbitError::SensitiveInput { field, reason } => OrbitError::SensitiveInput {
@@ -185,6 +221,36 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
         OrbitError::Io(m) => OrbitError::Io(redact_all(&m)),
         OrbitError::WorkspaceError(m) => OrbitError::WorkspaceError(redact_all(&m)),
         OrbitError::Migration(m) => OrbitError::Migration(redact_all(&m)),
+    }
+}
+
+fn redact_artifact_origin(
+    artifact_origin: ArtifactOrigin,
+    redact: fn(&str) -> String,
+) -> ArtifactOrigin {
+    ArtifactOrigin {
+        mode: artifact_origin.mode,
+        worktree_root: credential_safe_location_with(&artifact_origin.worktree_root, redact),
+        branch: artifact_origin
+            .branch
+            .map(|branch| credential_safe_location_with(&branch, redact)),
+    }
+}
+
+/// Return a public-safe worktree or branch location. URI-shaped values are
+/// rejected wholesale so allocation metadata can never expose a credentialed
+/// transport target; ordinary filesystem paths retain their useful location
+/// while the standard credential patterns are scrubbed.
+pub fn credential_safe_location(raw: &str) -> String {
+    credential_safe_location_with(raw, redact_all)
+}
+
+fn credential_safe_location_with(raw: &str, redact: fn(&str) -> String) -> String {
+    let lower = raw.trim().to_ascii_lowercase();
+    if lower.contains("://") || lower.starts_with("bearer ") || lower.contains("authorization:") {
+        "[REDACTED_LOCATION]".to_string()
+    } else {
+        redact(raw)
     }
 }
 
