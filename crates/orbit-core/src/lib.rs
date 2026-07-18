@@ -48,6 +48,7 @@ pub mod auto_tasks;
 pub mod command;
 pub mod config;
 pub mod context;
+pub mod host_registry;
 pub mod metrics;
 mod paths;
 pub mod routines;
@@ -73,14 +74,16 @@ pub use command::search::{
 };
 pub use command::workflow::{ShipMode, build_ship_input, find_workflow, resolved_ship_mode};
 pub use context::ActorIdentity;
+pub use host_registry::HostRegistryService;
 // Shared domain types (owned by orbit-common) that the CLI and dashboard
 // render or construct.
 pub use auto_tasks::{AutoTaskAddParams, AutoTaskUpdateParams};
 pub use orbit_common::types::{
     AuditEvent, AuditEventStatus, AuditStats, AutoTaskDefinition, AutoTaskSchedule,
-    AutoTaskTemplate, DedupePolicy, EvidenceKind, ExecutorDef, ExternalRef, JobRun, JobRunState,
-    JobRunStep, JobTargetType, Learning, LearningEvidence, LearningScope, LearningStatus,
-    ReviewThreadStatus, Task, TaskComplexity, TaskCreateStatus, TaskPriority, TaskStatus, TaskType,
+    AutoTaskTemplate, DedupePolicy, EvidenceKind, ExecutorDef, ExternalRef, HostAlias,
+    HostNameResolution, HostRecord, HostRegistration, HostStatus, JobRun, JobRunState, JobRunStep,
+    JobTargetType, Learning, LearningEvidence, LearningScope, LearningStatus, ReviewThreadStatus,
+    Task, TaskComplexity, TaskCreateStatus, TaskPriority, TaskStatus, TaskType,
     build_task_status_index, resolve_task_dependencies, task_dependencies_ready,
 };
 pub use orbit_common::types::{MissedRunPolicy, NotFoundKind, OrbitError, OverlapPolicy};

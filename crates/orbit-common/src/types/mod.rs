@@ -35,6 +35,7 @@ pub mod error;
 pub mod event;
 pub mod executor_def;
 pub mod friction;
+pub mod host;
 pub mod id;
 pub mod invocation;
 pub mod job;
@@ -97,6 +98,7 @@ pub use executor_def::{
     ExecutorDef, ExecutorSandboxKind, ExecutorType, ModelPairOverride, StdoutFormat,
 };
 pub use friction::{FrictionEntry, FrictionFrontmatter, FrictionRecord, FrictionStatus};
+pub use host::{HostAlias, HostNameResolution, HostRecord, HostRegistration, HostStatus};
 pub use id::OrbitId;
 pub use invocation::{InvocationTrace, TokenUsage, ToolCallTrace};
 pub use job::{

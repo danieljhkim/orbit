@@ -137,6 +137,9 @@ pub use backend::{
 };
 pub use file_lock::{LockHolderInfo, read_lock_holder};
 pub use json_schema::{validate_instance_against_schema, validate_schema_document};
+pub use orbit_common::types::{
+    HostAlias, HostNameResolution, HostRecord, HostRegistration, HostStatus,
+};
 pub use sqlite::audit_event_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
     AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,

@@ -6,6 +6,7 @@ mod audit_event;
 mod error;
 mod executor_def;
 mod friction;
+mod host;
 mod job;
 mod learning;
 mod resource;

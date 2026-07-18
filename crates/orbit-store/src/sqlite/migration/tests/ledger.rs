@@ -43,6 +43,9 @@ fn fresh_db_applies_baseline_and_records_ledger() {
     assert_eq!(applied[3].version, 4);
     assert_eq!(applied[3].name, "job_run_archive_stage");
     assert!(!applied[3].applied_at.is_empty());
+    assert_eq!(applied[4].version, 5);
+    assert_eq!(applied[4].name, "host_registry_core");
+    assert!(!applied[4].applied_at.is_empty());
 }
 
 #[test]
@@ -159,6 +162,10 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0004".to_string(),
                 "job_run_archive_stage".to_string()
             ),
+            (
+                "migration.v0005".to_string(),
+                "host_registry_core".to_string()
+            ),
         ]
     );
 }
@@ -170,7 +177,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0005', 'from-the-future', '2099-01-01T00:00:00Z')",
+         VALUES ('migration.v0006', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -186,35 +193,52 @@ fn refuses_db_from_a_newer_binary() {
 }
 
 #[test]
-fn store_reopens_database_at_shipped_schema_v4() {
+fn store_reopens_database_at_shipped_schema_v4_and_applies_v5() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("orbit.db");
 
-    // Start with whatever schema the current binary produces, then model the
-    // real incident: a previously shipped binary added the v4 column and
-    // ledger entry before this binary tried to reopen the shared store.
-    drop(crate::Store::open(&path).expect("create store"));
+    // Model a database last opened by the shipped v4 binary. V5 is additive
+    // and must preserve that schema while installing the host registry.
     let conn = Connection::open(&path).expect("open raw store connection");
-    if !table_has_column(&conn, "job_runs", "archived_at").expect("inspect job_runs") {
-        conn.execute_batch("ALTER TABLE job_runs ADD COLUMN archived_at TEXT")
-            .expect("apply shipped v4 schema");
-    }
-    conn.execute(
-        "INSERT OR REPLACE INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0004', 'job_run_archive_stage', '2026-07-15T22:11:59Z')",
-        [],
+    conn.execute_batch(
+        r#"
+            CREATE TABLE schema_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO schema_meta VALUES
+                ('migration.v0001', 'baseline', '2026-07-01T00:00:00Z'),
+                ('migration.v0002', 'learnings_index_workspace_scope', '2026-07-02T00:00:00Z'),
+                ('migration.v0003', 'flat_crew_model', '2026-07-03T00:00:00Z'),
+                ('migration.v0004', 'job_run_archive_stage', '2026-07-04T00:00:00Z');
+            CREATE TABLE job_runs (id TEXT PRIMARY KEY, archived_at TEXT);
+            INSERT INTO job_runs(id, archived_at) VALUES ('preserved-run', NULL);
+        "#,
     )
-    .expect("record shipped v4 migration");
+    .expect("seed shipped v4 database");
     drop(conn);
 
     let store = crate::Store::open(&path).expect("reopen shipped v4 store");
-    assert_eq!(store.schema_version().expect("schema version"), 4);
+    assert_eq!(store.schema_version().expect("schema version"), 5);
     let applied = store.applied_migrations().expect("applied migrations");
-    assert_eq!(applied.last().map(|migration| migration.version), Some(4));
+    assert_eq!(applied.last().map(|migration| migration.version), Some(5));
     assert_eq!(
         applied.last().map(|migration| migration.name.as_str()),
-        Some("job_run_archive_stage")
+        Some("host_registry_core")
     );
+    let connection = store.connection();
+    let conn = connection.lock().expect("connection");
+    assert!(table_exists(&conn, "hosts").expect("hosts table"));
+    assert!(table_exists(&conn, "host_aliases").expect("aliases table"));
+    let preserved: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM job_runs WHERE id = 'preserved-run'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("preserved v4 record");
+    assert_eq!(preserved, 1);
 }
 
 #[test]

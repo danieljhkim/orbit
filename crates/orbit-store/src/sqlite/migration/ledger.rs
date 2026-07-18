@@ -53,12 +53,17 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "job_run_archive_stage",
         apply: super::apply_job_run_archive_stage,
     },
+    Migration {
+        version: 5,
+        name: "host_registry_core",
+        apply: super::apply_host_registry_core,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 4;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 5;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 
