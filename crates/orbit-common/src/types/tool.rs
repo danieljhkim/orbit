@@ -94,6 +94,22 @@ impl McpToolPolicy {
             Ok(())
         }
     }
+
+    /// Policy for the ordinary agent and trusted operator surfaces.
+    pub fn agent_and_operator(placement: McpToolPlacement) -> Self {
+        Self {
+            placement,
+            allowed_capabilities: BTreeSet::from([McpCapability::Agent, McpCapability::Operator]),
+        }
+    }
+
+    /// Policy for an operator-only surface.
+    pub fn operator_only(placement: McpToolPlacement) -> Self {
+        Self {
+            placement,
+            allowed_capabilities: BTreeSet::from([McpCapability::Operator]),
+        }
+    }
 }
 
 /// A schema paired with the policy required for MCP exposure.
@@ -107,24 +123,6 @@ impl McpToolDefinition {
     pub fn new(schema: ToolSchema, policy: McpToolPolicy) -> Result<Self, McpToolPolicyError> {
         policy.validate()?;
         Ok(Self { schema, policy })
-    }
-}
-
-/// One immutable entry in Orbit's canonical MCP exposure registry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CanonicalMcpToolPolicy {
-    pub canonical_name: &'static str,
-    pub placement: McpToolPlacement,
-    pub allowed_capabilities: &'static [McpCapability],
-}
-
-impl CanonicalMcpToolPolicy {
-    pub fn policy(self) -> Result<McpToolPolicy, McpToolPolicyError> {
-        McpToolPolicy::new(self.placement, self.allowed_capabilities.iter().copied())
-    }
-
-    pub fn advertised_name(self) -> String {
-        mcp_advertised_tool_name(self.canonical_name)
     }
 }
 
@@ -143,183 +141,29 @@ pub enum McpToolPolicyError {
     DuplicateAdvertisedName(String),
 }
 
-const AGENT_OPERATOR: &[McpCapability] = &[McpCapability::Agent, McpCapability::Operator];
-const OPERATOR_ONLY: &[McpCapability] = &[McpCapability::Operator];
-
-const fn mcp_policy(
-    canonical_name: &'static str,
-    placement: McpToolPlacement,
-    allowed_capabilities: &'static [McpCapability],
-) -> CanonicalMcpToolPolicy {
-    CanonicalMcpToolPolicy {
-        canonical_name,
-        placement,
-        allowed_capabilities,
-    }
-}
-
-static CANONICAL_MCP_TOOL_POLICIES: &[CanonicalMcpToolPolicy] = &[
-    mcp_policy("orbit.task.add", McpToolPlacement::Hub, AGENT_OPERATOR),
-    mcp_policy("orbit.task.approve", McpToolPlacement::Hub, AGENT_OPERATOR),
-    mcp_policy(
-        "orbit.task.artifact.put",
-        McpToolPlacement::Hub,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy("orbit.task.list", McpToolPlacement::Hub, AGENT_OPERATOR),
-    mcp_policy(
-        "orbit.task.review_thread.add",
-        McpToolPlacement::Hub,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.task.review_thread.list",
-        McpToolPlacement::Hub,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.task.review_thread.reply",
-        McpToolPlacement::Hub,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.task.review_thread.resolve",
-        McpToolPlacement::Hub,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy("orbit.task.show", McpToolPlacement::Hub, AGENT_OPERATOR),
-    mcp_policy("orbit.task.start", McpToolPlacement::Hub, AGENT_OPERATOR),
-    mcp_policy("orbit.task.update", McpToolPlacement::Hub, AGENT_OPERATOR),
-    mcp_policy("orbit.friction.add", McpToolPlacement::Hub, AGENT_OPERATOR),
-    mcp_policy("orbit.friction.tags", McpToolPlacement::Hub, AGENT_OPERATOR),
-    mcp_policy(
-        "orbit.friction.update",
-        McpToolPlacement::Hub,
-        OPERATOR_ONLY,
-    ),
-    mcp_policy(
-        "orbit.graph.sync",
-        McpToolPlacement::LocalDerived,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.graph.search",
-        McpToolPlacement::LocalDerived,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.graph.show",
-        McpToolPlacement::LocalDerived,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.graph.refs",
-        McpToolPlacement::LocalDerived,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.graph.callees",
-        McpToolPlacement::LocalDerived,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.graph.impact",
-        McpToolPlacement::LocalDerived,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.graph.trace",
-        McpToolPlacement::LocalDerived,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.graph.overview",
-        McpToolPlacement::LocalDerived,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.graph.implementors",
-        McpToolPlacement::LocalDerived,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.graph.deps",
-        McpToolPlacement::LocalDerived,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy("orbit.search", McpToolPlacement::Composite, AGENT_OPERATOR),
-    mcp_policy("orbit.adr.add", McpToolPlacement::Composite, AGENT_OPERATOR),
-    mcp_policy("orbit.adr.show", McpToolPlacement::Owner, AGENT_OPERATOR),
-    mcp_policy(
-        "orbit.adr.supersede",
-        McpToolPlacement::Owner,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy("orbit.adr.update", McpToolPlacement::Owner, AGENT_OPERATOR),
-    mcp_policy(
-        "orbit.learning.add",
-        McpToolPlacement::Composite,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.learning.show",
-        McpToolPlacement::Owner,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.learning.update",
-        McpToolPlacement::Owner,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.learning.supersede",
-        McpToolPlacement::Owner,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.auto_task.add",
-        McpToolPlacement::Owner,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.auto_task.show",
-        McpToolPlacement::Owner,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.auto_task.update",
-        McpToolPlacement::Owner,
-        AGENT_OPERATOR,
-    ),
-    mcp_policy(
-        "orbit.auto_task.toggle",
-        McpToolPlacement::Owner,
-        AGENT_OPERATOR,
-    ),
-];
-
 /// Convert a canonical Orbit tool name to its MCP-advertised form.
 pub fn mcp_advertised_tool_name(canonical_name: &str) -> String {
     canonical_name.replace('.', "_")
 }
 
-/// Validate a policy registry, including both canonical and advertised names.
-pub fn validate_mcp_tool_policies(
-    entries: &[CanonicalMcpToolPolicy],
+/// Validate schema-adjacent MCP definitions, including both canonical and advertised names.
+pub fn validate_mcp_tool_definitions(
+    definitions: &[McpToolDefinition],
 ) -> Result<(), McpToolPolicyError> {
     let mut canonical_names = BTreeSet::new();
     let mut advertised_names = BTreeSet::new();
-    for entry in entries {
-        if entry.canonical_name.trim().is_empty() {
+    for definition in definitions {
+        let canonical_name = definition.schema.name.as_str();
+        if canonical_name.trim().is_empty() {
             return Err(McpToolPolicyError::EmptyCanonicalName);
         }
-        entry.policy()?;
-        if !canonical_names.insert(entry.canonical_name) {
+        definition.policy.validate()?;
+        if !canonical_names.insert(canonical_name) {
             return Err(McpToolPolicyError::DuplicateCanonicalName(
-                entry.canonical_name.to_string(),
+                canonical_name.to_string(),
             ));
         }
-        let advertised_name = entry.advertised_name();
+        let advertised_name = mcp_advertised_tool_name(canonical_name);
         if !advertised_names.insert(advertised_name.clone()) {
             return Err(McpToolPolicyError::DuplicateAdvertisedName(advertised_name));
         }
@@ -327,38 +171,24 @@ pub fn validate_mcp_tool_policies(
     Ok(())
 }
 
-/// Return the validated canonical MCP registry. An invalid registry fails closed.
-pub fn canonical_mcp_tool_policies() -> Result<&'static [CanonicalMcpToolPolicy], McpToolPolicyError>
-{
-    validate_mcp_tool_policies(CANONICAL_MCP_TOOL_POLICIES)?;
-    Ok(CANONICAL_MCP_TOOL_POLICIES)
-}
-
-/// Resolve one tool policy from the canonical registry, failing closed on drift.
-pub fn canonical_mcp_tool_policy(canonical_name: &str) -> Option<McpToolPolicy> {
-    canonical_mcp_tool_policies()
-        .ok()?
-        .iter()
-        .find(|entry| entry.canonical_name == canonical_name)
-        .and_then(|entry| entry.policy().ok())
-}
-
 /// Capability-by-placement coverage generated from the canonical registry.
 pub type McpCapabilityPlacementMatrix =
-    BTreeMap<McpToolPlacement, BTreeMap<McpCapability, Vec<&'static str>>>;
+    BTreeMap<McpToolPlacement, BTreeMap<McpCapability, Vec<String>>>;
 
 /// Build the capability-by-placement matrix without a second allowlist.
-pub fn mcp_capability_placement_matrix() -> Result<McpCapabilityPlacementMatrix, McpToolPolicyError>
-{
+pub fn mcp_capability_placement_matrix(
+    definitions: &[McpToolDefinition],
+) -> Result<McpCapabilityPlacementMatrix, McpToolPolicyError> {
+    validate_mcp_tool_definitions(definitions)?;
     let mut matrix = BTreeMap::new();
-    for entry in canonical_mcp_tool_policies()? {
-        for capability in entry.allowed_capabilities {
+    for definition in definitions {
+        for capability in definition.policy.allowed_capabilities() {
             matrix
-                .entry(entry.placement)
+                .entry(definition.policy.placement())
                 .or_insert_with(BTreeMap::new)
                 .entry(*capability)
                 .or_insert_with(Vec::new)
-                .push(entry.canonical_name);
+                .push(definition.schema.name.clone());
         }
     }
     Ok(matrix)

@@ -21,7 +21,10 @@ mod tests;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, ToolSessionContext};
+use orbit_common::types::{
+    LearningInjectionCaps, LearningInjectionState, McpToolDefinition, McpToolPolicyError,
+    ToolSessionContext,
+};
 
 use crate::McpHost;
 
@@ -103,4 +106,8 @@ pub(super) const PROCESS_LEARNING_SESSION_KEY: &str = "__process__";
 
 pub(crate) fn graph_tool_names() -> &'static [&'static str] {
     graph::GRAPH_TOOL_NAMES
+}
+
+pub(crate) fn graph_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
+    graph::graph_tool_definitions()
 }

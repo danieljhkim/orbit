@@ -5,27 +5,25 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use orbit_common::types::{
-    McpCapability, McpToolPlacement, NotFoundKind, OrbitError, ToolSessionContext,
-    canonical_mcp_tool_policy,
+    McpCapability, McpToolDefinition, McpToolPlacement, NotFoundKind, OrbitError,
+    ToolSessionContext,
 };
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::super::OrbitToolServer;
 use super::super::graph::graph_tool_definitions;
-use super::super::test_support::{StubHost, request_with_args, tool_schema};
+use super::super::test_support::{StubHost, request_with_args, test_mcp_definitions, tool_schema};
 
 #[test]
 fn graph_tool_schemas_cover_cli_parameters() {
-    let definitions = graph_tool_definitions();
+    let definitions = graph_tool_definitions().expect("graph definitions are valid");
     assert!(definitions.iter().all(|definition| {
         definition.policy.placement() == McpToolPlacement::LocalDerived
             && definition.policy.allowed_capabilities()
                 == &[McpCapability::Agent, McpCapability::Operator]
                     .into_iter()
                     .collect()
-            && canonical_mcp_tool_policy(&definition.schema.name).as_ref()
-                == Some(&definition.policy)
     }));
     let schemas: Vec<_> = definitions
         .into_iter()
@@ -86,7 +84,9 @@ fn combined_schemas_replace_known_host_graph_tools_and_preserve_unknown_ones() {
         ],
     });
     let server = OrbitToolServer::new(host);
-    let schemas = server.combined_tool_schemas();
+    let schemas = server
+        .combined_tool_schemas()
+        .expect("combined definitions are valid");
     let names: Vec<_> = schemas.iter().map(|schema| schema.name.as_str()).collect();
 
     assert_eq!(
@@ -120,8 +120,8 @@ async fn reexposed_graph_schema_still_crosses_in_process_policy_seam() {
     }
 
     impl crate::McpHost for ReexposedGraphHost {
-        fn list_tool_schemas(&self) -> Vec<orbit_common::types::ToolSchema> {
-            vec![tool_schema("orbit.graph.search")]
+        fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+            test_mcp_definitions(vec![tool_schema("orbit.graph.search")])
         }
 
         fn call_tool(
@@ -171,7 +171,9 @@ fn combined_schemas_use_adapter_graph_tools_when_host_has_no_graph_surface() {
         schemas: vec![tool_schema("orbit.task.show")],
     });
     let server = OrbitToolServer::new(host);
-    let schemas = server.combined_tool_schemas();
+    let schemas = server
+        .combined_tool_schemas()
+        .expect("combined definitions are valid");
     let names: Vec<_> = schemas.iter().map(|schema| schema.name.as_str()).collect();
 
     assert!(names.contains(&"orbit.task.show"));

@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Design
 owner: codex
-last_updated: 2026-07-17
+last_updated: 2026-07-18
 status: Accepted
 feature: mcp-bridge
 doc_role: design
@@ -297,7 +297,7 @@ Trusted configuration is machine-local and names exactly one stable hub:
 machine_id = "hm_41a92e70"
 transport = "ssh"
 host = "dk1"                  # OpenSSH Host alias
-max_capability = "operator"
+allowed_capabilities = ["agent", "operator"]
 ```
 
 Rules:
@@ -306,8 +306,9 @@ Rules:
   registration. `mcp.toml` cannot select a different coordination plane.
 - `host` is an OpenSSH alias only. V1 accepts no arbitrary SSH command, remote
   shell fragment, extra environment, or per-repository override.
-- `max_capability` is a ceiling. A client cannot request `operator` if trusted
-  config permits only `agent`.
+- `allowed_capabilities` is a non-empty, non-hierarchical trust set. A client
+  cannot request a capability absent from the set; allowing `operator` does not
+  grant `runner`, and allowing `runner` does not grant `agent` or `operator`.
 - Repository `.orbit/config.toml` cannot change the hub, SSH target, or capability.
 - Hub rename does not break the mapping because `machine_id` is stable.
 - On the hub machine, no `[hub]` transport entry is required; dispatch short-

@@ -91,7 +91,7 @@ pub(super) fn claude_mcp_server_value() -> JsonValue {
 fn claude_safe_permissions() -> Vec<String> {
     safe_mcp_tool_names()
         .into_iter()
-        .map(claude_permission_name)
+        .map(|name| claude_permission_name(&name))
         .collect()
 }
 
@@ -131,7 +131,7 @@ fn claude_legacy_safe_permissions() -> Vec<String> {
         .map(|name| {
             format!(
                 "mcp__plugin_orbit_orbit__{}",
-                mcp_advertised_tool_name(name)
+                mcp_advertised_tool_name(&name)
             )
         })
         .collect()

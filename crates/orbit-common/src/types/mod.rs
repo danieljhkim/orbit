@@ -150,10 +150,10 @@ pub use task_artifacts::{
 };
 pub use task_plan::{TaskPlan, TaskPlanCheckpoint, TaskPlanSuccessCriterion, parse_task_plan};
 pub use tool::{
-    CanonicalMcpToolPolicy, ExecutionResult, McpCapability, McpCapabilityPlacementMatrix,
-    McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolPolicyError, StoredTool, ToolParam,
-    ToolSchema, ToolSessionContext, canonical_mcp_tool_policies, canonical_mcp_tool_policy,
-    mcp_advertised_tool_name, mcp_capability_placement_matrix, validate_mcp_tool_policies,
+    ExecutionResult, McpCapability, McpCapabilityPlacementMatrix, McpToolDefinition,
+    McpToolPlacement, McpToolPolicy, McpToolPolicyError, StoredTool, ToolParam, ToolSchema,
+    ToolSessionContext, mcp_advertised_tool_name, mcp_capability_placement_matrix,
+    validate_mcp_tool_definitions,
 };
 pub use tool_input::{
     RETIRED_TASK_ADD_INPUT_FIELDS, optional_csv_or_string_list_alias, optional_raw_string,

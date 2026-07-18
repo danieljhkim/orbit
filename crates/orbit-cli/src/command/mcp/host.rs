@@ -1,7 +1,8 @@
 //! MCP host implementations and audit bracketing.
 //!
-//! Registry-backed listing is sourced from [`OrbitRuntime::list_tools`], which
-//! already filters disabled tools and merges external (non-builtin) entries.
+//! Registry-backed listing is sourced from
+//! [`OrbitRuntime::list_mcp_tool_definitions`], which filters disabled tools
+//! while preserving each builtin schema's adjacent MCP policy.
 //! Registry-backed and adapter-owned execution both use the runtime audit
 //! boundary tagged with [`ToolEntryPoint::Mcp`], so every dispatch has the same
 //! identity-resolution rules as the CLI path. Adapter preflight lives inside
@@ -11,8 +12,8 @@
 use std::time::Instant;
 
 use orbit_common::types::{
-    AuditEventStatus, LearningInjectionState, McpToolPolicy, ToolSchema, ToolSessionContext,
-    audit_execution_id, canonical_mcp_tool_policies, canonical_mcp_tool_policy,
+    AuditEventStatus, LearningInjectionState, McpToolDefinition, McpToolPolicyError,
+    ToolSessionContext, audit_execution_id, validate_mcp_tool_definitions,
 };
 use orbit_core::command::tool::{ToolEntryPoint, audit_role_label};
 use orbit_core::{
@@ -24,14 +25,31 @@ use serde_json::{Value, json};
 
 pub(crate) const ORBIT_MCP_SERVER_ID: &str = "orbit";
 
-pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
-    canonical_mcp_tool_policies()
-        .map(|entries| entries.iter().map(|entry| entry.canonical_name).collect())
+pub(crate) fn canonical_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError>
+{
+    let mut definitions = orbit_core::canonical_builtin_mcp_tool_definitions()?;
+    definitions.extend(orbit_mcp::graph_mcp_tool_definitions()?);
+    validate_mcp_tool_definitions(&definitions)?;
+    Ok(definitions)
+}
+
+pub(crate) fn safe_mcp_tool_names() -> Vec<String> {
+    canonical_mcp_tool_definitions()
+        .map(|definitions| {
+            definitions
+                .into_iter()
+                .map(|definition| definition.schema.name)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 pub(crate) fn is_mcp_tool_exposed(name: &str) -> bool {
-    canonical_mcp_tool_policy(name).is_some()
+    canonical_mcp_tool_definitions().is_ok_and(|definitions| {
+        definitions
+            .iter()
+            .any(|definition| definition.schema.name == name)
+    })
 }
 
 fn ensure_mcp_tool_exposed(name: &str) -> Result<(), OrbitError> {
@@ -50,34 +68,13 @@ pub(super) struct RuntimeMcpHost {
 
 impl RuntimeMcpHost {
     pub(super) fn new(runtime: OrbitRuntime) -> Self {
-        let safe_names = safe_mcp_tool_names();
-        assert!(
-            orbit_mcp::graph_tool_names()
-                .iter()
-                .all(|name| safe_names.contains(name)),
-            "in-process graph tool names must be a subset of the MCP safe surface"
-        );
         Self { runtime }
     }
 }
 
 impl McpHost for RuntimeMcpHost {
-    fn list_tool_schemas(&self) -> Vec<ToolSchema> {
-        let tools = self.runtime.list_tools().unwrap_or_default();
-        tools
-            .into_iter()
-            .filter(|tool| tool.enabled && is_mcp_tool_exposed(&tool.name))
-            .map(|tool| ToolSchema {
-                name: tool.name,
-                description: tool.description,
-                parameters: tool.parameters,
-                builtin: tool.builtin,
-            })
-            .collect()
-    }
-
-    fn mcp_tool_policy(&self, canonical_name: &str) -> Option<McpToolPolicy> {
-        canonical_mcp_tool_policy(canonical_name)
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        self.runtime.list_mcp_tool_definitions()
     }
 
     fn call_tool(
@@ -257,8 +254,8 @@ fn record_mcp_preflight_failure(
 pub(super) struct EmptyMcpHost;
 
 impl McpHost for EmptyMcpHost {
-    fn list_tool_schemas(&self) -> Vec<ToolSchema> {
-        Vec::new()
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        Ok(Vec::new())
     }
 
     fn call_tool(

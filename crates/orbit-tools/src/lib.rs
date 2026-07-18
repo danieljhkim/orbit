@@ -64,7 +64,7 @@ pub const TIMEOUT_SLOW_MS: u64 = 30_000;
 /// fetches a branch and may transfer significant data over the network.
 pub const TIMEOUT_LONG_MS: u64 = 60_000;
 
-pub use registry::ToolRegistry;
+pub use registry::{ToolRegistry, canonical_builtin_mcp_tool_definitions};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrbitBuiltinAction {

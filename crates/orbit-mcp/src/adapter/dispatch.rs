@@ -2,8 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use orbit_common::types::{
-    McpToolDefinition, NotFoundKind, OrbitError, ToolSchema, ToolSessionContext,
-    mcp_advertised_tool_name,
+    McpToolDefinition, OrbitError, ToolSchema, ToolSessionContext, validate_mcp_tool_definitions,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::ServerHandler;
@@ -21,29 +20,28 @@ use super::structured::mcp_structured_content;
 use crate::error::tool_error_result;
 
 impl OrbitToolServer {
-    pub(super) fn combined_tool_definitions(&self) -> Vec<McpToolDefinition> {
-        let mut definitions = self
-            .host
-            .list_tool_schemas()
-            .into_iter()
-            .filter(|schema| !self.graph_tools.is_graph_tool(&schema.name))
-            .filter_map(|schema| {
-                let policy = self.host.mcp_tool_policy(&schema.name)?;
-                McpToolDefinition::new(schema, policy).ok()
-            })
-            .collect::<Vec<_>>();
+    pub(super) fn combined_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        let mut definitions = self.host.list_mcp_tool_definitions()?;
+        definitions.retain(|definition| !self.graph_tools.is_graph_tool(&definition.schema.name));
         // ORB-00391: the v1 orbit-knowledge graph builtins were decommissioned,
         // so the in-process orbit-graph (v2) adapter owns its known graph
         // names and their local-derived policies.
-        definitions.extend(self.graph_tools.definitions());
-        definitions
+        definitions.extend(
+            self.graph_tools
+                .definitions()
+                .map_err(|error| OrbitError::InvalidInput(error.to_string()))?,
+        );
+        validate_mcp_tool_definitions(&definitions)
+            .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
+        Ok(definitions)
     }
 
-    pub(super) fn combined_tool_schemas(&self) -> Vec<ToolSchema> {
-        self.combined_tool_definitions()
+    pub(super) fn combined_tool_schemas(&self) -> Result<Vec<ToolSchema>, OrbitError> {
+        Ok(self
+            .combined_tool_definitions()?
             .into_iter()
             .map(|definition| definition.schema)
-            .collect()
+            .collect())
     }
 
     // pub(super) visibility widened from private so that adapter::tests (sibling under adapter)
@@ -87,13 +85,15 @@ impl OrbitToolServer {
             .unwrap_or_default()
     }
 
-    pub(super) fn canonical_name(&self, advertised: &str) -> Result<String, ToolNameCollision> {
-        let schemas = self.combined_tool_schemas();
+    pub(super) fn canonical_name(&self, advertised: &str) -> Result<String, McpError> {
+        let schemas = self
+            .combined_tool_schemas()
+            .map_err(invalid_definitions_mcp_error)?;
         let map = match build_name_map(&schemas) {
             Ok(map) => map,
             Err(err) => {
                 self.clear_name_map();
-                return Err(err);
+                return Err(err.into_mcp_error());
             }
         };
         let resolved = map.get(advertised).cloned();
@@ -106,28 +106,7 @@ impl OrbitToolServer {
         req: CallToolRequestParams,
     ) -> Result<CallToolResult, McpError> {
         let inbound = req.name.to_string();
-        let canonical = self
-            .canonical_name(&inbound)
-            .map_err(ToolNameCollision::into_mcp_error)?;
-        let has_valid_definition = self
-            .combined_tool_schemas()
-            .iter()
-            .any(|schema| schema.name == canonical);
-        // L-0093: reject declared policy drift here, but let truly unknown names
-        // reach the host preflight because it owns rejected-call audit insertion.
-        let declared_without_valid_policy = !has_valid_definition
-            && (self.host.list_tool_schemas().iter().any(|schema| {
-                schema.name == canonical || mcp_advertised_tool_name(&schema.name) == inbound
-            }) || self.graph_tools.is_graph_tool(&canonical)
-                || super::graph::GRAPH_TOOL_NAMES
-                    .iter()
-                    .any(|name| mcp_advertised_tool_name(name) == inbound));
-        if declared_without_valid_policy {
-            return Ok(tool_error_result(&OrbitError::not_found(
-                NotFoundKind::Tool,
-                canonical,
-            )));
-        }
+        let canonical = self.canonical_name(&inbound)?;
         let input = req
             .arguments
             .map(Value::Object)
@@ -213,7 +192,9 @@ impl ServerHandler for OrbitToolServer {
         _request: Option<PaginatedRequestParams>,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        let mut schemas = self.combined_tool_schemas();
+        let mut schemas = self
+            .combined_tool_schemas()
+            .map_err(invalid_definitions_mcp_error)?;
         schemas.sort_by(|a, b| a.name.cmp(&b.name));
         self.refresh_name_map(&schemas)
             .map_err(ToolNameCollision::into_mcp_error)?;
@@ -228,6 +209,13 @@ impl ServerHandler for OrbitToolServer {
     ) -> Result<CallToolResult, McpError> {
         self.call_tool_request(req).await
     }
+}
+
+fn invalid_definitions_mcp_error(error: OrbitError) -> McpError {
+    McpError::internal_error(
+        format!("invalid canonical MCP tool definitions: {error}"),
+        Some(serde_json::json!({ "code": "invalid_tool_definitions" })),
+    )
 }
 
 pub(super) fn session_context_from_initialize(

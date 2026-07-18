@@ -21,8 +21,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use orbit_common::types::{
-    McpToolPolicy, NotFoundKind, OrbitError, ToolParam, ToolSchema, ToolSessionContext,
-    canonical_mcp_tool_policy,
+    McpToolDefinition, McpToolPlacement, McpToolPolicy, NotFoundKind, OrbitError, ToolParam,
+    ToolSchema, ToolSessionContext,
 };
 use orbit_mcp::{McpHost, OrbitToolServer};
 use rmcp::ServiceExt;
@@ -121,7 +121,7 @@ impl FileStoreHost {
 }
 
 impl McpHost for FileStoreHost {
-    fn list_tool_schemas(&self) -> Vec<ToolSchema> {
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
         fn param(name: &str, description: &str, param_type: &str, required: bool) -> ToolParam {
             ToolParam {
                 name: name.to_string(),
@@ -138,7 +138,7 @@ impl McpHost for FileStoreHost {
                 builtin: true,
             }
         }
-        vec![
+        let schemas = vec![
             schema(
                 "orbit.task.add",
                 "Create a task record in the fixture store.",
@@ -158,11 +158,17 @@ impl McpHost for FileStoreHost {
                 "List every task record in the fixture store.",
                 Vec::new(),
             ),
-        ]
-    }
-
-    fn mcp_tool_policy(&self, canonical_name: &str) -> Option<McpToolPolicy> {
-        canonical_mcp_tool_policy(canonical_name)
+        ];
+        schemas
+            .into_iter()
+            .map(|schema| {
+                McpToolDefinition::new(
+                    schema,
+                    McpToolPolicy::agent_and_operator(McpToolPlacement::Hub),
+                )
+                .map_err(|error| OrbitError::InvalidInput(error.to_string()))
+            })
+            .collect()
     }
 
     fn call_tool(
