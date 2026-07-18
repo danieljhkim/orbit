@@ -1,19 +1,17 @@
 use clap::Args;
 use orbit_core::OrbitError;
-use orbit_core::routines::{install_clock, resolve_host_id, write_host_id};
+use orbit_core::routines::{install_clock, load_host_identity};
 use orbit_core::workspace_registry;
 
 #[derive(Args)]
 #[command(
-    after_help = "Writes ~/.orbit/host.toml (the identity `hosts:` pinning matches\n\
-                        against) and, with --install-clock, installs the per-user OS clock\n\
-                        unit that invokes `orbit sweep` every minute (launchd on macOS, a\n\
-                        systemd user timer on Linux)."
+    after_help = "Reads the machine identity from ~/.orbit/host.toml (created by\n\
+                        `orbit init`) and, with --install-clock, installs the per-user OS\n\
+                        clock unit that invokes `orbit sweep` every minute (launchd on\n\
+                        macOS, a systemd user timer on Linux). It never creates or rewrites\n\
+                        host identity — run `orbit init` for that."
 )]
 pub struct RoutineInitArgs {
-    /// Host identity to write (defaults to the machine hostname).
-    #[arg(long)]
-    pub host_id: Option<String>,
     /// Also install and activate the OS clock unit driving `orbit sweep`.
     #[arg(long)]
     pub install_clock: bool,
@@ -23,12 +21,13 @@ impl RoutineInitArgs {
     pub fn execute_without_runtime(self) -> Result<(), OrbitError> {
         let global_root = workspace_registry::global_orbit_dir()?;
 
-        let host_id = match self.host_id {
-            Some(host_id) => host_id,
-            None => resolve_host_id(&global_root)?,
-        };
-        let path = write_host_id(&global_root, &host_id)?;
-        println!("host_id \"{host_id}\" written to {}", path.display());
+        // Read-only: host identity is owned by `orbit init`. Fail closed with
+        // an actionable error when it is absent or unmigrated.
+        let identity = load_host_identity(&global_root)?;
+        println!(
+            "host identity: host_id=\"{}\", machine_id={}, mode={}",
+            identity.host_id, identity.machine_id, identity.mode
+        );
 
         if !self.install_clock {
             println!("clock unit not installed (pass --install-clock to set up `orbit sweep`)");

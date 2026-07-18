@@ -18,7 +18,7 @@ use crate::OrbitRuntime;
 use crate::workspace_registry;
 
 use super::due::{DueDecision, due_decision, parse_cron};
-use super::host::resolve_host_id;
+use super::host::load_host_identity;
 use super::loader::{
     LoadedRoutine, RoutineCollection, RoutineLoadError, collect_routines, discover_workspaces,
 };
@@ -129,7 +129,7 @@ pub fn run_sweep(options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
 
 /// Run one sweep pass against an explicit global root (test seam).
 pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
-    let host_id = resolve_host_id(global_root)?;
+    let host_id = load_host_identity(global_root)?.host_id;
 
     // One pass per host at a time: overlapping invocations from a slow prior
     // pass must not double-fire. flock releases on process death, so a

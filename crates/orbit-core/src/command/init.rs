@@ -221,13 +221,14 @@ pub fn init_workspace_at_root(
         created_skills_symlink = global_result.created_skills_symlink;
         // Routines are workspace-authored (`.orbit/routines/`, no global
         // directory), so defaults seed here rather than in the global
-        // branch. Host resolution is best-effort: an unresolvable host id
-        // skips routine seeding instead of failing the whole init.
-        match crate::routines::resolve_host_id(&global_root) {
-            Ok(host_id) => {
+        // branch. Host resolution is best-effort: an absent or unmigrated
+        // host identity (created by `orbit init`) skips routine seeding
+        // instead of failing the whole init — no OS-hostname fallback.
+        match crate::routines::load_host_identity(&global_root) {
+            Ok(identity) => {
                 refreshed_default_routines = seed_default_routines(
                     &orbit_root.join("routines"),
-                    &host_id,
+                    &identity.host_id,
                     workspace_slug_from_orbit_root(&orbit_root).as_deref(),
                     // Routine definitions become workspace-authored after
                     // seeding. Refresh global defaults without overwriting

@@ -497,7 +497,13 @@ fn run_sweep_at_dry_run_discovers_loads_and_fails_closed() {
     fs::create_dir_all(ws_orbit.join("routines")).unwrap();
     fs::create_dir_all(ws_orbit.join("resources/jobs")).unwrap();
 
-    fs::write(global.join("host.toml"), format!("host_id = \"{HOST}\"\n")).unwrap();
+    fs::write(
+        global.join("host.toml"),
+        format!(
+            "schema_version = 1\nmachine_id = \"hm_testhost\"\nhost_id = \"{HOST}\"\nmode = \"standalone\"\n"
+        ),
+    )
+    .unwrap();
     fs::write(
         ws_orbit.join("config.toml"),
         "[routines]\nrole = \"source\"\n",

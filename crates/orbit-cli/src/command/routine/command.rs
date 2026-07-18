@@ -45,7 +45,7 @@ pub enum RoutineSubcommand {
     Pause(RoutinePauseArgs),
     /// Clear a host-local pause
     Resume(RoutineResumeArgs),
-    /// Set this host's identity and optionally install the OS clock unit
+    /// Read this host's identity and optionally install the OS clock unit
     Init(RoutineInitArgs),
 }
 

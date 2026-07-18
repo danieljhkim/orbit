@@ -6,7 +6,7 @@
 //! at seed time:
 //!
 //! - `__ORBIT_HOST_ID__` — routines v1 has no "any host", so the seeded
-//!   definition pins the initializing host (`resolve_host_id`).
+//!   definition pins the initializing host (`load_host_identity().host_id`).
 //! - `__ORBIT_ROUTINE_NAME__` — routine names must be unique across all
 //!   routine sources on a host, so the seeded name carries a
 //!   workspace-derived suffix (`task-triage-<workspace>`) to keep two
