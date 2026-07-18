@@ -7,6 +7,7 @@ use orbit_tools::ToolContext;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
+use crate::command::job::JobRunListParams;
 use crate::runtime::orbit_tool_host::parse_task_ids;
 
 pub(super) fn validate_bundles(action: &str, input: &Value) -> Result<Value, DispatchError> {
@@ -101,34 +102,39 @@ pub(super) fn invoke_and_wait(
         .get("run_input")
         .cloned()
         .unwrap_or_else(|| Value::Object(Default::default()));
-    let mut invoke_args = serde_json::Map::new();
-    invoke_args.insert("job_name".to_string(), Value::String(job_name.clone()));
-    invoke_args.insert("input".to_string(), run_input);
-    if let Some(priority) = input.get("priority").cloned() {
-        invoke_args.insert("priority".to_string(), priority);
-    }
+    let run_id = match deduped_child_run_id(runtime, action, input, &job_name, &run_input)? {
+        Some(run_id) => run_id,
+        None => {
+            let mut invoke_args = serde_json::Map::new();
+            invoke_args.insert("job_name".to_string(), Value::String(job_name.clone()));
+            invoke_args.insert("input".to_string(), run_input);
+            if let Some(priority) = input.get("priority").cloned() {
+                invoke_args.insert("priority".to_string(), priority);
+            }
 
-    let invoke_ctx = tool_context.clone();
-    let invoke_output = runtime
-        .run_tool_with_context_and_role(
-            "orbit.pipeline.invoke",
-            Value::Object(invoke_args),
-            Role::Admin,
-            invoke_ctx,
-        )
-        .map_err(|err| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: format!("pipeline.invoke failed: {err}"),
-        })?;
+            let invoke_ctx = tool_context.clone();
+            let invoke_output = runtime
+                .run_tool_with_context_and_role(
+                    "orbit.pipeline.invoke",
+                    Value::Object(invoke_args),
+                    Role::Admin,
+                    invoke_ctx,
+                )
+                .map_err(|err| DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: format!("pipeline.invoke failed: {err}"),
+                })?;
 
-    let run_id = invoke_output
-        .get("run_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: "pipeline.invoke returned no run_id".to_string(),
-        })?
-        .to_string();
+            invoke_output
+                .get("run_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: "pipeline.invoke returned no run_id".to_string(),
+                })?
+                .to_string()
+        }
+    };
 
     let mut wait_args = serde_json::Map::new();
     wait_args.insert(
@@ -166,6 +172,64 @@ pub(super) fn invoke_and_wait(
             })
         });
     Ok(first)
+}
+
+fn deduped_child_run_id(
+    runtime: &OrbitRuntime,
+    action: &str,
+    input: &Value,
+    job_name: &str,
+    run_input: &Value,
+) -> Result<Option<String>, DispatchError> {
+    let Some(field) = input
+        .get("dedupe_run_input_field")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let key = run_input
+        .get(field)
+        .filter(|value| !value.is_null())
+        .ok_or_else(|| {
+            action_failed(
+                action,
+                format!("dedupe field '{field}' is missing from run_input"),
+            )
+        })?;
+    let runs = runtime
+        .list_job_runs(JobRunListParams {
+            job_id: Some(job_name.to_string()),
+            ..JobRunListParams::default()
+        })
+        .map_err(|error| {
+            action_failed(
+                action,
+                format!("list existing {job_name} Runs for dedupe: {error}"),
+            )
+        })?;
+    let matches = runs
+        .into_iter()
+        .filter(|run| {
+            run.input
+                .as_ref()
+                .and_then(|value| value.get(field))
+                .is_some_and(|value| value == key)
+        })
+        .map(|run| run.run_id)
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [] => Ok(None),
+        [run_id] => Ok(Some(run_id.clone())),
+        _ => Err(action_failed(
+            action,
+            format!(
+                "multiple {job_name} Runs match dedupe field '{field}' value {key}: {}",
+                matches.join(", ")
+            ),
+        )),
+    }
 }
 
 fn stale_gate_admission_noop(
@@ -411,6 +475,57 @@ pub(super) fn pipeline_success_guard(action: &str, input: &Value) -> Result<Valu
     }))
 }
 
+pub(super) fn independent_review_guard(
+    action: &str,
+    input: &Value,
+) -> Result<Value, DispatchError> {
+    let verdict = input
+        .get("verdict")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| action_failed(action, "missing non-blank `verdict`".to_string()))?;
+    if !matches!(verdict, "approve" | "request_changes") {
+        return Err(action_failed(
+            action,
+            format!(
+                "unknown independent review verdict '{verdict}' (expected 'approve' or 'request_changes')"
+            ),
+        ));
+    }
+
+    let reviewed_head_sha = input
+        .get("reviewed_head_sha")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            action_failed(action, "missing non-blank `reviewed_head_sha`".to_string())
+        })?;
+    let candidate_head_sha = input
+        .get("candidate_head_sha")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            action_failed(action, "missing non-blank `candidate_head_sha`".to_string())
+        })?;
+    if reviewed_head_sha != candidate_head_sha {
+        return Err(action_failed(
+            action,
+            format!(
+                "independent review head mismatch: reviewer reported '{reviewed_head_sha}', published candidate is '{candidate_head_sha}'"
+            ),
+        ));
+    }
+
+    Ok(serde_json::json!({
+        "verdict": verdict,
+        "reviewed_head_sha": reviewed_head_sha,
+        "exact_head": true,
+    }))
+}
+
 fn pipeline_wait_entry_failure(label: &str, entry: &Value) -> Option<String> {
     let Some(status) = entry.get("status").and_then(Value::as_str) else {
         return Some(format!("{label} missing string status"));
@@ -604,5 +719,103 @@ mod tests {
         let message = action_failure_message(err);
         assert!(message.contains("results[1] run jrun-cancelled status cancelled"));
         assert!(message.contains("results[2] missing string status"));
+    }
+
+    #[test]
+    fn invoke_and_wait_dedupe_reuses_one_run_and_rejects_multiple_matches() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let first = runtime
+            .stores()
+            .jobs()
+            .insert_run(
+                "task_review_pipeline",
+                1,
+                chrono::Utc::now(),
+                Some(json!({ "parent_run_id": "jrun-parent" })),
+                None,
+            )
+            .expect("insert first review run");
+        let action_input = json!({ "dedupe_run_input_field": "parent_run_id" });
+        let run_input = json!({ "parent_run_id": "jrun-parent" });
+
+        let reused = deduped_child_run_id(
+            &runtime,
+            "invoke_and_wait",
+            &action_input,
+            "task_review_pipeline",
+            &run_input,
+        )
+        .expect("dedupe lookup");
+        assert_eq!(reused.as_deref(), Some(first.run_id.as_str()));
+
+        runtime
+            .stores()
+            .jobs()
+            .insert_run(
+                "task_review_pipeline",
+                1,
+                chrono::Utc::now(),
+                Some(json!({ "parent_run_id": "jrun-parent" })),
+                None,
+            )
+            .expect("insert duplicate review run");
+        let error = deduped_child_run_id(
+            &runtime,
+            "invoke_and_wait",
+            &action_input,
+            "task_review_pipeline",
+            &run_input,
+        )
+        .expect_err("multiple matching review runs fail closed");
+        assert!(matches!(
+            error,
+            DispatchError::DeterministicActionFailed { .. }
+        ));
+    }
+
+    #[test]
+    fn independent_review_guard_accepts_both_exact_head_verdicts() {
+        for verdict in ["approve", "request_changes"] {
+            let output = independent_review_guard(
+                "independent_review_guard",
+                &json!({
+                    "verdict": verdict,
+                    "reviewed_head_sha": "abc123",
+                    "candidate_head_sha": "abc123",
+                }),
+            )
+            .expect("exact-head verdict passes");
+
+            assert_eq!(output["verdict"], verdict);
+            assert_eq!(output["reviewed_head_sha"], "abc123");
+            assert_eq!(output["exact_head"], true);
+        }
+    }
+
+    #[test]
+    fn independent_review_guard_fails_closed_on_missing_or_mismatched_verdict() {
+        for input in [
+            json!({
+                "reviewed_head_sha": "abc123",
+                "candidate_head_sha": "abc123",
+            }),
+            json!({
+                "verdict": "looks_good",
+                "reviewed_head_sha": "abc123",
+                "candidate_head_sha": "abc123",
+            }),
+            json!({
+                "verdict": "approve",
+                "reviewed_head_sha": "def456",
+                "candidate_head_sha": "abc123",
+            }),
+        ] {
+            let error = independent_review_guard("independent_review_guard", &input)
+                .expect_err("invalid verdict must fail");
+            assert!(matches!(
+                error,
+                DispatchError::DeterministicActionFailed { .. }
+            ));
+        }
     }
 }

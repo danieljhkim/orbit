@@ -1,0 +1,32 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: independent_review_guard
+spec:
+  type: deterministic
+  description: >
+    Require an independent review verdict and prove that the reviewer bound it
+    to the exact candidate SHA published by the parent PR pipeline.
+  input_schema_json:
+    type: object
+    required: [verdict, reviewed_head_sha, candidate_head_sha]
+    properties:
+      verdict:
+        type: string
+        enum: [approve, request_changes]
+      reviewed_head_sha:
+        type: string
+      candidate_head_sha:
+        type: string
+  output_schema_json:
+    type: object
+    required: [verdict, reviewed_head_sha, exact_head]
+    properties:
+      verdict:
+        type: string
+      reviewed_head_sha:
+        type: string
+      exact_head:
+        type: boolean
+  action: independent_review_guard
+  config: {}

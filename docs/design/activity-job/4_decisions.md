@@ -3,7 +3,7 @@ summary: "Activity / Job — Decisions"
 type: design
 title: "Activity / Job — Decisions"
 owner: codex
-last_updated: 2026-07-16
+last_updated: 2026-07-18
 status: Draft
 feature: activity-job
 doc_role: decisions
@@ -624,6 +624,21 @@ Rejected alternatives: reconciling by parent linkage (no parent run id is persis
 
 ---
 
+## ADR-0233 — Materialize independent review as a post-publication child Run
+
+**Status:** Accepted · 2026-07 · [ORB-10266]
+
+**Context.** An inline `agent_review` step ran before the PR candidate was committed, pushed, or published and left no independently addressable review Run. Orbit could keep that inline activity and add more output checks, or materialize review only after publication as its own durable child bound to the pushed SHA.
+
+**Decision.** For explicit-task PR shipment with review enabled, dispatch exactly one `task_review_pipeline` child after push, PR publication, and task promotion. Snapshot the parent run, task IDs, workspace, explicit review crew, candidate branch, pushed SHA, and PR identity in the child input; require a structured verdict whose reviewed SHA exactly matches that snapshot. Preflight the selected crew and deployed job/activity contract before inserting the implementation run, and reject review outside PR mode.
+
+**Consequences.**
+- Independent review is observable and resumable through normal job-run records and cannot silently inherit the implementation crew.
+- `review=false` keeps the implementation-only shipment path, while review-enabled no-diff and local shipments do not invent an unpublished candidate to review.
+- Cost: review-enabled shipment adds a child Run and wait boundary after PR publication, increasing latency and requiring source/shipped workflow assets to stay synchronized.
+
+---
+
 ## Task References
 
 - **[T20260418-2018]** — Add `JobV2` DAG constructs (`parallel`, `fan_out`, `loop`, `retry`, `when`).
@@ -694,5 +709,6 @@ Rejected alternatives: reconciling by parent linkage (no parent run id is persis
 - **[ORB-00374]** — Remove the `shell` activity variant and `run_shell` dispatch (fail-closed resolution of [ORB-00363]).
 - **[ORB-10202]** — Remove the retired friction task status while preserving workflow admission and triage behavior.
 - **[ORB-10232]** — Model recoverable PR handoff as checkpointed job activities with exact-SHA force-push provenance.
+- **[ORB-10266]** — Materialize independent review as a durable exact-head child Run or fail before implementation.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

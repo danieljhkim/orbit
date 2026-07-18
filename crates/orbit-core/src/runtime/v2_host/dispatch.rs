@@ -292,6 +292,9 @@ pub(super) fn run_deterministic(
         // Fail a workflow if one or more child pipeline wait results did not
         // reach `succeeded`.
         "pipeline_success_guard" => pipeline_actions::pipeline_success_guard(action, input),
+        // Require the independent reviewer to return a structured verdict for
+        // the exact candidate SHA snapshotted by the PR pipeline.
+        "independent_review_guard" => pipeline_actions::independent_review_guard(action, input),
         // Post-loop gate signal: the admission window never opened in
         // time. Emits a `gate.starvation` audit event with task_ids and
         // conflicting_files so an epic-orchestrator parent can decide

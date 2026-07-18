@@ -57,6 +57,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/invoke_and_wait.yaml"),
     ),
     (
+        "independent_review_guard",
+        include_str!("../../assets/activities/independent_review_guard.yaml"),
+    ),
+    (
         "pipeline_wait",
         include_str!("../../assets/activities/pipeline_wait.yaml"),
     ),
@@ -181,6 +185,7 @@ mod tests {
             ("pr_promote", "pr_promote"),
             ("release_locks", "release_locks"),
             ("pipeline_wait", "pipeline_wait"),
+            ("independent_review_guard", "independent_review_guard"),
             ("list_triage_candidates", "list_triage_candidates"),
             ("apply_triage_dispositions", "apply_triage_dispositions"),
         ] {
@@ -225,7 +230,7 @@ mod tests {
     fn agent_response_contract_matches_durable_handoff_shape() {
         for (name, required) in [
             ("agent_implement", false),
-            ("agent_review", false),
+            ("agent_review", true),
             ("triage_failed_runs", true),
             ("epic_orchestrator", true),
         ] {
@@ -242,6 +247,32 @@ mod tests {
                 ),
                 other => panic!("expected agent_loop {name} activity, got {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn agent_review_is_read_only_and_requires_an_exact_head_verdict() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "agent_review")
+            .expect("agent review activity is seeded");
+        let asset = load_activity_asset(yaml).expect("parse agent review activity");
+        assert_eq!(
+            asset.spec.output_schema_json["required"],
+            serde_json::json!(["verdict", "reviewed_head_sha"])
+        );
+        match asset.spec.spec {
+            ActivityV2Spec::AgentLoop(spec) => {
+                assert!(spec.require_response_envelope);
+                assert_eq!(
+                    spec.role, None,
+                    "flat review crew must not need a role field"
+                );
+                assert!(!spec.tools.iter().any(|tool| tool == "fs.delete"));
+                assert!(spec.instruction.contains("candidate_head_sha"));
+                assert!(spec.instruction.contains("Do not edit"));
+            }
+            other => panic!("expected agent_loop agent_review, got {other:?}"),
         }
     }
 

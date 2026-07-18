@@ -5,15 +5,16 @@ metadata:
 spec:
   type: agent_loop
   description: >
-    Review the pending changes in a bundle's worktree against the participating
-    tasks' acceptance criteria, record blocking findings as durable review
-    threads on each task, and apply targeted fixes in-place. Findings and fix
-    state are tracked via `orbit.task.review_thread.*`; the activity response
-    body is NOT the source of truth and must not be relied on by downstream
-    pipeline steps.
+    Independently review an already-published PR candidate against the
+    participating tasks' acceptance criteria, record blocking findings as
+    durable review threads, and return a structured verdict bound to the exact
+    published candidate SHA. This activity is read-only with respect to the
+    candidate worktree.
   input_schema_json:
     type: object
-    required: [task_ids, workspace_path]
+    required:
+      [task_ids, workspace_path, base_branch, crew, parent_run_id, candidate_head,
+       candidate_head_sha, pr_number]
     properties:
       task_ids:
         type: array
@@ -23,25 +24,45 @@ spec:
         type: string
       base_branch:
         type: string
+      crew:
+        type: string
+      parent_run_id:
+        type: string
+      candidate_head:
+        type: string
+      candidate_head_sha:
+        type: string
+      pr_number:
+        type: string
+      pr_url:
+        type: [string, "null"]
   output_schema_json:
     type: object
+    required: [verdict, reviewed_head_sha]
+    properties:
+      verdict:
+        type: string
+        enum: [approve, request_changes]
+      reviewed_head_sha:
+        type: string
   instruction: |
-    You are reviewing a bundle's pending code changes and applying fixes.
+    You are the independent final reviewer of an already-published PR candidate.
 
-    Durable record: review threads, not this response. Use
-    `orbit.task.review_thread.add` to record blocking issues and
-    `orbit.task.review_thread.resolve` to mark each issue resolved after the
-    corresponding fix lands. Calls to `review_thread.add` and
-    `review_thread.reply` require `model`; `review_thread.list` and
-    `review_thread.resolve` do not, though `resolve` may include it for
-    provenance. The pipeline does not parse your response body.
+    The durable records are this child Run's structured verdict plus any review
+    threads you create. Do not edit, delete, commit, push, or otherwise mutate
+    the candidate. Do not transition task status. Use
+    `orbit.task.review_thread.add` for every blocking issue; include `model`.
+    Leave your own threads open for the implementation owner.
 
     Procedure:
 
-    1. Treat `input.workspace_path` as the active worktree. Diff it against
-       `input.base_branch` (the workflow's configured base, e.g. `main` or
-       `agent-main`) using `proc.spawn` git, e.g. `git diff <base>...HEAD`
-       and `git diff` for unstaged changes.
+    1. Treat `input.workspace_path` as the active worktree. Before reviewing,
+       use `proc.spawn` git to obtain `git rev-parse HEAD` and `git status
+       --porcelain`. The resolved HEAD MUST equal `input.candidate_head_sha`
+       exactly and the worktree MUST be clean. Also resolve
+       `input.candidate_head` and require it to name the same SHA. On any
+       mismatch, return a failed Orbit response envelope; do not review a
+       different head.
     2. For each task id in `input.task_ids`, call `orbit.task.show` to
        recover its description, acceptance criteria, plan, and context
        files. Read context selectors via `orbit.graph.show` (and
@@ -51,32 +72,30 @@ spec:
        `semantic: "<task-id>"` to surface prior similar tasks whose review
        threads or decisions may inform this review; skip if the companion
        binary is not installed.
-    3. For each blocking issue you find — correctness bug, broken contract,
+    3. Diff `input.base_branch...input.candidate_head_sha` and inspect the
+       published candidate. For each blocking issue you find — correctness bug,
        acceptance-criteria miss, obvious regression — record it with
        `orbit.task.review_thread.add` against the most relevant task. Use
        inline `path` and string `line` (`"line": "<line>"`) when the issue is
        file-specific; omit them for general findings. Include `model` on every
        `review_thread.add` call. Skip stylistic nits.
-    4. Apply fixes directly in the worktree, scoped to files the bundle
-       already touches. Do not widen scope: out-of-scope concerns belong in
-       new tasks created later, not in this review pass.
-    5. After landing each fix, call `orbit.task.review_thread.resolve` on
-       the corresponding thread.
-    6. If a fix cannot be applied (ambiguity, missing context, scope
-       boundary), leave the thread `open` and move on. Open threads will
-       surface to human reviewers via the existing PR review-thread sync.
-    7. Before stopping, run the learning checkpoint: if this review surfaced a
+    4. Before stopping, run the learning checkpoint: if this review surfaced a
        contradicted assumption, recurring failure mode, non-obvious gotcha that
        took more than 10 minutes to debug, or incident-style root cause, follow
        the `orbit-knowledge` skill and call the `add` action on
        `orbit.learning` (or use that skill's update/supersede flow when it
        points to existing guidance).
        Skip if none apply.
-    8. Stop when no further blocking issues remain. Do not synthesize a
-       summary in the response — the review-thread records are the result.
+    5. Return exactly one Orbit response envelope. Use status `success`, set
+       `result.verdict` to `approve` only when no blocking issue remains, or
+       `request_changes` when at least one blocking thread is open, and set
+       `result.reviewed_head_sha` to the exact SHA you verified. The required
+       shape is:
+       {"schemaVersion":1,"status":"success","result":{"verdict":"approve|request_changes","reviewed_head_sha":"<sha>"},"error":null}
   tools:
-    - orbit.task.*
-    - orbit.friction.*
+    - orbit.task.show
+    - orbit.task.review_thread.add
+    - orbit.task.review_thread.list
     - orbit.graph.*
     - orbit.search
     - orbit.learning.show
@@ -84,12 +103,11 @@ spec:
     - orbit.learning.update
     - orbit.learning.supersede
     - fs.read
-    - fs.delete
     - proc.spawn
   proc_allowed_programs:
     - git
     - rg
   on_denial: terminate
   max_iterations: 20
-  role: reviewer
+  require_response_envelope: true
   wall_clock_timeout_seconds: 3600

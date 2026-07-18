@@ -138,6 +138,16 @@ pub fn build_ship_input(
             "ship base branch must not be empty".to_string(),
         ));
     }
+    if review && mode != ShipMode::Pr {
+        return Err(OrbitError::InvalidInput(
+            "ship review is supported only for PR mode".to_string(),
+        ));
+    }
+    if review && task_ids.is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "ship review requires an explicit task id selection".to_string(),
+        ));
+    }
     let mut seen = std::collections::HashSet::new();
     for task_id in task_ids {
         if task_id.trim().is_empty() {
@@ -377,23 +387,53 @@ mod ship_input_tests {
 
     #[test]
     fn build_ship_input_includes_explicit_review_controls() {
-        let input = build_ship_input(ShipMode::Pr, "main", &[], true, Some("opus-review"))
-            .expect("review input builds");
+        let input = build_ship_input(
+            ShipMode::Pr,
+            "main",
+            &["ORB-10000".to_string()],
+            true,
+            Some("opus-review"),
+        )
+        .expect("review input builds");
 
         assert_eq!(input["review"], true);
         assert_eq!(input["review_crew"], "opus-review");
+        assert_eq!(input["task_ids"], serde_json::json!(["ORB-10000"]));
     }
 
     #[test]
     fn build_ship_input_rejects_enabled_review_without_non_blank_crew() {
         for review_crew in [None, Some(""), Some("   ")] {
-            let error = build_ship_input(ShipMode::Pr, "main", &[], true, review_crew)
-                .expect_err("enabled review requires a crew");
+            let error = build_ship_input(
+                ShipMode::Pr,
+                "main",
+                &["ORB-10000".to_string()],
+                true,
+                review_crew,
+            )
+            .expect_err("enabled review requires a crew");
             assert!(
                 error.to_string().contains("non-blank explicit review crew"),
                 "unexpected error: {error}"
             );
         }
+    }
+
+    #[test]
+    fn build_ship_input_rejects_review_without_explicit_pr_tasks() {
+        let auto_error = build_ship_input(ShipMode::Pr, "main", &[], true, Some("opus"))
+            .expect_err("review cannot auto-discover tasks");
+        assert!(auto_error.to_string().contains("explicit task id"));
+
+        let local_error = build_ship_input(
+            ShipMode::Local,
+            "main",
+            &["ORB-10000".to_string()],
+            true,
+            Some("opus"),
+        )
+        .expect_err("review is PR-only");
+        assert!(local_error.to_string().contains("only for PR mode"));
     }
 
     #[test]

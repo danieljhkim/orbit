@@ -196,6 +196,27 @@ pub trait V2RuntimeHost: Send + Sync {
     ) -> Option<AgentRoleConfig> {
         self.agent_role_config(role)
     }
+
+    /// Resolve a flat crew selected explicitly by the rendered activity
+    /// input. This is separate from role-tag lookup: modern crews have one
+    /// assignment, so an activity carrying `crew` does not need a synthetic
+    /// reviewer/implementer/planner role merely to select that assignment.
+    fn explicit_agent_crew_config_for_input(
+        &self,
+        input: &Value,
+    ) -> Result<Option<AgentRoleConfig>, DispatchError> {
+        if let Some(crew) = input
+            .get("crew")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Err(DispatchError::JobValidation(format!(
+                "explicit activity crew '{crew}' cannot be resolved by this runtime host"
+            )));
+        }
+        Ok(None)
+    }
 }
 
 /// Input bundle for a single v2 activity dispatch.

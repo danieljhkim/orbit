@@ -76,6 +76,22 @@ impl V2RuntimeHost for RoleHost {
         self.observed.lock().expect("observed lock").push(role);
         self.config.get(&role).cloned()
     }
+
+    fn explicit_agent_crew_config_for_input(
+        &self,
+        input: &Value,
+    ) -> Result<Option<AgentRoleConfig>, DispatchError> {
+        if input.get("crew").and_then(Value::as_str).is_none() {
+            return Ok(None);
+        }
+        self.config
+            .get(&AgentRole::Reviewer)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| {
+                DispatchError::JobValidation("explicit test crew is unknown".to_string())
+            })
+    }
 }
 
 fn inline_agent_loop_spec() -> AgentLoopSpec {
@@ -140,7 +156,9 @@ fn role_override_pulls_provider_from_host_for_step_role() {
     let ctx = exec_ctx(&host);
     let target = target_step_with_role(inline_agent_loop_spec(), Some(AgentRole::Implementer));
 
-    let overridden = role_overridden_spec(&target, &ctx).expect("override expected");
+    let overridden = role_overridden_spec(&target, &ctx, &ctx.input)
+        .expect("resolve override")
+        .expect("override expected");
     assert_eq!(overridden.provider, Provider::Codex);
     // Field-by-field fallback: model and backend stay inline.
     assert_eq!(overridden.model.as_deref(), Some(TEST_CLAUDE_MODEL));
@@ -158,7 +176,9 @@ fn role_override_step_role_wins_over_activity_role() {
     spec.role = Some(AgentRole::Planner);
     let target = target_step_with_role(spec, Some(AgentRole::Implementer));
 
-    let overridden = role_overridden_spec(&target, &ctx).expect("override expected");
+    let overridden = role_overridden_spec(&target, &ctx, &ctx.input)
+        .expect("resolve override")
+        .expect("override expected");
     assert_eq!(overridden.provider, Provider::Codex);
     // Only Implementer was looked up; Planner was never queried.
     assert_eq!(host.observed_lookups(), vec![AgentRole::Implementer]);
@@ -172,7 +192,9 @@ fn role_override_falls_back_to_activity_role_when_step_role_absent() {
     spec.role = Some(AgentRole::Implementer);
     let target = target_step_with_role(spec, None);
 
-    let overridden = role_overridden_spec(&target, &ctx).expect("override expected");
+    let overridden = role_overridden_spec(&target, &ctx, &ctx.input)
+        .expect("resolve override")
+        .expect("override expected");
     assert_eq!(overridden.provider, Provider::Codex);
     assert_eq!(host.observed_lookups(), vec![AgentRole::Implementer]);
 }
@@ -185,8 +207,49 @@ fn role_override_returns_none_when_no_role_anywhere() {
 
     // Inline activity role is also None — no override should be built and
     // the host should not be queried at all.
-    assert!(role_overridden_spec(&target, &ctx).is_none());
+    assert!(
+        role_overridden_spec(&target, &ctx, &ctx.input)
+            .expect("resolve override")
+            .is_none()
+    );
     assert!(host.observed_lookups().is_empty());
+}
+
+#[test]
+fn explicit_flat_crew_overrides_untagged_agent_activity() {
+    let mut config = HashMap::new();
+    config.insert(
+        AgentRole::Reviewer,
+        AgentRoleConfig {
+            provider: Some(Provider::Codex),
+            model: Some("gpt-review".to_string()),
+            backend: Some(Backend::Cli),
+        },
+    );
+    let host = RoleHost::new(config);
+    let ctx = exec_ctx(&host);
+    let rendered_input = json!({ "crew": "independent-review" });
+    let target = target_step_with_role(inline_agent_loop_spec(), None);
+
+    let overridden = role_overridden_spec(&target, &ctx, &rendered_input)
+        .expect("resolve explicit rendered crew")
+        .expect("explicit rendered crew override");
+    assert_eq!(overridden.provider, Provider::Codex);
+    assert_eq!(overridden.model.as_deref(), Some("gpt-review"));
+    assert_eq!(overridden.backend, Backend::Cli);
+    assert!(host.observed_lookups().is_empty());
+}
+
+#[test]
+fn explicit_flat_crew_resolution_failure_does_not_fall_back_inline() {
+    let host = RoleHost::new(HashMap::new());
+    let ctx = exec_ctx(&host);
+    let rendered_input = json!({ "crew": "unknown-review" });
+    let target = target_step_with_role(inline_agent_loop_spec(), None);
+
+    let error = role_overridden_spec(&target, &ctx, &rendered_input)
+        .expect_err("unknown explicit crew must fail closed");
+    assert!(matches!(error, DispatchError::JobValidation(_)));
 }
 
 #[test]
@@ -199,7 +262,9 @@ fn role_override_returns_none_when_host_has_no_matching_entry() {
     let ctx = exec_ctx(&host);
     let target = target_step_with_role(inline_agent_loop_spec(), Some(AgentRole::Reviewer));
 
-    let overridden = role_overridden_spec(&target, &ctx).expect("override expected");
+    let overridden = role_overridden_spec(&target, &ctx, &ctx.input)
+        .expect("resolve override")
+        .expect("override expected");
     assert_eq!(overridden.provider, Provider::Claude);
     assert_eq!(overridden.model.as_deref(), Some(TEST_CLAUDE_MODEL));
     assert_eq!(overridden.backend, Backend::Cli);
@@ -224,7 +289,11 @@ fn role_override_does_not_apply_to_non_agent_loop_specs() {
         session: None,
         role: Some(AgentRole::Implementer),
     };
-    assert!(role_overridden_spec(&target, &ctx).is_none());
+    assert!(
+        role_overridden_spec(&target, &ctx, &ctx.input)
+            .expect("resolve override")
+            .is_none()
+    );
     assert!(host.observed_lookups().is_empty());
 }
 
@@ -269,7 +338,9 @@ fn role_override_does_not_disable_replay_short_circuit() {
     let ctx = exec_ctx(&host);
     let target = target_step_with_role(inline_agent_loop_spec(), Some(AgentRole::Implementer));
 
-    let overridden = role_overridden_spec(&target, &ctx).expect("override expected");
+    let overridden = role_overridden_spec(&target, &ctx, &ctx.input)
+        .expect("resolve override")
+        .expect("override expected");
     assert_eq!(overridden.provider, Provider::Codex);
     // Replay short-circuit still triggers — independent of the override.
     assert!(super::replay_active());
