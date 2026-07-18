@@ -71,8 +71,8 @@ provider = "grok"
 backend = "cli"
 
 [crews.qa]
-model = "gpt-5.6-terra"
-provider = "codex"
+model = "opus"
+provider = "claude"
 backend = "cli"
 
 
