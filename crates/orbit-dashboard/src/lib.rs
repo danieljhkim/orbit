@@ -125,36 +125,28 @@ pub fn serve_from_env(args: ServeArgs, root_override: Option<&Path>) -> Result<(
     run_server(&args, state)
 }
 
-/// Resolve dashboard state from the environment: global mode over every
-/// registered workspace (stale-path entries are listed but marked inactive
-/// and never built). The dropdown's default selection is, in priority order:
-/// the registered/active workspace matching `root_override` (an explicit
-/// `--root <path>`), else the registered workspace containing the cwd (see
+/// Resolve dashboard state from the environment: registry-backed global mode
+/// over every registered workspace (stale-path entries are listed but marked
+/// inactive and never built). The servable set is reloaded from
+/// `~/.orbit/workspaces.json` on every request boundary (see
+/// [`state::DashboardState::refresh`]), so a native `orbit workspace
+/// init/remove` or binding change becomes visible without restarting the
+/// server. The dropdown's default selection is, in priority order: the
+/// registered/active workspace matching `root_override` (an explicit `--root
+/// <path>`), else the registered workspace containing the cwd (see
 /// [`default_workspace_for_cwd`]), else "All workspaces". See
 /// [`default_workspace_selection`] for the precedence logic.
+///
+/// The initial load is eager: a malformed registry at startup is fatal, exactly
+/// as before this became refreshable. A malformed *refresh* after a good
+/// startup retains the last valid snapshot instead (see `refresh`).
 fn build_state(root_override: Option<&Path>) -> Result<state::DashboardState, OrbitError> {
     let global_root = workspace_registry::global_orbit_dir()?;
-    let mut registry = workspace_registry::load_registry()?;
-    workspace_registry::validate_workspaces(&mut registry);
-
+    let registry_path = workspace_registry::registry_path()?;
     let cwd = std::env::current_dir().ok();
-    let default_workspace = default_workspace_selection(&registry, root_override, cwd.as_deref());
-
-    let entries = workspace_registry::local_workspaces(&registry)
-        .map(|(workspace, checkout)| state::WsEntry {
-            id: workspace.id.clone(),
-            name: workspace.name.clone(),
-            repo_root: checkout.repo_root.clone(),
-            orbit_dir: checkout.orbit_dir.clone(),
-            active: workspace.status == WorkspaceStatus::Active,
-        })
-        .collect();
-
-    Ok(state::DashboardState::global(
-        global_root,
-        entries,
-        default_workspace,
-    ))
+    let source =
+        state::RegistrySource::new(registry_path, root_override.map(Path::to_path_buf), cwd);
+    state::DashboardState::from_registry(global_root, source)
 }
 
 /// Best-effort default when serving globally: the registered workspace whose
