@@ -200,48 +200,66 @@ fn recovered_rebase_continues_remaining_handoff_phases_without_replay() {
 }
 
 /// ORB-10313: every resumable PR checkpoint reloads durable state through
-/// `load_handoff_context`, so `pr_open` fails closed on a failed, missing, or
-/// unknown execution outcome before any GitHub call, external-ref write, or
-/// promotion — and the task stays outside review.
+/// `load_handoff_context`, so `pr_open` fails closed on an explicit failed
+/// execution outcome before any GitHub call, external-ref write, or promotion
+/// — and the task stays outside review.
 #[test]
-fn pr_open_blocks_non_success_outcomes_before_external_calls() {
-    for (summary, fragment) in [
-        (
+fn pr_open_blocks_failed_outcome_before_external_calls() {
+    let workspace = pr_workspace();
+    let host = PrOpenTestHost::new(
+        vec![batch_task(
+            "ORB-10313-PR",
+            "Gated delivery",
             "Outcome: failed\n\nChanges:\n- Critical scope unimplemented.",
-            "failed",
-        ),
-        ("Changes:\n- No outcome line at all.", "Changes:"),
-        ("Outcome: partial\n\nChanges:\n- Partly done.", "partial"),
+        )],
+        workspace.repo.clone(),
+    );
+
+    let error = pr_open(&host, &pr_open_input(&workspace.repo, vec!["ORB-10313-PR"]))
+        .expect_err("explicit failed outcome must block PR handoff");
+    assert!(error.to_string().contains("ORB-10313-PR"), "{error}");
+    assert!(error.to_string().contains("failed"), "{error}");
+    assert!(host.tool_calls().is_empty(), "zero GitHub calls");
+    assert!(
+        host.automation_updates().is_empty(),
+        "zero external-ref writes and zero promotion updates"
+    );
+    let task = host.get_task("ORB-10313-PR").expect("task");
+    assert_eq!(
+        task.status,
+        TaskStatus::InProgress,
+        "task remains outside review"
+    );
+    assert!(task.external_refs.is_empty());
+}
+
+#[test]
+fn pr_open_allows_meaningful_non_failed_outcomes() {
+    for summary in [
+        "Changes:\n- No outcome line at all.",
+        "Outcome: partial\n\nChanges:\n- Partly done.",
     ] {
         let workspace = pr_workspace();
         let host = PrOpenTestHost::new(
-            vec![batch_task("ORB-10313-PR", "Gated delivery", summary)],
+            vec![batch_task("ORB-10313-PR", "Allowed delivery", summary)],
             workspace.repo.clone(),
         );
 
-        let error = pr_open(&host, &pr_open_input(&workspace.repo, vec!["ORB-10313-PR"]))
-            .expect_err("non-success outcome must block PR handoff");
-        assert!(error.to_string().contains("ORB-10313-PR"), "{error}");
-        assert!(error.to_string().contains(fragment), "{error}");
-        assert!(host.tool_calls().is_empty(), "zero GitHub calls");
+        pr_open(&host, &pr_open_input(&workspace.repo, vec!["ORB-10313-PR"]))
+            .expect("meaningful summary without explicit failure may open a PR");
         assert!(
-            host.automation_updates().is_empty(),
-            "zero external-ref writes and zero promotion updates"
+            host.tool_calls()
+                .iter()
+                .any(|call| call.name == "github.pr.create"),
+            "the allowed handoff reaches PR creation"
         );
-        let task = host.get_task("ORB-10313-PR").expect("task");
-        assert_eq!(
-            task.status,
-            TaskStatus::InProgress,
-            "task remains outside review"
-        );
-        assert!(task.external_refs.is_empty());
     }
 }
 
 /// The same durable gate covers `pr_prepare`, so a resumed prepare revalidates
 /// the outcome before it inspects Git or writes any checkpoint.
 #[test]
-fn pr_prepare_blocks_non_success_outcome_before_git_inspection() {
+fn pr_prepare_blocks_failed_outcome_before_git_inspection() {
     let workspace = pr_workspace();
     let host = PrOpenTestHost::new(
         vec![batch_task(
@@ -271,7 +289,7 @@ fn pr_prepare_blocks_non_success_outcome_before_git_inspection() {
 /// failed outcome cannot bypass the gate even when the task carries the
 /// no-diff-expected tag.
 #[test]
-fn pr_promote_no_diff_blocks_non_success_outcome() {
+fn pr_promote_no_diff_blocks_failed_outcome() {
     let workspace = no_diff_pr_workspace();
     let mut task = batch_task(
         "ORB-10313-ND",

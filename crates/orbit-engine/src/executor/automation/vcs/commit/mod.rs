@@ -13,7 +13,7 @@ use crate::context::{RuntimeHost, TaskHost};
 
 use super::super::input::{canonicalize_existing_dir, input_string_field, required_job_run_id};
 use super::git::{git_output, git_success};
-use super::handoff::require_delivery_success;
+use super::handoff::reject_failed_delivery;
 use author::{append_co_author_trailers, commit_author_for_tasks, git_author_for_task};
 use git_ops::{
     ensure_named_branch, ensure_no_unmerged_changes, git_commit_with_identity, stage_paths,
@@ -180,7 +180,7 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
 
     // ORB-10313: fail closed on the durable execution outcome before resolving
     // the delivery checkout, staging files, mutating the index, or committing.
-    require_delivery_success(task)?;
+    reject_failed_delivery(task)?;
 
     let workspace_path = resolve_workspace_path(host, input, batch_id)?;
     ensure_named_branch(&workspace_path)?;
