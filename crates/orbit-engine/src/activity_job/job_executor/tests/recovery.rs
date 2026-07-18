@@ -321,31 +321,174 @@ fn non_retryable_failure_skips_recovery_and_audit_event() {
 }
 
 #[test]
-fn worktree_integrity_failure_skips_recovery_and_audit_event() {
-    let integrity_error = DispatchError::WorktreeIntegrity {
-        code: "worktree_escape",
-        diagnostic: r#"{"task_id":"ORB-10296","run_id":"run-integrity"}"#.to_string(),
-    };
+fn worktree_integrity_failure_bypasses_retry_then_recovers_once() {
+    let integrity_error = worktree_integrity_error("run-integrity-recovered");
     let host = RecoveryHost::new([
-        ("flaky", vec![Err(integrity_error)]),
+        (
+            "flaky",
+            vec![Err(integrity_error.clone()), Ok(json!({"fixed": true}))],
+        ),
         ("recover", vec![Ok(json!({"recovered": true}))]),
     ]);
     let job = recovery_job(Some("recover"), None, "flaky", None, 3);
-    let writer = std::sync::Arc::new(test_writer("run-integrity"));
+    let writer = std::sync::Arc::new(test_writer("run-integrity-recovered"));
 
-    let err = execute_job(&job, Value::Null, "run-integrity", writer.clone(), &host)
-        .expect_err("worktree integrity must bypass recovery");
+    let outcome = execute_job(
+        &job,
+        Value::Null,
+        "run-integrity-recovered",
+        writer.clone(),
+        &host,
+    )
+    .expect("configured recovery should get one chance to repair integrity state");
 
+    assert!(outcome.success);
+    assert_eq!(
+        host.actions(),
+        vec!["flaky", "recover", "flaky"],
+        "ordinary retry must be skipped before the single recovery attempt"
+    );
+    assert_eq!(host.action_count("recover"), 1);
+    assert_eq!(
+        host.input_for_action("recover"),
+        Some(json!({
+            "failed_step_id": "build",
+            "activity_name": "flaky",
+            "error_message": integrity_error.to_string(),
+            "attempt": 1,
+            "max_attempts": 3
+        }))
+    );
+
+    let events = writer.events_snapshot().expect("audit snapshot");
+    let recovery_events = recovery_events(&events);
+    assert_eq!(recovery_events.len(), 1);
     assert!(matches!(
-        err,
-        DispatchError::WorktreeIntegrity {
-            code: "worktree_escape",
+        recovery_events[0].kind,
+        V2AuditEventKind::StepRecoveryAttempted {
+            ref step_id,
+            ref recovery_activity,
+            recovery_succeeded: true,
+        } if step_id == "build" && recovery_activity == "recover"
+    ));
+}
+
+#[test]
+fn worktree_integrity_without_retry_block_uses_step_recovery_once() {
+    let integrity_error = worktree_integrity_error("run-integrity-step-recovery");
+    let host = RecoveryHost::new([
+        (
+            "flaky",
+            vec![Err(integrity_error), Ok(json!({"fixed": true}))],
+        ),
+        ("recover_step", vec![Ok(json!({"recovered": true}))]),
+    ]);
+    let mut job = recovery_job(None, None, "flaky", None, 1);
+    job.steps[0].retry = None;
+    job.steps[0].recovery_activity = Some("recover_step".to_string());
+    job.steps[0].resolved_recovery_activity = Some(deterministic_activity("recover_step", None));
+    let writer = std::sync::Arc::new(test_writer("run-integrity-step-recovery"));
+
+    let outcome = execute_job(
+        &job,
+        Value::Null,
+        "run-integrity-step-recovery",
+        writer.clone(),
+        &host,
+    )
+    .expect("step-level recovery should run without a retry block");
+
+    assert!(outcome.success);
+    assert_eq!(host.actions(), vec!["flaky", "recover_step", "flaky"]);
+    assert_eq!(host.action_count("recover_step"), 1);
+    assert_eq!(recovery_events(&writer.events_snapshot().unwrap()).len(), 1);
+}
+
+#[test]
+fn worktree_integrity_without_recovery_returns_original_without_retry() {
+    let integrity_error = worktree_integrity_error("run-integrity-no-recovery");
+    let host = RecoveryHost::new([("flaky", vec![Err(integrity_error.clone())])]);
+    let job = recovery_job(None, None, "flaky", None, 3);
+    let writer = std::sync::Arc::new(test_writer("run-integrity-no-recovery"));
+
+    let err = execute_job(
+        &job,
+        Value::Null,
+        "run-integrity-no-recovery",
+        writer.clone(),
+        &host,
+    )
+    .expect_err("integrity failure without configured recovery must fail closed");
+
+    assert_eq!(err.to_string(), integrity_error.to_string());
+    assert_eq!(host.actions(), vec!["flaky"]);
+    assert!(recovery_events(&writer.events_snapshot().unwrap()).is_empty());
+}
+
+#[test]
+fn worktree_integrity_unsuccessful_recovery_returns_original() {
+    let integrity_error = worktree_integrity_error("run-integrity-recovery-failed");
+    let host = RecoveryHost::new([
+        ("flaky", vec![Err(integrity_error.clone())]),
+        (
+            "recover",
+            vec![Err(retryable_error("recover", "unsafe to reconcile"))],
+        ),
+    ]);
+    let job = recovery_job(Some("recover"), None, "flaky", None, 3);
+    let writer = std::sync::Arc::new(test_writer("run-integrity-recovery-failed"));
+
+    let err = execute_job(
+        &job,
+        Value::Null,
+        "run-integrity-recovery-failed",
+        writer.clone(),
+        &host,
+    )
+    .expect_err("unsuccessful recovery must preserve the integrity failure");
+
+    assert_eq!(err.to_string(), integrity_error.to_string());
+    assert_eq!(host.actions(), vec!["flaky", "recover"]);
+    let events = writer.events_snapshot().expect("audit snapshot");
+    let recovery_events = recovery_events(&events);
+    assert_eq!(recovery_events.len(), 1);
+    assert!(matches!(
+        recovery_events[0].kind,
+        V2AuditEventKind::StepRecoveryAttempted {
+            recovery_succeeded: false,
             ..
         }
     ));
-    assert_eq!(host.action_count("flaky"), 1, "must not retry");
-    assert_eq!(host.action_count("recover"), 0, "must not recover");
-    assert!(recovery_events(&writer.events_snapshot().unwrap()).is_empty());
+}
+
+#[test]
+fn worktree_integrity_post_recovery_failure_returns_original() {
+    let integrity_error = worktree_integrity_error("run-integrity-post-failed");
+    let host = RecoveryHost::new([
+        (
+            "flaky",
+            vec![
+                Err(integrity_error.clone()),
+                Err(retryable_error("flaky", "still unsafe")),
+            ],
+        ),
+        ("recover", vec![Ok(json!({"recovered": true}))]),
+    ]);
+    let job = recovery_job(Some("recover"), None, "flaky", None, 3);
+    let writer = std::sync::Arc::new(test_writer("run-integrity-post-failed"));
+
+    let err = execute_job(
+        &job,
+        Value::Null,
+        "run-integrity-post-failed",
+        writer.clone(),
+        &host,
+    )
+    .expect_err("failed post-recovery attempt must preserve the integrity failure");
+
+    assert_eq!(err.to_string(), integrity_error.to_string());
+    assert_eq!(host.actions(), vec!["flaky", "recover", "flaky"]);
+    assert_eq!(recovery_events(&writer.events_snapshot().unwrap()).len(), 1);
 }
 
 #[test]
@@ -511,6 +654,15 @@ fn retryable_error(action: &str, message: &str) -> DispatchError {
     DispatchError::DeterministicActionFailed {
         action: action.to_string(),
         message: message.to_string(),
+    }
+}
+
+fn worktree_integrity_error(run_id: &str) -> DispatchError {
+    DispatchError::WorktreeIntegrity {
+        code: "worktree_integrity_ambiguous",
+        diagnostic: format!(
+            r#"{{"task_id":"ORB-10306","run_id":"{run_id}","primary_changed":true,"assigned_changed":true}}"#
+        ),
     }
 }
 
