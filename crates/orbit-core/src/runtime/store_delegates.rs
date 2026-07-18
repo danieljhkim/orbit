@@ -6,19 +6,19 @@ use orbit_common::types::{
 };
 use orbit_search::{EmbedWorker, VectorStore};
 use orbit_store::{
-    AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter, AdrStoreBackend,
-    AuditEventFilter, AuditEventInsertParams, AuditEventStoreBackend, ExecutorDefStoreBackend,
-    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCreateParams, LearningListEntry,
-    LearningSearchParams, LearningSearchResult, LearningStoreBackend, LearningUpdateParams,
-    PolicyDefStoreBackend, RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams,
-    TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
-    TaskHistoryUpdateParams, TaskReservationCheckParams, TaskReservationCheckResult,
-    TaskReservationListResult, TaskReservationOwnedConflictsParams,
-    TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
-    TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
-    TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
-    TaskReservationStoreBackend, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
-    ToolStoreBackend,
+    AdrArtifactResolution, AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter,
+    AdrStoreBackend, AuditEventFilter, AuditEventInsertParams, AuditEventStoreBackend,
+    ExecutorDefStoreBackend, JobRunQuery, JobRunStepParams, JobRunStoreBackend,
+    LearningCreateParams, LearningListEntry, LearningSearchParams, LearningSearchResult,
+    LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend, RemoteArtifactStub,
+    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
+    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams,
+    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
+    TaskReservationOwnedConflictsParams, TaskReservationOwnedConflictsResult,
+    TaskReservationReleaseByOwnerParams, TaskReservationReleaseByOwnerResult,
+    TaskReservationReleaseParams, TaskReservationReleaseResult, TaskReservationReserveParams,
+    TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
+    TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend,
 };
 use std::collections::BTreeMap;
 
@@ -731,8 +731,8 @@ impl AdrRecords<'_> {
         self.store.get_adr(id)
     }
 
-    pub(crate) fn get_federated(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
-        self.store.get_adr_federated(id)
+    pub(crate) fn resolve_artifact(&self, id: &str) -> Result<AdrArtifactResolution, OrbitError> {
+        self.store.resolve_adr_artifact(id)
     }
 
     /// Unfiltered list. The tool surface uses [`Self::list_filtered`]; this
@@ -792,10 +792,6 @@ impl AdrRecords<'_> {
             },
             include_remote,
         )
-    }
-
-    pub(crate) fn remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError> {
-        self.store.get_adr_remote_stub(id)
     }
 
     pub(crate) fn update_status(&self, id: &str, new_status: AdrStatus) -> Result<(), OrbitError> {

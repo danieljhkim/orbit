@@ -23,6 +23,11 @@ fn error_payload(err: &OrbitError) -> Value {
     {
         object.insert("did_you_mean".to_string(), json!(did_you_mean));
     }
+    if let Some(artifact_origin) = err.artifact_origin()
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert("artifact_origin".to_string(), json!(artifact_origin));
+    }
     payload
 }
 
@@ -50,6 +55,8 @@ fn error_code(err: &OrbitError) -> &'static str {
         OrbitError::TaskStatusTransition(_)
         | OrbitError::JobRunStateTransition(_)
         | OrbitError::AdrInvalidTransition(_) => "invalid_transition",
+        OrbitError::RemoteArtifactUnavailable { .. } => "remote_artifact_unavailable",
+        OrbitError::ArtifactNotLocal { .. } => "artifact_not_local",
         OrbitError::AgentProtocolViolation(_) => "agent_protocol_violation",
         OrbitError::UnsupportedAgentProvider(_) => "unsupported_provider",
         OrbitError::Execution(_) => "execution_failed",
@@ -59,3 +66,7 @@ fn error_code(err: &OrbitError) -> &'static str {
         OrbitError::Migration(_) => "migration_failed",
     }
 }
+
+#[cfg(test)]
+#[path = "tests/error.rs"]
+mod tests;

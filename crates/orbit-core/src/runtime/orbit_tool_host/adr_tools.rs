@@ -6,11 +6,14 @@
 use std::str::FromStr;
 
 use orbit_common::types::{
-    Adr, AdrStatus, AuditEventStatus, LegacyValidation, NotFoundKind, OrbitError,
-    audit_execution_id, normalize_optional_attribution_label, optional_string,
+    Adr, AdrStatus, ArtifactOriginMode, AuditEventStatus, LegacyValidation, NotFoundKind,
+    OrbitError, audit_execution_id, normalize_optional_attribution_label, optional_string,
     optional_string_alias, optional_string_list_alias, required_string,
 };
-use orbit_store::{AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, RemoteArtifactStub};
+use orbit_store::{
+    AdrArtifact, AdrArtifactResolution, AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry,
+    RemoteArtifactStub,
+};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
@@ -67,7 +70,7 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     };
 
     let adrs = runtime.stores().adrs();
-    let adr = if by_legacy {
+    let resolved_id = if by_legacy {
         let matches =
             adrs.list_filtered(None, None, None, None, Some(&id_value), None, None, None)?;
         if matches.len() > 1 {
@@ -79,19 +82,13 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         matches
             .into_iter()
             .next()
+            .map(|adr| adr.id)
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id_value.clone()))?
     } else {
-        match adrs.get_federated(&id_value)? {
-            Some(adr) => adr,
-            None => {
-                if let Some(stub) = adrs.remote_stub(&id_value)? {
-                    return Err(remote_artifact_error("ADR", &stub));
-                }
-                return Err(OrbitError::not_found(NotFoundKind::Adr, id_value.clone()));
-            }
-        }
+        id_value
     };
-    Ok(adr_to_json(&adr))
+    let artifact = readable_artifact(&resolved_id, adrs.resolve_artifact(&resolved_id)?)?;
+    Ok(adr_artifact_to_json(&artifact))
 }
 
 pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
@@ -132,9 +129,7 @@ pub(super) fn update(
 ) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
     let adrs = runtime.stores().adrs();
-    let existing = adrs
-        .get(&id)?
-        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id.clone()))?;
+    let existing = local_artifact(&id, adrs.resolve_artifact(&id)?)?.adr;
 
     let new_status = optional_string(&input, "status")?
         .map(|raw| AdrStatus::from_str(&raw).map_err(OrbitError::InvalidInput))
@@ -228,9 +223,8 @@ pub(super) fn supersede(
     let old_id = required_string(&input, &["old_id", "old", "oldId"], "old_id")?;
     let new_id = required_string(&input, &["new_id", "new", "newId"], "new_id")?;
     let adrs = runtime.stores().adrs();
-    let before = adrs
-        .get(&old_id)?
-        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, old_id.clone()))?;
+    let before = local_artifact(&old_id, adrs.resolve_artifact(&old_id)?)?.adr;
+    local_artifact(&new_id, adrs.resolve_artifact(&new_id)?)?;
     adrs.supersede(&old_id, &new_id)?;
     record_transition_audit(
         runtime,
@@ -293,6 +287,61 @@ fn adr_to_json(adr: &Adr) -> Value {
     })
 }
 
+fn adr_artifact_to_json(artifact: &AdrArtifact) -> Value {
+    let mut value = adr_to_json(&artifact.adr);
+    if let Some(object) = value.as_object_mut() {
+        object.insert("body".to_string(), Value::String(artifact.body.clone()));
+        object.insert(
+            "artifact_origin".to_string(),
+            json!(artifact.artifact_origin),
+        );
+    }
+    value
+}
+
+fn readable_artifact(
+    id: &str,
+    resolution: AdrArtifactResolution,
+) -> Result<AdrArtifact, OrbitError> {
+    match resolution {
+        AdrArtifactResolution::Local(artifact) | AdrArtifactResolution::Federated(artifact) => {
+            Ok(artifact)
+        }
+        AdrArtifactResolution::RemoteArtifactUnavailable(origin) => Err(
+            OrbitError::remote_artifact_unavailable(NotFoundKind::Adr, id, origin),
+        ),
+        AdrArtifactResolution::NotFound => {
+            Err(OrbitError::not_found(NotFoundKind::Adr, id.to_string()))
+        }
+    }
+}
+
+fn local_artifact(id: &str, resolution: AdrArtifactResolution) -> Result<AdrArtifact, OrbitError> {
+    match resolution {
+        AdrArtifactResolution::Local(artifact) => Ok(artifact),
+        AdrArtifactResolution::Federated(artifact) => Err(OrbitError::artifact_not_local(
+            NotFoundKind::Adr,
+            id,
+            artifact.artifact_origin,
+        )),
+        AdrArtifactResolution::RemoteArtifactUnavailable(origin)
+            if origin.mode == ArtifactOriginMode::Federated =>
+        {
+            Err(OrbitError::artifact_not_local(
+                NotFoundKind::Adr,
+                id,
+                origin,
+            ))
+        }
+        AdrArtifactResolution::RemoteArtifactUnavailable(origin) => Err(
+            OrbitError::remote_artifact_unavailable(NotFoundKind::Adr, id, origin),
+        ),
+        AdrArtifactResolution::NotFound => {
+            Err(OrbitError::not_found(NotFoundKind::Adr, id.to_string()))
+        }
+    }
+}
+
 fn adr_entry_to_json(entry: &AdrListEntry) -> Value {
     match entry {
         AdrListEntry::Local(adr) => {
@@ -324,15 +373,6 @@ fn remote_stub_to_json(stub: &RemoteArtifactStub) -> Value {
         "paths": Value::Null,
         "legacy_ids": Value::Null,
     })
-}
-
-fn remote_artifact_error(kind: &str, stub: &RemoteArtifactStub) -> OrbitError {
-    OrbitError::Store(format!(
-        "{kind} {} is recorded in another worktree and its body is not locally readable; worktree_root={}, branch={}",
-        stub.id,
-        stub.worktree_root.display(),
-        stub.branch.as_deref().unwrap_or("<none>")
-    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -411,6 +451,7 @@ mod tests {
     use crate::runtime::orbit_tool_host::test_support::test_runtime;
     use orbit_common::types::{LearningScope, NotFoundKind};
     use orbit_store::LearningCreateParams;
+    use std::path::Path;
     use tempfile::tempdir;
 
     fn assert_adr_field(value: &Value, field: &str, expected: &str) {
@@ -580,6 +621,186 @@ mod tests {
         let id = created["id"].as_str().unwrap().to_string();
         let response = show(&runtime, json!({"id": id.clone()})).expect("show");
         assert_adr_field(&response, "id", &id);
+        assert_eq!(response["body"], "B");
+        assert_eq!(response["artifact_origin"]["mode"], "local");
+    }
+
+    #[test]
+    fn federated_show_then_local_update_preserves_body_origin_allocation_and_audit_boundary() {
+        let root = tempdir().expect("tempdir");
+        let global_root = root.path().join("global");
+        let shared_root = root.path().join("hub/.orbit");
+        let local_root = root.path().join("local/.orbit");
+        let sibling_root = root.path().join("sibling/.orbit");
+        for path in [&global_root, &shared_root, &local_root, &sibling_root] {
+            std::fs::create_dir_all(path).expect("runtime root");
+        }
+        let sibling = OrbitRuntime::from_resolved_roots(&global_root, &shared_root, &sibling_root)
+            .expect("sibling runtime");
+        let local = OrbitRuntime::from_resolved_roots(&global_root, &shared_root, &local_root)
+            .expect("local runtime");
+
+        let old = add(
+            &sibling,
+            json!({
+                "title": "Sibling old",
+                "owner": "codex",
+                "body": "exact federated body",
+                "related_tasks": ["ORB-10297"],
+            }),
+            None,
+            None,
+        )
+        .expect("add sibling old");
+        let new = add(
+            &sibling,
+            json!({
+                "title": "Sibling new",
+                "owner": "codex",
+                "body": "replacement body",
+                "related_tasks": ["ORB-10297"],
+            }),
+            None,
+            None,
+        )
+        .expect("add sibling new");
+        update(
+            &sibling,
+            json!({"id": new["id"], "status": "accepted"}),
+            None,
+            None,
+        )
+        .expect("accept sibling new");
+        let old_id = old["id"].as_str().expect("old id");
+        let new_id = new["id"].as_str().expect("new id");
+
+        let shown = show(&local, json!({"id": old_id})).expect("federated show");
+        assert_eq!(shown["body"], "exact federated body");
+        assert_eq!(shown["title"], "Sibling old");
+        assert_eq!(shown["artifact_origin"]["mode"], "federated");
+        assert!(shown["artifact_origin"].get("body_path").is_none());
+
+        let allocation_before = allocation_snapshot(&shared_root, old_id);
+        let sibling_bundle_before = bundle_snapshot(&sibling_root, "proposed", old_id);
+        let audit_before = local
+            .list_audit_events(None, None, None, None, 100)
+            .expect("audit before");
+        for error in [
+            update(
+                &local,
+                json!({"id": old_id, "title": "must not write"}),
+                None,
+                None,
+            ),
+            update(
+                &local,
+                json!({"id": old_id, "status": "accepted"}),
+                None,
+                None,
+            ),
+            supersede(
+                &local,
+                json!({"old_id": old_id, "new_id": new_id}),
+                None,
+                None,
+            ),
+        ] {
+            assert!(matches!(error, Err(OrbitError::ArtifactNotLocal { .. })));
+        }
+        assert_eq!(allocation_snapshot(&shared_root, old_id), allocation_before);
+        assert_eq!(
+            bundle_snapshot(&sibling_root, "proposed", old_id),
+            sibling_bundle_before
+        );
+        assert_eq!(
+            local
+                .list_audit_events(None, None, None, None, 100)
+                .expect("audit after rejection"),
+            audit_before
+        );
+
+        let sibling_dir = sibling_root.join("adrs/proposed").join(old_id);
+        let local_dir = local_root.join("adrs/proposed").join(old_id);
+        std::fs::create_dir_all(&local_dir).expect("local ADR dir");
+        std::fs::copy(sibling_dir.join("adr.yaml"), local_dir.join("adr.yaml"))
+            .expect("copy ADR yaml");
+        std::fs::write(local_dir.join("body.md"), "landed local body").expect("write local body");
+
+        let landed = show(&local, json!({"id": old_id})).expect("landed show");
+        assert_eq!(landed["body"], "landed local body");
+        assert_eq!(
+            serde_json::from_value::<ArtifactOriginMode>(landed["artifact_origin"]["mode"].clone())
+                .expect("origin mode"),
+            ArtifactOriginMode::Local
+        );
+        update(
+            &local,
+            json!({
+                "id": old_id,
+                "title": "Landed update",
+                "status": "accepted",
+            }),
+            None,
+            None,
+        )
+        .expect("landed update");
+        let updated = show(&local, json!({"id": old_id})).expect("updated show");
+        assert_eq!(updated["title"], "Landed update");
+        assert_eq!(updated["status"], "accepted");
+        assert_eq!(updated["body"], "landed local body");
+        assert_eq!(allocation_snapshot(&shared_root, old_id), allocation_before);
+
+        let unavailable = add(
+            &sibling,
+            json!({"title": "Unavailable", "owner": "codex", "body": "body"}),
+            None,
+            None,
+        )
+        .expect("add unavailable");
+        let unavailable_id = unavailable["id"].as_str().expect("unavailable id");
+        std::fs::remove_file(
+            sibling_root
+                .join("adrs/proposed")
+                .join(unavailable_id)
+                .join("body.md"),
+        )
+        .expect("remove unavailable body");
+        let error =
+            show(&local, json!({"id": unavailable_id})).expect_err("unavailable show must fail");
+        assert!(matches!(
+            error,
+            OrbitError::RemoteArtifactUnavailable { .. }
+        ));
+    }
+
+    fn allocation_snapshot(shared_root: &Path, id: &str) -> Value {
+        let connection = rusqlite::Connection::open(shared_root.join("state/semantic.db"))
+            .expect("allocator db");
+        connection
+            .query_row(
+                "SELECT kind, id, allocated_at, worktree_root, branch, status, body_path FROM id_allocations WHERE id = ?1",
+                [id],
+                |row| {
+                    Ok(json!([
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                    ]))
+                },
+            )
+            .expect("allocation snapshot")
+    }
+
+    fn bundle_snapshot(local_root: &Path, status: &str, id: &str) -> (Vec<u8>, Vec<u8>) {
+        let dir = local_root.join("adrs").join(status).join(id);
+        (
+            std::fs::read(dir.join("adr.yaml")).expect("yaml snapshot"),
+            std::fs::read(dir.join("body.md")).expect("body snapshot"),
+        )
     }
 
     #[test]

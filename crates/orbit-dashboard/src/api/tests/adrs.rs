@@ -94,6 +94,20 @@ async fn request_accept(
         .expect("response")
 }
 
+async fn request_get(runtime: OrbitRuntime, id: &str) -> axum::response::Response {
+    router()
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/adrs/{id}"))
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response")
+}
+
 async fn request_supersede(
     runtime: OrbitRuntime,
     id: &str,
@@ -168,6 +182,106 @@ async fn create_persists_proposed_adr_and_reads_back() {
     assert_eq!(stored["id"], id);
     assert_eq!(stored["status"], "proposed");
     assert_eq!(stored["title"], "Created over HTTP");
+}
+
+#[tokio::test]
+async fn federated_http_show_and_mutators_preserve_typed_origin_boundary() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let global_root = root.path().join("global");
+    let shared_root = root.path().join("hub/.orbit");
+    let local_root = root.path().join("local/.orbit");
+    let sibling_root = root.path().join("sibling/.orbit");
+    for path in [&global_root, &shared_root, &local_root, &sibling_root] {
+        std::fs::create_dir_all(path).expect("runtime root");
+    }
+    let sibling = OrbitRuntime::from_resolved_roots(&global_root, &shared_root, &sibling_root)
+        .expect("sibling runtime");
+    let local = OrbitRuntime::from_resolved_roots(&global_root, &shared_root, &local_root)
+        .expect("local runtime");
+    let old = seed_adr(&sibling, "Federated old", vec!["ORB-10297"]);
+    let new = seed_adr(&sibling, "Federated new", vec!["ORB-10297"]);
+    accept_adr(&sibling, adr_id(&new));
+    let old_id = adr_id(&old);
+    let new_id = adr_id(&new);
+
+    let response = request_get(local.clone(), old_id).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let shown = body_json(response).await;
+    assert_eq!(shown["title"], "Federated old");
+    let stored_body = std::fs::read_to_string(
+        sibling_root
+            .join("adrs/proposed")
+            .join(old_id)
+            .join("body.md"),
+    )
+    .expect("stored sibling body");
+    assert_eq!(shown["body"], stored_body);
+    assert_eq!(shown["artifact_origin"]["mode"], "federated");
+    assert_eq!(shown["artifact_origin"]["branch"], Value::Null);
+    assert!(shown["artifact_origin"].get("body_path").is_none());
+
+    for response in [
+        request_update(
+            local.clone(),
+            old_id,
+            Some("http://localhost:7878"),
+            Some(json!({"title": "must not write"})),
+        )
+        .await,
+        request_accept(local.clone(), old_id, Some("http://localhost:7878")).await,
+        request_supersede(
+            local.clone(),
+            old_id,
+            Some("http://localhost:7878"),
+            Some(json!({"by": new_id})),
+        )
+        .await,
+    ] {
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let payload = body_json(response).await;
+        assert_eq!(payload["code"], "artifact_not_local");
+        assert!(payload["error"].is_string());
+        assert_eq!(payload["artifact_origin"]["mode"], "federated");
+        assert!(payload["artifact_origin"].get("body_path").is_none());
+    }
+
+    let unavailable = seed_adr(&sibling, "Unavailable", vec!["ORB-10297"]);
+    std::fs::remove_file(
+        sibling_root
+            .join("adrs/proposed")
+            .join(adr_id(&unavailable))
+            .join("body.md"),
+    )
+    .expect("remove body");
+    let response = request_get(local.clone(), adr_id(&unavailable)).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let payload = body_json(response).await;
+    assert_eq!(payload["code"], "remote_artifact_unavailable");
+    assert_eq!(payload["artifact_origin"]["mode"], "federated");
+
+    let response = request_get(local.clone(), "ADR-9999").await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let payload = body_json(response).await;
+    assert!(payload["error"].is_string());
+    assert!(payload.get("code").is_none());
+
+    let source = sibling_root.join("adrs/proposed").join(old_id);
+    let target = local_root.join("adrs/proposed").join(old_id);
+    std::fs::create_dir_all(&target).expect("local ADR dir");
+    std::fs::copy(source.join("adr.yaml"), target.join("adr.yaml")).expect("copy ADR yaml");
+    std::fs::write(target.join("body.md"), "landed HTTP body").expect("write local body");
+    let response = request_update(
+        local.clone(),
+        old_id,
+        Some("http://localhost:7878"),
+        Some(json!({"title": "Landed HTTP update"})),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_json(response).await;
+    assert_eq!(payload["title"], "Landed HTTP update");
+    assert_eq!(payload["body"], "landed HTTP body");
+    assert_eq!(payload["artifact_origin"]["mode"], "local");
 }
 
 #[tokio::test]

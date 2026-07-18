@@ -1,8 +1,5 @@
 //! ADR scan and lifecycle handlers.
 
-use std::fs;
-use std::io::ErrorKind;
-
 use crate::state::Ws;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query};
@@ -125,9 +122,15 @@ pub(super) async fn list_adrs(Ws(runtime): Ws, Query(query): Query<AdrsQuery>) -
         .take(limit)
         .collect::<Vec<_>>();
     for adr in &mut items {
-        if let Err(e) = attach_body(&runtime, adr) {
-            return map_runtime_error(e);
-        }
+        let Some(id) = adr.get("id").and_then(Value::as_str) else {
+            return map_runtime_error(OrbitError::Execution(
+                "orbit.adr.list returned an ADR without an id".to_string(),
+            ));
+        };
+        *adr = match adr_show(&runtime, id) {
+            Ok(resolved) => resolved,
+            Err(e) => return map_runtime_error(e),
+        };
     }
 
     Json(json!({
@@ -183,9 +186,14 @@ pub(super) async fn create_adr_action(
     }
 
     match run_adr_tool(&runtime, "orbit.adr.add", input) {
-        Ok(mut adr) => match attach_body(&runtime, &mut adr) {
-            Ok(()) => Json(adr).into_response(),
-            Err(e) => map_runtime_error(e),
+        Ok(adr) => match adr.get("id").and_then(Value::as_str) {
+            Some(id) => match adr_show(&runtime, id) {
+                Ok(resolved) => Json(resolved).into_response(),
+                Err(e) => map_runtime_error(e),
+            },
+            None => map_runtime_error(OrbitError::Execution(
+                "orbit.adr.add returned an ADR without an id".to_string(),
+            )),
         },
         Err(e) => map_runtime_error(e),
     }
@@ -196,13 +204,13 @@ pub(super) async fn accept_adr_action(Ws(runtime): Ws, Path(id): Path<String>) -
         &runtime,
         "orbit.adr.update",
         json!({
-            "id": id,
+            "id": id.clone(),
             "status": "accepted",
         }),
     );
     match result {
-        Ok(mut adr) => match attach_body(&runtime, &mut adr) {
-            Ok(()) => Json(adr).into_response(),
+        Ok(_) => match adr_show(&runtime, &id) {
+            Ok(adr) => Json(adr).into_response(),
             Err(e) => map_runtime_error(e),
         },
         Err(e) => map_runtime_error(e),
@@ -244,11 +252,11 @@ pub(super) async fn update_adr_action(
     if input.is_empty() {
         return bad_request("request body must include at least one updatable field".to_string());
     }
-    input.insert("id".to_string(), Value::String(id));
+    input.insert("id".to_string(), Value::String(id.clone()));
 
     match run_adr_tool(&runtime, "orbit.adr.update", Value::Object(input)) {
-        Ok(mut adr) => match attach_body(&runtime, &mut adr) {
-            Ok(()) => Json(adr).into_response(),
+        Ok(_) => match adr_show(&runtime, &id) {
+            Ok(adr) => Json(adr).into_response(),
             Err(e) => map_runtime_error(e),
         },
         Err(e) => map_runtime_error(e),
@@ -272,16 +280,17 @@ pub(super) async fn supersede_adr_action(
         &runtime,
         "orbit.adr.supersede",
         json!({
-            "old_id": id,
-            "new_id": by,
+            "old_id": id.clone(),
+            "new_id": by.clone(),
         }),
     );
 
     match result {
-        Ok(mut old) => {
-            if let Err(e) = attach_body(&runtime, &mut old) {
-                return map_runtime_error(e);
-            }
+        Ok(_) => {
+            let old = match adr_show(&runtime, &id) {
+                Ok(adr) => adr,
+                Err(e) => return map_runtime_error(e),
+            };
             let new_id = old
                 .get("superseded_by")
                 .and_then(Value::as_str)
@@ -323,9 +332,7 @@ fn adr_list(runtime: &OrbitRuntime, input: Map<String, Value>) -> Result<Vec<Val
 }
 
 fn adr_show(runtime: &OrbitRuntime, id: &str) -> Result<Value, OrbitError> {
-    let mut adr = run_adr_tool(runtime, "orbit.adr.show", json!({ "id": id }))?;
-    attach_body(runtime, &mut adr)?;
-    Ok(adr)
+    run_adr_tool(runtime, "orbit.adr.show", json!({ "id": id }))
 }
 
 fn run_adr_tool(runtime: &OrbitRuntime, name: &str, mut input: Value) -> Result<Value, OrbitError> {
@@ -335,31 +342,6 @@ fn run_adr_tool(runtime: &OrbitRuntime, name: &str, mut input: Value) -> Result<
             .or_insert_with(|| Value::String(ADR_TOOL_MODEL.to_string()));
     }
     runtime.run_tool(name, input)
-}
-
-fn attach_body(runtime: &OrbitRuntime, adr: &mut Value) -> Result<(), OrbitError> {
-    let id = adr.get("id").and_then(Value::as_str).unwrap_or_default();
-    let status = adr
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let body_path = runtime
-        .data_root()
-        .join("adrs")
-        .join(status)
-        .join(id)
-        .join("body.md");
-    let body = match fs::read_to_string(&body_path) {
-        Ok(body) => body,
-        Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
-        Err(e) => {
-            return Err(OrbitError::Io(format!("read ADR body for {id}: {}", e)));
-        }
-    };
-    if let Some(object) = adr.as_object_mut() {
-        object.insert("body".to_string(), Value::String(body));
-    }
-    Ok(())
 }
 
 fn adr_stats_to_json(adrs: &[Value]) -> Value {

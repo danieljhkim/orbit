@@ -7,11 +7,11 @@ use orbit_common::types::{
 };
 
 use super::contracts::{
-    AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter, AdrStoreBackend,
-    ExecutorDefStoreBackend, LearningCreateParams, LearningListEntry, LearningSearchParams,
-    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend,
-    RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
-    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    AdrArtifactResolution, AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter,
+    AdrStoreBackend, ExecutorDefStoreBackend, LearningCreateParams, LearningListEntry,
+    LearningSearchParams, LearningSearchResult, LearningStoreBackend, LearningUpdateParams,
+    PolicyDefStoreBackend, RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams,
+    TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
     TaskHistoryUpdateParams, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
 };
 use crate::file::adr_store::AdrFileStore;
@@ -195,8 +195,8 @@ impl AdrStoreBackend for AdrFileStore {
         resolve::<Adr, _>(self, id)
     }
 
-    fn get_adr_federated(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
-        AdrFileStore::get_adr_federated(self, id)
+    fn resolve_adr_artifact(&self, id: &str) -> Result<AdrArtifactResolution, OrbitError> {
+        AdrFileStore::resolve_adr_artifact(self, id)
     }
 
     fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError> {

@@ -51,11 +51,7 @@ pub(super) fn validate_bundle(bundle: &AdrBundle) -> Result<(), OrbitError> {
 }
 
 fn read_companion_text(path: &Path) -> Result<String, OrbitError> {
-    match fs::read_to_string(path) {
-        Ok(value) => Ok(value),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(err) => Err(OrbitError::Io(err.to_string())),
-    }
+    fs::read_to_string(path).map_err(|err| OrbitError::Io(err.to_string()))
 }
 
 #[cfg(test)]
