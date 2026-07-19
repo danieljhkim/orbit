@@ -25,26 +25,22 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 #[derive(Debug, Clone, Copy)]
 struct HubLinkLimits {
     queue_capacity: usize,
-    submission: Duration,
     initialize: Duration,
     request: Duration,
     idle: Duration,
     idle_poll: Duration,
     close: Duration,
-    caller_wait: Duration,
 }
 
 impl Default for HubLinkLimits {
     fn default() -> Self {
         Self {
             queue_capacity: 8,
-            submission: Duration::from_secs(2),
             initialize: Duration::from_secs(10),
             request: Duration::from_secs(30),
             idle: Duration::from_secs(60),
             idle_poll: Duration::from_secs(5),
             close: Duration::from_secs(2),
-            caller_wait: Duration::from_secs(45),
         }
     }
 }
@@ -265,7 +261,6 @@ struct CallRequest {
     name: String,
     input: Value,
     context: ToolSessionContext,
-    queued_at: Duration,
     response: mpsc::SyncSender<Result<Value, OrbitError>>,
 }
 
@@ -273,7 +268,6 @@ struct RegistrationRequest {
     capability: McpCapability,
     registration: SpokeRegistrationRequestV1,
     context: ToolSessionContext,
-    queued_at: Duration,
     response: mpsc::SyncSender<Result<SpokeRegistrationResultV1, OrbitError>>,
 }
 
@@ -293,8 +287,6 @@ struct CachedPeer {
 pub(super) struct HubLinkPool {
     tx: Option<mpsc::SyncSender<WorkerMessage>>,
     worker: Option<JoinHandle<()>>,
-    limits: HubLinkLimits,
-    clock: Arc<dyn HubClock>,
 }
 
 impl HubLinkPool {
@@ -342,8 +334,6 @@ impl HubLinkPool {
         Ok(Self {
             tx: Some(tx),
             worker: Some(worker),
-            limits,
-            clock,
         })
     }
 
@@ -370,7 +360,6 @@ impl HubLinkPool {
                 name: name.to_string(),
                 input,
                 context,
-                queued_at: self.clock.now(),
                 response: response_tx,
             }))
             .map_err(|error| match error {
@@ -381,11 +370,14 @@ impl HubLinkPool {
                     "hub link worker is unavailable before handoff".to_string(),
                 ),
             })?;
+        // Queue admission is the pre-handoff boundary. Once accepted, wait for
+        // the worker's bounded connect/request/close operations to return a
+        // definitive result instead of inventing a second caller deadline.
         response_rx
-            .recv_timeout(self.limits.caller_wait)
+            .recv()
             .map_err(|error| OrbitError::OutcomeUnknown {
                 mcp_call_id,
-                message: format!("hub link worker response deadline elapsed: {error}"),
+                message: format!("hub link worker disconnected after queue handoff: {error}"),
             })?
     }
 
@@ -425,7 +417,6 @@ impl HubLinkPool {
                 capability,
                 registration,
                 context,
-                queued_at: self.clock.now(),
                 response: response_tx,
             }))
             .map_err(|error| match error {
@@ -437,10 +428,10 @@ impl HubLinkPool {
                 ),
             })?;
         response_rx
-            .recv_timeout(self.limits.caller_wait)
+            .recv()
             .map_err(|error| OrbitError::OutcomeUnknown {
                 mcp_call_id,
-                message: format!("hub link worker response deadline elapsed: {error}"),
+                message: format!("hub link worker disconnected after queue handoff: {error}"),
             })?
     }
 }
@@ -559,11 +550,6 @@ async fn process_registration(
     request: &RegistrationRequest,
 ) -> Result<SpokeRegistrationResultV1, OrbitError> {
     let now = worker.clock.now();
-    if now.saturating_sub(request.queued_at) > worker.limits.submission {
-        return Err(OrbitError::HubUnavailable(
-            "hub registration expired in the bounded queue before transport handoff".to_string(),
-        ));
-    }
     reap_idle(peers, now, worker.limits.idle).await;
     ensure_peer(peers, worker, request.capability).await?;
     let cached = peers
@@ -603,11 +589,6 @@ async fn process_call(
     request: &CallRequest,
 ) -> Result<Value, OrbitError> {
     let now = worker.clock.now();
-    if now.saturating_sub(request.queued_at) > worker.limits.submission {
-        return Err(OrbitError::HubUnavailable(
-            "hub request expired in the bounded queue before transport handoff".to_string(),
-        ));
-    }
     reap_idle(peers, now, worker.limits.idle).await;
     ensure_peer(peers, worker, request.capability).await?;
     let cached = peers
@@ -1167,13 +1148,13 @@ mod tests {
         let limits = HubLinkLimits {
             queue_capacity: 1,
             request: Duration::from_millis(50),
-            caller_wait: Duration::from_secs(1),
             ..HubLinkLimits::default()
         };
+        let clock = Arc::new(ManualClock::default());
         let pool = Arc::new(test_pool_with(
             Arc::clone(&factory),
             limits,
-            Arc::new(MonotonicClock::default()),
+            Arc::clone(&clock) as Arc<dyn HubClock>,
         ));
         let first_pool = Arc::clone(&pool);
         let first = std::thread::spawn(move || {
@@ -1197,10 +1178,10 @@ mod tests {
                 name: "orbit.task.show".to_string(),
                 input: json!({}),
                 context: context(McpCapability::Agent, "mcall-queued"),
-                queued_at: pool.clock.now(),
                 response: queued_tx,
             }))
             .expect("one bounded queue slot");
+        clock.advance(Duration::from_secs(3));
         let saturated = pool
             .call(
                 McpCapability::Agent,
@@ -1215,7 +1196,13 @@ mod tests {
             timed_out,
             OrbitError::OutcomeUnknown { ref mcp_call_id, .. } if mcp_call_id == "mcall-silent"
         ));
-        assert!(queued_rx.recv_timeout(Duration::from_secs(1)).is_ok());
+        assert!(
+            queued_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("queued response")
+                .is_ok(),
+            "accepted queue wait must not become a pre-handoff expiry"
+        );
     }
 
     fn write_canary_identity(root: &Path, mode: &str, machine_id: &str, host_id: &str) {
