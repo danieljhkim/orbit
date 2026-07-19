@@ -261,15 +261,31 @@ impl McpClient {
     }
 
     fn call_tool_with_meta_ok(&mut self, name: &str, arguments: Value, meta: Value) -> Value {
+        let result = self.call_tool_with_meta(name, arguments, meta);
+        assert_eq!(result["isError"], false, "`{name}` failed: {result}");
+        result
+            .get("structuredContent")
+            .cloned()
+            .unwrap_or_else(|| panic!("`{name}` returned no structuredContent: {result}"))
+    }
+
+    fn call_tool_with_meta(&mut self, name: &str, arguments: Value, meta: Value) -> Value {
         let response = self.request(
             "tools/call",
             json!({ "name": name, "arguments": arguments, "_meta": meta }),
         );
-        let result = response
+        response
             .get("result")
             .cloned()
-            .unwrap_or_else(|| panic!("tools/call `{name}` returned no result: {response}"));
-        assert_eq!(result["isError"], false, "`{name}` failed: {result}");
+            .unwrap_or_else(|| panic!("tools/call `{name}` returned no result: {response}"))
+    }
+
+    fn call_tool_with_meta_err(&mut self, name: &str, arguments: Value, meta: Value) -> Value {
+        let result = self.call_tool_with_meta(name, arguments, meta);
+        assert_eq!(
+            result["isError"], true,
+            "`{name}` unexpectedly succeeded: {result}"
+        );
         result
             .get("structuredContent")
             .cloned()
@@ -487,9 +503,23 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
         }),
     );
     assert_eq!(created["title"], "Checkoutless hub round trip");
-    let graph_denied = client.call_tool_err(
+    let graph_denied = client.call_tool_with_meta_err(
         "orbit_graph_search",
         json!({"workspace": "ws_mcp-roundtrip", "query": "must-not-run"}),
+        json!({
+            "orbit": {
+                "remote_session_context": {
+                    "workspace": "ws_mcp-roundtrip",
+                    "workspace_id": "ws_mcp-roundtrip",
+                    "caller_machine_id": "hm_spoke",
+                    "caller_host_id": "spoke",
+                    "transport": "ssh-mcp",
+                    "effective_capabilities": ["agent"],
+                    "origin_session_id": "session-spoke",
+                    "mcp_call_id": "mcall-remote-graph-denied"
+                }
+            }
+        }),
     );
     assert!(
         graph_denied["message"]

@@ -119,9 +119,12 @@ impl OrbitToolServer {
         &self,
         transport_meta: &Meta,
     ) -> Result<ToolSessionContext, OrbitError> {
-        if self.host.accepts_remote_session_context()
-            && let Some(remote) = remote_session_context_from_meta(transport_meta)?
-        {
+        if self.host.accepts_remote_session_context() {
+            let Some(remote) = remote_session_context_from_meta(transport_meta)? else {
+                return Err(OrbitError::InvalidInput(
+                    "hub tool calls require connector-owned remote session metadata".to_string(),
+                ));
+            };
             let trusted = self.session_context();
             if remote.transport != Some(orbit_common::types::McpTransport::SshMcp) {
                 return Err(OrbitError::InvalidInput(
@@ -147,6 +150,9 @@ impl OrbitToolServer {
             // The fixed server capability is authority; the connector cannot
             // expand it through per-call metadata.
             remote.effective_capabilities = trusted.effective_capabilities;
+            // Lease correlation is a trusted runner/broker seam. A spoke may
+            // not attach an arbitrary run or lease to a hub audit record.
+            remote.leased_run = None;
             return Ok(remote);
         }
         let mut context = self.session_context();

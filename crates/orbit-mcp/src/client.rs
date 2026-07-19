@@ -361,7 +361,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use orbit_common::types::{
-        HostRegistration, McpToolDefinition, McpToolPlacement, McpToolPolicy,
+        HostRegistration, McpLeasedRun, McpToolDefinition, McpToolPlacement, McpToolPolicy,
         SPOKE_REGISTRATION_SCHEMA_VERSION, SpokeRegistrationRequestV1, SpokeRegistrationResultV1,
         ToolSchema,
     };
@@ -500,6 +500,10 @@ mod tests {
             effective_capabilities: BTreeSet::from([McpCapability::Agent]),
             origin_session_id: Some("session-1".to_string()),
             mcp_call_id: Some("mcall-1".to_string()),
+            leased_run: Some(McpLeasedRun {
+                run_id: "spoofed-run".to_string(),
+                lease_id: "spoofed-lease".to_string(),
+            }),
             ..ToolSessionContext::default()
         }
     }
@@ -566,6 +570,7 @@ mod tests {
         assert_eq!(result["mcp_call_id"], "mcall-1");
         assert_eq!(result["workspace_id"], "ws_orbit");
         assert_eq!(result["process_machine_id"], Value::Null);
+        assert_eq!(result["leased_run"], Value::Null);
         assert_eq!(host.calls.lock().expect("calls").len(), 1);
     }
 

@@ -607,6 +607,17 @@ impl BrokerMcpHost {
                 .or_else(|| input.get("with-context"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
+        if with_context
+            && definition.policy.placement() == McpToolPlacement::Hub
+            && self.is_spoke()?
+        {
+            let error = OrbitError::InvalidInput(
+                "remote `orbit.task.show` cannot provide `with_context`; checkout-derived enrichment is local-only and local coordination fallback is forbidden"
+                    .to_string(),
+            );
+            self.record_preflight_denial(name, &input, &context, &error);
+            return Err(error);
+        }
         let require_local = definition.policy.placement() != McpToolPlacement::Hub || with_context;
         let (workspace_id, binding) = match self.resolve_workspace(selector, require_local) {
             Ok(resolved) => resolved,

@@ -181,6 +181,60 @@ fn broker_with_context_requires_local_checkout_before_dispatch() {
 }
 
 #[test]
+fn broker_spoke_with_context_fails_closed_before_local_resolution() {
+    use chrono::Utc;
+    use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
+    use orbit_core::routines::{HostMode, NewHostIdentity, ensure_host_identity};
+
+    let root = tempfile::tempdir().expect("global root");
+    ensure_host_identity(root.path(), || {
+        Ok(NewHostIdentity {
+            host_id: "spoke".to_string(),
+            mode: HostMode::Spoke,
+        })
+    })
+    .expect("spoke identity");
+    orbit_core::workspace_registry::save_registry_to(
+        &WorkspaceRegistry {
+            workspaces: vec![Workspace {
+                id: "ws_remote".to_string(),
+                name: "Remote".to_string(),
+                owner_machine_id: Some("hm_owner".to_string()),
+                git_remote: None,
+                ship_mode: None,
+                base_branch: "agent-main".to_string(),
+                status: WorkspaceStatus::Active,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }],
+            ..Default::default()
+        },
+        &orbit_core::workspace_registry::registry_path_for(root.path()),
+    )
+    .expect("workspace registry");
+    let host = BrokerMcpHost::new(root.path().to_path_buf());
+
+    let error = host
+        .call_tool(
+            "orbit.task.show",
+            json!({"workspace": "ws_remote", "id": "ORB-00001", "with_context": true}),
+            ToolSessionContext::trusted_local(
+                Some("ws_remote".to_string()),
+                Some("hm_spoke".to_string()),
+                Some("spoke".to_string()),
+            ),
+        )
+        .expect_err("spoke must not fall through to a local coordination store");
+
+    assert!(
+        error
+            .to_string()
+            .contains("local coordination fallback is forbidden")
+    );
+    assert!(!root.path().join("tasks").exists());
+}
+
+#[test]
 fn broker_spoke_hub_denial_writes_no_local_coordination_state() {
     use chrono::Utc;
     use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};

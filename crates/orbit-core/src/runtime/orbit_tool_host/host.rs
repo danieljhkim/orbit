@@ -15,7 +15,8 @@ use orbit_common::utility::redaction::redact_all;
 use orbit_common::utility::selector::canonical_selector;
 use orbit_store::friction_store::{
     FrictionAddParams, FrictionUpdateParams, add_friction, friction_tags,
-    prepare_hub_friction_root, resolve_friction_by_task, update_friction,
+    prepare_hub_friction_root, readable_hub_friction_root, resolve_friction_by_task,
+    update_friction,
 };
 use orbit_store::sqlite::task_registry::{
     RegisterWorkspaceParams, TaskRegistryStore, task_registry_path,
@@ -765,26 +766,39 @@ impl HubCoordinationExecutor {
         )
     }
 
+    fn readable_friction_root(&self) -> Result<PathBuf, OrbitError> {
+        readable_hub_friction_root(
+            &self.inner.global_root,
+            &self.inner.workspace_id,
+            self.inner.legacy_friction_root.as_deref(),
+        )
+    }
+
     fn friction(
         &self,
         action: OrbitBuiltinAction,
         input: Value,
         model: Option<String>,
     ) -> Result<Value, OrbitError> {
-        let root = self.friction_root()?;
         match action {
             OrbitBuiltinAction::FrictionList => {
+                let root = self.readable_friction_root()?;
                 let mut value = super::friction_tools::list_at_root(&root, input)?;
                 strip_private_friction_paths(&mut value);
                 Ok(value)
             }
             OrbitBuiltinAction::FrictionShow => {
+                let root = self.readable_friction_root()?;
                 let mut value = super::friction_tools::show_at_root(&root, input)?;
                 strip_private_friction_paths(&mut value);
                 Ok(value)
             }
-            OrbitBuiltinAction::FrictionTags => Ok(json!(friction_tags(&root)?)),
+            OrbitBuiltinAction::FrictionTags => {
+                let root = self.readable_friction_root()?;
+                Ok(json!(friction_tags(&root)?))
+            }
             OrbitBuiltinAction::FrictionAdd => {
+                let root = self.friction_root()?;
                 let model = model
                     .filter(|value| !value.trim().is_empty())
                     .ok_or_else(|| {
@@ -809,6 +823,7 @@ impl HubCoordinationExecutor {
                 friction_json(stored)
             }
             OrbitBuiltinAction::FrictionUpdate => {
+                let root = self.friction_root()?;
                 let id = required_string(&input, &["id"], "id")?;
                 let status = optional_string(&input, "status")?
                     .map(|value| {

@@ -70,18 +70,34 @@ pub fn prepare_hub_friction_root(
             return Ok(canonical.clone());
         }
 
+        // A checkoutless caller may not know whether legacy state exists.
+        // Make the canonical root usable, but do not publish a migration
+        // decision that would prevent a later caller with the legacy root
+        // from copying or conflict-checking that state.
+        if legacy_root.is_none() {
+            fs::create_dir_all(&canonical).map_err(|error| OrbitError::Io(error.to_string()))?;
+            return Ok(canonical.clone());
+        }
+
         let source = legacy_root.filter(|path| path.exists());
-        if canonical.exists() {
-            if let Some(source) = source
-                && !directory_trees_identical(source, &canonical)?
-            {
+        if canonical.exists()
+            && let Some(source) = source
+            && !directory_trees_identical(source, &canonical)?
+        {
+            if directory_tree_is_empty(&canonical)? {
+                fs::remove_dir_all(&canonical)
+                    .map_err(|error| OrbitError::Io(error.to_string()))?;
+            } else {
                 return Err(OrbitError::Store(format!(
                     "hub friction migration conflict for workspace '{workspace_id}': legacy '{}' differs from uncommitted canonical '{}'",
                     source.display(),
                     canonical.display()
                 )));
             }
-        } else if let Some(source) = source {
+        }
+        if !canonical.exists()
+            && let Some(source) = source
+        {
             let staging = parent.join(format!(
                 ".{workspace_id}.migration-{}-{}",
                 std::process::id(),
@@ -101,13 +117,26 @@ pub fn prepare_hub_friction_root(
                     canonical.display()
                 ))
             })?;
-        } else {
+        } else if !canonical.exists() {
             fs::create_dir_all(&canonical).map_err(|error| OrbitError::Io(error.to_string()))?;
         }
 
         atomic_write_text(&marker, "schema_version: 1\nstate: complete\n")?;
         Ok(canonical.clone())
     })
+}
+
+fn directory_tree_is_empty(root: &Path) -> Result<bool, OrbitError> {
+    for entry in fs::read_dir(root).map_err(|error| OrbitError::Io(error.to_string()))? {
+        let entry = entry.map_err(|error| OrbitError::Io(error.to_string()))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| OrbitError::Io(error.to_string()))?;
+        if file_type.is_file() || !file_type.is_dir() || !directory_tree_is_empty(&entry.path())? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Resolves the readable root without treating an unmarked publish as committed.

@@ -1571,20 +1571,6 @@
           ],
           "description": "New acceptance criteria as an array of strings or a single string"
         },
-        "artifacts": {
-          "anyOf": [
-            {
-              "type": "object"
-            },
-            {
-              "items": {
-                "type": "object"
-              },
-              "type": "array"
-            }
-          ],
-          "description": "Task artifacts to write under `artifacts/`. Accepts either an object map of `path -> content` or an array of `{ path, content }` objects."
-        },
         "comment": {
           "description": "Task comment to append",
           "type": "string"

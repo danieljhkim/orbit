@@ -148,8 +148,10 @@ check. The endpoint filters the canonical registry by exactly one `hub` placemen
 and one scalar capability, disables the in-process graph re-merge, accepts only
 stable logical workspace IDs, and invokes the checkout-independent coordination
 executor without constructing `OrbitRuntime` or opening any connector. Local calls
-may derive caller identity from the hub; an SSH-carried call without authenticated
-caller identity fails closed rather than being attributed to the hub.
+may derive caller identity from the hub. Every `tools/call` accepted by the fixed
+hub endpoint must carry connector-owned remote session metadata; omission or an
+incomplete identity fails before host preflight rather than being attributed to the
+hub.
 
 ### 2.3 Hub-local short circuit
 
@@ -231,8 +233,9 @@ untrusted address selector until local validation. The adapter/broker derives st
 workspace and caller/process identity, transport, and the complete canonical sorted
 effective capability set, then generates the origin session and exactly one call ID
 per call before preflight. `leased_run` is optional and is injected by the runner
-when it launches an executor's broker; it is not accepted from model-authored tool
-input. The nested hub session receives the derived context. Capability is always a
+when it launches an executor's local broker; it is not accepted from model-authored
+tool input. A nested hub call strips that field because the v1 SSH principal does
+not bind a spoke-supplied lease claim. Capability is always a
 set authorized by membership; no scalar ceiling, ordinal, maximum, or selected
 authorizing member is valid.
 
@@ -391,6 +394,12 @@ One hub link is cached per effective capability with a bounded idle lifetime. A
 later call may reconnect after failure, but an interrupted mutation is never
 retried automatically (§9).
 
+The worker queue is bounded at admission. A full or disconnected queue is a
+pre-handoff `hub_unavailable`; once admitted, a call may wait behind an in-flight
+request and then receives the result of the worker's bounded initialize/request/
+close operations. Queue residence has no separate expiry and the synchronous
+caller has no shorter deadline that could discard a definitive result.
+
 Bootstrap registration uses one already-negotiated peer and exactly one capability
 from local `allowed_capabilities`; it does not require or grant operator. The private
 `orbit/private/register-spoke/v1` request is not advertised and cannot be reached
@@ -426,15 +435,20 @@ Hub friction state is partitioned at
 `<global_root>/frictions/workspaces/<workspace_id>`. Legacy checkout-local state
 is copied to a staging tree and atomically published before a separate completion
 marker commits the migration. Identical repeats are idempotent, differing trees
-fail closed, and reads remain on the legacy tree until the marker exists.
+fail closed, and reads remain on the legacy tree until the marker exists. A caller
+that has no legacy-root binding may use the canonical root but cannot commit the
+migration marker; read-only list/show resolution never prepares or commits a
+migration.
 
 `orbit.task.artifact.put` completes capability, workspace, and placement
 preflight before opening the caller-local source. It reads at most the typed
 content limit on the spoke and sends a connector-private
 `{path, media_type, content}` byte payload under the same canonical tool/audit name.
 The hub accepts that preloaded form only on authenticated `ssh-mcp`; caller-local
-paths never cross the coordination boundary. Hub friction responses likewise omit
-their private backing-file path [ORB-10271].
+paths never cross the coordination boundary. The public `orbit.task.update` schema
+does not accept inline artifacts, so this private form is reachable only through
+`orbit.task.artifact.put`. Hub friction responses likewise omit their private
+backing-file path [ORB-10271].
 
 ### 6.2 Knowledge creation
 
@@ -701,7 +715,8 @@ schemas.
   without spoke-to-spoke discovery; and filter `tools/list`/`tools/call` by the
   non-hierarchical effective capability set. Hub task, artifact, review-thread,
   verdict, and friction calls use the stable-ID checkoutless coordination
-  executor; `task.show(with_context=true)` remains explicitly local-derived.
+  executor; `task.show(with_context=true)` remains explicitly local-derived and a
+  spoke fails closed instead of reading local coordination state.
 
 ### Phase 3 — singular hub link
 

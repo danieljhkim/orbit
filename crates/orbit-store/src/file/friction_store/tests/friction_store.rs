@@ -50,6 +50,31 @@ fn hub_migration_accepts_identical_interrupted_publish_and_commits_marker() {
 }
 
 #[test]
+fn checkoutless_prepare_does_not_commit_an_unknown_legacy_migration() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let canonical = prepare_hub_friction_root(temp.path(), "ws_test", None)
+        .expect("checkoutless canonical root");
+    let marker = canonical
+        .parent()
+        .unwrap()
+        .join(".migration-markers/ws_test.complete");
+    assert!(canonical.is_dir());
+    assert!(!marker.exists());
+
+    let legacy = temp.path().join("legacy");
+    fs::create_dir_all(&legacy).unwrap();
+    fs::write(legacy.join("tags.yaml"), "legacy: state\n").unwrap();
+    prepare_hub_friction_root(temp.path(), "ws_test", Some(&legacy))
+        .expect("later known legacy migration");
+
+    assert!(marker.exists());
+    assert_eq!(
+        fs::read(canonical.join("tags.yaml")).unwrap(),
+        b"legacy: state\n"
+    );
+}
+
+#[test]
 fn hub_migration_conflict_fails_closed_and_preserves_legacy_reads() {
     let temp = tempfile::tempdir().expect("tempdir");
     let legacy = temp.path().join("legacy");
