@@ -3,7 +3,7 @@ summary: "Orbit Graph — Vision"
 type: design
 title: "Orbit Graph — Vision"
 owner: claude
-last_updated: 2026-06-13
+last_updated: 2026-07-19
 status: Draft
 feature: orbit-graph
 doc_role: vision
@@ -63,7 +63,7 @@ Five named transitions; each lives in one module. The V1 read model is deliberat
 
 **Open V2 questions:**
 
-- How are edits exposed to non-Rust callers? An MCP `orbit.graph.stage` / `orbit.graph.commit` pair is the obvious surface, but the payload shape for `Rename` vs `ReplaceBody` differs enough that one tool with a union type may be awkward.
+- How are edits exposed to non-Rust callers while preserving the CLI-only boundary? A future `orbit graph stage` / `orbit graph commit` pair could wrap the Rust API, but the payload shape for `Rename` vs `ReplaceBody` differs enough that one command with a union type may be awkward. MCP exposure is excluded by ADR-0241.
 - Should the working graph be persistable across processes? V1's answer is no — ephemeral, per session. But agents on long tasks may want to stage many edits and commit at the end of the session.
 - Cross-language renames are out of V2's scope. A Rust symbol's TypeScript binding stays untouched unless V3 adds cross-language refs (§1.2).
 

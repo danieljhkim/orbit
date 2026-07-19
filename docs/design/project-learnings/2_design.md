@@ -3,7 +3,7 @@ summary: "Project Learnings — Design"
 type: design
 title: "Project Learnings — Design"
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-07-19
 status: Draft
 feature: project-learnings
 doc_role: design
@@ -198,7 +198,7 @@ This is the universal layer because every supported agent runtime (Claude, Codex
 
 ### 4.2 Layer 2 — MCP tool-call injection (cross-agent, fine-grained)
 
-For tools whose arguments or responses reference file paths — `orbit_graph_show`, `orbit_graph_refs`, `orbit_task_show` (which surfaces `context_files`), `orbit_task_artifact_put`, etc. — the `orbit-remote` MCP composition attaches a `learnings` sidecar to the tool response:
+For MCP tools whose arguments or responses reference file paths — `orbit_task_show` (which surfaces `context_files`), `orbit_task_artifact_put`, and similar registered tools — the `orbit-remote` MCP composition attaches a `learnings` sidecar to the tool response. The CLI-only graph surface does not pass through this mechanism:
 
 ```jsonc
 {

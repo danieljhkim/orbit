@@ -46,10 +46,11 @@ spec:
     2. If the injected task context is missing or malformed, recover it with
        `orbit.task.show`.
     3. Read the task description, acceptance criteria, and plan first. Treat
-       `context_files` as Orbit graph selectors: prefer `orbit.graph.show`
-       (and `orbit.graph.overview` for `dir:` scopes) to gather context, and
-       fall back to `fs.read` only for selectors that stay unresolved or when
-       the graph is unavailable. If `orbit.search`
+       `context_files` as Orbit graph selectors and use the CLI-only graph
+       surface through `proc.spawn`: prefer `orbit graph show <selector>`
+       (and `orbit graph overview <selector>` for `dir:` scopes) to gather
+       context, and fall back to `fs.read` only for selectors that stay
+       unresolved or when the graph CLI is unavailable. If `orbit.search`
        is available, call it with `semantic: "<task-id>"` to surface prior tasks
        not linked via `context_files` (past decisions, related review threads);
        skip if the companion binary is not installed.
@@ -142,7 +143,6 @@ spec:
   tools:
     - orbit.task.*
     - orbit.friction.*
-    - orbit.graph.*
     - orbit.search
     - orbit.learning.show
     - orbit.learning.add

@@ -51,7 +51,7 @@ type: agent_loop
 instruction: Review the current diff and report risks.
 tools:
   - orbit.task.show
-  - orbit.graph.search
+  - orbit.search
 provider: claude
 backend: cli
 max_iterations: 25

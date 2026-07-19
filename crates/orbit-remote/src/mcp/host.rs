@@ -1,12 +1,12 @@
 //! MCP host implementations and audit bracketing.
 //!
 //! Canonical listing composes generic builtin definitions with Remote-owned
-//! discovery and graph definitions while preserving each schema's adjacent
-//! MCP policy. Runtime-backed and Remote-owned execution both use the audit
+//! discovery definitions while preserving each schema's adjacent MCP policy.
+//! Runtime-backed and Remote-owned execution both use the audit
 //! boundary tagged with [`ToolEntryPoint::Mcp`], so every dispatch has the same
-//! identity-resolution rules as the CLI path. Adapter preflight lives inside
-//! that boundary; registry preflight failures are recorded explicitly before
-//! runtime dispatch. Either rejection path produces a failure-status row.
+//! identity-resolution rules as the CLI path. Registry preflight failures are
+//! recorded explicitly before runtime dispatch. Either rejection path produces
+//! a failure-status row.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -40,10 +40,7 @@ use super::hub_link::HubLinkPool;
 pub fn canonical_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
     let mut definitions = orbit_tools::canonical_builtin_mcp_tool_definitions()?;
     definitions.extend(super::discovery::discovery_tool_definitions()?);
-    // Preserve the historical generic-registry order used by generated client
-    // permission arrays; graph definitions remain the trailing extension set.
     definitions.sort_by(|left, right| left.schema.name.cmp(&right.schema.name));
-    definitions.extend(super::graph::graph_tool_definitions()?);
     validate_mcp_tool_definitions(&definitions)?;
     Ok(definitions)
 }

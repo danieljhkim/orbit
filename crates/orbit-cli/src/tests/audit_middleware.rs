@@ -99,7 +99,7 @@ fn tool_run_audit_meta_uses_agent_flags_for_role() {
         "orbit",
         "tool",
         "run",
-        "orbit.graph.search",
+        "orbit.search",
         "--agent",
         "codex",
         "--model",
@@ -108,7 +108,7 @@ fn tool_run_audit_meta_uses_agent_flags_for_role() {
 
     assert_eq!(meta.command, "tool");
     assert_eq!(meta.subcommand.as_deref(), Some("run"));
-    assert_eq!(meta.tool_name.as_deref(), Some("orbit.graph.search"));
+    assert_eq!(meta.tool_name.as_deref(), Some("orbit.search"));
     assert_eq!(meta.role, TEST_CODEX_MODEL);
 }
 
@@ -118,7 +118,7 @@ fn tool_run_audit_meta_uses_input_identity_for_role() {
         "orbit",
         "tool",
         "run",
-        "orbit.graph.search",
+        "orbit.search",
         "--input",
         r#"{"query":"actor","agent":"codex","model":"gpt-5.5"}"#,
     ]);
@@ -132,7 +132,7 @@ fn tool_run_audit_meta_uses_model_only_input_for_role() {
         "orbit",
         "tool",
         "run",
-        "orbit.graph.search",
+        "orbit.search",
         "--input",
         r#"{"query":"actor","model":"gpt-5.5"}"#,
     ]);
@@ -146,7 +146,7 @@ fn tool_run_audit_meta_prefers_input_identity_over_flags() {
         "orbit",
         "tool",
         "run",
-        "orbit.graph.search",
+        "orbit.search",
         "--agent",
         "codex",
         "--model",
@@ -160,7 +160,7 @@ fn tool_run_audit_meta_prefers_input_identity_over_flags() {
 
 #[test]
 fn tool_run_audit_meta_uses_agent_role_without_identity() {
-    let meta = meta_for(&["orbit", "tool", "run", "orbit.graph.search"]);
+    let meta = meta_for(&["orbit", "tool", "run", "orbit.search"]);
 
     assert_eq!(meta.role, "agent");
 }

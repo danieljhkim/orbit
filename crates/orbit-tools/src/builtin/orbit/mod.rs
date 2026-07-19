@@ -143,10 +143,8 @@ pub fn register(registry: &mut ToolRegistry) {
     );
     registry.register(duel::plan_add::OrbitDuelPlanAddTool);
     registry.register(duel::plan_winner::OrbitDuelPlanWinnerTool);
-    // ORB-00391: the v1 orbit-knowledge graph builtins (callers/deps/
-    // implementors/overview/pack/refs/search/show) and the graph.history
-    // compatibility stub were decommissioned. The agent graph surface is now
-    // served by the in-process orbit-graph (v2) adapter in orbit-mcp.
+    // ORB-00391 removed the v1 orbit-knowledge graph builtins and graph.history
+    // compatibility stub; ORB-10325 keeps v2 exclusively on `orbit graph`.
     registry.register_mcp(
         learning::add::OrbitLearningAddTool,
         agent_operator(McpToolPlacement::Composite),
@@ -314,15 +312,6 @@ pub(super) fn scored_identity_params() -> Vec<ToolParam> {
             required: true,
         },
     ]
-}
-
-pub(super) fn graph_ref_param() -> ToolParam {
-    ToolParam {
-        name: "ref".to_string(),
-        description: "Ref.".to_string(),
-        param_type: "string".to_string(),
-        required: false,
-    }
 }
 
 pub(super) fn execute_host_action(

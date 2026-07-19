@@ -3,7 +3,6 @@
 mod config;
 mod contract;
 mod discovery;
-mod graph;
 mod host;
 mod hub;
 mod hub_client;
@@ -22,10 +21,7 @@ use std::sync::Arc;
 use orbit_common::types::{McpCapability, ToolSessionContext};
 use orbit_core::OrbitError;
 use orbit_core::runtime::resolve_global_root;
-use orbit_mcp::{
-    McpHost, McpResultDecorator, McpServerComposition, McpServerMetadata, McpToolExtension,
-    McpToolExtensionRegistration,
-};
+use orbit_mcp::{McpHost, McpResultDecorator, McpServerComposition, McpServerMetadata};
 
 use crate::{HostIdentityState, HostMode, inspect_host_identity};
 
@@ -130,23 +126,19 @@ pub fn serve_mcp_stdio(
 }
 
 fn broker_server_composition(host: Arc<BrokerMcpHost>) -> McpServerComposition {
-    let graph: Arc<dyn McpToolExtension> = Arc::new(graph::GraphToolRegistry::new());
     let learning_host: Arc<dyn LearningSidecarHost> = host;
     let learning: Arc<dyn McpResultDecorator> =
         Arc::new(LearningSidecarDecorator::from_env(learning_host));
     McpServerComposition::new()
-        .with_tool_extension(McpToolExtensionRegistration::advertised(graph))
         .with_result_decorator(learning)
         .with_input_schema_resolver(Arc::new(RemoteInputSchemaResolver))
 }
 
 fn hub_server_composition(host: Arc<HubMcpHost>) -> McpServerComposition {
-    let graph: Arc<dyn McpToolExtension> = Arc::new(graph::GraphToolRegistry::new());
     let learning_host: Arc<dyn LearningSidecarHost> = host.clone();
     let learning: Arc<dyn McpResultDecorator> =
         Arc::new(LearningSidecarDecorator::from_env(learning_host));
     McpServerComposition::new()
-        .with_tool_extension(McpToolExtensionRegistration::recognition_only(graph))
         .with_result_decorator(learning)
         .with_call_context_resolver(Arc::new(RemoteCallContextResolver))
         .with_input_schema_resolver(Arc::new(RemoteInputSchemaResolver))

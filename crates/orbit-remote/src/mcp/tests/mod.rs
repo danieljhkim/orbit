@@ -5,7 +5,6 @@
 mod contract;
 mod discovery;
 mod e1;
-mod graph;
 mod hub_client;
 mod hub_link;
 mod knowledge_allocation;
@@ -481,10 +480,6 @@ const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.task.review_thread.reply",
     "orbit.task.review_thread.resolve",
     "orbit.task.start",
-    // ORB-00391: the v1 orbit.graph.* builtins were decommissioned. The agent
-    // graph surface is now served by the in-process orbit-graph (v2) adapter in
-    // orbit-remote (see crates/orbit-remote/src/mcp/graph.rs and its tests), not by
-    // the orbit-tools runtime registry, so no orbit.graph.* tool appears here.
     "orbit.adr.add",
     "orbit.adr.show",
     "orbit.adr.supersede",
@@ -503,7 +498,6 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
     name == "orbit.search"
         || name.starts_with("orbit.task.")
         || name.starts_with("orbit.friction.")
-        || name.starts_with("orbit.graph.")
         || name.starts_with("orbit.adr.")
         || name.starts_with("orbit.semantic.")
         || name.starts_with("orbit.docs.")
@@ -511,7 +505,7 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
 }
 
 fn is_remote_owned_non_runtime_tool(name: &str) -> bool {
-    name.starts_with("orbit.graph.") || matches!(name, "orbit.host.list" | "orbit.workspace.list")
+    matches!(name, "orbit.host.list" | "orbit.workspace.list")
 }
 
 #[test]
@@ -614,37 +608,27 @@ fn safe_surface_separates_remote_owned_and_runtime_tools() {
     }
 
     for name in [
-        "orbit.graph.add",
-        "orbit.graph.delete",
-        "orbit.graph.move",
-        "orbit.graph.write",
+        "orbit.graph.sync",
+        "orbit.graph.search",
+        "orbit.graph.show",
+        "orbit.graph.refs",
+        "orbit.graph.callees",
+        "orbit.graph.impact",
+        "orbit.graph.trace",
+        "orbit.graph.overview",
+        "orbit.graph.implementors",
+        "orbit.graph.deps",
     ] {
         assert!(
             !names.contains(name),
-            "runtime exposes graph write tool: {name}"
+            "runtime exposes removed graph MCP tool: {name}"
         );
+        assert!(!safe_names.contains(name));
         assert!(!is_mcp_tool_exposed(name));
     }
 
     assert!(!is_mcp_tool_exposed("orbit.state.get"));
     assert!(!is_mcp_tool_exposed("demo.hello"));
-}
-
-#[test]
-fn graph_adapter_names_have_schema_adjacent_canonical_definitions() {
-    let safe_names: BTreeSet<String> = safe_mcp_tool_names().into_iter().collect();
-    let adapter_names: BTreeSet<&str> = super::graph::GRAPH_TOOL_NAMES.iter().copied().collect();
-    let configured_names: BTreeSet<&str> = safe_names
-        .iter()
-        .map(String::as_str)
-        .filter(|name| name.starts_with("orbit.graph."))
-        .collect();
-
-    assert_eq!(adapter_names, configured_names);
-    assert!(adapter_names.iter().all(|name| safe_names.contains(*name)));
-    for name in adapter_names {
-        assert!(is_mcp_tool_exposed(name));
-    }
 }
 
 #[test]
@@ -682,13 +666,10 @@ fn runtime_mcp_host_lists_only_core_registry_backed_safe_tools() {
         );
     }
 
-    // ORB-00391: the orbit-tools runtime host still owns no `orbit.graph.*`
-    // implementation. The orbit-mcp adapter now replaces any accidentally
-    // re-exposed known graph schema, but this assertion preserves the intended
-    // crate ownership boundary.
+    // ORB-10325: graph navigation is CLI-only and must not enter any MCP host.
     assert!(
         !listed.iter().any(|name| name.starts_with("orbit.graph.")),
-        "host must expose no orbit.graph.* tool after the v2 cutover, found: {:?}",
+        "host must expose no graph MCP tools, found: {:?}",
         listed
             .iter()
             .filter(|name| name.starts_with("orbit.graph."))
@@ -1270,7 +1251,7 @@ mod audited_mcp_call_tests {
     }
 
     #[test]
-    fn in_process_graph_dispatch_records_success_and_failure_audit_rows() {
+    fn in_process_extension_dispatch_records_success_and_failure_audit_rows() {
         let _guard = EnvGuard::set(&[
             ("ORBIT_AGENT_NAME", None),
             ("ORBIT_AGENT_MODEL", None),
@@ -1292,15 +1273,15 @@ mod audited_mcp_call_tests {
             Some("hm_local".to_string()),
             Some("local-host".to_string()),
         );
-        success_context.origin_session_id = Some("mcp-session-graph".to_string());
-        success_context.mcp_call_id = Some("mcall-graph-success".to_string());
+        success_context.origin_session_id = Some("mcp-session-extension".to_string());
+        success_context.mcp_call_id = Some("mcall-extension-success".to_string());
         host.call_in_process_tool(
-            "orbit.graph.search",
+            "orbit.search",
             json!({ "query": "dispatch", "model": "codex" }),
             success_context,
             &mut success_dispatch,
         )
-        .expect("allowlisted graph call succeeds");
+        .expect("allowlisted extension call succeeds");
 
         let mut failure_dispatch =
             |_input: serde_json::Value, _session_context: ToolSessionContext| {
@@ -1311,23 +1292,23 @@ mod audited_mcp_call_tests {
             Some("hm_local".to_string()),
             Some("local-host".to_string()),
         );
-        failure_context.origin_session_id = Some("mcp-session-graph".to_string());
-        failure_context.mcp_call_id = Some("mcall-graph-failure".to_string());
+        failure_context.origin_session_id = Some("mcp-session-extension".to_string());
+        failure_context.mcp_call_id = Some("mcall-extension-failure".to_string());
         host.call_in_process_tool(
-            "orbit.graph.show",
-            json!({ "selector": "invalid", "model": "codex" }),
+            "orbit.task.show",
+            json!({ "id": "ORB-invalid", "model": "codex" }),
             failure_context,
             &mut failure_dispatch,
         )
-        .expect_err("graph implementation failure propagates");
+        .expect_err("extension implementation failure propagates");
 
         for (name, expected_status) in [
-            ("orbit.graph.search", AuditEventStatus::Success),
-            ("orbit.graph.show", AuditEventStatus::Failure),
+            ("orbit.search", AuditEventStatus::Success),
+            ("orbit.task.show", AuditEventStatus::Failure),
         ] {
             let events = runtime
                 .list_audit_events(None, Some(name.to_string()), None, None, 16)
-                .expect("list graph audit events");
+                .expect("list extension audit events");
             assert_eq!(events.len(), 1, "exactly one audit row for {name}");
             let row = &events[0];
             assert_eq!(row.subcommand.as_deref(), Some("run-mcp"));
@@ -1339,15 +1320,18 @@ mod audited_mcp_call_tests {
             assert_eq!(row.caller_machine_id.as_deref(), Some("hm_local"));
             assert_eq!(row.process_machine_id.as_deref(), Some("hm_local"));
             assert_eq!(row.transport, Some(McpTransport::Local));
-            assert_eq!(row.origin_session_id.as_deref(), Some("mcp-session-graph"));
+            assert_eq!(
+                row.origin_session_id.as_deref(),
+                Some("mcp-session-extension")
+            );
             assert!(row.mcp_call_id.as_deref().is_some_and(|call_id| {
-                call_id == "mcall-graph-success" || call_id == "mcall-graph-failure"
+                call_id == "mcall-extension-success" || call_id == "mcall-extension-failure"
             }));
         }
     }
 
     #[test]
-    fn unallowlisted_graph_tool_is_rejected_before_in_process_dispatch() {
+    fn removed_graph_tool_is_rejected_before_in_process_dispatch() {
         let runtime = OrbitRuntime::in_memory().expect("build test runtime");
         let host = RuntimeMcpHost {
             runtime: runtime.clone(),
@@ -1360,18 +1344,18 @@ mod audited_mcp_call_tests {
 
         let error = host
             .call_in_process_tool(
-                "orbit.graph.pack",
+                "orbit.graph.search",
                 json!({ "model": "codex" }),
                 Default::default(),
                 &mut dispatch,
             )
-            .expect_err("unallowlisted graph tool is rejected");
+            .expect_err("removed graph tool is rejected");
         assert!(matches!(error, OrbitError::NotFound { .. }));
         assert!(!called, "rejected graph implementation must not run");
 
         let events = runtime
-            .list_audit_events(None, Some("orbit.graph.pack".to_string()), None, None, 16)
-            .expect("list graph preflight audit event");
+            .list_audit_events(None, Some("orbit.graph.search".to_string()), None, None, 16)
+            .expect("list removed graph preflight audit event");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));
         assert_eq!(events[0].status, AuditEventStatus::Denied);
@@ -1508,12 +1492,6 @@ mod audited_mcp_call_tests {
             .expect("canonical operator triage read");
         assert_eq!(value, json!([]));
     }
-
-    // ORB-00391: the former `mcp_graph_search_accepts_allow_fuzzy_and_returns_result_shape`
-    // test exercised the v1 orbit-knowledge `orbit.graph.search` builtin over the
-    // host dispatch path. That builtin was decommissioned; the v2 graph search is
-    // served by the in-process orbit-graph adapter in orbit-mcp and is covered by
-    // `orbit-remote/src/mcp/tests/graph.rs` (`graph_tools_invoke_in_process_fixture`).
 
     struct EnvGuard {
         _lock: MutexGuard<'static, ()>,

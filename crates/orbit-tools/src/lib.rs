@@ -17,8 +17,7 @@
 //! # Role
 //! Depends on `orbit-exec` for process spawning and `orbit-common` for shared
 //! types. Consumed by `orbit-engine`, `orbit-core`, and `orbit-remote`, which
-//! compose its workspace-scoped definitions with Remote-owned discovery and
-//! graph tools.
+//! compose its workspace-scoped definitions with Remote-owned discovery tools.
 //!
 //! # Key exports
 //! - [`ToolRegistry`] — central registry; call `register_builtins()` to load all standard tools

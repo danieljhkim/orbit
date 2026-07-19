@@ -511,12 +511,8 @@ fn hub_checkoutless_dispatch_and_denials_each_write_one_trusted_audit() {
             json!({"workspace": "ws_checkoutless", "query": "never"}),
             context(McpCapability::Agent, "mcall-hub-graph-denied"),
         )
-        .expect_err("local-derived tool denied");
-    assert!(
-        graph_error
-            .to_string()
-            .contains("placement is 'local-derived'")
-    );
+        .expect_err("removed graph MCP tool denied");
+    assert!(graph_error.to_string().contains("not found"));
 
     let operator_error = host
         .call_tool(

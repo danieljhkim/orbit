@@ -19,8 +19,6 @@ chrono.workspace = true
 hostname.workspace = true
 orbit-common = { path = "../orbit-common" }
 orbit-core = { path = "../orbit-core" }
-orbit-graph = { path = "../orbit-graph" }
-orbit-graph-extract = { path = "../orbit-graph-extract" }
 orbit-mcp = { path = "../orbit-mcp" }
 orbit-store = { path = "../orbit-store" }
 orbit-tools = { path = "../orbit-tools" }

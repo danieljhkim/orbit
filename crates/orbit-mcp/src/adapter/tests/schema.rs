@@ -81,21 +81,19 @@ fn task_dependency_schemas_accept_string_or_string_array() {
     );
 }
 
-/// ORB-00382: `orbit.graph.pack`'s handler requires `selectors`, so the
-/// published MCP schema must advertise it in `required` (as a string|array
-/// union) — otherwise a caller following the schema omits it and the backend
-/// rejects the call with `missing selectors`. This pins the adapter contract
-/// that a handler-required param surfaces in the published `required` set.
+/// A handler-required list parameter must be advertised in `required` as a
+/// string|array union. Otherwise a schema-following caller can omit it and the
+/// backend rejects the call only after dispatch.
 #[test]
-fn graph_pack_mcp_schema_marks_required_selectors_as_string_or_array() {
+fn required_string_list_param_is_advertised_as_string_or_array() {
     let selectors = ToolParam {
         name: "selectors".to_string(),
-        description: "Graph selector string or array.".to_string(),
+        description: "Selector string or array.".to_string(),
         param_type: "string_list".to_string(),
         required: true,
     };
     let summary = param_with_type("summary", "boolean");
-    let schema = build_input_schema("orbit.graph.pack", &[selectors, summary]);
+    let schema = build_input_schema("fixture.batch", &[selectors, summary]);
 
     let required = schema
         .get("required")

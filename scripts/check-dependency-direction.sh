@@ -16,7 +16,7 @@ allowed_internal_deps() {
       # lower layers may depend back on Remote.
       # orbit-cmd is test-only: the shared learning-state canary crosses the
       # Remote MCP host and the CLI hook command layer.
-      echo "orbit-cmd orbit-common orbit-core orbit-graph orbit-graph-extract orbit-mcp orbit-store orbit-tools"
+      echo "orbit-cmd orbit-common orbit-core orbit-mcp orbit-store orbit-tools"
       ;;
     orbit-policy | orbit-exec | orbit-store | orbit-search)
       echo "orbit-common"

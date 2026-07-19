@@ -10,9 +10,9 @@ const MANIFEST: &str = include_str!("../Cargo.toml");
 
 #[test]
 fn vertical_feature_depends_only_on_approved_runtime_layers() {
-    // ADR-0240: Remote composes neutral Core kernels, Store persistence, the
-    // generic MCP/tool kernels, and its local-derived graph implementation;
-    // none of those lower layers depends back on this feature crate.
+    // ADR-0240 + ADR-0241: Remote composes neutral Core kernels, Store
+    // persistence, and the generic MCP/tool kernels; graph navigation remains
+    // CLI-only and no lower layer depends back on this feature crate.
     let manifest = parse_manifest();
     let mut dependency_names = BTreeSet::new();
 
@@ -33,8 +33,6 @@ fn vertical_feature_depends_only_on_approved_runtime_layers() {
         vec![
             "orbit-common".to_string(),
             "orbit-core".to_string(),
-            "orbit-graph".to_string(),
-            "orbit-graph-extract".to_string(),
             "orbit-mcp".to_string(),
             "orbit-store".to_string(),
             "orbit-tools".to_string(),

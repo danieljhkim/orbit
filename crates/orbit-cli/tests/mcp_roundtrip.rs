@@ -411,7 +411,7 @@ fn mcp_serve_lists_canonical_agent_surface_outside_any_checkout() {
         .filter_map(|tool| tool["name"].as_str())
         .collect::<Vec<_>>();
     assert!(names.contains(&"orbit_task_show"));
-    assert!(names.contains(&"orbit_graph_search"));
+    assert!(!names.iter().any(|name| name.starts_with("orbit_graph_")));
     assert!(!names.contains(&"orbit_host_list"));
 
     let missing = client.call_tool_err("orbit_task_show", json!({ "id": "ORB-00001" }));
@@ -524,8 +524,8 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
     assert!(
         graph_denied["message"]
             .as_str()
-            .is_some_and(|message| message.contains("placement is 'local-derived'")),
-        "graph denial must retain canonical placement evidence: {graph_denied}"
+            .is_some_and(|message| message.contains("not found")),
+        "removed graph tool must be reported as unknown: {graph_denied}"
     );
     let wire_payload = serde_json::to_string(&(listed, created)).expect("serialize wire payload");
     assert!(!wire_payload.contains(workspace.work.to_string_lossy().as_ref()));
@@ -561,27 +561,16 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
     assert_eq!(audit.5.as_deref(), Some("[\"agent\"]"));
     assert_eq!(audit.6.as_deref(), Some("mcall-remote-roundtrip"));
 
-    let graph_audit = connection
+    let graph_audit_count: i64 = connection
         .query_row(
-            "SELECT COUNT(*), status, mcp_call_id
-             FROM audit_events WHERE tool_name = 'orbit.graph.search'",
+            "SELECT COUNT(*) FROM audit_events WHERE tool_name = 'orbit.graph.search'",
             [],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            },
+            |row| row.get(0),
         )
-        .expect("hub graph denial audit");
-    assert_eq!(graph_audit.0, 1, "one D2 audit row per denied call");
-    assert_eq!(graph_audit.1, "denied");
-    assert!(
-        graph_audit
-            .2
-            .as_deref()
-            .is_some_and(|id| id.starts_with("mcall-"))
+        .expect("count removed graph audit rows");
+    assert_eq!(
+        graph_audit_count, 0,
+        "an unrecognized graph name must not enter registered-tool audit dispatch"
     );
 }
 
@@ -724,35 +713,31 @@ fn mcp_serve_error_paths_return_tool_errors_and_keep_serving() {
 }
 
 #[test]
-fn mcp_graph_calls_persist_success_and_failure_audit_rows() {
+fn mcp_registered_calls_are_audited_but_removed_graph_names_are_not_dispatched() {
     let workspace = McpWorkspace::init();
     let mut client = workspace.serve();
 
     client.call_tool_ok(
-        "orbit_graph_search",
+        "orbit_search",
         json!({ "query": "mcp-audit-marker", "model": "codex" }),
     );
     let error = client.call_tool_err(
-        "orbit_graph_show",
-        json!({ "selector": "not-a-selector", "model": "codex" }),
+        "orbit_task_add",
+        json!({ "description": "missing title", "model": "codex" }),
     );
     assert_eq!(error["code"], "invalid_input");
-    let unallowlisted = client.call_tool_err(
-        "orbit.graph.pack",
-        json!({ "selectors": ["file:src/lib.rs"], "model": "codex" }),
+    let removed = client.call_tool_err(
+        "orbit_graph_search",
+        json!({ "query": "must-not-run", "model": "codex" }),
     );
-    assert_eq!(unallowlisted["code"], "tool_not_found");
+    assert_eq!(removed["code"], "tool_not_found");
     drop(client);
 
-    for (tool_name, status) in [
-        ("orbit.graph.search", "success"),
-        ("orbit.graph.show", "failure"),
-        ("orbit.graph.pack", "denied"),
-    ] {
+    for (tool_name, status) in [("orbit.search", "success"), ("orbit.task.add", "failure")] {
         let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
             .args(["audit", "list", "--tool", tool_name, "--json"])
             .output()
-            .expect("query graph audit rows");
+            .expect("query MCP audit rows");
         assert!(
             output.status.success(),
             "audit list failed for {tool_name}: {}",
@@ -775,4 +760,12 @@ fn mcp_graph_calls_persist_success_and_failure_audit_rows() {
         assert!(row["mcp_call_id"].as_str().is_some());
         assert!(row["duration_ms"].as_i64().is_some_and(|value| value >= 1));
     }
+
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["audit", "list", "--tool", "orbit.graph.search", "--json"])
+        .output()
+        .expect("query removed graph audit rows");
+    assert!(output.status.success());
+    let rows: Value = serde_json::from_slice(&output.stdout).expect("parse graph audit rows");
+    assert_eq!(rows, json!([]));
 }

@@ -8,7 +8,7 @@ use orbit_common::types::{
 use orbit_mcp::McpHost;
 use orbit_mcp::OrbitToolServer;
 use rmcp::ServiceExt;
-use rmcp::model::{CallToolRequestParams, CallToolResult, ClientInfo, ListToolsResult, Meta};
+use rmcp::model::{CallToolRequestParams, CallToolResult, ClientInfo, Meta};
 use rmcp::service::{RoleClient, RunningService};
 use serde_json::{Value, json};
 use tokio::io::duplex;
@@ -48,35 +48,6 @@ pub(super) fn request_with_args(name: &str, args: Value) -> CallToolRequestParam
     )
 }
 
-pub(super) struct StubHost {
-    pub(super) schemas: Vec<ToolSchema>,
-}
-
-impl McpHost for StubHost {
-    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
-        test_mcp_definitions(self.schemas.clone())
-    }
-
-    fn call_tool(
-        &self,
-        _name: &str,
-        _input: Value,
-        _session_context: ToolSessionContext,
-    ) -> Result<Value, OrbitError> {
-        Ok(Value::Null)
-    }
-
-    fn call_in_process_tool(
-        &self,
-        _name: &str,
-        input: Value,
-        session_context: ToolSessionContext,
-        dispatch: &mut dyn FnMut(Value, ToolSessionContext) -> Result<Value, OrbitError>,
-    ) -> Result<Value, OrbitError> {
-        dispatch(input, session_context)
-    }
-}
-
 pub(super) struct LearningSidecarHost {
     response: Value,
     search_by_path: HashMap<String, Vec<Value>>,
@@ -98,8 +69,6 @@ impl LearningSidecarHost {
 impl McpHost for LearningSidecarHost {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
         test_mcp_definitions([
-            tool_schema("orbit.graph.show"),
-            tool_schema("orbit.graph.refs"),
             tool_schema("orbit.task.show"),
             tool_schema("orbit.learning.list"),
         ])
@@ -193,14 +162,6 @@ impl WireServer {
             .call_tool(request_with_args(name, args))
             .await
             .expect("MCP fixture call")
-    }
-
-    pub(super) async fn list_tools(&self) -> ListToolsResult {
-        self.client
-            .peer()
-            .list_tools(Default::default())
-            .await
-            .expect("MCP fixture tools/list")
     }
 }
 

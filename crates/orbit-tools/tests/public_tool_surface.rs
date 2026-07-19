@@ -115,10 +115,8 @@ fn workflow_critical_tools_remain_registered() {
         "github.pr.review",
         "github.pr.review.comment",
         "github.pr.view",
-        // ORB-00391: the v1 orbit.graph.* builtins (callers/deps/implementors/
-        // overview/pack/refs/search/show) were decommissioned from this registry;
-        // the agent graph surface is now served by the orbit-graph (v2) adapter in
-        // orbit-remote. See crates/orbit-remote/src/mcp/graph.rs.
+        // ORB-00391 removed the v1 orbit.graph.* builtins; ORB-10325 confirms
+        // the v2 graph remains exclusively on the `orbit graph` CLI surface.
         "orbit.groundhog.checkpoint_failure",
         "orbit.groundhog.checkpoint_success",
         "orbit.groundhog.side_effect",

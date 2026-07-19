@@ -8,15 +8,12 @@ source_of_truth:
   composed_from:
     - crates/orbit-tools/src/registry.rs::canonical_builtin_mcp_tool_definitions
     - crates/orbit-remote/src/mcp/discovery.rs::discovery_tool_definitions
-    - crates/orbit-remote/src/mcp/graph.rs::graph_tool_definitions
   placement_metadata_owner:
     - crates/orbit-tools/src/builtin/orbit/mod.rs::register
     - crates/orbit-remote/src/mcp/discovery.rs::discovery_tool_definitions
-    - crates/orbit-remote/src/mcp/graph.rs::graph_tool_definitions
   scope_metadata_owner:
     - crates/orbit-tools/src/builtin/orbit/mod.rs::register
     - crates/orbit-remote/src/mcp/discovery.rs::discovery_tool_definitions
-    - crates/orbit-remote/src/mcp/graph.rs::graph_tool_definitions
 
 capabilities:
   allowed_values: [agent, operator, runner]
@@ -72,16 +69,6 @@ tools:
   orbit.friction.update: { placement: hub, scope: workspace-required, allowed_capabilities: [operator] }
   orbit.host.list: { placement: hub, scope: global, allowed_capabilities: [operator] }
   orbit.workspace.list: { placement: hub, scope: global, allowed_capabilities: [operator] }
-  orbit.graph.sync: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.graph.search: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.graph.show: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.graph.refs: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.graph.callees: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.graph.impact: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.graph.trace: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.graph.overview: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.graph.implementors: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.graph.deps: { placement: local-derived, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.search: { placement: composite, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.adr.add: { placement: composite, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.adr.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
