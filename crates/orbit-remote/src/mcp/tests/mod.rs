@@ -505,7 +505,10 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
 }
 
 fn is_remote_owned_non_runtime_tool(name: &str) -> bool {
-    matches!(name, "orbit.host.list" | "orbit.workspace.list")
+    matches!(
+        name,
+        "orbit.host.list" | "orbit.workspace.list" | "orbit.crew.list"
+    )
 }
 
 #[test]
@@ -553,7 +556,7 @@ fn safe_surface_separates_remote_owned_and_runtime_tools() {
         );
     }
 
-    for name in ["orbit.host.list", "orbit.workspace.list"] {
+    for name in ["orbit.host.list", "orbit.workspace.list", "orbit.crew.list"] {
         assert!(safe_names.contains(name));
         assert!(is_mcp_tool_exposed(name));
         assert!(
@@ -675,7 +678,7 @@ fn runtime_mcp_host_lists_only_core_registry_backed_safe_tools() {
             .filter(|name| name.starts_with("orbit.graph."))
             .collect::<Vec<_>>()
     );
-    for name in ["orbit.host.list", "orbit.workspace.list"] {
+    for name in ["orbit.host.list", "orbit.workspace.list", "orbit.crew.list"] {
         assert!(
             !listed.contains(name),
             "Core runtime host must not expose Remote discovery: {name}"

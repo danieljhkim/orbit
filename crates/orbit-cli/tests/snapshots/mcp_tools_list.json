@@ -434,6 +434,20 @@
     "name": "orbit_auto_task_update"
   },
   {
+    "description": "List a workspace owner's published execution-profile crews with sanitized profile state, generation, and freshness (agent/operator, hub placement).",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "workspace": {
+          "description": "Stable logical workspace ID. Defaults to the trusted MCP session workspace; never resolved from process cwd or a checkout path.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "orbit_crew_list"
+  },
+  {
     "description": "Append an Orbit friction report under .orbit/frictions/",
     "inputSchema": {
       "additionalProperties": true,

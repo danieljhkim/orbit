@@ -99,10 +99,11 @@ pub use duel::{
 pub use error::{ArtifactOrigin, ArtifactOriginMode, NotFoundKind, OrbitError};
 pub use event::OrbitEvent;
 pub use execution_profile::{
-    EXECUTION_CONFIG_DIGEST_DOMAIN, EXECUTION_PROFILE_SCHEMA_VERSION, ExecutionProfileCrewV1,
-    ExecutionProfileShipV1, ExecutionProfileV1, HostWorkspacePresence, ProjectionFreshness,
-    SanitizedExecutionProfile, SanitizedWorkspacePresence, StoredExecutionProfile,
-    WorkspaceOwnership, WorkspacePresenceDeclaration,
+    CREW_DISCOVERY_SCHEMA_VERSION, CrewDiscoveryV1, EXECUTION_CONFIG_DIGEST_DOMAIN,
+    EXECUTION_PROFILE_SCHEMA_VERSION, ExecutionProfileCrewV1, ExecutionProfileShipV1,
+    ExecutionProfileV1, HostWorkspacePresence, ProjectionFreshness, SanitizedExecutionProfile,
+    SanitizedWorkspacePresence, StoredExecutionProfile, ValidatedCrewProfile, WorkspaceOwnership,
+    WorkspacePresenceDeclaration,
 };
 pub use executor_def::{
     ExecutorDef, ExecutorSandboxKind, ExecutorType, ModelPairOverride, StdoutFormat,

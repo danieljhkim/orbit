@@ -305,6 +305,9 @@ fn hub_listing_uses_one_canonical_placement_and_capability_predicate() {
         .collect::<BTreeSet<_>>();
     assert!(agent_names.contains("orbit.task.add"));
     assert!(!agent_names.contains("orbit.host.list"));
+    // Crew discovery is admitted for agent (unlike the operator-only registry
+    // discovery tools), proving capability is by placement, not a hierarchy.
+    assert!(agent_names.contains("orbit.crew.list"));
     assert!(
         !agent_names
             .iter()
@@ -320,6 +323,7 @@ fn hub_listing_uses_one_canonical_placement_and_capability_predicate() {
         .map(|definition| definition.schema.name)
         .collect::<BTreeSet<_>>();
     assert!(operator_names.contains("orbit.host.list"));
+    assert!(operator_names.contains("orbit.crew.list"));
     assert!(operator_names.contains("orbit.friction.list"));
     assert!(operator_names.contains("orbit.friction.show"));
     assert!(operator_names.contains("orbit.friction.update"));
@@ -337,6 +341,157 @@ fn hub_listing_uses_one_canonical_placement_and_capability_predicate() {
             .expect("runner tools")
             .is_empty(),
         "D1 currently declares no runner-capability hub tools"
+    );
+}
+
+#[test]
+fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
+    use orbit_common::types::{ExecutionProfileCrewV1, ExecutionProfileShipV1, ExecutionProfileV1};
+
+    use crate::host_identity::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode};
+    use crate::host_registry::HostRegistryService;
+
+    let root = tempfile::tempdir().expect("global root");
+    write_identity(&root, "hub", "hm_hub");
+    // Register + stamp the hub, bind the workspace owner, and publish an owner
+    // execution profile through the same coordination store the hub reads.
+    let service = HostRegistryService::new(crate::remote_store_at(root.path()).expect("store"));
+    service
+        .register_hub_identity(
+            &HostIdentity {
+                schema_version: HOST_IDENTITY_SCHEMA_VERSION,
+                machine_id: "hm_hub".to_string(),
+                host_id: "test-host".to_string(),
+                mode: HostMode::Hub,
+            },
+            BTreeSet::new(),
+        )
+        .expect("register hub");
+    add_checkoutless_workspace(&root, "ws_alpha");
+    let registry = crate::workspace_registry::load_registry_from(
+        &crate::workspace_registry::registry_path_for(root.path()),
+    )
+    .expect("registry");
+    service
+        .bind_workspace_owner(&registry, "ws_alpha", "hm_hub")
+        .expect("bind owner");
+    let observed = Utc::now();
+    let mut profile = ExecutionProfileV1 {
+        schema_version: 1,
+        workspace_id: "ws_alpha".to_string(),
+        owner_machine_id: "hm_hub".to_string(),
+        observed_at: observed,
+        config_digest: String::new(),
+        default_crew: "sol".to_string(),
+        crews: vec![ExecutionProfileCrewV1 {
+            name: "sol".to_string(),
+            provider: "codex".to_string(),
+            model: "gpt-test".to_string(),
+            backend: "cli".to_string(),
+            description: None,
+            tags: Vec::new(),
+        }],
+        ship: ExecutionProfileShipV1 {
+            mode: "pr".to_string(),
+            base_branch: "agent-main".to_string(),
+            ship_closure_digest: "a".repeat(64),
+        },
+    };
+    profile.config_digest = profile.compute_config_digest().expect("config digest");
+    service
+        .publish_execution_profile("hm_hub", 0, &profile)
+        .expect("publish owner profile");
+
+    let host = HubMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("hub host");
+    let workspace_context = |call_id: &str| {
+        let mut context = context(McpCapability::Agent, call_id);
+        context.workspace = Some("ws_alpha".to_string());
+        context.workspace_id = Some("ws_alpha".to_string());
+        context
+    };
+
+    // Crew discovery resolves the session workspace and projects the owner
+    // profile, not the hub's unrelated local configuration.
+    let crews = host
+        .call_tool(
+            "orbit.crew.list",
+            json!({"workspace": "ws_alpha"}),
+            workspace_context("mcall-crew-list"),
+        )
+        .expect("crew list");
+    assert_eq!(crews["workspace_id"], "ws_alpha");
+    assert_eq!(crews["owner_machine_id"], "hm_hub");
+    assert_eq!(crews["profile"]["freshness"], "current");
+    assert_eq!(crews["profile"]["generation"], 1);
+    assert_eq!(crews["default_crew"], "sol");
+    assert_eq!(crews["crews"][0]["name"], "sol");
+    assert_eq!(crews["crews"][0]["model"], "gpt-test");
+    let serialized = serde_json::to_string(&crews).expect("serialize crew list");
+    for forbidden in ["config_digest", "ship_closure_digest", "\"root\""] {
+        assert!(
+            !serialized.contains(forbidden),
+            "crew list leaked {forbidden}"
+        );
+    }
+
+    // A valid explicit crew is accepted and the coordination task lands.
+    let created = host
+        .call_tool(
+            "orbit.task.add",
+            json!({
+                "workspace": "ws_alpha",
+                "title": "Coordinate",
+                "description": "Body",
+                "crew": "sol",
+                "model": "codex"
+            }),
+            workspace_context("mcall-task-valid"),
+        )
+        .expect("valid crew task add");
+    assert_eq!(created["crew"], "sol");
+
+    // An unknown explicit crew is rejected before allocation.
+    let error = host
+        .call_tool(
+            "orbit.task.add",
+            json!({
+                "workspace": "ws_alpha",
+                "title": "Rejected",
+                "description": "Body",
+                "crew": "ghost",
+                "model": "codex"
+            }),
+            workspace_context("mcall-task-bad"),
+        )
+        .expect_err("unknown crew rejected");
+    assert!(error.to_string().contains("ghost"), "unexpected: {error}");
+
+    // Omitting the crew is always accepted, even for coordination filing.
+    host.call_tool(
+        "orbit.task.add",
+        json!({
+            "workspace": "ws_alpha",
+            "title": "No crew",
+            "description": "Body",
+            "model": "codex"
+        }),
+        workspace_context("mcall-task-nocrew"),
+    )
+    .expect("omitted crew task add");
+
+    // The rejected task never entered hub coordination state: exactly the two
+    // accepted tasks exist.
+    let listed = host
+        .call_tool(
+            "orbit.task.list",
+            json!({"workspace": "ws_alpha"}),
+            workspace_context("mcall-task-list"),
+        )
+        .expect("task list");
+    assert_eq!(
+        listed.as_array().expect("task array").len(),
+        2,
+        "unknown-crew add must not mutate the task count"
     );
 }
 

@@ -69,6 +69,7 @@ tools:
   orbit.friction.update: { placement: hub, scope: workspace-required, allowed_capabilities: [operator] }
   orbit.host.list: { placement: hub, scope: global, allowed_capabilities: [operator] }
   orbit.workspace.list: { placement: hub, scope: global, allowed_capabilities: [operator] }
+  orbit.crew.list: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.search: { placement: composite, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.adr.add: { placement: composite, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.adr.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
