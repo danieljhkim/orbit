@@ -9,13 +9,18 @@ use toml::Value;
 const MANIFEST: &str = include_str!("../Cargo.toml");
 
 #[test]
-fn vertical_feature_depends_only_on_neutral_core_and_store_layers() {
-    // ADR-0240: Remote composes neutral Core kernels over Store persistence;
-    // neither lower layer depends back on this feature crate.
+fn vertical_feature_depends_only_on_approved_runtime_layers() {
+    // ADR-0240: Remote composes neutral Core kernels, Store persistence, and
+    // the generic MCP contract; none of those lower layers depends back on
+    // this feature crate.
     let manifest = parse_manifest();
     let mut dependency_names = BTreeSet::new();
 
-    collect_dependencies(&manifest, &mut dependency_names);
+    collect_dependencies(
+        &manifest,
+        &["dependencies", "build-dependencies"],
+        &mut dependency_names,
+    );
 
     let orbit_deps = dependency_names
         .iter()
@@ -28,17 +33,38 @@ fn vertical_feature_depends_only_on_neutral_core_and_store_layers() {
         vec![
             "orbit-common".to_string(),
             "orbit-core".to_string(),
+            "orbit-mcp".to_string(),
             "orbit-store".to_string(),
         ],
-        "orbit-remote may compose only the approved neutral Core and Store layers in this cut"
+        "orbit-remote may compose only the approved runtime layers in this cut"
     );
 
-    for forbidden in ["orbit-mcp", "orbit-tools", "orbit-policy", "orbit-exec"] {
+    for forbidden in ["orbit-cmd", "orbit-tools", "orbit-policy", "orbit-exec"] {
         assert!(
             !dependency_names.contains(forbidden),
             "forbidden internal dependency added: {forbidden}"
         );
     }
+}
+
+#[test]
+fn command_layer_dependency_is_test_only_for_the_cross_layer_canary() {
+    let manifest = parse_manifest();
+    let mut dependency_names = BTreeSet::new();
+
+    collect_dependencies(&manifest, &["dev-dependencies"], &mut dependency_names);
+
+    let orbit_deps = dependency_names
+        .iter()
+        .filter(|name| name.starts_with("orbit-"))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        orbit_deps,
+        vec!["orbit-cmd".to_string()],
+        "orbit-cmd is permitted only as the explicit cross-layer learning-state canary"
+    );
 }
 
 #[test]
@@ -74,14 +100,14 @@ fn parse_manifest() -> Value {
     toml::from_str(MANIFEST).expect("crate manifest parses")
 }
 
-fn collect_dependencies(manifest: &Value, names: &mut BTreeSet<String>) {
-    for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
+fn collect_dependencies(manifest: &Value, sections: &[&str], names: &mut BTreeSet<String>) {
+    for section in sections {
         collect_dependency_table(manifest.get(section), names);
     }
 
     if let Some(targets) = manifest.get("target").and_then(Value::as_table) {
         for target in targets.values() {
-            for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
+            for section in sections {
                 collect_dependency_table(target.get(section), names);
             }
         }

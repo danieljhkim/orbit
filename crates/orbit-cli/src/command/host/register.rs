@@ -35,8 +35,7 @@ impl Execute for HostRegisterArgs {
                         .to_string(),
                 ));
             }
-            let record =
-                crate::command::mcp::register_local_spoke(runtime, &local_identity, labels)?;
+            let record = orbit_remote::register_local_spoke(runtime, &local_identity, labels)?;
             println!(
                 "registered spoke '{}' (machine_id {}) with the verified hub and refreshed the local registry cache",
                 record.host_id, record.machine_id

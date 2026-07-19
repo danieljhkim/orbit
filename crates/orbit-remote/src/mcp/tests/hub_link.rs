@@ -3,13 +3,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::{RegistryCacheService, RegistryCacheState, load_host_identity};
 use chrono::Utc;
 use orbit_common::types::{
     AuditEventStatus, HostRegistration, HostStatus, SPOKE_REGISTRATION_SCHEMA_VERSION, Workspace,
     WorkspacePresenceDeclaration, WorkspaceRegistry, WorkspaceStatus,
 };
 use orbit_mcp::{McpHost, OrbitToolServer};
-use orbit_remote::{RegistryCacheService, RegistryCacheState, load_host_identity};
 use rmcp::ServiceExt;
 use serde_json::json;
 
@@ -582,9 +582,9 @@ fn canary_workspace() -> Workspace {
 }
 
 fn save_canary_registry(root: &Path, registry: &WorkspaceRegistry) {
-    orbit_remote::workspace_registry::save_registry_to(
+    crate::workspace_registry::save_registry_to(
         registry,
-        &orbit_remote::workspace_registry::registry_path_for(root),
+        &crate::workspace_registry::registry_path_for(root),
     )
     .expect("workspace registry");
 }
@@ -616,7 +616,7 @@ fn spoke_rmcp_coordination_canary_is_hub_only_and_preserves_provenance() {
     save_canary_registry(spoke.path(), &registry);
 
     let registry_service =
-        orbit_remote::host_registry_service_at(hub.path()).expect("hub registry service");
+        crate::host_registry_service_at(hub.path()).expect("hub registry service");
     registry_service
         .register_hub_identity(
             &load_host_identity(hub.path()).expect("hub identity"),

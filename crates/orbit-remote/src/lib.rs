@@ -8,17 +8,19 @@
     rustdoc::invalid_html_tags,
     rustdoc::private_intra_doc_links
 )]
-//! Machine and workspace registry domain for Orbit.
+//! Remote execution, coordination, and machine/workspace registry domain for Orbit.
 //!
 //! This crate owns strict machine identity, the path-free logical workspace
-//! catalog plus machine-local checkout roles, the atomic satellite cache, and
-//! the host/workspace registry service. Shared DTOs remain in `orbit-common`;
-//! registry persistence, feature migrations, revision advancement, and
-//! transactional snapshot queries are encapsulated here over `orbit-store`'s
+//! catalog plus machine-local checkout roles, the atomic satellite cache, the
+//! host/workspace registry service, and remote MCP broker/hub/link composition.
+//! Shared DTOs remain in `orbit-common`; generic MCP framing remains in
+//! `orbit-mcp`; registry persistence, feature migrations, revision advancement,
+//! and transactional snapshot queries are encapsulated here over `orbit-store`'s
 //! generic SQLite connection infrastructure.
 
 pub mod host_identity;
 pub mod host_registry;
+pub mod mcp;
 pub mod persistence;
 pub mod profile;
 pub mod registry_cache;
@@ -34,6 +36,9 @@ pub use host_identity::{
     load_host_identity, os_hostname, rename_current_host_identity,
 };
 pub use host_registry::{HostRegistryService, WorkspaceLink, require_local_hub_identity};
+pub use mcp::{
+    canonical_mcp_tool_definitions, register_local_spoke, safe_mcp_tool_names, serve_mcp_stdio,
+};
 pub use persistence::RemoteStore;
 pub use profile::build_execution_profile_v1;
 pub use registry_cache::{RegistryCacheOutcome, RegistryCacheService, RegistryCacheState};

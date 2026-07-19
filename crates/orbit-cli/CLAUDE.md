@@ -77,15 +77,16 @@ directory was a parent command or a folder, and were removed in ORB-00279.
 
 ## Crate boundary
 
-`orbit-cli` is a clap entry point. Domain logic lives in `orbit-core`. CLI
+`orbit-cli` is a clap entry point. Domain logic lives in `orbit-core` and
+vertical feature crates such as `orbit-remote`. CLI
 subcommand files hold only:
 
 - Clap `Args` / `Subcommand` definitions.
-- One `impl Execute` that calls into `orbit-core`.
+- One `impl Execute` that calls into the owning domain crate.
 - Optional `println!` / `eprintln!` for stdout/stderr formatting.
 - Output projection helpers (JSON shaping, table rendering) — these are
   presentation concerns, not domain logic.
 
 Anything beyond that — registry lookups, file I/O, audit decisions, state
-mutation — belongs in `orbit-core`. See [`ARCHITECTURE.md`](../../ARCHITECTURE.md)
+mutation — belongs in the owning domain crate. See [`ARCHITECTURE.md`](../../ARCHITECTURE.md)
 for the full crate-layer rules.

@@ -10,6 +10,7 @@
 //! runtime dispatch. Either rejection path produces a failure-status row.
 
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -29,24 +30,22 @@ use orbit_core::{
     redact_sensitive_env_text,
 };
 use orbit_mcp::McpHost;
-use orbit_remote::runtime::RemoteRuntimeFactory;
-use orbit_remote::{HostIdentityState, HostMode, inspect_host_identity};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::runtime::RemoteRuntimeFactory;
+use crate::{HostIdentityState, HostMode, inspect_host_identity};
+
 use super::hub_link::HubLinkPool;
 
-pub(crate) const ORBIT_MCP_SERVER_ID: &str = "orbit";
-
-pub(crate) fn canonical_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError>
-{
+pub fn canonical_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
     let mut definitions = orbit_core::canonical_builtin_mcp_tool_definitions()?;
     definitions.extend(orbit_mcp::graph_mcp_tool_definitions()?);
     validate_mcp_tool_definitions(&definitions)?;
     Ok(definitions)
 }
 
-pub(crate) fn safe_mcp_tool_names() -> Vec<String> {
+pub fn safe_mcp_tool_names() -> Vec<String> {
     canonical_mcp_tool_definitions()
         .map(|definitions| {
             definitions
@@ -241,7 +240,7 @@ impl BrokerMcpHost {
             }
         }
         let params = mcp_preflight_failure_params(name, &context, denial);
-        if let Err(error) = orbit_remote::record_global_audit_event_at(&self.global_root, &params) {
+        if let Err(error) = crate::record_global_audit_event_at(&self.global_root, &params) {
             tracing::warn!(
                 tool = name,
                 error = %error,
@@ -288,8 +287,8 @@ impl BrokerMcpHost {
             )));
         }
 
-        let registry_path = orbit_remote::workspace_registry::registry_path_for(&self.global_root);
-        let registry = orbit_remote::workspace_registry::load_registry_from(&registry_path)?;
+        let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
+        let registry = crate::workspace_registry::load_registry_from(&registry_path)?;
         let workspace = registry
             .workspaces
             .iter()
@@ -351,8 +350,8 @@ impl BrokerMcpHost {
         let repo_root = git_path(&selected, "--show-toplevel")?;
         let common_dir = git_path(&selected, "--git-common-dir")?;
 
-        let registry_path = orbit_remote::workspace_registry::registry_path_for(&self.global_root);
-        let registry = orbit_remote::workspace_registry::load_registry_from(&registry_path)?;
+        let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
+        let registry = crate::workspace_registry::load_registry_from(&registry_path)?;
         let mut matches = Vec::new();
         for checkout in &registry.checkouts {
             let Ok(registered_common) = git_path(&checkout.repo_root, "--git-common-dir") else {
@@ -517,7 +516,7 @@ impl BrokerMcpHost {
     }
 
     fn global_call(&self, name: &str) -> Result<Value, OrbitError> {
-        let snapshot = orbit_remote::registry_snapshot_at(&self.global_root)?;
+        let snapshot = crate::registry_snapshot_at(&self.global_root)?;
         match name {
             "orbit.host.list" => Ok(json!({
                 "hub_machine_id": snapshot.hub_machine_id,
@@ -541,8 +540,8 @@ impl BrokerMcpHost {
         if let Some(binding) = binding {
             return Some(binding.key.shared_root.join("frictions"));
         }
-        let registry_path = orbit_remote::workspace_registry::registry_path_for(&self.global_root);
-        let registry = orbit_remote::workspace_registry::load_registry_from(&registry_path).ok()?;
+        let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
+        let registry = crate::workspace_registry::load_registry_from(&registry_path).ok()?;
         registry
             .checkouts
             .iter()
@@ -570,7 +569,7 @@ impl BrokerMcpHost {
                 params.error_message = Some(redact_sensitive_env_text(&error.to_string()));
             }
         }
-        if let Err(error) = orbit_remote::record_global_audit_event_at(&self.global_root, &params) {
+        if let Err(error) = crate::record_global_audit_event_at(&self.global_root, &params) {
             tracing::warn!(tool = name, error = %error, "failed to persist global MCP coordination audit");
         }
     }
@@ -800,7 +799,7 @@ fn read_workspace_identity(path: &Path) -> Result<WorkspaceIdentityDocument, Orb
 /// write is bypassed. This wrapper records that failure path explicitly and
 /// then short-circuits. On the success path it delegates to the runtime,
 /// which owns the audit row (no dedup needed because `orbit mcp serve` is
-/// invoked outside any CLI [`crate::audit_middleware::AuditGuard`]).
+/// invoked outside the CLI audit middleware guard.
 #[cfg(test)]
 pub(super) fn audited_mcp_call(
     runtime: &OrbitRuntime,
@@ -847,7 +846,10 @@ fn record_mcp_preflight_failure(
 ) {
     let params = mcp_preflight_failure_params(name, session_context, err);
     if let Err(write_err) = runtime.record_audit_event(&params) {
-        eprintln!("warning: failed to persist MCP preflight audit event: {write_err}");
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "warning: failed to persist MCP preflight audit event: {write_err}"
+        );
     }
 }
 

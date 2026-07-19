@@ -19,11 +19,19 @@ chrono.workspace = true
 hostname.workspace = true
 orbit-common = { path = "../orbit-common" }
 orbit-core = { path = "../orbit-core" }
+orbit-mcp = { path = "../orbit-mcp" }
 orbit-store = { path = "../orbit-store" }
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
+tokio = { workspace = true, features = ["io-util", "process", "time"] }
 toml.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
+# Cross-layer compatibility canary: Remote MCP and the CLI learning hook must
+# share one persisted learning-admission state.
+orbit-cmd = { path = "../orbit-cmd" }
+rmcp = { version = "1.5", default-features = false, features = ["server", "transport-io"] }
 tempfile.workspace = true

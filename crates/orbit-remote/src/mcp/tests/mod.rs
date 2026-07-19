@@ -40,12 +40,12 @@ fn broker_checkoutless_task_call_uses_stable_id_and_one_trusted_audit() {
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
-    orbit_remote::workspace_registry::save_registry_to(
+    crate::workspace_registry::save_registry_to(
         &WorkspaceRegistry {
             workspaces: vec![workspace],
             ..Default::default()
         },
-        &orbit_remote::workspace_registry::registry_path_for(root.path()),
+        &crate::workspace_registry::registry_path_for(root.path()),
     )
     .expect("workspace registry");
     orbit_core::runtime::HubCoordinationExecutor::register_workspace(
@@ -137,7 +137,7 @@ fn broker_with_context_requires_local_checkout_before_dispatch() {
     use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
 
     let root = tempfile::tempdir().expect("global root");
-    orbit_remote::workspace_registry::save_registry_to(
+    crate::workspace_registry::save_registry_to(
         &WorkspaceRegistry {
             workspaces: vec![Workspace {
                 id: "ws_checkoutless".to_string(),
@@ -152,7 +152,7 @@ fn broker_with_context_requires_local_checkout_before_dispatch() {
             }],
             ..Default::default()
         },
-        &orbit_remote::workspace_registry::registry_path_for(root.path()),
+        &crate::workspace_registry::registry_path_for(root.path()),
     )
     .expect("workspace registry");
     let host = BrokerMcpHost::new(root.path().to_path_buf());
@@ -182,9 +182,9 @@ fn broker_with_context_requires_local_checkout_before_dispatch() {
 
 #[test]
 fn broker_spoke_with_context_fails_closed_before_local_resolution() {
+    use crate::{HostMode, NewHostIdentity, ensure_host_identity};
     use chrono::Utc;
     use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
-    use orbit_remote::{HostMode, NewHostIdentity, ensure_host_identity};
 
     let root = tempfile::tempdir().expect("global root");
     ensure_host_identity(root.path(), || {
@@ -194,7 +194,7 @@ fn broker_spoke_with_context_fails_closed_before_local_resolution() {
         })
     })
     .expect("spoke identity");
-    orbit_remote::workspace_registry::save_registry_to(
+    crate::workspace_registry::save_registry_to(
         &WorkspaceRegistry {
             workspaces: vec![Workspace {
                 id: "ws_remote".to_string(),
@@ -209,7 +209,7 @@ fn broker_spoke_with_context_fails_closed_before_local_resolution() {
             }],
             ..Default::default()
         },
-        &orbit_remote::workspace_registry::registry_path_for(root.path()),
+        &crate::workspace_registry::registry_path_for(root.path()),
     )
     .expect("workspace registry");
     let host = BrokerMcpHost::new(root.path().to_path_buf());
@@ -236,9 +236,9 @@ fn broker_spoke_with_context_fails_closed_before_local_resolution() {
 
 #[test]
 fn broker_spoke_hub_denial_writes_no_local_coordination_state() {
+    use crate::{HostMode, NewHostIdentity, ensure_host_identity};
     use chrono::Utc;
     use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
-    use orbit_remote::{HostMode, NewHostIdentity, ensure_host_identity};
 
     let root = tempfile::tempdir().expect("global root");
     ensure_host_identity(root.path(), || {
@@ -248,7 +248,7 @@ fn broker_spoke_hub_denial_writes_no_local_coordination_state() {
         })
     })
     .expect("spoke identity");
-    orbit_remote::workspace_registry::save_registry_to(
+    crate::workspace_registry::save_registry_to(
         &WorkspaceRegistry {
             workspaces: vec![Workspace {
                 id: "ws_remote".to_string(),
@@ -263,7 +263,7 @@ fn broker_spoke_hub_denial_writes_no_local_coordination_state() {
             }],
             ..Default::default()
         },
-        &orbit_remote::workspace_registry::registry_path_for(root.path()),
+        &crate::workspace_registry::registry_path_for(root.path()),
     )
     .expect("workspace registry");
     let host = BrokerMcpHost::new(root.path().to_path_buf());
@@ -296,7 +296,7 @@ fn broker_capability_denial_precedes_coordination_store_open() {
     use orbit_common::types::{McpCapability, Workspace, WorkspaceRegistry, WorkspaceStatus};
 
     let root = tempfile::tempdir().expect("global root");
-    orbit_remote::workspace_registry::save_registry_to(
+    crate::workspace_registry::save_registry_to(
         &WorkspaceRegistry {
             workspaces: vec![Workspace {
                 id: "ws_checkoutless".to_string(),
@@ -311,7 +311,7 @@ fn broker_capability_denial_precedes_coordination_store_open() {
             }],
             ..Default::default()
         },
-        &orbit_remote::workspace_registry::registry_path_for(root.path()),
+        &crate::workspace_registry::registry_path_for(root.path()),
     )
     .expect("workspace registry");
     let host = BrokerMcpHost::new(root.path().to_path_buf());
@@ -1081,7 +1081,7 @@ mod audited_mcp_call_tests {
         let workspace_root = root.path().join("workspace");
         std::fs::create_dir_all(&global_root).expect("global root");
         std::fs::create_dir_all(&workspace_root).expect("workspace root");
-        let runtime = orbit_remote::runtime::RemoteRuntimeFactory::open_resolved_checkout(
+        let runtime = crate::runtime::RemoteRuntimeFactory::open_resolved_checkout(
             &global_root,
             &workspace_root,
             &workspace_root,
@@ -1092,10 +1092,9 @@ mod audited_mcp_call_tests {
             },
         )
         .expect("build Remote-composed test runtime");
-        let store = orbit_remote::RemoteStore::from_store(
-            runtime.sqlite_store().expect("open real SQLite store"),
-        )
-        .expect("adopt Remote registry store");
+        let store =
+            crate::RemoteStore::from_store(runtime.sqlite_store().expect("open real SQLite store"))
+                .expect("adopt Remote registry store");
         store
             .register_hub(&HostRegistration {
                 machine_id: "hm_hub".to_string(),

@@ -13,7 +13,9 @@ allowed_internal_deps() {
     orbit-remote)
       # ADR-0240: vertical Remote feature composes neutral Core kernels over
       # Store persistence; neither lower layer may depend back on Remote.
-      echo "orbit-common orbit-core orbit-store"
+      # orbit-cmd is test-only: the shared learning-state canary crosses the
+      # Remote MCP host and the CLI hook command layer.
+      echo "orbit-cmd orbit-common orbit-core orbit-mcp orbit-store"
       ;;
     orbit-policy | orbit-exec | orbit-store | orbit-search)
       echo "orbit-common"
@@ -58,7 +60,7 @@ allowed_internal_deps() {
       echo "orbit-common orbit-cmd orbit-core orbit-remote"
       ;;
     orbit-cli)
-      echo "orbit-common orbit-cmd orbit-core orbit-graph-cli orbit-mcp orbit-remote orbit-dashboard"
+      echo "orbit-common orbit-cmd orbit-core orbit-graph-cli orbit-remote orbit-dashboard"
       ;;
     *)
       return 1
