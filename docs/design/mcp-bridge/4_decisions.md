@@ -204,6 +204,10 @@ adapter, runtime profile/ship construction in `orbit-core`, persistence in
   `host.toml`/store stamp, canonical hub/capability filtering is singular, graph is
   not re-merged, checkoutless writes use stable workspace IDs, and every denial or
   outcome keeps one trusted D2 audit identity.
+- [ORB-10269] — added the fixed SSH argv connector, per-capability bounded link
+  pool, revision plus canonical hub-schema negotiation, trusted remote call
+  metadata, and the pre-handoff `hub_unavailable` / post-handoff
+  `outcome_unknown` split. Mutations are never replayed automatically.
 - [ORB-10302] — moved the coupled registry domain into `orbit-registry` and retained
   MCP ownership of serialization/dispatch only ([ADR-0235]).
 

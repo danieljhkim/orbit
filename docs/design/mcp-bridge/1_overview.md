@@ -91,7 +91,7 @@ network edge per spoke: spoke → hub.
 | Concern | File | Task |
 |---------|------|------|
 | MCP wire adapter and graph wrappers | [crates/orbit-mcp/](../../../crates/orbit-mcp/) | [ORB-00424] |
-| Local broker, trusted hub config/server, safe surface, and audit boundary | [crates/orbit-cli/src/command/mcp/](../../../crates/orbit-cli/src/command/mcp/) | [ORB-10262], [ORB-10268] |
+| Local broker, trusted hub config/server/link pool, safe surface, and audit boundary | [crates/orbit-cli/src/command/mcp/](../../../crates/orbit-cli/src/command/mcp/) | [ORB-10262], [ORB-10268], [ORB-10269] |
 | Canonical builtin schema + placement metadata | [crates/orbit-tools/src/builtin/orbit/mod.rs](../../../crates/orbit-tools/src/builtin/orbit/mod.rs) | [ORB-00424] |
 | Canonical graph schema + placement metadata | [crates/orbit-mcp/src/adapter/graph.rs](../../../crates/orbit-mcp/src/adapter/graph.rs) | [ORB-00424] |
 | Runtime tool dispatch and audit provenance | [crates/orbit-core/src/command/tool.rs](../../../crates/orbit-core/src/command/tool.rs) | [ORB-00424] |
@@ -110,5 +110,7 @@ Detailed topology, knowledge semantics, routing, configuration, and migration ar
   host-registry hub/owner split and star topology.
 - [ORB-10268] — implemented the strict machine-global hub trust document and the
   fixed, checkoutless, non-recursive hub MCP server boundary.
+- [ORB-10269] — implemented contract-pinned SSH MCP links, bounded per-capability
+  reuse, exact caller/workspace correlation, and no-replay outcome handling.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

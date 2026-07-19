@@ -11,7 +11,10 @@ use orbit_common::types::{
 use orbit_core::routines::{HostIdentity, HostMode, load_host_identity};
 use orbit_core::runtime::HubCoordinationExecutor;
 use orbit_core::{NotFoundKind, OrbitError, redact_sensitive_env_text};
-use orbit_mcp::McpHost;
+use orbit_mcp::{
+    CANONICAL_MCP_REGISTRY_REVISION, HubServerContractV1, MCP_CONTRACT_REVISION, McpHost,
+    hub_schema_digest,
+};
 use serde_json::{Value, json};
 
 use super::host::{
@@ -25,6 +28,7 @@ pub(super) struct HubMcpHost {
     global_root: PathBuf,
     identity: HostIdentity,
     capability: McpCapability,
+    private_instructions: String,
 }
 
 impl HubMcpHost {
@@ -36,10 +40,21 @@ impl HubMcpHost {
                 identity.host_id, identity.machine_id, identity.mode
             )));
         }
+        let definitions = canonical_mcp_tool_definitions()
+            .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
+        let contract = HubServerContractV1 {
+            contract_revision: MCP_CONTRACT_REVISION,
+            canonical_registry_revision: CANONICAL_MCP_REGISTRY_REVISION,
+            hub_machine_id: identity.machine_id.clone(),
+            effective_capability: capability,
+            hub_schema_digest: hub_schema_digest(&definitions, capability)?,
+        };
+        let private_instructions = contract.instructions()?;
         let host = Self {
             global_root,
             identity,
             capability,
+            private_instructions,
         };
         // Fail before stdio is opened. Listing and every call repeat this
         // check so a long-lived server cannot outlive an authority change.
@@ -340,6 +355,14 @@ impl McpHost for HubMcpHost {
 
     fn in_process_graph_tools_enabled(&self) -> bool {
         false
+    }
+
+    fn private_server_instructions(&self) -> Option<String> {
+        Some(self.private_instructions.clone())
+    }
+
+    fn accepts_remote_session_context(&self) -> bool {
+        true
     }
 
     fn call_tool(

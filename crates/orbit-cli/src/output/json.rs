@@ -23,6 +23,9 @@ pub fn render(value: &Value, pretty: bool) -> Result<String, OrbitError> {
 }
 
 pub fn error_payload(error: &OrbitError) -> Value {
+    if let OrbitError::RemoteTool { payload, .. } = error {
+        return payload.clone();
+    }
     let mut payload = json!({
         "error": error.to_string(),
         "code": error_code(error),
@@ -40,7 +43,7 @@ pub fn error_payload(error: &OrbitError) -> Value {
     payload
 }
 
-fn error_code(error: &OrbitError) -> &'static str {
+fn error_code(error: &OrbitError) -> &str {
     match error {
         OrbitError::PolicyDenied(_) => "policy_denied",
         OrbitError::NotFound { kind, .. } => match kind {
@@ -64,6 +67,10 @@ fn error_code(error: &OrbitError) -> &'static str {
         OrbitError::JobValidation(_) => "job_validation_failed",
         OrbitError::AgentProtocolViolation(_) => "agent_protocol_violation",
         OrbitError::UnsupportedAgentProvider(_) => "unsupported_agent_provider",
+        OrbitError::HubUnavailable(_) => "hub_unavailable",
+        OrbitError::HubNegotiation(_) => "hub_negotiation",
+        OrbitError::OutcomeUnknown { .. } => "outcome_unknown",
+        OrbitError::RemoteTool { code, .. } => code.as_str(),
         OrbitError::Execution(_) => "execution_failed",
         OrbitError::Store(_) => "store_error",
         OrbitError::TaskStatusTransition(_) => "task_status_transition",

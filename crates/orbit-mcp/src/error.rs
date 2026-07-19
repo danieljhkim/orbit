@@ -14,6 +14,9 @@ pub(crate) fn tool_error_result(err: &OrbitError) -> CallToolResult {
 }
 
 fn error_payload(err: &OrbitError) -> Value {
+    if let OrbitError::RemoteTool { payload, .. } = err {
+        return payload.clone();
+    }
     let mut payload = json!({
         "code": error_code(err),
         "message": err.to_string(),
@@ -31,7 +34,7 @@ fn error_payload(err: &OrbitError) -> Value {
     payload
 }
 
-fn error_code(err: &OrbitError) -> &'static str {
+fn error_code(err: &OrbitError) -> &str {
     match err {
         OrbitError::NotFound { kind, .. } => match kind {
             NotFoundKind::Tool => "tool_not_found",
@@ -59,6 +62,10 @@ fn error_code(err: &OrbitError) -> &'static str {
         OrbitError::ArtifactNotLocal { .. } => "artifact_not_local",
         OrbitError::AgentProtocolViolation(_) => "agent_protocol_violation",
         OrbitError::UnsupportedAgentProvider(_) => "unsupported_provider",
+        OrbitError::HubUnavailable(_) => "hub_unavailable",
+        OrbitError::HubNegotiation(_) => "hub_negotiation",
+        OrbitError::OutcomeUnknown { .. } => "outcome_unknown",
+        OrbitError::RemoteTool { code, .. } => code.as_str(),
         OrbitError::Execution(_) => "execution_failed",
         OrbitError::Store(_) => "store_error",
         OrbitError::WorkspaceError(_) => "workspace_error",

@@ -35,7 +35,9 @@
 //! are follow-up work once authentication is in scope.
 
 mod adapter;
+mod client;
 mod error;
+mod hub_contract;
 
 use std::sync::Arc;
 
@@ -48,6 +50,11 @@ use rmcp::transport::io::stdio;
 use serde_json::Value;
 
 pub use adapter::OrbitToolServer;
+pub use client::{HubClientExpectation, OrbitMcpClient, validate_remote_call_context};
+pub use hub_contract::{
+    CANONICAL_MCP_REGISTRY_REVISION, HUB_CONTRACT_INSTRUCTIONS_PREFIX, HUB_SCHEMA_DOMAIN,
+    HubServerContractV1, MCP_CONTRACT_REVISION, canonical_hub_schema_bytes, hub_schema_digest,
+};
 
 /// Canonical names implemented by the in-process graph adapter.
 pub fn graph_tool_names() -> &'static [&'static str] {
@@ -77,6 +84,18 @@ pub trait McpHost: Send + Sync + 'static {
     /// be merged back into its hub-only surface.
     fn in_process_graph_tools_enabled(&self) -> bool {
         true
+    }
+
+    /// Private initialize instructions used only by a fixed hub transport.
+    /// Ordinary MCP servers keep the human-readable default.
+    fn private_server_instructions(&self) -> Option<String> {
+        None
+    }
+
+    /// Whether connector-owned per-call metadata may replace the local
+    /// session context. Only the explicit checkoutless hub host enables this.
+    fn accepts_remote_session_context(&self) -> bool {
+        false
     }
 
     fn call_tool(

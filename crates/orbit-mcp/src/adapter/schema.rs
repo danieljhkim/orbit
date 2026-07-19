@@ -13,7 +13,7 @@ pub(super) fn schema_to_tool(schema: ToolSchema) -> Tool {
     Tool::new(advertised_name, description, Arc::new(input_schema))
 }
 
-pub(super) fn build_input_schema(tool_name: &str, params: &[ToolParam]) -> JsonObject {
+pub(crate) fn build_input_schema(tool_name: &str, params: &[ToolParam]) -> JsonObject {
     let mut properties = Map::new();
     let mut required: Vec<Value> = Vec::new();
 

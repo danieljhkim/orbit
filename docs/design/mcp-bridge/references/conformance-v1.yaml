@@ -69,7 +69,13 @@ tools:
   orbit.auto_task.toggle: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
 
 hub_schema_digest:
+  domain_tag: orbit.mcp.hub-schema.v1
   contract_revision: 1
+  canonical_registry_revision: 1
+  golden_vector:
+    capability: agent
+    canonical_json: '{"canonical_registry_revision":1,"capability":"agent","tools":[{"advertised_name":"orbit_task_show","canonical_name":"orbit.task.show","description":"Show one task","input_schema":{"additionalProperties":true,"properties":{"id":{"description":"Task ID","type":"string"}},"required":["id"],"type":"object"}}]}'
+    expected_sha256: ec8ef56c153562d0f4125cee1b3932c33ed30eb8509601aa5652a351a7b6a8f7
   inputs:
     - canonical schema name, description, and input schema for every hub-placed tool
     - canonical schema name, description, and input schema for every composite tool's hub step

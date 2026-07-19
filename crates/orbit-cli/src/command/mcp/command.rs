@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -7,13 +7,14 @@ use orbit_common::types::{McpCapability, ToolSessionContext};
 use orbit_core::routines::{HostIdentityState, inspect_host_identity};
 use orbit_core::runtime::resolve_global_root;
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_mcp::McpHost;
+use orbit_mcp::{McpHost, hub_schema_digest};
 
 use crate::command::Execute;
 
 use super::config::load_trusted_mcp_config;
-use super::host::BrokerMcpHost;
+use super::host::{BrokerMcpHost, canonical_mcp_tool_definitions};
 use super::hub::HubMcpHost;
+use super::hub_link::HubLinkPool;
 use super::setup::{InitArgs, RemoveArgs};
 
 #[derive(Args)]
@@ -96,20 +97,46 @@ impl ServeArgs {
             );
             (Arc::new(hub), context)
         } else {
-            let host: Arc<dyn McpHost> = Arc::new(BrokerMcpHost::new(global_root.clone()));
-            let (machine_id, host_id) = match inspect_host_identity(&global_root)? {
-                HostIdentityState::Present(identity) => {
-                    if identity.mode == orbit_core::routines::HostMode::Spoke {
-                        let (route, _) = trusted_config.spoke_route(&identity, Some(capability))?;
-                        // E1 validates and fixes this route but intentionally
-                        // does not open it; the E2 connector consumes it.
-                        debug_assert_eq!(route.transport, super::config::HubTransport::Ssh);
-                        debug_assert!(!route.host.is_empty());
+            let (host, machine_id, host_id): (Arc<dyn McpHost>, Option<String>, Option<String>) =
+                match inspect_host_identity(&global_root)? {
+                    HostIdentityState::Present(identity) => {
+                        if identity.mode == orbit_core::routines::HostMode::Spoke {
+                            let (route, _) =
+                                trusted_config.spoke_route(&identity, Some(capability))?;
+                            let definitions = canonical_mcp_tool_definitions()
+                                .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
+                            let mut schema_digests = BTreeMap::new();
+                            for allowed in &route.allowed_capabilities {
+                                schema_digests
+                                    .insert(*allowed, hub_schema_digest(&definitions, *allowed)?);
+                            }
+                            let pool = HubLinkPool::ssh(
+                                route.host.clone(),
+                                route.machine_id.clone(),
+                                schema_digests,
+                            )?;
+                            (
+                                Arc::new(BrokerMcpHost::new_with_hub_link(
+                                    global_root.clone(),
+                                    pool,
+                                )),
+                                Some(identity.machine_id),
+                                Some(identity.host_id),
+                            )
+                        } else {
+                            (
+                                Arc::new(BrokerMcpHost::new(global_root.clone())),
+                                Some(identity.machine_id),
+                                Some(identity.host_id),
+                            )
+                        }
                     }
-                    (Some(identity.machine_id), Some(identity.host_id))
-                }
-                HostIdentityState::Legacy { .. } | HostIdentityState::Absent => (None, None),
-            };
+                    HostIdentityState::Legacy { .. } | HostIdentityState::Absent => (
+                        Arc::new(BrokerMcpHost::new(global_root.clone())),
+                        None,
+                        None,
+                    ),
+                };
             (
                 host,
                 ToolSessionContext::trusted_local(None, machine_id, host_id),

@@ -621,7 +621,23 @@ fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
 struct McpConformanceFixture {
     capabilities: McpConformanceCapabilities,
     scopes: McpConformanceScopes,
+    hub_schema_digest: McpConformanceHubDigest,
     tools: BTreeMap<String, McpConformancePolicy>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformanceHubDigest {
+    domain_tag: String,
+    contract_revision: u32,
+    canonical_registry_revision: u32,
+    golden_vector: McpConformanceGoldenVector,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformanceGoldenVector {
+    capability: McpCapability,
+    canonical_json: String,
+    expected_sha256: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -688,6 +704,46 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
     assert_eq!(
         fixture.scopes.allowed_values,
         BTreeSet::from([McpToolScope::WorkspaceRequired, McpToolScope::Global])
+    );
+    assert_eq!(
+        fixture.hub_schema_digest.domain_tag,
+        orbit_mcp::HUB_SCHEMA_DOMAIN
+    );
+    assert_eq!(
+        fixture.hub_schema_digest.contract_revision,
+        orbit_mcp::MCP_CONTRACT_REVISION
+    );
+    assert_eq!(
+        fixture.hub_schema_digest.canonical_registry_revision,
+        orbit_mcp::CANONICAL_MCP_REGISTRY_REVISION
+    );
+    let vector_definition = McpToolDefinition::new(
+        orbit_common::types::ToolSchema {
+            name: "orbit.task.show".to_string(),
+            description: "Show one task".to_string(),
+            parameters: vec![orbit_common::types::ToolParam {
+                name: "id".to_string(),
+                description: "Task ID".to_string(),
+                param_type: "string".to_string(),
+                required: true,
+            }],
+            builtin: true,
+        },
+        McpToolPolicy::agent_and_operator(McpToolPlacement::Hub),
+    )
+    .expect("golden definition");
+    let vector = &fixture.hub_schema_digest.golden_vector;
+    let mut expected_bytes = format!("{}\0", fixture.hub_schema_digest.domain_tag).into_bytes();
+    expected_bytes.extend_from_slice(vector.canonical_json.as_bytes());
+    assert_eq!(
+        orbit_mcp::canonical_hub_schema_bytes(&[vector_definition.clone()], vector.capability)
+            .expect("canonical golden bytes"),
+        expected_bytes
+    );
+    assert_eq!(
+        orbit_mcp::hub_schema_digest(&[vector_definition], vector.capability)
+            .expect("golden digest"),
+        vector.expected_sha256
     );
 
     let definitions =

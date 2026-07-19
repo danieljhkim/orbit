@@ -9,6 +9,7 @@ mod command;
 mod config;
 mod host;
 mod hub;
+mod hub_link;
 mod setup;
 
 pub use command::{McpCommand, McpSubcommand};

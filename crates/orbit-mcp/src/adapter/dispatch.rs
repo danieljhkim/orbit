@@ -9,7 +9,8 @@ use rmcp::ErrorData as McpError;
 use rmcp::ServerHandler;
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, Implementation, InitializeRequestParams,
-    InitializeResult, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerInfo,
+    InitializeResult, ListToolsResult, Meta, PaginatedRequestParams, ServerCapabilities,
+    ServerInfo,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use serde_json::{Map, Value};
@@ -113,10 +114,43 @@ impl OrbitToolServer {
             .unwrap_or_default()
     }
 
-    fn session_context_for_call(&self) -> ToolSessionContext {
+    fn session_context_for_call(
+        &self,
+        transport_meta: &Meta,
+    ) -> Result<ToolSessionContext, OrbitError> {
+        if self.host.accepts_remote_session_context()
+            && let Some(remote) = remote_session_context_from_meta(transport_meta)?
+        {
+            let trusted = self.session_context();
+            if remote.transport != Some(orbit_common::types::McpTransport::SshMcp) {
+                return Err(OrbitError::InvalidInput(
+                    "hub remote session metadata must declare ssh-mcp transport".to_string(),
+                ));
+            }
+            if remote.caller_machine_id.is_none()
+                || remote.caller_host_id.is_none()
+                || remote.origin_session_id.is_none()
+                || remote.mcp_call_id.is_none()
+            {
+                return Err(OrbitError::InvalidInput(
+                    "hub remote session metadata requires caller identity and call correlation"
+                        .to_string(),
+                ));
+            }
+            if remote.process_machine_id.is_some() || remote.process_host_id.is_some() {
+                return Err(OrbitError::InvalidInput(
+                    "hub remote session metadata may not claim process identity".to_string(),
+                ));
+            }
+            let mut remote = remote;
+            // The fixed server capability is authority; the connector cannot
+            // expand it through per-call metadata.
+            remote.effective_capabilities = trusted.effective_capabilities;
+            return Ok(remote);
+        }
         let mut context = self.session_context();
         context.mcp_call_id = Some(audit_execution_id("mcall"));
-        context
+        Ok(context)
     }
 
     pub(super) fn canonical_name(&self, advertised: &str) -> Result<String, McpError> {
@@ -141,13 +175,32 @@ impl OrbitToolServer {
         Ok(resolved.unwrap_or_else(|| advertised.to_string()))
     }
 
+    #[cfg(test)]
     pub(super) async fn call_tool_request(
         &self,
         req: CallToolRequestParams,
     ) -> Result<CallToolResult, McpError> {
+        self.call_tool_request_with_meta(req, &Meta::default())
+            .await
+    }
+
+    async fn call_tool_request_with_meta(
+        &self,
+        req: CallToolRequestParams,
+        transport_meta: &Meta,
+    ) -> Result<CallToolResult, McpError> {
         // Generate exactly once before name/exposure preflight. Every dispatch
         // and denial path below receives this same trusted call context.
-        let session_context = self.session_context_for_call();
+        let session_context = match self.session_context_for_call(transport_meta) {
+            Ok(context) => context,
+            Err(denial) => {
+                let context = self.session_context();
+                let denial =
+                    self.host
+                        .reject_tool_call(req.name.as_ref(), &Value::Null, &context, denial);
+                return Ok(tool_error_result(&denial));
+            }
+        };
         let inbound = req.name.to_string();
         let canonical = self.canonical_name(&inbound)?;
         let input = req
@@ -255,13 +308,15 @@ impl ServerHandler for OrbitToolServer {
     fn get_info(&self) -> ServerInfo {
         let implementation = Implementation::new("orbit-mcp", env!("CARGO_PKG_VERSION"));
         let capabilities = ServerCapabilities::builder().enable_tools().build();
+        let instructions = self.host.private_server_instructions().unwrap_or_else(|| {
+            "Orbit tool registry exposed over MCP. Call tools/list to discover available \
+             task, graph, state, and review operations; each tool advertises its own input \
+             schema."
+                .to_string()
+        });
         InitializeResult::new(capabilities)
             .with_server_info(implementation)
-            .with_instructions(
-                "Orbit tool registry exposed over MCP. Call tools/list to discover available \
-                 task, graph, state, and review operations; each tool advertises its own input \
-                 schema.",
-            )
+            .with_instructions(instructions)
     }
 
     async fn list_tools(
@@ -282,9 +337,9 @@ impl ServerHandler for OrbitToolServer {
     async fn call_tool(
         &self,
         req: CallToolRequestParams,
-        _ctx: RequestContext<RoleServer>,
+        ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        self.call_tool_request(req).await
+        self.call_tool_request_with_meta(req, &ctx.meta).await
     }
 }
 
@@ -327,4 +382,19 @@ fn workspace_from_meta(meta: Option<&rmcp::model::JsonObject>) -> Option<String>
     .map(str::trim)
     .filter(|value| !value.is_empty())
     .map(ToOwned::to_owned)
+}
+
+fn remote_session_context_from_meta(meta: &Meta) -> Result<Option<ToolSessionContext>, OrbitError> {
+    let Some(value) = meta
+        .0
+        .get("orbit")
+        .and_then(|orbit| orbit.get(crate::client::REMOTE_SESSION_META_KEY))
+    else {
+        return Ok(None);
+    };
+    serde_json::from_value(value.clone())
+        .map(Some)
+        .map_err(|error| {
+            OrbitError::InvalidInput(format!("invalid hub remote session metadata: {error}"))
+        })
 }

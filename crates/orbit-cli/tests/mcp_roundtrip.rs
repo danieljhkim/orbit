@@ -259,6 +259,22 @@ impl McpClient {
             .unwrap_or_else(|| panic!("`{name}` returned no structuredContent: {result}"))
     }
 
+    fn call_tool_with_meta_ok(&mut self, name: &str, arguments: Value, meta: Value) -> Value {
+        let response = self.request(
+            "tools/call",
+            json!({ "name": name, "arguments": arguments, "_meta": meta }),
+        );
+        let result = response
+            .get("result")
+            .cloned()
+            .unwrap_or_else(|| panic!("tools/call `{name}` returned no result: {response}"));
+        assert_eq!(result["isError"], false, "`{name}` failed: {result}");
+        result
+            .get("structuredContent")
+            .cloned()
+            .unwrap_or_else(|| panic!("`{name}` returned no structuredContent: {result}"))
+    }
+
     /// `tools/call` that must fail as a structured tool error; returns it.
     fn call_tool_err(&mut self, name: &str, arguments: Value) -> Value {
         let result = self.call_tool(name, arguments);
@@ -411,6 +427,11 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
         }),
     );
     assert_eq!(initialized["result"]["serverInfo"]["name"], "orbit-mcp");
+    assert!(
+        initialized["result"]["instructions"]
+            .as_str()
+            .is_some_and(|instructions| instructions.starts_with("orbit-hub-contract-v1:"))
+    );
     client.notify("notifications/initialized");
 
     let listed = client.request("tools/list", Value::Null);
@@ -428,13 +449,27 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
     assert!(!names.contains(&"orbit_host_list"));
     assert!(!names.contains(&"orbit_friction_update"));
 
-    let created = client.call_tool_ok(
+    let created = client.call_tool_with_meta_ok(
         "orbit_task_add",
         json!({
             "workspace": "ws_mcp-roundtrip",
             "title": "Checkoutless hub round trip",
             "description": "Created through fixed hub mode",
             "model": "codex"
+        }),
+        json!({
+            "orbit": {
+                "remote_session_context": {
+                    "workspace": "ws_mcp-roundtrip",
+                    "workspace_id": "ws_mcp-roundtrip",
+                    "caller_machine_id": "hm_spoke",
+                    "caller_host_id": "spoke",
+                    "transport": "ssh-mcp",
+                    "effective_capabilities": ["agent"],
+                    "origin_session_id": "session-spoke",
+                    "mcp_call_id": "mcall-remote-roundtrip"
+                }
+            }
         }),
     );
     assert_eq!(created["title"], "Checkoutless hub round trip");
@@ -475,19 +510,12 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
         .expect("hub task audit");
     assert_eq!(audit.0, 1, "one D2 audit row per accepted call");
     assert_eq!(audit.1.as_deref(), Some("ws_mcp-roundtrip"));
-    assert_eq!(
-        audit.2, audit.3,
-        "local hub caller and process identities match"
-    );
-    assert!(audit.2.as_deref().is_some_and(|id| id.starts_with("hm_")));
-    assert_eq!(audit.4.as_deref(), Some("local"));
+    assert_eq!(audit.2.as_deref(), Some("hm_spoke"));
+    assert!(audit.3.as_deref().is_some_and(|id| id.starts_with("hm_")));
+    assert_ne!(audit.2, audit.3, "caller and hub process stay distinct");
+    assert_eq!(audit.4.as_deref(), Some("ssh-mcp"));
     assert_eq!(audit.5.as_deref(), Some("[\"agent\"]"));
-    assert!(
-        audit
-            .6
-            .as_deref()
-            .is_some_and(|id| id.starts_with("mcall-"))
-    );
+    assert_eq!(audit.6.as_deref(), Some("mcall-remote-roundtrip"));
 
     let graph_audit = connection
         .query_row(
