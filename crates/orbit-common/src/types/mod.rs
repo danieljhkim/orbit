@@ -40,6 +40,7 @@ pub mod host;
 pub mod id;
 pub mod invocation;
 pub mod job;
+pub mod knowledge_allocation;
 pub mod learning;
 pub mod metrics;
 pub mod policy_decision;
@@ -118,6 +119,10 @@ pub use job::{
     AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRun, JobRunState, JobRunStep,
     JobScheduleState, JobStep, JobTargetType, KnowledgeRunMetrics, RunEvent, StepCondition,
     default_job_max_active_runs, default_max_iterations, default_retry_backoff_seconds,
+};
+pub use knowledge_allocation::{
+    HUB_KNOWLEDGE_ALLOCATION_METHOD_V1, HUB_KNOWLEDGE_ALLOCATION_SCHEMA_VERSION,
+    HubKnowledgeAllocationRequestV1, HubKnowledgeAllocationV1, KnowledgeIdKind,
 };
 pub use learning::{
     DEFAULT_LEARNING_REMINDER_PER_CALL_CAP, DEFAULT_LEARNING_REMINDER_SESSION_CAP, EvidenceKind,

@@ -36,7 +36,7 @@ use self::hub::HubMcpHost;
 use self::hub_link::HubLinkPool;
 use self::learning::{LearningSidecarDecorator, LearningSidecarHost};
 use self::schema::RemoteInputSchemaResolver;
-use self::transport::{RemoteCallContextResolver, SpokeRegistrationHandler};
+use self::transport::{PrivateHubRequestHandler, RemoteCallContextResolver};
 
 pub use self::host::{canonical_mcp_tool_definitions, safe_mcp_tool_names};
 pub use self::registration::register_local_spoke;
@@ -150,6 +150,6 @@ fn hub_server_composition(host: Arc<HubMcpHost>) -> McpServerComposition {
         .with_result_decorator(learning)
         .with_call_context_resolver(Arc::new(RemoteCallContextResolver))
         .with_input_schema_resolver(Arc::new(RemoteInputSchemaResolver))
-        .with_custom_request_handler(Arc::new(SpokeRegistrationHandler::new(Arc::clone(&host))))
+        .with_custom_request_handler(Arc::new(PrivateHubRequestHandler::new(Arc::clone(&host))))
         .with_metadata(McpServerMetadata::default().with_instructions(host.private_instructions()))
 }
