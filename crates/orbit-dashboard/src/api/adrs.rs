@@ -11,7 +11,6 @@ use serde_json::{Map, Value, json};
 use super::{bad_request, bounded_limit, map_runtime_error, non_empty_string};
 
 const ADRS_DEFAULT_LIMIT: usize = 100;
-const ADR_TOOL_MODEL: &str = orbit_common::model_defaults::CODEX_DEFAULT_MODEL;
 
 #[derive(Deserialize, Default)]
 pub(super) struct AdrsQuery {
@@ -31,6 +30,12 @@ pub(super) struct AdrsQuery {
 /// `title` and `body` are required (validated in the handler for a structured
 /// 400 rather than serde's default rejection); the remaining fields default to
 /// empty. Status is not a field — the tool always creates a Proposed ADR.
+/// `model` carries caller-supplied attribution (the canonical agent family,
+/// e.g. `codex`/`claude`, or `human`) and is forwarded to the tool host
+/// unchanged; when absent, the tool host attributes the write to the human
+/// actor label rather than defaulting to a model constant. `orbit.adr.add`
+/// rejects a separate `agent` field (attribution was consolidated to
+/// `model`-only), so this body does not accept one.
 #[derive(Deserialize, Default)]
 pub(super) struct CreateAdrBody {
     #[serde(default)]
@@ -39,6 +44,8 @@ pub(super) struct CreateAdrBody {
     body: Option<String>,
     #[serde(default)]
     owner: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
     #[serde(default)]
     related_features: Vec<String>,
     #[serde(default)]
@@ -55,6 +62,8 @@ pub(super) struct SupersedeAdrBody {
     by: Option<String>,
     #[serde(default)]
     reason: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
 }
 
 /// Partial-update payload for `PATCH /adrs/:id`, mirroring the mutable fields
@@ -84,6 +93,8 @@ pub(super) struct AdrPatchBody {
     supersedes: Option<Vec<String>>,
     #[serde(default)]
     legacy_ids: Option<Vec<String>>,
+    #[serde(default)]
+    model: Option<String>,
 }
 
 pub(super) async fn list_adrs(Ws(runtime): Ws, Query(query): Query<AdrsQuery>) -> Response {
@@ -184,8 +195,13 @@ pub(super) async fn create_adr_action(
     {
         object.insert("owner".to_string(), Value::String(owner));
     }
+    if let Some(model) = body.model.as_deref().and_then(non_empty_string)
+        && let Some(object) = input.as_object_mut()
+    {
+        object.insert("model".to_string(), Value::String(model));
+    }
 
-    match run_adr_tool(&runtime, "orbit.adr.add", input) {
+    match runtime.run_tool("orbit.adr.add", input) {
         Ok(adr) => match adr.get("id").and_then(Value::as_str) {
             Some(id) => match adr_show(&runtime, id) {
                 Ok(resolved) => Json(resolved).into_response(),
@@ -200,8 +216,7 @@ pub(super) async fn create_adr_action(
 }
 
 pub(super) async fn accept_adr_action(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
-    let result = run_adr_tool(
-        &runtime,
+    let result = runtime.run_tool(
         "orbit.adr.update",
         json!({
             "id": id.clone(),
@@ -236,6 +251,7 @@ pub(super) async fn update_adr_action(
         paths,
         supersedes,
         legacy_ids,
+        model,
     } = body;
 
     let mut input = Map::new();
@@ -249,12 +265,13 @@ pub(super) async fn update_adr_action(
     insert_optional_list(&mut input, "paths", paths);
     insert_optional_list(&mut input, "supersedes", supersedes);
     insert_optional_list(&mut input, "legacy_ids", legacy_ids);
+    insert_optional_string(&mut input, "model", model);
     if input.is_empty() {
         return bad_request("request body must include at least one updatable field".to_string());
     }
     input.insert("id".to_string(), Value::String(id.clone()));
 
-    match run_adr_tool(&runtime, "orbit.adr.update", Value::Object(input)) {
+    match runtime.run_tool("orbit.adr.update", Value::Object(input)) {
         Ok(_) => match adr_show(&runtime, &id) {
             Ok(adr) => Json(adr).into_response(),
             Err(e) => map_runtime_error(e),
@@ -276,14 +293,17 @@ pub(super) async fn supersede_adr_action(
     };
     let _reason = body.reason.as_deref().and_then(non_empty_string);
 
-    let result = run_adr_tool(
-        &runtime,
-        "orbit.adr.supersede",
-        json!({
-            "old_id": id.clone(),
-            "new_id": by.clone(),
-        }),
-    );
+    let mut input = json!({
+        "old_id": id.clone(),
+        "new_id": by.clone(),
+    });
+    if let Some(object) = input.as_object_mut()
+        && let Some(model) = body.model.as_deref().and_then(non_empty_string)
+    {
+        object.insert("model".to_string(), Value::String(model));
+    }
+
+    let result = runtime.run_tool("orbit.adr.supersede", input);
 
     match result {
         Ok(_) => {
@@ -322,7 +342,7 @@ fn insert_optional_list(input: &mut Map<String, Value>, key: &str, value: Option
 }
 
 fn adr_list(runtime: &OrbitRuntime, input: Map<String, Value>) -> Result<Vec<Value>, OrbitError> {
-    let value = run_adr_tool(runtime, "orbit.adr.list", Value::Object(input))?;
+    let value = runtime.run_tool("orbit.adr.list", Value::Object(input))?;
     match value {
         Value::Array(adrs) => Ok(adrs),
         other => Err(OrbitError::Execution(format!(
@@ -332,16 +352,7 @@ fn adr_list(runtime: &OrbitRuntime, input: Map<String, Value>) -> Result<Vec<Val
 }
 
 fn adr_show(runtime: &OrbitRuntime, id: &str) -> Result<Value, OrbitError> {
-    run_adr_tool(runtime, "orbit.adr.show", json!({ "id": id }))
-}
-
-fn run_adr_tool(runtime: &OrbitRuntime, name: &str, mut input: Value) -> Result<Value, OrbitError> {
-    if let Some(object) = input.as_object_mut() {
-        object
-            .entry("model".to_string())
-            .or_insert_with(|| Value::String(ADR_TOOL_MODEL.to_string()));
-    }
-    runtime.run_tool(name, input)
+    runtime.run_tool("orbit.adr.show", json!({ "id": id }))
 }
 
 fn adr_stats_to_json(adrs: &[Value]) -> Value {

@@ -185,6 +185,55 @@ async fn create_persists_proposed_adr_and_reads_back() {
 }
 
 #[tokio::test]
+async fn create_without_attribution_defaults_owner_to_human() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request_create(
+        runtime,
+        Some("http://localhost:7878"),
+        Some(json!({
+            "title": "No attribution supplied",
+            "body": ADR_BODY,
+            "related_features": ["dashboard"],
+            "related_tasks": ["ORB-00063"],
+        })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let created = body_json(response).await;
+    assert_eq!(
+        created["owner"], "human",
+        "identity-less writes attribute to the human actor label, not a model constant"
+    );
+}
+
+#[tokio::test]
+async fn create_forwards_explicit_model_attribution() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request_create(
+        runtime,
+        Some("http://localhost:7878"),
+        Some(json!({
+            "title": "Explicit attribution supplied",
+            "body": ADR_BODY,
+            "model": TEST_CODEX_MODEL,
+            "related_features": ["dashboard"],
+            "related_tasks": ["ORB-00063"],
+        })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let created = body_json(response).await;
+    assert_eq!(
+        created["owner"], TEST_CODEX_MODEL,
+        "caller-supplied `model` is forwarded to the tool host unchanged"
+    );
+}
+
+#[tokio::test]
 async fn federated_http_show_and_mutators_preserve_typed_origin_boundary() {
     let root = tempfile::tempdir().expect("tempdir");
     let global_root = root.path().join("global");
@@ -576,6 +625,70 @@ async fn update_sets_status_and_tags() {
         )
         .expect("show adr");
     assert_eq!(stored["status"], "accepted");
+}
+
+fn transition_audit_actor(runtime: &OrbitRuntime, adr_id: &str) -> String {
+    let events = runtime
+        .list_audit_events(None, Some("orbit.adr.update".to_string()), None, None, 20)
+        .expect("audit events");
+    let event = events
+        .iter()
+        .find(|event| {
+            event
+                .arguments_json
+                .as_deref()
+                .is_some_and(|args| args.contains(adr_id))
+        })
+        .expect("transition audit event");
+    let payload: Value = serde_json::from_str(event.arguments_json.as_deref().expect("args"))
+        .expect("audit payload");
+    payload["actor"].as_str().expect("actor field").to_string()
+}
+
+#[tokio::test]
+async fn update_without_attribution_records_human_actor_in_audit() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let adr = seed_adr(&runtime, "No attribution transition", vec!["ORB-00063"]);
+
+    let response = request_update(
+        runtime.clone(),
+        adr_id(&adr),
+        Some("http://localhost:7878"),
+        Some(json!({ "status": "accepted" })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        transition_audit_actor(&runtime, adr_id(&adr)),
+        "human",
+        "identity-less transitions attribute to the human actor label"
+    );
+}
+
+#[tokio::test]
+async fn update_forwards_explicit_model_attribution_to_audit() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let adr = seed_adr(
+        &runtime,
+        "Explicit attribution transition",
+        vec!["ORB-00063"],
+    );
+
+    let response = request_update(
+        runtime.clone(),
+        adr_id(&adr),
+        Some("http://localhost:7878"),
+        Some(json!({ "status": "accepted", "model": TEST_CODEX_MODEL })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        transition_audit_actor(&runtime, adr_id(&adr)),
+        TEST_CODEX_MODEL,
+        "caller-supplied `model` is forwarded to the tool host unchanged"
+    );
 }
 
 #[tokio::test]

@@ -11,7 +11,7 @@ use serde_json::{Map, Value, json};
 use super::{bad_request, bounded_limit, map_runtime_error, non_empty_string};
 
 const FRICTIONS_DEFAULT_LIMIT: usize = 100;
-const FRICTION_TOOL_MODEL: &str = orbit_common::model_defaults::CODEX_DEFAULT_MODEL;
+const HUMAN_ACTOR_LABEL: &str = "human";
 
 #[derive(Deserialize, Default)]
 pub(super) struct FrictionsQuery {
@@ -30,12 +30,13 @@ pub(super) struct FrictionsQuery {
 }
 
 /// Create body for `POST /frictions`. Mirrors the `orbit.friction.add` tool
-/// schema: `body` is required, `model` provenance and `tags`/`during_task` are
-/// optional. Field parsing and validation stay in the shared runtime add path
-/// so the wire shape and defaults match the native MCP tool exactly. `model`
-/// falls back to the dashboard default (`FRICTION_TOOL_MODEL`) via
-/// [`run_friction_tool`] when the caller omits it, matching the other friction
-/// routes.
+/// schema: `body` is required, `model` provenance and `tags`/`during_task`
+/// are optional. Field parsing and validation stay in the shared runtime add
+/// path so the wire shape and defaults match the native MCP tool exactly.
+/// `model` falls back to the human actor label via [`run_friction_tool`] when
+/// the caller omits it, matching the ADR routes. `orbit.friction.add` rejects
+/// a separate `agent` field (attribution was consolidated to `model`-only),
+/// so this body does not accept one.
 #[derive(Deserialize, Default)]
 pub(super) struct CreateFrictionBody {
     #[serde(default)]
@@ -209,17 +210,21 @@ fn insert_optional(input: &mut Map<String, Value>, key: &str, value: Option<&str
     }
 }
 
+/// `orbit.friction.add` requires a non-empty `model`; when the caller supplies
+/// no attribution, default to the human actor label rather than a model
+/// constant. No other friction tool consumes `model`, so this only touches
+/// `orbit.friction.add`.
 fn run_friction_tool(
     runtime: &OrbitRuntime,
     name: &str,
     mut input: Value,
 ) -> Result<Value, OrbitError> {
-    if name != "orbit.friction.list"
+    if name == "orbit.friction.add"
         && let Some(object) = input.as_object_mut()
     {
         object
             .entry("model".to_string())
-            .or_insert_with(|| Value::String(FRICTION_TOOL_MODEL.to_string()));
+            .or_insert_with(|| Value::String(HUMAN_ACTOR_LABEL.to_string()));
     }
     runtime.run_tool(name, input)
 }
