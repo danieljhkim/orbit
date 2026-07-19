@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use orbit_common::types::{
     McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, OrbitError,
@@ -14,6 +15,36 @@ use super::super::test_support::{EchoArrayHost, StubHost, tool_schema};
 struct MissingPolicyHost;
 
 struct CapabilityHost;
+
+struct RemoteMetadataHost {
+    called: AtomicBool,
+}
+
+impl crate::McpHost for RemoteMetadataHost {
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        Ok(vec![
+            McpToolDefinition::new(
+                tool_schema("demo.remote"),
+                McpToolPolicy::agent_and_operator(McpToolPlacement::Hub),
+            )
+            .expect("remote definition"),
+        ])
+    }
+
+    fn accepts_remote_session_context(&self) -> bool {
+        true
+    }
+
+    fn call_tool(
+        &self,
+        _name: &str,
+        _input: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        self.called.store(true, Ordering::SeqCst);
+        Ok(json!({ "must_not_execute": true }))
+    }
+}
 
 impl crate::McpHost for CapabilityHost {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
@@ -141,8 +172,10 @@ async fn managed_empty_capability_set_is_never_upgraded_and_runner_is_non_hierar
         .expect("empty capability denial is structured");
     assert_eq!(denied.is_error, Some(true));
 
-    let mut runner_context = ToolSessionContext::default();
-    runner_context.effective_capabilities = [McpCapability::Runner].into_iter().collect();
+    let runner_context = ToolSessionContext {
+        effective_capabilities: [McpCapability::Runner].into_iter().collect(),
+        ..ToolSessionContext::default()
+    };
     let runner = OrbitToolServer::new_with_context(Arc::new(CapabilityHost), runner_context);
     let names = runner
         .visible_tool_schemas()
@@ -151,6 +184,25 @@ async fn managed_empty_capability_set_is_never_upgraded_and_runner_is_non_hierar
         .map(|schema| schema.name)
         .collect::<Vec<_>>();
     assert_eq!(names, vec!["demo.runner"]);
+}
+
+#[tokio::test]
+async fn hub_tool_call_without_connector_metadata_fails_before_dispatch() {
+    let host = Arc::new(RemoteMetadataHost {
+        called: AtomicBool::new(false),
+    });
+    let mut trusted = ToolSessionContext::trusted_local(None, None, None);
+    trusted.effective_capabilities = [McpCapability::Agent].into_iter().collect();
+    let server_host: Arc<dyn crate::McpHost> = host.clone();
+    let server = OrbitToolServer::new_with_context(server_host, trusted);
+
+    let denied = server
+        .call_tool_request(CallToolRequestParams::new("demo_remote"))
+        .await
+        .expect("missing metadata is a structured tool denial");
+
+    assert_eq!(denied.is_error, Some(true));
+    assert!(!host.called.load(Ordering::SeqCst));
 }
 
 #[tokio::test]

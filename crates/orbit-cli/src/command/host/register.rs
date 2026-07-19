@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 
 use clap::Args;
-use orbit_core::routines::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode};
+use orbit_core::routines::{
+    HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, load_host_identity,
+};
 use orbit_core::{HostRegistryService, OrbitError, OrbitRuntime, require_local_hub_identity};
 
 use crate::command::Execute;
@@ -25,10 +27,26 @@ pub struct HostRegisterArgs {
 
 impl Execute for HostRegisterArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        // This direct administration surface may only open the coordination
-        // store on the hub. Spokes must use the later MCP registration path.
-        let local_hub = require_local_hub_identity(&runtime.global_root())?;
         let labels: BTreeSet<String> = self.labels.into_iter().collect();
+        let local_identity = load_host_identity(&runtime.global_root())?;
+        if local_identity.mode == HostMode::Spoke {
+            if self.machine_id.is_some() || self.host_id.is_some() {
+                return Err(OrbitError::InvalidInput(
+                    "spoke registration reads machine_id and host_id only from validated host.toml; --machine-id/--host-id overrides are forbidden"
+                        .to_string(),
+                ));
+            }
+            let record =
+                crate::command::mcp::register_local_spoke(runtime, &local_identity, labels)?;
+            println!(
+                "registered spoke '{}' (machine_id {}) with the verified hub and refreshed the local registry cache",
+                record.host_id, record.machine_id
+            );
+            return Ok(());
+        }
+
+        // Direct coordination-store administration remains hub-local.
+        let local_hub = require_local_hub_identity(&runtime.global_root())?;
 
         let (identity, is_current_machine) = match (self.machine_id, self.host_id) {
             (Some(machine_id), Some(host_id)) if machine_id == local_hub.machine_id => {

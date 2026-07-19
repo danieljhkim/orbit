@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
-use orbit_common::types::OrbitError;
+use orbit_common::types::{McpTransport, OrbitError, ToolSessionContext};
 
 use super::super::artifact_put::*;
 use crate::{OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, Tool, ToolContext};
@@ -142,4 +142,45 @@ fn artifact_put_size_failure_never_calls_host() {
 
     assert!(error.to_string().contains("content limit"));
     assert!(host.call.lock().expect("host call").is_none());
+}
+
+#[test]
+fn preloaded_artifact_payload_is_private_to_authenticated_ssh_mcp() {
+    let host = RecordingHost::default();
+    let ctx = ToolContext {
+        session_context: ToolSessionContext {
+            transport: Some(McpTransport::SshMcp),
+            ..ToolSessionContext::default()
+        },
+        orbit_host: Some(Arc::new(host.clone())),
+        ..ToolContext::default()
+    };
+    OrbitTaskArtifactPutTool
+        .execute(
+            &ctx,
+            json!({
+                "id": "ORB-00001",
+                "artifacts": [{"path": "reports/result.txt", "content": [111, 107]}],
+                "model": "codex"
+            }),
+        )
+        .expect("authenticated hub accepts path-free connector payload");
+    let call = host.call.lock().expect("recorded call").take().unwrap();
+    assert_eq!(call.action, OrbitBuiltinAction::TaskUpdate);
+    assert_eq!(call.input["artifacts"][0]["path"], "reports/result.txt");
+
+    let local = ToolContext {
+        orbit_host: Some(Arc::new(RecordingHost::default())),
+        ..ToolContext::default()
+    };
+    let error = OrbitTaskArtifactPutTool
+        .execute(
+            &local,
+            json!({
+                "id": "ORB-00001",
+                "artifacts": [{"path": "reports/result.txt", "content": [111, 107]}]
+            }),
+        )
+        .expect_err("ordinary local/model calls cannot inject the private payload");
+    assert!(error.to_string().contains("authenticated ssh-mcp"));
 }

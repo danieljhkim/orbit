@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use orbit_common::types::{
@@ -31,6 +31,8 @@ use orbit_core::{
 use orbit_mcp::McpHost;
 use serde::Deserialize;
 use serde_json::{Value, json};
+
+use super::hub_link::HubLinkPool;
 
 pub(crate) const ORBIT_MCP_SERVER_ID: &str = "orbit";
 
@@ -117,6 +119,7 @@ struct WorkspaceIdentityDocument {
 pub(super) struct BrokerMcpHost {
     global_root: PathBuf,
     runtimes: Mutex<BTreeMap<RuntimeCacheKey, OrbitRuntime>>,
+    hub_links: Option<Arc<HubLinkPool>>,
 }
 
 impl BrokerMcpHost {
@@ -124,7 +127,64 @@ impl BrokerMcpHost {
         Self {
             global_root,
             runtimes: Mutex::new(BTreeMap::new()),
+            hub_links: None,
         }
+    }
+
+    pub(super) fn new_with_hub_link(global_root: PathBuf, hub_links: HubLinkPool) -> Self {
+        Self {
+            global_root,
+            runtimes: Mutex::new(BTreeMap::new()),
+            hub_links: Some(Arc::new(hub_links)),
+        }
+    }
+
+    fn is_spoke(&self) -> Result<bool, OrbitError> {
+        Ok(matches!(
+            inspect_host_identity(&self.global_root)?,
+            HostIdentityState::Present(identity) if identity.mode == HostMode::Spoke
+        ))
+    }
+
+    fn scalar_capability(
+        context: &ToolSessionContext,
+    ) -> Result<orbit_common::types::McpCapability, OrbitError> {
+        if context.effective_capabilities.len() != 1 {
+            return Err(OrbitError::InvalidInput(
+                "remote hub routing requires exactly one effective capability".to_string(),
+            ));
+        }
+        context
+            .effective_capabilities
+            .iter()
+            .next()
+            .copied()
+            .ok_or_else(|| {
+                OrbitError::InvalidInput("remote hub routing requires a capability".to_string())
+            })
+    }
+
+    fn remote_hub_call(
+        &self,
+        name: &str,
+        input: Value,
+        mut context: ToolSessionContext,
+        workspace_id: Option<&str>,
+    ) -> Result<Value, OrbitError> {
+        let pool = self.hub_links.as_ref().ok_or_else(|| {
+            OrbitError::HubUnavailable(
+                "this spoke has no initialized MCP hub link; local fallback is forbidden"
+                    .to_string(),
+            )
+        })?;
+        context = normalize_trusted_call_context(context);
+        context.transport = Some(McpTransport::SshMcp);
+        context.process_machine_id = None;
+        context.process_host_id = None;
+        context.workspace = workspace_id.map(ToOwned::to_owned);
+        context.workspace_id = workspace_id.map(ToOwned::to_owned);
+        let capability = Self::scalar_capability(&context)?;
+        pool.call(capability, name, input, context)
     }
 
     fn definition(&self, name: &str) -> Result<McpToolDefinition, OrbitError> {
@@ -391,8 +451,8 @@ impl BrokerMcpHost {
             }
         };
         match placement {
-            McpToolPlacement::Hub if mode == HostMode::Spoke => {
-                Err(OrbitError::InvalidInput(format!(
+            McpToolPlacement::Hub if mode == HostMode::Spoke && self.hub_links.is_none() => {
+                Err(OrbitError::HubUnavailable(format!(
                     "hub placement for workspace '{workspace_id}' is unavailable from this spoke: no MCP hub transport is configured"
                 )))
             }
@@ -522,6 +582,9 @@ impl BrokerMcpHost {
             return Err(error);
         }
         if definition.policy.scope() == McpToolScope::Global {
+            if self.is_spoke()? {
+                return self.remote_hub_call(name, input, context, None);
+            }
             let result = self.global_call(name);
             self.record_coordination_outcome(name, &context, &result);
             return result;
@@ -544,6 +607,17 @@ impl BrokerMcpHost {
                 .or_else(|| input.get("with-context"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
+        if with_context
+            && definition.policy.placement() == McpToolPlacement::Hub
+            && self.is_spoke()?
+        {
+            let error = OrbitError::InvalidInput(
+                "remote `orbit.task.show` cannot provide `with_context`; checkout-derived enrichment is local-only and local coordination fallback is forbidden"
+                    .to_string(),
+            );
+            self.record_preflight_denial(name, &input, &context, &error);
+            return Err(error);
+        }
         let require_local = definition.policy.placement() != McpToolPlacement::Hub || with_context;
         let (workspace_id, binding) = match self.resolve_workspace(selector, require_local) {
             Ok(resolved) => resolved,
@@ -568,6 +642,21 @@ impl BrokerMcpHost {
                 && object.contains_key("workspace")
             {
                 object.insert("workspace".to_string(), Value::String(workspace_id.clone()));
+            }
+            if self.is_spoke()? {
+                if name == "orbit.task.artifact.put" {
+                    input = match orbit_core::prepare_remote_task_artifact_put(
+                        input,
+                        std::env::current_dir().ok().as_deref(),
+                    ) {
+                        Ok(prepared) => prepared,
+                        Err(error) => {
+                            self.record_preflight_denial(name, &Value::Null, &context, &error);
+                            return Err(error);
+                        }
+                    };
+                }
+                return self.remote_hub_call(name, input, context, Some(&workspace_id));
             }
             let legacy_root = self.legacy_friction_root(&workspace_id, binding.as_ref());
             let result = HubCoordinationExecutor::new(&self.global_root, workspace_id, legacy_root)
@@ -755,7 +844,7 @@ fn record_mcp_preflight_failure(
     }
 }
 
-fn mcp_preflight_failure_params(
+pub(super) fn mcp_preflight_failure_params(
     name: &str,
     session_context: &ToolSessionContext,
     err: &OrbitError,

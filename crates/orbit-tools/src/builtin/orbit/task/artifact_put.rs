@@ -44,42 +44,65 @@ impl Tool for OrbitTaskArtifactPutTool {
 
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
         super::super::reject_agent_field(&input, "orbit.task.artifact.put")?;
-        let id = super::super::required_string(&input, &["id"], "id")?;
-        let source_path = super::super::required_string(
-            &input,
-            &["source_path", "sourcePath", "source-path"],
-            "source_path",
-        )?;
-        let artifact_path = super::super::optional_string_alias(
-            &input,
-            &["path", "artifact_path", "artifactPath"],
-        )?;
-        let resolved_source_path = resolve_source_path(ctx, &source_path);
-        let artifact = read_bounded_artifact(&resolved_source_path, artifact_path.as_deref())?;
+        // A spoke broker reads the caller-local source before crossing the
+        // hub link, then sends this path-free private payload under the same
+        // canonical tool name. The hub accepts that shape only on ssh-mcp;
+        // local/model calls must continue to supply a real source_path.
+        if input.get("artifacts").is_some() {
+            if ctx.session_context.transport != Some(orbit_common::types::McpTransport::SshMcp)
+                || input.get("source_path").is_some()
+                || input.get("sourcePath").is_some()
+                || input.get("source-path").is_some()
+            {
+                return Err(OrbitError::InvalidInput(
+                    "preloaded task artifact payloads are accepted only from the authenticated ssh-mcp spoke connector"
+                        .to_string(),
+                ));
+            }
+            return super::super::execute_host_action(ctx, input, OrbitBuiltinAction::TaskUpdate);
+        }
 
-        let mut update_input = input.as_object().cloned().unwrap_or_else(Map::new);
-        update_input.insert("id".to_string(), Value::String(id));
-        update_input.remove("source_path");
-        update_input.remove("sourcePath");
-        update_input.remove("source-path");
-        update_input.remove("path");
-        update_input.remove("artifact_path");
-        update_input.remove("artifactPath");
-        update_input.insert(
-            "artifacts".to_string(),
-            json!([{
-                "path": artifact.path,
-                "media_type": artifact.media_type,
-                "content": artifact.content,
-            }]),
-        );
+        let update_input = prepare_remote_payload(input, ctx.cwd.as_deref().map(Path::new))?;
 
-        super::super::execute_host_action(
-            ctx,
-            Value::Object(update_input),
-            OrbitBuiltinAction::TaskUpdate,
-        )
+        super::super::execute_host_action(ctx, update_input, OrbitBuiltinAction::TaskUpdate)
     }
+}
+
+/// Read a caller-local task artifact into the bounded, path-free payload used
+/// by the spoke connector. The source path is consumed locally and never
+/// appears in the returned coordination frame.
+pub(crate) fn prepare_remote_payload(
+    input: Value,
+    cwd: Option<&Path>,
+) -> Result<Value, OrbitError> {
+    let id = super::super::required_string(&input, &["id"], "id")?;
+    let source_path = super::super::required_string(
+        &input,
+        &["source_path", "sourcePath", "source-path"],
+        "source_path",
+    )?;
+    let artifact_path =
+        super::super::optional_string_alias(&input, &["path", "artifact_path", "artifactPath"])?;
+    let resolved_source_path = resolve_source_path(cwd, &source_path);
+    let artifact = read_bounded_artifact(&resolved_source_path, artifact_path.as_deref())?;
+
+    let mut update_input = input.as_object().cloned().unwrap_or_else(Map::new);
+    update_input.insert("id".to_string(), Value::String(id));
+    update_input.remove("source_path");
+    update_input.remove("sourcePath");
+    update_input.remove("source-path");
+    update_input.remove("path");
+    update_input.remove("artifact_path");
+    update_input.remove("artifactPath");
+    update_input.insert(
+        "artifacts".to_string(),
+        json!([{
+            "path": artifact.path,
+            "media_type": artifact.media_type,
+            "content": artifact.content,
+        }]),
+    );
+    Ok(Value::Object(update_input))
 }
 
 fn read_bounded_artifact(
@@ -133,14 +156,10 @@ fn read_bounded_artifact(
     })
 }
 
-fn resolve_source_path(ctx: &ToolContext, source_path: &str) -> PathBuf {
+fn resolve_source_path(cwd: Option<&Path>, source_path: &str) -> PathBuf {
     let path = PathBuf::from(source_path);
     if path.is_absolute() {
         return path;
     }
-    ctx.cwd
-        .as_ref()
-        .map(PathBuf::from)
-        .map(|cwd| cwd.join(&path))
-        .unwrap_or(path)
+    cwd.map(|cwd| cwd.join(&path)).unwrap_or(path)
 }

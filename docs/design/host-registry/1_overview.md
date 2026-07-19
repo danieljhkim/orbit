@@ -1,7 +1,7 @@
 ---
 title: Host Registry — Overview
 owner: claude
-last_updated: 2026-07-17
+last_updated: 2026-07-18
 status: Accepted
 feature: host-registry
 doc_role: overview
@@ -10,7 +10,7 @@ summary: First-class, validated machine identity plus a main-host inventory, ena
 tags: [host-registry, multi-host, dispatch, routines]
 paths: ["crates/orbit-registry/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access]
-related_artifacts: [ORB-00424, ORB-10248, ORB-10249, ORB-10302, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10248, ORB-10249, ORB-10268, ORB-10302, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Host Registry — Overview
@@ -100,7 +100,7 @@ authority — that direction was already rejected ([ADR-0200], the archived
 | Versioned logical-workspace catalog + local checkout bindings | [crates/orbit-registry/src/workspace_registry.rs](../../../crates/orbit-registry/src/workspace_registry.rs) | [ORB-10248], [ORB-10302] |
 | Host/workspace registry service + satellite cache | [crates/orbit-registry/src/](../../../crates/orbit-registry/src/) | [ORB-10302] |
 | Logical task coordination registry + single-authority allocator | [crates/orbit-store/src/sqlite/task_registry/](../../../crates/orbit-store/src/sqlite/task_registry/) | [ORB-10249] |
-| MCP surface (`orbit.host.*`, placement) | [mcp-bridge/2_design.md](../mcp-bridge/2_design.md) | [ORB-00424] |
+| MCP hub trust/server and placement surface | [mcp-bridge/2_design.md](../mcp-bridge/2_design.md) | [ORB-10262], [ORB-10268] |
 | Routine sweep host filter | [docs/design/routines/2_design.md](../routines/2_design.md) | — |
 
 Detailed mechanisms in [2_design.md](./2_design.md); open directions in
@@ -115,6 +115,8 @@ Detailed mechanisms in [2_design.md](./2_design.md); open directions in
   checkout paths and owner/replica bindings.
 - [ORB-10249] — split logical task-registry workspace records from optional
   local checkout bindings and made task relations/readiness global by task ID.
+- [ORB-10268] — implemented the machine-global hub trust document and the
+  checkoutless hub MCP endpoint that consumes registry identity and store authority.
 - [ORB-10302] — established `orbit-registry` as the host/workspace domain crate,
   retaining execution-profile construction in `orbit-core` and persistence in
   `orbit-store` ([ADR-0235]).

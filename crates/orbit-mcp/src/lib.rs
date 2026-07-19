@@ -35,19 +35,26 @@
 //! are follow-up work once authentication is in scope.
 
 mod adapter;
+mod client;
 mod error;
+mod hub_contract;
 
 use std::sync::Arc;
 
 use orbit_common::types::{
     LearningInjectionState, McpToolDefinition, McpToolPolicyError, NotFoundKind, OrbitError,
-    ToolSessionContext,
+    SpokeRegistrationRequestV1, SpokeRegistrationResultV1, ToolSessionContext,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::io::stdio;
 use serde_json::Value;
 
 pub use adapter::OrbitToolServer;
+pub use client::{HubClientExpectation, OrbitMcpClient, validate_remote_call_context};
+pub use hub_contract::{
+    CANONICAL_MCP_REGISTRY_REVISION, HUB_CONTRACT_INSTRUCTIONS_PREFIX, HUB_SCHEMA_DOMAIN,
+    HubServerContractV1, MCP_CONTRACT_REVISION, canonical_hub_schema_bytes, hub_schema_digest,
+};
 
 /// Canonical names implemented by the in-process graph adapter.
 pub fn graph_tool_names() -> &'static [&'static str] {
@@ -70,6 +77,51 @@ pub fn graph_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPol
 /// implementation without first crossing the latter host seam.
 pub trait McpHost: Send + Sync + 'static {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError>;
+
+    /// Whether the adapter may install its local-checkout graph implementations.
+    /// The ordinary broker enables them by default. A checkoutless hub server
+    /// disables them structurally so adapter-owned local-derived tools cannot
+    /// be merged back into its hub-only surface.
+    fn in_process_graph_tools_enabled(&self) -> bool {
+        true
+    }
+
+    /// Private initialize instructions used only by a fixed hub transport.
+    /// Ordinary MCP servers keep the human-readable default.
+    fn private_server_instructions(&self) -> Option<String> {
+        None
+    }
+
+    /// Whether connector-owned per-call metadata may replace the local
+    /// session context. Only the explicit checkoutless hub host enables this.
+    fn accepts_remote_session_context(&self) -> bool {
+        false
+    }
+
+    /// Handle the one connector-private spoke bootstrap request.
+    ///
+    /// `None` is the secure default and makes the adapter return JSON-RPC
+    /// `METHOD_NOT_FOUND`. Only the explicit checkoutless hub host overrides
+    /// this seam. It is never represented by an MCP tool definition.
+    fn private_register_spoke(
+        &self,
+        _request: SpokeRegistrationRequestV1,
+        _session_context: ToolSessionContext,
+    ) -> Option<Result<SpokeRegistrationResultV1, OrbitError>> {
+        None
+    }
+
+    /// Validate trusted call identity before the adapter resolves a canonical
+    /// tool definition. Hub hosts use this to reject unknown/retired callers
+    /// before any registry discovery or domain dispatch.
+    fn preflight_tool_call(
+        &self,
+        _name: &str,
+        _session_context: &ToolSessionContext,
+    ) -> Result<(), OrbitError> {
+        Ok(())
+    }
+
     fn call_tool(
         &self,
         name: &str,

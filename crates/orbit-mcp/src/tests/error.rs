@@ -40,3 +40,31 @@ fn adr_artifact_errors_keep_stable_codes_and_safe_origin() {
         );
     }
 }
+
+#[test]
+fn hub_transport_errors_keep_stable_codes_and_call_identity() {
+    let unavailable = error_payload(&OrbitError::HubUnavailable("offline".to_string()));
+    assert_eq!(unavailable["code"], "hub_unavailable");
+
+    let negotiation = error_payload(&OrbitError::HubNegotiation("digest drift".to_string()));
+    assert_eq!(negotiation["code"], "hub_negotiation");
+
+    let unknown = error_payload(&OrbitError::OutcomeUnknown {
+        mcp_call_id: "mcall-exact".to_string(),
+        message: "EOF after handoff".to_string(),
+    });
+    assert_eq!(unknown["code"], "outcome_unknown");
+    assert!(
+        unknown["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("mcall-exact"))
+    );
+
+    let remote = error_payload(&OrbitError::RemoteTool {
+        code: "invalid_input".to_string(),
+        message: "definitive".to_string(),
+        payload: json!({"code": "invalid_input", "message": "definitive", "detail": 7}),
+    });
+    assert_eq!(remote["code"], "invalid_input");
+    assert_eq!(remote["detail"], 7);
+}

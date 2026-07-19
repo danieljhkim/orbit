@@ -65,7 +65,7 @@ pub(super) fn format_workspace_list(registry: &WorkspaceRegistry) -> String {
             "{:<20} {:<id_width$} {:<8} {:<10} {:<22} {:<8} {}\n",
             workspace.name,
             workspace.id,
-            workspace.status,
+            workspace.status.to_string(),
             orbit_core::resolved_ship_mode(workspace).as_input_value(),
             owner,
             role,

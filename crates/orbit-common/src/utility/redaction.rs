@@ -144,6 +144,24 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         OrbitError::UnsupportedAgentProvider(m) => {
             OrbitError::UnsupportedAgentProvider(redact_sensitive_env_text(&m))
         }
+        OrbitError::HubUnavailable(m) => OrbitError::HubUnavailable(redact_sensitive_env_text(&m)),
+        OrbitError::HubNegotiation(m) => OrbitError::HubNegotiation(redact_sensitive_env_text(&m)),
+        OrbitError::OutcomeUnknown {
+            mcp_call_id,
+            message,
+        } => OrbitError::OutcomeUnknown {
+            mcp_call_id: redact_sensitive_env_text(&mcp_call_id),
+            message: redact_sensitive_env_text(&message),
+        },
+        OrbitError::RemoteTool {
+            code,
+            message,
+            payload,
+        } => OrbitError::RemoteTool {
+            code: redact_sensitive_env_text(&code),
+            message: redact_sensitive_env_text(&message),
+            payload: redact_sensitive_env_json(payload),
+        },
         OrbitError::Execution(m) => OrbitError::Execution(redact_sensitive_env_text(&m)),
         OrbitError::Store(m) => OrbitError::Store(redact_sensitive_env_text(&m)),
         OrbitError::TaskStatusTransition(m) => {
@@ -214,6 +232,24 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
         OrbitError::UnsupportedAgentProvider(m) => {
             OrbitError::UnsupportedAgentProvider(redact_all(&m))
         }
+        OrbitError::HubUnavailable(m) => OrbitError::HubUnavailable(redact_all(&m)),
+        OrbitError::HubNegotiation(m) => OrbitError::HubNegotiation(redact_all(&m)),
+        OrbitError::OutcomeUnknown {
+            mcp_call_id,
+            message,
+        } => OrbitError::OutcomeUnknown {
+            mcp_call_id: redact_all(&mcp_call_id),
+            message: redact_all(&message),
+        },
+        OrbitError::RemoteTool {
+            code,
+            message,
+            payload,
+        } => OrbitError::RemoteTool {
+            code: redact_all(&code),
+            message: redact_all(&message),
+            payload: redact_json_with(payload, redact_all),
+        },
         OrbitError::Execution(m) => OrbitError::Execution(redact_all(&m)),
         OrbitError::Store(m) => OrbitError::Store(redact_all(&m)),
         OrbitError::TaskStatusTransition(m) => OrbitError::TaskStatusTransition(redact_all(&m)),
@@ -221,6 +257,24 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
         OrbitError::Io(m) => OrbitError::Io(redact_all(&m)),
         OrbitError::WorkspaceError(m) => OrbitError::WorkspaceError(redact_all(&m)),
         OrbitError::Migration(m) => OrbitError::Migration(redact_all(&m)),
+    }
+}
+
+fn redact_json_with(value: Value, redact: fn(&str) -> String) -> Value {
+    match value {
+        Value::String(raw) => Value::String(redact(&raw)),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| redact_json_with(item, redact))
+                .collect(),
+        ),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, value)| (key, redact_json_with(value, redact)))
+                .collect(),
+        ),
+        other => other,
     }
 }
 

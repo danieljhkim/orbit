@@ -91,6 +91,13 @@ pub struct ToolDispatchOutcome {
     pub audit_recorded: bool,
 }
 
+struct ToolDispatchAuditContext {
+    agent_override: Option<String>,
+    model_override: Option<String>,
+    entry_point: ToolEntryPoint,
+    session_context: Option<ToolSessionContext>,
+}
+
 impl OrbitRuntime {
     /// Execute a tool by name and return its JSON value. CLI-callers use this
     /// path; the runtime tags the audit row with [`ToolEntryPoint::Cli`].
@@ -146,10 +153,12 @@ impl OrbitRuntime {
         self.execute_tool_dispatch_with(
             name,
             input,
-            agent_override.clone(),
-            model_override.clone(),
-            entry_point,
-            Some(audit_session_context),
+            ToolDispatchAuditContext {
+                agent_override: agent_override.clone(),
+                model_override: model_override.clone(),
+                entry_point,
+                session_context: Some(audit_session_context),
+            },
             |input| {
                 self.ensure_tool_agent_facing(name)?;
                 let trusted_env = entry_point != ToolEntryPoint::Mcp || managed_run_context();
@@ -207,10 +216,12 @@ impl OrbitRuntime {
         self.execute_tool_dispatch_with(
             name,
             input,
-            None,
-            None,
-            entry_point,
-            Some(session_context),
+            ToolDispatchAuditContext {
+                agent_override: None,
+                model_override: None,
+                entry_point,
+                session_context: Some(session_context),
+            },
             dispatch,
         )
     }
@@ -219,15 +230,18 @@ impl OrbitRuntime {
         &self,
         name: &str,
         input: Value,
-        agent_override: Option<String>,
-        model_override: Option<String>,
-        entry_point: ToolEntryPoint,
-        session_context: Option<ToolSessionContext>,
+        audit: ToolDispatchAuditContext,
         dispatch: F,
     ) -> Result<ToolDispatchOutcome, OrbitError>
     where
         F: FnOnce(Value) -> Result<Value, OrbitError>,
     {
+        let ToolDispatchAuditContext {
+            agent_override,
+            model_override,
+            entry_point,
+            session_context,
+        } = audit;
         let start = Instant::now();
         let role_label = audit_role_label_for_entry_point(
             &input,

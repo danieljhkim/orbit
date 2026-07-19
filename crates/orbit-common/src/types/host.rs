@@ -102,6 +102,7 @@ impl FromStr for HostStatus {
 /// Registration timestamps and liveness are store-owned. Repeating this
 /// declaration is idempotent only while all three fields remain compatible.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HostRegistration {
     pub machine_id: String,
     pub host_id: String,

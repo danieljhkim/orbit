@@ -10,7 +10,7 @@ summary: Accepted ADR log for the coupled Host Registry and MCP Bridge v1 contra
 tags: [host-registry, mcp-bridge, multi-host, placement]
 paths: ["crates/orbit-registry/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10302, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10302, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Host Registry — Decisions
@@ -46,7 +46,7 @@ logical workspace/owner separately from machine-local checkout bindings.
 
 ## ADR-0227 — Stable machine identity, registry, and out-of-band hub pin
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze the host identity boundary; [ORB-10255] implemented the durable registry core; [ORB-10267] added operator administration (register/list/rename/retire), current-machine `host.toml` rename coordination, and the hub-global `registry_revision`.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze the host identity boundary; [ORB-10255] implemented the durable registry core; [ORB-10267] added operator administration (register/list/rename/retire), current-machine `host.toml` rename coordination, and the hub-global `registry_revision`; [ORB-10268] enforced the machine-global trust and exact hub/store pin at the MCP boundary; [ORB-10271] implemented private spoke self-registration from validated `host.toml`, staged projection results, and definitive-success cache refresh.
 
 ### Context
 
@@ -68,7 +68,7 @@ and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
 
 ## ADR-0228 — Local placement broker with capability-set filtering
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] added the `orbit.host.list` and `orbit.workspace.list` canonical discovery tools (hub placement, operator capability, workspace-unscoped) reading one sanitized path-free registry snapshot.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] added the `orbit.host.list` and `orbit.workspace.list` canonical discovery tools (hub placement, operator capability, workspace-unscoped) reading one sanitized path-free registry snapshot; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface; [ORB-10271] enforced current registered/active caller identity before every ordinary remote call and exposed path-free operator friction list/show.
 
 ### Context
 
@@ -127,7 +127,8 @@ pre-start loss permits redelivery, while post-start uncertainty is
 
 ## ADR-0231 — Committed-routine ownership with host-local cursors
 
-**Status:** Accepted · 2026-07 · [ORB-10245] fixed routine execution ownership.
+**Status:** Accepted · 2026-07 · [ORB-10245] fixed routine execution ownership;
+[ORB-10270] supplied the registry/cache validation and reassignment evidence.
 
 ### Context
 
@@ -199,8 +200,10 @@ service. Keep runtime profile/ship construction in `orbit-core`, persistence in
 - [ORB-10258] — implemented the enforcement half of ADR-0231 (Unit R1 of ORB-10246):
   origin-aware routine loading. Committed definitions fail closed without a non-empty host
   pin; `.orbit/routines/local/` definitions are implicit to the loading host and may not
-  name another host; cross-origin name collisions fail deterministically. Registry-cache
-  pin validation and reassignment-baseline semantics remain deferred to R2.
+  name another host; cross-origin name collisions fail deterministically.
+- [ORB-10270] — completed ADR-0231 enforcement (Unit R2): registry/cache-aware validation
+  runs before scheduler mutation, degraded cache evidence remains warning-only with exact
+  local fallback, and reassignment preserves A while B baselines without backfill.
 - [ORB-10267] — implemented Unit C3 of ORB-10246: operator host administration
   (`orbit host register/list/rename/retire`), hub-side workspace `link` and machine-local
   `role` (owner/replica) operations, the `orbit.host.list`/`orbit.workspace.list` canonical
@@ -214,8 +217,17 @@ service. Keep runtime profile/ship construction in `orbit-core`, persistence in
   reparsed `host.toml` write, the durable registry rename, and post-error outcome
   classification. `machine_id` uses the canonical path-free `hm_` namespace, and hub-local
   CLI enumeration renders the same single-transaction sanitized snapshot as discovery.
-  Remote registration and
-  post-link/register cache refresh remain deferred to E3; poll-driven refresh to I/J.
+  Poll-driven refresh remains deferred to I/J.
+- [ORB-10268] — implemented Unit E1's strict machine-global hub trust document and
+  fixed checkoutless hub MCP endpoint, including repeated exact store-stamp checks,
+  stable workspace-only payloads, canonical placement/capability filtering, and
+  trusted one-call/one-audit provenance.
+- [ORB-10269] — implemented Unit E2's negotiated bounded SSH-carried hub link,
+  scalar-capability peer reuse, trusted remote session metadata, and no-replay
+  transport error classification.
+- [ORB-10271] — implemented Unit E3's connector-private registration, honest
+  committed-stage results, local cache refresh boundary, ordinary active-caller
+  guard, path-free coordination frames, friction reads, and two-root canary.
 - [ORB-10302] — implemented Unit C4: moved the host/workspace/cache/service domain
   and its tests into `orbit-registry`, retired the replicated-registry scaffold,
   and preserved core/store/common ownership boundaries ([ADR-0235]).

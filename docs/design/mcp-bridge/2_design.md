@@ -10,7 +10,7 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-registry/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10302, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10302, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Orbit MCP Bridge — Design
@@ -21,7 +21,10 @@ capability, scope, and trusted-session metadata they depend on have landed. C4
 places identity, catalog, cache, and the store-backed registry service in the
 dedicated `orbit-registry` domain crate ([ORB-10302], [ADR-0235]). The local
 checkout-aware broker, exact-worktree runtime cache, and effective-capability
-filtering landed in [ORB-10262]; remote transport remains pending. It replaces both
+filtering landed in [ORB-10262]. Strict machine-global trust configuration and the
+fixed checkoutless hub endpoint landed in [ORB-10268]. The bounded negotiated SSH
+connector landed in [ORB-10269], and private spoke registration plus the first
+end-to-end coordination slice landed in [ORB-10271]. It replaces both
 Bridge's HTTP parity layer and the earlier
 per-workspace-authority draft with a local broker that has one remote destination:
 the coordination hub. It covers client→hub transport and local tool placement. The
@@ -138,6 +141,18 @@ The `--hub` spelling is the public conceptual shape; implementation may use an
 internal subcommand if that better preserves CLI compatibility. Orbit constructs
 the fixed remote command; `mcp.toml` cannot inject arbitrary shell text.
 
+[ORB-10268] implements this public spelling directly. Startup requires local hub
+mode and verifies that the opened global store is stamped with the exact local
+`machine_id` before stdio begins; listing and every call repeat that authority
+check. The endpoint filters the canonical registry by exactly one `hub` placement
+and one scalar capability, disables the in-process graph re-merge, accepts only
+stable logical workspace IDs, and invokes the checkout-independent coordination
+executor without constructing `OrbitRuntime` or opening any connector. Local calls
+may derive caller identity from the hub. Every `tools/call` accepted by the fixed
+hub endpoint must carry connector-owned remote session metadata; omission or an
+incomplete identity fails before host preflight rather than being attributed to the
+hub.
+
 ### 2.3 Hub-local short circuit
 
 When the current machine's role is hub, hub-class calls dispatch directly through
@@ -218,8 +233,9 @@ untrusted address selector until local validation. The adapter/broker derives st
 workspace and caller/process identity, transport, and the complete canonical sorted
 effective capability set, then generates the origin session and exactly one call ID
 per call before preflight. `leased_run` is optional and is injected by the runner
-when it launches an executor's broker; it is not accepted from model-authored tool
-input. The nested hub session receives the derived context. Capability is always a
+when it launches an executor's local broker; it is not accepted from model-authored
+tool input. A nested hub call strips that field because the v1 SSH principal does
+not bind a spoke-supplied lease claim. Capability is always a
 set authorized by membership; no scalar ceiling, ordinal, maximum, or selected
 authorizing member is valid.
 
@@ -315,6 +331,11 @@ hub-schema digest match. A mismatch fails hub routing before dispatch and names 
 versions/revisions. Local-derived and eligible owner tools may remain usable;
 there is no translation compatibility layer.
 
+The connector-private registration method is a negotiated protocol input even
+though it is deliberately absent from the canonical tool registry. Adding
+`orbit/private/register-spoke/v1` therefore advanced the MCP contract revision to
+2; an E3 spoke refuses an E2-only hub before any registration mutation [ORB-10271].
+
 ## 5. Hub Transport and Trusted Configuration
 
 ### 5.1 `mcp.toml` describes one hub
@@ -345,6 +366,14 @@ Rules:
 - On the hub machine, no `[hub]` transport entry is required; dispatch short-
   circuits locally.
 
+[ORB-10268] freezes the on-disk boundary as one optional `[hub]` table under the
+machine-global Orbit root. The whole document and table reject unknown fields;
+transport is exactly `ssh`; aliases are argument-safe OpenSSH host aliases; and the
+allowed list is non-empty, duplicate-free, and typed as `agent|operator|runner`.
+Repository, cwd, and environment decoys cannot override this file. A spoke missing
+the route, requesting a capability outside the exact set, or pointing at itself
+fails before any transport is opened.
+
 There is no target per workspace and no owner target. Adding a workspace or moving
 ownership requires no MCP transport change.
 
@@ -364,6 +393,22 @@ Orbit opens no listening port and invents no bearer token.
 One hub link is cached per effective capability with a bounded idle lifetime. A
 later call may reconnect after failure, but an interrupted mutation is never
 retried automatically (§9).
+
+The worker queue is bounded at admission. A full or disconnected queue is a
+pre-handoff `hub_unavailable`; once admitted, a call may wait behind an in-flight
+request and then receives the result of the worker's bounded initialize/request/
+close operations. Queue residence has no separate expiry and the synchronous
+caller has no shorter deadline that could discard a definitive result.
+
+Bootstrap registration uses one already-negotiated peer and exactly one capability
+from local `allowed_capabilities`; it does not require or grant operator. The private
+`orbit/private/register-spoke/v1` request is not advertised and cannot be reached
+through ordinary `tools/call`. Until it succeeds, the hub rejects every ordinary
+remote request before definition lookup or domain mutation. Afterward, every call
+rechecks the current registered host name and active status, so retirement
+invalidates an already-open peer on its next call. Complete responses carry only a
+sanitized snapshot; partial responses name the last committed stage, and only a
+definitive complete response may refresh the spoke cache [ORB-10271].
 
 ## 6. Artifact and Knowledge Semantics
 
@@ -390,12 +435,20 @@ Hub friction state is partitioned at
 `<global_root>/frictions/workspaces/<workspace_id>`. Legacy checkout-local state
 is copied to a staging tree and atomically published before a separate completion
 marker commits the migration. Identical repeats are idempotent, differing trees
-fail closed, and reads remain on the legacy tree until the marker exists.
+fail closed, and reads remain on the legacy tree until the marker exists. A caller
+that has no legacy-root binding may use the canonical root but cannot commit the
+migration marker; read-only list/show resolution never prepares or commits a
+migration.
 
 `orbit.task.artifact.put` completes capability, workspace, and placement
 preflight before opening the caller-local source. It reads at most the typed
-content limit and sends `{path, media_type, content}` bytes to hub execution;
-caller-local paths never cross the coordination boundary.
+content limit on the spoke and sends a connector-private
+`{path, media_type, content}` byte payload under the same canonical tool/audit name.
+The hub accepts that preloaded form only on authenticated `ssh-mcp`; caller-local
+paths never cross the coordination boundary. The public `orbit.task.update` schema
+does not accept inline artifacts, so this private form is reachable only through
+`orbit.task.artifact.put`. Hub friction responses likewise omit their private
+backing-file path [ORB-10271].
 
 ### 6.2 Knowledge creation
 
@@ -662,13 +715,16 @@ schemas.
   without spoke-to-spoke discovery; and filter `tools/list`/`tools/call` by the
   non-hierarchical effective capability set. Hub task, artifact, review-thread,
   verdict, and friction calls use the stable-ID checkoutless coordination
-  executor; `task.show(with_context=true)` remains explicitly local-derived.
+  executor; `task.show(with_context=true)` remains explicitly local-derived and a
+  spoke fails closed instead of reading local coordination state.
 
 ### Phase 3 — singular hub link
 
-- Add `[hub]` trusted config and fixed SSH hub mode.
-- Add contract revision/digest negotiation and bounded connection reuse.
-- Propagate workspace/caller/call identity; prove no automatic mutation retry.
+- Implemented by [ORB-10268, ORB-10269, ORB-10271]: add `[hub]` trusted config and
+  fixed SSH hub mode; negotiate contract revision/digest with bounded per-capability
+  reuse; add private staged spoke registration and definitive-success cache refresh;
+  propagate workspace/caller/call identity; enforce current active caller state;
+  and prove hub-only coordination plus no automatic mutation retry.
 
 ### Phase 4 — knowledge and search split
 
@@ -706,7 +762,10 @@ Required validation:
 7. Search requires explicit replica/omit semantics when current knowledge is
    unavailable, rejects `kind=doc|all` without a local checkout, and preserves
    current round-robin ranking when branches resolve.
-8. Workspace IDs, never spoke absolute paths, cross the hub link.
+8. Ordinary routing, session, coordination, response, cache, audit, and lease
+   frames carry stable IDs, never spoke absolute paths. Authenticated
+   registration/poll presence publication is the sole path-bearing exception and
+   stores the reporting root only in the hub-private host-keyed projection.
 9. Hub audits distinguish caller and process machine identity; composite knowledge
    audit events correlate by `mcp_call_id`.
 10. `agent`, `operator`, and `runner` advertise/enforce the intended surfaces across
@@ -753,5 +812,13 @@ Required validation:
 - [ORB-10302] — established the `orbit-registry` domain boundary used by future
   broker registration, discovery, profile, and cache flows while preserving the
   MCP adapter as serialization/dispatch only ([ADR-0235]).
+- [ORB-10268] — implemented strict machine-global hub trust and the non-recursive,
+  checkoutless fixed-capability hub endpoint.
+- [ORB-10269] — implemented the fixed SSH argv connector, contract/digest
+  negotiation, bounded per-capability peers, trusted remote metadata, and
+  pre-/post-handoff no-replay classification.
+- [ORB-10271] — implemented private staged spoke registration, contract revision 2,
+  current active-caller enforcement, definitive-success cache refresh, path-free
+  task artifact/friction coordination, and the two-root RMCP canary.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

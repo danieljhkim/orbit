@@ -122,11 +122,11 @@ properties fall out:
   polaris; the mechanism tolerates additional sources, and `orbit routine list` names each
   routine's source workspace so provenance is never ambiguous.
 
-Host identity is the one genuinely host-local datum: `~/.orbit/host.toml` carries
-`host_id = "dk-mac"`, defaulting to the machine hostname when absent. `orbit routine init`
-writes it and (with `--install-clock`) installs the OS clock unit (§5). A malformed
-`host.toml` is an error, not a fallback; a `[routines] role` value other than `"source"`
-is a config error (fail-closed on both).
+Host identity is the one genuinely host-local datum: `~/.orbit/host.toml` carries the
+versioned `machine_id`, human-facing `host_id`, and `mode`. `orbit init` owns identity
+creation and legacy migration; `orbit routine init --install-clock` only installs the OS
+clock unit (§5). A malformed `host.toml` is an error, not a fallback; a `[routines] role`
+value other than `"source"` is a config error (fail-closed on both).
 
 ---
 
@@ -142,22 +142,42 @@ Per pass:
 
 1. Take a host-global advisory lock (in the host store, §4). If another sweep holds it,
    exit immediately — overlapping invocations from a slow prior pass must not double-fire.
-2. Load the registry; collect routines from all source workspaces (fail-closed per file).
-3. Filter to routines where `enabled`, `hosts` contains this `host_id`, and no local pause.
-4. Sync unresolved fires against actual run state, reclaiming entries older than the
+2. Load the local registry source; collect routines from all source workspaces (fail-closed
+   per file). A hub uses its current registry snapshot, a spoke uses the classified atomic
+   registry cache, and standalone mode uses exact local identity.
+3. Validate every committed routine pin before any scheduler mutation. Current registry
+   data resolves aliases to stable `machine_id` and reports unknown, retired, collision,
+   alias, and quiet-host diagnostics. Missing, malformed, future-schema, or stale spoke
+   cache is warning-only: an exact local `host_id` remains eligible offline, while stale
+   positive active/alias matches remain usable. During an upgrade, a hub whose trusted
+   `host.toml` identity predates its registry record also keeps an exact local pin eligible
+   and emits `local_host_unregistered` until `orbit host register` is run; this preserves
+   pre-registry schedules without treating any non-local unknown pin as valid.
+   Location-scoped local routines bypass registry validation because their loader already
+   binds them to this machine.
+4. Filter to routines where `enabled`, validation says this machine owns the pin, and no
+   local pause.
+5. Sync unresolved fires against actual run state, reclaiming entries older than the
    routine's `timeout_minutes` (the staleness horizon — a sweep that crashed between
-   intent and dispatch must not block `overlap: forbid` forever).
-5. For each, compute due-ness from the cron expression and the persisted cursor
+   intent and dispatch must not block `overlap: forbid` forever). Fires for a routine that
+   is no longer assigned to this machine are deliberately untouched.
+6. For each, compute due-ness from the cron expression and the persisted cursor
    (last slot, else the first-observation baseline — a routine never fires for slots that
    predate its registration on this host; the first sweep records the baseline and fires
    nothing). Due-ness is O(1) via previous-occurrence lookup, never a walk over every
    missed slot; `missed_run` policy decides gaps. A slot is "natural" within a 120s grace
    of its scheduled time.
-6. For each due routine: check `overlap` against in-flight fires, record the fire intent
+7. For each due routine: check `overlap` against in-flight fires, record the fire intent
    (idempotency key: routine name + scheduled slot + attempt, transactionally with the
    cursor advance), then dispatch the target via `submit_pipeline_run` in the routine's
    source workspace with actor `routine/<name>` as run provenance.
-7. Record outcomes and exit.
+8. Record outcomes and exit.
+
+`orbit routine list`, `orbit routine show`, and `orbit sweep` expose the registry source,
+cache state/age, stable diagnostic codes, severity, and stale provenance additively in
+human and JSON output. Moving a committed pin from host A to host B never mutates A's
+cursor, fires, or pause. B has no migrated state, so its first sweep records the normal
+first-observation baseline; only the next natural slot can fire.
 
 Fires are normal runs: they appear in run history, carry v2 audit envelopes, and are
 debuggable with the existing run tooling — there is no separate "scheduled run" ledger.
@@ -247,6 +267,8 @@ out of v1 scope for this reason.
 
 - [ORB-10001] — authored this design-doc folder (proposal; no implementation).
 - [ORB-10021] — implemented routines v1 (types, store, sweep, CLI, clock units).
+- [ORB-10270] — implemented registry-aware validation before scheduler mutation,
+  cache-degraded offline behavior, stable diagnostics, and no-backfill reassignment.
 - [ORB-10207] — added disabled-by-default seeding and workspace-local ship sweep.
 - [ORB-00374] — removed the `shell` activity variant and `run_shell` dispatch (fail-closed);
   routines inherit this constraint.

@@ -39,7 +39,7 @@ fn set_with_seed_from_global_copies_global_content_then_applies_edit() {
     let (_root, runtime, global_root, workspace_root) = test_runtime();
     fs::write(
         global_root.join("config.toml"),
-        "# hand-written global comment\n[workflow]\nbase_branch = \"main\"\ndefault_crew = \"codex\"\n",
+        "# hand-written global comment\n[workflow]\nbase_branch = \"main\"\ndefault_crew = \"sol\"\n",
     )
     .expect("write global config");
 
@@ -51,7 +51,7 @@ fn set_with_seed_from_global_copies_global_content_then_applies_edit() {
         .expect("read seeded workspace config");
     assert!(saved.contains("# hand-written global comment"), "{saved}");
     assert!(saved.contains("base_branch = \"agent-main\""), "{saved}");
-    assert!(saved.contains("default_crew = \"codex\""), "{saved}");
+    assert!(saved.contains("default_crew = \"sol\""), "{saved}");
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn set_with_fresh_starts_from_empty_document() {
     let (_root, runtime, global_root, workspace_root) = test_runtime();
     fs::write(
         global_root.join("config.toml"),
-        "[workflow]\nbase_branch = \"main\"\ndefault_crew = \"codex\"\n",
+        "[workflow]\nbase_branch = \"main\"\ndefault_crew = \"sol\"\n",
     )
     .expect("write global config");
 

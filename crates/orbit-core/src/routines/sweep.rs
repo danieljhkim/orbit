@@ -18,9 +18,15 @@ use crate::OrbitRuntime;
 use crate::workspace_registry;
 
 use super::due::{DueDecision, due_decision, parse_cron};
-use super::host::load_host_identity;
+#[cfg(test)]
+use super::host::{HOST_IDENTITY_SCHEMA_VERSION, HostMode};
+use super::host::{HostIdentity, load_host_identity};
 use super::loader::{
     LoadedRoutine, RoutineCollection, RoutineLoadError, collect_routines, discover_workspaces,
+};
+use super::validation::{
+    DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS, RoutinePinValidation,
+    RoutineRegistryStatus, RoutineRegistryView, load_routine_registry_view, validate_routine_pins,
 };
 
 /// Dispatch seam for the sweep [ORB-00421]. The production impl
@@ -98,6 +104,8 @@ pub struct RoutineSweepReport {
     pub slot: Option<String>,
     /// Run id returned by dispatch, when one was submitted.
     pub run_id: Option<String>,
+    /// Registry-aware eligibility and diagnostics evaluated before mutation.
+    pub validation: RoutinePinValidation,
 }
 
 /// Result of one sweep pass.
@@ -105,6 +113,10 @@ pub struct RoutineSweepReport {
 pub struct SweepOutcome {
     /// Host identity the pass filtered against.
     pub host_id: String,
+    /// Stable machine identity used by registry-resolved pins.
+    pub machine_id: String,
+    /// Registry source/state used for this pass.
+    pub registry: RoutineRegistryStatus,
     /// True when another sweep held the lock and this pass exited early.
     pub lock_busy: bool,
     /// Per-routine outcomes.
@@ -131,7 +143,7 @@ pub fn run_sweep(options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
 
 /// Run one sweep pass against an explicit global root (test seam).
 pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
-    let host_id = load_host_identity(global_root)?.host_id;
+    let identity = load_host_identity(global_root)?;
 
     // One pass per host at a time: overlapping invocations from a slow prior
     // pass must not double-fire. flock releases on process death, so a
@@ -139,19 +151,29 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
     let lock = orbit_store::try_acquire_routine_sweep_lock(&global_root.join("state"))?;
     let Some(_lock) = lock else {
         return Ok(SweepOutcome {
-            host_id,
+            host_id: identity.host_id,
+            machine_id: identity.machine_id,
             lock_busy: true,
             ..SweepOutcome::default()
         });
     };
 
-    let store = Store::open(&global_root.join("orbit.db"))?;
+    let store = super::open_routine_store(global_root)?;
+    let now_utc = Utc::now();
+    let registry_view = load_routine_registry_view(
+        global_root,
+        &store,
+        &identity,
+        now_utc,
+        Duration::seconds(DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS),
+    )?;
+    let registry = registry_view.status();
 
     // One runtime per active workspace; discovery and dispatch share them.
     let discovered = discover_workspaces(global_root)?;
     let mut load_errors: Vec<RoutineLoadError> = discovered.errors.clone();
 
-    let mut collection = collect_routines(&discovered.entries, &host_id);
+    let mut collection = collect_routines(&discovered.entries, &identity.host_id);
     load_errors.append(&mut collection.errors);
 
     let dispatch = RuntimeDispatch {
@@ -162,17 +184,20 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
             .collect(),
     };
 
-    let reports = run_sweep_core(
+    let reports = run_sweep_core_with_registry(
         &store,
-        &host_id,
+        &identity,
+        &registry_view,
         &collection,
         &dispatch,
         options,
-        Utc::now(),
+        now_utc,
     )?;
 
     Ok(SweepOutcome {
-        host_id,
+        host_id: identity.host_id,
+        machine_id: identity.machine_id,
+        registry,
         lock_busy: false,
         reports,
         load_errors,
@@ -184,6 +209,7 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
 /// from [`run_sweep_at`] — which owns the lock, store, and workspace discovery
 /// — so the orchestration can be driven against a temp store, a hand-built
 /// [`RoutineCollection`], a fake [`RoutineDispatch`], and an explicit `now`.
+#[cfg(test)]
 pub(crate) fn run_sweep_core(
     store: &Store,
     host_id: &str,
@@ -192,9 +218,58 @@ pub(crate) fn run_sweep_core(
     options: SweepOptions,
     now_utc: DateTime<Utc>,
 ) -> Result<Vec<RoutineSweepReport>, OrbitError> {
+    let identity = HostIdentity {
+        schema_version: HOST_IDENTITY_SCHEMA_VERSION,
+        machine_id: format!("hm_standalone_{}", sanitize_test_machine_suffix(host_id)),
+        host_id: host_id.to_string(),
+        mode: HostMode::Standalone,
+    };
+    run_sweep_core_with_registry(
+        store,
+        &identity,
+        &RoutineRegistryView::Standalone,
+        collection,
+        dispatch,
+        options,
+        now_utc,
+    )
+}
+
+/// Registry-aware core used by production and deterministic R2 fixtures.
+pub(crate) fn run_sweep_core_with_registry(
+    store: &Store,
+    identity: &HostIdentity,
+    registry_view: &RoutineRegistryView,
+    collection: &RoutineCollection,
+    dispatch: &dyn RoutineDispatch,
+    options: SweepOptions,
+    now_utc: DateTime<Utc>,
+) -> Result<Vec<RoutineSweepReport>, OrbitError> {
+    let validations: BTreeMap<String, RoutinePinValidation> = collection
+        .routines
+        .iter()
+        .map(|routine| {
+            (
+                routine.definition.name.clone(),
+                validate_routine_pins(
+                    identity,
+                    routine.origin,
+                    &routine.definition.hosts,
+                    registry_view,
+                    now_utc,
+                    Duration::seconds(DEFAULT_QUIET_HOST_AFTER_SECONDS),
+                ),
+            )
+        })
+        .collect();
     let routines_by_name: BTreeMap<String, &LoadedRoutine> = collection
         .routines
         .iter()
+        .filter(|routine| {
+            validations
+                .get(&routine.definition.name)
+                .is_some_and(|validation| validation.eligible)
+        })
         .map(|routine| (routine.definition.name.clone(), routine))
         .collect();
 
@@ -206,16 +281,32 @@ pub(crate) fn run_sweep_core(
 
     let mut reports = Vec::new();
     for routine in &collection.routines {
-        let report = sweep_routine(store, routine, dispatch, host_id, &pauses, options, now_utc)
-            .unwrap_or_else(|error| RoutineSweepReport {
-                routine: routine.definition.name.clone(),
-                source: routine.source_workspace.clone(),
-                origin: routine.origin.as_str(),
-                action: "error",
-                reason: Some(error.to_string()),
-                slot: None,
-                run_id: None,
+        let validation = validations
+            .get(&routine.definition.name)
+            .cloned()
+            .unwrap_or(RoutinePinValidation {
+                eligible: false,
+                diagnostics: Vec::new(),
             });
+        let report = sweep_routine(
+            store,
+            routine,
+            dispatch,
+            &validation,
+            &pauses,
+            options,
+            now_utc,
+        )
+        .unwrap_or_else(|error| RoutineSweepReport {
+            routine: routine.definition.name.clone(),
+            source: routine.source_workspace.clone(),
+            origin: routine.origin.as_str(),
+            action: "error",
+            reason: Some(error.to_string()),
+            slot: None,
+            run_id: None,
+            validation: validation.clone(),
+        });
         reports.push(report);
     }
 
@@ -226,7 +317,7 @@ fn sweep_routine(
     store: &Store,
     routine: &LoadedRoutine,
     dispatch: &dyn RoutineDispatch,
-    host_id: &str,
+    validation: &RoutinePinValidation,
     pauses: &BTreeMap<String, orbit_store::RoutinePauseRecord>,
     options: SweepOptions,
     now_utc: DateTime<Utc>,
@@ -237,13 +328,13 @@ fn sweep_routine(
     // Toggle resolution order (2_design.md §4): versioned kill-switch →
     // versioned host pinning → host-local pause.
     if !definition.enabled {
-        return Ok(skipped(routine, "disabled_in_definition"));
+        return Ok(skipped(routine, validation, "disabled_in_definition"));
     }
-    if !definition.hosts.iter().any(|host| host == host_id) {
-        return Ok(skipped(routine, "host_not_pinned"));
+    if !validation.eligible {
+        return Ok(skipped(routine, validation, "host_not_pinned"));
     }
     if pauses.contains_key(name) {
-        return Ok(skipped(routine, "paused_locally"));
+        return Ok(skipped(routine, validation, "paused_locally"));
     }
 
     let cron = parse_cron(&definition.trigger.cron)?;
@@ -254,10 +345,10 @@ fn sweep_routine(
         // nothing — a routine never fires for slots that predate its
         // registration here.
         if options.dry_run {
-            return Ok(action(routine, "would_baseline"));
+            return Ok(action(routine, validation, "would_baseline"));
         }
         store.routine_record_baseline(name, &now_utc.to_rfc3339())?;
-        return Ok(action(routine, "baselined"));
+        return Ok(action(routine, validation, "baselined"));
     };
 
     let lower_bound_raw = cursor.last_slot.as_deref().unwrap_or(&cursor.baseline_at);
@@ -271,7 +362,18 @@ fn sweep_routine(
     )? {
         DueDecision::Fire { slot, .. } => {
             let slot_utc = slot.with_timezone(&Utc).to_rfc3339();
-            fire(store, routine, dispatch, &slot_utc, 1, "fired", options)
+            fire(
+                store,
+                routine,
+                dispatch,
+                validation,
+                FireRequest {
+                    slot: &slot_utc,
+                    attempt: 1,
+                    fired_action: "fired",
+                    options,
+                },
+            )
         }
         DueDecision::NotDue => {
             // No new slot: a most-recent fire that failed (run-level) or
@@ -282,13 +384,16 @@ fn sweep_routine(
                     store,
                     routine,
                     dispatch,
-                    &retry.slot,
-                    retry.attempt + 1,
-                    "retry_fired",
-                    options,
+                    validation,
+                    FireRequest {
+                        slot: &retry.slot,
+                        attempt: retry.attempt + 1,
+                        fired_action: "retry_fired",
+                        options,
+                    },
                 );
             }
-            Ok(skipped(routine, "not_due"))
+            Ok(skipped(routine, validation, "not_due"))
         }
     }
 }
@@ -330,15 +435,26 @@ fn retry_candidate(
     Ok(Some(latest))
 }
 
+struct FireRequest<'a> {
+    slot: &'a str,
+    attempt: u32,
+    fired_action: &'static str,
+    options: SweepOptions,
+}
+
 fn fire(
     store: &Store,
     routine: &LoadedRoutine,
     dispatch: &dyn RoutineDispatch,
-    slot: &str,
-    attempt: u32,
-    fired_action: &'static str,
-    options: SweepOptions,
+    validation: &RoutinePinValidation,
+    request: FireRequest<'_>,
 ) -> Result<RoutineSweepReport, OrbitError> {
+    let FireRequest {
+        slot,
+        attempt,
+        fired_action,
+        options,
+    } = request;
     let definition = &routine.definition;
     let name = &definition.name;
 
@@ -351,14 +467,14 @@ fn fire(
         // still non-terminal here is genuinely (believed) in flight.
         return Ok(RoutineSweepReport {
             slot: Some(slot.to_string()),
-            ..skipped(routine, "overlap_in_flight")
+            ..skipped(routine, validation, "overlap_in_flight")
         });
     }
 
     if options.dry_run {
         return Ok(RoutineSweepReport {
             slot: Some(slot.to_string()),
-            ..action(routine, "would_fire")
+            ..action(routine, validation, "would_fire")
         });
     }
 
@@ -371,7 +487,7 @@ fn fire(
     if !claimed {
         return Ok(RoutineSweepReport {
             slot: Some(slot.to_string()),
-            ..skipped(routine, "slot_already_claimed")
+            ..skipped(routine, validation, "slot_already_claimed")
         });
     }
 
@@ -391,6 +507,7 @@ fn fire(
                 reason: None,
                 slot: Some(slot.to_string()),
                 run_id: Some(run_id),
+                validation: validation.clone(),
             })
         }
         Err(error) => {
@@ -413,6 +530,7 @@ fn fire(
                 reason: Some(format!("dispatch failed: {error}")),
                 slot: Some(slot.to_string()),
                 run_id: None,
+                validation: validation.clone(),
             })
         }
     }
@@ -429,10 +547,13 @@ fn sync_unresolved_fires(
     now_utc: DateTime<Utc>,
 ) -> Result<(), OrbitError> {
     for fire in store.routine_unresolved_fires()? {
-        let timeout_minutes = routines_by_name
-            .get(&fire.routine_name)
-            .map(|routine| routine.definition.policy.timeout_minutes)
-            .unwrap_or(60);
+        // Eligibility was resolved before this mutation phase. A routine that
+        // is no longer assigned to this machine must leave this machine's
+        // prior fire history byte/logically untouched.
+        let Some(routine) = routines_by_name.get(&fire.routine_name) else {
+            continue;
+        };
+        let timeout_minutes = routine.definition.policy.timeout_minutes;
         let created_at = match parse_rfc3339(&fire.created_at) {
             Ok(value) => value,
             Err(_) => continue,
@@ -491,7 +612,11 @@ fn sync_unresolved_fires(
     Ok(())
 }
 
-fn skipped(routine: &LoadedRoutine, reason: &str) -> RoutineSweepReport {
+fn skipped(
+    routine: &LoadedRoutine,
+    validation: &RoutinePinValidation,
+    reason: &str,
+) -> RoutineSweepReport {
     RoutineSweepReport {
         routine: routine.definition.name.clone(),
         source: routine.source_workspace.clone(),
@@ -500,10 +625,15 @@ fn skipped(routine: &LoadedRoutine, reason: &str) -> RoutineSweepReport {
         reason: Some(reason.to_string()),
         slot: None,
         run_id: None,
+        validation: validation.clone(),
     }
 }
 
-fn action(routine: &LoadedRoutine, action: &'static str) -> RoutineSweepReport {
+fn action(
+    routine: &LoadedRoutine,
+    validation: &RoutinePinValidation,
+    action: &'static str,
+) -> RoutineSweepReport {
     RoutineSweepReport {
         routine: routine.definition.name.clone(),
         source: routine.source_workspace.clone(),
@@ -512,6 +642,26 @@ fn action(routine: &LoadedRoutine, action: &'static str) -> RoutineSweepReport {
         reason: None,
         slot: None,
         run_id: None,
+        validation: validation.clone(),
+    }
+}
+
+#[cfg(test)]
+fn sanitize_test_machine_suffix(host_id: &str) -> String {
+    let suffix: String = host_id
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-') {
+                char::from(byte)
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if suffix.is_empty() {
+        "host".to_string()
+    } else {
+        suffix
     }
 }
 
