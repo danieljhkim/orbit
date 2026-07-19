@@ -158,7 +158,7 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
         });
     };
 
-    let store = Store::open(&global_root.join("orbit.db"))?;
+    let store = super::open_routine_store(global_root)?;
     let now_utc = Utc::now();
     let registry_view = load_routine_registry_view(
         global_root,
@@ -363,7 +363,16 @@ fn sweep_routine(
         DueDecision::Fire { slot, .. } => {
             let slot_utc = slot.with_timezone(&Utc).to_rfc3339();
             fire(
-                store, routine, dispatch, validation, &slot_utc, 1, "fired", options,
+                store,
+                routine,
+                dispatch,
+                validation,
+                FireRequest {
+                    slot: &slot_utc,
+                    attempt: 1,
+                    fired_action: "fired",
+                    options,
+                },
             )
         }
         DueDecision::NotDue => {
@@ -376,10 +385,12 @@ fn sweep_routine(
                     routine,
                     dispatch,
                     validation,
-                    &retry.slot,
-                    retry.attempt + 1,
-                    "retry_fired",
-                    options,
+                    FireRequest {
+                        slot: &retry.slot,
+                        attempt: retry.attempt + 1,
+                        fired_action: "retry_fired",
+                        options,
+                    },
                 );
             }
             Ok(skipped(routine, validation, "not_due"))
@@ -424,16 +435,26 @@ fn retry_candidate(
     Ok(Some(latest))
 }
 
+struct FireRequest<'a> {
+    slot: &'a str,
+    attempt: u32,
+    fired_action: &'static str,
+    options: SweepOptions,
+}
+
 fn fire(
     store: &Store,
     routine: &LoadedRoutine,
     dispatch: &dyn RoutineDispatch,
     validation: &RoutinePinValidation,
-    slot: &str,
-    attempt: u32,
-    fired_action: &'static str,
-    options: SweepOptions,
+    request: FireRequest<'_>,
 ) -> Result<RoutineSweepReport, OrbitError> {
+    let FireRequest {
+        slot,
+        attempt,
+        fired_action,
+        options,
+    } = request;
     let definition = &routine.definition;
     let name = &definition.name;
 

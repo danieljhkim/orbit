@@ -7,7 +7,7 @@ use std::path::Path;
 
 use chrono::{Duration, Local, Utc};
 use orbit_common::types::OrbitError;
-use orbit_store::{RoutineFireRecord, Store};
+use orbit_store::RoutineFireRecord;
 
 use super::due::{parse_cron, truncate_to_minute};
 use super::host::load_host_identity;
@@ -60,7 +60,7 @@ pub struct RoutineStatusReport {
 /// Collect the status of every routine visible from the global registry.
 pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, OrbitError> {
     let identity = load_host_identity(global_root)?;
-    let store = Store::open(&global_root.join("orbit.db"))?;
+    let store = super::open_routine_store(global_root)?;
     let now_utc = Utc::now();
     let registry_view = load_routine_registry_view(
         global_root,
@@ -121,13 +121,13 @@ pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, Orbit
 /// Pause a routine on this host (host-local, never synced). Returns `false`
 /// when it was already paused.
 pub fn pause_routine(global_root: &Path, name: &str, actor: &str) -> Result<bool, OrbitError> {
-    let store = Store::open(&global_root.join("orbit.db"))?;
+    let store = super::open_routine_store(global_root)?;
     store.routine_pause(name, actor)
 }
 
 /// Clear a host-local pause. Returns `false` when it was not paused.
 pub fn resume_routine(global_root: &Path, name: &str) -> Result<bool, OrbitError> {
-    let store = Store::open(&global_root.join("orbit.db"))?;
+    let store = super::open_routine_store(global_root)?;
     store.routine_resume(name)
 }
 
@@ -137,6 +137,6 @@ pub fn recent_fires(
     name: &str,
     limit: usize,
 ) -> Result<Vec<RoutineFireRecord>, OrbitError> {
-    let store = Store::open(&global_root.join("orbit.db"))?;
+    let store = super::open_routine_store(global_root)?;
     store.routine_recent_fires(name, limit)
 }

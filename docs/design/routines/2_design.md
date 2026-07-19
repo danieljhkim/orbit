@@ -149,8 +149,12 @@ Per pass:
    data resolves aliases to stable `machine_id` and reports unknown, retired, collision,
    alias, and quiet-host diagnostics. Missing, malformed, future-schema, or stale spoke
    cache is warning-only: an exact local `host_id` remains eligible offline, while stale
-   positive active/alias matches remain usable. Location-scoped local routines bypass
-   registry validation because their loader already binds them to this machine.
+   positive active/alias matches remain usable. During an upgrade, a hub whose trusted
+   `host.toml` identity predates its registry record also keeps an exact local pin eligible
+   and emits `local_host_unregistered` until `orbit host register` is run; this preserves
+   pre-registry schedules without treating any non-local unknown pin as valid.
+   Location-scoped local routines bypass registry validation because their loader already
+   binds them to this machine.
 4. Filter to routines where `enabled`, validation says this machine owns the pin, and no
    local pause.
 5. Sync unresolved fires against actual run state, reclaiming entries older than the

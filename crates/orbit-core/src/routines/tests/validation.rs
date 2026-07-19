@@ -250,6 +250,41 @@ fn current_unknown_and_retired_pins_are_independently_unusable_errors() {
 }
 
 #[test]
+fn unregistered_hub_keeps_exact_local_pin_eligible_with_upgrade_warning() {
+    let now = ts(10, 0);
+    let local = identity("hm_local", "local", HostMode::Hub);
+    let view = RoutineRegistryView::Hub {
+        snapshot: snapshot(Vec::new()),
+    };
+
+    let validation = validate_routine_pins(
+        &local,
+        RoutineOrigin::Committed,
+        &["local".to_string(), "missing".to_string()],
+        &view,
+        now,
+        Duration::minutes(5),
+    );
+
+    assert!(
+        validation.eligible,
+        "exact local pin preserves pre-registry behavior"
+    );
+    assert_eq!(
+        codes(&validation),
+        vec!["local_host_unregistered", "host_unknown"]
+    );
+    assert_eq!(
+        validation.diagnostics[0].severity,
+        RoutineDiagnosticSeverity::Warning
+    );
+    assert_eq!(
+        validation.diagnostics[1].severity,
+        RoutineDiagnosticSeverity::Error
+    );
+}
+
+#[test]
 fn every_unusable_spoke_cache_keeps_exact_local_committed_pin_eligible() {
     let now = ts(10, 0);
     let local = identity("hm_local", "local", HostMode::Spoke);

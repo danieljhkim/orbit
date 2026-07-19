@@ -228,6 +228,7 @@ pub fn validate_routine_pins(
                 quiet_after,
                 false,
                 true,
+                true,
                 &mut diagnostics,
             );
             RoutinePinValidation {
@@ -246,6 +247,7 @@ pub fn validate_routine_pins(
                 quiet_after,
                 false,
                 true,
+                false,
                 &mut diagnostics,
             );
             RoutinePinValidation {
@@ -263,6 +265,7 @@ pub fn validate_routine_pins(
                 now,
                 quiet_after,
                 true,
+                false,
                 false,
                 &mut diagnostics,
             ) || pins.iter().any(|pin| pin == &identity.host_id);
@@ -287,11 +290,36 @@ fn validate_snapshot_pins(
     quiet_after: Duration,
     stale: bool,
     authoritative: bool,
+    allow_unregistered_local_identity: bool,
     diagnostics: &mut Vec<RoutineValidationDiagnostic>,
 ) -> bool {
     let mut eligible = false;
     for pin in pins {
         match resolve_pin(snapshot, pin) {
+            PinResolution::Unknown
+                if allow_unregistered_local_identity
+                    && pin == &identity.host_id
+                    && !snapshot
+                        .hosts
+                        .iter()
+                        .any(|host| host.machine_id == identity.machine_id) =>
+            {
+                // Upgrade compatibility: host.toml predates the registry and
+                // remains trusted machine-local identity. Keep an exact local
+                // committed pin firing until the hub is explicitly registered,
+                // but make the missing registry record visible.
+                eligible = true;
+                diagnostics.push(diagnostic(
+                    "local_host_unregistered",
+                    RoutineDiagnosticSeverity::Warning,
+                    Some(pin.clone()),
+                    format!(
+                        "exact local host pin '{pin}' is eligible from host.toml, but machine_id '{}' is not registered; run `orbit host register`",
+                        identity.machine_id
+                    ),
+                    false,
+                ));
+            }
             PinResolution::Unknown => diagnostics.push(diagnostic(
                 "host_unknown",
                 negative_severity(authoritative),

@@ -9,6 +9,11 @@
 //! shared across hosts via git; all scheduler state is host-local and never
 //! synced (ADR-0204..ADR-0208; design in `docs/design/routines/`).
 
+use std::path::Path;
+
+use orbit_common::types::OrbitError;
+use orbit_store::Store;
+
 pub mod clock;
 pub mod due;
 pub mod host;
@@ -37,6 +42,16 @@ pub use validation::{
     RoutineDiagnosticSeverity, RoutinePinValidation, RoutineRegistryStatus, RoutineRegistryView,
     RoutineValidationDiagnostic, load_routine_registry_view, validate_routine_pins,
 };
+
+/// Open the one config-resolved machine-local scheduler/registry store.
+///
+/// Status, mutation, and sweep paths must share this resolver with the host
+/// registry. Opening `<global_root>/orbit.db` independently can make routine
+/// validation observe a different registry authority from the writer.
+fn open_routine_store(global_root: &Path) -> Result<Store, OrbitError> {
+    let database = crate::config::resolved_audit_db_path(global_root, global_root)?;
+    Store::open(&database)
+}
 
 #[cfg(test)]
 mod tests;
