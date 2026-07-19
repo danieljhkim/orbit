@@ -145,6 +145,7 @@ pub use json_schema::{validate_instance_against_schema, validate_schema_document
 pub use sqlite::audit_event_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
     AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
+    LEARNING_INJECTED_TARGET_TYPE, LEARNING_SHOWN_TARGET_TYPE, LearningUsageStat,
 };
 pub use sqlite::connection::{Store, StoreTx};
 pub use sqlite::id_allocator::{

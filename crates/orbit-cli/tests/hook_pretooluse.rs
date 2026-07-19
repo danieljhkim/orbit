@@ -382,6 +382,147 @@ fn missing_session_uses_tmpdir_parent_pid_state_file() {
     );
 }
 
+#[test]
+fn payload_session_id_keys_dedup_without_env_var() {
+    let workspace = TestWorkspace::new();
+    workspace.add_learning("Payload session id anchors dedup", &["src/**"]);
+    // No ORBIT_SESSION_ID in the environment — the session id rides in the
+    // hook payload itself, as Claude Code sends it on every hook event. This
+    // is the previously-dead path: ORBIT_SESSION_ID was exported on 0/2,374
+    // observed fires, so dedup only engages once the payload anchors it.
+    let payload = r#"{"tool_name":"Edit","tool_input":{"file_path":"src/lib.rs"},"session_id":"payload-session"}"#;
+
+    let first = workspace.run_hook(payload, &[], "payload session first");
+    assert!(!first.stdout.is_empty());
+    let second = workspace.run_hook(payload, &[], "payload session second");
+    assert!(
+        second.stdout.is_empty(),
+        "second stdout: {}",
+        String::from_utf8_lossy(&second.stdout)
+    );
+
+    let state = workspace.session_learning_state("payload-session");
+    assert_eq!(state["count"], 1);
+
+    let events = workspace.run_json(
+        &["audit", "list", "--kind", "learning_injected", "--json"],
+        "audit list",
+    );
+    let rows = events.as_array().expect("audit rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["session_id"], "payload-session");
+}
+
+#[test]
+fn env_session_id_takes_priority_over_payload_session_id() {
+    let workspace = TestWorkspace::new();
+    workspace.add_learning("Env session id wins over payload", &["src/**"]);
+    let payload = r#"{"tool_name":"Edit","tool_input":{"file_path":"src/lib.rs"},"session_id":"payload-session"}"#;
+
+    let output = workspace.run_hook(
+        payload,
+        &[("ORBIT_SESSION_ID", "env-session")],
+        "env-priority hook",
+    );
+    assert!(!output.stdout.is_empty());
+
+    // Engine-managed runs pre-seed dedup state under the env session id, so
+    // the env var must key the state even when the payload carries its own.
+    let state = workspace.session_learning_state("env-session");
+    assert_eq!(state["count"], 1);
+}
+
+#[test]
+fn unavailable_audit_backend_fails_open_and_still_injects() {
+    let workspace = TestWorkspace::new();
+    workspace.add_learning("Injection survives a dead audit backend", &["src/**"]);
+    workspace.break_audit_event_inserts();
+
+    let output = workspace.run_hook(
+        r#"{"tool_name":"Edit","tool_input":{"file_path":"src/lib.rs"},"session_id":"failopen-session"}"#,
+        &[],
+        "fail-open hook",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Injection survives a dead audit backend"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
+fn show_emits_learning_shown_event_and_stats_roll_up() {
+    let workspace = TestWorkspace::new();
+    let shown = workspace.add_learning("Shown learning gets read", &["src/**"]);
+    let shown_id = shown["id"].as_str().expect("shown learning id").to_string();
+    let unshown = workspace.add_learning("Unshown learning stays cold", &["src/**"]);
+    let unshown_id = unshown["id"]
+        .as_str()
+        .expect("unshown learning id")
+        .to_string();
+
+    // Inject both learnings in one hook fire.
+    let output = workspace.run_hook(
+        r#"{"tool_name":"Edit","tool_input":{"file_path":"src/lib.rs"},"session_id":"show-session"}"#,
+        &[],
+        "show rollup hook",
+    );
+    assert!(!output.stdout.is_empty());
+
+    // Opening the full body is the passive usage signal.
+    let shown_view =
+        workspace.run_json(&["learning", "show", &shown_id, "--json"], "learning show");
+    assert_eq!(shown_view["id"], shown_id);
+
+    let shown_events = workspace.run_json(
+        &["audit", "list", "--kind", "learning_shown", "--json"],
+        "audit list shown",
+    );
+    let shown_rows = shown_events.as_array().expect("shown rows");
+    assert_eq!(shown_rows.len(), 1, "shown rows: {shown_events}");
+    assert_eq!(shown_rows[0]["target_id"], shown_id);
+
+    let stats = workspace.run_json(&["learning", "stats", "--json"], "learning stats");
+    let rows = stats.as_array().expect("stats rows");
+    assert_eq!(rows.len(), 2, "stats rows: {stats}");
+    let row_for = |id: &str| {
+        rows.iter()
+            .find(|row| row["learning_id"] == *id)
+            .unwrap_or_else(|| panic!("no stats row for {id}: {stats}"))
+    };
+
+    let shown_row = row_for(&shown_id);
+    assert_eq!(shown_row["injected_count"], 1);
+    assert_eq!(shown_row["shown_count"], 1);
+    assert_eq!(shown_row["shown_ratio"], 1.0);
+    assert!(shown_row["last_shown_at"].is_string());
+
+    let unshown_row = row_for(&unshown_id);
+    assert_eq!(unshown_row["injected_count"], 1);
+    assert_eq!(unshown_row["shown_count"], 0);
+    assert_eq!(unshown_row["shown_ratio"], 0.0);
+    assert!(unshown_row["last_shown_at"].is_null());
+}
+
+#[test]
+fn show_fails_open_when_audit_backend_unavailable() {
+    let workspace = TestWorkspace::new();
+    let learning = workspace.add_learning("Show survives a dead audit backend", &["src/**"]);
+    let learning_id = learning["id"].as_str().expect("learning id").to_string();
+
+    workspace.break_audit_event_inserts();
+    // Showing still works — the learning_shown emission is instrumentation
+    // and must not break the read surface when the audit backend is down.
+    let output = workspace.run(
+        &["learning", "show", &learning_id, "--json"],
+        None,
+        &[],
+        "show with dead audit backend",
+    );
+    let view: Value = serde_json::from_slice(&output.stdout).expect("show JSON stdout");
+    assert_eq!(view["id"], learning_id);
+}
+
 struct TestWorkspace {
     _temp: TempDir,
     home: PathBuf,
@@ -494,6 +635,18 @@ impl TestWorkspace {
             .as_str()
             .expect("thread id")
             .to_string()
+    }
+
+    /// Simulate an unavailable audit/log backend: reads (learning search,
+    /// session state) keep working, but every `audit_events` insert fails.
+    fn break_audit_event_inserts(&self) {
+        let conn = rusqlite::Connection::open(self.home.join(".orbit").join("orbit.db"))
+            .expect("open orbit db");
+        conn.execute_batch(
+            "CREATE TRIGGER break_audit_inserts BEFORE INSERT ON audit_events \
+             BEGIN SELECT RAISE(ABORT, 'audit backend unavailable'); END;",
+        )
+        .expect("install audit insert trigger");
     }
 
     fn session_learning_state(&self, session_id: &str) -> Value {

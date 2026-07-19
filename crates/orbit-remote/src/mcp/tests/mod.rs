@@ -1414,6 +1414,7 @@ mod audited_mcp_call_tests {
                     .and_then(serde_json::Value::as_str)
                     .expect("candidate summary")
                     .to_string(),
+                tags: Vec::new(),
             })
             .collect::<Vec<_>>();
         assert_eq!(

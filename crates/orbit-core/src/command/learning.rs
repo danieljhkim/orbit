@@ -8,10 +8,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{EvidenceKind, Learning, LearningStatus, NotFoundKind, OrbitError};
+use orbit_common::types::{
+    AuditEventStatus, EvidenceKind, Learning, LearningStatus, NotFoundKind, OrbitError,
+    audit_execution_id,
+};
 use orbit_store::{
-    LearningCreateParams, LearningListEntry, LearningSearchParams, LearningSearchResult,
-    LearningUpdateParams, RemoteArtifactStub, learning_layout::LearningLayoutMigrationReport,
+    AuditEventInsertParams, LEARNING_SHOWN_TARGET_TYPE, LearningCreateParams, LearningListEntry,
+    LearningSearchParams, LearningSearchResult, LearningUpdateParams, LearningUsageStat,
+    RemoteArtifactStub, learning_layout::LearningLayoutMigrationReport,
 };
 use serde::Deserialize;
 
@@ -94,6 +98,83 @@ impl OrbitRuntime {
 
     pub fn learning_search_config(&self) -> Result<LearningSearchConfig, OrbitError> {
         read_learning_search_config_from_config_path(&self.config_path())
+    }
+
+    /// Record a `learning_shown` audit event — the passive, ungameable usage
+    /// signal emitted when an agent opens a learning's full body via
+    /// `orbit learning show` (CLI or MCP). Keyed by learning ID + session.
+    ///
+    /// Fails open: an unavailable audit backend logs a warning and returns
+    /// `Ok(())` so the show surface keeps working. The session id resolves
+    /// from `ORBIT_SESSION_ID` (the injecting session exports it); an absent
+    /// session records a `None`, which the rollup still counts per learning.
+    pub fn record_learning_shown(&self, learning_id: &str) -> Result<(), OrbitError> {
+        let session_id = std::env::var("ORBIT_SESSION_ID")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let working_directory = std::env::current_dir()
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string());
+        let params = AuditEventInsertParams {
+            execution_id: audit_execution_id("learning"),
+            command: "learning".to_string(),
+            subcommand: Some("show".to_string()),
+            tool_name: None,
+            target_type: Some(LEARNING_SHOWN_TARGET_TYPE.to_string()),
+            target_id: Some(learning_id.to_string()),
+            role: "agent".to_string(),
+            status: AuditEventStatus::Success,
+            exit_code: 0,
+            duration_ms: 0,
+            working_directory,
+            arguments_json: None,
+            stdout_truncated: None,
+            stderr_truncated: None,
+            error_message: None,
+            host: std::env::var("HOSTNAME").ok(),
+            pid: std::process::id(),
+            session_id,
+            workspace_id: None,
+            caller_machine_id: None,
+            caller_host_id: None,
+            process_machine_id: None,
+            process_host_id: None,
+            transport: None,
+            effective_capabilities: Default::default(),
+            origin_session_id: None,
+            mcp_call_id: None,
+            lease_id: None,
+            task_id: std::env::var("ORBIT_TASK_ID")
+                .ok()
+                .filter(|value| !value.is_empty()),
+            job_run_id: std::env::var("ORBIT_RUN_ID")
+                .ok()
+                .filter(|value| !value.is_empty()),
+            activity_id: std::env::var("ORBIT_ACTIVITY_ID")
+                .ok()
+                .filter(|value| !value.is_empty()),
+            step_index: std::env::var("ORBIT_STEP_INDEX")
+                .ok()
+                .and_then(|value| value.parse().ok()),
+        };
+        if let Err(error) = self.record_audit_event(&params) {
+            tracing::warn!(
+                learning_id,
+                error = %error,
+                "learning_shown audit emit failed open"
+            );
+        }
+        Ok(())
+    }
+
+    /// Per-learning usage rollup over the global audit store: injection
+    /// counts from `learning_injected` events, show counts from
+    /// `learning_shown` events. Input for the deprecation sweep (ORB-10318).
+    pub fn learning_usage_stats(
+        &self,
+        since: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Vec<LearningUsageStat>, OrbitError> {
+        self.stores().audit_events().learning_usage(since.as_ref())
     }
 
     pub fn update_learning(

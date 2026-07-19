@@ -8,6 +8,7 @@ use super::list::LearningListArgs;
 use super::migrate_layout::LearningMigrateLayoutArgs;
 use super::prune::LearningPruneArgs;
 use super::show::LearningShowArgs;
+use super::stats::LearningStatsArgs;
 use super::supersede::LearningSupersedeArgs;
 use super::sync::LearningSyncArgs;
 use super::update::LearningUpdateArgs;
@@ -33,6 +34,8 @@ pub enum LearningSubcommand {
     List(LearningListArgs),
     /// Show a single learning by ID
     Show(LearningShowArgs),
+    /// Per-learning usage rollup from injection and show audit events
+    Stats(LearningStatsArgs),
     /// Update an existing active learning
     Update(LearningUpdateArgs),
     /// Mark a learning as superseded by another
@@ -51,6 +54,7 @@ impl Execute for LearningSubcommand {
             LearningSubcommand::Add(args) => args.execute(runtime),
             LearningSubcommand::List(args) => args.execute(runtime),
             LearningSubcommand::Show(args) => args.execute(runtime),
+            LearningSubcommand::Stats(args) => args.execute(runtime),
             LearningSubcommand::Update(args) => args.execute(runtime),
             LearningSubcommand::Supersede(args) => args.execute(runtime),
             LearningSubcommand::Sync(args) => args.execute(runtime),

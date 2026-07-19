@@ -187,6 +187,93 @@ fn list_audit_events_filters_by_target_type_kind() {
     assert_eq!(events[0].execution_id, "exec-hook");
 }
 
+fn learning_injected_params(execution_id: &str, learning_ids: &[&str]) -> AuditEventInsertParams {
+    AuditEventInsertParams {
+        execution_id: execution_id.to_string(),
+        command: "hook".to_string(),
+        subcommand: Some("pretooluse".to_string()),
+        target_type: Some(LEARNING_INJECTED_TARGET_TYPE.to_string()),
+        target_id: Some("src/lib.rs".to_string()),
+        arguments_json: Some(serde_json::json!({ "learning_ids": learning_ids }).to_string()),
+        ..sample_params()
+    }
+}
+
+fn learning_shown_params(execution_id: &str, learning_id: &str) -> AuditEventInsertParams {
+    AuditEventInsertParams {
+        execution_id: execution_id.to_string(),
+        command: "learning".to_string(),
+        subcommand: Some("show".to_string()),
+        target_type: Some(LEARNING_SHOWN_TARGET_TYPE.to_string()),
+        target_id: Some(learning_id.to_string()),
+        arguments_json: None,
+        ..sample_params()
+    }
+}
+
+#[test]
+fn learning_usage_stats_fold_injections_and_shows_per_learning() {
+    let store = Store::open_in_memory().expect("open store");
+    for (execution_id, ids) in [
+        ("exec-inject-1", vec!["L-0001", "L-0002"]),
+        ("exec-inject-2", vec!["L-0001"]),
+        ("exec-inject-3", vec!["L-0001"]),
+    ] {
+        store
+            .insert_audit_event_record(&learning_injected_params(execution_id, &ids))
+            .expect("insert injection event");
+    }
+    store
+        .insert_audit_event_record(&learning_shown_params("exec-show-1", "L-0001"))
+        .expect("insert show event");
+
+    let stats = store
+        .get_learning_usage_stats(None)
+        .expect("learning usage stats");
+    assert_eq!(stats.len(), 2);
+
+    // Sorted by injected_count DESC: L-0001 (3) before L-0002 (1).
+    let first = &stats[0];
+    assert_eq!(first.learning_id, "L-0001");
+    assert_eq!(first.injected_count, 3);
+    assert_eq!(first.shown_count, 1);
+    assert_eq!(first.shown_ratio(), Some(1.0 / 3.0));
+    assert!(first.last_injected_at.is_some());
+    assert!(first.last_shown_at.is_some());
+
+    let second = &stats[1];
+    assert_eq!(second.learning_id, "L-0002");
+    assert_eq!(second.injected_count, 1);
+    assert_eq!(second.shown_count, 0);
+    assert_eq!(second.shown_ratio(), Some(0.0));
+    assert!(second.last_shown_at.is_none());
+}
+
+#[test]
+fn learning_usage_stats_skip_malformed_arguments_and_respect_since() {
+    let store = Store::open_in_memory().expect("open store");
+    let mut malformed = learning_injected_params("exec-malformed", &["L-0001"]);
+    malformed.arguments_json = Some("not-json".to_string());
+    store
+        .insert_audit_event_record(&malformed)
+        .expect("insert malformed event");
+    store
+        .insert_audit_event_record(&learning_injected_params("exec-ok", &["L-0002"]))
+        .expect("insert valid event");
+
+    let stats = store
+        .get_learning_usage_stats(None)
+        .expect("learning usage stats");
+    assert_eq!(stats.len(), 1);
+    assert_eq!(stats[0].learning_id, "L-0002");
+
+    let future = chrono::Utc::now() + chrono::Duration::days(1);
+    let stats = store
+        .get_learning_usage_stats(Some(&future))
+        .expect("learning usage stats since future");
+    assert!(stats.is_empty());
+}
+
 #[test]
 fn migration_adds_correlation_columns_to_legacy_table() {
     let conn = rusqlite::Connection::open_in_memory().expect("open in-memory connection");

@@ -3,7 +3,7 @@ summary: "Project Learnings — Decisions"
 type: design
 title: "Project Learnings — Decisions"
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-07-19
 status: Draft
 feature: project-learnings
 doc_role: decisions
@@ -229,9 +229,34 @@ Alternatives considered:
 
 ---
 
+## ADR-0242 — Teaser learning injection + show-as-usage-signal (replaces rejected ack design)
+
+**Status:** Accepted · 2026-07 · [ORB-10316]
+
+**Context.** The 2026-07-18 relevancy audit (friction F2026-07-092) found the learning PreToolUse hook fired 2,374 times over two weeks with 13 injections (0.55%) and **zero usage signal**: nothing recorded whether an injected learning shaped the receiving agent's work, so nothing could drive deprecation of stale learnings. ADR-0210 removed the vote/comment feedback surfaces for lack of real usage, with an explicit reopening clause: a scoped feedback primitive can return "with real usage data behind it." A first attempt (PR #657, closed unmerged) added an explicit `orbit learning ack` CLI/MCP surface — Daniel rejected it as gameable, agent-remembered, and a new tool in the frozen conformance fixture, with "unacked = ignored" penalizing every silent session. Separately, per-session dedup was dead: `ORBIT_SESSION_ID` was exported on 0/2,374 fires and the ppid-tmpfile fallback re-keys per invocation (L-0077 injected 10× in one session).
+
+Alternatives considered:
+
+| Approach | Profile |
+|----------|---------|
+| **Explicit `learning ack` surface (PR #657)** | Active, gameable, adds an MCP tool to the frozen conformance fixture and a reminder footer line; silence forced to mean "ignored." Rejected. |
+| **Full-content injection, no signal (status quo)** | High per-fire token cost, no usage data, no deprecation input. |
+| **Teaser injection + show-as-signal (this ADR)** | Injection carries only id + summary + tags; opening the body via `orbit learning show` is the passive, ungameable signal. Lower token cost, no new agent action, no new MCP tool. |
+
+**Decision.** Injection projects only the learning id, one-line summary, and scope tags; the full body is retrieved via `orbit learning show <id>`, which records a `learning_shown` audit event (keyed by learning id + session) in the host-global `~/.orbit/orbit.db` — the passive usage signal. `orbit learning stats` folds `learning_injected` + `learning_shown` into a per-learning rollup (injected, shown, shown ratio, last-injected/last-shown). Both emissions **fail open**: an unavailable audit backend logs a warning and the injection/show still completes. Session dedup keys on the first resolvable anchor: `ORBIT_SESSION_ID` env → the `session_id` field the hook payload carries → ppid-tmpfile last resort. **No ack surface** — no `orbit learning ack`, no `orbit.learning.ack`, no ack instruction in the injected block.
+
+**Consequences.**
+- The rollup is the designed input for downstream deprecation policy (ORB-10318); decay/TTL is deliberately follow-up work, not implemented at this layer.
+- The `learning_injected`/`learning_shown` contract lives in audit-event conventions (`target_type` + `arguments_json`), enforced by store-level fold tests, not a schema migration.
+- Signal quality depends on agents opening learnings they use, but `show` is far harder to game than an ack and costs nothing extra to emit; the ratio is directional input for a sweep, not an automated gate.
+- Cost: one audit row per `show`, plus scope tags on each teaser line. **No** change to the MCP conformance surface (no new tool), unlike the rejected ack design.
+
+---
+
 ## Task References
 
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
 - [ORB-10046] — Remove the vote and comment surfaces from the learning subsystem (ADR-0210 supersedes ADR-0157).
+- [ORB-10316] — Teaser injection + `learning_shown` usage signal + `orbit learning stats` rollup + payload-derived session dedup (ADR-0242).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
