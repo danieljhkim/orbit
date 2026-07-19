@@ -39,18 +39,24 @@ mod client;
 mod error;
 mod hub_contract;
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use orbit_common::types::{
     LearningInjectionState, McpToolDefinition, McpToolPolicyError, NotFoundKind, OrbitError,
-    SpokeRegistrationRequestV1, SpokeRegistrationResultV1, ToolSessionContext,
+    SpokeRegistrationRequestV1, SpokeRegistrationResultV1, ToolParam, ToolSessionContext,
+    audit_execution_id,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::io::stdio;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 pub use adapter::OrbitToolServer;
-pub use client::{HubClientExpectation, OrbitMcpClient, validate_remote_call_context};
+pub use client::{
+    HubClientExpectation, McpClientInitialization, McpClientRequestError, McpToolResponse,
+    OrbitMcpClient, RawOrbitMcpClient, validate_remote_call_context,
+};
 pub use hub_contract::{
     CANONICAL_MCP_REGISTRY_REVISION, HUB_CONTRACT_INSTRUCTIONS_PREFIX, HUB_SCHEMA_DOMAIN,
     HubServerContractV1, MCP_CONTRACT_REVISION, canonical_hub_schema_bytes, hub_schema_digest,
@@ -64,6 +70,33 @@ pub fn graph_tool_names() -> &'static [&'static str] {
 /// Workspace-independent source for the graph adapter's schema-adjacent policies.
 pub fn graph_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
     adapter::graph_mcp_tool_definitions()
+}
+
+/// Complete JSON input schema advertised for one MCP tool.
+pub type McpInputSchema = Map<String, Value>;
+
+/// Encode Orbit's compatibility input schema for one canonical tool.
+///
+/// Higher-level feature crates may instead provide a complete schema through
+/// [`McpToolExtension::input_schema`].
+pub fn encode_mcp_input_schema(tool_name: &str, params: &[ToolParam]) -> McpInputSchema {
+    adapter::encode_mcp_input_schema(tool_name, params)
+}
+
+/// Encode an input schema with a caller-owned enum-value resolver.
+///
+/// This keeps JSON-schema framing in the generic MCP kernel while allowing a
+/// feature-owned extension to keep its enum metadata adjacent to its tool
+/// definitions.
+pub fn encode_mcp_input_schema_with_enum_values<F>(
+    tool_name: &str,
+    params: &[ToolParam],
+    enum_values: F,
+) -> McpInputSchema
+where
+    F: Fn(&str, &str) -> Option<&'static [&'static str]>,
+{
+    adapter::encode_mcp_input_schema_with_enum_values(tool_name, params, enum_values)
 }
 
 /// An in-process MCP tool implementation composed into [`OrbitToolServer`].
@@ -88,9 +121,240 @@ pub trait McpToolExtension: Send + Sync + 'static {
         session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError>;
 
+    /// Encode the complete input schema for one definition owned by this
+    /// extension. The compatibility default preserves the kernel's existing
+    /// schema encoding; feature extensions may override it completely.
+    fn input_schema(&self, definition: &McpToolDefinition) -> Result<McpInputSchema, OrbitError> {
+        Ok(encode_mcp_input_schema(
+            &definition.schema.name,
+            &definition.schema.parameters,
+        ))
+    }
+
     /// Preserve implementation-specific diagnostics after the host boundary
     /// returns a call failure. Generic extensions need not emit anything.
     fn report_call_failure(&self, _name: &str, _error: &OrbitError) {}
+}
+
+/// Identifies the request whose trusted per-call context is being resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpRequestKind {
+    Tool { name: String },
+    Custom { method: String },
+}
+
+/// Resolves one trusted per-call context from server-owned state and opaque
+/// transport metadata.
+pub trait McpCallContextResolver: Send + Sync + 'static {
+    fn resolve(
+        &self,
+        trusted_context: &ToolSessionContext,
+        request: &McpRequestKind,
+        transport_metadata: &Map<String, Value>,
+    ) -> Result<ToolSessionContext, OrbitError>;
+}
+
+/// Default resolver for ordinary local MCP sessions.
+#[derive(Debug, Default)]
+pub struct LocalMcpCallContextResolver;
+
+impl McpCallContextResolver for LocalMcpCallContextResolver {
+    fn resolve(
+        &self,
+        trusted_context: &ToolSessionContext,
+        _request: &McpRequestKind,
+        _transport_metadata: &Map<String, Value>,
+    ) -> Result<ToolSessionContext, OrbitError> {
+        let mut context = trusted_context.clone();
+        context.mcp_call_id = Some(audit_execution_id("mcall"));
+        Ok(context)
+    }
+}
+
+/// Error classification returned by an in-process custom MCP request handler.
+#[derive(Debug, Clone, PartialEq)]
+pub enum McpCustomRequestError {
+    MethodNotFound,
+    InvalidParams {
+        message: String,
+        data: Option<Value>,
+    },
+    Internal {
+        message: String,
+        data: Option<Value>,
+    },
+}
+
+impl McpCustomRequestError {
+    pub fn invalid_params(message: impl Into<String>) -> Self {
+        Self::InvalidParams {
+            message: message.into(),
+            data: None,
+        }
+    }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::Internal {
+            message: message.into(),
+            data: None,
+        }
+    }
+}
+
+/// Handles one family of non-tool MCP requests.
+pub trait McpCustomRequestHandler: Send + Sync + 'static {
+    fn recognizes(&self, method: &str) -> bool;
+
+    /// Stable label used when the blocking handler worker itself fails.
+    fn worker_label(&self) -> &'static str {
+        "MCP custom request"
+    }
+
+    fn call(
+        &self,
+        method: &str,
+        params: Option<Value>,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, McpCustomRequestError>;
+}
+
+/// Successful tool-call data presented to a post-call result decorator.
+#[derive(Debug, Clone)]
+pub struct McpResultDecoration {
+    pub canonical_name: String,
+    pub input: Value,
+    pub output: Value,
+    pub call_context: ToolSessionContext,
+    pub server_context: ToolSessionContext,
+}
+
+/// Stable adapter-level error returned by a result decorator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpResultDecorationError {
+    message: String,
+}
+
+impl McpResultDecorationError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for McpResultDecorationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for McpResultDecorationError {}
+
+pub type McpResultDecorationFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Value, McpResultDecorationError>> + Send + 'a>>;
+
+/// Decorates a successful tool result before MCP structured framing.
+pub trait McpResultDecorator: Send + Sync + 'static {
+    fn decorate(&self, call: McpResultDecoration) -> McpResultDecorationFuture<'_>;
+}
+
+/// Opaque initialize metadata supplied by server composition.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct McpServerMetadata {
+    instructions: Option<String>,
+}
+
+impl McpServerMetadata {
+    pub fn with_instructions(mut self, instructions: impl Into<String>) -> Self {
+        self.instructions = Some(instructions.into());
+        self
+    }
+
+    pub fn instructions(&self) -> Option<&str> {
+        self.instructions.as_deref()
+    }
+}
+
+/// Complete generic composition for one [`OrbitToolServer`].
+#[derive(Clone)]
+pub struct McpServerComposition {
+    tool_extensions: Vec<McpToolExtensionRegistration>,
+    result_decorators: Vec<Arc<dyn McpResultDecorator>>,
+    call_context_resolver: Arc<dyn McpCallContextResolver>,
+    custom_request_handlers: Vec<Arc<dyn McpCustomRequestHandler>>,
+    metadata: McpServerMetadata,
+}
+
+pub(crate) struct McpServerCompositionParts {
+    pub(crate) tool_extensions: Vec<McpToolExtensionRegistration>,
+    pub(crate) result_decorators: Vec<Arc<dyn McpResultDecorator>>,
+    pub(crate) call_context_resolver: Arc<dyn McpCallContextResolver>,
+    pub(crate) custom_request_handlers: Vec<Arc<dyn McpCustomRequestHandler>>,
+    pub(crate) metadata: McpServerMetadata,
+}
+
+impl McpServerComposition {
+    pub fn new() -> Self {
+        Self {
+            tool_extensions: Vec::new(),
+            result_decorators: Vec::new(),
+            call_context_resolver: Arc::new(LocalMcpCallContextResolver),
+            custom_request_handlers: Vec::new(),
+            metadata: McpServerMetadata::default(),
+        }
+    }
+
+    pub fn with_tool_extension(mut self, extension: McpToolExtensionRegistration) -> Self {
+        self.tool_extensions.push(extension);
+        self
+    }
+
+    pub fn with_tool_extensions(
+        mut self,
+        extensions: impl IntoIterator<Item = McpToolExtensionRegistration>,
+    ) -> Self {
+        self.tool_extensions.extend(extensions);
+        self
+    }
+
+    pub fn with_result_decorator(mut self, decorator: Arc<dyn McpResultDecorator>) -> Self {
+        self.result_decorators.push(decorator);
+        self
+    }
+
+    pub fn with_call_context_resolver(mut self, resolver: Arc<dyn McpCallContextResolver>) -> Self {
+        self.call_context_resolver = resolver;
+        self
+    }
+
+    pub fn with_custom_request_handler(
+        mut self,
+        handler: Arc<dyn McpCustomRequestHandler>,
+    ) -> Self {
+        self.custom_request_handlers.push(handler);
+        self
+    }
+
+    pub fn with_metadata(mut self, metadata: McpServerMetadata) -> Self {
+        self.metadata = metadata;
+        self
+    }
+
+    pub(crate) fn into_parts(self) -> McpServerCompositionParts {
+        McpServerCompositionParts {
+            tool_extensions: self.tool_extensions,
+            result_decorators: self.result_decorators,
+            call_context_resolver: self.call_context_resolver,
+            custom_request_handlers: self.custom_request_handlers,
+            metadata: self.metadata,
+        }
+    }
+}
+
+impl Default for McpServerComposition {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Composition metadata for one in-process MCP tool extension.
@@ -271,6 +535,19 @@ pub async fn serve_stdio_with_extensions(
     .await
 }
 
+/// Serve stdio MCP from a complete generic server composition.
+pub async fn serve_stdio_with_composition(
+    host: Arc<dyn McpHost>,
+    composition: McpServerComposition,
+) -> Result<(), OrbitError> {
+    serve_stdio_with_context_and_composition(
+        host,
+        ToolSessionContext::trusted_local(None, None, None),
+        composition,
+    )
+    .await
+}
+
 /// Serve stdio MCP with adapter-validated trusted context. The external
 /// initialize payload can replace only the legacy `workspace` selector.
 pub async fn serve_stdio_with_context(
@@ -291,6 +568,18 @@ pub async fn serve_stdio_with_context_and_extensions(
 ) -> Result<(), OrbitError> {
     let server =
         OrbitToolServer::new_with_context_and_extensions(host, trusted_context, extensions);
+    serve_server(server).await
+}
+
+/// Serve stdio MCP with trusted context and a complete generic server
+/// composition.
+pub async fn serve_stdio_with_context_and_composition(
+    host: Arc<dyn McpHost>,
+    trusted_context: ToolSessionContext,
+    composition: McpServerComposition,
+) -> Result<(), OrbitError> {
+    let server =
+        OrbitToolServer::new_with_context_and_composition(host, trusted_context, composition);
     serve_server(server).await
 }
 

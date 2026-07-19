@@ -6,20 +6,30 @@ use serde_json::{Map, Value, json};
 
 use super::name_map::sanitize_tool_name;
 
-pub(super) fn schema_to_tool(schema: ToolSchema) -> Tool {
+pub(super) fn schema_to_tool(schema: ToolSchema, input_schema: JsonObject) -> Tool {
     let description = schema.description.clone();
-    let input_schema = build_input_schema(&schema.name, &schema.parameters);
     let advertised_name = sanitize_tool_name(&schema.name);
     Tool::new(advertised_name, description, Arc::new(input_schema))
 }
 
 pub(crate) fn build_input_schema(tool_name: &str, params: &[ToolParam]) -> JsonObject {
+    build_input_schema_with_enum_values(tool_name, params, enum_values_for)
+}
+
+pub(crate) fn build_input_schema_with_enum_values<F>(
+    tool_name: &str,
+    params: &[ToolParam],
+    enum_values: F,
+) -> JsonObject
+where
+    F: Fn(&str, &str) -> Option<&'static [&'static str]>,
+{
     let mut properties = Map::new();
     let mut required: Vec<Value> = Vec::new();
 
     for param in params {
         let mut prop = property_for(&param.param_type);
-        if let Some(values) = enum_values_for(tool_name, &param.name) {
+        if let Some(values) = enum_values(tool_name, &param.name) {
             prop.insert(
                 "enum".to_string(),
                 Value::Array(

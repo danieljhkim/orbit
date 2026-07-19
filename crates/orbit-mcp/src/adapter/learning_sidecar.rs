@@ -2,22 +2,81 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use orbit_common::types::{
-    LearningInjectionCaps, LearningReminder, OrbitError, ToolSessionContext,
+    LearningInjectionCaps, LearningInjectionState, LearningReminder, OrbitError, ToolSessionContext,
 };
 use orbit_common::utility::selector::anchor_path;
-use rmcp::ErrorData as McpError;
 use serde_json::{Value, json};
 
-use super::{OrbitToolServer, PROCESS_LEARNING_SESSION_KEY};
-use crate::McpHost;
+use super::PROCESS_LEARNING_SESSION_KEY;
+use crate::{
+    McpHost, McpResultDecoration, McpResultDecorationError, McpResultDecorationFuture,
+    McpResultDecorator,
+};
 
-impl OrbitToolServer {
-    pub(super) async fn maybe_attach_learning_sidecar(
+pub(super) struct LearningSidecarDecorator {
+    host: Arc<dyn McpHost>,
+    learning_session_id: Option<String>,
+    learning_caps: LearningInjectionCaps,
+    learning_states: Arc<tokio::sync::Mutex<BTreeMap<String, LearningInjectionState>>>,
+}
+
+impl LearningSidecarDecorator {
+    pub(super) fn from_env(host: Arc<dyn McpHost>) -> Self {
+        let learning_session_id = std::env::var("ORBIT_SESSION_ID")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        Self::new(
+            host,
+            learning_session_id,
+            LearningInjectionCaps::from_env(),
+            LearningInjectionState::default(),
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn new_for_test(
+        host: Arc<dyn McpHost>,
+        learning_session_id: Option<String>,
+        learning_caps: LearningInjectionCaps,
+        initial_state: LearningInjectionState,
+    ) -> Self {
+        Self::new(host, learning_session_id, learning_caps, initial_state)
+    }
+
+    fn new(
+        host: Arc<dyn McpHost>,
+        learning_session_id: Option<String>,
+        learning_caps: LearningInjectionCaps,
+        initial_state: LearningInjectionState,
+    ) -> Self {
+        let key = learning_session_id
+            .clone()
+            .unwrap_or_else(|| PROCESS_LEARNING_SESSION_KEY.to_string());
+        let mut learning_states = BTreeMap::new();
+        learning_states.insert(key, initial_state);
+        Self {
+            host,
+            learning_session_id,
+            learning_caps,
+            learning_states: Arc::new(tokio::sync::Mutex::new(learning_states)),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn states(
+        &self,
+    ) -> Arc<tokio::sync::Mutex<BTreeMap<String, LearningInjectionState>>> {
+        Arc::clone(&self.learning_states)
+    }
+
+    async fn maybe_attach_learning_sidecar(
         &self,
         canonical: &str,
         input: Value,
         value: Value,
-    ) -> Result<Value, McpError> {
+        session_context: ToolSessionContext,
+    ) -> Result<Value, McpResultDecorationError> {
         if !learning_sidecar_tool(canonical) {
             return Ok(value);
         }
@@ -28,7 +87,6 @@ impl OrbitToolServer {
 
         let host = Arc::clone(&self.host);
         let caps = self.learning_caps;
-        let session_context = self.session_context();
         let join = tokio::task::spawn_blocking(move || {
             search_learning_reminders(&*host, &paths, caps, session_context)
         })
@@ -63,7 +121,7 @@ impl OrbitToolServer {
     async fn admit_learning_reminders(
         &self,
         reminders: Vec<LearningReminder>,
-    ) -> Result<Vec<LearningReminder>, McpError> {
+    ) -> Result<Vec<LearningReminder>, McpResultDecorationError> {
         let key = self.learning_session_key();
         let caps = self.learning_caps;
         if let Some(session_id) = self.learning_session_id.clone() {
@@ -84,13 +142,12 @@ impl OrbitToolServer {
             })
             .await
             .map_err(|error| {
-                McpError::internal_error(
-                    format!("learning session state worker failed: {error}"),
-                    None,
-                )
+                McpResultDecorationError::new(format!(
+                    "learning session state worker failed: {error}"
+                ))
             })?;
             let (state, admitted) = join.map_err(|error| {
-                McpError::internal_error(format!("update learning session state: {error}"), None)
+                McpResultDecorationError::new(format!("update learning session state: {error}"))
             })?;
             let mut states = self.learning_states.lock().await;
             states.insert(key, state);
@@ -106,6 +163,20 @@ impl OrbitToolServer {
         self.learning_session_id
             .clone()
             .unwrap_or_else(|| PROCESS_LEARNING_SESSION_KEY.to_string())
+    }
+}
+
+impl McpResultDecorator for LearningSidecarDecorator {
+    fn decorate(&self, call: McpResultDecoration) -> McpResultDecorationFuture<'_> {
+        Box::pin(async move {
+            self.maybe_attach_learning_sidecar(
+                &call.canonical_name,
+                call.input,
+                call.output,
+                call.server_context,
+            )
+            .await
+        })
     }
 }
 

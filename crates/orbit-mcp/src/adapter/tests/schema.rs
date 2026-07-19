@@ -45,7 +45,9 @@ fn task_update_schema_excludes_friction_status_enum() {
 
 #[test]
 fn schema_to_tool_keeps_dotted_orbit_tools_advertised_with_underscores() {
-    let tool = schema_to_tool(tool_schema("orbit.task.add"));
+    let schema = tool_schema("orbit.task.add");
+    let input_schema = build_input_schema(&schema.name, &schema.parameters);
+    let tool = schema_to_tool(schema, input_schema);
     assert_eq!(tool.name.as_ref(), "orbit_task_add");
 }
 

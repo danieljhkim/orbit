@@ -21,12 +21,16 @@ mod tests;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+#[cfg(test)]
+use orbit_common::types::{LearningInjectionCaps, LearningInjectionState};
 use orbit_common::types::{
-    LearningInjectionCaps, LearningInjectionState, McpToolDefinition, McpToolPolicyError,
-    ToolSessionContext, audit_execution_id,
+    McpToolDefinition, McpToolPolicyError, ToolParam, ToolSessionContext, audit_execution_id,
 };
 
-use crate::{McpHost, McpToolExtension, McpToolExtensionRegistration};
+use crate::{
+    McpCallContextResolver, McpCustomRequestHandler, McpHost, McpInputSchema, McpResultDecorator,
+    McpServerComposition, McpServerMetadata, McpToolExtension, McpToolExtensionRegistration,
+};
 
 /// An rmcp [`ServerHandler`] that delegates tool listing and tool execution to
 /// an injected [`McpHost`].
@@ -48,11 +52,15 @@ use crate::{McpHost, McpToolExtension, McpToolExtensionRegistration};
 pub struct OrbitToolServer {
     host: Arc<dyn McpHost>,
     extensions: Vec<McpToolExtensionRegistration>,
+    result_decorators: Vec<Arc<dyn McpResultDecorator>>,
+    call_context_resolver: Arc<dyn McpCallContextResolver>,
+    custom_request_handlers: Vec<Arc<dyn McpCustomRequestHandler>>,
+    metadata: McpServerMetadata,
     name_map: RwLock<HashMap<String, String>>,
     session_context: RwLock<ToolSessionContext>,
-    learning_session_id: Option<String>,
-    learning_caps: LearningInjectionCaps,
-    learning_states: tokio::sync::Mutex<HashMap<String, LearningInjectionState>>,
+    #[cfg(test)]
+    learning_states_for_test:
+        Option<Arc<tokio::sync::Mutex<std::collections::BTreeMap<String, LearningInjectionState>>>>,
 }
 
 impl OrbitToolServer {
@@ -72,6 +80,15 @@ impl OrbitToolServer {
         )
     }
 
+    /// Construct a server from a complete generic MCP composition.
+    pub fn new_with_composition(host: Arc<dyn McpHost>, composition: McpServerComposition) -> Self {
+        Self::new_with_context_and_composition(
+            host,
+            ToolSessionContext::trusted_local(None, None, None),
+            composition,
+        )
+    }
+
     pub fn new_with_context(host: Arc<dyn McpHost>, trusted_context: ToolSessionContext) -> Self {
         let extensions = default_extensions(&host);
         Self::new_with_context_and_extensions(host, trusted_context, extensions)
@@ -81,31 +98,44 @@ impl OrbitToolServer {
     /// extension composition.
     pub fn new_with_context_and_extensions(
         host: Arc<dyn McpHost>,
-        mut trusted_context: ToolSessionContext,
+        trusted_context: ToolSessionContext,
         extensions: Vec<McpToolExtensionRegistration>,
+    ) -> Self {
+        let composition = compatibility_composition(
+            &host,
+            extensions,
+            Arc::new(learning_sidecar::LearningSidecarDecorator::from_env(
+                Arc::clone(&host),
+            )),
+        );
+        Self::new_with_context_and_composition(host, trusted_context, composition)
+    }
+
+    /// Construct a server with trusted context and a complete generic MCP
+    /// composition. Unlike compatibility constructors, this installs only the
+    /// extensions, decorators, handlers, resolver, and metadata supplied by
+    /// the caller.
+    pub fn new_with_context_and_composition(
+        host: Arc<dyn McpHost>,
+        mut trusted_context: ToolSessionContext,
+        composition: McpServerComposition,
     ) -> Self {
         if trusted_context.origin_session_id.is_none() {
             trusted_context.origin_session_id = Some(audit_execution_id("mcp-session"));
         }
         trusted_context.mcp_call_id = None;
-        let learning_session_id = std::env::var("ORBIT_SESSION_ID")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-        let learning_caps = LearningInjectionCaps::from_env();
-        let mut learning_states = HashMap::new();
-        let key = learning_session_id
-            .clone()
-            .unwrap_or_else(|| PROCESS_LEARNING_SESSION_KEY.to_string());
-        learning_states.insert(key, LearningInjectionState::default());
+        let parts = composition.into_parts();
         Self {
             host,
-            extensions,
+            extensions: parts.tool_extensions,
+            result_decorators: parts.result_decorators,
+            call_context_resolver: parts.call_context_resolver,
+            custom_request_handlers: parts.custom_request_handlers,
+            metadata: parts.metadata,
             name_map: RwLock::new(HashMap::new()),
             session_context: RwLock::new(trusted_context),
-            learning_session_id,
-            learning_caps,
-            learning_states: tokio::sync::Mutex::new(learning_states),
+            #[cfg(test)]
+            learning_states_for_test: None,
         }
     }
 
@@ -117,23 +147,49 @@ impl OrbitToolServer {
         initial_state: LearningInjectionState,
     ) -> Self {
         let extensions = default_extensions(&host);
-        let key = learning_session_id
-            .clone()
-            .unwrap_or_else(|| PROCESS_LEARNING_SESSION_KEY.to_string());
-        let mut learning_states = HashMap::new();
-        learning_states.insert(key, initial_state);
-        let mut trusted_context = ToolSessionContext::trusted_local(None, None, None);
-        trusted_context.origin_session_id = Some(audit_execution_id("mcp-session"));
-        Self {
-            host,
-            extensions,
-            name_map: RwLock::new(HashMap::new()),
-            session_context: RwLock::new(trusted_context),
+        let learning = Arc::new(learning_sidecar::LearningSidecarDecorator::new_for_test(
+            Arc::clone(&host),
             learning_session_id,
             learning_caps,
-            learning_states: tokio::sync::Mutex::new(learning_states),
-        }
+            initial_state,
+        ));
+        let learning_states = learning.states();
+        let composition = compatibility_composition(&host, extensions, learning);
+        let mut trusted_context = ToolSessionContext::trusted_local(None, None, None);
+        trusted_context.origin_session_id = Some(audit_execution_id("mcp-session"));
+        let mut server = Self::new_with_context_and_composition(host, trusted_context, composition);
+        server.learning_states_for_test = Some(learning_states);
+        server
     }
+
+    #[cfg(test)]
+    async fn learning_state_for_test(&self, key: &str) -> Option<LearningInjectionState> {
+        let states = self.learning_states_for_test.as_ref()?;
+        states.lock().await.get(key).cloned()
+    }
+}
+
+fn compatibility_composition(
+    host: &Arc<dyn McpHost>,
+    extensions: Vec<McpToolExtensionRegistration>,
+    learning: Arc<dyn McpResultDecorator>,
+) -> McpServerComposition {
+    let mut composition = McpServerComposition::new()
+        .with_tool_extensions(extensions)
+        .with_result_decorator(learning)
+        .with_call_context_resolver(Arc::new(dispatch::CompatibilityCallContextResolver::new(
+            host.accepts_remote_session_context(),
+        )));
+    if host.accepts_remote_session_context() {
+        composition = composition.with_custom_request_handler(Arc::new(
+            dispatch::SpokeRegistrationHandler::new(Arc::clone(host)),
+        ));
+    }
+    if let Some(instructions) = host.private_server_instructions() {
+        composition =
+            composition.with_metadata(McpServerMetadata::default().with_instructions(instructions));
+    }
+    composition
 }
 
 fn default_extensions(host: &Arc<dyn McpHost>) -> Vec<McpToolExtensionRegistration> {
@@ -154,4 +210,19 @@ pub(crate) fn graph_tool_names() -> &'static [&'static str] {
 
 pub(crate) fn graph_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
     graph::graph_tool_definitions()
+}
+
+pub(crate) fn encode_mcp_input_schema(tool_name: &str, params: &[ToolParam]) -> McpInputSchema {
+    schema::build_input_schema(tool_name, params)
+}
+
+pub(crate) fn encode_mcp_input_schema_with_enum_values<F>(
+    tool_name: &str,
+    params: &[ToolParam],
+    enum_values: F,
+) -> McpInputSchema
+where
+    F: Fn(&str, &str) -> Option<&'static [&'static str]>,
+{
+    schema::build_input_schema_with_enum_values(tool_name, params, enum_values)
 }

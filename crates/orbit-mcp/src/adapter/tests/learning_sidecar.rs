@@ -126,8 +126,10 @@ async fn l1_seeded_learning_is_suppressed_by_l2_dedup_state() {
         .expect("structured content");
 
     assert!(structured.get("learnings").is_none());
-    let states = server.learning_states.lock().await;
-    let state = states.get(PROCESS_LEARNING_SESSION_KEY).expect("state");
+    let state = server
+        .learning_state_for_test(PROCESS_LEARNING_SESSION_KEY)
+        .await
+        .expect("state");
     assert_eq!(state.count, 1);
     assert!(state.emitted_ids.contains("L-0001"));
 }
@@ -182,8 +184,10 @@ async fn learning_sidecar_enforces_per_session_hard_cap() {
     }
 
     assert_eq!(emitted, 20);
-    let states = server.learning_states.lock().await;
-    let state = states.get(PROCESS_LEARNING_SESSION_KEY).expect("state");
+    let state = server
+        .learning_state_for_test(PROCESS_LEARNING_SESSION_KEY)
+        .await
+        .expect("state");
     assert_eq!(state.count, 20);
     assert_eq!(state.emitted_ids.len(), 20);
 }

@@ -51,6 +51,23 @@ impl McpToolExtension for EchoExtension {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(json!({ "tool": name, "input": input }))
     }
+
+    fn input_schema(
+        &self,
+        _definition: &McpToolDefinition,
+    ) -> Result<crate::McpInputSchema, OrbitError> {
+        Ok(json!({
+            "type": "object",
+            "properties": {
+                "value": { "type": "integer", "minimum": 1 }
+            },
+            "required": ["value"],
+            "additionalProperties": false
+        })
+        .as_object()
+        .expect("schema object")
+        .clone())
+    }
 }
 
 impl crate::McpHost for ExtensionPolicyHost {
@@ -186,6 +203,36 @@ async fn explicit_extension_is_advertised_and_crosses_host_policy_seam() {
     assert_eq!(extension.calls.load(Ordering::SeqCst), 1);
     assert_eq!(host.in_process_calls.load(Ordering::SeqCst), 1);
     assert_eq!(host.host_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn extension_owns_its_complete_advertised_input_schema() {
+    let host = Arc::new(ExtensionPolicyHost {
+        schemas: Vec::new(),
+        host_calls: AtomicUsize::new(0),
+        in_process_calls: AtomicUsize::new(0),
+    });
+    let extension: Arc<dyn McpToolExtension> = Arc::new(EchoExtension {
+        calls: AtomicUsize::new(0),
+    });
+    let server = OrbitToolServer::new_with_extensions(
+        host,
+        vec![McpToolExtensionRegistration::advertised(extension)],
+    );
+    let definition = server
+        .combined_tool_definitions()
+        .expect("extension definitions")
+        .into_iter()
+        .find(|definition| definition.schema.name == "demo.extension")
+        .expect("extension definition");
+
+    let schema = server
+        .input_schema_for(&definition)
+        .expect("extension input schema");
+
+    assert_eq!(schema["additionalProperties"], false);
+    assert_eq!(schema["properties"]["value"]["minimum"], 1);
+    assert_eq!(schema["required"], json!(["value"]));
 }
 
 #[tokio::test]
