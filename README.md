@@ -204,12 +204,11 @@ codex plugin add orbit@orbit
 
 </details>
 
-> **Cowork users:** Cowork launches the plugin's MCP server with its working directory and `CLAUDE_PROJECT_DIR` pointed at an internal scratchpad rather than your selected repo, so `orbit mcp serve` finds no workspace and exposes only the graph tools — `orbit_task_add` and the rest of the task/ADR/learning surface stay hidden. Workaround: point the server at your repo explicitly with the global `--root` flag in your user config (`~/.claude/settings.json`):
->
-> ```json
-> { "mcpServers": { "orbit": { "command": "npx",
->   "args": ["-y", "@orbit-tools/cli@latest", "--root", "/abs/path/to/repo", "mcp", "serve"] } } }
-> ```
+> **Cowork users:** Orbit advertises its canonical MCP surface independently of the
+> server's launch directory. Workspace routing comes from MCP initialize/session
+> context or an explicit registered `workspace` on the tool call. Do not add the
+> global `--root` flag to `orbit mcp serve`; the server rejects launch-root routing
+> so a scratchpad cwd cannot silently select the wrong workspace.
 
 ---
 

@@ -103,9 +103,12 @@ If setup or a sweep misbehaves, surface it and offer `orbit-task` friction repor
 
 ## Cowork configuration
 
-If the user runs the plugin inside **Cowork** (the Claude desktop app) and only the `orbit_graph_*` tools appear — no `orbit_task_add` / ADR / learning tools — it's the known workspace-discovery gap: Cowork launches the plugin's MCP server with cwd and `CLAUDE_PROJECT_DIR` set to an internal scratchpad, not the selected repo, so `serve` finds no `.orbit/` and falls back to the graph-only surface.
-
-Fix: pass the repo explicitly via the global `--root` flag in the orbit MCP launch, in user config (`~/.claude/settings.json`) since the cached plugin copy is overwritten on reinstall. See the README "Cowork users" note for the exact `mcpServers` block — re-read it at invocation time. There is no env/cwd source for the repo path in Cowork today.
+Orbit advertises the canonical MCP surface independently of Cowork's launch cwd or
+`CLAUDE_PROJECT_DIR`. Do not add the global `--root` flag to `orbit mcp serve`; the
+server rejects launch-root routing. Calls resolve a registered workspace from MCP
+initialize/session context or an explicit `workspace` input. If a call reports that
+workspace selection is missing, provide that selector rather than changing the MCP
+launch command. A graph-only advertised surface is no longer expected behavior.
 
 ## Anti-patterns (DO NOT)
 

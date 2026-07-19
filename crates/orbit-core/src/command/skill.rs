@@ -323,6 +323,7 @@ mod tests {
         let repo = repo_root();
         let plugin_skills = repo.join("plugin/skills");
         let assets = repo.join("crates/orbit-core/assets/skills");
+        let claude_mcp_path = repo.join("plugin/.mcp.json");
         let codex_manifest_path = repo.join("plugin/.codex-plugin/plugin.json");
         let marketplace_path = repo.join(".agents/plugins/marketplace.json");
         let excluded: BTreeSet<&str> = PLUGIN_EXCLUDED_SKILLS.iter().copied().collect();
@@ -433,6 +434,51 @@ mod tests {
             {
                 failures.push(
                     "  plugin/.codex-plugin/plugin.json: Codex MCP config must not reference CLAUDE_PROJECT_DIR"
+                        .to_string(),
+                );
+            }
+        }
+
+        // MCP workspace selection is per initialize/session context or tool
+        // call. A launch-time --root silently reintroduces the retired cwd
+        // routing model and is rejected by `orbit mcp serve`.
+        let claude_mcp: serde_json::Value = match std::fs::read_to_string(&claude_mcp_path) {
+            Ok(contents) => match serde_json::from_str(&contents) {
+                Ok(value) => value,
+                Err(e) => {
+                    failures.push(format!(
+                        "  {}: invalid JSON: {e}",
+                        claude_mcp_path.display()
+                    ));
+                    serde_json::Value::Null
+                }
+            },
+            Err(e) => {
+                failures.push(format!(
+                    "  {}: failed to read Claude MCP config: {e}",
+                    claude_mcp_path.display()
+                ));
+                serde_json::Value::Null
+            }
+        };
+        if !claude_mcp.is_null() {
+            let command = claude_mcp
+                .pointer("/mcpServers/orbit/command")
+                .and_then(|value| value.as_str());
+            let args = claude_mcp
+                .pointer("/mcpServers/orbit/args")
+                .and_then(|value| value.as_array())
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|value| value.as_str())
+                        .collect::<Vec<_>>()
+                });
+            if command != Some("npx")
+                || args != Some(vec!["-y", "@orbit-tools/cli@latest", "mcp", "serve"])
+            {
+                failures.push(
+                    "  plugin/.mcp.json: Orbit MCP launch must be `npx -y @orbit-tools/cli@latest mcp serve` with no cwd or --root routing"
                         .to_string(),
                 );
             }
