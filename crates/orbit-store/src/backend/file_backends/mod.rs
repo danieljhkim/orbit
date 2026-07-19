@@ -190,6 +190,18 @@ impl AdrStoreBackend for AdrFileStore {
         self.add_adr(params)
     }
 
+    fn finalize_preallocated_adr(
+        &self,
+        id: &str,
+        params: AdrCreateParams,
+    ) -> Result<Adr, OrbitError> {
+        self.finalize_preallocated_adr(id, params)
+    }
+
+    fn rollback_preallocated_adr(&self, id: &str) -> Result<bool, OrbitError> {
+        self.rollback_preallocated_adr(id)
+    }
+
     fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
         // ADRs use the WorkspaceOnly strategy per `CLAUDE.md`.
         resolve::<Adr, _>(self, id)
@@ -247,6 +259,18 @@ impl AdrStoreBackend for AdrFileStore {
 impl LearningStoreBackend for LearningFileStore {
     fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
         self.create_learning(params)
+    }
+
+    fn finalize_preallocated_learning(
+        &self,
+        id: &str,
+        params: LearningCreateParams,
+    ) -> Result<Learning, OrbitError> {
+        self.finalize_preallocated_learning(id, params)
+    }
+
+    fn rollback_preallocated_learning(&self, id: &str) -> Result<bool, OrbitError> {
+        self.rollback_preallocated_learning(id)
     }
 
     fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError> {

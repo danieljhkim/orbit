@@ -49,6 +49,11 @@ pub struct IdAllocationRecord {
     pub branch: Option<String>,
     pub status: String,
     pub body_path: Option<PathBuf>,
+    /// True for an owner-local visibility projection of an ID allocated by
+    /// the singular hub. Projection rows never participate in compatibility
+    /// ID selection and are removable only through the preallocated cleanup
+    /// path.
+    pub is_projection: bool,
 }
 
 impl IdAllocationRecord {
@@ -194,6 +199,30 @@ impl IdAllocator {
 
     pub fn record_learning_body_path(&self, id: &str, body_path: &Path) -> Result<(), OrbitError> {
         self.record_body_path(IdAllocationKind::Learning, id, body_path)
+    }
+
+    pub fn install_preallocated_adr_projection(
+        &self,
+        id: &str,
+        body_path: &Path,
+    ) -> Result<(), OrbitError> {
+        self.install_preallocated_projection(IdAllocationKind::Adr, id, body_path)
+    }
+
+    pub fn install_preallocated_learning_projection(
+        &self,
+        id: &str,
+        body_path: &Path,
+    ) -> Result<(), OrbitError> {
+        self.install_preallocated_projection(IdAllocationKind::Learning, id, body_path)
+    }
+
+    pub fn remove_preallocated_adr_projection(&self, id: &str) -> Result<bool, OrbitError> {
+        self.remove_preallocated_projection(IdAllocationKind::Adr, id)
+    }
+
+    pub fn remove_preallocated_learning_projection(&self, id: &str) -> Result<bool, OrbitError> {
+        self.remove_preallocated_projection(IdAllocationKind::Learning, id)
     }
 
     pub fn abandon_learning(&self, id: &str) -> Result<(), OrbitError> {
@@ -480,6 +509,80 @@ impl IdAllocator {
         Ok(())
     }
 
+    /// Install the owner-local lookup projection for an ID already allocated
+    /// by the hub. This deliberately does not call `allocate`, inspect a
+    /// sequence, or mutate a compatibility reservation.
+    fn install_preallocated_projection(
+        &self,
+        kind: IdAllocationKind,
+        id: &str,
+        body_path: &Path,
+    ) -> Result<(), OrbitError> {
+        let valid = match kind {
+            IdAllocationKind::Adr => parse_adr_sequence(id).is_some(),
+            IdAllocationKind::Learning => parse_learning_sequence(id).is_some(),
+        };
+        if !valid {
+            return Err(OrbitError::InvalidInput(format!(
+                "invalid preallocated {} id '{id}'",
+                kind.as_str()
+            )));
+        }
+
+        let relative_body_path = relative_to(body_path, &self.inner.worktree_root);
+        let branch = best_effort_branch(&self.inner.worktree_root);
+        let _lock = self.acquire_lock()?;
+        let mut conn = self.lock_conn()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        tx.execute(
+            "INSERT INTO id_allocations(
+                kind, id, allocated_at, worktree_root, branch, status, body_path, is_projection
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+            params![
+                kind.as_str(),
+                id,
+                Utc::now().timestamp(),
+                self.inner.worktree_root.to_string_lossy(),
+                branch,
+                STATUS_MERGED,
+                relative_body_path.to_string_lossy(),
+            ],
+        )
+        .map_err(|error| {
+            OrbitError::Store(format!(
+                "install owner-local projection for {} {id}: {error}",
+                kind.as_str()
+            ))
+        })?;
+        tx.commit()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(())
+    }
+
+    fn remove_preallocated_projection(
+        &self,
+        kind: IdAllocationKind,
+        id: &str,
+    ) -> Result<bool, OrbitError> {
+        let _lock = self.acquire_lock()?;
+        let mut conn = self.lock_conn()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let removed = tx
+            .execute(
+                "DELETE FROM id_allocations
+                 WHERE kind = ?1 AND id = ?2 AND is_projection = 1",
+                params![kind.as_str(), id],
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        tx.commit()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(removed == 1)
+    }
+
     fn abandon(&self, kind: IdAllocationKind, id: &str) -> Result<(), OrbitError> {
         let _lock = self.acquire_lock()?;
         let mut conn = self.lock_conn()?;
@@ -516,7 +619,8 @@ impl IdAllocator {
         let conn = self.lock_conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT kind, id, allocated_at, worktree_root, branch, status, body_path
+                "SELECT kind, id, allocated_at, worktree_root, branch, status, body_path,
+                        is_projection
                  FROM id_allocations
                  WHERE kind = ?1 AND id = ?2 AND status != ?3",
             )
@@ -539,7 +643,8 @@ impl IdAllocator {
         let conn = self.lock_conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT kind, id, allocated_at, worktree_root, branch, status, body_path
+                "SELECT kind, id, allocated_at, worktree_root, branch, status, body_path,
+                        is_projection
                  FROM id_allocations
                  WHERE kind = ?1 AND status != ?2
                  ORDER BY id DESC",
@@ -584,6 +689,7 @@ pub fn ensure_id_allocation_schema(conn: &Connection) -> Result<(), OrbitError> 
                 branch TEXT,
                 status TEXT NOT NULL,
                 body_path TEXT,
+                is_projection INTEGER NOT NULL DEFAULT 0 CHECK (is_projection IN (0, 1)),
                 PRIMARY KEY (kind, id),
                 CHECK (kind IN ('adr', 'learning')),
                 CHECK (status IN ('reserved', 'merged', 'abandoned'))
@@ -598,6 +704,12 @@ pub fn ensure_id_allocation_schema(conn: &Connection) -> Result<(), OrbitError> 
     )
     .map_err(|error| OrbitError::Store(error.to_string()))?;
     add_column_if_missing(conn, "id_allocations", "body_path", "TEXT")?;
+    add_column_if_missing(
+        conn,
+        "id_allocations",
+        "is_projection",
+        "INTEGER NOT NULL DEFAULT 0 CHECK (is_projection IN (0, 1))",
+    )?;
     Ok(())
 }
 
@@ -613,7 +725,7 @@ fn next_id_for_kind(tx: &Transaction<'_>, kind: IdAllocationKind) -> Result<Stri
 
 fn max_sequence(tx: &Transaction<'_>, kind: IdAllocationKind) -> Result<u32, OrbitError> {
     let mut stmt = tx
-        .prepare("SELECT id FROM id_allocations WHERE kind = ?1")
+        .prepare("SELECT id FROM id_allocations WHERE kind = ?1 AND is_projection = 0")
         .map_err(|error| OrbitError::Store(error.to_string()))?;
     let rows = stmt
         .query_map([kind.as_str()], |row| row.get::<_, String>(0))
@@ -752,6 +864,7 @@ fn allocation_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<IdAll
         branch: row.get(4)?,
         status: row.get(5)?,
         body_path: body_path.map(PathBuf::from),
+        is_projection: row.get::<_, i64>(7)? != 0,
     })
 }
 

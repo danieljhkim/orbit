@@ -393,6 +393,133 @@ fn add_adr_twice_allocates_sequential_ids() {
 }
 
 #[test]
+fn finalize_preallocated_adr_installs_projection_without_advancing_allocator() {
+    let (_dir, store) = store_with_index();
+    let adr = store
+        .finalize_preallocated_adr("ADR-9000", create_params("Hub ID", "Body"))
+        .expect("finalize supplied ID");
+
+    assert_eq!(adr.id, "ADR-9000");
+    let projection = store
+        .id_allocator
+        .adr_allocation(&adr.id)
+        .expect("projection lookup")
+        .expect("projection exists");
+    assert!(projection.is_projection);
+    assert_eq!(count_index_rows(&store), 1);
+    assert_eq!(
+        store
+            .list_adr_entries_filtered(AdrListFilter::default(), false)
+            .expect("list")
+            .len(),
+        1
+    );
+
+    store
+        .update_adr_status(&adr.id, AdrStatus::Accepted)
+        .expect("lifecycle uses projection");
+    let compatibility = store
+        .add_adr(create_params("Compatibility", "Body"))
+        .expect("compatibility allocation");
+    assert_eq!(compatibility.id, "ADR-0001");
+}
+
+#[test]
+fn finalize_preallocated_adr_collision_preserves_original_without_replacement() {
+    let (_dir, store) = store_with_index();
+    let original = store
+        .finalize_preallocated_adr("ADR-7000", create_params("Original", "Original body"))
+        .expect("original");
+    let original_dir = store.root.join("proposed").join(&original.id);
+    let before = (
+        fs::read(original_dir.join("adr.yaml")).expect("original yaml"),
+        fs::read(original_dir.join("body.md")).expect("original body"),
+    );
+
+    let error = store
+        .finalize_preallocated_adr("ADR-7000", create_params("Replacement", "Replacement body"))
+        .expect_err("collision")
+        .to_string();
+    assert!(error.contains("refusing overwrite"), "{error}");
+    assert_eq!(
+        (
+            fs::read(original_dir.join("adr.yaml")).expect("unchanged yaml"),
+            fs::read(original_dir.join("body.md")).expect("unchanged body"),
+        ),
+        before
+    );
+    assert_eq!(store.id_allocator.adr_allocations().expect("rows").len(), 1);
+    assert_eq!(
+        store.id_allocator.allocate_adr().expect("next").id,
+        "ADR-0001"
+    );
+}
+
+#[test]
+fn finalize_preallocated_adr_index_failure_removes_body_projection_and_index() {
+    let (dir, store) = store_with_index();
+    let index = store.index.as_ref().expect("index");
+    index
+        .connection()
+        .lock()
+        .expect("lock")
+        .execute_batch(
+            "CREATE TRIGGER fail_preallocated_adr_index
+             BEFORE INSERT ON adrs WHEN NEW.id = 'ADR-6000'
+             BEGIN SELECT RAISE(ABORT, 'injected ADR index failure'); END;",
+        )
+        .expect("failure trigger");
+
+    let error = store
+        .finalize_preallocated_adr("ADR-6000", create_params("Fails", "Body"))
+        .expect_err("injected failure")
+        .to_string();
+    assert!(error.contains("injected ADR index failure"), "{error}");
+    assert!(!dir.path().join("proposed/ADR-6000").exists());
+    assert!(
+        store
+            .id_allocator
+            .adr_allocation("ADR-6000")
+            .expect("projection lookup")
+            .is_none()
+    );
+    assert_eq!(count_index_rows(&store), 0);
+    assert_eq!(
+        store.id_allocator.allocate_adr().expect("next").id,
+        "ADR-0001"
+    );
+}
+
+#[test]
+fn preallocated_adr_finalizes_only_in_selected_worktree_store() {
+    let fixture = TwoWorktreeFixture::new();
+    let adr = fixture
+        .local
+        .finalize_preallocated_adr("ADR-5000", create_params("Selected", "Local only"))
+        .expect("local finalization");
+
+    assert!(
+        fixture
+            .local_root
+            .join(".orbit/adrs/proposed/ADR-5000/adr.yaml")
+            .is_file()
+    );
+    assert!(
+        !fixture
+            .sibling_root
+            .join(".orbit/adrs/proposed/ADR-5000")
+            .exists()
+    );
+    assert!(
+        fixture
+            .sibling
+            .get_adr(&adr.id)
+            .expect("sibling read")
+            .is_none()
+    );
+}
+
+#[test]
 fn update_adr_status_proposed_to_accepted_moves_dir_and_sets_accepted_at() {
     let tempdir = tempdir().expect("tempdir");
     let store = AdrFileStore::new(tempdir.path().to_path_buf());

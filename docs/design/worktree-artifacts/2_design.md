@@ -10,7 +10,7 @@ doc_role: design
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ADR-0177", "ADR-0229"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10273", "ORB-10297", "ADR-0177", "ADR-0229"]
 ---
 
 # Worktree Artifacts - Design
@@ -63,6 +63,16 @@ reservation, release, reuse, or remote-finalize protocol.
 F1 leaves the substrate dormant and exposes no public allocation tool. F3 alone
 activates public issuance and cuts owner creation over; standalone hosts cannot
 enter hub authority.
+
+F2 [ORB-10273] adds an owner-local projection row for a successfully finalized
+hub ID. The row is explicitly non-authoritative: it records the selected
+checkout/body path for ordinary list and lifecycle operations but is excluded from
+compatibility sequence selection. The supplied-ID finalizers write only under the
+D3-selected `local_root`, never infer placement from process cwd, and never accept
+an absolute checkout path as request data. Collision refuses overwrite/adoption;
+failure removes every partial body, sidecar, index entry, and projection while the
+hub allocation remains a valid consumed gap. The public create paths still use the
+compatibility allocator until F3 enables the dormant broker atomically.
 
 ## 3. Write Path
 
@@ -118,5 +128,8 @@ The `worktree_root` column preserves historical rows from earlier phases, so old
 - [ORB-10272] added the dormant, path-free Remote-v2 hub sequence and reconciliation
   substrate while preserving the standalone shared-root allocator and owner-local
   body/federation semantics; F3 owns activation and caller cutover.
+- [ORB-10273] added exact-checkout supplied-ID body finalization and removable,
+  non-authoritative owner-local projections without advancing or replacing the
+  compatibility allocator; the public F2 gate stays inactive.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
