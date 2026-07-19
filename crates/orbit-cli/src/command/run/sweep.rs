@@ -8,8 +8,9 @@ use std::path::Path;
 
 use clap::Args;
 use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceStatus};
-use orbit_core::workspace_registry;
-use orbit_core::{JobRunState, OrbitError, OrbitRuntime, TaskStatus, task_dependencies_ready};
+use orbit_core::{JobRunState, OrbitError, TaskStatus, task_dependencies_ready};
+use orbit_remote::runtime::RemoteRuntimeFactory;
+use orbit_remote::workspace_registry;
 use serde_json::{Value, json};
 
 use super::ship::ShipMode;
@@ -190,7 +191,7 @@ fn sweep_active_workspace(
     mode: orbit_core::ShipMode,
     dry_run: bool,
 ) -> Result<SweepReport, OrbitError> {
-    let runtime = OrbitRuntime::from_roots(global_root, &checkout.orbit_dir)?;
+    let runtime = RemoteRuntimeFactory::open_registered_checkout(global_root, ws, checkout)?;
     if !runtime.workflow_auto_ship() {
         return Ok(SweepReport::skipped(ws, "auto_ship_disabled", 0));
     }

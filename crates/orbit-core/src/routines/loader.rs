@@ -8,12 +8,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::{
-    OrbitError, RoutineDefinition, Workspace, WorkspaceStatus, parse_local_routine_yaml,
-    parse_routine_yaml,
+    OrbitError, RoutineDefinition, Workspace, parse_local_routine_yaml, parse_routine_yaml,
 };
 
 use crate::OrbitRuntime;
-use crate::workspace_registry;
 
 use super::due::parse_cron;
 
@@ -95,29 +93,11 @@ pub struct DiscoveredWorkspaces {
     pub errors: Vec<RoutineLoadError>,
 }
 
-/// Enumerate the global registry (validating and persisting hygiene fixes,
-/// like `ship-sweep` does) and build one runtime per active workspace.
-pub fn discover_workspaces(global_root: &Path) -> Result<DiscoveredWorkspaces, OrbitError> {
-    let registry_path = workspace_registry::registry_path_for(global_root);
-    let mut registry = workspace_registry::load_registry_from(&registry_path)?;
-    workspace_registry::validate_workspaces(&mut registry);
-    workspace_registry::save_registry_to(&registry, &registry_path)?;
-
-    let mut discovered = DiscoveredWorkspaces::default();
-    for (workspace, checkout) in workspace_registry::local_workspaces(&registry) {
-        if workspace.status != WorkspaceStatus::Active || !checkout.orbit_dir.exists() {
-            continue;
-        }
-        match OrbitRuntime::from_roots(global_root, &checkout.orbit_dir) {
-            Ok(runtime) => discovered.entries.push((workspace.clone(), runtime)),
-            Err(error) => discovered.errors.push(RoutineLoadError {
-                source_workspace: workspace.name.clone(),
-                path: Some(checkout.orbit_dir.clone()),
-                message: format!("failed to open workspace runtime: {error}"),
-            }),
-        }
-    }
-    Ok(discovered)
+/// Registry-neutral source of workspace runtimes for routine status and sweep.
+/// Implementations may consult a catalog, but Core only observes the prepared
+/// workspaces and fail-closed discovery errors.
+pub trait RoutineWorkspaceProvider {
+    fn discover_workspaces(&self, global_root: &Path) -> Result<DiscoveredWorkspaces, OrbitError>;
 }
 
 /// Load routines from every source workspace among `workspaces` (the same

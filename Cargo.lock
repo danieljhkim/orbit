@@ -2204,16 +2204,14 @@ dependencies = [
  "orbit-core",
  "orbit-dashboard",
  "orbit-graph-cli",
- "orbit-mcp",
+ "orbit-remote",
  "predicates",
  "regex",
- "rmcp",
  "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",
  "tempfile",
- "tokio",
  "toml",
  "tower",
  "tracing",
@@ -2276,7 +2274,6 @@ dependencies = [
  "orbit-common",
  "orbit-engine",
  "orbit-policy",
- "orbit-registry",
  "orbit-search",
  "orbit-store",
  "orbit-tools",
@@ -2304,6 +2301,7 @@ dependencies = [
  "orbit-cmd",
  "orbit-common",
  "orbit-core",
+ "orbit-remote",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2414,12 +2412,9 @@ name = "orbit-mcp"
 version = "0.9.2"
 dependencies = [
  "orbit-common",
- "orbit-graph",
- "orbit-graph-extract",
  "rmcp",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "tokio",
  "tracing",
@@ -2437,17 +2432,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "orbit-registry"
+name = "orbit-remote"
 version = "0.9.2"
 dependencies = [
  "chrono",
  "hostname",
+ "orbit-cmd",
  "orbit-common",
+ "orbit-core",
+ "orbit-graph",
+ "orbit-graph-extract",
+ "orbit-mcp",
  "orbit-store",
+ "orbit-tools",
+ "rmcp",
+ "rusqlite",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "sha2",
  "tempfile",
+ "tokio",
  "toml",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

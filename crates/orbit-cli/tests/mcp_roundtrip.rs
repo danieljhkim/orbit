@@ -425,14 +425,14 @@ fn mcp_serve_lists_canonical_agent_surface_outside_any_checkout() {
 fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
     let workspace = McpWorkspace::init_hub();
     let global_root = workspace.home.join(".orbit");
-    orbit_core::host_registry::host_registry_service_at(&global_root)
+    orbit_remote::host_registry_service_at(&global_root)
         .expect("hub registry service")
         .register_identity(
-            &orbit_core::routines::HostIdentity {
-                schema_version: orbit_core::routines::HOST_IDENTITY_SCHEMA_VERSION,
+            &orbit_remote::HostIdentity {
+                schema_version: orbit_remote::HOST_IDENTITY_SCHEMA_VERSION,
                 machine_id: "hm_spoke".to_string(),
                 host_id: "spoke".to_string(),
-                mode: orbit_core::routines::HostMode::Spoke,
+                mode: orbit_remote::HostMode::Spoke,
             },
             BTreeSet::new(),
         )

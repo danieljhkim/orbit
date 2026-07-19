@@ -1,16 +1,16 @@
 ---
 title: Routines — Overview
 owner: claude
-last_updated: 2026-07-15
+last_updated: 2026-07-18
 status: Accepted
 feature: routines
 doc_role: overview
 type: design
 summary: Durable, git-versioned scheduler primitive that fires catalog jobs/activities on cron triggers, per host, with local state.
 tags: [routines, scheduler]
-paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**"]
-related_features: [routines, activity-job]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ADR-0223]
+paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs", "crates/orbit-store/src/sqlite/routine_store/**"]
+related_features: [routines, activity-job, host-registry]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223]
 ---
 
 # Routines — Overview
@@ -26,7 +26,8 @@ is host-local and never synced. [2_design.md](./2_design.md) is the v1 contract;
 
 > **Status.** v1 shipped in [ORB-10021]; the At a Glance table lists the actual home of
 > each concern. Targets are `job:<name>` in v1 — see [ADR-0206] for why `activity:` is
-> reserved.
+> reserved. Registry/cache/identity composition now lives in `orbit-remote`; Core keeps the
+> registry-neutral scheduler, validation, and dispatch kernels. [ORB-10319]
 
 `orbit workspace init` creates the complete default set (`auto_task_scheduler`,
 `task_triage`, and `ship_sweep`) under `.orbit/routines/`. Every default is
@@ -89,8 +90,8 @@ fragmentation this feature exists to end.
 | Concern | File | Task |
 |---------|------|------|
 | Routine definition type + fail-closed YAML parse | `crates/orbit-common/src/types/routine.rs` | [ORB-10021] |
-| Discovery, due computation, dispatch, status | `crates/orbit-core/src/routines/` | [ORB-10021] |
-| Registry-aware pin validation and reassignment baseline | `crates/orbit-core/src/routines/validation.rs` + `sweep.rs` | [ORB-10270] |
+| Registry-neutral loading, due computation, dispatch, status, and pin validation | `crates/orbit-core/src/routines/` | [ORB-10021], [ORB-10270] |
+| Host identity, registry/cache projection, workspace discovery, and runtime construction | `crates/orbit-remote/src/routines.rs` | [ORB-10270], [ORB-10319] |
 | Host-local scheduler state (fires, pauses) | `crates/orbit-store/src/sqlite/routine_store/` | [ORB-10021] |
 | Sweep advisory lock (flock, host-global) | `crates/orbit-store/src/sqlite/routine_store/mod.rs` | [ORB-10021] |
 | `orbit sweep` CLI entrypoint | `crates/orbit-cli/src/command/sweep.rs` | [ORB-10021] |
@@ -109,6 +110,8 @@ fragmentation this feature exists to end.
 - [ORB-10270] — added registry/cache-aware pin diagnostics and safe host reassignment:
   the old host preserves its cursor/fire/pause state, while the new host baselines on first
   observation and starts at the next natural slot without backfill.
+- [ORB-10319] — moved Remote-specific identity, registry/cache, and workspace-runtime
+  composition out of Core without changing scheduler behavior.
 - [ORB-00374] — removed the `shell` activity variant and `run_shell` dispatch (fail-closed);
   routines inherit this constraint.
 

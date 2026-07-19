@@ -3,12 +3,14 @@ summary: "Orbit Graph — Design"
 type: design
 title: "Orbit Graph — Design"
 owner: claude
-last_updated: 2026-07-16
+last_updated: 2026-07-18
 status: Draft
 feature: orbit-graph
 doc_role: design
 tags: ["orbit-graph"]
+paths: ["crates/orbit-graph/**", "crates/orbit-graph-extract/**", "crates/orbit-graph-cli/**", "crates/orbit-remote/src/mcp/graph.rs"]
 related_features: [knowledge-graph]
+related_artifacts: [ORB-00391, ORB-00396, ORB-10011, ORB-10225, ORB-10319]
 ---
 
 # Orbit Graph — Design
@@ -21,7 +23,7 @@ The companion ADR log is in [4_decisions.md](./4_decisions.md); forward-looking 
 
 ## 1. Crate Boundaries
 
-Three crates, replacing `orbit-knowledge`. Layered per [`ARCHITECTURE.md`](../../../ARCHITECTURE.md); no cross-crate edges beyond what's shown.
+Three graph crates replace `orbit-knowledge`; the Remote feature crate composes the agent-facing MCP extension over the generic MCP kernel. Layered per [`ARCHITECTURE.md`](../../../ARCHITECTURE.md); no cross-crate edges beyond what's shown.
 
 ```
                  authoritative
@@ -42,19 +44,29 @@ Three crates, replacing `orbit-knowledge`. Layered per [`ARCHITECTURE.md`](../..
           │  Graph::open/sync/...  │   build pipeline
           └───────┬────────────────┘
                   │ JSON views
-                  ▼
-          ┌────────────────────────┐
-          │   orbit-graph-cli      │   subcommands + MCP wrappers
-          └────────────────────────┘
+             ┌────┴─────────────────────────────┐
+             ▼                                  ▼
+  ┌────────────────────────┐       ┌────────────────────────┐
+  │   orbit-graph-cli      │       │ orbit-remote::mcp      │
+  │ human/script commands  │       │ graph extension/policy │
+  └────────────────────────┘       └────────────┬───────────┘
+                                               │ composition hooks
+                                               ▼
+                                  ┌────────────────────────┐
+                                  │      orbit-mcp         │
+                                  │ generic MCP kernel     │
+                                  └────────────────────────┘
 ```
 
 | Crate | Owns | Doesn't own |
 |---|---|---|
-| `orbit-graph-extract` | Tree-sitter parsing, language-specific extractors, the `ExtractedFile` shape, the `Selector` parser | Storage, queries, I/O, async |
+| `orbit-graph-extract` | Tree-sitter parsing, language-specific extractors, the `ExtractedFile` shape, and a compatibility re-export of the canonical selector parser | Storage, queries, I/O, async |
 | `orbit-graph` | Schema, transactions, sync pipeline, query API, confidence resolution | CLI, MCP, language-specific parsing |
-| `orbit-graph-cli` | Argument parsing, JSON formatting, MCP tool registration | Anything semantic about the graph |
+| `orbit-graph-cli` | Human/script argument parsing and JSON formatting | MCP exposure; anything semantic about the graph |
+| `orbit-remote` | Agent graph schemas, safe-surface policy, watcher-backed handle composition, audit routing | Graph query semantics; generic MCP framing |
+| `orbit-mcp` | Generic MCP framing and extension/composition hooks | Graph schemas, policy, or persistence |
 
-The selector parser lives in the extract crate (not the graph crate) because skills and downstream callers parse selectors before any DB exists, and the selector grammar is part of the public contract independent of storage.
+The canonical selector parser lives in `orbit-common::utility::selector` because skills and downstream callers parse selectors before any DB exists, and the grammar is part of the public contract independent of storage. `orbit-graph-extract` re-exports it unchanged for graph consumers. [ORB-10011]
 
 ## 2. Storage
 
@@ -195,7 +207,7 @@ Bounded outputs: `impact` and `trace` both cap at 200 visited nodes regardless o
 
 `refs` unions queries against the `refs` table (calls/type/use/trait_bound) and the `relations` table (impl/extends/implements). CLI `--kind impl` is a routing alias to `relations`. The ten-command surface absorbs `orbit-knowledge`'s navigation use cases while keeping `overview`, `implementors`, and outbound module-level `deps` explicit.
 
-For the agent-facing MCP entry point, the ten canonical names are an explicit safe-surface set in `orbit-cli`. `orbit-mcp` owns the in-process implementations but calls them only through the host's policy/audit seam; `RuntimeMcpHost` applies the allowlist and records success or failure through the shared `ToolEntryPoint::Mcp` runtime boundary. Known graph schemas accidentally re-exposed by a host are replaced by the adapter schemas, so schema presence cannot disable that seam. [ORB-10225] added the startup subset assertion and end-to-end audit coverage.
+For the agent-facing MCP entry point, the ten canonical names are an explicit safe-surface set in `orbit-remote`. `orbit-remote` owns and explicitly composes the in-process implementations over the generic `orbit-mcp` kernel, but calls them only through the host's policy/audit seam; the broker host applies the allowlist and records success or failure through the shared `ToolEntryPoint::Mcp` runtime boundary. Known graph schemas accidentally re-exposed by a host are replaced by the Remote extension schemas, so schema presence cannot disable that seam. [ORB-10225] added the startup subset assertion and end-to-end audit coverage.
 
 The `Selector` grammar is preserved verbatim from `orbit-knowledge` — every form used in existing skills (`symbol:<file>#<name>:<kind>`, `file:<path>`, `module:<qualified>`, `command:<name>`) must continue to parse identically. A pre-Step-1 audit of `.claude/skills/` captures the full grammar surface as the canonical reference.
 
@@ -241,5 +253,6 @@ No async on the public surface. SQLite and tree-sitter are both sync. If the MCP
 
 - [ORB-00377] moved long-lived MCP graph reads to watcher-backed background sync and documented the freshness contract in ADR-0195.
 - [ORB-10225] routed the in-process graph MCP surface through the explicit allowlist and shared runtime audit boundary.
+- [ORB-10319] consolidated the agent graph extension and policy composition in `orbit-remote` over the generic MCP kernel.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

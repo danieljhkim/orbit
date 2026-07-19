@@ -1,8 +1,8 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use orbit_common::types::{
-    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, OrbitError,
+    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, OrbitError, ToolSchema,
     ToolSessionContext,
 };
 use rmcp::model::CallToolRequestParams;
@@ -10,39 +10,86 @@ use serde_json::{Value, json};
 
 use super::super::OrbitToolServer;
 use super::super::name_map::sanitize_tool_name;
-use super::super::test_support::{EchoArrayHost, StubHost, tool_schema};
+use super::super::test_support::{
+    EchoArrayHost, StubHost, request_with_args, test_mcp_definitions, tool_schema,
+};
+use crate::{McpToolExtension, McpToolExtensionRegistration};
 
 struct MissingPolicyHost;
 
 struct CapabilityHost;
 
-struct RemoteMetadataHost {
-    called: AtomicBool,
+struct ExtensionPolicyHost {
+    schemas: Vec<ToolSchema>,
+    host_calls: AtomicUsize,
+    in_process_calls: AtomicUsize,
 }
 
-impl crate::McpHost for RemoteMetadataHost {
-    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
-        Ok(vec![
-            McpToolDefinition::new(
-                tool_schema("demo.remote"),
-                McpToolPolicy::agent_and_operator(McpToolPlacement::Hub),
-            )
-            .expect("remote definition"),
-        ])
+struct EchoExtension {
+    calls: AtomicUsize,
+}
+
+impl McpToolExtension for EchoExtension {
+    fn definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        test_mcp_definitions(vec![tool_schema("demo.extension")])
     }
 
-    fn accepts_remote_session_context(&self) -> bool {
-        true
+    fn recognizes(&self, name: &str) -> bool {
+        name == "demo.extension"
+    }
+
+    fn call(
+        &self,
+        name: &str,
+        input: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(json!({ "tool": name, "input": input }))
+    }
+
+    fn input_schema(
+        &self,
+        _definition: &McpToolDefinition,
+    ) -> Result<crate::McpInputSchema, OrbitError> {
+        Ok(json!({
+            "type": "object",
+            "properties": {
+                "value": { "type": "integer", "minimum": 1 }
+            },
+            "required": ["value"],
+            "additionalProperties": false
+        })
+        .as_object()
+        .expect("schema object")
+        .clone())
+    }
+}
+
+impl crate::McpHost for ExtensionPolicyHost {
+    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        test_mcp_definitions(self.schemas.clone())
     }
 
     fn call_tool(
         &self,
-        _name: &str,
+        name: &str,
         _input: Value,
         _session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
-        self.called.store(true, Ordering::SeqCst);
-        Ok(json!({ "must_not_execute": true }))
+        self.host_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(json!({ "host_tool": name }))
+    }
+
+    fn call_in_process_tool(
+        &self,
+        _name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+        dispatch: &mut dyn FnMut(Value, ToolSessionContext) -> Result<Value, OrbitError>,
+    ) -> Result<Value, OrbitError> {
+        self.in_process_calls.fetch_add(1, Ordering::SeqCst);
+        dispatch(input, session_context)
     }
 }
 
@@ -88,6 +135,108 @@ impl crate::McpHost for MissingPolicyHost {
     ) -> Result<Value, OrbitError> {
         Ok(json!({ "must_not_execute": true }))
     }
+}
+
+#[tokio::test]
+async fn explicit_extension_is_advertised_and_crosses_host_policy_seam() {
+    let host = Arc::new(ExtensionPolicyHost {
+        schemas: vec![tool_schema("demo.host")],
+        host_calls: AtomicUsize::new(0),
+        in_process_calls: AtomicUsize::new(0),
+    });
+    let extension = Arc::new(EchoExtension {
+        calls: AtomicUsize::new(0),
+    });
+    let extension_handler: Arc<dyn McpToolExtension> = extension.clone();
+    let server = OrbitToolServer::new_with_extensions(
+        host.clone(),
+        vec![McpToolExtensionRegistration::advertised(extension_handler)],
+    );
+
+    let names = server
+        .combined_tool_schemas()
+        .expect("combined extension definitions")
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect::<Vec<_>>();
+    assert!(names.iter().any(|name| name == "demo.host"));
+    assert!(names.iter().any(|name| name == "demo.extension"));
+
+    let result = server
+        .call_tool_request(request_with_args("demo.extension", json!({ "value": 7 })))
+        .await
+        .expect("extension call succeeds");
+    assert_eq!(
+        result.structured_content.expect("structured response"),
+        json!({ "tool": "demo.extension", "input": { "value": 7 } })
+    );
+    assert_eq!(extension.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(host.in_process_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(host.host_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn extension_owns_its_complete_advertised_input_schema() {
+    let host = Arc::new(ExtensionPolicyHost {
+        schemas: Vec::new(),
+        host_calls: AtomicUsize::new(0),
+        in_process_calls: AtomicUsize::new(0),
+    });
+    let extension: Arc<dyn McpToolExtension> = Arc::new(EchoExtension {
+        calls: AtomicUsize::new(0),
+    });
+    let server = OrbitToolServer::new_with_extensions(
+        host,
+        vec![McpToolExtensionRegistration::advertised(extension)],
+    );
+    let definition = server
+        .combined_tool_definitions()
+        .expect("extension definitions")
+        .into_iter()
+        .find(|definition| definition.schema.name == "demo.extension")
+        .expect("extension definition");
+
+    let schema = server
+        .input_schema_for(&definition)
+        .expect("extension input schema");
+
+    assert_eq!(schema["additionalProperties"], false);
+    assert_eq!(schema["properties"]["value"]["minimum"], 1);
+    assert_eq!(schema["required"], json!(["value"]));
+}
+
+#[tokio::test]
+async fn recognition_only_extension_stays_hidden_and_owns_guessed_calls() {
+    let host = Arc::new(ExtensionPolicyHost {
+        schemas: vec![tool_schema("demo.extension")],
+        host_calls: AtomicUsize::new(0),
+        in_process_calls: AtomicUsize::new(0),
+    });
+    let extension = Arc::new(EchoExtension {
+        calls: AtomicUsize::new(0),
+    });
+    let extension_handler: Arc<dyn McpToolExtension> = extension.clone();
+    let server = OrbitToolServer::new_with_extensions(
+        host.clone(),
+        vec![McpToolExtensionRegistration::recognition_only(
+            extension_handler,
+        )],
+    );
+
+    assert!(
+        server
+            .combined_tool_schemas()
+            .expect("hidden extension composition")
+            .is_empty()
+    );
+    let result = server
+        .call_tool_request(CallToolRequestParams::new("demo.extension"))
+        .await
+        .expect("guessed canonical call reaches the extension");
+    assert!(!result.is_error.unwrap_or(false));
+    assert_eq!(extension.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(host.in_process_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(host.host_calls.load(Ordering::SeqCst), 0);
 }
 
 #[test]
@@ -184,25 +333,6 @@ async fn managed_empty_capability_set_is_never_upgraded_and_runner_is_non_hierar
         .map(|schema| schema.name)
         .collect::<Vec<_>>();
     assert_eq!(names, vec!["demo.runner"]);
-}
-
-#[tokio::test]
-async fn hub_tool_call_without_connector_metadata_fails_before_dispatch() {
-    let host = Arc::new(RemoteMetadataHost {
-        called: AtomicBool::new(false),
-    });
-    let mut trusted = ToolSessionContext::trusted_local(None, None, None);
-    trusted.effective_capabilities = [McpCapability::Agent].into_iter().collect();
-    let server_host: Arc<dyn crate::McpHost> = host.clone();
-    let server = OrbitToolServer::new_with_context(server_host, trusted);
-
-    let denied = server
-        .call_tool_request(CallToolRequestParams::new("demo_remote"))
-        .await
-        .expect("missing metadata is a structured tool denial");
-
-    assert_eq!(denied.is_error, Some(true));
-    assert!(!host.called.load(Ordering::SeqCst));
 }
 
 #[tokio::test]

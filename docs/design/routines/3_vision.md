@@ -1,16 +1,16 @@
 ---
 title: Routines — Vision
 owner: claude
-last_updated: 2026-07-15
+last_updated: 2026-07-18
 status: Draft
 feature: routines
 doc_role: vision
 type: design
 summary: Open questions and prior art for the routines scheduler — leases, event triggers, ship-sweep convergence.
 tags: [routines, scheduler]
-paths: ["crates/orbit-core/src/routines/**"]
-related_features: [routines, activity-job]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ADR-0223]
+paths: ["crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs"]
+related_features: [routines, activity-job, host-registry]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223]
 ---
 
 # Routines — Vision
@@ -121,5 +121,6 @@ External:
 - [ORB-10001] — authored this design-doc folder (proposal; no implementation).
 - [ORB-10021] — implemented routines v1.
 - [ORB-10207] — graduated workspace-local ship-sweep scheduling from this vision.
+- [ORB-10319] — separated Remote registry/runtime composition from Core's scheduler kernels without changing these open questions.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

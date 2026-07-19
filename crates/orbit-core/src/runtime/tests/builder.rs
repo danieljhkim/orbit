@@ -11,6 +11,8 @@ use tempfile::tempdir;
 
 use crate::OrbitRuntime;
 use crate::command::task::{TaskAddParams, TaskUpdateParams};
+use crate::command::workflow::ShipMode;
+use crate::runtime::WorkspaceRuntimeBinding;
 
 fn v2_runtime() -> (tempfile::TempDir, PathBuf, PathBuf, OrbitRuntime) {
     let root = tempdir().expect("tempdir");
@@ -21,6 +23,64 @@ fn v2_runtime() -> (tempfile::TempDir, PathBuf, PathBuf, OrbitRuntime) {
     std::fs::create_dir_all(&workspace_root).expect("create workspace root");
     let runtime = OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
     (root, global_root, workspace_root, runtime)
+}
+
+#[test]
+fn registry_neutral_binding_controls_workspace_id_repo_root_and_ship_mode() {
+    let root = tempdir().expect("tempdir");
+    let global_root = root.path().join("global");
+    let custom_repo_root = root.path().join("custom-repo-root");
+    let workspace_root = root.path().join("detached-orbit-root");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    std::fs::create_dir_all(&workspace_root).expect("create workspace root");
+
+    let binding = WorkspaceRuntimeBinding {
+        workspace_id: "ws_bound".to_string(),
+        repo_root: custom_repo_root.clone(),
+        ship_mode: ShipMode::Pr,
+    };
+    let runtime =
+        OrbitRuntime::from_roots_with_binding(&global_root, &workspace_root, binding.clone())
+            .expect("build bound runtime");
+
+    assert_eq!(runtime.workspace_id().expect("workspace id"), "ws_bound");
+    assert_eq!(runtime.context.paths().repo_root, custom_repo_root);
+    assert_eq!(runtime.workspace_runtime_binding(), Some(&binding));
+}
+
+#[test]
+fn registry_neutral_binding_rejects_a_conflicting_workspace_config() {
+    let root = tempdir().expect("tempdir");
+    let global_root = root.path().join("global");
+    let workspace_root = root.path().join("repo/.orbit");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    std::fs::create_dir_all(&workspace_root).expect("create workspace root");
+    orbit_store::sqlite::task_registry::write_workspace_config(
+        &workspace_root,
+        &orbit_store::sqlite::task_registry::WorkspaceConfig {
+            schema_version: 1,
+            workspace_id: "ws_configured".to_string(),
+        },
+    )
+    .expect("write workspace config");
+
+    let error = OrbitRuntime::from_roots_with_binding(
+        &global_root,
+        &workspace_root,
+        WorkspaceRuntimeBinding {
+            workspace_id: "ws_other".to_string(),
+            repo_root: root.path().join("repo"),
+            ship_mode: ShipMode::Local,
+        },
+    )
+    .err()
+    .expect("conflicting binding must fail closed");
+
+    assert!(
+        error
+            .to_string()
+            .contains("does not match configured workspace id")
+    );
 }
 
 #[test]

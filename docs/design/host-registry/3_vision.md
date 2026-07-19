@@ -1,16 +1,16 @@
 ---
 title: Host Registry — Vision
 owner: claude
-last_updated: 2026-07-17
+last_updated: 2026-07-18
 status: Accepted
 feature: host-registry
 doc_role: vision
 type: design
 summary: Open questions (non-owner knowledge authoring, label taxonomy, ownership migration, coordination-plane distribution) and prior art (CI runner registration, cluster membership, the rejected task-sync design) for the host registry.
 tags: [host-registry, multi-host, dispatch]
-paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
+paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access]
-related_artifacts: [ORB-00424, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10319, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0240]
 ---
 
 # Host Registry — Vision
@@ -19,6 +19,12 @@ Forward-looking notes for the host registry. Everything here is unbuilt and most
 it is deliberately deferred; the v1 posture is the smallest registry that makes
 placement validated, leased, and auditable, and dead pins visible. Speculation is
 labelled as such.
+
+These questions assume the current vertical boundary: `orbit-remote` owns the
+feature from registry persistence through MCP placement and registration, while
+Store and MCP remain neutral infrastructure ([ORB-10319], [ADR-0240]). A future
+transport or availability design should extend that feature boundary rather than
+redistribute its policy across kernels.
 
 ## 1. Open Questions
 
@@ -118,5 +124,7 @@ orchestrator. Placement without replication; inventory without a control plane.
 
 - [ORB-00424] — proposed the local/remote Orbit MCP unification this registry
   complements.
+- [ORB-10319] — consolidates the registry and MCP bridge into the vertical
+  `orbit-remote` feature boundary assumed by these open questions.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

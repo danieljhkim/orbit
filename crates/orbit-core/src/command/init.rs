@@ -49,6 +49,9 @@ pub struct InitOptions {
     pub global_only: bool,
     /// Explicit global root to seed when preparing a workspace root.
     pub global_root_override: Option<PathBuf>,
+    /// Host id to pin into newly seeded workspace routines. Higher-level
+    /// composition owns host identity and supplies this value explicitly.
+    pub routine_host_id: Option<String>,
     /// When true, create/update user-level skill symlinks for global skills.
     pub link_global_skills: bool,
     /// Agent settings collected by the legacy init prompt. The implementer
@@ -104,7 +107,7 @@ pub fn init_global(
 ) -> Result<InitResult, OrbitError> {
     let global_root = match root_override {
         Some(root) => root.to_path_buf(),
-        None => crate::workspace_registry::global_orbit_dir()?,
+        None => resolve_global_root()?,
     };
     init_workspace_at_root(
         &global_root,
@@ -220,26 +223,20 @@ pub fn init_workspace_at_root(
         refreshed_skill_files = global_result.refreshed_skill_files;
         created_skills_symlink = global_result.created_skills_symlink;
         // Routines are workspace-authored (`.orbit/routines/`, no global
-        // directory), so defaults seed here rather than in the global
-        // branch. Host resolution is best-effort: an absent or unmigrated
-        // host identity (created by `orbit init`) skips routine seeding
-        // instead of failing the whole init — no OS-hostname fallback.
-        match crate::routines::load_host_identity(&global_root) {
-            Ok(identity) => {
-                refreshed_default_routines = seed_default_routines(
-                    &orbit_root.join("routines"),
-                    &identity.host_id,
-                    workspace_slug_from_orbit_root(&orbit_root).as_deref(),
-                    // Routine definitions become workspace-authored after
-                    // seeding. Refresh global defaults without overwriting
-                    // cadence, host pins, policy, or enabled choices here;
-                    // destructive `force` already recreated the root.
-                    options.force,
-                )?;
-            }
-            Err(error) => {
-                tracing::warn!("skipping default routine seeding: {error}");
-            }
+        // directory), so defaults seed here rather than in the global branch.
+        // Host identity is owned by higher-level composition and injected;
+        // Core never opens host.toml or falls back to an OS hostname.
+        if let Some(host_id) = options.routine_host_id.as_deref() {
+            refreshed_default_routines = seed_default_routines(
+                &orbit_root.join("routines"),
+                host_id,
+                workspace_slug_from_orbit_root(&orbit_root).as_deref(),
+                // Routine definitions become workspace-authored after
+                // seeding. Refresh global defaults without overwriting
+                // cadence, host pins, policy, or enabled choices here;
+                // destructive `force` already recreated the root.
+                options.force,
+            )?;
         }
         (
             global_result.refreshed_default_activities,

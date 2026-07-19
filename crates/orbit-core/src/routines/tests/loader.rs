@@ -12,13 +12,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
+use orbit_common::types::{Workspace, WorkspaceStatus};
 use tempfile::{TempDir, tempdir};
 
-use crate::routines::loader::{
-    LoadedRoutine, RoutineCollection, RoutineOrigin, collect_routines, discover_workspaces,
-};
-use crate::workspace_registry;
+use crate::OrbitRuntime;
+use crate::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin, collect_routines};
 
 const HOST: &str = "test-host";
 
@@ -35,7 +33,8 @@ default_input:\n        task_id: \"qa\"\n";
 /// `routines/local/` before collecting.
 struct SourceWorkspace {
     _tmp: TempDir,
-    global: PathBuf,
+    workspace: Workspace,
+    runtime: OrbitRuntime,
     routines_dir: PathBuf,
     local_dir: PathBuf,
 }
@@ -58,8 +57,7 @@ fn seed_source_workspace() -> SourceWorkspace {
     .unwrap();
     fs::write(ws_orbit.join("resources/jobs/noop.yaml"), NOOP_JOB).unwrap();
 
-    let mut registry = WorkspaceRegistry::default();
-    registry.workspaces.push(Workspace {
+    let workspace = Workspace {
         id: "ws-1".to_string(),
         name: "polaris".to_string(),
         owner_machine_id: None,
@@ -69,21 +67,13 @@ fn seed_source_workspace() -> SourceWorkspace {
         status: WorkspaceStatus::Active,
         created_at: Utc::now(),
         updated_at: Utc::now(),
-    });
-    registry.checkouts.push(WorkspaceCheckout::owner(
-        "ws-1".to_string(),
-        ws_root,
-        ws_orbit,
-    ));
-    workspace_registry::save_registry_to(
-        &registry,
-        &workspace_registry::registry_path_for(&global),
-    )
-    .unwrap();
+    };
+    let runtime = OrbitRuntime::from_roots(&global, &ws_orbit).unwrap();
 
     SourceWorkspace {
         _tmp: tmp,
-        global,
+        workspace,
+        runtime,
         routines_dir,
         local_dir,
     }
@@ -95,8 +85,7 @@ fn write_routine(dir: &Path, file: &str, body: &str) {
 
 /// Collect against `HOST`, the same seam the sweep and status projections use.
 fn collect(ws: &SourceWorkspace) -> RoutineCollection {
-    let discovered = discover_workspaces(&ws.global).expect("discover workspaces");
-    collect_routines(&discovered.entries, HOST)
+    collect_routines(&[(ws.workspace.clone(), ws.runtime.clone())], HOST)
 }
 
 fn find<'a>(collection: &'a RoutineCollection, name: &str) -> Option<&'a LoadedRoutine> {

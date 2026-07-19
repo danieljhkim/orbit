@@ -16,7 +16,6 @@ use orbit_store::Store;
 
 pub mod clock;
 pub mod due;
-pub mod host;
 pub mod loader;
 pub mod status;
 pub mod sweep;
@@ -24,23 +23,23 @@ pub mod validation;
 
 pub use clock::{ClockInstallReport, install_clock};
 pub use due::{DueDecision, due_decision, parse_cron};
-pub use host::{
-    HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostIdentityOutcome, HostIdentityState, HostMode,
-    NewHostIdentity, ensure_host_identity, inspect_host_identity, load_host_identity, os_hostname,
-    rename_current_host_identity,
-};
 pub use loader::{
-    LoadedRoutine, RoutineCollection, RoutineLoadError, RoutineOrigin, collect_routines,
+    DiscoveredWorkspaces, LoadedRoutine, RoutineCollection, RoutineLoadError, RoutineOrigin,
+    RoutineWorkspaceProvider, collect_routines,
 };
 pub use status::{
     RoutineStatus, RoutineStatusReport, pause_routine, recent_fires, resume_routine,
-    routine_statuses,
+    routine_statuses_with_providers,
 };
-pub use sweep::{RoutineSweepReport, SweepOptions, SweepOutcome, run_sweep, run_sweep_at};
+pub use sweep::{
+    RoutineSweepReport, SweepOptions, SweepOutcome, run_sweep_at_with_providers,
+    run_sweep_with_providers,
+};
 pub use validation::{
     DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS,
-    RoutineDiagnosticSeverity, RoutinePinValidation, RoutineRegistryStatus, RoutineRegistryView,
-    RoutineValidationDiagnostic, load_routine_registry_view, validate_routine_pins,
+    RoutineDiagnosticSeverity, RoutineHostIdentity, RoutineHostIdentityView, RoutinePinValidation,
+    RoutinePlacementProjection, RoutinePlacementProvider, RoutineRegistryCacheView,
+    RoutineRegistryStatus, RoutineRegistryView, RoutineValidationDiagnostic, validate_routine_pins,
 };
 
 /// Open the one config-resolved machine-local scheduler/registry store.

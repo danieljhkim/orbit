@@ -8,10 +8,11 @@
 //! - `orbit migrate` (apply): opens the runtime normally, which applies
 //!   everything pending, then reports the resulting versions and what the
 //!   open applied.
-//! - `orbit migrate --dry-run`: inspects the workspace *without* opening the
-//!   runtime (see [`migrate_dry_run`]) so pending migrations are listed
-//!   instead of silently applied — the only way to see "pending" given
-//!   auto-migration on open.
+//! - `orbit migrate --dry-run`: inspects explicit resolved roots *without*
+//!   opening the runtime (see [`migrate_dry_run_at`]) so pending migrations
+//!   are listed instead of silently applied — the only way to see "pending"
+//!   given auto-migration on open. Environment and workspace-catalog
+//!   resolution belongs to the calling application.
 
 use std::path::{Path, PathBuf};
 
@@ -64,27 +65,9 @@ impl MigrateStatus {
     }
 }
 
-/// Inspect a workspace's migration state without opening the runtime — and
-/// therefore without triggering the auto-migrations a runtime open performs.
-/// Resolves the workspace from the current directory (honoring the usual
-/// `--root` / `ORBIT_ROOT` overrides) and refuses to bootstrap one.
-pub fn migrate_dry_run(root_override: Option<&Path>) -> Result<MigrateStatus, OrbitError> {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let Some(resolved) = orbit_core::runtime::try_resolve_initialized_roots(&cwd, root_override)?
-    else {
-        return Err(OrbitError::WorkspaceError(
-            "no initialized orbit workspace found from the current directory; \
-             run `orbit init` first"
-                .to_string(),
-        ));
-    };
-    let global_root = orbit_core::runtime::resolve_global_root()?;
-    migrate_dry_run_at(&global_root, &resolved.shared_root)
-}
-
 /// Dry-run inspection against explicit roots. Read-only: reads the layout
 /// marker and the schema ledger (read-only SQLite open), never applies.
-pub(crate) fn migrate_dry_run_at(
+pub fn migrate_dry_run_at(
     global_root: &Path,
     orbit_dir: &Path,
 ) -> Result<MigrateStatus, OrbitError> {

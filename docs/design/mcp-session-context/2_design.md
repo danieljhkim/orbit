@@ -8,9 +8,9 @@ status: Accepted
 feature: mcp-session-context
 doc_role: design
 tags: ["mcp-session-context", "mcp", "workspace"]
-paths: ["crates/orbit-mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-cli/src/command/mcp/**"]
+paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool.rs"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10262", "ADR-0181", "ADR-0199", "ADR-0149"]
+related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10262", "ORB-10319", "ADR-0181", "ADR-0199", "ADR-0149"]
 ---
 
 # MCP Session Context — Design
@@ -39,19 +39,24 @@ Clients announce workspace with:
 
 `OrbitToolServer` stores a `ToolSessionContext` in an `RwLock` for the lifetime of the stdio session. Each `tools/call` snapshots that context, generates exactly one unique `mcp_call_id` before name/exposure preflight, and passes the same snapshot through registry-backed or graph dispatch.
 
-The CLI `BrokerMcpHost` resolves and validates the logical workspace plus any exact local checkout before constructing or selecting an `OrbitRuntime`, then forwards the trusted context into `OrbitRuntime::execute_tool_command_dispatch_with_session_context`, which places it on `ToolContext` and audit. Unknown/unexposed denial, runtime success/failure, and graph success/failure retain the same per-call context.
+The Remote-owned `BrokerMcpHost` resolves and validates the logical workspace plus any exact local checkout before constructing or selecting an `OrbitRuntime`, then forwards the trusted context into `OrbitRuntime::execute_tool_command_dispatch_with_session_context`, which places it on `ToolContext` and audit. Unknown/unexposed denial, runtime success/failure, and graph success/failure retain the same per-call context. `orbit-cli` only delegates `mcp serve` into this composition.
 
 The trusted fields are `workspace_id`, caller/process `machine_id` and display `host_id`, `transport`, the complete sorted `effective_capabilities` set, `origin_session_id`, `mcp_call_id`, and optional typed `leased_run {run_id, lease_id}`. A standalone stdio session is always `transport=local`, has exactly `{agent}`, and audits as `role=unverified`. Ambient `ORBIT_*` identity/correlation is ignored unless `ORBIT_MANAGED_RUN_CONTEXT` authenticates the existing managed envelope.
 
 ## 3. Workspace Resolution
 
-`crates/orbit-tools/src/builtin/orbit/mod.rs` owns the shared resolver:
+`crates/orbit-tools/src/builtin/orbit/mod.rs` retains the shared builtin argument resolver:
 
 1. If the tool input has a non-empty `workspace`, use it.
 2. Else if `ToolContext.session_context.workspace` is non-empty, insert that value into the input passed to the runtime host.
 3. Else return a clear `missing workspace` error.
 
 When explicit input and session context differ, Orbit logs an info-level event and honors the explicit input. This preserves an operator escape hatch while making the mismatch visible in traces.
+
+Before that tool-level fallback, `crates/orbit-remote/src/mcp/host.rs` resolves the same
+selector to a logical workspace and, when placement requires it, an exact checkout. That
+Remote preflight owns routing and authorization; it does not replace the builtin's
+explicit-over-session input contract. [ORB-10262], [ORB-10319]
 
 ## 4. Task Add
 
@@ -76,5 +81,6 @@ The external channel carries a workspace address, not a trusted workspace ID. Th
 - [ORB-00256] implemented the initial session context channel and workspace resolver.
 - [ORB-10228] implemented trusted provenance, anti-spoofing, capability-set propagation and audit, call correlation, and audit migration v7.
 - [ORB-10262] implemented exact-checkout workspace resolution, placement preflight, capability enforcement, and runtime caching by exact binding.
+- [ORB-10319] moved broker/session resolution and MCP composition into the vertical `orbit-remote` feature crate while leaving runtime audit/dispatch in Core.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -1,16 +1,16 @@
 ---
 title: Orbit MCP Bridge — Vision
 owner: codex
-last_updated: 2026-07-17
+last_updated: 2026-07-18
 status: Accepted
 feature: mcp-bridge
 doc_role: vision
 type: design
 summary: Open questions and prior art for a singular hub MCP link, owner-bound knowledge, explicit Git-replica reads, execution-profile projection, schema skew, and host identity assurance.
 tags: [mcp, remote-access, host-registry, bridge]
-paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool.rs"]
+paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
-related_artifacts: [ORB-00424, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
+related_artifacts: [ORB-00424, ORB-10319, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0240]
 ---
 
 # Orbit MCP Bridge — Vision
@@ -19,6 +19,9 @@ Forward-looking notes for the MCP bridge. V1 is deliberately narrow: one trusted
 operator, one coordination hub, a small host fleet, SSH transport, one declared
 owner per workspace, no spoke-to-spoke routes, and no offline coordination writes.
 Speculation below should not leak into implementation without demonstrated need.
+It also assumes [ADR-0240]'s vertical `orbit-remote` owner over neutral MCP, Store,
+Core, Tools, and Common kernels; new remote behavior should normally extend that
+feature rather than add another horizontal broker crate ([ORB-10319]).
 
 ## 1. Open Questions
 
@@ -60,11 +63,14 @@ Speculation below should not leak into implementation without demonstrated need.
 
 ### Orbit MCP and session context
 
-The current MCP adapter already separates protocol framing from an injected
-`McpHost`, keeps graph tools in process, sanitizes advertised names, and threads
-`ToolSessionContext` into dispatch. [ADR-0181] established deliberate workspace
+The generic MCP adapter separates protocol framing from an injected `McpHost`,
+sanitizes advertised names, resolves structural schemas, and threads
+`ToolSessionContext` into dispatch. `orbit-remote` composes generic builtin schemas
+with Remote-owned discovery/graph definitions and supplies the in-process graph,
+learning, hub, and broker behavior. [ADR-0181] established deliberate workspace
 context instead of cwd fallback; [ADR-0199] proposed per-call runtime resolution.
-The local broker extends those seams rather than starting a second implementation.
+The local broker extends those neutral seams rather than starting a second
+implementation.
 
 ### Host registry and star topology
 
@@ -133,5 +139,7 @@ a relay or universal read proxy.
 
 - [ORB-00424] — umbrella proposal for canonical Orbit MCP and Bridge parity
   retirement.
+- [ORB-10319] — consolidates registry persistence and MCP routing in the vertical
+  `orbit-remote` feature boundary assumed here ([ADR-0240]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

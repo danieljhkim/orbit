@@ -81,6 +81,24 @@ fn unused_tools_are_not_registered_in_public_surface() {
 }
 
 #[test]
+fn remote_discovery_is_not_registered_in_the_generic_tool_surface() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+    let all_names = registry
+        .all_schemas()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect::<BTreeSet<_>>();
+
+    for remote_owned in ["orbit.host.list", "orbit.workspace.list"] {
+        assert!(
+            !all_names.contains(remote_owned),
+            "Remote-owned discovery leaked into generic ToolRegistry: {remote_owned}"
+        );
+    }
+}
+
+#[test]
 fn workflow_critical_tools_remain_registered() {
     let names = registered_tool_names();
 
@@ -100,7 +118,7 @@ fn workflow_critical_tools_remain_registered() {
         // ORB-00391: the v1 orbit.graph.* builtins (callers/deps/implementors/
         // overview/pack/refs/search/show) were decommissioned from this registry;
         // the agent graph surface is now served by the orbit-graph (v2) adapter in
-        // orbit-mcp. See crates/orbit-tools/src/builtin/orbit/mod.rs.
+        // orbit-remote. See crates/orbit-remote/src/mcp/graph.rs.
         "orbit.groundhog.checkpoint_failure",
         "orbit.groundhog.checkpoint_success",
         "orbit.groundhog.side_effect",

@@ -8,9 +8,9 @@ status: Accepted
 feature: mcp-session-context
 doc_role: decisions
 tags: ["mcp-session-context", "mcp", "workspace"]
-paths: ["crates/orbit-mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-cli/src/command/mcp/**"]
+paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool.rs"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-00406", "ORB-10228", "ORB-10262", "ADR-0181", "ADR-0199", "ADR-0149"]
+related_artifacts: ["ORB-00256", "ORB-00406", "ORB-10228", "ORB-10262", "ORB-10319", "ADR-0181", "ADR-0199", "ADR-0149"]
 ---
 
 # MCP Session Context — Decisions
@@ -33,7 +33,7 @@ ADR log for MCP session context. Format follows [docs/design/CONVENTIONS.md §4]
 - [ADR-0149] remains the `workspace_id` binding invariant; this ADR amends only how MCP calls address that binding.
 - `orbit.task.add` and future workspace-taking tools can make `workspace` optional without defaulting to process cwd.
 - Clients that cannot send initialize metadata can continue passing `workspace` explicitly.
-- Cost: Orbit now carries MCP session metadata across the adapter, CLI host, runtime dispatch, and tool context, so new host surfaces must preserve that thread-through path.
+- Cost: Orbit now carries MCP session metadata across the generic adapter, Remote host, runtime dispatch, and tool context, so new host surfaces must preserve that thread-through path.
 - Capability authorization is membership in the complete set; scalar or max-capability representations are forbidden.
 - Existing audit `host`, `session_id`, and `job_run_id` meanings remain canonical; all new provenance is additive.
 
@@ -57,5 +57,6 @@ ADR log for MCP session context. Format follows [docs/design/CONVENTIONS.md §4]
 - [ORB-00406] proposes workspace_path-addressable host tools ([ADR-0199]).
 - [ORB-10228] accepted and implemented the trusted-provenance amendment to [ADR-0181].
 - [ORB-10262] accepted and implemented ADR-0199 through the exact-checkout local broker.
+- [ORB-10319] consolidated the broker/session implementation in `orbit-remote`; it does not change ADR-0181 or ADR-0199 semantics.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

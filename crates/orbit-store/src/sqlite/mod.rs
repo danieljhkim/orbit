@@ -1,13 +1,11 @@
 pub mod audit_event_store;
 pub mod connection;
-pub mod host_registry;
 pub mod id_allocator;
 pub(crate) mod invocation_store;
 pub mod job_run_store;
 pub mod learning_index;
 pub mod migration;
 pub(crate) mod read_pool;
-pub mod registry_snapshot;
 pub mod routine_store;
 pub mod session_learning_state_store;
 pub mod task_registry;

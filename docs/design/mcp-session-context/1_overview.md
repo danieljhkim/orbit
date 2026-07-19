@@ -8,9 +8,9 @@ status: Accepted
 feature: mcp-session-context
 doc_role: overview
 tags: ["mcp-session-context", "mcp", "workspace"]
-paths: ["crates/orbit-mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-cli/src/command/mcp/**"]
+paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool.rs"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-10228", "ADR-0181", "ADR-0149"]
+related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10319", "ADR-0181", "ADR-0149"]
 ---
 
 # MCP Session Context — Overview
@@ -45,14 +45,16 @@ Before [ORB-00256], every MCP call to `orbit.task.add` had to pass `workspace`. 
 |---|---|---|
 | MCP initialization parsing | `crates/orbit-mcp/src/adapter/dispatch.rs` | [ORB-00256] |
 | Session metadata DTO | `crates/orbit-common/src/types/tool.rs` | [ORB-00256] |
-| Trusted provenance, capabilities, and per-call correlation | common, MCP adapter, runtime, audit store | [ORB-10228] |
+| Trusted provenance, capabilities, and per-call correlation | common DTOs, generic MCP session framing, Remote host policy, Core runtime, audit store | [ORB-10228], [ORB-10319] |
 | Runtime dispatch thread-through | `crates/orbit-core/src/command/tool.rs` | [ORB-00256] |
-| MCP host wiring | `crates/orbit-cli/src/command/mcp/mod.rs` | [ORB-00256] |
-| Tool workspace resolution | `crates/orbit-tools/src/builtin/orbit/mod.rs` | [ORB-00256] |
+| MCP host and server composition | `crates/orbit-remote/src/mcp/mod.rs` | [ORB-10319] |
+| Route selection, exact-checkout resolution, and placement preflight | `crates/orbit-remote/src/mcp/host.rs` | [ORB-10262], [ORB-10319] |
+| Builtin explicit/session workspace-argument fallback | `crates/orbit-tools/src/builtin/orbit/mod.rs` | [ORB-00256] |
 
 ## Task References
 
 - [ORB-00256] implemented MCP ambient workspace session context.
 - [ORB-10228] made all non-address fields trusted adapter/runtime provenance and added additive audit correlation.
+- [ORB-10319] consolidated trusted broker/session policy and MCP server composition in `orbit-remote`; `orbit-mcp` remains the generic transport kernel.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

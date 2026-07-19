@@ -13,14 +13,15 @@
 //!
 //! This is the library crate that assembles all subsystems into the
 //! [`OrbitRuntime`] — the single entry point used by the CLI, the dashboard,
-//! and the extracted `orbit-cmd` command layer. It handles initialization
+//! the extracted `orbit-cmd` command layer, and vertical feature crates such as
+//! `orbit-remote`. It handles initialization
 //! from disk (two-root layout: global + workspace), config loading and
 //! merging, and default asset seeding via embedded YAML templates.
 //!
 //! # Role
 //! Depends on the lower Orbit crates (never on `orbit-cmd`). Consumed by
-//! `orbit-cmd`, `orbit-cli`, and `orbit-dashboard`; nothing below this layer
-//! imports from `orbit-core`.
+//! `orbit-cmd`, `orbit-cli`, `orbit-dashboard`, and `orbit-remote`; neutral
+//! kernels below this layer do not import from `orbit-core`.
 //!
 //! Command groups that runtime internals invoke (tool hosts, engine hosts,
 //! bootstrap seeding) live in [`command`]; CLI-only command groups were
@@ -41,20 +42,18 @@
 //! - `skill_catalog` — re-exported skill store for CLI skill lookup
 //!
 //! # Dependency direction
-//! orbit-common, orbit-store, orbit-registry, orbit-policy, orbit-exec, orbit-tools, orbit-agent, orbit-engine
-//! → `orbit-core` → orbit-cmd → orbit-cli / orbit-dashboard
+//! orbit-common, orbit-store, orbit-policy, orbit-tools, orbit-search, orbit-engine
+//! → `orbit-core` → orbit-cmd / orbit-remote → orbit-cli / orbit-dashboard
 
 pub mod auto_tasks;
 pub mod command;
 pub mod config;
 pub mod context;
-pub mod host_registry;
+pub mod execution_environment;
 pub mod metrics;
 mod paths;
-pub mod registry_cache;
 pub mod routines;
 pub mod runtime;
-pub mod workspace_registry;
 
 // Store metric/scoreboard projections consumed by the dashboard's JSON API.
 pub use orbit_store::scoreboard_summary;
@@ -63,9 +62,6 @@ pub use orbit_store::{
     ActivityInvocationMetrics, InvocationInsertParams, InvocationQuery, InvocationRecord,
     TaskInvocationMetrics, ToolInvocationMetrics,
 };
-// Canonical builtin MCP definitions are re-exported for the CLI without requiring
-// an OrbitRuntime or adding a new CLI -> orbit-tools dependency edge.
-pub use orbit_tools::canonical_builtin_mcp_tool_definitions;
 pub use orbit_tools::prepare_remote_task_artifact_put;
 
 // Command-layer types the CLI names in its clap surfaces.
@@ -76,8 +72,7 @@ pub use command::search::{
 };
 pub use command::workflow::{ShipMode, build_ship_input, find_workflow, resolved_ship_mode};
 pub use context::ActorIdentity;
-pub use host_registry::{HostRegistryService, WorkspaceLink, require_local_hub_identity};
-pub use registry_cache::{RegistryCacheOutcome, RegistryCacheService, RegistryCacheState};
+pub use execution_environment::ExecutionEnvironmentSnapshot;
 // Shared domain types (owned by orbit-common) that the CLI and dashboard
 // render or construct.
 pub use auto_tasks::{AutoTaskAddParams, AutoTaskUpdateParams};
@@ -104,5 +99,5 @@ pub use orbit_store::{
 };
 // Routine fire records surfaced by the dashboard's routine-health JSON API.
 pub use orbit_store::{RoutineFireRecord, RoutineFireState};
-pub use runtime::OrbitRuntime;
 pub use runtime::engine::ResolvedCrewProjection;
+pub use runtime::{OrbitRuntime, WorkspaceRootHint, WorkspaceRuntimeBinding};

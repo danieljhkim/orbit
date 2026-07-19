@@ -34,7 +34,7 @@ pub use activity_v2::{ActivityV2Commands, V2ActivityRunResult};
 pub use diagnostics::DiagnosticsCommands;
 pub use doctor::{DoctorCommands, WorkspaceDoctorResult, WorkspaceDoctorStatus};
 pub use learning_hook::LearningHookCommands;
-pub use migrate::{MigrateCommands, MigrateStatus, migrate_dry_run};
+pub use migrate::{MigrateCommands, MigrateStatus, migrate_dry_run_at};
 pub use task_template::{TaskTemplate, TaskTemplateCommands};
 
 /// One-stop import for every runtime extension trait this crate defines.

@@ -10,11 +10,33 @@ use tempfile::{tempdir, tempdir_in};
 use orbit_common::types::OrbitError;
 
 use super::super::resolve::{
-    ResolvedOrbitRoots, resolve_bootstrap_roots, resolve_initialize_roots,
-    try_resolve_initialized_roots,
+    ResolvedOrbitRoots, WorkspaceRootHint, resolve_bootstrap_roots, resolve_initialize_roots,
+    resolve_initialize_roots_with_hint, try_resolve_initialized_roots,
 };
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+#[test]
+fn caller_supplied_workspace_hint_keeps_registry_out_of_core_resolution() {
+    let _guard = ENV_LOCK.lock().expect("lock env");
+    let home = tempdir().expect("home tempdir");
+    let cwd = tempdir().expect("cwd tempdir");
+    let hinted = tempdir().expect("hinted tempdir");
+    let hinted_orbit = hinted.path().join(".orbit");
+    seed_initialized_workspace_root(&hinted_orbit);
+    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
+
+    let roots = resolve_initialize_roots_with_hint(
+        cwd.path(),
+        None,
+        Some(&WorkspaceRootHint {
+            orbit_dir: hinted_orbit.clone(),
+        }),
+    )
+    .expect("resolve caller hint");
+
+    assert_pinned_roots(&roots, &hinted_orbit);
+}
 
 #[test]
 fn explicit_root_with_initialized_child_orbit_resolves_to_child() {

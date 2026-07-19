@@ -1,10 +1,9 @@
 use std::collections::BTreeSet;
 
 use clap::Args;
-use orbit_core::routines::{
-    HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, load_host_identity,
-};
-use orbit_core::{HostRegistryService, OrbitError, OrbitRuntime, require_local_hub_identity};
+use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_remote::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, load_host_identity};
+use orbit_remote::{host_registry_service_at, require_local_hub_identity};
 
 use crate::command::Execute;
 
@@ -36,8 +35,7 @@ impl Execute for HostRegisterArgs {
                         .to_string(),
                 ));
             }
-            let record =
-                crate::command::mcp::register_local_spoke(runtime, &local_identity, labels)?;
+            let record = orbit_remote::register_local_spoke(runtime, &local_identity, labels)?;
             println!(
                 "registered spoke '{}' (machine_id {}) with the verified hub and refreshed the local registry cache",
                 record.host_id, record.machine_id
@@ -79,7 +77,7 @@ impl Execute for HostRegisterArgs {
             }
         };
 
-        let service = HostRegistryService::new(runtime.sqlite_store()?);
+        let service = host_registry_service_at(&runtime.global_root())?;
         let record = if is_current_machine {
             // Registration and the singular hub snapshot identity share one
             // store transaction; neither can commit without the other.

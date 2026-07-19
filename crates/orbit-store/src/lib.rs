@@ -13,11 +13,14 @@
 //! Provides two storage backends — a file store for human-readable, git-friendly
 //! YAML artifacts (tasks, jobs, activities, skills) and a SQLite store for
 //! append-only data (audit events, stored tools). Store builders make the
-//! supported workspace/global split explicit per domain.
+//! supported workspace/global split explicit per domain. The SQLite layer also
+//! provides generic connection/transaction primitives and a namespaced feature
+//! migration ledger; feature crates own their active schemas and queries while
+//! Store retains any immutable historical bootstrap migrations needed for compatibility.
 //!
 //! # Role
-//! Depends only on `orbit-types`. Consumed by `orbit-core`, which constructs
-//! the appropriate backend(s) and injects them into the [`OrbitRuntime`].
+//! Depends only on `orbit-common`. Consumed by `orbit-core`, `orbit-engine`,
+//! `orbit-cmd`, and vertical feature crates such as `orbit-remote`.
 //!
 //! # Key exports
 //! - Backend trait types: [`TaskStoreBackend`], [`TaskDocumentStoreBackend`],
@@ -31,7 +34,7 @@
 //! - [`validate_instance_against_schema`] — JSON Schema validation for activity I/O
 //!
 //! # Dependency direction
-//! `orbit-types` → `orbit-store` → orbit-core
+//! `orbit-common` ← `orbit-store` ← consumers such as orbit-core and orbit-remote
 
 pub(crate) mod backend;
 mod file;
@@ -139,12 +142,6 @@ pub use backend::{
 };
 pub use file_lock::{LockHolderInfo, read_lock_holder};
 pub use json_schema::{validate_instance_against_schema, validate_schema_document};
-pub use orbit_common::types::{
-    ExecutionProfileV1, HostAlias, HostNameResolution, HostRecord, HostRegistration, HostStatus,
-    HostWorkspacePresence, ProjectionFreshness, SanitizedExecutionProfile,
-    SanitizedWorkspacePresence, StoredExecutionProfile, WorkspaceOwnership,
-    WorkspacePresenceDeclaration,
-};
 pub use sqlite::audit_event_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
     AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,

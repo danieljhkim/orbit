@@ -16,8 +16,9 @@
 //!
 //! # Role
 //! Depends on `orbit-exec` for process spawning and `orbit-common` for shared
-//! types. Consumed by `orbit-engine` and `orbit-core`, which pass a configured
-//! [`ToolRegistry`] into the execution context.
+//! types. Consumed by `orbit-engine`, `orbit-core`, and `orbit-remote`, which
+//! compose its workspace-scoped definitions with Remote-owned discovery and
+//! graph tools.
 //!
 //! # Key exports
 //! - [`ToolRegistry`] — central registry; call `register_builtins()` to load all standard tools
@@ -35,7 +36,7 @@
 //! process allowlists, and the narrow Orbit host surface used by Orbit builtins.
 //!
 //! # Dependency direction
-//! `orbit-common` → `orbit-exec` → `orbit-tools` → orbit-engine, orbit-core
+//! orbit-common / orbit-exec / orbit-policy → `orbit-tools` → orbit-engine, orbit-core, orbit-remote
 
 pub(crate) mod builtin;
 pub mod external;
@@ -99,7 +100,6 @@ pub enum OrbitBuiltinAction {
     FrictionStats,
     FrictionTags,
     FrictionUpdate,
-    HostList,
     LearningAdd,
     LearningList,
     LearningPrune,
@@ -132,7 +132,6 @@ pub enum OrbitBuiltinAction {
     TaskShow,
     TaskStart,
     TaskUpdate,
-    WorkspaceList,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -10,7 +10,8 @@ use axum::http::{Method, Request, StatusCode, header};
 use chrono::Utc;
 use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 use orbit_core::command::task::TaskAddParams;
-use orbit_core::{ActorIdentity, OrbitRuntime, TaskStatus};
+use orbit_core::runtime::WorkspaceRuntimeBinding;
+use orbit_core::{ActorIdentity, OrbitRuntime, ShipMode, TaskStatus};
 use serde_json::json;
 use tower::ServiceExt;
 use tracing_subscriber::Registry;
@@ -37,6 +38,11 @@ fn seed_workspace(global_root: &Path, base: &Path, name: &str) -> (PathBuf, Path
     let orbit_dir = repo_root.join(".orbit");
     std::fs::create_dir_all(&orbit_dir).expect("create .orbit");
     std::fs::write(orbit_dir.join("config.toml"), "").expect("write config");
+    std::fs::write(
+        orbit_dir.join("config.yaml"),
+        format!("schema_version: 1\nworkspace_id: ws_{name}\n"),
+    )
+    .expect("write workspace identity");
     let runtime = OrbitRuntime::from_roots(global_root, &orbit_dir)
         .expect("build runtime")
         .with_actor(ActorIdentity::human("human"));
@@ -50,6 +56,22 @@ fn seed_workspace(global_root: &Path, base: &Path, name: &str) -> (PathBuf, Path
         })
         .expect("add task");
     (orbit_dir, repo_root)
+}
+
+fn workspace_entry(id: &str, repo_root: PathBuf, orbit_dir: PathBuf, active: bool) -> WsEntry {
+    let binding = active.then(|| WorkspaceRuntimeBinding {
+        workspace_id: format!("ws_{id}"),
+        repo_root: repo_root.clone(),
+        ship_mode: ShipMode::Local,
+    });
+    WsEntry {
+        id: id.to_string(),
+        name: id.to_string(),
+        repo_root,
+        orbit_dir,
+        binding,
+        active,
+    }
 }
 
 #[tokio::test]
@@ -106,27 +128,14 @@ async fn tasks_all_aggregates_active_workspaces_and_skips_inactive() {
     let (beta_orbit, beta_repo) = seed_workspace(&global_root, tmp.path(), "beta");
 
     let entries = vec![
-        WsEntry {
-            id: "alpha".to_string(),
-            name: "alpha".to_string(),
-            repo_root: alpha_repo,
-            orbit_dir: alpha_orbit,
-            active: true,
-        },
-        WsEntry {
-            id: "beta".to_string(),
-            name: "beta".to_string(),
-            repo_root: beta_repo,
-            orbit_dir: beta_orbit,
-            active: true,
-        },
-        WsEntry {
-            id: "gone".to_string(),
-            name: "gone".to_string(),
-            repo_root: tmp.path().join("missing"),
-            orbit_dir: tmp.path().join("missing/.orbit"),
-            active: false,
-        },
+        workspace_entry("alpha", alpha_repo, alpha_orbit, true),
+        workspace_entry("beta", beta_repo, beta_orbit, true),
+        workspace_entry(
+            "gone",
+            tmp.path().join("missing"),
+            tmp.path().join("missing/.orbit"),
+            false,
+        ),
     ];
     let state = DashboardState::global(global_root, entries, Some("alpha".to_string()));
 
@@ -196,20 +205,13 @@ async fn workspace_selection_errors_are_clean_4xx_json() {
     std::fs::create_dir_all(&global_root).expect("create global root");
     let (orbit_dir, repo_root) = seed_workspace(&global_root, tmp.path(), "alpha");
     let entries = vec![
-        WsEntry {
-            id: "alpha".to_string(),
-            name: "alpha".to_string(),
-            repo_root,
-            orbit_dir,
-            active: true,
-        },
-        WsEntry {
-            id: "stale".to_string(),
-            name: "stale".to_string(),
-            repo_root: tmp.path().join("missing"),
-            orbit_dir: tmp.path().join("missing/.orbit"),
-            active: false,
-        },
+        workspace_entry("alpha", repo_root, orbit_dir, true),
+        workspace_entry(
+            "stale",
+            tmp.path().join("missing"),
+            tmp.path().join("missing/.orbit"),
+            false,
+        ),
     ];
     // No default workspace configured: requests must select one explicitly.
     let state = DashboardState::global(global_root, entries, None);
@@ -297,6 +299,11 @@ async fn cross_workspace_dependency_resolves_global_status_not_missing() {
     let alpha_orbit = alpha_repo.join(".orbit");
     std::fs::create_dir_all(&alpha_orbit).expect("create .orbit");
     std::fs::write(alpha_orbit.join("config.toml"), "").expect("write config");
+    std::fs::write(
+        alpha_orbit.join("config.yaml"),
+        "schema_version: 1\nworkspace_id: ws_alpha\n",
+    )
+    .expect("write workspace identity");
     let alpha_task = {
         let alpha_runtime = OrbitRuntime::from_roots(&global_root, &alpha_orbit)
             .expect("build alpha runtime")
@@ -314,20 +321,8 @@ async fn cross_workspace_dependency_resolves_global_status_not_missing() {
     };
 
     let entries = vec![
-        WsEntry {
-            id: "alpha".to_string(),
-            name: "alpha".to_string(),
-            repo_root: alpha_repo,
-            orbit_dir: alpha_orbit,
-            active: true,
-        },
-        WsEntry {
-            id: "beta".to_string(),
-            name: "beta".to_string(),
-            repo_root: beta_repo,
-            orbit_dir: beta_orbit,
-            active: true,
-        },
+        workspace_entry("alpha", alpha_repo, alpha_orbit, true),
+        workspace_entry("beta", beta_repo, beta_orbit, true),
     ];
     let state = DashboardState::global(global_root, entries, Some("alpha".to_string()));
     let expected_label = format!("{} [done]", beta_task.id);
@@ -442,20 +437,8 @@ async fn create_task_with_workspace_param_binds_to_that_workspace() {
     let (alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
     let (beta_orbit, beta_repo) = seed_workspace(&global_root, tmp.path(), "beta");
     let entries = vec![
-        WsEntry {
-            id: "alpha".to_string(),
-            name: "alpha".to_string(),
-            repo_root: alpha_repo,
-            orbit_dir: alpha_orbit,
-            active: true,
-        },
-        WsEntry {
-            id: "beta".to_string(),
-            name: "beta".to_string(),
-            repo_root: beta_repo,
-            orbit_dir: beta_orbit,
-            active: true,
-        },
+        workspace_entry("alpha", alpha_repo, alpha_orbit, true),
+        workspace_entry("beta", beta_repo, beta_orbit, true),
     ];
     // alpha is the default: an unrouted create would land there.
     let state = DashboardState::global(global_root, entries, Some("alpha".to_string()));
@@ -508,13 +491,7 @@ async fn create_task_with_unknown_workspace_is_404_and_creates_nothing() {
     let global_root = tmp.path().join("global");
     std::fs::create_dir_all(&global_root).expect("create global root");
     let (alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
-    let entries = vec![WsEntry {
-        id: "alpha".to_string(),
-        name: "alpha".to_string(),
-        repo_root: alpha_repo,
-        orbit_dir: alpha_orbit,
-        active: true,
-    }];
+    let entries = vec![workspace_entry("alpha", alpha_repo, alpha_orbit, true)];
     let state = DashboardState::global(global_root, entries, Some("alpha".to_string()));
 
     let response = router()
@@ -550,15 +527,23 @@ async fn create_task_with_unknown_workspace_is_404_and_creates_nothing() {
 /// Write a registry file at `<global_root>/workspaces.json` binding each
 /// `(id, repo_root)` as an active, owner-role workspace.
 fn write_registry(global_root: &Path, workspaces: &[(&str, &Path)]) {
+    let workspaces: Vec<_> = workspaces
+        .iter()
+        .map(|(id, repo_root)| (*id, *repo_root, None))
+        .collect();
+    write_registry_with_ship_modes(global_root, &workspaces);
+}
+
+fn write_registry_with_ship_modes(global_root: &Path, workspaces: &[(&str, &Path, Option<&str>)]) {
     let now = Utc::now();
     let mut registry = WorkspaceRegistry::default();
-    for (id, repo_root) in workspaces {
+    for (id, repo_root, ship_mode) in workspaces {
         registry.workspaces.push(Workspace {
             id: (*id).to_string(),
             name: (*id).to_string(),
             owner_machine_id: None,
             git_remote: None,
-            ship_mode: None,
+            ship_mode: ship_mode.map(str::to_string),
             base_branch: "main".to_string(),
             status: WorkspaceStatus::Active,
             created_at: now,
@@ -570,7 +555,7 @@ fn write_registry(global_root: &Path, workspaces: &[(&str, &Path)]) {
             repo_root.join(".orbit"),
         ));
     }
-    orbit_core::workspace_registry::save_registry_to(
+    orbit_remote::workspace_registry::save_registry_to(
         &registry,
         &global_root.join("workspaces.json"),
     )
@@ -704,6 +689,13 @@ async fn refresh_rebinds_workspace_to_new_checkout() {
     let titles = task_titles(&state, "alpha").await;
     assert!(titles.iter().any(|t| t == "alpha task"), "got {titles:?}");
     let before = open_runtime(&state, "alpha").expect("alpha open");
+    assert_eq!(
+        before
+            .workspace_runtime_binding()
+            .expect("dashboard runtime binding")
+            .workspace_id,
+        "ws_alpha"
+    );
 
     // Rebind `alpha` to a different on-disk checkout with a distinct task.
     let (_v2_orbit, v2_repo) = seed_workspace(&global_root, tmp.path(), "alpha_v2");
@@ -719,6 +711,58 @@ async fn refresh_rebinds_workspace_to_new_checkout() {
     assert!(
         !Arc::ptr_eq(&before, &after),
         "a rebind must invalidate the old runtime"
+    );
+    assert_eq!(
+        after
+            .workspace_runtime_binding()
+            .expect("dashboard runtime binding")
+            .workspace_id,
+        "ws_alpha_v2",
+        "logical registry id may differ from the runtime's configured id"
+    );
+}
+
+/// A registry-only ship-mode change is part of the authoritative runtime
+/// binding even when the checkout paths are unchanged. Refresh must therefore
+/// evict the cached runtime and rebuild it with the new mode.
+#[tokio::test]
+async fn refresh_rebuilds_runtime_for_ship_mode_only_change() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (_alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    write_registry_with_ship_modes(&global_root, &[("alpha", &alpha_repo, None)]);
+    let state = registry_state(&global_root);
+
+    assert_eq!(route_status(&state, "alpha").await, StatusCode::OK);
+    let before = open_runtime(&state, "alpha").expect("alpha open");
+    assert_eq!(
+        before
+            .workspace_runtime_binding()
+            .expect("dashboard runtime binding")
+            .ship_mode,
+        ShipMode::Local
+    );
+
+    write_registry_with_ship_modes(&global_root, &[("alpha", &alpha_repo, Some("pr"))]);
+    state.refresh();
+    assert!(
+        open_runtime(&state, "alpha").is_none(),
+        "binding-only change must evict the cached runtime"
+    );
+
+    assert_eq!(route_status(&state, "alpha").await, StatusCode::OK);
+    let after = open_runtime(&state, "alpha").expect("alpha reopened");
+    assert!(
+        !Arc::ptr_eq(&before, &after),
+        "ship-mode-only change must rebuild the runtime"
+    );
+    assert_eq!(
+        after
+            .workspace_runtime_binding()
+            .expect("dashboard runtime binding")
+            .ship_mode,
+        ShipMode::Pr
     );
 }
 

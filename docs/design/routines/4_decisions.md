@@ -1,16 +1,16 @@
 ---
 title: Routines — Decisions
 owner: claude
-last_updated: 2026-07-15
+last_updated: 2026-07-18
 status: Accepted
 feature: routines
 doc_role: decisions
 type: design
 summary: ADR log for the routines scheduler, including default seeding and workspace-local shipment.
 tags: [routines, scheduler]
-paths: ["crates/orbit-core/src/routines/**"]
-related_features: [routines, activity-job]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ADR-0223]
+paths: ["crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs"]
+related_features: [routines, activity-job, host-registry]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223]
 ---
 
 # Routines — Decisions
@@ -256,6 +256,9 @@ consult `workflow.auto_ship` or the cross-workspace sweep path.
 - [ORB-10270] — completed ADR-0231's runtime enforcement: committed pins resolve through
   current registry or classified spoke-cache data before scheduler mutation, diagnostics
   remain explicit under degradation, and reassignment starts with a fresh baseline.
+- [ORB-10319] — moved the Remote-specific providers that source identity, registry/cache,
+  workspace bindings, and runtimes into `orbit-remote`; the accepted routine decisions and
+  Core scheduler semantics are unchanged.
 - [ORB-10138] — exposed per-routine scheduler health over the dashboard HTTP API
   (`GET /api/routines`), realizing the single-host half of the §7 cross-host-visibility
   vision. Read-only projection of `routine_statuses`; no new ADR (no new architectural

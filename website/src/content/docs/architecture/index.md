@@ -11,41 +11,86 @@ Orbit is a layered Rust workspace. Lower layers do not depend on higher layers.
 
 ```mermaid
 flowchart LR
-  Common["orbit-common"] --> Policy["orbit-policy"]
-  Common --> Exec["orbit-exec"]
-  Common --> Knowledge["orbit-knowledge"]
-  Common --> Store["orbit-store"]
-  Common --> MCP["orbit-mcp"]
-  Policy --> Tools["orbit-tools"]
-  Exec --> Tools
-  Knowledge --> Tools
-  Tools --> Agent["orbit-agent"]
-  Tools --> Engine["orbit-engine"]
-  Store --> Engine
-  Agent --> Engine
-  Engine --> Core["orbit-core"]
-  Core --> Cmd["orbit-cmd"]
-  Core --> CLI["orbit-cli"]
-  Cmd --> CLI
-  MCP --> CLI
+  CLI["orbit-cli"] --> Cmd["orbit-cmd"]
+  CLI --> Core["orbit-core"]
+  CLI --> Remote["orbit-remote"]
+  CLI --> Dashboard["orbit-dashboard"]
+  CLI --> GraphCli["orbit-graph-cli"]
+  Dashboard --> Core
+  Dashboard --> Remote
+  Dashboard --> Cmd
+  Cmd --> Core
+  Cmd --> Engine
+  Cmd --> Store
+  Core --> Engine["orbit-engine"]
+  Core --> Store["orbit-store"]
+  Core --> Tools["orbit-tools"]
+  Core --> Search["orbit-search"]
+  Core --> Policy["orbit-policy"]
+  Engine --> Agent["orbit-agent"]
+  Engine --> Exec["orbit-exec"]
+  Engine --> Store
+  Engine --> Tools
+  Agent --> Tools
+  Agent --> Common["orbit-common"]
+  Tools --> Exec
+  Tools --> Policy
+  Remote --> Core
+  Remote --> Store
+  Remote --> Tools
+  Remote --> MCP["orbit-mcp"]
+  Remote --> Graph["orbit-graph"]
+  Remote --> GraphExtract["orbit-graph-extract"]
+  Remote --> Common
+  Graph --> GraphExtract["orbit-graph-extract"]
+  Graph --> Common
+  GraphExtract --> Common
+  GraphCli --> Graph
+  GraphCli --> GraphExtract
+  Search --> Common
+  SearchCompanion["orbit-search-companion"] --> Search
+  SearchCompanion --> Common
+  MCP --> Common
+  Store --> Common
+  Exec --> Common
+  Policy --> Common
+  Tools --> Common
+  Core --> Common
+  Cmd --> Common
 ```
 
-`orbit-store` and `orbit-mcp` depend only on `orbit-common`. `orbit-mcp` is consumed by `orbit-cli` directly via `orbit mcp serve`. `orbit-core` does **not** depend on `orbit-agent`; the bridge is `orbit-engine`'s `backend: cli` subprocess runner.
+Arrows point from a consumer to its dependency. `orbit-store` and `orbit-mcp` are
+neutral kernels that depend only on `orbit-common`. The vertical `orbit-remote`
+feature composes registry persistence, MCP policy, broker/hub routing, SSH links,
+and spoke registration without introducing a reverse dependency from those kernels.
+Layering constrains dependency direction, not feature ownership: a vertical crate
+may own its domain model, feature schema, transport policy, and composition end to
+end while reusing neutral mechanisms.
+`orbit-core` does **not** depend on `orbit-agent`; the bridge is `orbit-engine`'s
+`backend: cli` subprocess runner.
 
 ## Boundaries
 
 | Crate | Role |
 |-------|------|
 | `orbit-common` | Shared domain types, errors, IDs, utility helpers. |
-| `orbit-knowledge` | Graph parsing, storage helpers, selectors, graph services. |
-| `orbit-store` | YAML and SQLite stores. |
+| `orbit-policy` | Filesystem-scoping policy and profile resolution. |
+| `orbit-exec` | Process, sandbox, and supervision primitives. |
+| `orbit-store` | Generic YAML/SQLite stores, connection primitives, namespaced feature-migration ledger, and immutable historical bootstrap migrations. |
+| `orbit-graph-extract` | Language extractors and raw graph row contracts. |
+| `orbit-graph` | Worktree-local derived graph index and query API. |
+| `orbit-graph-cli` | Shared clap/JSON command surface for `orbit graph`. |
+| `orbit-search` | Retrieval/ranking feature and workspace-local semantic index. |
+| `orbit-search-companion` | Separately installed embedding companion binary. |
 | `orbit-agent` | HTTP loop transport and retained CLI runtimes. |
 | `orbit-engine` | Activity/job execution, template rendering, retries, CLI subprocess runner. |
-| `orbit-tools` | Built-in tool registry and external tool integration. |
-| `orbit-mcp` | MCP adapter over the tool registry. |
-| `orbit-core` | Runtime bootstrap, config, runtime-integrated commands, default asset seeding. |
+| `orbit-tools` | Generic built-in tool registry and external tool integration. |
+| `orbit-mcp` | Generic RMCP framing, server composition, and raw-client kernel. |
+| `orbit-remote` | Vertical host/workspace registry, feature persistence, MCP contract and extensions, broker, hub, SSH link, and registration composition. |
+| `orbit-core` | Neutral runtime bootstrap, config, runtime-integrated commands, coordination executor, and default asset seeding. |
 | `orbit-cmd` | CLI-facing command layer (doctor, migrate, diagnostics, templates, hooks) over `OrbitRuntime`. |
-| `orbit-cli` | Clap-based CLI entrypoint. |
+| `orbit-dashboard` | Read-only web dashboard over Core and Remote registry state. |
+| `orbit-cli` | Clap-based entrypoint and local client-configuration surface; delegates Remote behavior to `orbit-remote`. |
 
 ## Feature Ownership
 
@@ -53,12 +98,15 @@ Feature design docs live under `docs/design/<feature>/` and follow `docs/design/
 
 | Feature | Folder | Lead |
 |---------|--------|------|
-| Knowledge graph | `knowledge-graph/` | `claude` |
+| Orbit Graph | `orbit-graph/` | `claude` |
 | Policy & Sandboxing | `policy-sandbox/` | `claude` |
 | Activity / Job | `activity-job/` | `codex` |
 | Auditability | `auditability/` | `codex` |
 | Groundhog | `groundhog/` | `codex` |
 | User Interface | `user-interface/` | `gemini` |
+| Host Registry | `host-registry/` | `claude` |
+| MCP Bridge | `mcp-bridge/` | `codex` |
+| MCP Session Context | `mcp-session-context/` | `codex` |
 
 ## Design Mirror
 

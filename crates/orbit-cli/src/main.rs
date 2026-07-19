@@ -37,7 +37,8 @@ mod output;
 mod parse;
 
 use clap::Parser;
-use orbit_core::{ActorIdentity, OrbitRuntime};
+use orbit_core::ActorIdentity;
+use orbit_remote::runtime::RemoteRuntimeFactory;
 
 #[cfg(test)]
 use crate::command::init::InitCommand;
@@ -65,19 +66,20 @@ fn main() {
         return;
     }
 
-    let runtime = match OrbitRuntime::initialize_with_root_override(root_override.as_deref()) {
-        Ok(runtime) => runtime,
-        Err(err) => {
-            if suppress_errors {
-                return;
+    let runtime =
+        match RemoteRuntimeFactory::initialize_with_root_override(root_override.as_deref()) {
+            Ok(runtime) => runtime,
+            Err(err) => {
+                if suppress_errors {
+                    return;
+                }
+                print_error(&err, json_error_preference);
+                std::process::exit(1);
             }
-            print_error(&err, json_error_preference);
-            std::process::exit(1);
         }
-    }
-    // Direct CLI commands are human-driven by default. Tool-dispatch paths
-    // reclassify themselves as agent-driven inside `execute_tool_command`.
-    .with_actor(ActorIdentity::human("human"));
+        // Direct CLI commands are human-driven by default. Tool-dispatch paths
+        // reclassify themselves as agent-driven inside `execute_tool_command`.
+        .with_actor(ActorIdentity::human("human"));
 
     let context = DispatchContext::with_runtime(&runtime, root_override.as_deref());
     let result = match audit_meta {

@@ -1,6 +1,7 @@
 use clap::{Args, Subcommand};
 use orbit_common::types::HostNameResolution;
-use orbit_core::{HostRegistryService, OrbitError, OrbitRuntime};
+use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_remote::HostRegistryService;
 
 use crate::command::Execute;
 

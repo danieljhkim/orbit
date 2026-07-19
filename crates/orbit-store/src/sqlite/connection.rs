@@ -27,6 +27,19 @@ pub struct StoreTx<'a> {
     pub(crate) tx: Transaction<'a>,
 }
 
+impl StoreTx<'_> {
+    /// Borrow the transaction as a raw SQLite connection.
+    ///
+    /// Feature crates use this narrow escape hatch to keep their SQL and row
+    /// codecs inside the owning crate while reusing Store's serialized writer
+    /// and transaction boundary. The returned connection remains inside this
+    /// transaction; callers must not issue transaction-control statements or
+    /// re-enter the parent [`Store`] from the callback.
+    pub fn connection(&self) -> &Connection {
+        &self.tx
+    }
+}
+
 impl Store {
     pub fn open(path: &Path) -> Result<Self, OrbitError> {
         if let Some(parent) = path.parent() {
@@ -106,6 +119,21 @@ impl Store {
                 Ok(ReadGuard::Writer(guard))
             }
         }
+    }
+
+    /// Run a SELECT-shaped callback on Store's pooled read connection.
+    ///
+    /// File-backed stores provide a `query_only=ON` connection; in-memory
+    /// stores use the writer connection because separate in-memory SQLite
+    /// connections do not share state. Callers must therefore treat the
+    /// connection as read-only on every backend and must not re-enter this
+    /// Store from the callback.
+    pub fn with_read_connection<T, F>(&self, op: F) -> Result<T, OrbitError>
+    where
+        F: FnOnce(&Connection) -> Result<T, OrbitError>,
+    {
+        let conn = self.read()?;
+        op(&conn)
     }
 
     pub fn connection(&self) -> Arc<Mutex<Connection>> {

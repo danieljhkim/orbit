@@ -1,0 +1,42 @@
+[package]
+name = "orbit-remote"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[package.metadata.orbit]
+stability = "experimental"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+
+[dependencies]
+chrono.workspace = true
+hostname.workspace = true
+orbit-common = { path = "../orbit-common" }
+orbit-core = { path = "../orbit-core" }
+orbit-graph = { path = "../orbit-graph" }
+orbit-graph-extract = { path = "../orbit-graph-extract" }
+orbit-mcp = { path = "../orbit-mcp" }
+orbit-store = { path = "../orbit-store" }
+orbit-tools = { path = "../orbit-tools" }
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["io-util", "process", "time"] }
+toml.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# Cross-layer compatibility canary: Remote MCP and the CLI learning hook must
+# share one persisted learning-admission state.
+orbit-cmd = { path = "../orbit-cmd" }
+rmcp = { version = "1.5", default-features = false, features = ["client", "server", "transport-io"] }
+tempfile.workspace = true
+tracing-subscriber.workspace = true

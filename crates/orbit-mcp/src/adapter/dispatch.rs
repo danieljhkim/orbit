@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use orbit_common::types::{
-    McpToolDefinition, OrbitError, SPOKE_REGISTRATION_METHOD_V1, SpokeRegistrationRequestV1,
-    SpokeRegistrationResultV1, ToolSchema, ToolSessionContext, audit_execution_id,
-    validate_mcp_tool_definitions,
+    McpToolDefinition, OrbitError, ToolSchema, ToolSessionContext, validate_mcp_tool_definitions,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::ServerHandler;
@@ -21,24 +19,53 @@ use super::name_map::{ToolNameCollision, build_name_map};
 use super::schema::schema_to_tool;
 use super::structured::mcp_structured_content;
 use crate::error::tool_error_result;
+use crate::{McpCustomRequestError, McpRequestKind, McpResultDecoration, McpToolExtension};
 
 impl OrbitToolServer {
     pub(super) fn combined_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
         let mut definitions = self.host.list_mcp_tool_definitions()?;
-        definitions.retain(|definition| !self.graph_tools.is_graph_tool(&definition.schema.name));
-        // ORB-00391: the v1 orbit-knowledge graph builtins were decommissioned,
-        // so the in-process orbit-graph (v2) adapter owns its known graph
-        // names and their local-derived policies.
-        if self.host.in_process_graph_tools_enabled() {
-            definitions.extend(
-                self.graph_tools
-                    .definitions()
-                    .map_err(|error| OrbitError::InvalidInput(error.to_string()))?,
-            );
+        definitions.retain(|definition| {
+            !self
+                .extensions
+                .iter()
+                .any(|registration| registration.extension().recognizes(&definition.schema.name))
+        });
+        for registration in self
+            .extensions
+            .iter()
+            .filter(|registration| registration.advertises_definitions())
+        {
+            let extension_definitions = registration.extension().definitions()?;
+            for definition in &extension_definitions {
+                if !registration.extension().recognizes(&definition.schema.name) {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "in-process MCP extension definition '{}' is not recognized by its owner",
+                        definition.schema.name
+                    )));
+                }
+                let _owner = self.extension_for(&definition.schema.name)?;
+            }
+            definitions.extend(extension_definitions);
         }
         validate_mcp_tool_definitions(&definitions)
             .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
         Ok(definitions)
+    }
+
+    fn extension_for(&self, name: &str) -> Result<Option<Arc<dyn McpToolExtension>>, OrbitError> {
+        let mut matches = self
+            .extensions
+            .iter()
+            .filter(|registration| registration.extension().recognizes(name));
+        let Some(first) = matches.next() else {
+            return Ok(None);
+        };
+        if matches.next().is_some() {
+            return Err(OrbitError::InvalidInput(format!(
+                "multiple in-process MCP extensions recognize tool '{name}'"
+            )));
+        }
+        Ok(Some(Arc::clone(first.extension())))
     }
 
     #[cfg(test)]
@@ -58,7 +85,16 @@ impl OrbitToolServer {
     /// name resolution still uses the unfiltered registry so a call to a
     /// hidden tool reaches the host's audited denial path instead of being
     /// misclassified as an unknown name.
+    #[cfg(test)]
     pub(super) fn visible_tool_schemas(&self) -> Result<Vec<ToolSchema>, OrbitError> {
+        Ok(self
+            .visible_tool_definitions()?
+            .into_iter()
+            .map(|definition| definition.schema)
+            .collect())
+    }
+
+    pub(super) fn visible_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
         let context = self.session_context();
         Ok(self
             .combined_tool_definitions()?
@@ -70,8 +106,18 @@ impl OrbitToolServer {
                     .iter()
                     .any(|capability| context.effective_capabilities.contains(capability))
             })
-            .map(|definition| definition.schema)
             .collect())
+    }
+
+    pub(super) fn input_schema_for(
+        &self,
+        definition: &McpToolDefinition,
+    ) -> Result<Map<String, Value>, OrbitError> {
+        if let Some(extension) = self.extension_for(&definition.schema.name)? {
+            extension.input_schema(definition)
+        } else {
+            self.input_schema_resolver.input_schema(definition)
+        }
     }
 
     // pub(super) visibility widened from private so that adapter::tests (sibling under adapter)
@@ -117,47 +163,11 @@ impl OrbitToolServer {
 
     fn session_context_for_call(
         &self,
+        request: &McpRequestKind,
         transport_meta: &Meta,
     ) -> Result<ToolSessionContext, OrbitError> {
-        if self.host.accepts_remote_session_context() {
-            let Some(remote) = remote_session_context_from_meta(transport_meta)? else {
-                return Err(OrbitError::InvalidInput(
-                    "hub tool calls require connector-owned remote session metadata".to_string(),
-                ));
-            };
-            let trusted = self.session_context();
-            if remote.transport != Some(orbit_common::types::McpTransport::SshMcp) {
-                return Err(OrbitError::InvalidInput(
-                    "hub remote session metadata must declare ssh-mcp transport".to_string(),
-                ));
-            }
-            if remote.caller_machine_id.is_none()
-                || remote.caller_host_id.is_none()
-                || remote.origin_session_id.is_none()
-                || remote.mcp_call_id.is_none()
-            {
-                return Err(OrbitError::InvalidInput(
-                    "hub remote session metadata requires caller identity and call correlation"
-                        .to_string(),
-                ));
-            }
-            if remote.process_machine_id.is_some() || remote.process_host_id.is_some() {
-                return Err(OrbitError::InvalidInput(
-                    "hub remote session metadata may not claim process identity".to_string(),
-                ));
-            }
-            let mut remote = remote;
-            // The fixed server capability is authority; the connector cannot
-            // expand it through per-call metadata.
-            remote.effective_capabilities = trusted.effective_capabilities;
-            // Lease correlation is a trusted runner/broker seam. A spoke may
-            // not attach an arbitrary run or lease to a hub audit record.
-            remote.leased_run = None;
-            return Ok(remote);
-        }
-        let mut context = self.session_context();
-        context.mcp_call_id = Some(audit_execution_id("mcall"));
-        Ok(context)
+        self.call_context_resolver
+            .resolve(&self.session_context(), request, &transport_meta.0)
     }
 
     pub(super) fn canonical_name(&self, advertised: &str) -> Result<String, McpError> {
@@ -198,7 +208,11 @@ impl OrbitToolServer {
     ) -> Result<CallToolResult, McpError> {
         // Generate exactly once before name/exposure preflight. Every dispatch
         // and denial path below receives this same trusted call context.
-        let session_context = match self.session_context_for_call(transport_meta) {
+        let inbound = req.name.to_string();
+        let request_kind = McpRequestKind::Tool {
+            name: inbound.clone(),
+        };
+        let session_context = match self.session_context_for_call(&request_kind, transport_meta) {
             Ok(context) => context,
             Err(denial) => {
                 let context = self.session_context();
@@ -208,7 +222,6 @@ impl OrbitToolServer {
                 return Ok(tool_error_result(&denial));
             }
         };
-        let inbound = req.name.to_string();
         if let Err(denial) = self.host.preflight_tool_call(&inbound, &session_context) {
             let denial =
                 self.host
@@ -249,19 +262,23 @@ impl OrbitToolServer {
             return Ok(tool_error_result(&denial));
         }
 
+        let extension = self
+            .extension_for(&canonical)
+            .map_err(invalid_definitions_mcp_error)?;
+        let extension_for_dispatch = extension.clone();
         let host = Arc::clone(&self.host);
-        let graph_tools = Arc::clone(&self.graph_tools);
         let exec_name = canonical.clone();
         let input_for_learning = input.clone();
-        // Dispatch recognition is deliberately independent of host schemas.
-        // Re-exposing a host graph schema must not make
-        // adapter-owned graph calls bypass the host's policy/audit seam.
-        let graph_tool = self.graph_tools.is_graph_tool(&canonical);
+        let call_context = session_context.clone();
+        let server_context = self.session_context();
+        // Extension recognition is deliberately independent of advertised
+        // schemas. Re-exposing a host schema must not make an in-process call
+        // bypass the host's policy/audit seam.
         let join = tokio::task::spawn_blocking(move || {
-            if graph_tool {
-                let graph_name = exec_name.clone();
+            if let Some(extension) = extension_for_dispatch {
+                let extension_name = exec_name.clone();
                 let mut dispatch = move |input, session_context| {
-                    graph_tools.call_tool(&graph_name, input, session_context)
+                    extension.call(&extension_name, input, session_context)
                 };
                 host.call_in_process_tool(&exec_name, input, session_context, &mut dispatch)
             } else {
@@ -271,20 +288,24 @@ impl OrbitToolServer {
         .await;
 
         match join {
-            Ok(Ok(value)) => {
-                let value = self
-                    .maybe_attach_learning_sidecar(&canonical, input_for_learning, value)
-                    .await?;
+            Ok(Ok(mut value)) => {
+                for decorator in &self.result_decorators {
+                    value = decorator
+                        .decorate(McpResultDecoration {
+                            canonical_name: canonical.clone(),
+                            input: input_for_learning.clone(),
+                            output: value,
+                            call_context: call_context.clone(),
+                            server_context: server_context.clone(),
+                        })
+                        .await
+                        .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+                }
                 Ok(CallToolResult::structured(mcp_structured_content(value)))
             }
             Ok(Err(orbit_err)) => {
-                if graph_tool {
-                    tracing::warn!(
-                        target: "orbit.mcp.graph",
-                        tool = %canonical,
-                        error = %orbit_err,
-                        "graph tool call failed"
-                    );
+                if let Some(extension) = extension.as_ref() {
+                    extension.report_call_failure(&canonical, &orbit_err);
                 }
                 Ok(tool_error_result(&orbit_err))
             }
@@ -321,12 +342,16 @@ impl ServerHandler for OrbitToolServer {
     fn get_info(&self) -> ServerInfo {
         let implementation = Implementation::new("orbit-mcp", env!("CARGO_PKG_VERSION"));
         let capabilities = ServerCapabilities::builder().enable_tools().build();
-        let instructions = self.host.private_server_instructions().unwrap_or_else(|| {
-            "Orbit tool registry exposed over MCP. Call tools/list to discover available \
-             task, graph, state, and review operations; each tool advertises its own input \
-             schema."
-                .to_string()
-        });
+        let instructions = self
+            .metadata
+            .instructions()
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| {
+                "Orbit tool registry exposed over MCP. Call tools/list to discover available \
+                 task, graph, state, and review operations; each tool advertises its own input \
+                 schema."
+                    .to_string()
+            });
         InitializeResult::new(capabilities)
             .with_server_info(implementation)
             .with_instructions(instructions)
@@ -337,13 +362,25 @@ impl ServerHandler for OrbitToolServer {
         _request: Option<PaginatedRequestParams>,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        let mut schemas = self
-            .visible_tool_schemas()
+        let mut definitions = self
+            .visible_tool_definitions()
             .map_err(invalid_definitions_mcp_error)?;
-        schemas.sort_by(|a, b| a.name.cmp(&b.name));
+        definitions.sort_by(|a, b| a.schema.name.cmp(&b.schema.name));
+        let schemas = definitions
+            .iter()
+            .map(|definition| definition.schema.clone())
+            .collect::<Vec<_>>();
         self.refresh_name_map(&schemas)
             .map_err(ToolNameCollision::into_mcp_error)?;
-        let tools = schemas.into_iter().map(schema_to_tool).collect();
+        let tools = definitions
+            .into_iter()
+            .map(|definition| {
+                let input_schema = self
+                    .input_schema_for(&definition)
+                    .map_err(invalid_definitions_mcp_error)?;
+                Ok(schema_to_tool(definition.schema, input_schema))
+            })
+            .collect::<Result<Vec<_>, McpError>>()?;
         Ok(ListToolsResult::with_all_items(tools))
     }
 
@@ -361,73 +398,51 @@ impl ServerHandler for OrbitToolServer {
         ctx: RequestContext<RoleServer>,
     ) -> Result<CustomResult, McpError> {
         let method = request.method.clone();
-        if method != SPOKE_REGISTRATION_METHOD_V1 || !self.host.accepts_remote_session_context() {
+        let mut handlers = self
+            .custom_request_handlers
+            .iter()
+            .filter(|handler| handler.recognizes(&method));
+        let Some(handler) = handlers.next().cloned() else {
             return Err(McpError::new(ErrorCode::METHOD_NOT_FOUND, method, None));
-        }
-        if remote_session_context_from_meta(&ctx.meta)
-            .map_err(|error| McpError::invalid_params(error.to_string(), None))?
-            .is_none()
-        {
-            return Err(McpError::invalid_params(
-                "private spoke registration requires connector-owned remote session metadata",
+        };
+        if handlers.next().is_some() {
+            return Err(McpError::internal_error(
+                format!("multiple MCP custom request handlers recognize method '{method}'"),
                 None,
             ));
         }
+        let request_kind = McpRequestKind::Custom {
+            method: method.clone(),
+        };
         let session_context = self
-            .session_context_for_call(&ctx.meta)
+            .session_context_for_call(&request_kind, &ctx.meta)
             .map_err(|error| McpError::invalid_params(error.to_string(), None))?;
-        let registration = request
-            .params_as::<SpokeRegistrationRequestV1>()
-            .map_err(|error| {
-                McpError::invalid_params(
-                    format!("invalid private spoke registration payload: {error}"),
-                    None,
-                )
-            })?
-            .ok_or_else(|| {
-                McpError::invalid_params("private spoke registration requires parameters", None)
-            })?;
-        if let Err(error) = registration.validate() {
-            return registration_custom_result(SpokeRegistrationResultV1::rejected(&error));
-        }
-
-        let host = Arc::clone(&self.host);
-        let outcome = tokio::task::spawn_blocking(move || {
-            host.private_register_spoke(registration, session_context)
+        let worker_label = handler.worker_label();
+        let method_for_handler = method.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            handler.call(&method_for_handler, request.params, session_context)
         })
         .await
         .map_err(|error| {
-            McpError::internal_error(
-                format!("private spoke registration worker failed: {error}"),
-                None,
-            )
-        })?;
-        let Some(outcome) = outcome else {
-            return Err(McpError::new(ErrorCode::METHOD_NOT_FOUND, method, None));
-        };
-        let result = match outcome {
-            Ok(result) => result,
-            Err(error) => SpokeRegistrationResultV1::rejected(&error),
-        };
-        result.validate().map_err(|error| {
-            McpError::internal_error(
-                format!("invalid private spoke registration result: {error}"),
-                None,
-            )
-        })?;
-        registration_custom_result(result)
+            McpError::internal_error(format!("{worker_label} worker failed: {error}"), None)
+        })?
+        .map_err(|error| custom_request_error_to_mcp(error, &method))?;
+        Ok(CustomResult::new(result))
     }
 }
 
-fn registration_custom_result(result: SpokeRegistrationResultV1) -> Result<CustomResult, McpError> {
-    serde_json::to_value(result)
-        .map(CustomResult::new)
-        .map_err(|error| {
-            McpError::internal_error(
-                format!("serialize private spoke registration result: {error}"),
-                None,
-            )
-        })
+fn custom_request_error_to_mcp(error: McpCustomRequestError, method: &str) -> McpError {
+    match error {
+        McpCustomRequestError::MethodNotFound => {
+            McpError::new(ErrorCode::METHOD_NOT_FOUND, method.to_string(), None)
+        }
+        McpCustomRequestError::InvalidParams { message, data } => {
+            McpError::invalid_params(message, data)
+        }
+        McpCustomRequestError::Internal { message, data } => {
+            McpError::internal_error(message, data)
+        }
+    }
 }
 
 fn invalid_definitions_mcp_error(error: OrbitError) -> McpError {
@@ -469,19 +484,4 @@ fn workspace_from_meta(meta: Option<&rmcp::model::JsonObject>) -> Option<String>
     .map(str::trim)
     .filter(|value| !value.is_empty())
     .map(ToOwned::to_owned)
-}
-
-fn remote_session_context_from_meta(meta: &Meta) -> Result<Option<ToolSessionContext>, OrbitError> {
-    let Some(value) = meta
-        .0
-        .get("orbit")
-        .and_then(|orbit| orbit.get(crate::client::REMOTE_SESSION_META_KEY))
-    else {
-        return Ok(None);
-    };
-    serde_json::from_value(value.clone())
-        .map(Some)
-        .map_err(|error| {
-            OrbitError::InvalidInput(format!("invalid hub remote session metadata: {error}"))
-        })
 }

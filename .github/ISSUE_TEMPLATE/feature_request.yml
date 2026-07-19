@@ -48,7 +48,7 @@ body:
         - orbit-knowledge
         - orbit-mcp
         - orbit-policy
-        - orbit-registry
+        - orbit-remote
         - orbit-store
         - orbit-tools
         - Other / not sure

@@ -1,8 +1,8 @@
 use clap::Args;
 use comfy_table::Cell;
 use orbit_core::OrbitError;
-use orbit_core::routines::routine_statuses;
-use orbit_core::workspace_registry;
+use orbit_remote::routines::routine_statuses;
+use orbit_remote::workspace_registry;
 use serde_json::json;
 
 use crate::output::table::{add_single_line_row, build_table};

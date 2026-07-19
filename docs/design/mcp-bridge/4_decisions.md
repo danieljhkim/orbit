@@ -6,11 +6,11 @@ status: Accepted
 feature: mcp-bridge
 doc_role: decisions
 type: design
-summary: Accepted ADR log for the coupled MCP Bridge and Host Registry v1 contract.
+summary: ADR log for the coupled MCP Bridge and Host Registry v1 contract and its evolving implementation boundary.
 tags: [mcp, remote-access, host-registry, bridge]
-paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-registry/**", "crates/orbit-core/src/command/tool.rs"]
+paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10302, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10302, ORB-10319, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Orbit MCP Bridge — Decisions
@@ -19,7 +19,9 @@ ADR log for `mcp-bridge`. Entries are append-only and ordered by global ID. The
 Orbit ADR store owns allocation, status, and task links; this log records the
 complete seven-decision v1 behavior contract shared with
 [host-registry](../host-registry/4_decisions.md), plus the crate boundary that
-keeps its registry implementation singular.
+keeps its implementation singular. ADR-0235 records the intermediate registry-only
+extraction; proposed ADR-0240 records [ORB-10319]'s vertical Remote replacement.
+The older entry remains intact as design history.
 
 ## ADR-0226 — Singular coordination hub, workspace owner, and per-run placement
 
@@ -65,7 +67,7 @@ and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
 
 ## ADR-0228 — Local placement broker with capability-set filtering
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] registered the first operator-only, hub-placement canonical discovery tools (`orbit.host.list`, `orbit.workspace.list`) in the canonical registry and the versioned conformance fixture; [ORB-10262] implemented the local exact-checkout broker and capability enforcement; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface; [ORB-10271] implemented active registered-caller validation, operator-only friction reads, and path-free remote artifacts/responses.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] registered the first operator-only, hub-placement canonical discovery tools (`orbit.host.list`, `orbit.workspace.list`) in Remote's canonical composition and the versioned conformance fixture; [ORB-10262] implemented the local exact-checkout broker and capability enforcement; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface; [ORB-10271] implemented active registered-caller validation, operator-only friction reads, and path-free remote artifacts/responses; [ORB-10319] colocated MCP-only discovery schemas and execution in Remote while retaining the dedicated human CLI commands.
 
 ### Context
 
@@ -184,15 +186,52 @@ adapter, runtime profile/ship construction in `orbit-core`, persistence in
 - The retired replicated-writer API cannot reappear as a second authority beside the singular hub.
 - Cost: `orbit-registry` gains a store dependency and is no longer a consumer-agnostic leaf.
 
+**Planned replacement:** [ADR-0240] proposes superseding this horizontal boundary
+when [ORB-10319] lands. Until that task is approved and merged, ADR-0235 remains the
+accepted historical decision.
+
+## ADR-0240 — Consolidate remote coordination in one vertical feature crate
+
+**Status:** Proposed · 2026-07 · [ORB-10319] implements the candidate boundary.
+
+### Context
+
+The registry-only extraction in ADR-0235 still made one MCP/remote feature cross
+CLI, Core, Registry, Store, MCP, and Tools whenever persistence, schema composition,
+and routing changed together. A separate broker crate would add another horizontal
+layer without eliminating those cross-crate changes.
+
+### Decision
+
+Rename and widen `orbit-registry` into `orbit-remote`, a vertical feature crate that
+owns host/workspace registry behavior, its SQLite statements and feature schema,
+profiles and caches, MCP contract composition, the local broker, hub authority and
+link, graph/learning integration, and registration. Keep `orbit-store` and
+`orbit-mcp` as neutral kernels, shared DTOs in `orbit-common`, generic builtin
+definitions in `orbit-tools`, and the transport-independent coordination executor
+in `orbit-core`. Reuse the same config-resolved `orbit.db`; do not introduce a
+Remote database or a separate broker crate.
+
+### Consequences
+
+- One Remote composition produces the production tool surface and hub digest, while
+  the MCP kernel remains unaware of registry, graph, learning, or routing policy.
+- Remote owns its registry SQL through `RemoteStore`; Store owns generic connection,
+  transaction, and namespaced feature-migration infrastructure.
+- CLI retains command parsing, client setup/removal, and black-box binary tests;
+  broker/hub/link/registration behavior evolves inside the feature crate.
+- Cost: `orbit-remote` is intentionally broad and needs disciplined internal seams;
+  genuinely cross-feature mechanisms must still be extracted into a neutral kernel.
+
 ## Task References
 
 - [ORB-00424] — completed design proposal for canonical Orbit MCP and Bridge parity retirement.
 - [ORB-10245] — accepted the coupled contract and recorded this ADR set.
 - [ORB-10267] — registered the `orbit.host.list` and `orbit.workspace.list` operator discovery
   tools (hub placement, operator capability, typed global/workspace-unscoped scope) in the
-  canonical builtin registry and the versioned conformance fixture, with every pre-existing tool
+  Remote-owned discovery registry and the versioned conformance fixture, with every pre-existing tool
   defaulting to typed `workspace-required`. Each discovery tool is backed by one sanitized,
-  path-free registry snapshot. C3 proves the real runtime/store action path with no session
+  path-free registry snapshot. C3 proves the real broker/store action path with no session
   workspace or checkout binding for the enumerated workspace.
 - [ORB-10262] — replaced startup cwd discovery and `EmptyMcpHost` with the canonical
   schema-listing broker, exact-checkout resolution/cache identity, placement preflight, and
@@ -203,7 +242,7 @@ adapter, runtime profile/ship construction in `orbit-core`, persistence in
 - [ORB-10268] — added strict `~/.orbit/mcp.toml` trust parsing and the non-recursive
   `orbit mcp serve --hub` endpoint. Hub startup/list/call verify the exact
   `host.toml`/store stamp, canonical hub/capability filtering is singular, graph is
-  not re-merged, checkoutless writes use stable workspace IDs, and every denial or
+  recognition-only in hub composition, checkoutless writes use stable workspace IDs, and every denial or
   outcome keeps one trusted D2 audit identity.
 - [ORB-10269] — added the fixed SSH argv connector, per-capability bounded link
   pool, revision plus canonical hub-schema negotiation, trusted remote call
@@ -215,5 +254,8 @@ adapter, runtime profile/ship construction in `orbit-core`, persistence in
   two-root RMCP canary proving hub-only writes and one trusted audit per call.
 - [ORB-10302] — moved the coupled registry domain into `orbit-registry` and retained
   MCP ownership of serialization/dispatch only ([ADR-0235]).
+- [ORB-10319] — implements proposed ADR-0240 by renaming and widening the registry
+  crate into vertical `orbit-remote`, adopting registry persistence in place and
+  moving MCP composition/broker/hub/link/registration out of CLI and the MCP kernel.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

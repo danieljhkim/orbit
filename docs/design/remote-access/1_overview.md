@@ -1,16 +1,16 @@
 ---
 title: "Remote Access — Overview"
 owner: claude
-last_updated: 2026-07-15
+last_updated: 2026-07-18
 status: Accepted
 feature: remote-access
 doc_role: overview
 type: design
 summary: "How an operator views Orbit across every local workspace and across machines, with no shared server and no new auth."
 tags: [remote-access]
-paths: ["crates/orbit-dashboard/**", "crates/orbit-cli/src/command/web.rs", "crates/orbit-cli/src/command/operation.rs"]
-related_features: [remote-access, user-interface]
-related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ORB-10200, ADR-0200, ADR-0201]
+paths: ["crates/orbit-dashboard/**", "crates/orbit-remote/src/runtime.rs", "crates/orbit-remote/src/workspace_registry.rs", "crates/orbit-cli/src/command/web.rs", "crates/orbit-cli/src/command/operation.rs"]
+related_features: [remote-access, user-interface, host-registry]
+related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ORB-10200, ORB-10319, ADR-0200, ADR-0201]
 ---
 
 # Remote Access — Overview
@@ -58,6 +58,7 @@ Remote access shows what already exists on a machine that is online and reachabl
 |---------|------|------|
 | Global (always-on) serve, state construction | [crates/orbit-dashboard/src/lib.rs](../../../crates/orbit-dashboard/src/lib.rs) | [ORB-00030], [ORB-10029] |
 | Workspace-keyed runtime map + `Ws` extractor | [crates/orbit-dashboard/src/state.rs](../../../crates/orbit-dashboard/src/state.rs) | [ORB-00030] |
+| Logical-workspace catalog + registered-checkout runtime construction | [crates/orbit-remote/src/workspace_registry.rs](../../../crates/orbit-remote/src/workspace_registry.rs), [crates/orbit-remote/src/runtime.rs](../../../crates/orbit-remote/src/runtime.rs) | [ORB-10319] |
 | Aggregate endpoints (`/api/workspaces`, `/api/tasks/all`) | [crates/orbit-dashboard/src/api/workspaces.rs](../../../crates/orbit-dashboard/src/api/workspaces.rs) | [ORB-00030] |
 | SSH tunnel, port selection, teardown | [crates/orbit-dashboard/src/connect.rs](../../../crates/orbit-dashboard/src/connect.rs) | [ORB-00029] |
 | CLI runtime-free operation policy (dispatch before eager runtime init) | [crates/orbit-cli/src/command/operation.rs](../../../crates/orbit-cli/src/command/operation.rs) | [ORB-00029], [ORB-00030], [ORB-10200] |
@@ -75,5 +76,6 @@ Remote access shows what already exists on a machine that is online and reachabl
 - [ORB-00360] — Restricted the dashboard to loopback binds only and fixed stored XSS; the security floor remote access builds on.
 - [ORB-10029] — Made global mode the default and only mode for `orbit web serve`; `--global` is now a deprecated no-op retained for `connect` passthrough.
 - [ORB-10200] — Moved runtime-free web dispatch into the exhaustive command-operation registry.
+- [ORB-10319] — Made the dashboard consume the Remote-owned workspace catalog and runtime factory instead of Core-owned registry composition.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

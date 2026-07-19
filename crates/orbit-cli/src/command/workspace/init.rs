@@ -7,10 +7,11 @@ use orbit_common::types::{
     Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceStatus, validate_machine_id,
 };
 use orbit_common::utility::fs::atomic_write_text;
+use orbit_core::OrbitError;
 use orbit_core::command::init::{InitOptions, init_workspace_at_root, seed_default_orbitignore};
-use orbit_core::routines::{HostIdentityState, HostMode, inspect_host_identity};
-use orbit_core::workspace_registry;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_remote::runtime::RemoteRuntimeFactory;
+use orbit_remote::workspace_registry;
+use orbit_remote::{HostIdentityState, HostMode, inspect_host_identity};
 use serde::Serialize;
 
 use super::role::CliCheckoutRole;
@@ -61,7 +62,7 @@ pub struct WorkspaceInitArgs {
 impl WorkspaceInitArgs {
     pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
         let cwd = std::env::current_dir().map_err(|e| OrbitError::Io(e.to_string()))?;
-        let roots = OrbitRuntime::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
+        let roots = RemoteRuntimeFactory::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
         let orbit_dir = roots.shared_root;
         let global_root = roots.global_root;
         let registry_path = workspace_registry::registry_path_for(&global_root);
@@ -150,12 +151,17 @@ impl WorkspaceInitArgs {
         if let Some(mode) = self.ship_mode.as_deref() {
             orbit_core::ShipMode::parse(mode)?;
         }
-        let (local_machine_id, local_mode) = match inspect_host_identity(global_root)? {
-            HostIdentityState::Present(identity) => (Some(identity.machine_id), identity.mode),
-            HostIdentityState::Legacy { .. } | HostIdentityState::Absent => {
-                (None, HostMode::Standalone)
-            }
-        };
+        let (local_machine_id, local_host_id, local_mode) =
+            match inspect_host_identity(global_root)? {
+                HostIdentityState::Present(identity) => (
+                    Some(identity.machine_id),
+                    Some(identity.host_id),
+                    identity.mode,
+                ),
+                HostIdentityState::Legacy { .. } | HostIdentityState::Absent => {
+                    (None, None, HostMode::Standalone)
+                }
+            };
         let explicit_role = self.role.map(WorkspaceCheckoutRole::from);
         match (explicit_role, self.owner.as_deref()) {
             (None, Some(_)) => {
@@ -194,6 +200,7 @@ impl WorkspaceInitArgs {
             InitOptions {
                 refresh_defaults: true,
                 global_root_override: Some(global_root.to_path_buf()),
+                routine_host_id: local_host_id,
                 ..Default::default()
             },
         )?;

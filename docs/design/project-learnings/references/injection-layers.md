@@ -1,6 +1,6 @@
 # Injection-Layer Coverage Matrix
 
-**Last updated:** 2026-05-17
+**Last updated:** 2026-07-18
 
 A coverage map of the project-learnings push-injection pipeline against Orbit's two agent tool surfaces. Quick-reference companion to [2_design.md §4](../2_design.md), which is the design itself. Look here to answer "does *my* surface get learning X?"; look there to understand how each layer is built.
 
@@ -26,7 +26,7 @@ Same tools, same JSON I/O. The transports differ only in what wraps the response
 Three observations:
 
 1. **Every cell that should be covered, is.** L1 covers the engine-driven path. L2 covers MCP. L3 covers Claude Code's file-touch surface. Humans and scripts intentionally get nothing — auto-injection in a shell is noise, not signal.
-2. **L2 lives in `orbit-mcp`, not in the tool layer.** That is correct; see Rule 2 below.
+2. **L2 lives in `orbit-remote` composition, not in the generic MCP kernel or tool layer.** That is correct; see Rule 2 below.
 3. **Uneven coverage by agent vendor is by design.** [§8.4](../2_design.md) accepts the unevenness because L1 is universal and forms a baseline that is strictly better than today.
 
 ## Rules for new enrichments
@@ -42,13 +42,13 @@ Useful test: would a human running `orbit tool run ...` in a shell want to see t
 
 ### Rule 2 — Sidecar enrichments live in the adapter that owns the session
 
-L2 lives in `orbit-mcp` because:
+L2 lives in `orbit-remote`'s MCP composition because:
 
 - Session dedup needs session state. MCP has sessions; the tool layer does not. Pushing dedup down requires threading a session ID through every tool call.
 - Caps and admission policy are consumer-shape concerns. Different consumers (MCP, CLI, future REST adapter) tolerate different volumes of injected context.
-- ARCHITECTURE.md forbids `orbit-mcp → orbit-store`, so L2 re-enters the tool surface via `McpHost::call_tool("orbit.search", …)` with a `{"kind": "learning"}` body. The tool layer is the *callee*, not the *home*, of the sidecar.
+- The generic `orbit-mcp` kernel remains store-neutral, so L2 re-enters the host tool surface for candidate lookup instead of coupling result decoration to persistence. The tool layer is the *callee*, not the *home*, of the sidecar.
 
-If a future adapter (REST, gRPC, …) needs its own sidecar, the right move is **another L2-shaped layer in that adapter**, not pulling the existing one down into `orbit-tools`.
+If a future adapter (REST, gRPC, …) needs its own sidecar, the right move is **another L2-shaped composition in that feature crate**, not pulling the existing one down into generic MCP or `orbit-tools`.
 
 ### Rule 3 — Maintain the canonical-data invariant
 
@@ -74,7 +74,7 @@ The bottom rows of the matrix (human at shell, programmatic caller) have no inje
 
 Current as of the `Last updated` date above. Re-grep before relying on these if the date is older than a release.
 
-- [`crates/orbit-mcp/src/adapter/learning_sidecar.rs`](../../../../crates/orbit-mcp/src/adapter/learning_sidecar.rs) — L2 implementation (allowlist, path collection, session admission, response attachment).
+- [`crates/orbit-remote/src/mcp/learning.rs`](../../../../crates/orbit-remote/src/mcp/learning.rs) — L2 implementation (allowlist, path collection, session admission, response attachment).
 - [`crates/orbit-mcp/src/adapter/dispatch.rs`](../../../../crates/orbit-mcp/src/adapter/dispatch.rs) — call site that wraps every MCP tool response.
 - `crates/orbit-engine/...` — L1 implementation (engine pre-prompt injection at agent runtime spawn).
 - `.claude/settings.json` (per-user) — L3 PreToolUse hook configuration.

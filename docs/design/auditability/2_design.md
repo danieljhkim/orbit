@@ -54,8 +54,8 @@ Compatibility remains deliberate: legacy `host` is the executing-process hostnam
 
 Some runtime paths write targeted command-audit rows directly:
 
-- `crates/orbit-core/src/command/tool.rs` records registry-backed and in-process CLI/MCP tool invocations as `command: tool` with `subcommand: "run"` or `"run-mcp"`.
-- `crates/orbit-cli/src/command/mcp/host.rs` owns MCP safe-surface preflight. Adapter-owned preflight runs inside the shared runtime boundary; registry preflight failures are recorded explicitly before runtime dispatch. Unknown or unexposed names therefore produce denied rows without invoking either implementation.
+- `crates/orbit-core/src/command/tool.rs` records runtime-backed and in-process CLI/MCP tool invocations as `command: tool` with `subcommand: "run"` or `"run-mcp"`.
+- `crates/orbit-remote/src/mcp/host.rs` owns MCP safe-surface, capability, placement, and checkout preflight. Remote-owned graph/discovery implementations run inside Core's shared runtime audit boundary; pre-runtime and checkoutless failures are recorded through Remote's config-resolved global audit seam. Unknown or unexposed names therefore produce denied rows without invoking either implementation.
 - `crates/orbit-core/src/runtime/orbit_tool_host/mod.rs` records task lock reservation checks, reservations, releases, and denials.
 - `crates/orbit-core/src/runtime/v2_host/pipeline_actions.rs` records gate-starvation failures for task bundles.
 
@@ -183,5 +183,6 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[ORB-10225]** — Route in-process graph MCP calls through the safe-surface allowlist and shared runtime audit boundary.
 - **[ORB-10228]** — Add trusted MCP context, anti-spoofing, full capability-set audit, per-call correlation, and additive audit migration v7.
 - **[ORB-10262]** — Enforce MCP capability and exact-checkout placement preflight, retaining one trusted call ID and one denial row before runtime/store mutation, including global checkoutless denials.
+- **[ORB-10319]** — Move Remote MCP policy/preflight and global audit composition out of CLI/Core ownership while preserving the shared `ToolEntryPoint::Mcp` audit contract.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

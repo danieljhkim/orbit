@@ -1,9 +1,11 @@
 use clap::Args;
 use orbit_common::types::HostRecord;
 use orbit_common::utility::fs::with_exclusive_file_lock;
-use orbit_core::routines::host::HOST_TOML_FILE;
-use orbit_core::routines::rename_current_host_identity;
-use orbit_core::{HostRegistryService, OrbitError, OrbitRuntime, require_local_hub_identity};
+use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_remote::{
+    HOST_TOML_FILE, host_registry_service_at, rename_current_host_identity,
+    require_local_hub_identity,
+};
 
 use crate::command::Execute;
 
@@ -22,7 +24,7 @@ impl Execute for HostRenameArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let global_root = runtime.global_root();
         let local_hub = require_local_hub_identity(&global_root)?;
-        let service = HostRegistryService::new(runtime.sqlite_store()?);
+        let service = host_registry_service_at(&global_root)?;
         service.require_configured_local_hub(&local_hub)?;
         let machine_id = resolve_machine_id(&service, &self.current_name)?;
 

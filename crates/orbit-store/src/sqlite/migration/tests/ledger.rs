@@ -55,6 +55,9 @@ fn fresh_db_applies_baseline_and_records_ledger() {
     assert_eq!(applied[7].version, 8);
     assert_eq!(applied[7].name, "hub_registry_metadata");
     assert!(!applied[7].applied_at.is_empty());
+    assert_eq!(applied[8].version, 9);
+    assert_eq!(applied[8].name, "feature_schema_ledger");
+    assert!(!applied[8].applied_at.is_empty());
 }
 
 #[test]
@@ -187,6 +190,10 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0008".to_string(),
                 "hub_registry_metadata".to_string()
             ),
+            (
+                "migration.v0009".to_string(),
+                "feature_schema_ledger".to_string()
+            ),
         ]
     );
 }
@@ -198,7 +205,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0009', 'from-the-future', '2099-01-01T00:00:00Z')",
+         VALUES ('migration.v0010', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -267,12 +274,12 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_through_latest() {
     drop(conn);
 
     let store = crate::Store::open(&path).expect("reopen shipped v4 store");
-    assert_eq!(store.schema_version().expect("schema version"), 8);
+    assert_eq!(store.schema_version().expect("schema version"), 9);
     let applied = store.applied_migrations().expect("applied migrations");
-    assert_eq!(applied.last().map(|migration| migration.version), Some(8));
+    assert_eq!(applied.last().map(|migration| migration.version), Some(9));
     assert_eq!(
         applied.last().map(|migration| migration.name.as_str()),
-        Some("hub_registry_metadata")
+        Some("feature_schema_ledger")
     );
     let connection = store.connection();
     let conn = connection.lock().expect("connection");
@@ -349,7 +356,7 @@ fn store_reopens_shipped_v6_audit_rows_and_applies_v7_additively() {
     drop(conn);
 
     let store = crate::Store::open(&path).expect("open and migrate v6 store");
-    assert_eq!(store.schema_version().expect("schema version"), 8);
+    assert_eq!(store.schema_version().expect("schema version"), 9);
     let rows = store
         .list_audit_events(&crate::AuditEventFilter::default())
         .expect("read migrated audit rows");
@@ -363,7 +370,7 @@ fn store_reopens_shipped_v6_audit_rows_and_applies_v7_additively() {
     drop(store);
 
     let reopened = crate::Store::open(&path).expect("reopen migrated store");
-    assert_eq!(reopened.schema_version().expect("schema version"), 8);
+    assert_eq!(reopened.schema_version().expect("schema version"), 9);
     assert_eq!(
         reopened
             .list_audit_events(&crate::AuditEventFilter::default())

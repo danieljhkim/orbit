@@ -72,7 +72,7 @@ pub fn graph_error_to_orbit(error: GraphError) -> OrbitError {
 }
 ```
 
-Used at every cross-crate edge — e.g. `crates/orbit-mcp/src/adapter/graph.rs`:
+Used at every cross-crate edge — e.g. `crates/orbit-remote/src/mcp/graph.rs`:
 
 ```rust
 to_json(graph.search(&query).map_err(graph_error_to_orbit)?)
