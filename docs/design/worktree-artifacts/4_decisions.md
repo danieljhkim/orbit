@@ -10,7 +10,7 @@ doc_role: decisions
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10273", "ORB-10297", "ADR-0177", "ADR-0229"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ADR-0177", "ADR-0229"]
 ---
 
 # Worktree Artifacts - Decisions
@@ -19,7 +19,7 @@ ADR-style log for worktree artifact storage. Entries use globally allocated ADR 
 
 ## ADR-0177 - Worktree-local ADR and learning bodies with shared ID allocation
 
-**Status:** Accepted - 2026-05 - [ORB-00201]; amended 2026-07 by [ORB-10297], [ORB-10272], and [ORB-10273]
+**Status:** Accepted - 2026-05 - [ORB-00201]; amended 2026-07 by [ORB-10297] and [ORB-10272]
 
 **Context.** Linked worktrees need ADR and learning bodies committed with the code branch that created them, but IDs must remain collision-free across all worktrees. [ORB-00199] introduced shared/local root resolution and [ORB-00200] introduced the shared SQLite allocator. The remaining choice was whether body files follow the allocator into `shared_root` or follow the editing branch into `local_root`.
 
@@ -33,11 +33,6 @@ advance, ledger append, and audit are atomic; owner-local body creation remains 
 separate step and may leave a valid gap. F1 preserves every existing allocator and
 create caller. F3 alone activates and cuts public issuance over. The hub never
 proxies to or reads a spoke owner's worktree.
-[ORB-10273] adds supplied-ID finalization in one D3-selected owner checkout and a
-non-authoritative local projection for ordinary reads/lifecycle operations. The
-projection records placement but cannot advance or choose from the compatibility
-sequence; failed finalization removes it and every partial local artifact without
-releasing or replacing the consumed hub ID.
 
 **Consequences.**
 - ADR and learning files can be staged in the same PR as the implementation that created them.
@@ -47,8 +42,6 @@ releasing or replacing the consumed hub ID.
 - A late workspace is explicitly ineligible until its complete hub-local inventory
   reconciles; missing sources and duplicate IDs fail before mutation.
 - Standalone/worktree allocation remains unchanged until the explicit F3 cutover.
-- Owner finalization is independent of process cwd, refuses supplied-ID collision,
-  and leaves the sibling-worktree projection/index unchanged.
 - Readers get predictable defaults without failing on missing sibling-worktree files.
 - Readable sibling ADRs preserve their exact body, while unavailable allocations and unknown IDs remain distinct typed failures.
 - Rejected sibling-only mutations leave bundles, allocation metadata, lifecycle timestamps, and audit state unchanged.
@@ -64,7 +57,5 @@ releasing or replacing the consumed hub ID.
 - [ORB-10272] amended the allocation boundary with the dormant Remote-v2 hub-global
   sequence, full legacy reconciliation, immutable correlation ledger and atomic
   audit while retaining standalone compatibility and owner-local bodies.
-- [ORB-10273] amended finalization with exact-checkout supplied IDs and removable
-  non-authoritative projections while preserving allowed gaps and no owner proxy.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

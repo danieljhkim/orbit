@@ -14,7 +14,6 @@ use orbit_store::{
     AdrArtifact, AdrArtifactResolution, AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry,
     RemoteArtifactStub,
 };
-use orbit_tools::OrbitBuiltinAction;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
@@ -25,64 +24,20 @@ pub(super) fn add(
     agent: Option<String>,
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
-    let params = adr_create_params(runtime, &input, agent.as_deref(), model.as_deref())?;
-    let adr = runtime.stores().adrs().add(params)?;
-    runtime.record_id_allocation_audit("adr", &adr.id)?;
-    Ok(adr_to_json(&adr))
-}
-
-impl OrbitRuntime {
-    /// Complete one hub-issued ADR ID in this exact runtime binding while
-    /// preserving the public `orbit.adr.add` parser and result shape.
-    pub fn finalize_preallocated_adr_tool(
-        &self,
-        expected_runtime_workspace_id: &str,
-        id: &str,
-        input: Value,
-        model: Option<String>,
-    ) -> Result<Value, OrbitError> {
-        self.verify_preallocated_owner_runtime(expected_runtime_workspace_id)?;
-        let (input, redaction_report) =
-            super::artifact_redaction::sanitize_tool_input(OrbitBuiltinAction::AdrAdd, input)?;
-        let params = adr_create_params(self, &input, None, model.as_deref())?;
-        let adr = self.stores().adrs().finalize_preallocated(id, params)?;
-        let mut response = adr_to_json(&adr);
-        super::artifact_redaction::finish_tool_response(
-            self,
-            OrbitBuiltinAction::AdrAdd,
-            &mut response,
-            &redaction_report,
-            None,
-            model.as_deref(),
-        )?;
-        Ok(response)
-    }
-
-    pub fn rollback_preallocated_adr(&self, id: &str) -> Result<bool, OrbitError> {
-        self.stores().adrs().rollback_preallocated(id)
-    }
-}
-
-fn adr_create_params(
-    runtime: &OrbitRuntime,
-    input: &Value,
-    agent: Option<&str>,
-    model: Option<&str>,
-) -> Result<AdrCreateParams, OrbitError> {
-    let title = required_string(input, &["title"], "title")?;
-    let owner = match optional_string(input, "owner")? {
+    let title = required_string(&input, &["title"], "title")?;
+    let owner = match optional_string(&input, "owner")? {
         Some(value) => value,
-        None => actor_label(runtime, agent, model),
+        None => actor_label(runtime, agent.as_deref(), model.as_deref()),
     };
-    let body = required_string(input, &["body"], "body")?;
+    let body = required_string(&input, &["body"], "body")?;
     let related_features =
-        optional_string_list_alias(input, &["related_features", "features"])?.unwrap_or_default();
+        optional_string_list_alias(&input, &["related_features", "features"])?.unwrap_or_default();
     let related_tasks =
-        optional_string_list_alias(input, &["related_tasks", "tasks"])?.unwrap_or_default();
-    let tags = optional_string_list_alias(input, &["tags"])?.unwrap_or_default();
-    let paths = optional_string_list_alias(input, &["paths"])?.unwrap_or_default();
+        optional_string_list_alias(&input, &["related_tasks", "tasks"])?.unwrap_or_default();
+    let tags = optional_string_list_alias(&input, &["tags"])?.unwrap_or_default();
+    let paths = optional_string_list_alias(&input, &["paths"])?.unwrap_or_default();
 
-    Ok(AdrCreateParams {
+    let adr = runtime.stores().adrs().add(AdrCreateParams {
         title,
         owner,
         related_features,
@@ -90,7 +45,9 @@ fn adr_create_params(
         tags,
         paths,
         body,
-    })
+    })?;
+    runtime.record_id_allocation_audit("adr", &adr.id)?;
+    Ok(adr_to_json(&adr))
 }
 
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
@@ -492,7 +449,6 @@ mod tests {
     use super::*;
     use crate::OrbitRuntime;
     use crate::runtime::orbit_tool_host::test_support::test_runtime;
-    use crate::{ShipMode, WorkspaceRuntimeBinding};
     use orbit_common::types::{LearningScope, NotFoundKind};
     use orbit_store::LearningCreateParams;
     use std::path::Path;
@@ -523,72 +479,6 @@ mod tests {
         assert_adr_field(&response, "id", "ADR-0001");
         assert_adr_field(&response, "status", "proposed");
         assert_adr_field(&response, "owner", "claude");
-    }
-
-    #[test]
-    fn exact_bound_runtime_finalizes_supplied_adr_and_learning_ids() {
-        let root = tempdir().expect("tempdir");
-        let global_root = root.path().join("global");
-        let repo_root = root.path().join("selected-checkout");
-        let orbit_root = repo_root.join(".orbit");
-        std::fs::create_dir_all(&global_root).expect("global root");
-        std::fs::create_dir_all(&orbit_root).expect("Orbit root");
-        let runtime = OrbitRuntime::from_roots_with_binding(
-            &global_root,
-            &orbit_root,
-            WorkspaceRuntimeBinding {
-                workspace_id: "ws_exact".to_string(),
-                repo_root: repo_root.clone(),
-                ship_mode: ShipMode::Local,
-            },
-        )
-        .expect("bound runtime");
-
-        let adr = runtime
-            .finalize_preallocated_adr_tool(
-                "ws_exact",
-                "ADR-9000",
-                json!({"title": "Exact", "owner": "codex", "body": "Body"}),
-                Some("codex".to_string()),
-            )
-            .expect("ADR finalization");
-        let learning = runtime
-            .finalize_preallocated_learning_tool(
-                "ws_exact",
-                "L-9000",
-                json!({
-                    "summary": "Exact checkout learning",
-                    "scope": {"paths": ["src/**"], "tags": ["exact"]},
-                    "body": "Body"
-                }),
-                Some("codex".to_string()),
-            )
-            .expect("learning finalization");
-
-        assert_eq!(adr["id"], "ADR-9000");
-        assert_eq!(learning["id"], "L-9000");
-        assert!(
-            repo_root
-                .join(".orbit/adrs/proposed/ADR-9000/adr.yaml")
-                .is_file()
-        );
-        assert!(
-            repo_root
-                .join(".orbit/learnings/L-9000/learning.yaml")
-                .is_file()
-        );
-
-        let error = runtime
-            .finalize_preallocated_adr_tool(
-                "ws_other",
-                "ADR-9001",
-                json!({"title": "Wrong", "owner": "codex", "body": "Body"}),
-                None,
-            )
-            .expect_err("workspace mismatch")
-            .to_string();
-        assert!(error.contains("workspace mismatch"), "{error}");
-        assert!(!repo_root.join(".orbit/adrs/proposed/ADR-9001").exists());
     }
 
     #[test]

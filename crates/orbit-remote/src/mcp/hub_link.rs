@@ -320,6 +320,7 @@ pub(super) enum WorkerMessage {
     Register(RegistrationRequest),
     // Dormant until the F3 caller-path cutover; F1 freezes and tests the
     // connector-private seam without routing ordinary agent tools through it.
+    #[allow(dead_code)]
     Allocate(KnowledgeAllocationRequest),
     Shutdown,
 }
@@ -332,7 +333,6 @@ struct CachedPeer {
 /// Synchronous [`orbit_mcp::McpHost`] seam backed by one dedicated runtime
 /// thread and at most one live peer for each scalar capability.
 pub(super) struct HubLinkPool {
-    hub_machine_id: String,
     pub(super) tx: Option<mpsc::SyncSender<WorkerMessage>>,
     worker: Option<JoinHandle<()>>,
 }
@@ -363,14 +363,13 @@ impl HubLinkPool {
     ) -> Result<Self, OrbitError> {
         let (tx, rx) = mpsc::sync_channel(limits.queue_capacity);
         let worker_clock = Arc::clone(&clock);
-        let worker_hub_machine_id = hub_machine_id.clone();
         let worker = std::thread::Builder::new()
             .name("orbit-hub-link".to_string())
             .spawn(move || {
                 run_worker(
                     rx,
                     ssh_alias,
-                    worker_hub_machine_id,
+                    hub_machine_id,
                     schema_digests,
                     factory,
                     limits,
@@ -381,14 +380,9 @@ impl HubLinkPool {
                 OrbitError::HubUnavailable(format!("start hub link worker: {error}"))
             })?;
         Ok(Self {
-            hub_machine_id,
             tx: Some(tx),
             worker: Some(worker),
         })
-    }
-
-    pub(super) fn hub_machine_id(&self) -> &str {
-        &self.hub_machine_id
     }
 
     pub(super) fn call(
@@ -489,6 +483,7 @@ impl HubLinkPool {
             })?
     }
 
+    #[allow(dead_code)]
     pub(super) fn allocate_knowledge_id(
         &self,
         capability: McpCapability,

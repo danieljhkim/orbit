@@ -50,51 +50,6 @@ struct LearningSearchConfigSection {
 }
 
 impl OrbitRuntime {
-    /// Verify that a multi-host owner finalizer is operating through the exact
-    /// checkout-bound runtime capability selected by the broker. The caller
-    /// supplies only the stable runtime workspace ID; checkout paths come from
-    /// the trusted runtime binding, never from public request data or cwd.
-    pub fn verify_preallocated_owner_runtime(
-        &self,
-        expected_runtime_workspace_id: &str,
-    ) -> Result<(), OrbitError> {
-        let binding = self.workspace_runtime_binding().ok_or_else(|| {
-            OrbitError::InvalidInput(
-                "preallocated knowledge finalization requires a registered exact-checkout runtime binding"
-                    .to_string(),
-            )
-        })?;
-        let persisted_workspace_id = self.workspace_id()?;
-        if binding.workspace_id != expected_runtime_workspace_id
-            || persisted_workspace_id != expected_runtime_workspace_id
-        {
-            return Err(OrbitError::InvalidInput(format!(
-                "preallocated knowledge workspace mismatch: expected '{expected_runtime_workspace_id}', runtime binding is '{}', persisted checkout identity is '{persisted_workspace_id}'",
-                binding.workspace_id
-            )));
-        }
-        let bound_repo = binding.repo_root.canonicalize().map_err(|error| {
-            OrbitError::InvalidInput(format!(
-                "preallocated owner checkout '{}' is unavailable: {error}",
-                binding.repo_root.display()
-            ))
-        })?;
-        let runtime_repo = self.paths().repo_root.canonicalize().map_err(|error| {
-            OrbitError::InvalidInput(format!(
-                "runtime checkout '{}' is unavailable: {error}",
-                self.paths().repo_root.display()
-            ))
-        })?;
-        if bound_repo != runtime_repo {
-            return Err(OrbitError::InvalidInput(format!(
-                "preallocated owner checkout binding drifted: bound '{}', runtime '{}'",
-                bound_repo.display(),
-                runtime_repo.display()
-            )));
-        }
-        Ok(())
-    }
-
     pub fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
         let learning = self.stores().learnings().add(params)?;
         self.record_id_allocation_audit("learning", &learning.id)?;
