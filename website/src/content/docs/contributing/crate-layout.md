@@ -10,7 +10,7 @@ sidebar:
 | Crate | Responsibility |
 |-------|----------------|
 | `orbit-cli` | Clap-based entrypoint and local client-configuration surface; delegates Remote behavior to `orbit-remote`. |
-| `orbit-cmd` | CLI-facing command layer extracted from `orbit-core` (ORB-10016): doctor, migrate, diagnostics, task templates, hooks, agent-rules, direct v2 activity runs. Exposes `*Commands` extension traits over `OrbitRuntime`. |
+| `orbit-cmd` | CLI-facing command layer extracted from `orbit-core` (ORB-10016): doctor, migrate, diagnostics, hooks, agent-rules, direct v2 activity runs. Exposes `*Commands` extension traits over `OrbitRuntime`. |
 | `orbit-core` | Neutral runtime bootstrap, config layering, default asset seeding, and runtime-integrated command modules. Surfaces `OrbitRuntime` to `orbit-cmd`, `orbit-cli`, `orbit-dashboard`, and `orbit-remote`. Does **not** depend on `orbit-agent`, `orbit-cmd`, or `orbit-remote`. |
 | `orbit-remote` | Vertical host/workspace registry, registry persistence, MCP contract/extensions, broker, hub, bounded SSH link, and spoke-registration composition. |
 | `orbit-dashboard` | Read-only web dashboard over Core runtime projections and Remote registry state. |

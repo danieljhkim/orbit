@@ -11,6 +11,14 @@ fn task_add_parses_repeat_and_comma_delimited_lists() {
         "add",
         "--title",
         "List parsing",
+        "--description",
+        "Plain description",
+        "--plan",
+        "Plain plan",
+        "--priority",
+        "high",
+        "--type",
+        "bug",
         "--acceptance-criteria",
         "first,second",
         "--acceptance-criteria",
@@ -40,6 +48,10 @@ fn task_add_parses_repeat_and_comma_delimited_lists() {
     assert_eq!(args.tags, ["cli", "surface", "test"]);
     assert_eq!(args.dependencies, ["ORB-00001", "ORB-00002", "ORB-00003"]);
     assert_eq!(args.context, ["file:one.rs", "file:two.rs", "dir:three"]);
+    assert_eq!(args.description, "Plain description");
+    assert_eq!(args.plan, "Plain plan");
+    assert_eq!(args.priority, orbit_core::TaskPriority::High);
+    assert_eq!(args.task_type, Some(orbit_core::TaskType::Bug));
 }
 
 #[test]
@@ -63,6 +75,11 @@ fn task_add_status_only_advertises_creation_legal_values() {
         .find_subcommand_mut("add")
         .expect("task add command");
     let rendered = add.render_long_help().to_string();
+
+    assert!(
+        !rendered.contains("--template"),
+        "removed task-template flag leaked into help: {rendered}"
+    );
 
     for legal in ["- proposed:", "- backlog:", "- someday:"] {
         assert!(rendered.contains(legal), "{rendered}");
@@ -88,6 +105,7 @@ fn removed_task_flags_are_rejected() {
     for args in [
         vec!["task", "add", "--title", "Removed", "--agent", "codex"],
         vec!["task", "add", "--title", "Removed", "--comment", "legacy"],
+        vec!["task", "add", "--title", "Removed", "--template", "feature"],
         vec![
             "task",
             "add",

@@ -25,7 +25,6 @@ pub mod doctor;
 pub mod hook_install;
 pub mod learning_hook;
 pub mod migrate;
-pub mod task_template;
 
 #[cfg(test)]
 mod tests;
@@ -35,7 +34,6 @@ pub use diagnostics::DiagnosticsCommands;
 pub use doctor::{DoctorCommands, WorkspaceDoctorResult, WorkspaceDoctorStatus};
 pub use learning_hook::LearningHookCommands;
 pub use migrate::{MigrateCommands, MigrateStatus, migrate_dry_run_at};
-pub use task_template::{TaskTemplate, TaskTemplateCommands};
 
 /// One-stop import for every runtime extension trait this crate defines.
 pub mod prelude {
@@ -44,5 +42,4 @@ pub mod prelude {
     pub use crate::doctor::DoctorCommands;
     pub use crate::learning_hook::LearningHookCommands;
     pub use crate::migrate::MigrateCommands;
-    pub use crate::task_template::TaskTemplateCommands;
 }
