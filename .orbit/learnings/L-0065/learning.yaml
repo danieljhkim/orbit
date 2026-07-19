@@ -3,35 +3,39 @@ id: L-0065
 status: active
 scope:
   paths:
+  - crates/orbit-cli/src/command/mcp/command.rs
+  - crates/orbit-remote/src/mcp/**
   - plugin/.mcp.json
-  - crates/orbit-cli/src/command/mcp/**
+  - plugin/skills/orbit/references/guide.md
+  - README.md
   tags:
   - cowork
   - mcp
   - plugin
   - tooling
-summary: In Cowork, the plugin MCP server launches with cwd/CLAUDE_PROJECT_DIR = internal scratchpad, not the selected repo, so `orbit mcp serve` finds no workspace and exposes graph-only tools; pass `--root <repo>` to load the task/adr/learning surface.
+summary: MCP workspace routing is per initialize/session context or explicit registered workspace; `orbit mcp serve` advertises the canonical surface independently of cwd and rejects `--root`.
 body: |-
-  ## Symptom
-  Running the Orbit plugin inside Cowork (the Claude desktop app), the MCP surface shows only `orbit_graph_*` tools. `orbit_task_add` and the rest of the task/ADR/learning/friction surface are missing.
+  ## Historical symptom
 
-  ## Root cause
-  `orbit mcp serve` builds its host tool registry from workspace discovery at launch (`OrbitRuntime::try_initialize_existing`, cwd-based). When no initialized `.orbit/` workspace is discovered it installs `EmptyMcpHost` (`crates/orbit-cli/src/command/mcp/host.rs`), which returns an empty `tools/list`; only the workspace-agnostic graph adapter (which takes an explicit `workspace_path` per call) remains.
+  Before ADR-0199 was implemented, MCP tool registration depended on finding a workspace from the server launch directory. Cowork launches could use an internal scratchpad for cwd and `CLAUDE_PROJECT_DIR`, so Orbit installed an empty host and exposed only graph tools. The former workaround was to pass `--root <repo>` to `orbit mcp serve`.
 
-  Cowork launches the plugin's MCP server with **cwd and `CLAUDE_PROJECT_DIR` both set to its internal scratchpad** (`.../local_.../outputs`), not the user's selected repo. Verified by instrumenting the launch and dumping `env`: `CWD` and `CLAUDE_PROJECT_DIR` are the scratchpad, and no env var references the selected folder. So serve never finds `.orbit/` → `EmptyMcpHost` → graph-only. The graph adapter's announced workspace (`_meta.orbit.workspace`) is the scratchpad too, so no launch channel exposes the repo.
+  ## Current invariant
 
-  ## Workaround
-  The global `--root` flag (`crates/orbit-cli/src/command/mod.rs`, highest precedence) is already threaded into serve. Pass the repo explicitly:
-  `npx -y @orbit-tools/cli@latest --root /abs/path/to/repo mcp serve`
+  ORB-10262 replaced launch-time workspace discovery with the exact-checkout broker, and ORB-10319 moved that broker into `orbit-remote`. The server advertises the canonical MCP schema independently of cwd. Each call resolves a registered workspace from explicit input or trusted initialize/session context; absent selection fails clearly instead of inheriting process cwd.
 
-  Durable placement: the shipped `plugin/.mcp.json` should use `--root ${CLAUDE_PROJECT_DIR}` (correct for the Claude Code CLI; a harmless no-op in Cowork where it resolves to the scratchpad). Cowork users need an explicit `--root <repo>` override in user-scope `~/.claude/settings.json` — the cached `rpm/plugin_<id>/.mcp.json` copy also works but is wiped on plugin reinstall/update.
+  `orbit mcp serve` intentionally rejects the global `--root` override. The shipped plugin command must omit it. If a Cowork call lacks workspace selection, provide the registered `workspace` selector or correct the client's MCP roots/session metadata; changing the launch cwd is not a routing fix.
 
-  ## Real fix (out of scope for this repo)
-  Cowork should expose the selected workspace folder to plugin MCP launches (set `CLAUDE_PROJECT_DIR` to it, a dedicated env var, or advertise it via MCP `roots`). Until then there is no auto-dynamic root resolution on the plugin side.
+  ## Regression guard
+
+  Keep `plugin/.mcp.json`, the README, the Orbit skill guide, and the runtime-free `ServeArgs` contract aligned. A graph-only advertised surface or a plugin launch command containing `--root ... mcp serve` is a regression.
 evidence:
 - kind: task
   reference: ORB-00405
+- kind: task
+  reference: ORB-10262
+- kind: task
+  reference: ORB-10319
 created_at: 2026-06-21T18:27:26.130936Z
-updated_at: 2026-06-21T18:27:26.130936Z
+updated_at: 2026-07-19T06:55:46.384000923Z
 created_by: claude
 priority: 120

@@ -1,0 +1,19 @@
+schema_version: 2
+id: ADR-0241
+title: orbit-graph is CLI-surface only; separate MCP deferred until a shell-less consumer exists
+status: proposed
+owner: fable
+created_at: 2026-07-19T07:40:42.465407001Z
+last_updated: 2026-07-19T07:41:05.441825885Z
+related_features: []
+related_tasks: []
+tags:
+- orbit-graph
+- mcp
+- cli
+- surface-area
+paths: []
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none
