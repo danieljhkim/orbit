@@ -6,26 +6,23 @@
 //! - `run_sweep_core` against an in-memory store, a hand-built
 //!   [`RoutineCollection`], a fake [`RoutineDispatch`], and an explicit `now`
 //!   — deterministic, no pipeline workers spawned.
-//! - one `run_sweep_at` integration pass over a seeded global root, covering
-//!   discovery + fail-closed loading end-to-end via `--dry-run` (which records
-//!   and dispatches nothing).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use orbit_common::types::{
-    JobRunState, OrbitError, RoutineDefinition, Workspace, WorkspaceCheckout, WorkspaceRegistry,
-    WorkspaceStatus, parse_routine_yaml,
-};
+use orbit_common::types::{JobRunState, OrbitError, RoutineDefinition, parse_routine_yaml};
 use orbit_store::{RoutineFireIntentParams, RoutineFireState, Store};
-use tempfile::tempdir;
 
+use crate::routines::loader::{DiscoveredWorkspaces, RoutineWorkspaceProvider};
 use crate::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin};
-use crate::routines::sweep::{RoutineDispatch, SweepOptions, run_sweep_at, run_sweep_core};
-use crate::workspace_registry;
+use crate::routines::sweep::{
+    RoutineDispatch, SweepOptions, run_sweep_at_with_providers, run_sweep_core,
+};
+use crate::routines::validation::{
+    RoutineHostIdentity, RoutinePlacementProjection, RoutinePlacementProvider,
+};
 
 const HOST: &str = "test-host";
 const SOURCE_DIR: &str = "/ws/.orbit";
@@ -472,125 +469,46 @@ fn dry_run_records_no_state() {
     assert_eq!(dispatch.submit_count(), 0);
 }
 
-// ---- run_sweep_at end-to-end (discovery + fail-closed loading) ------------
+struct MustNotLoad;
 
-const NOOP_JOB: &str = "schemaVersion: 2\n\
-kind: Job\n\
-metadata:\n  name: noop\n\
-spec:\n  state: enabled\n  kind: workflow\n  max_active_runs: 1\n  \
-steps:\n    - id: noop\n      target: activity:worktree_setup\n      \
-default_input:\n        task_id: \"qa\"\n";
+impl RoutinePlacementProvider for MustNotLoad {
+    fn load_routine_placement(
+        &self,
+        _now: DateTime<Utc>,
+        _cache_max_age: Duration,
+    ) -> Result<RoutinePlacementProjection, OrbitError> {
+        panic!("placement provider ran before the busy sweep lock returned")
+    }
+}
 
-fn source_routine_yaml(name: &str, target: &str, hosts: &str) -> String {
-    format!(
-        "schemaVersion: 1\nname: {name}\nenabled: true\nhosts: {hosts}\n\
-         trigger: {{ cron: \"* * * * *\" }}\ntarget: {target}\n"
-    )
+impl RoutineWorkspaceProvider for MustNotLoad {
+    fn discover_workspaces(&self, _global_root: &Path) -> Result<DiscoveredWorkspaces, OrbitError> {
+        panic!("workspace provider ran before the busy sweep lock returned")
+    }
 }
 
 #[test]
-fn run_sweep_at_dry_run_discovers_loads_and_fails_closed() {
-    let tmp = tempdir().unwrap();
-    let global = tmp.path().join("global");
-    let ws_root = tmp.path().join("polaris");
-    let ws_orbit = ws_root.join(".orbit");
-    fs::create_dir_all(global.join("state")).unwrap();
-    fs::create_dir_all(ws_orbit.join("routines")).unwrap();
-    fs::create_dir_all(ws_orbit.join("resources/jobs")).unwrap();
+fn busy_lock_returns_before_remote_providers_are_loaded() {
+    let root = tempfile::tempdir().expect("root");
+    let global = root.path().join("global");
+    let state = global.join("state");
+    let _held = orbit_store::try_acquire_routine_sweep_lock(&state)
+        .expect("lock")
+        .expect("first lock");
 
-    fs::write(
-        global.join("host.toml"),
-        format!(
-            "schema_version = 1\nmachine_id = \"hm_testhost\"\nhost_id = \"{HOST}\"\nmode = \"standalone\"\n"
-        ),
+    let outcome = run_sweep_at_with_providers(
+        &global,
+        SweepOptions::default(),
+        RoutineHostIdentity {
+            machine_id: "hm_local".to_string(),
+            host_id: "local".to_string(),
+        },
+        &MustNotLoad,
+        &MustNotLoad,
     )
-    .unwrap();
-    fs::write(
-        ws_orbit.join("config.toml"),
-        "[routines]\nrole = \"source\"\n",
-    )
-    .unwrap();
-    fs::write(ws_orbit.join("resources/jobs/noop.yaml"), NOOP_JOB).unwrap();
+    .expect("busy outcome");
 
-    let ph = format!("[{HOST}]");
-    fs::write(
-        ws_orbit.join("routines/minutely.yaml"),
-        source_routine_yaml("qa-minutely", "job:noop", &ph),
-    )
-    .unwrap();
-    fs::write(
-        ws_orbit.join("routines/otherhost.yaml"),
-        source_routine_yaml("qa-otherhost", "job:noop", "[dk-server-1]"),
-    )
-    .unwrap();
-    fs::write(
-        ws_orbit.join("routines/badtarget.yaml"),
-        source_routine_yaml("qa-bad", "job:does_not_exist", &ph),
-    )
-    .unwrap();
-    fs::write(
-        ws_orbit.join("routines/activity.yaml"),
-        source_routine_yaml("qa-activity", "activity:worktree_setup", &ph),
-    )
-    .unwrap();
-
-    let mut registry = WorkspaceRegistry::default();
-    registry.workspaces.push(Workspace {
-        id: "ws-1".to_string(),
-        name: "polaris".to_string(),
-        owner_machine_id: None,
-        git_remote: None,
-        ship_mode: None,
-        base_branch: "agent-main".to_string(),
-        status: WorkspaceStatus::Active,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-    });
-    registry.checkouts.push(WorkspaceCheckout::owner(
-        "ws-1".to_string(),
-        ws_root,
-        ws_orbit,
-    ));
-    workspace_registry::save_registry_to(
-        &registry,
-        &workspace_registry::registry_path_for(&global),
-    )
-    .unwrap();
-
-    let outcome = run_sweep_at(&global, SweepOptions { dry_run: true }).expect("sweep ok");
-
-    assert_eq!(outcome.host_id, HOST);
-    assert!(!outcome.lock_busy);
-
-    let report = |name: &str| outcome.reports.iter().find(|r| r.routine == name);
-    // Valid, pinned routine: first observation -> would_baseline (dry-run).
-    assert_eq!(
-        report("qa-minutely").map(|r| r.action),
-        Some("would_baseline")
-    );
-    // Pinned elsewhere -> skipped.
-    assert_eq!(
-        report("qa-otherhost")
-            .and_then(|r| r.reason.clone())
-            .as_deref(),
-        Some("host_not_pinned")
-    );
-    // Fail-closed load errors, not fires: unresolvable target + reserved activity.
-    assert!(
-        outcome
-            .load_errors
-            .iter()
-            .any(|e| e.message.contains("does not resolve")),
-        "unresolvable target is a load error"
-    );
-    assert!(
-        outcome
-            .load_errors
-            .iter()
-            .any(|e| e.message.contains("not dispatchable")),
-        "activity target rejected at parse"
-    );
-    // dry-run recorded nothing.
-    let store = Store::open(&global.join("orbit.db")).unwrap();
-    assert!(store.routine_cursor("qa-minutely").unwrap().is_none());
+    assert!(outcome.lock_busy);
+    assert_eq!(outcome.machine_id, "hm_local");
+    assert_eq!(outcome.host_id, "local");
 }

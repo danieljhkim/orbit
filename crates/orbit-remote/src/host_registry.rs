@@ -15,9 +15,9 @@ use orbit_common::types::{
     SanitizedWorkspacePresence, StoredExecutionProfile, Workspace, WorkspaceOwnership,
     WorkspacePresenceDeclaration, WorkspaceRegistry, WorkspaceStatus,
 };
-use orbit_store::Store;
 
 use crate::host_identity::{HostIdentity, HostMode, load_host_identity};
+use crate::persistence::RemoteStore;
 
 const PROFILE_FRESHNESS_TTL: Duration = Duration::minutes(10);
 const PROFILE_MAX_OBSERVATION_AGE: Duration = Duration::minutes(10);
@@ -26,7 +26,7 @@ const PRESENCE_FRESHNESS_TTL: Duration = Duration::minutes(5);
 
 #[derive(Clone)]
 pub struct HostRegistryService {
-    store: Store,
+    store: RemoteStore,
 }
 
 /// Result of a hub-side workspace owner link: the recorded singular ownership
@@ -55,7 +55,7 @@ pub fn require_local_hub_identity(global_root: &Path) -> Result<HostIdentity, Or
 }
 
 impl HostRegistryService {
-    pub fn new(store: Store) -> Self {
+    pub fn new(store: RemoteStore) -> Self {
         Self { store }
     }
 

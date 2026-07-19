@@ -17,20 +17,18 @@ use orbit_common::types::{
 };
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::Store;
+use super::RemoteStore;
 
-impl Store {
+impl RemoteStore {
     /// The configured hub `machine_id`, or `None` when the hub identity has not
     /// been stamped yet.
     pub fn hub_machine_id(&self) -> Result<Option<String>, OrbitError> {
-        let conn = self.read()?;
-        hub_machine_id(&conn)
+        self.read(hub_machine_id)
     }
 
     /// The current hub-global registry revision.
     pub fn registry_revision(&self) -> Result<u64, OrbitError> {
-        let conn = self.read()?;
-        registry_revision(&conn)
+        self.read(registry_revision)
     }
 
     /// Read the whole sanitized registry snapshot — hub identity, revision,
@@ -44,8 +42,13 @@ impl Store {
         presence_freshness_ttl: Duration,
         profile_freshness_ttl: Duration,
     ) -> Result<RegistrySnapshotV1, OrbitError> {
-        self.with_transaction(|tx| {
-            read_snapshot(&tx.tx, now, presence_freshness_ttl, profile_freshness_ttl)
+        self.store.with_transaction(|tx| {
+            read_snapshot(
+                tx.connection(),
+                now,
+                presence_freshness_ttl,
+                profile_freshness_ttl,
+            )
         })
     }
 }
@@ -340,7 +343,7 @@ fn freshness_and_age(
 }
 
 fn parse_ts(value: &str) -> Result<DateTime<Utc>, OrbitError> {
-    crate::parse_timestamp(value).map_err(|error| OrbitError::Store(error.to_string()))
+    super::parse_timestamp(value).map_err(|error| OrbitError::Store(error.to_string()))
 }
 
 fn parse_opt_ts(value: Option<String>) -> Result<Option<DateTime<Utc>>, OrbitError> {

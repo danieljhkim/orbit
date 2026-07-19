@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::{McpCapability, OrbitError, validate_machine_id};
-use orbit_core::routines::{HostIdentity, HostMode};
+use orbit_remote::{HostIdentity, HostMode};
 use serde::Deserialize;
 
 pub(super) const MCP_TOML_FILE: &str = "mcp.toml";

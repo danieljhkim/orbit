@@ -5,17 +5,16 @@
 
 use std::path::Path;
 
-use chrono::{Duration, Local, Utc};
+use chrono::{DateTime, Duration, Local, Utc};
 use orbit_common::types::OrbitError;
 use orbit_store::RoutineFireRecord;
 
 use super::due::{parse_cron, truncate_to_minute};
-use super::host::load_host_identity;
-use super::loader::{LoadedRoutine, RoutineLoadError, collect_routines, discover_workspaces};
+use super::loader::{LoadedRoutine, RoutineLoadError, RoutineWorkspaceProvider, collect_routines};
 use super::validation::{
-    DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS,
-    RegistryRoutinePlacementProvider, RoutinePinValidation, RoutinePlacementProjection,
-    RoutinePlacementProvider, RoutineRegistryStatus, validate_routine_pins,
+    DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS, RoutinePinValidation,
+    RoutinePlacementProjection, RoutinePlacementProvider, RoutineRegistryStatus,
+    validate_routine_pins,
 };
 
 /// Full effective state of one routine on this host.
@@ -58,22 +57,25 @@ pub struct RoutineStatusReport {
     pub load_errors: Vec<RoutineLoadError>,
 }
 
-/// Collect the status of every routine visible from the global registry.
-pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, OrbitError> {
-    let identity = load_host_identity(global_root)?;
+/// Collect routine status from caller-supplied placement and workspace
+/// providers. Registry/cache ownership remains outside Core.
+pub fn routine_statuses_with_providers(
+    global_root: &Path,
+    placement_provider: &dyn RoutinePlacementProvider,
+    workspace_provider: &dyn RoutineWorkspaceProvider,
+    now_utc: DateTime<Utc>,
+) -> Result<RoutineStatusReport, OrbitError> {
     let store = super::open_routine_store(global_root)?;
-    let now_utc = Utc::now();
     let RoutinePlacementProjection {
         local_host,
         registry: registry_view,
-    } = RegistryRoutinePlacementProvider::new(global_root, &store, &identity)
-        .load_routine_placement(
-            now_utc,
-            Duration::seconds(DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS),
-        )?;
+    } = placement_provider.load_routine_placement(
+        now_utc,
+        Duration::seconds(DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS),
+    )?;
     let registry = registry_view.status();
 
-    let discovered = discover_workspaces(global_root)?;
+    let discovered = workspace_provider.discover_workspaces(global_root)?;
     let mut load_errors = discovered.errors.clone();
     let mut collection = collect_routines(&discovered.entries, &local_host.host_id);
     load_errors.append(&mut collection.errors);

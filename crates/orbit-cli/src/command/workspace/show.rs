@@ -1,7 +1,7 @@
 use clap::Args;
 use orbit_common::types::{Workspace, WorkspaceCheckout};
-use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_remote::workspace_registry;
 
 use crate::command::Execute;
 

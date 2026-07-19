@@ -5,11 +5,12 @@ use orbit_common::types::OrbitError;
 use serde::Deserialize;
 
 use crate::paths;
-use crate::workspace_registry;
 
 /// Returns the global orbit root at `~/.orbit/`.
 pub fn resolve_global_root() -> Result<PathBuf, OrbitError> {
-    workspace_registry::global_orbit_dir()
+    paths::home_dir()
+        .map(|home| home.join(".orbit"))
+        .ok_or_else(|| OrbitError::WorkspaceError("cannot determine home directory".to_string()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,8 +71,7 @@ pub(crate) fn resolve_initialize_roots(
     cwd: &Path,
     root_override: Option<&Path>,
 ) -> Result<ResolvedOrbitRoots, OrbitError> {
-    let hint = legacy_workspace_root_hint(cwd);
-    resolve_initialize_roots_with_hint(cwd, root_override, hint.as_ref())
+    resolve_initialize_roots_with_hint(cwd, root_override, None)
 }
 
 /// Resolve initialized roots using a caller-supplied workspace catalog hint.
@@ -93,8 +93,7 @@ pub(crate) fn resolve_bootstrap_roots(
     cwd: &Path,
     root_override: Option<&Path>,
 ) -> Result<ResolvedOrbitRoots, OrbitError> {
-    let hint = legacy_workspace_root_hint(cwd);
-    resolve_bootstrap_roots_with_hint(cwd, root_override, hint.as_ref())
+    resolve_bootstrap_roots_with_hint(cwd, root_override, None)
 }
 
 /// Resolve bootstrap roots using a caller-supplied workspace catalog hint.
@@ -216,15 +215,6 @@ enum ExplicitRootMode {
     RequireInitialized,
 }
 
-/// Compatibility adapter for path_overrides in the global registry.
-fn legacy_workspace_root_hint(cwd: &Path) -> Option<WorkspaceRootHint> {
-    let registry = workspace_registry::load_registry().ok()?;
-    let checkout = workspace_registry::find_checkout_by_path(&registry, cwd)?;
-    Some(WorkspaceRootHint {
-        orbit_dir: checkout.orbit_dir.clone(),
-    })
-}
-
 fn find_main_worktree_orbit_dir(cwd: &Path) -> Option<PathBuf> {
     Some(paths::find_git_main_worktree_root(cwd)?.join(".orbit"))
 }
@@ -274,13 +264,11 @@ fn walk_up_boundaries(cwd: &Path, explicit_root_mode: ExplicitRootMode) -> Vec<P
 }
 
 fn home_dir_boundary() -> Option<PathBuf> {
-    workspace_registry::global_orbit_dir()
-        .ok()
-        .and_then(|global| global.parent().map(Path::to_path_buf))
+    paths::home_dir()
 }
 
 fn is_global_orbit_dir(candidate: &Path) -> bool {
-    let Ok(global) = workspace_registry::global_orbit_dir() else {
+    let Some(global) = paths::home_dir().map(|home| home.join(".orbit")) else {
         return false;
     };
     paths_equivalent(candidate, &global)
@@ -416,8 +404,7 @@ pub fn try_resolve_initialized_roots(
     cwd: &Path,
     root_override: Option<&Path>,
 ) -> Result<Option<ResolvedOrbitRoots>, OrbitError> {
-    let hint = legacy_workspace_root_hint(cwd);
-    try_resolve_initialized_roots_with_hint(cwd, root_override, hint.as_ref())
+    try_resolve_initialized_roots_with_hint(cwd, root_override, None)
 }
 
 /// Resolve an existing workspace using a caller-supplied catalog hint without

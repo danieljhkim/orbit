@@ -19,8 +19,9 @@
 //! The registered workspace set is an immutable [`Snapshot`] stamped with a
 //! monotonic **generation**, swapped atomically on [`DashboardState::refresh`].
 //! The runtime cache is a *non-authoritative* memo: every read and every
-//! publication is validated against an exact binding (`id` + `repo_root` +
-//! `orbit_dir`) taken from a **pinned** snapshot generation, so a runtime built
+//! publication is validated against an exact binding (runtime workspace id +
+//! repo root + ship mode + `orbit_dir`) taken from a **pinned** snapshot
+//! generation, so a runtime built
 //! for an older snapshot can never be returned as current nor overwrite a newer
 //! binding. Each request boundary pins one snapshot ([`DashboardState::pin`] →
 //! [`Pinned`]) and derives default selection, entry metadata, runtime
@@ -38,7 +39,12 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Json, Response};
 use orbit_common::types::WorkspaceStatus;
-use orbit_core::{ActorIdentity, OrbitError, OrbitRuntime, workspace_registry};
+use orbit_core::runtime::WorkspaceRuntimeBinding;
+use orbit_core::{ActorIdentity, OrbitError, OrbitRuntime, ShipMode};
+use orbit_remote::{
+    runtime::{RemoteRuntimeFactory, workspace_runtime_binding},
+    workspace_registry,
+};
 use serde_json::json;
 
 /// Synthetic workspace id used by [`DashboardState::single`].
@@ -58,14 +64,17 @@ pub(crate) type PrePublishHook = Arc<dyn Fn(&str) + Send + Sync>;
 /// One registered workspace the dashboard can serve.
 ///
 /// `orbit_dir` is the workspace's `.orbit` directory — the value passed to
-/// [`OrbitRuntime::from_roots`] as the workspace root. `active` mirrors the
-/// registry status: inactive (stale-path) entries are listed but never built.
+/// [`RemoteRuntimeFactory::open_resolved_checkout`] as the workspace root. Active
+/// entries carry the complete runtime binding resolved from the logical
+/// workspace and local checkout. Inactive (stale-path) entries keep no binding:
+/// they are listed but never built.
 #[derive(Clone, Debug)]
 pub(crate) struct WsEntry {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) repo_root: PathBuf,
     pub(crate) orbit_dir: PathBuf,
+    pub(crate) binding: Option<WorkspaceRuntimeBinding>,
     pub(crate) active: bool,
 }
 
@@ -122,14 +131,21 @@ impl RegistrySource {
             self.cwd.as_deref(),
         );
         let entries = workspace_registry::local_workspaces(&registry)
-            .map(|(workspace, checkout)| WsEntry {
-                id: workspace.id.clone(),
-                name: workspace.name.clone(),
-                repo_root: checkout.repo_root.clone(),
-                orbit_dir: checkout.orbit_dir.clone(),
-                active: workspace.status == WorkspaceStatus::Active,
+            .map(|(workspace, checkout)| {
+                let active = workspace.status == WorkspaceStatus::Active;
+                let binding = active
+                    .then(|| workspace_runtime_binding(workspace, checkout))
+                    .transpose()?;
+                Ok(WsEntry {
+                    id: workspace.id.clone(),
+                    name: workspace.name.clone(),
+                    repo_root: checkout.repo_root.clone(),
+                    orbit_dir: checkout.orbit_dir.clone(),
+                    binding,
+                    active,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, OrbitError>>()?;
         Ok(SnapshotData {
             entries,
             default_workspace,
@@ -151,7 +167,7 @@ struct SnapshotData {
 /// generation lets publication refuse to overwrite a newer binding with an
 /// older-snapshot build.
 struct CachedRuntime {
-    repo_root: PathBuf,
+    binding: WorkspaceRuntimeBinding,
     orbit_dir: PathBuf,
     generation: u64,
     runtime: Arc<OrbitRuntime>,
@@ -218,7 +234,7 @@ impl StateInner {
         snapshot: &Snapshot,
         id: &str,
     ) -> Result<Arc<OrbitRuntime>, WsRejection> {
-        let (repo_root, orbit_dir) = {
+        let (binding, orbit_dir) = {
             let entry = snapshot
                 .entries
                 .iter()
@@ -227,19 +243,28 @@ impl StateInner {
             if !entry.active {
                 return Err(WsRejection::inactive(id));
             }
-            (entry.repo_root.clone(), entry.orbit_dir.clone())
+            let binding = entry
+                .binding
+                .clone()
+                .ok_or_else(|| WsRejection::missing_binding(id))?;
+            (binding, entry.orbit_dir.clone())
         };
         let generation = snapshot.generation;
 
         // Fast path: a cached runtime whose binding still matches this snapshot.
-        if let Some(runtime) = self.cached_matching(id, &repo_root, &orbit_dir) {
+        if let Some(runtime) = self.cached_matching(id, &binding, &orbit_dir) {
             return Ok(runtime);
         }
 
         // Build outside the lock (no lock held across construction).
-        let runtime = OrbitRuntime::from_roots(&self.global_root, &orbit_dir)
-            .map_err(|e| WsRejection::build_failed(id, &e))?
-            .with_actor(ActorIdentity::human("human"));
+        let runtime = RemoteRuntimeFactory::open_resolved_checkout(
+            &self.global_root,
+            &orbit_dir,
+            &orbit_dir,
+            binding.clone(),
+        )
+        .map_err(|e| WsRejection::build_failed(id, &e))?
+        .with_actor(ActorIdentity::human("human"));
         let runtime = Arc::new(runtime);
 
         // Test seam: pause between build and publish so a test can rebind +
@@ -247,7 +272,7 @@ impl StateInner {
         #[cfg(test)]
         self.invoke_pre_publish_hook(id);
 
-        Ok(self.publish_runtime(id, repo_root, orbit_dir, generation, runtime))
+        Ok(self.publish_runtime(id, binding, orbit_dir, generation, runtime))
     }
 
     /// Publish a freshly-built runtime under the cache lock with binding +
@@ -256,7 +281,7 @@ impl StateInner {
     fn publish_runtime(
         &self,
         id: &str,
-        repo_root: PathBuf,
+        binding: WorkspaceRuntimeBinding,
         orbit_dir: PathBuf,
         generation: u64,
         runtime: Arc<OrbitRuntime>,
@@ -264,7 +289,7 @@ impl StateInner {
         let mut cache = self.lock_runtimes();
         if let Some(existing) = cache.get(id) {
             // Same binding: a concurrent build already won; it is idempotent.
-            if existing.repo_root == repo_root && existing.orbit_dir == orbit_dir {
+            if existing.binding == binding && existing.orbit_dir == orbit_dir {
                 return existing.runtime.clone();
             }
             // Different binding at an equal-or-newer generation than ours means
@@ -279,7 +304,7 @@ impl StateInner {
         cache.insert(
             id.to_string(),
             CachedRuntime {
-                repo_root,
+                binding,
                 orbit_dir,
                 generation,
                 runtime: runtime.clone(),
@@ -288,18 +313,19 @@ impl StateInner {
         runtime
     }
 
-    /// Return the cached runtime for `id` iff its binding matches `(repo_root,
-    /// orbit_dir)`; a mismatch (rebound workspace or a stale publication) reports
-    /// absent so the caller rebuilds against the pinned snapshot.
+    /// Return the cached runtime for `id` iff its complete runtime binding and
+    /// orbit directory match the pinned entry; a mismatch (including a
+    /// workspace-id or ship-mode-only change) reports absent so the caller
+    /// rebuilds against the pinned snapshot.
     fn cached_matching(
         &self,
         id: &str,
-        repo_root: &Path,
+        binding: &WorkspaceRuntimeBinding,
         orbit_dir: &Path,
     ) -> Option<Arc<OrbitRuntime>> {
         let cache = self.lock_runtimes();
         cache.get(id).and_then(|cached| {
-            (cached.repo_root == repo_root && cached.orbit_dir == orbit_dir)
+            (cached.binding == *binding && cached.orbit_dir == orbit_dir)
                 .then(|| cached.runtime.clone())
         })
     }
@@ -314,7 +340,8 @@ impl StateInner {
             .iter()
             .filter_map(|entry| {
                 cache.get(&entry.id).and_then(|cached| {
-                    (cached.repo_root == entry.repo_root && cached.orbit_dir == entry.orbit_dir)
+                    (entry.binding.as_ref() == Some(&cached.binding)
+                        && cached.orbit_dir == entry.orbit_dir)
                         .then(|| (entry.id.clone(), cached.runtime.clone()))
                 })
             })
@@ -352,13 +379,22 @@ impl DashboardState {
             name: SINGLE_WORKSPACE_ID.to_string(),
             repo_root: PathBuf::new(),
             orbit_dir: PathBuf::new(),
+            binding: Some(WorkspaceRuntimeBinding {
+                workspace_id: SINGLE_WORKSPACE_ID.to_string(),
+                repo_root: PathBuf::new(),
+                ship_mode: ShipMode::Local,
+            }),
             active: true,
         };
         let mut runtimes = HashMap::new();
         runtimes.insert(
             SINGLE_WORKSPACE_ID.to_string(),
             CachedRuntime {
-                repo_root: PathBuf::new(),
+                binding: WorkspaceRuntimeBinding {
+                    workspace_id: SINGLE_WORKSPACE_ID.to_string(),
+                    repo_root: PathBuf::new(),
+                    ship_mode: ShipMode::Local,
+                },
                 orbit_dir: PathBuf::new(),
                 generation: INITIAL_GENERATION,
                 runtime,
@@ -541,16 +577,15 @@ impl DashboardState {
         let snapshot = self.inner.publish_snapshot(data);
         // Bindings still servable after the swap; used to evict runtimes whose
         // workspace was removed, went inactive, or was rebound.
-        let live: Vec<(String, PathBuf, PathBuf)> = snapshot
+        let live: Vec<(String, WorkspaceRuntimeBinding, PathBuf)> = snapshot
             .entries
             .iter()
             .filter(|entry| entry.active)
-            .map(|entry| {
-                (
-                    entry.id.clone(),
-                    entry.repo_root.clone(),
-                    entry.orbit_dir.clone(),
-                )
+            .filter_map(|entry| {
+                entry
+                    .binding
+                    .clone()
+                    .map(|binding| (entry.id.clone(), binding, entry.orbit_dir.clone()))
             })
             .collect();
         {
@@ -559,8 +594,8 @@ impl DashboardState {
         }
         let mut cache = self.inner.lock_runtimes();
         cache.retain(|id, cached| {
-            live.iter().any(|(live_id, repo_root, orbit_dir)| {
-                live_id == id && *repo_root == cached.repo_root && *orbit_dir == cached.orbit_dir
+            live.iter().any(|(live_id, binding, orbit_dir)| {
+                live_id == id && *binding == cached.binding && *orbit_dir == cached.orbit_dir
             })
         });
     }
@@ -662,6 +697,13 @@ impl WsRejection {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: format!("failed to open workspace '{id}': {err}"),
+        }
+    }
+
+    fn missing_binding(id: &str) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: format!("active workspace '{id}' has no runtime binding"),
         }
     }
 

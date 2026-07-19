@@ -9,8 +9,11 @@ use orbit_common::types::{
     SpokeRegistrationRequestV1, ToolSessionContext, WorkspaceCheckoutRole,
     WorkspacePresenceDeclaration, WorkspaceStatus, audit_execution_id,
 };
-use orbit_core::routines::HostIdentity;
-use orbit_core::{OrbitRuntime, RegistryCacheService, RegistryCacheState};
+use orbit_core::OrbitRuntime;
+use orbit_remote::runtime::{RemoteRuntimeFactory, resolved_workspace_binding};
+use orbit_remote::{
+    HostIdentity, RegistryCacheService, RegistryCacheState, build_execution_profile_v1,
+};
 
 use super::config::load_trusted_mcp_config;
 use super::host::canonical_mcp_tool_definitions;
@@ -26,11 +29,11 @@ pub(crate) fn register_local_spoke(
     let global_root = runtime.global_root();
     let trusted = load_trusted_mcp_config(&global_root)?;
     let (route, capability) = trusted.spoke_registration_route(identity)?;
-    let registry_path = orbit_core::workspace_registry::registry_path_for(&global_root);
-    let registry = orbit_core::workspace_registry::load_registry_from(&registry_path)?;
+    let registry_path = orbit_remote::workspace_registry::registry_path_for(&global_root);
+    let registry = orbit_remote::workspace_registry::load_registry_from(&registry_path)?;
     let observed_at = Utc::now();
 
-    let mut presence = orbit_core::workspace_registry::local_workspaces(&registry)
+    let mut presence = orbit_remote::workspace_registry::local_workspaces(&registry)
         .filter(|(workspace, checkout)| {
             workspace.status == WorkspaceStatus::Active && checkout.repo_root.exists()
         })
@@ -44,20 +47,23 @@ pub(crate) fn register_local_spoke(
 
     let cached_snapshot = cached_snapshot(&global_root)?;
     let mut profiles = Vec::new();
-    for (workspace, checkout) in orbit_core::workspace_registry::local_workspaces(&registry) {
+    for (workspace, checkout) in orbit_remote::workspace_registry::local_workspaces(&registry) {
         if workspace.status != WorkspaceStatus::Active
             || checkout.role != Some(WorkspaceCheckoutRole::Owner)
             || workspace.owner_machine_id.as_deref() != Some(identity.machine_id.as_str())
         {
             continue;
         }
+        let binding = resolved_workspace_binding(workspace, checkout)?;
         let owned_runtime = if runtime.shared_root() == checkout.orbit_dir {
             runtime.clone()
         } else {
-            OrbitRuntime::from_roots(&global_root, &checkout.orbit_dir)?
+            RemoteRuntimeFactory::open_registered_checkout(&global_root, workspace, checkout)?
         };
-        let profile = owned_runtime.build_execution_profile_v1(
+        let profile = build_execution_profile_v1(
+            owned_runtime.execution_environment_snapshot()?,
             workspace,
+            &binding,
             &identity.machine_id,
             observed_at,
         )?;

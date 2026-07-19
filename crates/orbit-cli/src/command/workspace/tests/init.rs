@@ -6,7 +6,7 @@ use orbit_common::types::{
     parse_routine_yaml,
 };
 use orbit_core::command::init::default_orbitignore_template;
-use orbit_core::workspace_registry;
+use orbit_remote::workspace_registry;
 
 use crate::tests::env_isolation::EnvGuard;
 

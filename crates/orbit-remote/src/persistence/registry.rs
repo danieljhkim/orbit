@@ -20,26 +20,27 @@ use orbit_common::types::{
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
-use crate::Store;
+use super::RemoteStore;
 
 const HOST_COLUMNS: &str = "machine_id, host_id, labels_json, status, registered_at, \
                             updated_at, retired_at, last_seen_at";
 const ALIAS_COLUMNS: &str = "host_id, machine_id, created_at, warning";
 
-impl Store {
+impl RemoteStore {
     /// Register a stable machine declaration. Repeating an active declaration
     /// with the same name and labels returns the existing row without changing
     /// timestamps. A changed name, changed labels, or retired row is an
     /// incompatible declaration and cannot silently rename/reactivate it.
     pub fn register_host(&self, registration: &HostRegistration) -> Result<HostRecord, OrbitError> {
         validate_registration(registration)?;
-        self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
-            let (host, inserted) = register_host_in_transaction(&tx.tx, registration)?;
-            if inserted {
-                advance_registry_revision(&tx.tx)?;
-            }
-            Ok(host)
-        })
+        self.store
+            .with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+                let (host, inserted) = register_host_in_transaction(tx.connection(), registration)?;
+                if inserted {
+                    advance_registry_revision(tx.connection())?;
+                }
+                Ok(host)
+            })
     }
 
     /// Atomically register the singular hub host and stamp its immutable
@@ -49,9 +50,9 @@ impl Store {
     /// is a no-op; a different configured hub fails before inserting a host.
     pub fn register_hub(&self, registration: &HostRegistration) -> Result<HostRecord, OrbitError> {
         validate_registration(registration)?;
-        self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+        self.store.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
             let configured_hub: Option<String> = tx
-                .tx
+                .connection()
                 .query_row(
                     "SELECT hub_machine_id FROM hub_registry_metadata WHERE id = 0",
                     [],
@@ -66,14 +67,14 @@ impl Store {
                 )));
             }
 
-            let (host, inserted) = register_host_in_transaction(&tx.tx, registration)?;
+            let (host, inserted) = register_host_in_transaction(tx.connection(), registration)?;
             let stamped = if configured_hub.is_none() {
                 let updated = tx
-                    .tx
+                    .connection()
                     .execute(
                         "UPDATE hub_registry_metadata
                          SET hub_machine_id = ?1, updated_at = ?2 WHERE id = 0",
-                        params![registration.machine_id, crate::now_string()],
+                        params![registration.machine_id, super::now_string()],
                     )
                     .map_err(|error| OrbitError::Store(format!("stamp hub machine_id: {error}")))?;
                 if updated != 1 {
@@ -87,7 +88,7 @@ impl Store {
             };
 
             if inserted || stamped {
-                advance_registry_revision(&tx.tx)?;
+                advance_registry_revision(tx.connection())?;
             }
             Ok(host)
         })
@@ -103,8 +104,7 @@ impl Store {
     ) -> Result<HostRecord, OrbitError> {
         validate_machine_id(machine_id)?;
         validate_host_id(new_host_id)?;
-        let conn = self.read()?;
-        validate_host_rename_in_connection(&conn, machine_id, new_host_id)
+        self.read(|conn| validate_host_rename_in_connection(conn, machine_id, new_host_id))
     }
 
     /// Rename an active machine and atomically preserve its old name as a
@@ -120,40 +120,42 @@ impl Store {
     ) -> Result<HostRecord, OrbitError> {
         validate_machine_id(machine_id)?;
         validate_host_id(new_host_id)?;
-        self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
-            let existing = validate_host_rename_in_connection(&tx.tx, machine_id, new_host_id)?;
-            if existing.host_id == new_host_id {
-                return Ok(existing);
-            }
+        self.store
+            .with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+                let existing =
+                    validate_host_rename_in_connection(tx.connection(), machine_id, new_host_id)?;
+                if existing.host_id == new_host_id {
+                    return Ok(existing);
+                }
 
-            let old_host_id = existing.host_id;
-            let now = crate::now_string();
-            tx.tx
-                .execute(
-                    "UPDATE hosts SET host_id = ?2, updated_at = ?3 WHERE machine_id = ?1",
-                    params![machine_id, new_host_id, now],
-                )
-                .map_err(|error| host_mutation_error("rename", new_host_id, error))?;
-            let warning = format!(
-                "host_id '{old_host_id}' is a permanent tombstone alias for machine_id \
+                let old_host_id = existing.host_id;
+                let now = super::now_string();
+                tx.connection()
+                    .execute(
+                        "UPDATE hosts SET host_id = ?2, updated_at = ?3 WHERE machine_id = ?1",
+                        params![machine_id, new_host_id, now],
+                    )
+                    .map_err(|error| host_mutation_error("rename", new_host_id, error))?;
+                let warning = format!(
+                    "host_id '{old_host_id}' is a permanent tombstone alias for machine_id \
                  '{machine_id}' and cannot be reused"
-            );
-            tx.tx
-                .execute(
-                    "INSERT INTO host_aliases(host_id, machine_id, created_at, warning)
+                );
+                tx.connection()
+                    .execute(
+                        "INSERT INTO host_aliases(host_id, machine_id, created_at, warning)
                      VALUES (?1, ?2, ?3, ?4)",
-                    params![old_host_id, machine_id, now, warning],
-                )
-                .map_err(|error| host_mutation_error("preserve alias", &old_host_id, error))?;
-            advance_registry_revision(&tx.tx)?;
+                        params![old_host_id, machine_id, now, warning],
+                    )
+                    .map_err(|error| host_mutation_error("preserve alias", &old_host_id, error))?;
+                advance_registry_revision(tx.connection())?;
 
-            host_by_machine_id(&tx.tx, machine_id)?.ok_or_else(|| {
-                OrbitError::Store(format!(
-                    "renamed host_id '{old_host_id}' but could not read machine_id \
+                host_by_machine_id(tx.connection(), machine_id)?.ok_or_else(|| {
+                    OrbitError::Store(format!(
+                        "renamed host_id '{old_host_id}' but could not read machine_id \
                      '{machine_id}' back"
-                ))
+                    ))
+                })
             })
-        })
     }
 
     /// Retire a machine without deleting its identity or aliases. Repeating a
@@ -162,8 +164,8 @@ impl Store {
     /// transaction as the lifecycle mutation.
     pub fn retire_host(&self, machine_id: &str) -> Result<HostRecord, OrbitError> {
         validate_machine_id(machine_id)?;
-        self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
-            let existing = host_by_machine_id(&tx.tx, machine_id)?.ok_or_else(|| {
+        self.store.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+            let existing = host_by_machine_id(tx.connection(), machine_id)?.ok_or_else(|| {
                 OrbitError::InvalidInput(format!(
                     "cannot retire unknown host machine_id '{machine_id}'"
                 ))
@@ -172,7 +174,7 @@ impl Store {
                 return Ok(existing);
             }
             let configured_hub: Option<String> = tx
-                .tx
+                .connection()
                 .query_row(
                     "SELECT hub_machine_id FROM hub_registry_metadata WHERE id = 0",
                     [],
@@ -184,8 +186,8 @@ impl Store {
                     "machine_id '{machine_id}' is the currently configured hub and cannot retire itself in v1"
                 )));
             }
-            let now = crate::now_string();
-            tx.tx
+            let now = super::now_string();
+            tx.connection()
                 .execute(
                     "UPDATE hosts
                      SET status = ?2, retired_at = ?3, updated_at = ?3
@@ -193,8 +195,8 @@ impl Store {
                     params![machine_id, HostStatus::Retired.as_str(), now],
                 )
                 .map_err(|error| host_mutation_error("retire", &existing.host_id, error))?;
-            advance_registry_revision(&tx.tx)?;
-            host_by_machine_id(&tx.tx, machine_id)?.ok_or_else(|| {
+            advance_registry_revision(tx.connection())?;
+            host_by_machine_id(tx.connection(), machine_id)?.ok_or_else(|| {
                 OrbitError::Store(format!(
                     "retired host_id '{}' but could not read it back",
                     existing.host_id
@@ -206,39 +208,40 @@ impl Store {
     /// Look up one machine by its immutable ID.
     pub fn get_host(&self, machine_id: &str) -> Result<Option<HostRecord>, OrbitError> {
         validate_machine_id(machine_id)?;
-        let conn = self.read()?;
-        host_by_machine_id(&conn, machine_id)
+        self.read(|conn| host_by_machine_id(conn, machine_id))
     }
 
     /// Enumerate active machines in stable human-name order. Retired rows stay
     /// durable but are deliberately absent from this projection.
     pub fn list_active_hosts(&self) -> Result<Vec<HostRecord>, OrbitError> {
-        let conn = self.read()?;
-        let mut statement = conn
-            .prepare(&format!(
-                "SELECT {HOST_COLUMNS} FROM hosts WHERE status = ?1 ORDER BY host_id ASC"
-            ))
-            .map_err(|error| OrbitError::Store(error.to_string()))?;
-        let rows = statement
-            .query_map([HostStatus::Active.as_str()], host_row)
-            .map_err(|error| OrbitError::Store(error.to_string()))?;
-        collect_hosts(rows)
+        self.read(|conn| {
+            let mut statement = conn
+                .prepare(&format!(
+                    "SELECT {HOST_COLUMNS} FROM hosts WHERE status = ?1 ORDER BY host_id ASC"
+                ))
+                .map_err(|error| OrbitError::Store(error.to_string()))?;
+            let rows = statement
+                .query_map([HostStatus::Active.as_str()], host_row)
+                .map_err(|error| OrbitError::Store(error.to_string()))?;
+            collect_hosts(rows)
+        })
     }
 
     /// List the permanent name history of a machine, oldest first.
     pub fn list_host_aliases(&self, machine_id: &str) -> Result<Vec<HostAlias>, OrbitError> {
         validate_machine_id(machine_id)?;
-        let conn = self.read()?;
-        let mut statement = conn
-            .prepare(&format!(
-                "SELECT {ALIAS_COLUMNS} FROM host_aliases
-                 WHERE machine_id = ?1 ORDER BY created_at ASC, host_id ASC"
-            ))
-            .map_err(|error| OrbitError::Store(error.to_string()))?;
-        let rows = statement
-            .query_map([machine_id], alias_row)
-            .map_err(|error| OrbitError::Store(error.to_string()))?;
-        collect_aliases(rows)
+        self.read(|conn| {
+            let mut statement = conn
+                .prepare(&format!(
+                    "SELECT {ALIAS_COLUMNS} FROM host_aliases
+                     WHERE machine_id = ?1 ORDER BY created_at ASC, host_id ASC"
+                ))
+                .map_err(|error| OrbitError::Store(error.to_string()))?;
+            let rows = statement
+                .query_map([machine_id], alias_row)
+                .map_err(|error| OrbitError::Store(error.to_string()))?;
+            collect_aliases(rows)
+        })
     }
 
     /// Resolve a current or historical human name without guessing. Retired
@@ -247,64 +250,7 @@ impl Store {
     /// collision outcome.
     pub fn resolve_host_id(&self, host_id: &str) -> Result<HostNameResolution, OrbitError> {
         validate_host_id(host_id)?;
-        let conn = self.read()?;
-        let mut statement = conn
-            .prepare(
-                "SELECT
-                    h.machine_id, h.host_id, h.labels_json, h.status,
-                    h.registered_at, h.updated_at, h.retired_at, h.last_seen_at,
-                    NULL, NULL, NULL, NULL
-                 FROM hosts h WHERE h.host_id = ?1
-                 UNION ALL
-                 SELECT
-                    h.machine_id, h.host_id, h.labels_json, h.status,
-                    h.registered_at, h.updated_at, h.retired_at, h.last_seen_at,
-                    a.host_id, a.machine_id, a.created_at, a.warning
-                 FROM host_aliases a
-                 JOIN hosts h ON h.machine_id = a.machine_id
-                 WHERE a.host_id = ?1",
-            )
-            .map_err(|error| OrbitError::Store(error.to_string()))?;
-        let rows = statement
-            .query_map([host_id], resolution_row)
-            .map_err(|error| OrbitError::Store(error.to_string()))?;
-        let mut matches = Vec::new();
-        for row in rows {
-            let raw = row.map_err(|error| OrbitError::Store(error.to_string()))?;
-            matches.push((
-                HostRecord::try_from(raw.host)?,
-                raw.alias.map(HostAlias::try_from).transpose()?,
-            ));
-        }
-
-        if matches.is_empty() {
-            return Ok(HostNameResolution::Unknown {
-                host_id: host_id.to_string(),
-            });
-        }
-        if matches.len() > 1 {
-            let mut machine_ids: Vec<String> = matches
-                .into_iter()
-                .map(|(host, _)| host.machine_id)
-                .collect();
-            machine_ids.sort();
-            machine_ids.dedup();
-            return Ok(HostNameResolution::Collision {
-                host_id: host_id.to_string(),
-                machine_ids,
-            });
-        }
-
-        let (host, alias) = matches.pop().ok_or_else(|| {
-            OrbitError::Store(format!(
-                "host_id '{host_id}' resolution lost its only match"
-            ))
-        })?;
-        match (host.status, alias) {
-            (HostStatus::Active, None) => Ok(HostNameResolution::Active { host }),
-            (HostStatus::Active, Some(alias)) => Ok(HostNameResolution::Alias { host, alias }),
-            (HostStatus::Retired, alias) => Ok(HostNameResolution::Retired { host, alias }),
-        }
+        self.read(|conn| resolve_host_id_in_connection(conn, host_id))
     }
 
     /// Declare the one durable owner of an existing logical workspace. The
@@ -318,9 +264,9 @@ impl Store {
     ) -> Result<WorkspaceOwnership, OrbitError> {
         validate_registry_identifier("workspace_id", workspace_id)?;
         validate_machine_id(owner_machine_id)?;
-        self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
-            require_active_host(&tx.tx, owner_machine_id)?;
-            if let Some(existing) = ownership_by_workspace(&tx.tx, workspace_id)? {
+        self.store.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+            require_active_host(tx.connection(), owner_machine_id)?;
+            if let Some(existing) = ownership_by_workspace(tx.connection(), workspace_id)? {
                 if existing.owner_machine_id != owner_machine_id {
                     return Err(OrbitError::InvalidInput(format!(
                         "workspace_id '{workspace_id}' is already owned by machine_id '{}'; ownership migration must be explicit",
@@ -329,8 +275,8 @@ impl Store {
                 }
                 return Ok(existing);
             }
-            let now = crate::now_string();
-            tx.tx
+            let now = super::now_string();
+            tx.connection()
                 .execute(
                     "INSERT INTO workspace_ownership(
                         workspace_id, owner_machine_id, bound_at, updated_at
@@ -342,8 +288,8 @@ impl Store {
                         "bind owner for workspace_id '{workspace_id}': {error}"
                     ))
                 })?;
-            advance_registry_revision(&tx.tx)?;
-            ownership_by_workspace(&tx.tx, workspace_id)?.ok_or_else(|| {
+            advance_registry_revision(tx.connection())?;
+            ownership_by_workspace(tx.connection(), workspace_id)?.ok_or_else(|| {
                 OrbitError::Store(format!(
                     "bound owner for workspace_id '{workspace_id}' but could not read it back"
                 ))
@@ -356,8 +302,7 @@ impl Store {
         workspace_id: &str,
     ) -> Result<Option<WorkspaceOwnership>, OrbitError> {
         validate_registry_identifier("workspace_id", workspace_id)?;
-        let conn = self.read()?;
-        ownership_by_workspace(&conn, workspace_id)
+        self.read(|conn| ownership_by_workspace(conn, workspace_id))
     }
 
     /// Atomically replace one authenticated machine's full declared presence
@@ -382,67 +327,70 @@ impl Store {
             validate_presence_root(&declaration.root)?;
         }
 
-        self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
-            let host = require_active_host(&tx.tx, caller_machine_id)?;
-            let mut intended = declarations
-                .iter()
-                .map(|declaration| HostWorkspacePresence {
-                    machine_id: caller_machine_id.to_string(),
-                    workspace_id: declaration.workspace_id.clone(),
-                    root: declaration.root.clone(),
-                    last_verified: declaration.last_verified,
-                })
-                .collect::<Vec<_>>();
-            intended.sort_by(|left, right| left.workspace_id.cmp(&right.workspace_id));
-            let current = presence_for_machine(&tx.tx, caller_machine_id)?;
-            if host.last_seen_at == Some(received_at) && current == intended {
-                return Ok(current);
-            }
+        self.store
+            .with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+                let host = require_active_host(tx.connection(), caller_machine_id)?;
+                let mut intended = declarations
+                    .iter()
+                    .map(|declaration| HostWorkspacePresence {
+                        machine_id: caller_machine_id.to_string(),
+                        workspace_id: declaration.workspace_id.clone(),
+                        root: declaration.root.clone(),
+                        last_verified: declaration.last_verified,
+                    })
+                    .collect::<Vec<_>>();
+                intended.sort_by(|left, right| left.workspace_id.cmp(&right.workspace_id));
+                let current = presence_for_machine(tx.connection(), caller_machine_id)?;
+                if host.last_seen_at == Some(received_at) && current == intended {
+                    return Ok(current);
+                }
 
-            tx.tx
-                .execute(
-                    "DELETE FROM host_workspace_presence WHERE machine_id = ?1",
-                    [caller_machine_id],
-                )
-                .map_err(|error| OrbitError::Store(error.to_string()))?;
-            for declaration in declarations {
-                let root = declaration.root.to_str().ok_or_else(|| {
-                    OrbitError::InvalidInput(format!(
-                        "presence root for workspace_id '{}' must be valid UTF-8",
-                        declaration.workspace_id
-                    ))
-                })?;
-                tx.tx
+                tx.connection()
                     .execute(
-                        "INSERT INTO host_workspace_presence(
-                            machine_id, workspace_id, root, last_verified
-                         ) VALUES (?1, ?2, ?3, ?4)",
-                        params![
-                            caller_machine_id,
-                            declaration.workspace_id,
-                            root,
-                            declaration.last_verified.to_rfc3339(),
-                        ],
+                        "DELETE FROM host_workspace_presence WHERE machine_id = ?1",
+                        [caller_machine_id],
                     )
-                    .map_err(|error| {
-                        OrbitError::Store(format!(
-                            "publish presence for workspace_id '{}': {error}",
+                    .map_err(|error| OrbitError::Store(error.to_string()))?;
+                for declaration in declarations {
+                    let root = declaration.root.to_str().ok_or_else(|| {
+                        OrbitError::InvalidInput(format!(
+                            "presence root for workspace_id '{}' must be valid UTF-8",
                             declaration.workspace_id
                         ))
                     })?;
-            }
-            tx.tx
-                .execute(
-                    "UPDATE hosts SET last_seen_at = ?2 WHERE machine_id = ?1",
-                    params![caller_machine_id, received_at.to_rfc3339()],
-                )
-                .map_err(|error| OrbitError::Store(format!("update host last_seen: {error}")))?;
-            // A changed declaration or receipt (`last_seen_at` /
-            // `last_verified`) is freshness-visible. An exact replay returned
-            // above without rewriting rows or advancing the revision.
-            advance_registry_revision(&tx.tx)?;
-            presence_for_machine(&tx.tx, caller_machine_id)
-        })
+                    tx.connection()
+                        .execute(
+                            "INSERT INTO host_workspace_presence(
+                            machine_id, workspace_id, root, last_verified
+                         ) VALUES (?1, ?2, ?3, ?4)",
+                            params![
+                                caller_machine_id,
+                                declaration.workspace_id,
+                                root,
+                                declaration.last_verified.to_rfc3339(),
+                            ],
+                        )
+                        .map_err(|error| {
+                            OrbitError::Store(format!(
+                                "publish presence for workspace_id '{}': {error}",
+                                declaration.workspace_id
+                            ))
+                        })?;
+                }
+                tx.connection()
+                    .execute(
+                        "UPDATE hosts SET last_seen_at = ?2 WHERE machine_id = ?1",
+                        params![caller_machine_id, received_at.to_rfc3339()],
+                    )
+                    .map_err(|error| {
+                        OrbitError::Store(format!("update host last_seen: {error}"))
+                    })?;
+                // A changed declaration or receipt (`last_seen_at` /
+                // `last_verified`) is freshness-visible. An exact replay returned
+                // above without rewriting rows or advancing the revision.
+                advance_registry_revision(tx.connection())?;
+                presence_for_machine(tx.connection(), caller_machine_id)
+            })
     }
 
     pub fn list_host_workspace_presence_private(
@@ -450,8 +398,7 @@ impl Store {
         machine_id: &str,
     ) -> Result<Vec<HostWorkspacePresence>, OrbitError> {
         validate_machine_id(machine_id)?;
-        let conn = self.read()?;
-        presence_for_machine(&conn, machine_id)
+        self.read(|conn| presence_for_machine(conn, machine_id))
     }
 
     pub fn sanitized_workspace_presence(
@@ -464,33 +411,34 @@ impl Store {
         validate_machine_id(machine_id)?;
         validate_registry_identifier("workspace_id", workspace_id)?;
         validate_nonnegative_duration("presence freshness TTL", freshness_ttl)?;
-        let conn = self.read()?;
-        let owner_machine_id = ownership_by_workspace(&conn, workspace_id)?
-            .map(|ownership| ownership.owner_machine_id);
-        let presence = presence_by_key(&conn, machine_id, workspace_id)?;
-        let Some(presence) = presence else {
-            return Ok(SanitizedWorkspacePresence {
+        self.read(|conn| {
+            let owner_machine_id = ownership_by_workspace(conn, workspace_id)?
+                .map(|ownership| ownership.owner_machine_id);
+            let presence = presence_by_key(conn, machine_id, workspace_id)?;
+            let Some(presence) = presence else {
+                return Ok(SanitizedWorkspacePresence {
+                    workspace_id: workspace_id.to_string(),
+                    machine_id: machine_id.to_string(),
+                    owner_machine_id,
+                    freshness: ProjectionFreshness::Missing,
+                    last_verified: None,
+                    age_seconds: None,
+                });
+            };
+            let age = age_seconds(now, presence.last_verified);
+            let freshness = if now.signed_duration_since(presence.last_verified) > freshness_ttl {
+                ProjectionFreshness::Stale
+            } else {
+                ProjectionFreshness::Current
+            };
+            Ok(SanitizedWorkspacePresence {
                 workspace_id: workspace_id.to_string(),
                 machine_id: machine_id.to_string(),
                 owner_machine_id,
-                freshness: ProjectionFreshness::Missing,
-                last_verified: None,
-                age_seconds: None,
-            });
-        };
-        let age = age_seconds(now, presence.last_verified);
-        let freshness = if now.signed_duration_since(presence.last_verified) > freshness_ttl {
-            ProjectionFreshness::Stale
-        } else {
-            ProjectionFreshness::Current
-        };
-        Ok(SanitizedWorkspacePresence {
-            workspace_id: workspace_id.to_string(),
-            machine_id: machine_id.to_string(),
-            owner_machine_id,
-            freshness,
-            last_verified: Some(presence.last_verified),
-            age_seconds: Some(age),
+                freshness,
+                last_verified: Some(presence.last_verified),
+                age_seconds: Some(age),
+            })
         })
     }
 
@@ -529,9 +477,9 @@ impl Store {
             )));
         }
 
-        self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
-            require_active_host(&tx.tx, caller_machine_id)?;
-            let ownership = ownership_by_workspace(&tx.tx, &profile.workspace_id)?.ok_or_else(|| {
+        self.store.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+            require_active_host(tx.connection(), caller_machine_id)?;
+            let ownership = ownership_by_workspace(tx.connection(), &profile.workspace_id)?.ok_or_else(|| {
                 OrbitError::InvalidInput(format!(
                     "workspace_id '{}' has no declared owner",
                     profile.workspace_id
@@ -544,7 +492,7 @@ impl Store {
                 )));
             }
 
-            let existing = stored_profile_by_workspace(&tx.tx, &profile.workspace_id)?;
+            let existing = stored_profile_by_workspace(tx.connection(), &profile.workspace_id)?;
             let actual_generation = existing.as_ref().map_or(0, |record| record.generation);
             if expected_generation != actual_generation {
                 return Err(OrbitError::InvalidInput(format!(
@@ -584,7 +532,7 @@ impl Store {
             let generation_sql = i64::try_from(generation).map_err(|error| {
                 OrbitError::Store(format!("execution profile generation is too large: {error}"))
             })?;
-            tx.tx
+            tx.connection()
                 .execute(
                     "INSERT INTO workspace_execution_profiles(
                         workspace_id, owner_machine_id, generation, payload_json, received_at
@@ -609,8 +557,8 @@ impl Store {
             // A changed profile observation or hub receipt (`received_at`) is
             // freshness-visible, so it advances the global revision even when
             // semantic generation is retained. An exact replay returned above.
-            advance_registry_revision(&tx.tx)?;
-            stored_profile_by_workspace(&tx.tx, &profile.workspace_id)?.ok_or_else(|| {
+            advance_registry_revision(tx.connection())?;
+            stored_profile_by_workspace(tx.connection(), &profile.workspace_id)?.ok_or_else(|| {
                 OrbitError::Store(format!(
                     "published execution profile for workspace_id '{}' but could not read it back",
                     profile.workspace_id
@@ -624,8 +572,7 @@ impl Store {
         workspace_id: &str,
     ) -> Result<Option<StoredExecutionProfile>, OrbitError> {
         validate_registry_identifier("workspace_id", workspace_id)?;
-        let conn = self.read()?;
-        stored_profile_by_workspace(&conn, workspace_id)
+        self.read(|conn| stored_profile_by_workspace(conn, workspace_id))
     }
 
     pub fn sanitized_execution_profile(
@@ -636,38 +583,102 @@ impl Store {
     ) -> Result<SanitizedExecutionProfile, OrbitError> {
         validate_registry_identifier("workspace_id", workspace_id)?;
         validate_nonnegative_duration("execution profile freshness TTL", freshness_ttl)?;
-        let conn = self.read()?;
-        let owner_machine_id = ownership_by_workspace(&conn, workspace_id)?
-            .map(|ownership| ownership.owner_machine_id);
-        let record = stored_profile_by_workspace(&conn, workspace_id)?;
-        let Some(record) = record else {
-            return Ok(SanitizedExecutionProfile {
+        self.read(|conn| {
+            let owner_machine_id = ownership_by_workspace(conn, workspace_id)?
+                .map(|ownership| ownership.owner_machine_id);
+            let record = stored_profile_by_workspace(conn, workspace_id)?;
+            let Some(record) = record else {
+                return Ok(SanitizedExecutionProfile {
+                    workspace_id: workspace_id.to_string(),
+                    owner_machine_id,
+                    freshness: ProjectionFreshness::Missing,
+                    generation: None,
+                    observed_at: None,
+                    received_at: None,
+                    age_seconds: None,
+                    profile: None,
+                });
+            };
+            let age = age_seconds(now, record.received_at);
+            let freshness = if now.signed_duration_since(record.received_at) > freshness_ttl {
+                ProjectionFreshness::Stale
+            } else {
+                ProjectionFreshness::Current
+            };
+            Ok(SanitizedExecutionProfile {
                 workspace_id: workspace_id.to_string(),
                 owner_machine_id,
-                freshness: ProjectionFreshness::Missing,
-                generation: None,
-                observed_at: None,
-                received_at: None,
-                age_seconds: None,
-                profile: None,
-            });
-        };
-        let age = age_seconds(now, record.received_at);
-        let freshness = if now.signed_duration_since(record.received_at) > freshness_ttl {
-            ProjectionFreshness::Stale
-        } else {
-            ProjectionFreshness::Current
-        };
-        Ok(SanitizedExecutionProfile {
-            workspace_id: workspace_id.to_string(),
-            owner_machine_id,
-            freshness,
-            generation: Some(record.generation),
-            observed_at: Some(record.profile.observed_at),
-            received_at: Some(record.received_at),
-            age_seconds: Some(age),
-            profile: Some(record.profile),
+                freshness,
+                generation: Some(record.generation),
+                observed_at: Some(record.profile.observed_at),
+                received_at: Some(record.received_at),
+                age_seconds: Some(age),
+                profile: Some(record.profile),
+            })
         })
+    }
+}
+
+fn resolve_host_id_in_connection(
+    conn: &Connection,
+    host_id: &str,
+) -> Result<HostNameResolution, OrbitError> {
+    let mut statement = conn
+        .prepare(
+            "SELECT
+                h.machine_id, h.host_id, h.labels_json, h.status,
+                h.registered_at, h.updated_at, h.retired_at, h.last_seen_at,
+                NULL, NULL, NULL, NULL
+             FROM hosts h WHERE h.host_id = ?1
+             UNION ALL
+             SELECT
+                h.machine_id, h.host_id, h.labels_json, h.status,
+                h.registered_at, h.updated_at, h.retired_at, h.last_seen_at,
+                a.host_id, a.machine_id, a.created_at, a.warning
+             FROM host_aliases a
+             JOIN hosts h ON h.machine_id = a.machine_id
+             WHERE a.host_id = ?1",
+        )
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+    let rows = statement
+        .query_map([host_id], resolution_row)
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+    let mut matches = Vec::new();
+    for row in rows {
+        let raw = row.map_err(|error| OrbitError::Store(error.to_string()))?;
+        matches.push((
+            HostRecord::try_from(raw.host)?,
+            raw.alias.map(HostAlias::try_from).transpose()?,
+        ));
+    }
+
+    if matches.is_empty() {
+        return Ok(HostNameResolution::Unknown {
+            host_id: host_id.to_string(),
+        });
+    }
+    if matches.len() > 1 {
+        let mut machine_ids: Vec<String> = matches
+            .into_iter()
+            .map(|(host, _)| host.machine_id)
+            .collect();
+        machine_ids.sort();
+        machine_ids.dedup();
+        return Ok(HostNameResolution::Collision {
+            host_id: host_id.to_string(),
+            machine_ids,
+        });
+    }
+
+    let (host, alias) = matches.pop().ok_or_else(|| {
+        OrbitError::Store(format!(
+            "host_id '{host_id}' resolution lost its only match"
+        ))
+    })?;
+    match (host.status, alias) {
+        (HostStatus::Active, None) => Ok(HostNameResolution::Active { host }),
+        (HostStatus::Active, Some(alias)) => Ok(HostNameResolution::Alias { host, alias }),
+        (HostStatus::Retired, alias) => Ok(HostNameResolution::Retired { host, alias }),
     }
 }
 
@@ -681,7 +692,7 @@ fn register_host_in_transaction(
     }
 
     ensure_name_available(conn, &registration.host_id)?;
-    let now = crate::now_string();
+    let now = super::now_string();
     let labels_json = serde_json::to_string(&registration.labels)
         .map_err(|error| OrbitError::Store(error.to_string()))?;
     conn.execute(
@@ -719,7 +730,7 @@ pub(crate) fn advance_registry_revision(conn: &Connection) -> Result<(), OrbitEr
              WHERE id = 0
                AND typeof(registry_revision) = 'integer'
                AND registry_revision < 9223372036854775807",
-            params![crate::now_string()],
+            params![super::now_string()],
         )
         .map_err(|error| OrbitError::Store(format!("advance registry revision: {error}")))?;
     if updated != 1 {
@@ -779,9 +790,9 @@ fn ownership_by_workspace(
         Ok(WorkspaceOwnership {
             workspace_id,
             owner_machine_id,
-            bound_at: crate::parse_timestamp(&bound_at)
+            bound_at: super::parse_timestamp(&bound_at)
                 .map_err(|error| OrbitError::Store(error.to_string()))?,
-            updated_at: crate::parse_timestamp(&updated_at)
+            updated_at: super::parse_timestamp(&updated_at)
                 .map_err(|error| OrbitError::Store(error.to_string()))?,
         })
     })
@@ -849,7 +860,7 @@ impl TryFrom<RawPresenceRow> for HostWorkspacePresence {
             machine_id: row.machine_id,
             workspace_id: row.workspace_id,
             root: row.root.into(),
-            last_verified: crate::parse_timestamp(&row.last_verified)
+            last_verified: super::parse_timestamp(&row.last_verified)
                 .map_err(|error| OrbitError::Store(error.to_string()))?,
         })
     }
@@ -893,7 +904,7 @@ fn stored_profile_by_workspace(
         Ok(StoredExecutionProfile {
             profile,
             generation,
-            received_at: crate::parse_timestamp(&received_at)
+            received_at: super::parse_timestamp(&received_at)
                 .map_err(|error| OrbitError::Store(error.to_string()))?,
         })
     })
@@ -1092,9 +1103,9 @@ impl TryFrom<RawHostRow> for HostRecord {
             host_id: row.host_id,
             labels,
             status,
-            registered_at: crate::parse_timestamp(&row.registered_at)
+            registered_at: super::parse_timestamp(&row.registered_at)
                 .map_err(|error| OrbitError::Store(error.to_string()))?,
-            updated_at: crate::parse_timestamp(&row.updated_at)
+            updated_at: super::parse_timestamp(&row.updated_at)
                 .map_err(|error| OrbitError::Store(error.to_string()))?,
             retired_at: parse_optional_timestamp(row.retired_at)?,
             last_seen_at: parse_optional_timestamp(row.last_seen_at)?,
@@ -1156,7 +1167,7 @@ impl TryFrom<RawAliasRow> for HostAlias {
         Ok(Self {
             alias_host_id: row.host_id,
             machine_id: row.machine_id,
-            created_at: crate::parse_timestamp(&row.created_at)
+            created_at: super::parse_timestamp(&row.created_at)
                 .map_err(|error| OrbitError::Store(error.to_string()))?,
             warning: row.warning,
         })
@@ -1168,7 +1179,7 @@ fn parse_optional_timestamp(
 ) -> Result<Option<chrono::DateTime<chrono::Utc>>, OrbitError> {
     value
         .map(|value| {
-            crate::parse_timestamp(&value).map_err(|error| OrbitError::Store(error.to_string()))
+            super::parse_timestamp(&value).map_err(|error| OrbitError::Store(error.to_string()))
         })
         .transpose()
 }

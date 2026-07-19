@@ -9,15 +9,13 @@ use orbit_common::types::{
     SpokeRegistrationRequestV1, SpokeRegistrationResultV1, SpokeRegistrationStageV1,
     ToolSessionContext, WorkspaceStatus, mcp_advertised_tool_name,
 };
-use orbit_core::routines::{
-    HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, load_host_identity,
-};
 use orbit_core::runtime::HubCoordinationExecutor;
 use orbit_core::{NotFoundKind, OrbitError, redact_sensitive_env_text};
 use orbit_mcp::{
     CANONICAL_MCP_REGISTRY_REVISION, HubServerContractV1, MCP_CONTRACT_REVISION, McpHost,
     hub_schema_digest,
 };
+use orbit_remote::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, load_host_identity};
 use serde_json::{Value, json};
 
 use super::host::{
@@ -83,7 +81,7 @@ impl HubMcpHost {
                 self.identity.machine_id, identity.machine_id
             )));
         }
-        let snapshot = orbit_core::host_registry::registry_snapshot_at(&self.global_root)?;
+        let snapshot = orbit_remote::registry_snapshot_at(&self.global_root)?;
         match snapshot.hub_machine_id.as_deref() {
             Some(configured) if configured == identity.machine_id => Ok((identity, snapshot)),
             Some(configured) => Err(OrbitError::InvalidInput(format!(
@@ -220,8 +218,8 @@ impl HubMcpHost {
                 "hub MCP workspace selector '{selector}' must be a stable logical workspace ID, never a checkout path"
             )));
         }
-        let registry_path = orbit_core::workspace_registry::registry_path_for(&self.global_root);
-        let registry = orbit_core::workspace_registry::load_registry_from(&registry_path)?;
+        let registry_path = orbit_remote::workspace_registry::registry_path_for(&self.global_root);
+        let registry = orbit_remote::workspace_registry::load_registry_from(&registry_path)?;
         let workspace = registry
             .workspaces
             .into_iter()
@@ -258,9 +256,7 @@ impl HubMcpHost {
 
     fn record_denial(&self, name: &str, context: &ToolSessionContext, denial: &OrbitError) {
         let params = mcp_preflight_failure_params(name, context, denial);
-        if let Err(error) =
-            orbit_core::host_registry::record_global_audit_event_at(&self.global_root, &params)
-        {
+        if let Err(error) = orbit_remote::record_global_audit_event_at(&self.global_root, &params) {
             tracing::warn!(tool = name, error = %error, "failed to persist hub MCP denial audit");
         }
     }
@@ -285,9 +281,7 @@ impl HubMcpHost {
                 params.error_message = Some(redact_sensitive_env_text(&error.to_string()));
             }
         }
-        if let Err(error) =
-            orbit_core::host_registry::record_global_audit_event_at(&self.global_root, &params)
-        {
+        if let Err(error) = orbit_remote::record_global_audit_event_at(&self.global_root, &params) {
             tracing::warn!(tool = name, error = %error, "failed to persist hub MCP outcome audit");
         }
     }
@@ -426,7 +420,7 @@ impl HubMcpHost {
             )));
         }
 
-        let service = match orbit_core::host_registry::host_registry_service_at(&self.global_root) {
+        let service = match orbit_remote::host_registry_service_at(&self.global_root) {
             Ok(service) => service,
             Err(error) => return SpokeRegistrationResultV1::rejected(&error),
         };
@@ -441,8 +435,8 @@ impl HubMcpHost {
             Err(error) => return SpokeRegistrationResultV1::rejected(&error),
         };
 
-        let registry_path = orbit_core::workspace_registry::registry_path_for(&self.global_root);
-        let registry = match orbit_core::workspace_registry::load_registry_from(&registry_path) {
+        let registry_path = orbit_remote::workspace_registry::registry_path_for(&self.global_root);
+        let registry = match orbit_remote::workspace_registry::load_registry_from(&registry_path) {
             Ok(registry) => registry,
             Err(error) => {
                 return registration_partial(

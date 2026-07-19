@@ -1,4 +1,4 @@
-use orbit_common::types::OrbitError;
+use orbit_common::types::{OrbitError, ToolSessionContext};
 use orbit_tools::{OrbitBuiltinAction, OrbitTaskScope, ReservationOwnerContext};
 use serde_json::Value;
 
@@ -41,7 +41,7 @@ pub(super) fn execute(
         OrbitBuiltinAction::FrictionStats => super::friction_tools::stats(runtime),
         OrbitBuiltinAction::FrictionTags => super::friction_tools::tags(runtime),
         OrbitBuiltinAction::FrictionUpdate => super::friction_tools::update(runtime, input),
-        OrbitBuiltinAction::HostList => super::registry_tools::host_list(runtime),
+        OrbitBuiltinAction::HostList => remote_coordination_tool(runtime, "orbit.host.list", input),
         OrbitBuiltinAction::LearningAdd => super::learning_tools::add(runtime, input, agent, model),
         OrbitBuiltinAction::LearningList => super::learning_tools::list(runtime, input),
         OrbitBuiltinAction::LearningPrune => super::learning_tools::prune(runtime, input),
@@ -92,7 +92,9 @@ pub(super) fn execute(
         OrbitBuiltinAction::TaskShow => super::task_tools::show(runtime, input),
         OrbitBuiltinAction::TaskStart => super::task_tools::start(runtime, input, agent, model),
         OrbitBuiltinAction::TaskUpdate => super::task_tools::update(runtime, input, agent, model),
-        OrbitBuiltinAction::WorkspaceList => super::registry_tools::workspace_list(runtime),
+        OrbitBuiltinAction::WorkspaceList => {
+            remote_coordination_tool(runtime, "orbit.workspace.list", input)
+        }
     }?;
     super::artifact_redaction::finish_tool_response(
         runtime,
@@ -103,4 +105,17 @@ pub(super) fn execute(
         model_for_audit.as_deref(),
     )?;
     Ok(response)
+}
+
+fn remote_coordination_tool(
+    runtime: &OrbitRuntime,
+    name: &str,
+    input: Value,
+) -> Result<Value, OrbitError> {
+    let dispatcher = runtime.coordination_tool_dispatcher().ok_or_else(|| {
+        OrbitError::Execution(format!(
+            "coordination tool '{name}' requires a configured feature dispatcher"
+        ))
+    })?;
+    dispatcher.execute_coordination_tool(name, input, ToolSessionContext::default())
 }

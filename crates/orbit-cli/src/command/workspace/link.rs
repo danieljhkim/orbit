@@ -1,6 +1,7 @@
 use clap::Args;
-use orbit_core::workspace_registry;
-use orbit_core::{HostRegistryService, OrbitError, OrbitRuntime, require_local_hub_identity};
+use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_remote::workspace_registry;
+use orbit_remote::{host_registry_service_at, require_local_hub_identity};
 
 use crate::command::Execute;
 
@@ -18,7 +19,7 @@ impl Execute for WorkspaceLinkArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let global_root = runtime.global_root();
         let local_hub = require_local_hub_identity(&global_root)?;
-        let service = HostRegistryService::new(runtime.sqlite_store()?);
+        let service = host_registry_service_at(&global_root)?;
         service.require_configured_local_hub(&local_hub)?;
         let registry_path = workspace_registry::registry_path_for(&global_root);
         let registry = workspace_registry::load_registry_from(&registry_path)?;

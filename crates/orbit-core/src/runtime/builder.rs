@@ -30,7 +30,6 @@ use crate::context::{
 };
 use crate::runtime::WorkspaceRuntimeBinding;
 use crate::skill_catalog::SkillCatalog;
-use crate::workspace_registry;
 
 /// Runtime builder. Global root provides activities, jobs, executors, policies,
 /// config, global skills, and SQLite. Shared root provides existing workspace
@@ -55,7 +54,6 @@ pub(crate) fn build_context_from_roots(
     // prefer the registry's workspace root over the parent-directory fallback.
     let repo_root = binding
         .map(|binding| binding.repo_root.clone())
-        .or_else(|| registered_repo_root(global_root, workspace_root))
         .unwrap_or_else(|| {
             workspace_root
                 .parent()
@@ -199,18 +197,6 @@ pub(crate) fn build_context_from_roots(
             duel,
         ),
     ))
-}
-
-fn registered_repo_root(global_root: &Path, workspace_root: &Path) -> Option<PathBuf> {
-    let registry_path = workspace_registry::registry_path_for(global_root);
-    let registry = workspace_registry::load_registry_from(&registry_path).ok()?;
-    let workspace_root_canonical =
-        std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
-    registry.checkouts.iter().find_map(|checkout| {
-        let orbit_dir_canonical = std::fs::canonicalize(&checkout.orbit_dir)
-            .unwrap_or_else(|_| checkout.orbit_dir.clone());
-        (orbit_dir_canonical == workspace_root_canonical).then(|| checkout.repo_root.clone())
-    })
 }
 
 fn worktree_root_from_local_root(local_root: &Path) -> PathBuf {

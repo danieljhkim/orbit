@@ -237,3 +237,19 @@ pub(crate) fn reject_execution_profile_env_overrides_from(
         active.join(", ")
     )))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::reject_execution_profile_env_overrides_from;
+
+    #[test]
+    fn unsupported_execution_environment_overrides_fail_closed_without_values() {
+        let error = reject_execution_profile_env_overrides_from(|name| {
+            (name == "ORBIT_JOB_DIR").then(|| "/secret/catalog/path".to_string())
+        })
+        .expect_err("override must fail")
+        .to_string();
+        assert!(error.contains("ORBIT_JOB_DIR"));
+        assert!(!error.contains("/secret/catalog/path"));
+    }
+}

@@ -9,7 +9,8 @@
 
 use clap::Args;
 use orbit_core::OrbitError;
-use orbit_core::routines::{RoutineSweepReport, SweepOptions, SweepOutcome, run_sweep};
+use orbit_core::routines::{RoutineSweepReport, SweepOptions, SweepOutcome};
+use orbit_remote::routines::run_sweep;
 use serde_json::json;
 
 #[derive(Args)]

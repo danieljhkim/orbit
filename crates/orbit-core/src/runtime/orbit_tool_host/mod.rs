@@ -9,7 +9,6 @@ mod input;
 mod json;
 mod learning_tools;
 mod pipeline_tools;
-mod registry_tools;
 mod review_threads;
 mod search_tools;
 mod semantic_tools;

@@ -324,27 +324,8 @@ fn resolve_workspace_ship_input(
         });
     }
 
-    let registry_path = crate::workspace_registry::registry_path_for(&runtime.global_root());
-    let registry =
-        crate::workspace_registry::load_registry_from(&registry_path).map_err(|error| {
-            DispatchError::DeterministicActionFailed {
-                action: action.to_string(),
-                message: format!("load workspace registry: {error}"),
-            }
-        })?;
-    let source_orbit_dir = runtime.shared_root();
-    let mode = registry
-        .checkouts
-        .iter()
-        .find(|checkout| checkout.orbit_dir == source_orbit_dir)
-        .and_then(|checkout| {
-            crate::workspace_registry::find_workspace(&registry, &checkout.workspace_id)
-        })
-        .map(crate::command::workflow::resolved_ship_mode)
-        .unwrap_or(crate::command::workflow::ShipMode::Local);
-
     crate::command::workflow::build_ship_input(
-        mode,
+        crate::command::workflow::ShipMode::Local,
         runtime.workflow_base_branch(),
         &[],
         false,
@@ -447,8 +428,6 @@ mod tests {
     use orbit_tools::ToolContext;
     use serde_json::json;
     use tempfile::tempdir;
-
-    use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 
     fn seed_task(
         runtime: &OrbitRuntime,
@@ -617,74 +596,6 @@ mod tests {
             }
             other => panic!("expected registered action failure, got {other}"),
         }
-    }
-
-    #[test]
-    fn workspace_ship_input_is_source_local_and_ignores_auto_ship() {
-        let root = tempdir().expect("tempdir");
-        let global = root.path().join("global");
-        let source_root = root.path().join("source");
-        let source_orbit = source_root.join(".orbit");
-        let other_root = root.path().join("other");
-        let other_orbit = other_root.join(".orbit");
-        std::fs::create_dir_all(&source_orbit).expect("source orbit");
-        std::fs::create_dir_all(&other_orbit).expect("other orbit");
-        std::fs::create_dir_all(&global).expect("global orbit");
-        std::fs::write(
-            source_orbit.join("config.toml"),
-            "[workflow]\nbase_branch = \"agent-main\"\nauto_ship = false\n",
-        )
-        .expect("source config");
-
-        let now = Utc::now();
-        let registry = WorkspaceRegistry {
-            workspaces: vec![
-                Workspace {
-                    id: "ws-other".to_string(),
-                    name: "other".to_string(),
-                    owner_machine_id: None,
-                    git_remote: None,
-                    ship_mode: Some("local".to_string()),
-                    base_branch: "wrong-branch".to_string(),
-                    status: WorkspaceStatus::Active,
-                    created_at: now,
-                    updated_at: now,
-                },
-                Workspace {
-                    id: "ws-source".to_string(),
-                    name: "source".to_string(),
-                    owner_machine_id: None,
-                    git_remote: None,
-                    ship_mode: Some("pr".to_string()),
-                    base_branch: "registry-branch".to_string(),
-                    status: WorkspaceStatus::Active,
-                    created_at: now,
-                    updated_at: now,
-                },
-            ],
-            checkouts: vec![
-                WorkspaceCheckout::owner("ws-other".to_string(), other_root, other_orbit),
-                WorkspaceCheckout::owner(
-                    "ws-source".to_string(),
-                    source_root,
-                    source_orbit.clone(),
-                ),
-            ],
-            ..WorkspaceRegistry::default()
-        };
-        crate::workspace_registry::save_registry_to(
-            &registry,
-            &crate::workspace_registry::registry_path_for(&global),
-        )
-        .expect("save registry");
-
-        let runtime = OrbitRuntime::from_roots(&global, &source_orbit).expect("source runtime");
-        assert!(!runtime.workflow_auto_ship());
-        let input = resolve_workspace_ship_input(&runtime, "resolve_workspace_ship_input")
-            .expect("resolve source ship input");
-
-        assert_eq!(input, json!({"mode": "pr", "base_branch": "agent-main"}));
-        assert!(input.get("task_ids").is_none());
     }
 
     #[test]

@@ -8,7 +8,6 @@ use orbit_common::types::{
     RegistryAliasV1, RegistryCacheV1, RegistryHostV1, RegistrySnapshotV1, RoutineDefinition,
     parse_routine_yaml,
 };
-use orbit_remote::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, RegistryCacheService};
 use orbit_store::{RoutineFireIntentParams, Store};
 use tempfile::tempdir;
 
@@ -16,9 +15,15 @@ use crate::OrbitError;
 use crate::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin};
 use crate::routines::sweep::{RoutineDispatch, SweepOptions, run_sweep_core_with_registry};
 use crate::routines::validation::{
-    RoutineDiagnosticSeverity, RoutineRegistryCacheView, RoutineRegistryView,
-    load_routine_registry_view, validate_routine_pins,
+    RoutineDiagnosticSeverity, RoutineHostIdentity, RoutineRegistryCacheView, RoutineRegistryView,
+    validate_routine_pins,
 };
+
+#[derive(Clone, Copy)]
+enum HostMode {
+    Hub,
+    Spoke,
+}
 
 fn ts(minute: u32, second: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 7, 18, 12, minute, second)
@@ -26,12 +31,10 @@ fn ts(minute: u32, second: u32) -> DateTime<Utc> {
         .expect("valid timestamp")
 }
 
-fn identity(machine_id: &str, host_id: &str, mode: HostMode) -> HostIdentity {
-    HostIdentity {
-        schema_version: HOST_IDENTITY_SCHEMA_VERSION,
+fn identity(machine_id: &str, host_id: &str, _mode: HostMode) -> RoutineHostIdentity {
+    RoutineHostIdentity {
         machine_id: machine_id.to_string(),
         host_id: host_id.to_string(),
-        mode,
     }
 }
 
@@ -316,56 +319,6 @@ fn every_unusable_spoke_cache_keeps_exact_local_committed_pin_eligible() {
             RoutineDiagnosticSeverity::Warning
         );
     }
-}
-
-#[test]
-fn cache_loader_preserves_malformed_and_future_bytes_and_uses_strict_age_boundary() {
-    let now = ts(10, 0);
-    let local = identity("hm_local", "local", HostMode::Spoke);
-
-    for (body, expected) in [
-        (b"{not json".as_slice(), "registry_cache_malformed"),
-        (
-            br#"{"schema_version":2,"received_at":"2026-07-18T12:00:00Z","snapshot":{}}"#
-                .as_slice(),
-            "registry_cache_future_schema",
-        ),
-    ] {
-        let root = tempdir().expect("temp root");
-        let path = root.path().join("registry-cache.json");
-        std::fs::write(&path, body).expect("write cache");
-        let store = Store::open(&root.path().join("orbit.db")).expect("store");
-        let view =
-            load_routine_registry_view(root.path(), &store, &local, now, Duration::minutes(5))
-                .expect("classified cache");
-        assert_eq!(view.status().diagnostics[0].code, expected);
-        assert_eq!(std::fs::read(&path).expect("read cache"), body);
-    }
-
-    let root = tempdir().expect("temp root");
-    let service = RegistryCacheService::new(root.path());
-    service
-        .refresh(snapshot(Vec::new()), now)
-        .expect("seed cache");
-    let store = Store::open(&root.path().join("orbit.db")).expect("store");
-    let exact = load_routine_registry_view(
-        root.path(),
-        &store,
-        &local,
-        now + Duration::minutes(5),
-        Duration::minutes(5),
-    )
-    .expect("exact threshold");
-    assert_eq!(exact.status().state, "current");
-    let over = load_routine_registry_view(
-        root.path(),
-        &store,
-        &local,
-        now + Duration::minutes(5) + Duration::seconds(1),
-        Duration::minutes(5),
-    )
-    .expect("over threshold");
-    assert_eq!(over.status().state, "stale");
 }
 
 fn loaded_routine(pin: &str) -> LoadedRoutine {

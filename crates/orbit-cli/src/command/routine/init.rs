@@ -1,7 +1,8 @@
 use clap::Args;
 use orbit_core::OrbitError;
-use orbit_core::routines::{install_clock, load_host_identity};
-use orbit_core::workspace_registry;
+use orbit_core::routines::install_clock;
+use orbit_remote::load_host_identity;
+use orbit_remote::workspace_registry;
 
 #[derive(Args)]
 #[command(

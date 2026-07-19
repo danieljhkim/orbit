@@ -7,7 +7,7 @@ use orbit_common::types::{
     HostRegistration, HostStatus, ProjectionFreshness, WorkspacePresenceDeclaration,
 };
 
-use crate::Store;
+use super::super::RemoteStore;
 
 fn registration(machine_id: &str, host_id: &str, labels: &[&str]) -> HostRegistration {
     HostRegistration {
@@ -53,7 +53,7 @@ fn execution_profile(
 
 #[test]
 fn deterministic_two_host_fixture_covers_registry_lifecycle_and_name_safety() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     let alpha = registration("hm_alpha", "alpha", &["codex", "os:linux"]);
     let beta = registration("hm_beta", "beta", &["claude", "os:macos"]);
 
@@ -174,7 +174,7 @@ fn deterministic_two_host_fixture_covers_registry_lifecycle_and_name_safety() {
 
 #[test]
 fn rename_failure_rolls_back_current_name_and_alias_insert() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     store
         .register_host(&registration("hm_alpha", "alpha", &[]))
         .expect("register");
@@ -208,7 +208,7 @@ fn rename_failure_rolls_back_current_name_and_alias_insert() {
 
 #[test]
 fn rename_preflight_matches_transaction_validation_and_never_mutates() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     store
         .register_host(&registration("hm_alpha", "alpha", &[]))
         .expect("register alpha");
@@ -254,7 +254,7 @@ fn rename_preflight_matches_transaction_validation_and_never_mutates() {
 
 #[test]
 fn aliases_are_immutable_and_cross_table_uniqueness_is_enforced() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     store
         .register_host(&registration("hm_alpha", "alpha", &[]))
         .expect("register alpha");
@@ -322,17 +322,17 @@ fn aliases_are_immutable_and_cross_table_uniqueness_is_enforced() {
 fn reopening_store_preserves_registry_semantics_and_migration_is_a_noop() {
     let directory = tempfile::tempdir().expect("tempdir");
     let path = directory.path().join("orbit.db");
-    let store = Store::open(&path).expect("store");
+    let store = RemoteStore::open(&path).expect("store");
     store
         .register_host(&registration("hm_alpha", "alpha", &["codex"]))
         .expect("register");
     store.rename_host("hm_alpha", "alpha-2").expect("rename");
-    let first_ledger = store.applied_migrations().expect("first ledger");
+    let first_ledger = store.schema_status().expect("first feature ledger");
     drop(store);
 
-    let reopened = Store::open(&path).expect("reopen");
+    let reopened = RemoteStore::open(&path).expect("reopen");
     assert_eq!(
-        reopened.applied_migrations().expect("second ledger"),
+        reopened.schema_status().expect("second feature ledger"),
         first_ledger
     );
     let host = reopened
@@ -355,7 +355,7 @@ fn reopening_store_preserves_registry_semantics_and_migration_is_a_noop() {
 
 #[test]
 fn identifiers_reject_paths_instead_of_persisting_them() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     for machine_id in [
         "/home/operator/.ssh/id",
         "dk1",
@@ -378,7 +378,7 @@ fn identifiers_reject_paths_instead_of_persisting_them() {
 
 #[test]
 fn two_host_multi_workspace_fixture_covers_ownership_presence_profile_cas_and_freshness() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     store
         .register_host(&registration("hm_alpha", "alpha", &["codex"]))
         .expect("register alpha");
@@ -647,7 +647,7 @@ fn reopen_preserves_workspace_coordination_projections() {
         .with_ymd_and_hms(2026, 7, 18, 10, 0, 0)
         .single()
         .expect("timestamp");
-    let store = Store::open(&path).expect("store");
+    let store = RemoteStore::open(&path).expect("store");
     store
         .register_host(&registration("hm_alpha", "alpha", &[]))
         .expect("host");
@@ -675,11 +675,11 @@ fn reopen_preserves_workspace_coordination_projections() {
             Duration::minutes(2),
         )
         .expect("profile");
-    let ledger = store.applied_migrations().expect("ledger");
+    let ledger = store.schema_status().expect("feature ledger");
     drop(store);
 
-    let reopened = Store::open(&path).expect("reopen");
-    assert_eq!(reopened.applied_migrations().expect("ledger"), ledger);
+    let reopened = RemoteStore::open(&path).expect("reopen");
+    assert_eq!(reopened.schema_status().expect("feature ledger"), ledger);
     assert_eq!(
         reopened
             .get_workspace_ownership("ws_alpha")
@@ -707,7 +707,7 @@ fn reopen_preserves_workspace_coordination_projections() {
 
 #[test]
 fn hub_registration_is_singular_atomic_and_advances_once() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     let hub = registration("hm_hub", "hub", &["codex"]);
 
     store.register_hub(&hub).expect("register hub");
@@ -737,7 +737,7 @@ fn hub_registration_is_singular_atomic_and_advances_once() {
 
 #[test]
 fn hub_registration_rolls_back_host_and_identity_when_revision_is_exhausted() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     {
         let connection = store.connection();
         let conn = connection.lock().expect("connection");
@@ -760,7 +760,7 @@ fn hub_registration_rolls_back_host_and_identity_when_revision_is_exhausted() {
 
 #[test]
 fn configured_hub_retirement_is_rejected_inside_store_transaction() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     store
         .register_hub(&registration("hm_hub", "hub", &[]))
         .expect("register hub");
@@ -785,7 +785,7 @@ fn configured_hub_retirement_is_rejected_inside_store_transaction() {
 
 #[test]
 fn registry_revision_overflow_rolls_back_snapshot_payload_mutation() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     store
         .register_host(&registration("hm_alpha", "alpha", &[]))
         .expect("register");
@@ -825,7 +825,7 @@ fn registry_revision_overflow_rolls_back_snapshot_payload_mutation() {
 
 #[test]
 fn exact_presence_and_profile_replays_are_revision_noops() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     store
         .register_host(&registration("hm_alpha", "alpha", &[]))
         .expect("register");
@@ -908,7 +908,7 @@ fn exact_presence_and_profile_replays_are_revision_noops() {
 
 #[test]
 fn registry_revision_advances_once_per_snapshot_visible_mutation_and_skips_no_ops() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     assert_eq!(store.registry_revision().expect("initial revision"), 0);
 
     // Register advances; repeating the identical registration is a no-op.
@@ -980,7 +980,7 @@ fn registry_revision_advances_once_per_snapshot_visible_mutation_and_skips_no_op
 
 #[test]
 fn registry_snapshot_is_path_free_and_carries_no_crew_or_model_content() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     store
         .register_hub(&registration("hm_alpha", "alpha", &["codex"]))
         .expect("register hub");

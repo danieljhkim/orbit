@@ -1,5 +1,6 @@
 use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime, migrate_learning_layout_at};
+use orbit_remote::runtime::RemoteRuntimeFactory;
 use serde_json::json;
 
 use crate::command::Execute;
@@ -17,14 +18,10 @@ impl LearningMigrateLayoutArgs {
         root_override: Option<&std::path::Path>,
     ) -> Result<(), OrbitError> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let roots = OrbitRuntime::resolve_roots_for_cwd(&cwd, root_override)?;
+        let roots = RemoteRuntimeFactory::resolve_roots_for_cwd(&cwd, root_override)?;
         let report = migrate_learning_layout_at(&roots.shared_root)?;
         if !report.already_migrated {
-            let runtime = OrbitRuntime::from_resolved_roots(
-                &roots.global_root,
-                &roots.shared_root,
-                &roots.local_root,
-            )?;
+            let runtime = RemoteRuntimeFactory::open_resolved_roots(roots)?;
             runtime.sync_learnings()?;
         }
         print_report(&report, self.json)

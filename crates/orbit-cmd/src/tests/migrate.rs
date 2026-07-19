@@ -9,7 +9,7 @@ use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
 
 use orbit_core::OrbitRuntime;
 
-use crate::migrate::{MigrateCommands, migrate_dry_run_at};
+use crate::{MigrateCommands, migrate_dry_run_at};
 
 struct Roots {
     _temp: tempfile::TempDir,

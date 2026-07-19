@@ -41,7 +41,7 @@
 //! - `skill_catalog` — re-exported skill store for CLI skill lookup
 //!
 //! # Dependency direction
-//! orbit-common, orbit-store, orbit-remote, orbit-policy, orbit-exec, orbit-tools, orbit-agent, orbit-engine
+//! orbit-common, orbit-store, orbit-policy, orbit-exec, orbit-tools, orbit-agent, orbit-engine
 //! → `orbit-core` → orbit-cmd → orbit-cli / orbit-dashboard
 
 pub mod auto_tasks;
@@ -49,13 +49,10 @@ pub mod command;
 pub mod config;
 pub mod context;
 pub mod execution_environment;
-pub mod host_registry;
 pub mod metrics;
 mod paths;
-pub mod registry_cache;
 pub mod routines;
 pub mod runtime;
-pub mod workspace_registry;
 
 // Store metric/scoreboard projections consumed by the dashboard's JSON API.
 pub use orbit_store::scoreboard_summary;
@@ -78,8 +75,6 @@ pub use command::search::{
 pub use command::workflow::{ShipMode, build_ship_input, find_workflow, resolved_ship_mode};
 pub use context::ActorIdentity;
 pub use execution_environment::ExecutionEnvironmentSnapshot;
-pub use host_registry::{HostRegistryService, WorkspaceLink, require_local_hub_identity};
-pub use registry_cache::{RegistryCacheOutcome, RegistryCacheService, RegistryCacheState};
 // Shared domain types (owned by orbit-common) that the CLI and dashboard
 // render or construct.
 pub use auto_tasks::{AutoTaskAddParams, AutoTaskUpdateParams};

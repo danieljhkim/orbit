@@ -11,7 +11,8 @@ use chrono::Utc;
 use orbit_common::utility::blob_store::BlobStore;
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::command::task::TaskAddParams;
-use orbit_core::{JobRunState, OrbitRuntime, V2AuditEventInsertParams};
+use orbit_core::runtime::WorkspaceRuntimeBinding;
+use orbit_core::{JobRunState, OrbitRuntime, ShipMode, V2AuditEventInsertParams};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -937,7 +938,31 @@ fn seed_ship_workspace(
     let orbit_dir = repo_root.join(".orbit");
     std::fs::create_dir_all(&orbit_dir).expect("create .orbit");
     std::fs::write(orbit_dir.join("config.toml"), "").expect("write config");
+    std::fs::write(
+        orbit_dir.join("config.yaml"),
+        format!("schema_version: 1\nworkspace_id: ws_{name}\n"),
+    )
+    .expect("write workspace identity");
     (orbit_dir, repo_root)
+}
+
+fn ship_workspace_entry(
+    id: &str,
+    repo_root: std::path::PathBuf,
+    orbit_dir: std::path::PathBuf,
+) -> crate::state::WsEntry {
+    crate::state::WsEntry {
+        id: id.to_string(),
+        name: id.to_string(),
+        binding: Some(WorkspaceRuntimeBinding {
+            workspace_id: format!("ws_{id}"),
+            repo_root: repo_root.clone(),
+            ship_mode: ShipMode::Local,
+        }),
+        repo_root,
+        orbit_dir,
+        active: true,
+    }
 }
 
 async fn request_ship_global(
@@ -974,20 +999,8 @@ async fn ship_endpoint_in_global_mode_targets_selected_workspace() {
     let (alpha_orbit, alpha_repo) = seed_ship_workspace(tmp.path(), "alpha");
     let (beta_orbit, beta_repo) = seed_ship_workspace(tmp.path(), "beta");
     let entries = vec![
-        crate::state::WsEntry {
-            id: "alpha".to_string(),
-            name: "alpha".to_string(),
-            repo_root: alpha_repo,
-            orbit_dir: alpha_orbit.clone(),
-            active: true,
-        },
-        crate::state::WsEntry {
-            id: "beta".to_string(),
-            name: "beta".to_string(),
-            repo_root: beta_repo,
-            orbit_dir: beta_orbit.clone(),
-            active: true,
-        },
+        ship_workspace_entry("alpha", alpha_repo, alpha_orbit.clone()),
+        ship_workspace_entry("beta", beta_repo, beta_orbit.clone()),
     ];
     let state = crate::state::DashboardState::global(
         global_root.clone(),

@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use clap::{Args, Subcommand};
 use orbit_common::types::{McpCapability, ToolSessionContext};
-use orbit_core::routines::{HostIdentityState, inspect_host_identity};
 use orbit_core::runtime::resolve_global_root;
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_mcp::{McpHost, hub_schema_digest};
+use orbit_remote::{HostIdentityState, HostMode, inspect_host_identity};
 
 use crate::command::Execute;
 
@@ -100,7 +100,7 @@ impl ServeArgs {
             let (host, machine_id, host_id): (Arc<dyn McpHost>, Option<String>, Option<String>) =
                 match inspect_host_identity(&global_root)? {
                     HostIdentityState::Present(identity) => {
-                        if identity.mode == orbit_core::routines::HostMode::Spoke {
+                        if identity.mode == HostMode::Spoke {
                             let (route, _) =
                                 trusted_config.spoke_route(&identity, Some(capability))?;
                             let definitions = canonical_mcp_tool_definitions()

@@ -9,9 +9,9 @@ use toml::Value;
 const MANIFEST: &str = include_str!("../Cargo.toml");
 
 #[test]
-fn only_common_and_store_are_internal_dependencies() {
-    // ADR-0235: the domain points one way into persistence; persistence never
-    // depends back on this crate.
+fn vertical_feature_depends_only_on_neutral_core_and_store_layers() {
+    // ADR-0240: Remote composes neutral Core kernels over Store persistence;
+    // neither lower layer depends back on this feature crate.
     let manifest = parse_manifest();
     let mut dependency_names = BTreeSet::new();
 
@@ -25,11 +25,15 @@ fn only_common_and_store_are_internal_dependencies() {
 
     assert_eq!(
         orbit_deps,
-        vec!["orbit-common".to_string(), "orbit-store".to_string()],
-        "orbit-remote owns the registry domain and may depend only on orbit-common and orbit-store internally"
+        vec![
+            "orbit-common".to_string(),
+            "orbit-core".to_string(),
+            "orbit-store".to_string(),
+        ],
+        "orbit-remote may compose only the approved neutral Core and Store layers in this cut"
     );
 
-    for forbidden in ["orbit-core", "orbit-tools", "orbit-policy", "orbit-exec"] {
+    for forbidden in ["orbit-mcp", "orbit-tools", "orbit-policy", "orbit-exec"] {
         assert!(
             !dependency_names.contains(forbidden),
             "forbidden internal dependency added: {forbidden}"

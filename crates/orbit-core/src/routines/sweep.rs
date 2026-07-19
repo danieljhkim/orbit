@@ -15,20 +15,17 @@ use orbit_store::{RoutineFireIntentParams, RoutineFireRecord, RoutineFireState, 
 use serde_json::json;
 
 use crate::OrbitRuntime;
-use crate::workspace_registry;
 
 use super::due::{DueDecision, due_decision, parse_cron};
-use super::host::load_host_identity;
 use super::loader::{
-    LoadedRoutine, RoutineCollection, RoutineLoadError, collect_routines, discover_workspaces,
+    LoadedRoutine, RoutineCollection, RoutineLoadError, RoutineWorkspaceProvider, collect_routines,
 };
 #[cfg(test)]
 use super::validation::RoutineHostIdentity;
 use super::validation::{
     DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS,
-    RegistryRoutinePlacementProvider, RoutineHostIdentityView, RoutinePinValidation,
-    RoutinePlacementProjection, RoutinePlacementProvider, RoutineRegistryStatus,
-    RoutineRegistryView, validate_routine_pins,
+    RoutineHostIdentityView, RoutinePinValidation, RoutinePlacementProjection,
+    RoutinePlacementProvider, RoutineRegistryStatus, RoutineRegistryView, validate_routine_pins,
 };
 
 /// Dispatch seam for the sweep [ORB-00421]. The production impl
@@ -127,34 +124,52 @@ pub struct SweepOutcome {
     pub load_errors: Vec<RoutineLoadError>,
 }
 
-/// Run one sweep pass against the default global root (`~/.orbit`).
-pub fn run_sweep(options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
-    let global_root = workspace_registry::global_orbit_dir()?;
+/// Run one sweep pass against the default global root with caller-supplied
+/// placement and workspace providers.
+pub fn run_sweep_with_providers(
+    options: SweepOptions,
+    local_host: super::validation::RoutineHostIdentity,
+    placement_provider: &dyn RoutinePlacementProvider,
+    workspace_provider: &dyn RoutineWorkspaceProvider,
+) -> Result<SweepOutcome, OrbitError> {
+    let global_root = crate::runtime::resolve_global_root()?;
     // The OS clock invokes this every minute forever; on macOS launchd
     // redirects stdout/stderr into `logs/sweep.log`. Opportunistically roll +
     // prune it here (rename-based, best-effort) so an always-on host cannot
     // grow it without bound [ORB-00423]. No-op until the file exceeds the
-    // configured per-file budget. `run_sweep_at` (the test seam) is left
+    // configured per-file budget. `run_sweep_at_with_providers` (the explicit
+    // root seam) is left
     // untouched so tests never rotate real logs.
     log_rotation::rotate_and_prune(
         &super::clock::sweep_log_path(&global_root),
         &LogRotationConfig::load_global_best_effort(),
     );
-    run_sweep_at(&global_root, options)
+    run_sweep_at_with_providers(
+        &global_root,
+        options,
+        local_host,
+        placement_provider,
+        workspace_provider,
+    )
 }
 
-/// Run one sweep pass against an explicit global root (test seam).
-pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
-    let identity = load_host_identity(global_root)?;
-
+/// Run one sweep pass against an explicit global root using injected remote
+/// composition. Provider calls occur only after the sweep lock is held.
+pub fn run_sweep_at_with_providers(
+    global_root: &Path,
+    options: SweepOptions,
+    local_host: super::validation::RoutineHostIdentity,
+    placement_provider: &dyn RoutinePlacementProvider,
+    workspace_provider: &dyn RoutineWorkspaceProvider,
+) -> Result<SweepOutcome, OrbitError> {
     // One pass per host at a time: overlapping invocations from a slow prior
     // pass must not double-fire. flock releases on process death, so a
     // crashed sweep never wedges the next one.
     let lock = orbit_store::try_acquire_routine_sweep_lock(&global_root.join("state"))?;
     let Some(_lock) = lock else {
         return Ok(SweepOutcome {
-            host_id: identity.host_id,
-            machine_id: identity.machine_id,
+            host_id: local_host.host_id,
+            machine_id: local_host.machine_id,
             lock_busy: true,
             ..SweepOutcome::default()
         });
@@ -165,15 +180,14 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
     let RoutinePlacementProjection {
         local_host,
         registry: registry_view,
-    } = RegistryRoutinePlacementProvider::new(global_root, &store, &identity)
-        .load_routine_placement(
-            now_utc,
-            Duration::seconds(DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS),
-        )?;
+    } = placement_provider.load_routine_placement(
+        now_utc,
+        Duration::seconds(DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS),
+    )?;
     let registry = registry_view.status();
 
     // One runtime per active workspace; discovery and dispatch share them.
-    let discovered = discover_workspaces(global_root)?;
+    let discovered = workspace_provider.discover_workspaces(global_root)?;
     let mut load_errors: Vec<RoutineLoadError> = discovered.errors.clone();
 
     let mut collection = collect_routines(&discovered.entries, &local_host.host_id);
@@ -209,7 +223,7 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
 
 /// The dispatch-agnostic core of one sweep pass [ORB-00421]: outcome-sync
 /// (unless dry-run), then per-routine due evaluation and fire/skip. Split out
-/// from [`run_sweep_at`] — which owns the lock, store, and workspace discovery
+/// from [`run_sweep_at_with_providers`] — which owns the lock, store, and workspace discovery
 /// — so the orchestration can be driven against a temp store, a hand-built
 /// [`RoutineCollection`], a fake [`RoutineDispatch`], and an explicit `now`.
 #[cfg(test)]

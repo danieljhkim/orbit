@@ -6,16 +6,11 @@ use chrono::{TimeZone, Utc};
 use orbit_common::types::{Workspace, WorkspaceStatus};
 use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
 
-use crate::OrbitRuntime;
-use crate::command::activity::seed_default_activities;
-use crate::command::job::seed_default_jobs;
-use crate::execution_environment::reject_execution_profile_env_overrides_from;
+use orbit_core::command::init::{InitOptions, init_workspace_at_root};
+use orbit_core::runtime::WorkspaceRuntimeBinding;
+use orbit_core::{OrbitRuntime, resolved_ship_mode};
 
-#[test]
-fn compatibility_module_reexports_host_registry_service() {
-    let _service =
-        super::HostRegistryService::new(orbit_store::Store::open_in_memory().expect("store"));
-}
+use crate::runtime::ResolvedWorkspaceBinding;
 
 fn workspace(id: &str, owner_machine_id: Option<&str>) -> Workspace {
     let now = Utc
@@ -71,9 +66,15 @@ fn profile_runtime(config: &str) -> (tempfile::TempDir, OrbitRuntime, PathBuf, P
     )
     .expect("workspace config");
     fs::write(workspace_root.join("config.toml"), config).expect("runtime config");
-    seed_default_activities(&global_root.join("resources/activities"), true)
-        .expect("seed activities");
-    seed_default_jobs(&global_root.join("resources/jobs"), true).expect("seed jobs");
+    init_workspace_at_root(
+        &global_root,
+        InitOptions {
+            global_only: true,
+            refresh_defaults: true,
+            ..InitOptions::default()
+        },
+    )
+    .expect("seed global execution assets");
     let runtime = OrbitRuntime::from_roots(&global_root, &workspace_root).expect("runtime");
     (
         root,
@@ -84,16 +85,50 @@ fn profile_runtime(config: &str) -> (tempfile::TempDir, OrbitRuntime, PathBuf, P
     )
 }
 
-fn build_profile(runtime: &OrbitRuntime, workspace: &Workspace) -> super::ExecutionProfileV1 {
-    runtime
-        .build_execution_profile_v1(
-            workspace,
-            "hm_owner",
-            Utc.with_ymd_and_hms(2026, 7, 18, 9, 0, 0)
-                .single()
-                .expect("timestamp"),
-        )
-        .expect("build profile")
+fn build_profile(
+    runtime: &OrbitRuntime,
+    workspace: &Workspace,
+) -> orbit_common::types::ExecutionProfileV1 {
+    let environment = runtime
+        .execution_environment_snapshot()
+        .expect("execution environment");
+    let binding = ResolvedWorkspaceBinding {
+        logical_workspace_id: workspace.id.clone(),
+        runtime: WorkspaceRuntimeBinding {
+            workspace_id: environment.workspace_id.clone(),
+            repo_root: PathBuf::from("/unused-profile-fixture"),
+            ship_mode: resolved_ship_mode(workspace),
+        },
+        role: None,
+        owner_machine_id: workspace.owner_machine_id.clone(),
+    };
+    super::build_execution_profile_v1(
+        environment,
+        workspace,
+        &binding,
+        "hm_owner",
+        Utc.with_ymd_and_hms(2026, 7, 18, 9, 0, 0)
+            .single()
+            .expect("timestamp"),
+    )
+    .expect("build profile")
+}
+
+#[test]
+fn execution_profile_validates_runtime_id_but_emits_logical_registry_id() {
+    let (_root, runtime, _global, _workspace_root, mut workspace) = profile_runtime(PROFILE_CONFIG);
+    workspace.id = "logical-registry-id".to_string();
+
+    let profile = build_profile(&runtime, &workspace);
+
+    assert_eq!(profile.workspace_id, "logical-registry-id");
+    assert_eq!(
+        runtime
+            .execution_environment_snapshot()
+            .expect("execution environment")
+            .workspace_id,
+        PROFILE_WORKSPACE_ID
+    );
 }
 
 #[test]
@@ -313,7 +348,7 @@ fn closure_digest_tracks_execution_precedence_jobs_activities_recovery_and_ignor
     )
     .expect("use unknown backend");
     let backend_error = runtime
-        .build_execution_profile_v1(&workspace, "hm_owner", Utc::now())
+        .execution_environment_snapshot()
         .expect_err("unknown backend fails profile publication")
         .to_string();
     assert!(backend_error.contains("backend") || backend_error.contains("ambiguous"));
@@ -346,10 +381,23 @@ fn config_digest_tracks_crew_mode_and_base_while_closure_is_independent() {
     let mismatch_config = PROFILE_CONFIG.replace("agent-main", "main");
     let (_base_root, base_runtime, _base_global, _base_workspace, mut base_ws) =
         profile_runtime(&mismatch_config);
-    let mismatch = base_runtime
-        .build_execution_profile_v1(&base_ws, "hm_owner", Utc::now())
-        .expect_err("base mismatch fails")
-        .to_string();
+    let environment = base_runtime
+        .execution_environment_snapshot()
+        .expect("environment");
+    let binding = ResolvedWorkspaceBinding {
+        logical_workspace_id: base_ws.id.clone(),
+        runtime: WorkspaceRuntimeBinding {
+            workspace_id: environment.workspace_id.clone(),
+            repo_root: PathBuf::from("/unused-profile-fixture"),
+            ship_mode: resolved_ship_mode(&base_ws),
+        },
+        role: None,
+        owner_machine_id: base_ws.owner_machine_id.clone(),
+    };
+    let mismatch =
+        super::build_execution_profile_v1(environment, &base_ws, &binding, "hm_owner", Utc::now())
+            .expect_err("base mismatch fails")
+            .to_string();
     assert!(mismatch.contains("does not match runtime"));
     base_ws.base_branch = "main".to_string();
     let base_changed = build_profile(&base_runtime, &base_ws);
@@ -358,15 +406,4 @@ fn config_digest_tracks_crew_mode_and_base_while_closure_is_independent() {
         base_changed.ship.ship_closure_digest,
         baseline.ship.ship_closure_digest
     );
-}
-
-#[test]
-fn unsupported_execution_environment_overrides_fail_closed_without_values() {
-    let error = reject_execution_profile_env_overrides_from(|name| {
-        (name == "ORBIT_JOB_DIR").then(|| "/secret/catalog/path".to_string())
-    })
-    .expect_err("override must fail")
-    .to_string();
-    assert!(error.contains("ORBIT_JOB_DIR"));
-    assert!(!error.contains("/secret/catalog/path"));
 }

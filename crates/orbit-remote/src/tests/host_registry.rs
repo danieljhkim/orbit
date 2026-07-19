@@ -6,10 +6,10 @@ use orbit_common::types::{
     ExecutionProfileCrewV1, ExecutionProfileShipV1, ExecutionProfileV1, HostNameResolution,
     HostStatus, ProjectionFreshness, Workspace, WorkspaceRegistry, WorkspaceStatus,
 };
-use orbit_store::Store;
 
 use super::{HostRegistryService, require_local_hub_identity};
 use crate::host_identity::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode};
+use crate::persistence::RemoteStore;
 
 fn identity(machine_id: &str, host_id: &str, mode: HostMode) -> HostIdentity {
     HostIdentity {
@@ -38,7 +38,7 @@ fn hub_administration_preflight_rejects_spoke_local_execution() {
 
 #[test]
 fn hub_administration_preflight_rejects_unstamped_and_shadow_stores() {
-    let service = HostRegistryService::new(Store::open_in_memory().expect("store"));
+    let service = HostRegistryService::new(RemoteStore::open_in_memory().expect("store"));
     let local = identity("hm_local", "local", HostMode::Hub);
     let unconfigured = service
         .require_configured_local_hub(&local)
@@ -69,7 +69,7 @@ fn hub_administration_preflight_rejects_unstamped_and_shadow_stores() {
 
 #[test]
 fn service_registers_stable_identity_and_preserves_typed_lifecycle_results() {
-    let service = HostRegistryService::new(Store::open_in_memory().expect("store"));
+    let service = HostRegistryService::new(RemoteStore::open_in_memory().expect("store"));
     let hub = identity("hm_hub", "hub", HostMode::Hub);
     let spoke = identity("hm_spoke", "spoke", HostMode::Spoke);
 
@@ -170,7 +170,7 @@ fn execution_profile(
 
 #[test]
 fn service_requires_explicit_existing_workspace_and_consistent_local_owner_mirror() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     let service = HostRegistryService::new(store);
     service
         .register_hub_identity(&identity("hm_hub", "hub", HostMode::Hub), BTreeSet::new())
@@ -201,7 +201,7 @@ fn service_requires_explicit_existing_workspace_and_consistent_local_owner_mirro
 
 #[test]
 fn service_profile_publication_uses_hub_receipt_for_freshness() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     let service = HostRegistryService::new(store.clone());
     service
         .register_identity(
@@ -241,7 +241,7 @@ fn service_profile_publication_uses_hub_receipt_for_freshness() {
 
 #[test]
 fn link_workspace_owner_binds_active_warns_on_alias_and_rejects_bad_resolutions() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     let service = HostRegistryService::new(store);
     service
         .register_identity(
@@ -296,7 +296,7 @@ fn link_workspace_owner_binds_active_warns_on_alias_and_rejects_bad_resolutions(
 
 #[test]
 fn retire_guarding_hub_rejects_self_retirement_before_mutation() {
-    let store = Store::open_in_memory().expect("store");
+    let store = RemoteStore::open_in_memory().expect("store");
     let service = HostRegistryService::new(store);
     service
         .register_hub_identity(&identity("hm_hub", "hub", HostMode::Hub), BTreeSet::new())

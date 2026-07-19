@@ -23,12 +23,14 @@ use orbit_common::types::{
 use orbit_core::command::tool::{
     ToolEntryPoint, audit_role_label_for_entry_point, trusted_mcp_audit_context,
 };
-use orbit_core::routines::{HostIdentityState, HostMode, inspect_host_identity};
 use orbit_core::runtime::HubCoordinationExecutor;
 use orbit_core::{
-    AuditEventInsertParams, NotFoundKind, OrbitError, OrbitRuntime, redact_sensitive_env_text,
+    AuditEventInsertParams, NotFoundKind, OrbitError, OrbitRuntime, WorkspaceRuntimeBinding,
+    redact_sensitive_env_text,
 };
 use orbit_mcp::McpHost;
+use orbit_remote::runtime::RemoteRuntimeFactory;
+use orbit_remote::{HostIdentityState, HostMode, inspect_host_identity};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -89,6 +91,7 @@ pub(super) fn normalize_trusted_call_context(
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RuntimeCacheKey {
     workspace_id: String,
+    ship_mode: String,
     repo_root: PathBuf,
     shared_root: PathBuf,
     local_root: PathBuf,
@@ -238,9 +241,7 @@ impl BrokerMcpHost {
             }
         }
         let params = mcp_preflight_failure_params(name, &context, denial);
-        if let Err(error) =
-            orbit_core::host_registry::record_global_audit_event_at(&self.global_root, &params)
-        {
+        if let Err(error) = orbit_remote::record_global_audit_event_at(&self.global_root, &params) {
             tracing::warn!(
                 tool = name,
                 error = %error,
@@ -287,8 +288,8 @@ impl BrokerMcpHost {
             )));
         }
 
-        let registry_path = orbit_core::workspace_registry::registry_path_for(&self.global_root);
-        let registry = orbit_core::workspace_registry::load_registry_from(&registry_path)?;
+        let registry_path = orbit_remote::workspace_registry::registry_path_for(&self.global_root);
+        let registry = orbit_remote::workspace_registry::load_registry_from(&registry_path)?;
         let workspace = registry
             .workspaces
             .iter()
@@ -350,8 +351,8 @@ impl BrokerMcpHost {
         let repo_root = git_path(&selected, "--show-toplevel")?;
         let common_dir = git_path(&selected, "--git-common-dir")?;
 
-        let registry_path = orbit_core::workspace_registry::registry_path_for(&self.global_root);
-        let registry = orbit_core::workspace_registry::load_registry_from(&registry_path)?;
+        let registry_path = orbit_remote::workspace_registry::registry_path_for(&self.global_root);
+        let registry = orbit_remote::workspace_registry::load_registry_from(&registry_path)?;
         let mut matches = Vec::new();
         for checkout in &registry.checkouts {
             let Ok(registered_common) = git_path(&checkout.repo_root, "--git-common-dir") else {
@@ -428,6 +429,9 @@ impl BrokerMcpHost {
             logical_workspace_id: workspace.id.clone(),
             key: RuntimeCacheKey {
                 workspace_id: identity.workspace_id,
+                ship_mode: orbit_core::resolved_ship_mode(workspace)
+                    .as_input_value()
+                    .to_string(),
                 repo_root: repo_root.clone(),
                 shared_root,
                 local_root: repo_root.join(".orbit"),
@@ -498,17 +502,22 @@ impl BrokerMcpHost {
         if let Some(runtime) = runtimes.get(&binding.key) {
             return Ok(runtime.clone());
         }
-        let runtime = OrbitRuntime::from_resolved_roots(
+        let runtime = RemoteRuntimeFactory::open_resolved_checkout(
             &self.global_root,
             &binding.key.shared_root,
             &binding.key.local_root,
+            WorkspaceRuntimeBinding {
+                workspace_id: binding.key.workspace_id.clone(),
+                repo_root: binding.key.repo_root.clone(),
+                ship_mode: orbit_core::ShipMode::parse(&binding.key.ship_mode)?,
+            },
         )?;
         runtimes.insert(binding.key.clone(), runtime.clone());
         Ok(runtime)
     }
 
     fn global_call(&self, name: &str) -> Result<Value, OrbitError> {
-        let snapshot = orbit_core::host_registry::registry_snapshot_at(&self.global_root)?;
+        let snapshot = orbit_remote::registry_snapshot_at(&self.global_root)?;
         match name {
             "orbit.host.list" => Ok(json!({
                 "hub_machine_id": snapshot.hub_machine_id,
@@ -532,8 +541,8 @@ impl BrokerMcpHost {
         if let Some(binding) = binding {
             return Some(binding.key.shared_root.join("frictions"));
         }
-        let registry_path = orbit_core::workspace_registry::registry_path_for(&self.global_root);
-        let registry = orbit_core::workspace_registry::load_registry_from(&registry_path).ok()?;
+        let registry_path = orbit_remote::workspace_registry::registry_path_for(&self.global_root);
+        let registry = orbit_remote::workspace_registry::load_registry_from(&registry_path).ok()?;
         registry
             .checkouts
             .iter()
@@ -561,9 +570,7 @@ impl BrokerMcpHost {
                 params.error_message = Some(redact_sensitive_env_text(&error.to_string()));
             }
         }
-        if let Err(error) =
-            orbit_core::host_registry::record_global_audit_event_at(&self.global_root, &params)
-        {
+        if let Err(error) = orbit_remote::record_global_audit_event_at(&self.global_root, &params) {
             tracing::warn!(tool = name, error = %error, "failed to persist global MCP coordination audit");
         }
     }

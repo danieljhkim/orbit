@@ -3,6 +3,7 @@
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use orbit_core::{RoutineFireRecord, RoutineFireState};
+use orbit_remote::{HostMode, NewHostIdentity, ensure_host_identity};
 use tower::ServiceExt;
 
 use super::super::router;
@@ -88,6 +89,13 @@ fn fire_json_omits_finish_while_in_flight() {
 #[tokio::test]
 async fn routines_endpoint_returns_envelope_for_empty_host() {
     let temp = tempfile::tempdir().expect("temp global root");
+    ensure_host_identity(temp.path(), || {
+        Ok(NewHostIdentity {
+            host_id: "dashboard-test".to_string(),
+            mode: HostMode::Standalone,
+        })
+    })
+    .expect("seed host identity");
     let state = DashboardState::global(temp.path().to_path_buf(), Vec::new(), None);
 
     let response = router()

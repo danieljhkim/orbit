@@ -11,8 +11,9 @@ allowed_internal_deps() {
       echo ""
       ;;
     orbit-remote)
-      # ADR-0235: registry domain may call store APIs; store must never depend back.
-      echo "orbit-common orbit-store"
+      # ADR-0240: vertical Remote feature composes neutral Core kernels over
+      # Store persistence; neither lower layer may depend back on Remote.
+      echo "orbit-common orbit-core orbit-store"
       ;;
     orbit-policy | orbit-exec | orbit-store | orbit-search)
       echo "orbit-common"
@@ -43,7 +44,7 @@ allowed_internal_deps() {
       echo "orbit-agent orbit-common orbit-exec orbit-store orbit-tools"
       ;;
     orbit-core)
-      echo "orbit-common orbit-search orbit-engine orbit-policy orbit-remote orbit-store orbit-tools"
+      echo "orbit-common orbit-search orbit-engine orbit-policy orbit-store orbit-tools"
       ;;
     orbit-cmd)
       # ORB-10016: CLI-facing command layer extracted from orbit-core.
@@ -54,10 +55,10 @@ allowed_internal_deps() {
       echo "orbit-common orbit-graph orbit-graph-extract orbit-tools"
       ;;
     orbit-dashboard)
-      echo "orbit-common orbit-cmd orbit-core"
+      echo "orbit-common orbit-cmd orbit-core orbit-remote"
       ;;
     orbit-cli)
-      echo "orbit-common orbit-cmd orbit-core orbit-graph-cli orbit-mcp orbit-dashboard"
+      echo "orbit-common orbit-cmd orbit-core orbit-graph-cli orbit-mcp orbit-remote orbit-dashboard"
       ;;
     *)
       return 1

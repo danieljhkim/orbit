@@ -5,11 +5,11 @@ use orbit_core::config::agent_detect::{DetectedAgents, RealAgentEnvProbe, detect
 use orbit_core::config::agent_prompt::{
     StdinPrompter, collect_qa_crew_setting, collect_role_settings,
 };
-use orbit_core::routines::{
+use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_remote::workspace_registry::global_orbit_dir;
+use orbit_remote::{
     HostIdentityOutcome, HostMode, NewHostIdentity, ensure_host_identity, os_hostname,
 };
-use orbit_core::workspace_registry::global_orbit_dir;
-use orbit_core::{OrbitError, OrbitRuntime};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};

@@ -1,7 +1,7 @@
 use clap::Args;
 use orbit_core::OrbitError;
 use orbit_core::routines::pause_routine;
-use orbit_core::workspace_registry;
+use orbit_remote::workspace_registry;
 
 #[derive(Args)]
 pub struct RoutinePauseArgs {

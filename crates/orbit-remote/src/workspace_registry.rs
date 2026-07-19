@@ -16,8 +16,7 @@ use crate::host_identity::{HostIdentityState, HostMode, inspect_host_identity};
 
 /// Returns the global Orbit directory: `~/.orbit/`.
 pub fn global_orbit_dir() -> Result<PathBuf, OrbitError> {
-    let home = home_dir()?;
-    Ok(home.join(".orbit"))
+    orbit_core::runtime::resolve_global_root()
 }
 
 /// Returns the path to the global workspace registry file.
@@ -720,25 +719,3 @@ fn legacy_default_status() -> WorkspaceStatus {
 #[cfg(test)]
 #[path = "tests/workspace_registry.rs"]
 mod tests;
-
-fn home_dir() -> Result<PathBuf, OrbitError> {
-    dirs_or_fallback()
-}
-
-fn dirs_or_fallback() -> Result<PathBuf, OrbitError> {
-    // Try HOME env first (works in tests), then platform default
-    if let Ok(home) = std::env::var("HOME")
-        && !home.is_empty()
-    {
-        return Ok(PathBuf::from(home));
-    }
-    #[cfg(windows)]
-    if let Ok(profile) = std::env::var("USERPROFILE") {
-        if !profile.is_empty() {
-            return Ok(PathBuf::from(profile));
-        }
-    }
-    Err(OrbitError::WorkspaceError(
-        "cannot determine home directory".to_string(),
-    ))
-}

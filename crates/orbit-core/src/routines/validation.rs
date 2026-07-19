@@ -6,14 +6,9 @@
 //! mutating identity, cache, registry, routine, or scheduler state.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::{HostStatus, OrbitError, RegistryHostV1, RegistrySnapshotV1};
-use orbit_remote::{
-    HostIdentity, HostMode, HostRegistryService, RegistryCacheService, RegistryCacheState,
-};
-use orbit_store::Store;
 use serde::Serialize;
 
 use super::loader::RoutineOrigin;
@@ -101,27 +96,6 @@ impl RoutineHostIdentityView for RoutineHostIdentity {
 
     fn host_id(&self) -> &str {
         &self.host_id
-    }
-}
-
-// Transitional adapter for the legacy Core-owned registry composition. The
-// neutral identity above is the contract a future feature crate supplies.
-impl RoutineHostIdentityView for HostIdentity {
-    fn machine_id(&self) -> &str {
-        &self.machine_id
-    }
-
-    fn host_id(&self) -> &str {
-        &self.host_id
-    }
-}
-
-impl From<&HostIdentity> for RoutineHostIdentity {
-    fn from(identity: &HostIdentity) -> Self {
-        Self {
-            machine_id: identity.machine_id.clone(),
-            host_id: identity.host_id.clone(),
-        }
     }
 }
 
@@ -249,92 +223,14 @@ pub struct RoutinePlacementProjection {
     pub registry: RoutineRegistryView,
 }
 
-/// Provider boundary for routine placement. Core's compatibility adapter is
-/// registry-backed; an extracted remote feature can implement the same input
-/// contract without making scheduling logic depend on that crate.
+/// Provider boundary for routine placement. A higher-level feature owns the
+/// registry/cache source and projects it into Core's neutral input.
 pub trait RoutinePlacementProvider {
     fn load_routine_placement(
         &self,
         now: DateTime<Utc>,
         cache_max_age: Duration,
     ) -> Result<RoutinePlacementProjection, OrbitError>;
-}
-
-/// Compatibility provider for the current on-disk host registry.
-pub struct RegistryRoutinePlacementProvider<'a> {
-    global_root: &'a Path,
-    store: &'a Store,
-    identity: &'a HostIdentity,
-}
-
-impl<'a> RegistryRoutinePlacementProvider<'a> {
-    pub fn new(global_root: &'a Path, store: &'a Store, identity: &'a HostIdentity) -> Self {
-        Self {
-            global_root,
-            store,
-            identity,
-        }
-    }
-}
-
-impl RoutinePlacementProvider for RegistryRoutinePlacementProvider<'_> {
-    fn load_routine_placement(
-        &self,
-        now: DateTime<Utc>,
-        cache_max_age: Duration,
-    ) -> Result<RoutinePlacementProjection, OrbitError> {
-        let registry = load_routine_registry_view(
-            self.global_root,
-            self.store,
-            self.identity,
-            now,
-            cache_max_age,
-        )?;
-        Ok(RoutinePlacementProjection {
-            local_host: RoutineHostIdentity::from(self.identity),
-            registry,
-        })
-    }
-}
-
-/// Load the appropriate local registry source. The spoke branch delegates all
-/// byte decoding and freshness classification to `RegistryCacheService::load`.
-pub fn load_routine_registry_view(
-    global_root: &Path,
-    store: &Store,
-    identity: &HostIdentity,
-    now: DateTime<Utc>,
-    cache_max_age: Duration,
-) -> Result<RoutineRegistryView, OrbitError> {
-    match identity.mode {
-        HostMode::Standalone => Ok(RoutineRegistryView::Standalone),
-        HostMode::Hub => HostRegistryService::new(store.clone())
-            .snapshot()
-            .map(|snapshot| RoutineRegistryView::Hub { snapshot }),
-        HostMode::Spoke => RegistryCacheService::new(global_root)
-            .load(now, cache_max_age)
-            .map(|cache| RoutineRegistryView::Spoke {
-                cache: project_registry_cache(cache),
-            }),
-    }
-}
-
-fn project_registry_cache(cache: RegistryCacheState) -> RoutineRegistryCacheView {
-    match cache {
-        RegistryCacheState::Current { cache, age_seconds } => RoutineRegistryCacheView::Current {
-            snapshot: Box::new(cache.snapshot),
-            age_seconds,
-        },
-        RegistryCacheState::Stale { cache, age_seconds } => RoutineRegistryCacheView::Stale {
-            snapshot: Box::new(cache.snapshot),
-            age_seconds,
-        },
-        RegistryCacheState::Missing => RoutineRegistryCacheView::Missing,
-        RegistryCacheState::Malformed { reason } => RoutineRegistryCacheView::Malformed { reason },
-        RegistryCacheState::UnsupportedFuture { schema_version } => {
-            RoutineRegistryCacheView::UnsupportedFuture { schema_version }
-        }
-    }
 }
 
 /// Pure, deterministic validation of one routine's declared pins.

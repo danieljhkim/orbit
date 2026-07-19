@@ -64,6 +64,7 @@ pub(crate) use store_delegates::TaskRecordUpdateParams;
 pub struct OrbitRuntime {
     context: OrbitContext,
     workspace_binding: Option<Arc<WorkspaceRuntimeBinding>>,
+    coordination_dispatcher: Option<Arc<dyn CoordinationToolDispatcher>>,
     activity_executors: Arc<ActivityExecutorRegistry>,
     pub event_log: event_bus::EventLog,
     /// Outcome of the [ORB-10012] workspace-layout pre-flight that ran when
@@ -111,8 +112,28 @@ impl OrbitRuntime {
     pub fn initialize_with_root_override(root_override: Option<&Path>) -> Result<Self, OrbitError> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let roots = Self::resolve_roots_for_cwd(&cwd, root_override)?;
+        Self::initialize_from_resolved_roots(roots, None)
+    }
+
+    /// Initialize from roots and optional higher-level workspace metadata.
+    /// This keeps bootstrap/layout behavior in Core while allowing a feature
+    /// owner to resolve catalog hints and bindings externally.
+    pub fn initialize_from_resolved_roots(
+        roots: OrbitRuntimeRoots,
+        binding: Option<WorkspaceRuntimeBinding>,
+    ) -> Result<Self, OrbitError> {
         ensure_orbit_root_initialized(&roots.global_root, &roots.shared_root)?;
-        Self::from_resolved_roots(&roots.global_root, &roots.shared_root, &roots.local_root)
+        match binding {
+            Some(binding) => Self::from_resolved_roots_with_binding(
+                &roots.global_root,
+                &roots.shared_root,
+                &roots.local_root,
+                binding,
+            ),
+            None => {
+                Self::from_resolved_roots(&roots.global_root, &roots.shared_root, &roots.local_root)
+            }
+        }
     }
 
     /// Initialize a runtime against an already-initialized workspace, returning
@@ -256,6 +277,7 @@ impl OrbitRuntime {
             activity_executors: build_activity_executor_registry(&context)?,
             context,
             workspace_binding: binding.map(Arc::new),
+            coordination_dispatcher: None,
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(layout_report),
             _temp_dir: None,
@@ -274,6 +296,7 @@ impl OrbitRuntime {
             activity_executors: build_activity_executor_registry(&context)?,
             context,
             workspace_binding: None,
+            coordination_dispatcher: None,
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(orbit_store::layout::LayoutUpgradeReport::default()),
             _temp_dir: Some(Arc::new(temp_dir)),
@@ -293,6 +316,17 @@ impl OrbitRuntime {
 
     pub fn with_actor(mut self, actor: ActorIdentity) -> Self {
         self.context.set_actor(actor);
+        self
+    }
+
+    /// Attach a higher-level owner for coordination-feature tool actions.
+    /// Core retains the neutral dispatch contract but never opens a host or
+    /// workspace registry itself.
+    pub fn with_coordination_dispatcher(
+        mut self,
+        dispatcher: Arc<dyn CoordinationToolDispatcher>,
+    ) -> Self {
+        self.coordination_dispatcher = Some(dispatcher);
         self
     }
 
@@ -354,6 +388,10 @@ impl OrbitRuntime {
     /// the caller supplied an authoritative binding.
     pub fn workspace_runtime_binding(&self) -> Option<&WorkspaceRuntimeBinding> {
         self.workspace_binding.as_deref()
+    }
+
+    pub(crate) fn coordination_tool_dispatcher(&self) -> Option<&dyn CoordinationToolDispatcher> {
+        self.coordination_dispatcher.as_deref()
     }
 
     /// Returns the effective config.toml path.

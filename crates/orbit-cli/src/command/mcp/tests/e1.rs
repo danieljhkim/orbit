@@ -27,7 +27,7 @@ fn write_identity(root: &TempDir, mode: &str, machine_id: &str) {
 }
 
 fn initialize_store(root: &TempDir) -> std::path::PathBuf {
-    orbit_core::host_registry::registry_snapshot_at(root.path()).expect("initialize global store");
+    orbit_remote::registry_snapshot_at(root.path()).expect("initialize global store");
     orbit_core::config::resolved_audit_db_path(root.path(), root.path()).expect("global store path")
 }
 
@@ -46,7 +46,7 @@ fn stamp_store(root: &TempDir, machine_id: &str) -> std::path::PathBuf {
 }
 
 fn add_checkoutless_workspace(root: &TempDir, workspace_id: &str) {
-    orbit_core::workspace_registry::save_registry_to(
+    orbit_remote::workspace_registry::save_registry_to(
         &WorkspaceRegistry {
             workspaces: vec![Workspace {
                 id: workspace_id.to_string(),
@@ -61,7 +61,7 @@ fn add_checkoutless_workspace(root: &TempDir, workspace_id: &str) {
             }],
             ..Default::default()
         },
-        &orbit_core::workspace_registry::registry_path_for(root.path()),
+        &orbit_remote::workspace_registry::registry_path_for(root.path()),
     )
     .expect("workspace registry");
     HubCoordinationExecutor::register_workspace(root.path(), workspace_id, "checkoutless")
@@ -225,7 +225,7 @@ fn config_resolution_ignores_repo_and_other_root_decoys() {
 
 #[test]
 fn spoke_route_requires_config_and_exact_non_hierarchical_membership() {
-    use orbit_core::routines::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode};
+    use orbit_remote::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode};
 
     let identity = HostIdentity {
         schema_version: HOST_IDENTITY_SCHEMA_VERSION,
@@ -387,7 +387,7 @@ fn unknown_remote_caller_can_only_register_and_retirement_invalidates_open_peer(
             .count(),
         1
     );
-    let before_hidden_call = orbit_core::host_registry::registry_snapshot_at(root.path())
+    let before_hidden_call = orbit_remote::registry_snapshot_at(root.path())
         .expect("snapshot before guessed ordinary call");
     let hidden = host
         .call_tool(
@@ -398,7 +398,7 @@ fn unknown_remote_caller_can_only_register_and_retirement_invalidates_open_peer(
         )
         .expect_err("ordinary tools/call cannot invoke the private method");
     assert!(hidden.to_string().contains("not found"));
-    let after_hidden_call = orbit_core::host_registry::registry_snapshot_at(root.path())
+    let after_hidden_call = orbit_remote::registry_snapshot_at(root.path())
         .expect("snapshot after guessed ordinary call");
     assert_eq!(
         after_hidden_call.registry_revision, before_hidden_call.registry_revision,
@@ -411,7 +411,7 @@ fn unknown_remote_caller_can_only_register_and_retirement_invalidates_open_peer(
     )
     .expect("registered active caller admitted");
 
-    orbit_core::host_registry::host_registry_service_at(root.path())
+    orbit_remote::host_registry_service_at(root.path())
         .expect("service")
         .retire("hm_spoke")
         .expect("retire spoke");
@@ -457,8 +457,8 @@ fn registration_reports_registry_commit_before_projection_failure_and_can_repair
     );
     assert!(partial.snapshot.is_none());
 
-    let snapshot = orbit_core::host_registry::registry_snapshot_at(root.path())
-        .expect("registry after projection failure");
+    let snapshot =
+        orbit_remote::registry_snapshot_at(root.path()).expect("registry after projection failure");
     assert!(
         snapshot
             .hosts

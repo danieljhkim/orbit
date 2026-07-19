@@ -52,6 +52,7 @@ fn global_mode_rejects_inactive_and_unknown_workspaces() {
         name: "stale".to_string(),
         repo_root: PathBuf::from("/nonexistent"),
         orbit_dir: PathBuf::from("/nonexistent/.orbit"),
+        binding: None,
         active: false,
     }];
     let state = DashboardState::global(PathBuf::from("/nonexistent"), entries, None);
