@@ -486,7 +486,3 @@ fn splitmix64(seed: u64) -> u64 {
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^ (z >> 31)
 }
-
-#[cfg(test)]
-#[path = "tests/host_identity.rs"]
-mod tests;

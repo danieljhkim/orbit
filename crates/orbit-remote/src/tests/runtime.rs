@@ -5,7 +5,7 @@ use orbit_common::types::{
 use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
 use serde_json::json;
 
-use super::{RemoteRuntimeFactory, resolved_workspace_binding, workspace_runtime_binding};
+use crate::runtime::{RemoteRuntimeFactory, resolved_workspace_binding, workspace_runtime_binding};
 
 fn workspace(id: &str, ship_mode: &str) -> Workspace {
     Workspace {

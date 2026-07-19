@@ -1,22 +1,29 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
+use std::time::Duration;
 
 use crate::{RegistryCacheService, RegistryCacheState, load_host_identity};
 use chrono::Utc;
 use orbit_common::types::{
-    AuditEventStatus, HostRegistration, HostStatus, SPOKE_REGISTRATION_SCHEMA_VERSION, Workspace,
-    WorkspacePresenceDeclaration, WorkspaceRegistry, WorkspaceStatus,
+    AuditEventStatus, HostRegistration, HostStatus, McpCapability, OrbitError,
+    SPOKE_REGISTRATION_SCHEMA_VERSION, SpokeRegistrationRequestV1, SpokeRegistrationResultV1,
+    ToolSessionContext, Workspace, WorkspacePresenceDeclaration, WorkspaceRegistry,
+    WorkspaceStatus,
 };
 use orbit_mcp::{McpHost, OrbitToolServer};
 use rmcp::ServiceExt;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::super::host::{BrokerMcpHost, canonical_mcp_tool_definitions};
 use super::super::hub::HubMcpHost;
+use super::super::hub_client::OrbitMcpClient;
+use super::super::hub_link::{
+    BoxFuture, CallRequest, HubClock, HubLinkLimits, HubLinkPool, HubPeer, HubPeerFactory,
+    HubSpawnSpec, MonotonicClock, WorkerMessage,
+};
 use super::super::hub_server_composition;
-use super::*;
 
 #[derive(Default)]
 struct FakeFactory {

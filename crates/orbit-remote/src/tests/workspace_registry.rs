@@ -9,7 +9,7 @@ use orbit_common::types::{
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
-use super::{
+use crate::workspace_registry::{
     assign_checkout_role, find_checkout_by_path, find_workspace, find_workspace_by_path,
     load_registry_from, load_registry_from_with_writer, save_registry_to,
 };

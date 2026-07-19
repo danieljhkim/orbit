@@ -1,4 +1,4 @@
-use super::super::host_identity::{
+use crate::host_identity::{
     HOST_IDENTITY_SCHEMA_VERSION, HostIdentityOutcome, HostIdentityState, HostMode,
     NewHostIdentity, ensure_host_identity, inspect_host_identity, load_host_identity,
     rename_current_host_identity, rename_current_host_identity_with_writer,

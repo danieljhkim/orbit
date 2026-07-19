@@ -21,16 +21,17 @@ use super::hub_client::{HubClientExpectation, OrbitMcpClient, validate_remote_ca
 
 const STDERR_LIMIT: u64 = 8 * 1024;
 
-type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+// This connector seam is crate-internal so sibling tests can supply deterministic peers.
+pub(super) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 #[derive(Debug, Clone, Copy)]
-struct HubLinkLimits {
-    queue_capacity: usize,
-    initialize: Duration,
-    request: Duration,
-    idle: Duration,
-    idle_poll: Duration,
-    close: Duration,
+pub(super) struct HubLinkLimits {
+    pub(super) queue_capacity: usize,
+    pub(super) initialize: Duration,
+    pub(super) request: Duration,
+    pub(super) idle: Duration,
+    pub(super) idle_poll: Duration,
+    pub(super) close: Duration,
 }
 
 impl Default for HubLinkLimits {
@@ -46,11 +47,11 @@ impl Default for HubLinkLimits {
     }
 }
 
-trait HubClock: Send + Sync + 'static {
+pub(super) trait HubClock: Send + Sync + 'static {
     fn now(&self) -> Duration;
 }
 
-struct MonotonicClock(Instant);
+pub(super) struct MonotonicClock(Instant);
 
 impl Default for MonotonicClock {
     fn default() -> Self {
@@ -73,7 +74,7 @@ pub(super) struct HubSpawnSpec {
 }
 
 impl HubSpawnSpec {
-    fn argv(&self) -> Vec<String> {
+    pub(super) fn argv(&self) -> Vec<String> {
         vec![
             "ssh".to_string(),
             self.ssh_alias.clone(),
@@ -86,7 +87,7 @@ impl HubSpawnSpec {
         ]
     }
 
-    fn expectation(&self) -> HubClientExpectation {
+    pub(super) fn expectation(&self) -> HubClientExpectation {
         HubClientExpectation {
             hub_machine_id: self.hub_machine_id.clone(),
             effective_capability: self.capability,
@@ -95,7 +96,7 @@ impl HubSpawnSpec {
     }
 }
 
-trait HubPeer: Send {
+pub(super) trait HubPeer: Send {
     fn is_closed(&self) -> bool;
     fn call<'a>(
         &'a mut self,
@@ -111,7 +112,7 @@ trait HubPeer: Send {
     fn close<'a>(&'a mut self) -> BoxFuture<'a, ()>;
 }
 
-trait HubPeerFactory: Send + Sync + 'static {
+pub(super) trait HubPeerFactory: Send + Sync + 'static {
     fn connect<'a>(
         &'a self,
         spec: &'a HubSpawnSpec,
@@ -257,22 +258,22 @@ impl HubPeer for SshHubPeer {
     }
 }
 
-struct CallRequest {
-    capability: McpCapability,
-    name: String,
-    input: Value,
-    context: ToolSessionContext,
-    response: mpsc::SyncSender<Result<Value, OrbitError>>,
+pub(super) struct CallRequest {
+    pub(super) capability: McpCapability,
+    pub(super) name: String,
+    pub(super) input: Value,
+    pub(super) context: ToolSessionContext,
+    pub(super) response: mpsc::SyncSender<Result<Value, OrbitError>>,
 }
 
-struct RegistrationRequest {
+pub(super) struct RegistrationRequest {
     capability: McpCapability,
     registration: SpokeRegistrationRequestV1,
     context: ToolSessionContext,
     response: mpsc::SyncSender<Result<SpokeRegistrationResultV1, OrbitError>>,
 }
 
-enum WorkerMessage {
+pub(super) enum WorkerMessage {
     Call(CallRequest),
     Register(RegistrationRequest),
     Shutdown,
@@ -286,7 +287,7 @@ struct CachedPeer {
 /// Synchronous [`orbit_mcp::McpHost`] seam backed by one dedicated runtime
 /// thread and at most one live peer for each scalar capability.
 pub(super) struct HubLinkPool {
-    tx: Option<mpsc::SyncSender<WorkerMessage>>,
+    pub(super) tx: Option<mpsc::SyncSender<WorkerMessage>>,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -306,7 +307,7 @@ impl HubLinkPool {
         )
     }
 
-    fn with_factory(
+    pub(super) fn with_factory(
         ssh_alias: String,
         hub_machine_id: String,
         schema_digests: BTreeMap<McpCapability, String>,
@@ -643,7 +644,3 @@ async fn close_all(peers: &mut BTreeMap<McpCapability, CachedPeer>) {
         cached.peer.close().await;
     }
 }
-
-#[cfg(test)]
-#[path = "tests/hub_link.rs"]
-mod tests;

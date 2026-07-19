@@ -793,20 +793,6 @@ fn read_workspace_identity(path: &Path) -> Result<WorkspaceIdentityDocument, Orb
 /// then short-circuits. On the success path it delegates to the runtime,
 /// which owns the audit row (no dedup needed because `orbit mcp serve` is
 /// invoked outside the CLI audit middleware guard.
-#[cfg(test)]
-pub(super) fn audited_mcp_call(
-    runtime: &OrbitRuntime,
-    name: &str,
-    input: Value,
-) -> Result<Value, OrbitError> {
-    audited_mcp_call_with_session_context(
-        runtime,
-        name,
-        input,
-        normalize_trusted_call_context(ToolSessionContext::trusted_local(None, None, None)),
-    )
-}
-
 pub(super) fn audited_mcp_call_with_session_context(
     runtime: &OrbitRuntime,
     name: &str,

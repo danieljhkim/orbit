@@ -5,13 +5,13 @@ use std::path::PathBuf;
 use chrono::{Duration, TimeZone, Utc};
 use orbit_common::types::{
     ExecutionProfileCrewV1, ExecutionProfileShipV1, ExecutionProfileV1, HostRegistration,
-    HostStatus, ProjectionFreshness, REGISTRY_SNAPSHOT_SCHEMA_VERSION, RegistryHostV1,
-    RegistryPresenceV1, RegistryProfileV1, RegistrySnapshotV1, RegistryWorkspaceV1,
-    WorkspacePresenceDeclaration,
+    HostStatus, OrbitError, ProjectionFreshness, REGISTRY_CACHE_SCHEMA_VERSION,
+    REGISTRY_SNAPSHOT_SCHEMA_VERSION, RegistryCacheV1, RegistryHostV1, RegistryPresenceV1,
+    RegistryProfileV1, RegistrySnapshotV1, RegistryWorkspaceV1, WorkspacePresenceDeclaration,
 };
 
-use super::*;
 use crate::persistence::RemoteStore;
+use crate::registry_cache::{RegistryCacheOutcome, RegistryCacheService, RegistryCacheState};
 
 fn snapshot(revision: u64, hub: Option<&str>) -> RegistrySnapshotV1 {
     RegistrySnapshotV1 {

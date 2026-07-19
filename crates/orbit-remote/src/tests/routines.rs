@@ -3,14 +3,12 @@ use orbit_common::types::{
     REGISTRY_SNAPSHOT_SCHEMA_VERSION, RegistrySnapshotV1, Workspace, WorkspaceCheckout,
     WorkspaceRegistry, WorkspaceStatus,
 };
-use orbit_core::routines::{
-    RoutinePlacementProvider, RoutineRegistryCacheView, RoutineRegistryView,
-    RoutineWorkspaceProvider,
-};
+use orbit_core::routines::{RoutineRegistryCacheView, RoutineRegistryView};
 use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
 
-use super::RemoteRoutineEnvironment;
 use crate::RegistryCacheService;
+use crate::host_identity::load_host_identity;
+use crate::routines::{discover_registered_workspaces, load_routine_placement_at};
 use crate::workspace_registry;
 
 fn write_spoke_identity(root: &std::path::Path) {
@@ -43,11 +41,15 @@ fn spoke_cache_projection_preserves_strict_freshness_boundary() {
     RegistryCacheService::new(root.path())
         .refresh(empty_snapshot(), now)
         .expect("cache");
-    let environment = RemoteRoutineEnvironment::load(root.path()).expect("environment");
+    let identity = load_host_identity(root.path()).expect("identity");
 
-    let exact = environment
-        .load_routine_placement(now + Duration::minutes(5), Duration::minutes(5))
-        .expect("exact boundary");
+    let exact = load_routine_placement_at(
+        root.path(),
+        &identity,
+        now + Duration::minutes(5),
+        Duration::minutes(5),
+    )
+    .expect("exact boundary");
     assert!(matches!(
         exact.registry,
         RoutineRegistryView::Spoke {
@@ -55,12 +57,13 @@ fn spoke_cache_projection_preserves_strict_freshness_boundary() {
         }
     ));
 
-    let stale = environment
-        .load_routine_placement(
-            now + Duration::minutes(5) + Duration::seconds(1),
-            Duration::minutes(5),
-        )
-        .expect("stale boundary");
+    let stale = load_routine_placement_at(
+        root.path(),
+        &identity,
+        now + Duration::minutes(5) + Duration::seconds(1),
+        Duration::minutes(5),
+    )
+    .expect("stale boundary");
     assert!(matches!(
         stale.registry,
         RoutineRegistryView::Spoke {
@@ -116,8 +119,7 @@ fn workspace_discovery_builds_bound_runtimes() {
     )
     .expect("registry");
 
-    let environment = RemoteRoutineEnvironment::load(&global).expect("environment");
-    let discovered = environment.discover_workspaces(&global).expect("discovery");
+    let discovered = discover_registered_workspaces(&global).expect("discovery");
     assert!(discovered.errors.is_empty());
     assert_eq!(discovered.entries.len(), 1);
     let binding = discovered.entries[0]

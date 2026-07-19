@@ -43,47 +43,71 @@ impl RoutinePlacementProvider for RemoteRoutineEnvironment {
         now: DateTime<Utc>,
         cache_max_age: Duration,
     ) -> Result<RoutinePlacementProjection, OrbitError> {
-        let registry = match self.identity.mode {
-            HostMode::Standalone => RoutineRegistryView::Standalone,
-            HostMode::Hub => RoutineRegistryView::Hub {
-                snapshot: host_registry_service_at(&self.global_root)?.snapshot()?,
-            },
-            HostMode::Spoke => RoutineRegistryView::Spoke {
-                cache: project_registry_cache(
-                    RegistryCacheService::new(&self.global_root).load(now, cache_max_age)?,
-                ),
-            },
-        };
-        Ok(RoutinePlacementProjection {
-            local_host: self.local_host(),
-            registry,
-        })
+        load_routine_placement_at(&self.global_root, &self.identity, now, cache_max_age)
     }
+}
+
+/// Build the local routine placement view from the registered host identity.
+/// This is the shared production seam for the provider implementation and
+/// callers that need an explicit clock.
+pub(crate) fn load_routine_placement_at(
+    global_root: &Path,
+    identity: &HostIdentity,
+    now: DateTime<Utc>,
+    cache_max_age: Duration,
+) -> Result<RoutinePlacementProjection, OrbitError> {
+    let registry = match identity.mode {
+        HostMode::Standalone => RoutineRegistryView::Standalone,
+        HostMode::Hub => RoutineRegistryView::Hub {
+            snapshot: host_registry_service_at(global_root)?.snapshot()?,
+        },
+        HostMode::Spoke => RoutineRegistryView::Spoke {
+            cache: project_registry_cache(
+                RegistryCacheService::new(global_root).load(now, cache_max_age)?,
+            ),
+        },
+    };
+    Ok(RoutinePlacementProjection {
+        local_host: RoutineHostIdentity {
+            machine_id: identity.machine_id.clone(),
+            host_id: identity.host_id.clone(),
+        },
+        registry,
+    })
 }
 
 impl RoutineWorkspaceProvider for RemoteRoutineEnvironment {
     fn discover_workspaces(&self, global_root: &Path) -> Result<DiscoveredWorkspaces, OrbitError> {
-        let registry_path = workspace_registry::registry_path_for(global_root);
-        let mut registry = workspace_registry::load_registry_from(&registry_path)?;
-        workspace_registry::validate_workspaces(&mut registry);
-        workspace_registry::save_registry_to(&registry, &registry_path)?;
-
-        let mut discovered = DiscoveredWorkspaces::default();
-        for (workspace, checkout) in workspace_registry::local_workspaces(&registry) {
-            if workspace.status != WorkspaceStatus::Active || !checkout.orbit_dir.exists() {
-                continue;
-            }
-            match RemoteRuntimeFactory::open_registered_checkout(global_root, workspace, checkout) {
-                Ok(runtime) => discovered.entries.push((workspace.clone(), runtime)),
-                Err(error) => discovered.errors.push(RoutineLoadError {
-                    source_workspace: workspace.name.clone(),
-                    path: Some(checkout.orbit_dir.clone()),
-                    message: format!("failed to open workspace runtime: {error}"),
-                }),
-            }
-        }
-        Ok(discovered)
+        discover_registered_workspaces(global_root)
     }
+}
+
+/// Discover runnable registered checkouts for routine execution.
+/// The provider delegates here so this production path can be exercised with
+/// an explicit global root.
+pub(crate) fn discover_registered_workspaces(
+    global_root: &Path,
+) -> Result<DiscoveredWorkspaces, OrbitError> {
+    let registry_path = workspace_registry::registry_path_for(global_root);
+    let mut registry = workspace_registry::load_registry_from(&registry_path)?;
+    workspace_registry::validate_workspaces(&mut registry);
+    workspace_registry::save_registry_to(&registry, &registry_path)?;
+
+    let mut discovered = DiscoveredWorkspaces::default();
+    for (workspace, checkout) in workspace_registry::local_workspaces(&registry) {
+        if workspace.status != WorkspaceStatus::Active || !checkout.orbit_dir.exists() {
+            continue;
+        }
+        match RemoteRuntimeFactory::open_registered_checkout(global_root, workspace, checkout) {
+            Ok(runtime) => discovered.entries.push((workspace.clone(), runtime)),
+            Err(error) => discovered.errors.push(RoutineLoadError {
+                source_workspace: workspace.name.clone(),
+                path: Some(checkout.orbit_dir.clone()),
+                message: format!("failed to open workspace runtime: {error}"),
+            }),
+        }
+    }
+    Ok(discovered)
 }
 
 pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, OrbitError> {
@@ -135,6 +159,3 @@ fn project_registry_cache(cache: RegistryCacheState) -> RoutineRegistryCacheView
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

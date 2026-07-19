@@ -280,7 +280,9 @@ impl HostRegistryService {
         )
     }
 
-    fn publish_execution_profile_at(
+    /// Publish with an explicit hub receipt time; the normal public method
+    /// delegates here using the current clock.
+    pub(crate) fn publish_execution_profile_at(
         &self,
         caller_machine_id: &str,
         expected_generation: u64,
@@ -324,7 +326,3 @@ fn require_logical_workspace<'a>(
     }
     Ok(workspace)
 }
-
-#[cfg(test)]
-#[path = "tests/host_registry.rs"]
-mod tests;

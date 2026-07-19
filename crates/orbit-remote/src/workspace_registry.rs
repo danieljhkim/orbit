@@ -42,7 +42,9 @@ pub fn load_registry_from(path: &Path) -> Result<WorkspaceRegistry, OrbitError> 
     })
 }
 
-fn load_registry_from_with_writer(
+/// Load and migrate a registry using the supplied persistence operation.
+/// [`load_registry_from`] delegates here with the atomic production writer.
+pub(crate) fn load_registry_from_with_writer(
     path: &Path,
     writer: impl FnOnce(&WorkspaceRegistry, &Path) -> Result<(), OrbitError>,
 ) -> Result<WorkspaceRegistry, OrbitError> {
@@ -715,7 +717,3 @@ fn legacy_default_base_branch() -> String {
 fn legacy_default_status() -> WorkspaceStatus {
     WorkspaceStatus::Active
 }
-
-#[cfg(test)]
-#[path = "tests/workspace_registry.rs"]
-mod tests;

@@ -103,7 +103,3 @@ pub fn build_execution_profile_v1(
     profile.validate()?;
     Ok(profile)
 }
-
-#[cfg(test)]
-#[path = "tests/profile.rs"]
-mod tests;

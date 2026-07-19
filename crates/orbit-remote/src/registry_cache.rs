@@ -105,13 +105,12 @@ impl RegistryCacheService {
         snapshot: RegistrySnapshotV1,
         now: DateTime<Utc>,
     ) -> Result<RegistryCacheOutcome, OrbitError> {
-        self.refresh_with_codec(snapshot, now, serialize_cache, atomic_write_bytes)
+        self.refresh_with_writer(snapshot, now, atomic_write_bytes)
     }
 
-    /// Refresh with an injectable writer seam, used by tests to simulate
-    /// write/rename failure and prove prior bytes survive.
-    #[cfg(test)]
-    fn refresh_with_writer<W>(
+    /// Refresh using the caller-provided commit primitive. Production refresh
+    /// uses this seam with the atomic filesystem writer.
+    pub(crate) fn refresh_with_writer<W>(
         &self,
         snapshot: RegistrySnapshotV1,
         now: DateTime<Utc>,
@@ -123,7 +122,9 @@ impl RegistryCacheService {
         self.refresh_with_codec(snapshot, now, serialize_cache, writer)
     }
 
-    fn refresh_with_codec<S, W>(
+    /// Refresh using explicit serialization and commit primitives. The
+    /// writer-backed production path above delegates here.
+    pub(crate) fn refresh_with_codec<S, W>(
         &self,
         snapshot: RegistrySnapshotV1,
         now: DateTime<Utc>,
@@ -422,7 +423,3 @@ fn read_optional(path: &Path) -> Result<Option<Vec<u8>>, OrbitError> {
         ))),
     }
 }
-
-#[cfg(test)]
-#[path = "tests/registry_cache.rs"]
-mod tests;

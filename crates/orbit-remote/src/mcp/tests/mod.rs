@@ -2,12 +2,16 @@
 
 // Content moved from inline #[cfg(test)] mod tests in mcp/mod.rs per ORB-00221.
 
+mod contract;
 mod discovery;
 mod e1;
 mod graph;
+mod hub_client;
+mod hub_link;
 mod learning;
 mod schema;
 mod support;
+mod transport;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1001,9 +1005,22 @@ mod audited_mcp_call_tests {
     use orbit_mcp::McpHost;
     use serde_json::json;
 
-    use super::super::host::{BrokerMcpHost, audited_mcp_call};
+    use super::super::host::{BrokerMcpHost, audited_mcp_call_with_session_context};
     use super::super::learning::LearningSidecarHost;
     use super::RuntimeMcpHost;
+
+    fn audited_mcp_call(
+        runtime: &OrbitRuntime,
+        name: &str,
+        input: serde_json::Value,
+    ) -> Result<serde_json::Value, OrbitError> {
+        audited_mcp_call_with_session_context(
+            runtime,
+            name,
+            input,
+            ToolSessionContext::trusted_local(None, None, None),
+        )
+    }
 
     // ORB-00289: the previous `create_task` helper + the three
     // `task_delete_*_over_mcp` tests asserted that `orbit.task.delete` was

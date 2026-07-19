@@ -32,6 +32,9 @@ pub mod runtime;
 pub mod service;
 pub mod workspace_registry;
 
+#[cfg(test)]
+mod tests;
+
 pub use host_identity::{
     HOST_IDENTITY_SCHEMA_VERSION, HOST_TOML_FILE, HostIdentity, HostIdentityOutcome,
     HostIdentityState, HostMode, NewHostIdentity, ensure_host_identity, inspect_host_identity,

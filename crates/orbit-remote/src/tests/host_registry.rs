@@ -7,8 +7,8 @@ use orbit_common::types::{
     HostStatus, ProjectionFreshness, Workspace, WorkspaceRegistry, WorkspaceStatus,
 };
 
-use super::{HostRegistryService, require_local_hub_identity};
 use crate::host_identity::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode};
+use crate::host_registry::{HostRegistryService, require_local_hub_identity};
 use crate::persistence::RemoteStore;
 
 fn identity(machine_id: &str, host_id: &str, mode: HostMode) -> HostIdentity {

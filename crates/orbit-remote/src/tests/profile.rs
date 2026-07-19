@@ -102,7 +102,7 @@ fn build_profile(
         role: None,
         owner_machine_id: workspace.owner_machine_id.clone(),
     };
-    super::build_execution_profile_v1(
+    crate::profile::build_execution_profile_v1(
         environment,
         workspace,
         &binding,
@@ -394,10 +394,15 @@ fn config_digest_tracks_crew_mode_and_base_while_closure_is_independent() {
         role: None,
         owner_machine_id: base_ws.owner_machine_id.clone(),
     };
-    let mismatch =
-        super::build_execution_profile_v1(environment, &base_ws, &binding, "hm_owner", Utc::now())
-            .expect_err("base mismatch fails")
-            .to_string();
+    let mismatch = crate::profile::build_execution_profile_v1(
+        environment,
+        &base_ws,
+        &binding,
+        "hm_owner",
+        Utc::now(),
+    )
+    .expect_err("base mismatch fails")
+    .to_string();
     assert!(mismatch.contains("does not match runtime"));
     base_ws.base_branch = "main".to_string();
     let base_changed = build_profile(&base_runtime, &base_ws);

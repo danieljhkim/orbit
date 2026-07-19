@@ -162,6 +162,3 @@ fn binding_for_registry_roots(
     }
     Ok(None)
 }
-
-#[cfg(test)]
-mod tests;
