@@ -15,7 +15,7 @@ Two paths are consulted, in order:
 
 **Workspace config REPLACES global config — it does not merge.** If `.orbit/config.toml` exists in your workspace, the global file is ignored entirely. This is intentional: per-repo agent behaviour (sandbox mode, approval policy, crew composition) must be fully deterministic and not silently inherit whatever happens to be in the user's global config.
 
-The workspace identity file `.orbit/config.yaml` is a separate artifact (it stores `workspace_id` for the canonical task store binding) and is unrelated to runtime config.
+The committed workspace contract `.orbit/config.yaml` stores `workspace_id` for the canonical task-store binding plus the narrow project-learning delivery contract (`learnings.tag_vocabulary` and `learnings.upfront_injection_cap`; [ADR-0237](design/project-learnings/4_decisions.md)). General runtime knobs still belong in `.orbit/config.toml`.
 
 ---
 

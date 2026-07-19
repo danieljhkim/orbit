@@ -1,0 +1,24 @@
+schema_version: 2
+id: ADR-0237
+title: Commit the canonical learning tag vocabulary in workspace config
+status: accepted
+owner: codex
+created_at: 2026-07-19T01:00:18.549348002Z
+accepted_at: 2026-07-19T01:00:29.328902656Z
+last_updated: 2026-07-19T01:00:29.328902656Z
+related_features:
+- project-learnings
+related_tasks:
+- ORB-10317
+tags:
+- learnings
+- config
+- injection
+paths:
+- .orbit/config.yaml
+- crates/orbit-core/src/command/**
+- crates/orbit-core/src/runtime/v2_host/**
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none

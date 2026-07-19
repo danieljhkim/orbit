@@ -1,8 +1,6 @@
 schema_version: 1
 id: L-0014
-legacy_ids:
-- L20260517-14
-status: active
+status: superseded
 scope:
   paths:
   - .orbit/config.toml
@@ -43,5 +41,8 @@ body: |
 evidence:
 - kind: external
   reference: conversation-2026-05-17-config-toml-vs-yaml
+superseded_by: L-0101
+legacy_ids:
+- L20260517-14
 created_at: 2026-05-17T22:42:15.317563Z
-updated_at: 2026-05-17T22:42:15.317563Z
+updated_at: 2026-07-19T01:03:32.852583248Z

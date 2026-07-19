@@ -1,0 +1,36 @@
+schema_version: 1
+id: L-0101
+status: active
+scope:
+  paths:
+  - .orbit/config.toml
+  - .orbit/config.yaml
+  tags:
+  - orbit-config
+  - config
+summary: Put general Orbit runtime knobs in .orbit/config.toml; .orbit/config.yaml is reserved for workspace identity plus ADR-0237's learning vocabulary and upfront cap.
+body: |-
+  ## Rule
+
+  Use .orbit/config.toml for general workspace runtime and agent behavior. Treat .orbit/config.yaml as the committed workspace contract: workspace identity plus the narrow project-learning delivery fields learnings.tag_vocabulary and learnings.upfront_injection_cap established by ADR-0237.
+
+  ## Why
+
+  The identity file is load-bearing across task registration, MCP preflight, audit partitioning, and worktrees. ORB-10317 deliberately added one PR-gated contract there because task and learning tag writes must consult the same committed vocabulary used by job-run startup. That exception does not turn config.yaml into the general knob registry.
+
+  ## How to apply
+
+  - Put execution, workflow, scoring, graph, PR, duel, crew, and similar behavior under config.toml.
+  - Change the learning tag vocabulary or upfront cap in config.yaml through a reviewed PR.
+  - When extending config.yaml, update every strict WorkspaceConfig parser and preserve backward-compatible defaults.
+  - Missing config.yaml means upfront learning delivery fails open without injection, while tagged writes reject because vocabulary membership cannot be proven.
+evidence:
+- kind: task
+  reference: ORB-10317
+- kind: external
+  reference: ADR-0237
+supersedes: L-0014
+created_at: 2026-07-19T01:03:27.221952125Z
+updated_at: 2026-07-19T01:03:32.852583248Z
+created_by: codex
+priority: 200

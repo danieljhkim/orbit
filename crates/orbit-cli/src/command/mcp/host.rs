@@ -26,7 +26,8 @@ use orbit_core::command::tool::{
 use orbit_core::routines::{HostIdentityState, HostMode, inspect_host_identity};
 use orbit_core::runtime::HubCoordinationExecutor;
 use orbit_core::{
-    AuditEventInsertParams, NotFoundKind, OrbitError, OrbitRuntime, redact_sensitive_env_text,
+    AuditEventInsertParams, NotFoundKind, OrbitError, OrbitRuntime, read_workspace_config,
+    redact_sensitive_env_text,
 };
 use orbit_mcp::McpHost;
 use serde::Deserialize;
@@ -105,6 +106,8 @@ struct ExactCheckoutBinding {
 struct WorkspaceIdentityDocument {
     schema_version: u32,
     workspace_id: String,
+    #[serde(default, rename = "learnings")]
+    _learnings: Option<serde_yaml::Value>,
 }
 
 /// Checkout-independent local MCP broker.
@@ -544,7 +547,13 @@ impl BrokerMcpHost {
                 .or_else(|| input.get("with-context"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
-        let require_local = definition.policy.placement() != McpToolPlacement::Hub || with_context;
+        let tagged_task_write = matches!(name, "orbit.task.add" | "orbit.task.update")
+            && input
+                .as_object()
+                .is_some_and(|object| object.contains_key("tags") || object.contains_key("tag"));
+        let require_local = definition.policy.placement() != McpToolPlacement::Hub
+            || with_context
+            || tagged_task_write;
         let (workspace_id, binding) = match self.resolve_workspace(selector, require_local) {
             Ok(resolved) => resolved,
             Err(error) => {
@@ -570,8 +579,24 @@ impl BrokerMcpHost {
                 object.insert("workspace".to_string(), Value::String(workspace_id.clone()));
             }
             let legacy_root = self.legacy_friction_root(&workspace_id, binding.as_ref());
-            let result = HubCoordinationExecutor::new(&self.global_root, workspace_id, legacy_root)
-                .and_then(|executor| executor.execute_tool(name, input, context.clone()));
+            let tag_vocabulary = if tagged_task_write {
+                binding
+                    .as_ref()
+                    .map(|binding| read_workspace_config(&binding.key.shared_root))
+                    .transpose()
+                    .map(|config| config.map(|config| config.learnings.tag_vocabulary))
+            } else {
+                Ok(None)
+            };
+            let result = tag_vocabulary.and_then(|tag_vocabulary| {
+                HubCoordinationExecutor::new_with_tag_vocabulary(
+                    &self.global_root,
+                    workspace_id,
+                    legacy_root,
+                    tag_vocabulary,
+                )
+                .and_then(|executor| executor.execute_tool(name, input, context.clone()))
+            });
             self.record_coordination_outcome(name, &context, &result);
             return result;
         }

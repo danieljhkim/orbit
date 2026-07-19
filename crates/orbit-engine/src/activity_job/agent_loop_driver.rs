@@ -170,7 +170,7 @@ fn drive_inner(
     let model = resolve_model(spec);
     let user_prompt = user_prompt_from_input(input)?;
     let user_prompt =
-        maybe_prepend_learning_reminders(user_prompt, host, input, session, &tool_ctx)?;
+        maybe_prepend_learning_reminders(user_prompt, host, input, run_id, session, &tool_ctx)?;
 
     if replay_active() {
         // Reuse the same ReplayTransport across calls so the cursor advances
@@ -216,24 +216,35 @@ fn maybe_prepend_learning_reminders(
     user_prompt: String,
     host: Option<&dyn V2RuntimeHost>,
     input: &Value,
+    run_id: &str,
     session: &mut Session,
     tool_ctx: &ToolContext,
 ) -> Result<String, DispatchError> {
     let Some(host) = host else {
         return Ok(user_prompt);
     };
-    let caps = LearningInjectionCaps::from_env();
-    let reminders = host.learning_reminders_for_task(input, caps)?;
-    if reminders.is_empty() {
+    let batch = host.learning_reminders_for_task(input)?;
+    if batch.reminders.is_empty() {
         return Ok(user_prompt);
     }
+    let caps = LearningInjectionCaps {
+        per_call: batch.cap,
+        per_session_hard: LearningInjectionCaps::from_env().per_session_hard,
+    };
     let admitted = session
         .learning_injection_state_mut()
-        .admit_reminders(&reminders, caps);
+        .admit_reminders(&batch.reminders, caps);
     if admitted.is_empty() {
         return Ok(user_prompt);
     }
     persist_session_learning_state(host, tool_ctx, session, &admitted)?;
+    host.record_learning_injected(
+        "job_run_start",
+        input.get("task_id").and_then(Value::as_str),
+        run_id,
+        session.id(),
+        &admitted,
+    )?;
     Ok(prepend_reminder_block(&user_prompt, &admitted))
 }
 

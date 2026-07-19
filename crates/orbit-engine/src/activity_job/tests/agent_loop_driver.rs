@@ -1,11 +1,12 @@
 #![allow(missing_docs)]
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use orbit_agent::loop_engine::audit::{AuditSink, NullSink};
 use orbit_agent::loop_engine::transport::MessageRole;
 use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
-use orbit_common::types::{LearningInjectionCaps, LearningReminder};
+use orbit_common::types::{LearningReminder, UpfrontLearningReminderBatch};
 use tempfile::NamedTempFile;
 
 use super::super::agent_loop_driver::*;
@@ -93,6 +94,7 @@ impl V2RuntimeHost for ReplayHost {
 
 struct LearningReplayHost {
     reminders: Vec<LearningReminder>,
+    injected: AtomicUsize,
 }
 
 impl V2RuntimeHost for LearningReplayHost {
@@ -126,9 +128,23 @@ impl V2RuntimeHost for LearningReplayHost {
     fn learning_reminders_for_task(
         &self,
         _input: &Value,
-        caps: LearningInjectionCaps,
-    ) -> Result<Vec<LearningReminder>, DispatchError> {
-        Ok(self.reminders.iter().take(caps.per_call).cloned().collect())
+    ) -> Result<UpfrontLearningReminderBatch, DispatchError> {
+        Ok(UpfrontLearningReminderBatch {
+            reminders: self.reminders.clone(),
+            cap: 5,
+        })
+    }
+
+    fn record_learning_injected(
+        &self,
+        _surface: &str,
+        _task_id: Option<&str>,
+        _run_id: &str,
+        _session_id: &str,
+        admitted: &[LearningReminder],
+    ) -> Result<(), DispatchError> {
+        self.injected.fetch_add(admitted.len(), Ordering::SeqCst);
+        Ok(())
     }
 
     fn tool_context_for_activity(
@@ -281,6 +297,7 @@ fn l1_learning_reminder_prepends_prompt_for_matching_task() {
             id: "L-0001".to_string(),
             summary: "Remember to validate the output.".to_string(),
         }],
+        injected: AtomicUsize::new(0),
     };
     let mut session = Session::new("replay", "test-model", "test", None);
 
@@ -305,6 +322,7 @@ Read full body via `orbit.learning.show <id>` if needed.\n\
 </system-reminder>\n\n\
 baseline prompt"
     );
+    assert_eq!(host.injected.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -314,6 +332,7 @@ fn l1_learning_reminder_leaves_prompt_unchanged_without_matches() {
     let _guard = ReplayEnvGuard::set_fixture(fixture.path());
     let host = LearningReplayHost {
         reminders: Vec::new(),
+        injected: AtomicUsize::new(0),
     };
     let mut session = Session::new("replay", "test-model", "test", None);
 
@@ -330,6 +349,7 @@ fn l1_learning_reminder_leaves_prompt_unchanged_without_matches() {
     .expect("replay should finish");
 
     assert_eq!(first_user_text(&session), "baseline prompt");
+    assert_eq!(host.injected.load(Ordering::SeqCst), 0);
 }
 
 #[test]
@@ -344,6 +364,7 @@ fn l1_learning_reminder_applies_default_per_call_cap() {
                 summary: format!("Learning {idx}"),
             })
             .collect(),
+        injected: AtomicUsize::new(0),
     };
     let mut session = Session::new("replay", "test-model", "test", None);
 
@@ -363,4 +384,5 @@ fn l1_learning_reminder_applies_default_per_call_cap() {
     assert!(text.contains("[L-0004] Learning 4"));
     assert!(!text.contains("L-0005"));
     assert_eq!(session.learning_injection_state().count, 5);
+    assert_eq!(host.injected.load(Ordering::SeqCst), 5);
 }

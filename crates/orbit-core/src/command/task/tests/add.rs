@@ -30,6 +30,24 @@ fn task_add_enters_proposed_and_requires_approval_before_backlog() {
     assert_eq!(started.status, TaskStatus::InProgress);
 }
 
+#[test]
+fn task_add_rejects_tag_outside_workspace_vocabulary() {
+    let (_root, runtime) = test_runtime();
+
+    let error = runtime
+        .add_task(TaskAddParams {
+            title: "Unknown tag".to_string(),
+            description: "Exercise vocabulary validation.".to_string(),
+            tags: vec!["invented-without-pr".to_string()],
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect_err("unknown task tag must be rejected");
+
+    assert!(error.to_string().contains("tag_vocabulary"), "{error}");
+    assert!(error.to_string().contains("invented-without-pr"), "{error}");
+}
+
 // --- ORB-00251: context_files omission / over-inclusion warning helper tests ---
 
 #[test]

@@ -6,12 +6,12 @@ use orbit_cmd::agent_rules::{InjectionAction, inject_agent_rules};
 use orbit_common::types::{
     Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceStatus, validate_machine_id,
 };
-use orbit_common::utility::fs::atomic_write_text;
 use orbit_core::command::init::{InitOptions, init_workspace_at_root, seed_default_orbitignore};
 use orbit_core::routines::{HostIdentityState, HostMode, inspect_host_identity};
 use orbit_core::workspace_registry;
-use orbit_core::{OrbitError, OrbitRuntime};
-use serde::Serialize;
+use orbit_core::{
+    LearningDeliveryConfig, OrbitError, OrbitRuntime, WorkspaceConfig, write_workspace_config,
+};
 
 use super::role::CliCheckoutRole;
 use super::support::{detect_git_remote, dir_name_or_fallback, ensure_orbit_gitignore_entry};
@@ -301,19 +301,15 @@ pub(super) fn canonical_workspace_id(name: &str) -> String {
     format!("ws_{canonical}")
 }
 
-#[derive(Serialize)]
-struct WorkspaceIdentityDocument<'a> {
-    schema_version: u32,
-    workspace_id: &'a str,
-}
-
 fn write_workspace_identity(orbit_dir: &Path, workspace_id: &str) -> Result<(), OrbitError> {
-    let content = serde_yaml::to_string(&WorkspaceIdentityDocument {
-        schema_version: 1,
-        workspace_id,
-    })
-    .map_err(|error| OrbitError::Store(format!("serialize workspace identity: {error}")))?;
-    atomic_write_text(&orbit_dir.join("config.yaml"), &content).map_err(OrbitError::from)
+    write_workspace_config(
+        orbit_dir,
+        &WorkspaceConfig {
+            schema_version: 1,
+            workspace_id: workspace_id.to_string(),
+            learnings: LearningDeliveryConfig::default(),
+        },
+    )
 }
 
 fn unassigned_checkout(

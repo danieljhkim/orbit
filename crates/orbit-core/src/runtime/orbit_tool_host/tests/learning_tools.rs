@@ -245,6 +245,42 @@ fn add_rejects_summary_longer_than_280_chars() {
 }
 
 #[test]
+fn add_rejects_tag_outside_workspace_vocabulary() {
+    let (_guard, runtime, _repo_root) = test_runtime();
+    let err = super::super::learning_tools::add(
+        &runtime,
+        json!({
+            "summary": "unknown vocabulary tag",
+            "scope": {"tags": ["invented-without-pr"]},
+        }),
+        None,
+        None,
+    )
+    .expect_err("unknown learning tag must be rejected");
+
+    assert!(err.to_string().contains("tag_vocabulary"), "{err}");
+    assert!(err.to_string().contains("invented-without-pr"), "{err}");
+}
+
+#[test]
+fn update_rejects_tag_outside_workspace_vocabulary() {
+    let (_guard, runtime, _repo_root) = test_runtime();
+    let learning = create_minimal(&runtime, "known learning", &[], &[]);
+    let err = super::super::learning_tools::update(
+        &runtime,
+        json!({
+            "id": learning.id,
+            "scope": {"tags": ["invented-without-pr"]},
+        }),
+        None,
+        None,
+    )
+    .expect_err("unknown learning update tag must be rejected");
+
+    assert!(err.to_string().contains("tag_vocabulary"), "{err}");
+}
+
+#[test]
 fn supersede_rejects_id_equal_to_with() {
     let (_guard, runtime, _repo_root) = test_runtime();
     let learning = create_minimal(&runtime, "x", &[], &[]);

@@ -87,7 +87,8 @@ pub fn run_cli_backend(
     let sandbox =
         host.resolve_executor_sandbox(&provider, fs_profile, subprocess_cwd.as_deref())?;
 
-    let learning_context = cli_learning_context(host, input, tool_ctx.workspace_root.as_deref())?;
+    let learning_context =
+        cli_learning_context(host, input, run_id, tool_ctx.workspace_root.as_deref())?;
     let envelope_json = cli_agent_envelope_json(
         spec,
         run_id,
@@ -426,19 +427,23 @@ struct CliLearningContext {
 fn cli_learning_context(
     host: &dyn V2RuntimeHost,
     input: &Value,
+    run_id: &str,
     workspace_root: Option<&std::path::Path>,
 ) -> Result<CliLearningContext, DispatchError> {
-    let caps = LearningInjectionCaps::from_env();
-    let reminders = host.learning_reminders_for_task(input, caps)?;
-    if reminders.is_empty() {
+    let batch = host.learning_reminders_for_task(input)?;
+    if batch.reminders.is_empty() {
         return Ok(CliLearningContext {
             prompt: None,
             session_id: None,
         });
     }
 
+    let caps = LearningInjectionCaps {
+        per_call: batch.cap,
+        per_session_hard: LearningInjectionCaps::from_env().per_session_hard,
+    };
     let mut state = LearningInjectionState::new();
-    let admitted = state.admit_reminders(&reminders, caps);
+    let admitted = state.admit_reminders(&batch.reminders, caps);
     if admitted.is_empty() {
         return Ok(CliLearningContext {
             prompt: None,
@@ -454,6 +459,13 @@ fn cli_learning_context(
                 DispatchError::CliInvocationFailed(format!("persist learning state: {err}"))
             })?;
     }
+    host.record_learning_injected(
+        "job_run_start",
+        task_id_from_input(input),
+        run_id,
+        &session_id,
+        &admitted,
+    )?;
     Ok(CliLearningContext {
         prompt: Some(prompt),
         session_id: Some(session_id),

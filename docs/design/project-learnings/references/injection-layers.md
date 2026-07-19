@@ -1,6 +1,6 @@
 # Injection-Layer Coverage Matrix
 
-**Last updated:** 2026-05-17
+**Last updated:** 2026-07-19
 
 A coverage map of the project-learnings push-injection pipeline against Orbit's two agent tool surfaces. Quick-reference companion to [2_design.md §4](../2_design.md), which is the design itself. Look here to answer "does *my* surface get learning X?"; look there to understand how each layer is built.
 
@@ -18,7 +18,7 @@ Same tools, same JSON I/O. The transports differ only in what wraps the response
 | Agent context | Transport | L1 pre-prompt (universal) | L2 MCP sidecar (cross-agent) | L3 PreToolUse hook (Claude-only) |
 |---|---|---|---|---|
 | Engine-spawned agent in worktree | CLI | **✓** | ✗ (not MCP) | rare in-envelope |
-| Interactive Claude Code with Orbit plugin | MCP | ✗ (no engine envelope) | **✓** | **✓** (on `Edit`/`Write`/`Read`) |
+| Interactive Claude Code with Orbit plugin | MCP | ✗ (no engine envelope) | **✓** | **✓** (on `Edit`/`Write`) |
 | Interactive Codex / Gemini with Orbit MCP | MCP | ✗ | **✓** | ✗ (no equivalent hook surface) |
 | Human at shell | CLI | ✗ | ✗ | ✗ |
 | Other programmatic CLI caller | CLI | ✗ | ✗ | ✗ |
@@ -76,5 +76,6 @@ Current as of the `Last updated` date above. Re-grep before relying on these if 
 
 - [`crates/orbit-mcp/src/adapter/learning_sidecar.rs`](../../../../crates/orbit-mcp/src/adapter/learning_sidecar.rs) — L2 implementation (allowlist, path collection, session admission, response attachment).
 - [`crates/orbit-mcp/src/adapter/dispatch.rs`](../../../../crates/orbit-mcp/src/adapter/dispatch.rs) — call site that wraps every MCP tool response.
-- `crates/orbit-engine/...` — L1 implementation (engine pre-prompt injection at agent runtime spawn).
-- `.claude/settings.json` (per-user) — L3 PreToolUse hook configuration.
+- `crates/orbit-core/src/runtime/v2_host/learning_reminders.rs` — L1 tag selection, ranking, and config cap.
+- `crates/orbit-engine/src/activity_job/` — L1 prompt admission for loop and CLI backends.
+- `crates/orbit-cmd/src/learning_hook.rs` plus `.claude/settings.json` — L3 path matching and `Edit|Write` wiring.

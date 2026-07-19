@@ -35,6 +35,15 @@ Failure modes:
 - If a tool implementation succeeds but its runtime audit insertion fails, the call fails closed and does not surface a successful result. The non-fatal `Drop` rule applies only to guard-side RAII persistence.
 - If runtime initialization fails before the guard exists, no command audit row is written.
 
+#### Learning injection events
+
+Both project-learning delivery surfaces write command-audit rows with `target_type = learning_injected` to the host-global `~/.orbit/orbit.db`. Their `arguments_json` is a stable object containing `surface` and `learning_ids`:
+
+- Upfront task injection uses `surface: job_run_start`, `command: job`, `subcommand: run-start`, `tool_name: agent_invoke`, and carries task, job-run, and session correlation.
+- Path hook injection uses `surface: pretooluse_path`, `command: hook`, `subcommand: pretooluse`, the actual `Edit` or `Write` tool name, and the touched path as `target_id`; managed task/run/session correlation is included when available.
+
+One row represents one admitted batch, so `learning_ids` may contain more than one ID. Empty selections emit no row. Hook persistence fails open with a warning; upfront persistence fails the dispatch so the prompt and durable evidence cannot disagree.
+
 ### V2 Activity/Job Audit Event
 
 Activity/job audit events are JSONL entries represented by `V2AuditEvent`.
@@ -90,4 +99,4 @@ Required invariants:
 
 ## Agent Signature
 
-Last revised by codex / gpt-5.5 for [T20260508-8].
+Last revised by codex for [ORB-10317].

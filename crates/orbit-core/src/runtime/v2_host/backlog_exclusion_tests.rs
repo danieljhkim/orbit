@@ -265,7 +265,7 @@ fn list_backlog_tasks_does_not_filter_auto_task_provenance_tags() {
             title: "Auto-task backlog".to_string(),
             description: "minted by scheduler".to_string(),
             acceptance_criteria: vec!["selected".to_string()],
-            tags: vec!["auto-task:nightly-maintenance".to_string()],
+            tags: vec!["auto-task:qa-sweep".to_string()],
             plan: "ship".to_string(),
             status: Some(TaskStatus::Backlog),
             task_type: Some(TaskType::Chore),

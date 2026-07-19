@@ -8,7 +8,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{EvidenceKind, Learning, LearningStatus, NotFoundKind, OrbitError};
+use orbit_common::types::{
+    EvidenceKind, Learning, LearningStatus, NotFoundKind, OrbitError, normalize_learning_tags,
+};
 use orbit_store::{
     LearningCreateParams, LearningListEntry, LearningSearchParams, LearningSearchResult,
     LearningUpdateParams, RemoteArtifactStub, learning_layout::LearningLayoutMigrationReport,
@@ -46,7 +48,16 @@ struct LearningSearchConfigSection {
 }
 
 impl OrbitRuntime {
-    pub fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
+    pub fn create_learning(
+        &self,
+        mut params: LearningCreateParams,
+    ) -> Result<Learning, OrbitError> {
+        params.scope.tags = normalize_learning_tags(params.scope.tags);
+        crate::command::tag_vocabulary::validate_workspace_tags(
+            self,
+            "learning",
+            &params.scope.tags,
+        )?;
         let learning = self.stores().learnings().add(params)?;
         self.record_id_allocation_audit("learning", &learning.id)?;
         Ok(learning)
@@ -99,8 +110,12 @@ impl OrbitRuntime {
     pub fn update_learning(
         &self,
         id: &str,
-        params: LearningUpdateParams,
+        mut params: LearningUpdateParams,
     ) -> Result<Learning, OrbitError> {
+        if let Some(scope) = &mut params.scope {
+            scope.tags = normalize_learning_tags(std::mem::take(&mut scope.tags));
+            crate::command::tag_vocabulary::validate_workspace_tags(self, "learning", &scope.tags)?;
+        }
         self.stores().learnings().update(id, params)
     }
 

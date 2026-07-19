@@ -424,7 +424,7 @@ fn global_search_learning_lexical_mode_keeps_legacy_json_shape() {
     let id = add_learning_with(
         &runtime,
         "lexstable literal learning",
-        &["lexstable"],
+        &["search"],
         Some(50),
     );
 

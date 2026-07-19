@@ -65,6 +65,8 @@ impl OrbitRuntime {
         let dependencies = normalize_task_dependencies(params.dependencies.clone())?;
         validate_task_dependencies(&self.list_tasks()?, None, &dependencies)?;
         self.validate_crew_name(params.crew.as_deref())?;
+        let tags = normalize_task_tags(params.tags.clone());
+        crate::command::tag_vocabulary::validate_workspace_tags(self, "task", &tags)?;
 
         let prune_root = context_workspace_root(&self.paths().repo_root, workspace_path.as_deref());
         let normalized_context_files =
@@ -82,7 +84,7 @@ impl OrbitRuntime {
                 acceptance_criteria: params.acceptance_criteria.clone(),
                 dependencies: dependencies.clone(),
                 relations: params.relations.clone(),
-                tags: normalize_task_tags(params.tags.clone()),
+                tags: tags.clone(),
                 plan: params.plan.clone(),
                 execution_summary: String::new(),
                 context_files: kept_context_files.clone(),

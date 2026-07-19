@@ -40,6 +40,17 @@ fn install_writes_expected_shims_and_config_entries() {
         "PreToolUse",
         ".claude/hooks/orbit-learning-reminder",
     );
+    let claude_settings: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(".claude/settings.json")).expect("read claude settings"),
+    )
+    .expect("parse claude settings");
+    let learning_hook = claude_settings["hooks"]["PreToolUse"]
+        .as_array()
+        .expect("pretool hooks")
+        .iter()
+        .find(|entry| json_value_contains_command(entry, ".claude/hooks/orbit-learning-reminder"))
+        .expect("learning hook entry");
+    assert_eq!(learning_hook["matcher"], "Edit|Write");
     assert_json_hook(
         &root.join(".gemini/settings.json"),
         "BeforeTool",

@@ -1,31 +1,28 @@
 use std::collections::BTreeMap;
 
 use orbit_common::types::{
-    LearningInjectionCaps, LearningReminder, OrbitError, Task, normalize_learning_tags,
+    LearningReminder, OrbitError, Task, UpfrontLearningReminderBatch, normalize_learning_tags,
 };
-use orbit_common::utility::selector::anchor_path;
 use orbit_engine::DispatchError;
 use orbit_store::{LearningSearchParams, LearningSearchResult};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
-use crate::command::task::{canonicalize_context_files_for_read, context_workspace_root};
 use crate::runtime::run_input::singular_task_id_from_input;
 
 pub(super) fn learning_reminders_for_task(
     runtime: &OrbitRuntime,
     input: &Value,
-    caps: LearningInjectionCaps,
-) -> Result<Vec<LearningReminder>, DispatchError> {
+) -> Result<UpfrontLearningReminderBatch, DispatchError> {
     let Some(task_id) = singular_task_id_from_input(input) else {
-        return Ok(Vec::new());
+        return Ok(UpfrontLearningReminderBatch::empty());
     };
     let task = runtime.get_task(task_id).map_err(|err| {
         DispatchError::CliInvocationFailed(format!(
             "load task `{task_id}` for learning reminders: {err}"
         ))
     })?;
-    learning_reminders_for_task_snapshot(runtime, &task, input, caps).map_err(|err| {
+    learning_reminders_for_task_snapshot(runtime, &task, input).map_err(|err| {
         DispatchError::CliInvocationFailed(format!("search learnings for task `{task_id}`: {err}"))
     })
 }
@@ -33,19 +30,39 @@ pub(super) fn learning_reminders_for_task(
 fn learning_reminders_for_task_snapshot(
     runtime: &OrbitRuntime,
     task: &Task,
-    input: &Value,
-    caps: LearningInjectionCaps,
-) -> Result<Vec<LearningReminder>, OrbitError> {
-    let mut batches = Vec::new();
-    for path in task_context_paths(runtime, task, input) {
-        batches.push(runtime.search_learnings(LearningSearchParams {
-            path: Some(path),
-            tag: None,
-            query: None,
-            limit: None,
-        })?);
+    _input: &Value,
+) -> Result<UpfrontLearningReminderBatch, OrbitError> {
+    let Some(config) = orbit_store::sqlite::task_registry::read_workspace_config_optional(
+        &runtime.paths().orbit_dir,
+    )?
+    else {
+        return Ok(UpfrontLearningReminderBatch::empty());
+    };
+    let cap = config.learnings.upfront_injection_cap;
+    if cap == 0 || config.learnings.tag_vocabulary.is_empty() {
+        return Ok(UpfrontLearningReminderBatch {
+            reminders: Vec::new(),
+            cap,
+        });
     }
-    for tag in normalize_learning_tags(task.tags.clone()) {
+    let vocabulary = config
+        .learnings
+        .tag_vocabulary
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    let tags = normalize_learning_tags(task.tags.clone())
+        .into_iter()
+        .filter(|tag| vocabulary.contains(tag))
+        .collect::<Vec<_>>();
+    if tags.is_empty() {
+        return Ok(UpfrontLearningReminderBatch {
+            reminders: Vec::new(),
+            cap,
+        });
+    }
+
+    let mut batches = Vec::new();
+    for tag in tags {
         batches.push(runtime.search_learnings(LearningSearchParams {
             path: None,
             tag: Some(tag),
@@ -55,7 +72,7 @@ fn learning_reminders_for_task_snapshot(
     }
 
     let mut reminders = Vec::new();
-    for result in merge_ranked_results(batches, caps.per_call) {
+    for result in merge_ranked_results(batches, cap) {
         let id = result.learning.id;
         // Skip index-only ghosts: the SQLite envelope can outlive its YAML
         // body after a partial rollback or manual removal. Reminders are a
@@ -78,25 +95,7 @@ fn learning_reminders_for_task_snapshot(
             summary: result.learning.summary,
         });
     }
-    Ok(reminders)
-}
-
-fn task_context_paths(runtime: &OrbitRuntime, task: &Task, input: &Value) -> Vec<String> {
-    let workspace_path = input.get("workspace_path").and_then(Value::as_str);
-    let prune_root = context_workspace_root(&runtime.paths().repo_root, workspace_path);
-    let canonical_context_files =
-        canonicalize_context_files_for_read(&task.context_files, &prune_root);
-    let mut paths = Vec::new();
-    for selector in canonical_context_files {
-        let Ok(path) = anchor_path(&selector) else {
-            continue;
-        };
-        let path = path.to_string_lossy().replace('\\', "/");
-        if !path.is_empty() && !paths.iter().any(|existing| existing == &path) {
-            paths.push(path);
-        }
-    }
-    paths
+    Ok(UpfrontLearningReminderBatch { reminders, cap })
 }
 
 fn merge_ranked_results(
@@ -112,8 +111,12 @@ fn merge_ranked_results(
     }
     let mut merged: Vec<_> = by_id.into_values().collect();
     merged.sort_by(|a, b| {
-        priority_rank(b.learning.priority)
-            .cmp(&priority_rank(a.learning.priority))
+        b.matched_by
+            .len()
+            .cmp(&a.matched_by.len())
+            .then_with(|| {
+                priority_rank(b.learning.priority).cmp(&priority_rank(a.learning.priority))
+            })
             .then_with(|| b.learning.updated_at.cmp(&a.learning.updated_at))
             .then_with(|| a.learning.id.cmp(&b.learning.id))
     });
@@ -138,6 +141,7 @@ mod tests {
     use orbit_common::types::{LearningScope, Task};
     use orbit_engine::V2RuntimeHost;
     use orbit_store::LearningCreateParams;
+    use orbit_store::sqlite::task_registry::{read_workspace_config, write_workspace_config};
     use serde_json::json;
 
     use super::*;
@@ -189,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn reminders_match_task_context_paths_and_tags_without_body() {
+    fn reminders_match_task_tags_only_without_body() {
         let runtime = OrbitRuntime::in_memory().expect("build runtime");
         create_learning(
             &runtime,
@@ -206,20 +210,14 @@ mod tests {
         );
 
         let reminders = runtime
-            .learning_reminders_for_task(
-                &json!({"task_id": task.id}),
-                LearningInjectionCaps::default(),
-            )
+            .learning_reminders_for_task(&json!({"task_id": task.id}))
             .expect("learning reminders");
 
-        assert_eq!(reminders.len(), 2);
+        assert_eq!(reminders.cap, 5);
+        assert_eq!(reminders.reminders.len(), 1);
         assert!(
             reminders
-                .iter()
-                .any(|reminder| reminder.summary == "Remember the engine path.")
-        );
-        assert!(
-            reminders
+                .reminders
                 .iter()
                 .any(|reminder| reminder.summary == "Remember the tag.")
         );
@@ -231,32 +229,130 @@ mod tests {
     }
 
     #[test]
-    fn reminders_apply_default_per_call_cap_after_merge() {
+    fn reminders_are_empty_for_no_tag_task() {
         let runtime = OrbitRuntime::in_memory().expect("build runtime");
-        for idx in 0..7 {
+        create_learning(&runtime, "Tagged.", &[], &["workflow"], None);
+        let task = task_with_context(&runtime, Vec::new(), Vec::new());
+
+        let batch = runtime
+            .learning_reminders_for_task(&json!({"task_id": task.id}))
+            .expect("learning reminders");
+
+        assert!(batch.reminders.is_empty());
+    }
+
+    #[test]
+    fn reminders_fail_open_for_empty_vocabulary_and_missing_config() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        create_learning(&runtime, "Tagged.", &[], &["workflow"], None);
+        let task = task_with_context(&runtime, Vec::new(), vec!["workflow".to_string()]);
+        let config_path = runtime.paths().orbit_dir.join("config.yaml");
+        let mut config = read_workspace_config(&runtime.paths().orbit_dir).expect("config");
+        config.learnings.tag_vocabulary.clear();
+        write_workspace_config(&runtime.paths().orbit_dir, &config).expect("empty vocabulary");
+
+        let empty = runtime
+            .learning_reminders_for_task(&json!({"task_id": task.id}))
+            .expect("empty vocabulary");
+        assert!(empty.reminders.is_empty());
+
+        std::fs::remove_file(config_path).expect("remove config");
+        let missing = runtime
+            .learning_reminders_for_task(&json!({"task_id": task.id}))
+            .expect("missing config must fail open");
+        assert!(missing.reminders.is_empty());
+    }
+
+    #[test]
+    fn reminders_rank_match_strength_before_priority_and_enforce_configured_cap() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        create_learning(
+            &runtime,
+            "Two matching tags, low priority",
+            &[],
+            &["workflow", "testing"],
+            Some(0),
+        );
+        create_learning(
+            &runtime,
+            "One matching tag, high priority",
+            &[],
+            &["workflow"],
+            Some(9),
+        );
+        for idx in 0..4 {
             create_learning(
                 &runtime,
                 &format!("Learning {idx}"),
-                &["crates/orbit-engine/**"],
                 &[],
+                &["workflow"],
                 Some(idx),
             );
         }
         let task = task_with_context(
             &runtime,
-            vec!["dir:crates/orbit-engine/src".to_string()],
             Vec::new(),
+            vec!["workflow".to_string(), "testing".to_string()],
         );
+        let mut config = read_workspace_config(&runtime.paths().orbit_dir).expect("config");
+        config.learnings.upfront_injection_cap = 2;
+        write_workspace_config(&runtime.paths().orbit_dir, &config).expect("write cap");
 
-        let reminders = runtime
-            .learning_reminders_for_task(
-                &json!({"task_id": task.id}),
-                LearningInjectionCaps::default(),
-            )
+        let batch = runtime
+            .learning_reminders_for_task(&json!({"task_id": task.id}))
             .expect("learning reminders");
 
-        assert_eq!(reminders.len(), 5);
-        assert_eq!(reminders[0].summary, "Learning 6");
+        assert_eq!(batch.cap, 2);
+        assert_eq!(batch.reminders.len(), 2);
+        assert_eq!(
+            batch.reminders[0].summary,
+            "Two matching tags, low priority"
+        );
+        assert_eq!(
+            batch.reminders[1].summary,
+            "One matching tag, high priority"
+        );
+    }
+
+    #[test]
+    fn upfront_injection_records_global_learning_injected_audit_event() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let admitted = vec![LearningReminder {
+            id: "L-0001".to_string(),
+            summary: "Audit this injection.".to_string(),
+        }];
+
+        runtime
+            .record_learning_injected(
+                "job_run_start",
+                Some("ORB-00001"),
+                "jrun-audit",
+                "session-audit",
+                &admitted,
+            )
+            .expect("record audit");
+
+        let events = runtime
+            .list_audit_events_with_kind(
+                None,
+                Some("agent_invoke".to_string()),
+                Some("learning_injected".to_string()),
+                None,
+                None,
+                10,
+            )
+            .expect("list audit");
+        let event = events.first().expect("learning audit event");
+        assert_eq!(event.command, "job");
+        assert_eq!(event.subcommand.as_deref(), Some("run-start"));
+        assert_eq!(event.task_id.as_deref(), Some("ORB-00001"));
+        assert_eq!(event.job_run_id.as_deref(), Some("jrun-audit"));
+        assert_eq!(event.session_id.as_deref(), Some("session-audit"));
+        let arguments: Value =
+            serde_json::from_str(event.arguments_json.as_deref().expect("audit arguments"))
+                .expect("parse audit arguments");
+        assert_eq!(arguments["surface"], "job_run_start");
+        assert_eq!(arguments["learning_ids"], json!(["L-0001"]));
     }
 
     #[test]
@@ -265,22 +361,12 @@ mod tests {
         let missing = create_learning(
             &runtime,
             "Missing YAML reminder.",
-            &["crates/orbit-engine/**"],
             &[],
+            &["workflow"],
             Some(2),
         );
-        create_learning(
-            &runtime,
-            "Available reminder.",
-            &["crates/orbit-engine/**"],
-            &[],
-            Some(1),
-        );
-        let task = task_with_context(
-            &runtime,
-            vec!["dir:crates/orbit-engine/src".to_string()],
-            Vec::new(),
-        );
+        create_learning(&runtime, "Available reminder.", &[], &["workflow"], Some(1));
+        let task = task_with_context(&runtime, Vec::new(), vec!["workflow".to_string()]);
         std::fs::remove_file(
             runtime
                 .paths()
@@ -292,8 +378,8 @@ mod tests {
 
         let search_results = runtime
             .search_learnings(LearningSearchParams {
-                path: Some("crates/orbit-engine/src".to_string()),
-                tag: None,
+                path: None,
+                tag: Some("workflow".to_string()),
                 query: None,
                 limit: None,
             })
@@ -305,15 +391,17 @@ mod tests {
         );
 
         let reminders = runtime
-            .learning_reminders_for_task(
-                &json!({"task_id": task.id}),
-                LearningInjectionCaps::default(),
-            )
+            .learning_reminders_for_task(&json!({"task_id": task.id}))
             .expect("learning reminders");
 
-        assert_eq!(reminders.len(), 1);
-        assert_eq!(reminders[0].summary, "Available reminder.");
-        assert!(!reminders.iter().any(|reminder| reminder.id == missing.id));
+        assert_eq!(reminders.reminders.len(), 1);
+        assert_eq!(reminders.reminders[0].summary, "Available reminder.");
+        assert!(
+            !reminders
+                .reminders
+                .iter()
+                .any(|reminder| reminder.id == missing.id)
+        );
     }
 
     /// ORB-10113: two workspaces bound to the same host-global database must
@@ -338,31 +426,13 @@ mod tests {
         // Workspace B owns a learning on a shared path glob. Its canonical id
         // is `L-0001`, colliding with workspace A's first record — the exact
         // duplicate-id shape that let a foreign summary leak in before scoping.
-        create_learning(
-            &runtime_b,
-            "workspace B leak",
-            &["crates/orbit-engine/**"],
-            &[],
-            Some(9),
-        );
+        create_learning(&runtime_b, "workspace B leak", &[], &["workflow"], Some(9));
 
         // Workspace A: a genuine same-workspace ghost (index row whose YAML is
         // removed) plus a live record. The ghost must be skipped, the live one
         // kept, and B's row must never appear.
-        let ghost = create_learning(
-            &runtime_a,
-            "workspace A ghost",
-            &["crates/orbit-engine/**"],
-            &[],
-            Some(5),
-        );
-        create_learning(
-            &runtime_a,
-            "workspace A live",
-            &["crates/orbit-engine/**"],
-            &[],
-            Some(1),
-        );
+        let ghost = create_learning(&runtime_a, "workspace A ghost", &[], &["workflow"], Some(5));
+        create_learning(&runtime_a, "workspace A live", &[], &["workflow"], Some(1));
         std::fs::remove_file(
             runtime_a
                 .paths()
@@ -372,30 +442,26 @@ mod tests {
         )
         .expect("remove ghost yaml");
 
-        let task = task_with_context(
-            &runtime_a,
-            vec!["dir:crates/orbit-engine/src".to_string()],
-            Vec::new(),
-        );
+        let task = task_with_context(&runtime_a, Vec::new(), vec!["workflow".to_string()]);
         let reminders = runtime_a
-            .learning_reminders_for_task(
-                &json!({"task_id": task.id}),
-                LearningInjectionCaps::default(),
-            )
+            .learning_reminders_for_task(&json!({"task_id": task.id}))
             .expect("learning reminders");
 
         assert_eq!(
-            reminders.len(),
+            reminders.reminders.len(),
             1,
             "only workspace A's live learning should remind: {reminders:?}"
         );
-        assert_eq!(reminders[0].summary, "workspace A live");
+        assert_eq!(reminders.reminders[0].summary, "workspace A live");
         assert!(
-            !reminders.iter().any(|r| r.summary == "workspace B leak"),
+            !reminders
+                .reminders
+                .iter()
+                .any(|r| r.summary == "workspace B leak"),
             "workspace B's learning must not cross into workspace A",
         );
         assert!(
-            !reminders.iter().any(|r| r.id == ghost.id),
+            !reminders.reminders.iter().any(|r| r.id == ghost.id),
             "the same-workspace ghost (missing YAML) must be skipped",
         );
     }

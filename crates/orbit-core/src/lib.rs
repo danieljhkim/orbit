@@ -94,6 +94,9 @@ pub use orbit_common::types::{
 pub use orbit_common::types::{MissedRunPolicy, NotFoundKind, OrbitError, OverlapPolicy};
 pub use orbit_common::utility::redaction::redact_sensitive_env_text;
 pub use orbit_store::learning_layout::LearningLayoutMigrationReport;
+pub use orbit_store::sqlite::task_registry::{
+    LearningDeliveryConfig, WorkspaceConfig, read_workspace_config, write_workspace_config,
+};
 pub use orbit_store::{
     AuditEventFilter, AuditEventInsertParams, AuditToolAggregate, V2AuditEventFilter,
     V2AuditEventInsertParams,

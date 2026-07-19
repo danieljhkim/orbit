@@ -67,6 +67,7 @@ fn profile_runtime(config: &str) -> (tempfile::TempDir, OrbitRuntime, PathBuf, P
         &WorkspaceConfig {
             schema_version: 1,
             workspace_id: PROFILE_WORKSPACE_ID.to_string(),
+            learnings: Default::default(),
         },
     )
     .expect("workspace config");

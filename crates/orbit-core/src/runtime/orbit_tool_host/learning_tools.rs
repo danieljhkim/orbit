@@ -146,7 +146,7 @@ pub(super) fn update(
     };
     let priority = parse_optional_priority_field(&input)?;
 
-    let updated = runtime.stores().learnings().update(
+    let updated = runtime.update_learning(
         &id,
         LearningUpdateParams {
             summary,

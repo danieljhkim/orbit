@@ -25,12 +25,12 @@ use std::sync::Arc;
 
 use orbit_common::types::activity_job::AgentRole;
 use orbit_common::types::{
-    InvocationTrace, LearningInjectionCaps, LearningInjectionState, LearningReminder, RoleSlot,
-    UNRESTRICTED_FS_PROFILE,
+    AuditEventStatus, InvocationTrace, LearningInjectionState, LearningReminder, RoleSlot,
+    UNRESTRICTED_FS_PROFILE, UpfrontLearningReminderBatch,
 };
 use orbit_engine::{AgentRoleConfig, EnvironmentHost};
 use orbit_engine::{DispatchError, ResolvedCliExecutor, ResolvedSandbox, V2RuntimeHost};
-use orbit_store::{InvocationInsertParams, Store, token_scoreboard};
+use orbit_store::{AuditEventInsertParams, InvocationInsertParams, Store, token_scoreboard};
 use orbit_tools::{FsAuditLogger, ReservationOwnerContext, ToolContext};
 use serde_json::Value;
 
@@ -85,9 +85,70 @@ impl V2RuntimeHost for OrbitRuntime {
     fn learning_reminders_for_task(
         &self,
         input: &Value,
-        caps: LearningInjectionCaps,
-    ) -> Result<Vec<LearningReminder>, DispatchError> {
-        learning_reminders::learning_reminders_for_task(self, input, caps)
+    ) -> Result<UpfrontLearningReminderBatch, DispatchError> {
+        learning_reminders::learning_reminders_for_task(self, input)
+    }
+
+    fn record_learning_injected(
+        &self,
+        surface: &str,
+        task_id: Option<&str>,
+        run_id: &str,
+        session_id: &str,
+        admitted: &[LearningReminder],
+    ) -> Result<(), DispatchError> {
+        let learning_ids = admitted
+            .iter()
+            .map(|reminder| reminder.id.clone())
+            .collect::<Vec<_>>();
+        let arguments_json = serde_json::to_string(&serde_json::json!({
+            "surface": surface,
+            "learning_ids": learning_ids,
+        }))
+        .map_err(|error| {
+            DispatchError::JobExecution(format!(
+                "serialize upfront learning audit arguments: {error}"
+            ))
+        })?;
+        let params = AuditEventInsertParams {
+            execution_id: orbit_common::types::audit_execution_id("learning"),
+            command: "job".to_string(),
+            subcommand: Some("run-start".to_string()),
+            tool_name: Some("agent_invoke".to_string()),
+            target_type: Some("learning_injected".to_string()),
+            target_id: task_id.map(ToOwned::to_owned),
+            role: "engine".to_string(),
+            status: AuditEventStatus::Success,
+            exit_code: 0,
+            duration_ms: 0,
+            working_directory: self.paths().repo_root.to_string_lossy().into_owned(),
+            arguments_json: Some(arguments_json),
+            stdout_truncated: None,
+            stderr_truncated: None,
+            error_message: None,
+            host: std::env::var("HOSTNAME").ok(),
+            pid: std::process::id(),
+            session_id: Some(session_id.to_string()),
+            workspace_id: self.workspace_id().ok(),
+            caller_machine_id: None,
+            caller_host_id: None,
+            process_machine_id: None,
+            process_host_id: None,
+            transport: None,
+            effective_capabilities: Default::default(),
+            origin_session_id: None,
+            mcp_call_id: None,
+            lease_id: None,
+            task_id: task_id.map(ToOwned::to_owned),
+            job_run_id: Some(run_id.to_string()),
+            activity_id: std::env::var("ORBIT_ACTIVITY_ID").ok(),
+            step_index: std::env::var("ORBIT_STEP_INDEX")
+                .ok()
+                .and_then(|value| value.parse().ok()),
+        };
+        self.record_audit_event(&params).map_err(|error| {
+            DispatchError::JobExecution(format!("record upfront learning audit event: {error}"))
+        })
     }
 
     fn persist_session_learning_state(

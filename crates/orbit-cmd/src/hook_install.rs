@@ -141,7 +141,7 @@ fn install_agent(workspace_root: &Path, agent: HookAgent) -> Result<(), OrbitErr
         HookAgent::Claude => merge_json_hook(
             &agent.config_path(workspace_root),
             "PreToolUse",
-            "Edit|Write|Read",
+            "Edit|Write",
             &agent.command(),
             agent.command_marker(),
             None,
@@ -164,7 +164,7 @@ fn install_agent(workspace_root: &Path, agent: HookAgent) -> Result<(), OrbitErr
         HookAgent::Grok => merge_toml_hook(
             &agent.config_path(workspace_root),
             "PreToolUse",
-            "Edit|Write|Read",
+            "Edit|Write",
             &agent.command(),
             agent.command_marker(),
         ),

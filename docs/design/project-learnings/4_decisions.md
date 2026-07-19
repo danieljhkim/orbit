@@ -3,7 +3,7 @@ summary: "Project Learnings — Decisions"
 type: design
 title: "Project Learnings — Decisions"
 owner: claude
-last_updated: 2026-07-11
+last_updated: 2026-07-19
 status: Draft
 feature: project-learnings
 doc_role: decisions
@@ -134,13 +134,15 @@ Phase 2 ([3_vision.md §1.1](./3_vision.md), [§1.2](./3_vision.md)) layers symb
 **Context.** The push-injection layer ([2_design.md §4](./2_design.md)) has multiple natural placements, each with different coverage:
 
 - **Engine pre-prompt only.** Inject when `orbit-engine` spawns an agent for a task. Universal across agents. Coarse: fires once at task start, before the agent has read its way to the relevant code, so narrow learnings (file-path-scoped) may not surface for the file the agent edits ten tool calls in.
-- **MCP-sidecar only.** Attach `learnings` to MCP tool responses that reference paths. Cross-agent. Misses Claude Code's built-in `Edit | Write | Read`, which agents use far more than they call MCP file tools.
+- **MCP-sidecar only.** Attach `learnings` to MCP tool responses that reference paths. Cross-agent. Misses Claude Code's built-in `Edit | Write`, which agents use far more than they call MCP file tools.
 - **Claude Code `PreToolUse` only.** Per-edit precision. Vendor-locked: doesn't apply to Codex, Gemini, Anthropic-API, Ollama, or any other agent runtime.
 - **All three layered.** Each layer adds precision on top of the layers below. Coverage degrades gracefully: agents without hook support still get layers 1 and 2; tools without path arguments still get layer 1.
 
 The vendor-locked single-layer options are non-starters because the project supports multiple agent providers (see `crates/orbit-agent/providers/`). Engine-pre-prompt-only misses the long-task case where an agent works for an hour through a wide context. MCP-sidecar-only misses the most-frequent agent action (built-in editor tools).
 
 **Decision.** Phase 1 ships all three layers active simultaneously. Each layer consults a per-session deduplication set so the same learning doesn't inject multiple times across layers. Per-call cap of 5 learnings; per-session cap of 20.
+
+**Amendment — ORB-10317.** Layer 1 is now tag-only and uses the `.orbit/config.yaml` upfront cap; Layer 3 fires only for `Edit | Write`. The MCP sidecar and path-glob selection semantics are unchanged. See [ADR-0237] for the vocabulary contract.
 
 **Consequences.**
 - Coverage is robust: even if one layer misfires or a vendor lacks hook support, the others provide a baseline.
@@ -229,9 +231,27 @@ Alternatives considered:
 
 ---
 
+## ADR-0237 — Commit the canonical learning tag vocabulary in workspace config
+
+**Status:** Accepted · 2026-07 · [ORB-10317]
+
+**Context.** Upfront job-run injection needs a stable exact-match bridge between task tags and learning tags. Free-form writes drift into aliases, while copying policy into the host-global registry would separate it from the code review that changes it. Keeping `.orbit/config.yaml` as an identity-only stub and putting every behavior knob in `config.toml` was the existing alternative.
+
+**Decision.** Commit the canonical task/learning vocabulary and upfront injection cap under `.orbit/config.yaml` `learnings`. Tagged writes normalize then reject unknown values, so vocabulary changes are PR-gated. Job-run injection reads the same contract, matches tags only, ranks by matched-tag count then priority and recency, and fails open with no injection when the file is missing.
+
+**Consequences.**
+- Task and learning authors receive actionable rejection instead of silently creating a tag that never joins the artifacts.
+- Pre-vocabulary configs receive shipped defaults; an explicit empty vocabulary disables upfront selection.
+- Tagged hub task writes require a local checkout binding so the broker can consult committed policy; tagless checkoutless coordination remains available.
+- Cost: `.orbit/config.yaml` is no longer an identity-only stub, so strict parsers and workspace initializers must preserve the `learnings` section.
+- Cost: legacy aliases must remain in the initial vocabulary until the existing learning corpus is migrated, making it larger than the desired steady state.
+
+---
+
 ## Task References
 
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
 - [ORB-10046] — Remove the vote and comment surfaces from the learning subsystem (ADR-0210 supersedes ADR-0157).
+- [ORB-10317] — Add tag-matched upfront injection, the workspace vocabulary, and write-only PreToolUse delivery (ADR-0237).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

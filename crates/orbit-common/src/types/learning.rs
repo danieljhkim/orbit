@@ -175,6 +175,22 @@ pub struct LearningReminder {
     pub summary: String,
 }
 
+/// Upfront task-learning selection plus the workspace-configured admission cap.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UpfrontLearningReminderBatch {
+    pub reminders: Vec<LearningReminder>,
+    pub cap: usize,
+}
+
+impl UpfrontLearningReminderBatch {
+    pub fn empty() -> Self {
+        Self {
+            reminders: Vec::new(),
+            cap: 0,
+        }
+    }
+}
+
 /// Budget controls for project-learning injection.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LearningInjectionCaps {

@@ -7,11 +7,16 @@ use orbit_common::types::{TaskStatus, auto_task_tag};
 use crate::OrbitRuntime;
 use crate::auto_tasks::scheduler::{SchedulerOptions, run_auto_task_scheduler_at};
 use crate::command::task::TaskUpdateParams;
+use orbit_store::sqlite::task_registry::{read_workspace_config, write_workspace_config};
 
 use super::interval_params;
 
 fn runtime() -> OrbitRuntime {
-    OrbitRuntime::in_memory().expect("build in-memory runtime")
+    let runtime = OrbitRuntime::in_memory().expect("build in-memory runtime");
+    let mut config = read_workspace_config(&runtime.paths().orbit_dir).expect("read config");
+    config.learnings.tag_vocabulary.push(auto_task_tag("chore"));
+    write_workspace_config(&runtime.paths().orbit_dir, &config).expect("write test vocabulary");
+    runtime
 }
 
 fn at(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Utc> {

@@ -35,5 +35,7 @@ pub mod task_migration;
 pub mod tool;
 pub mod workflow;
 
+pub(crate) mod tag_vocabulary;
+
 #[cfg(test)]
 mod tests;

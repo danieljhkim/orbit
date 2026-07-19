@@ -67,6 +67,7 @@ struct HubCoordinationState {
     global_root: PathBuf,
     workspace_id: String,
     legacy_friction_root: Option<PathBuf>,
+    tag_vocabulary: Option<Vec<String>>,
     tasks: WorkspaceTaskBackends,
 }
 
@@ -92,6 +93,15 @@ impl HubCoordinationExecutor {
         workspace_id: impl Into<String>,
         legacy_friction_root: Option<PathBuf>,
     ) -> Result<Self, OrbitError> {
+        Self::new_with_tag_vocabulary(global_root, workspace_id, legacy_friction_root, None)
+    }
+
+    pub fn new_with_tag_vocabulary(
+        global_root: &Path,
+        workspace_id: impl Into<String>,
+        legacy_friction_root: Option<PathBuf>,
+        tag_vocabulary: Option<Vec<String>>,
+    ) -> Result<Self, OrbitError> {
         let workspace_id = workspace_id.into();
         let registry = TaskRegistryStore::open(&task_registry_path(global_root))?;
         let tasks = coordination_task_backends(registry, workspace_id.clone());
@@ -100,6 +110,7 @@ impl HubCoordinationExecutor {
                 global_root: global_root.to_path_buf(),
                 workspace_id,
                 legacy_friction_root,
+                tag_vocabulary,
                 tasks,
             }),
         })
@@ -179,6 +190,13 @@ impl HubCoordinationExecutor {
         Ok(value)
     }
 
+    fn validate_task_tags(&self, tags: &[String]) -> Result<(), OrbitError> {
+        let Some(vocabulary) = self.inner.tag_vocabulary.as_deref() else {
+            return Ok(());
+        };
+        crate::command::tag_vocabulary::validate_tags_against_vocabulary("task", tags, vocabulary)
+    }
+
     fn add_task(
         &self,
         input: Value,
@@ -213,6 +231,10 @@ impl HubCoordinationExecutor {
         .into_iter()
         .map(|criterion| redact_all(&criterion))
         .collect();
+        let tags = normalize_task_tags(
+            optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default(),
+        );
+        self.validate_task_tags(&tags)?;
         let task = self.inner.tasks.task.create_task(TaskCreateParams {
             actor: actor.clone(),
             parent_id: None,
@@ -221,9 +243,7 @@ impl HubCoordinationExecutor {
             acceptance_criteria,
             dependencies: Vec::new(),
             relations,
-            tags: normalize_task_tags(
-                optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default(),
-            ),
+            tags,
             plan: String::new(),
             execution_summary: String::new(),
             context_files,
@@ -375,6 +395,11 @@ impl HubCoordinationExecutor {
             .transpose()?;
         let explicit_planned_by = raw_clearable(&input, "planned_by")?;
         let explicit_implemented_by = raw_clearable(&input, "implemented_by")?;
+        let tags =
+            optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.map(normalize_task_tags);
+        if let Some(tags) = tags.as_deref() {
+            self.validate_task_tags(tags)?;
+        }
         self.inner.tasks.document.update_task_document(
             &id,
             TaskDocumentUpdateParams {
@@ -392,8 +417,7 @@ impl HubCoordinationExecutor {
                 .map(|values| values.into_iter().map(|value| redact_all(&value)).collect()),
                 dependencies,
                 relations,
-                tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?
-                    .map(normalize_task_tags),
+                tags,
                 plan,
                 execution_summary: optional_raw_string(&input, "execution_summary")?
                     .map(|value| redact_all(&value)),
@@ -1044,6 +1068,41 @@ mod checkoutless_hub_tests {
             !root.path().join(".orbit").exists(),
             "no fabricated checkout"
         );
+    }
+
+    #[test]
+    fn configured_checkoutless_hub_rejects_unknown_task_tags() {
+        let root = tempfile::tempdir().expect("global root");
+        HubCoordinationExecutor::register_workspace(root.path(), "ws_tags", "tags")
+            .expect("register workspace");
+        let executor = HubCoordinationExecutor::new_with_tag_vocabulary(
+            root.path(),
+            "ws_tags",
+            None,
+            Some(vec!["testing".to_string()]),
+        )
+        .expect("coordination executor");
+        let context = ToolSessionContext::trusted_local(
+            Some("ws_tags".to_string()),
+            Some("hm_hub".to_string()),
+            Some("hub".to_string()),
+        );
+
+        let error = executor
+            .execute_tool(
+                "orbit.task.add",
+                json!({
+                    "workspace": "ws_tags",
+                    "title": "Reject unknown tag",
+                    "description": "Vocabulary validation",
+                    "tags": ["invented-without-pr"],
+                    "model": "codex"
+                }),
+                context,
+            )
+            .expect_err("unknown hub task tag must be rejected");
+
+        assert!(error.to_string().contains("tag_vocabulary"), "{error}");
     }
 
     #[test]

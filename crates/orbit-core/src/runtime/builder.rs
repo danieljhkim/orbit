@@ -291,6 +291,7 @@ fn build_v2_task_backends(
             &WorkspaceConfig {
                 schema_version: 1,
                 workspace_id: binding.workspace_id.clone(),
+                learnings: Default::default(),
             },
         )?;
     }

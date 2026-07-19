@@ -64,6 +64,7 @@ benchmarks/**/tasks/**
 !.orbit/resources/
 !.orbit/routines/
 !.orbit/config.toml
+!.orbit/config.yaml
 .monodev/
 
 # Python

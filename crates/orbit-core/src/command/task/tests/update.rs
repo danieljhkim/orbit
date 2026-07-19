@@ -45,6 +45,24 @@ fn update_status_backlog_restores_archived_task() {
 }
 
 #[test]
+fn task_update_rejects_tag_outside_workspace_vocabulary() {
+    let (_root, runtime) = test_runtime();
+    let task = add_proposed_task(&runtime, "Reject unknown update tag");
+
+    let error = runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                tags: Some(vec!["invented-without-pr".to_string()]),
+                ..Default::default()
+            },
+        )
+        .expect_err("unknown task update tag must be rejected");
+
+    assert!(error.to_string().contains("tag_vocabulary"), "{error}");
+}
+
+#[test]
 fn archived_task_rejects_non_restore_mutations() {
     let (_root, runtime) = test_runtime();
     let task = add_proposed_task(&runtime, "Archived stays frozen");

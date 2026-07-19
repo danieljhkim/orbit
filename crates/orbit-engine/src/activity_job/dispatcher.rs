@@ -10,8 +10,8 @@ use orbit_common::types::activity_job::{
 
 use crate::context::AgentRoleConfig;
 use orbit_common::types::{
-    ExecutorSandboxKind, InvocationTrace, LearningInjectionCaps, LearningInjectionState,
-    LearningReminder, OrbitError, ResolvedFsProfile, TokenUsage, ToolCallTrace,
+    ExecutorSandboxKind, InvocationTrace, LearningInjectionState, LearningReminder, OrbitError,
+    ResolvedFsProfile, TokenUsage, ToolCallTrace, UpfrontLearningReminderBatch,
 };
 use orbit_tools::{FsAuditLogger, FsCallEvent, FsCallEventKind, ToolContext};
 use serde_json::Value;
@@ -123,9 +123,19 @@ pub trait V2RuntimeHost: Send + Sync {
     fn learning_reminders_for_task(
         &self,
         _input: &Value,
-        _caps: LearningInjectionCaps,
-    ) -> Result<Vec<LearningReminder>, DispatchError> {
-        Ok(Vec::new())
+    ) -> Result<UpfrontLearningReminderBatch, DispatchError> {
+        Ok(UpfrontLearningReminderBatch::empty())
+    }
+
+    fn record_learning_injected(
+        &self,
+        _surface: &str,
+        _task_id: Option<&str>,
+        _run_id: &str,
+        _session_id: &str,
+        _admitted: &[LearningReminder],
+    ) -> Result<(), DispatchError> {
+        Ok(())
     }
 
     fn persist_session_learning_state(

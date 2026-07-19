@@ -3,6 +3,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use orbit_common::types::{OrbitError, Task, TaskPriority, TaskStatus, TaskType};
 use orbit_store::TaskCreateParams;
+use orbit_store::sqlite::task_registry::{read_workspace_config, write_workspace_config};
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;
@@ -16,6 +17,13 @@ pub(crate) fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf) {
     std::fs::create_dir_all(&workspace_root).expect("create workspace root");
     let runtime =
         OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
+    let mut config = read_workspace_config(&workspace_root).expect("read test workspace config");
+    config.learnings.tag_vocabulary.extend(
+        ["alpha", "bench", "other", "perf", "tag [redacted_env]"]
+            .into_iter()
+            .map(str::to_string),
+    );
+    write_workspace_config(&workspace_root, &config).expect("write test tag vocabulary");
     (root, runtime, repo_root)
 }
 

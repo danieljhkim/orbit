@@ -38,7 +38,7 @@ pub enum HookOutputFormat {
     Grok,
 }
 
-pub const CLAUDE_PRETOOLUSE_TOOLS: &[&str] = &["Edit", "Write", "Read"];
+pub const CLAUDE_PRETOOLUSE_TOOLS: &[&str] = &["Edit", "Write"];
 pub const CODEX_PRETOOLUSE_TOOLS: &[&str] = &["Bash", "apply_patch", "mcp"];
 pub const GEMINI_PRETOOLUSE_TOOLS: &[&str] = &[
     "read_file",
@@ -695,8 +695,11 @@ fn emit_learning_injected_audit(
         .iter()
         .map(|reminder| reminder.id.clone())
         .collect::<Vec<_>>();
-    let arguments_json = serde_json::to_string(&json!({ "learning_ids": learning_ids }))
-        .map_err(|error| format!("serialize audit arguments: {error}"))?;
+    let arguments_json = serde_json::to_string(&json!({
+        "surface": "pretooluse_path",
+        "learning_ids": learning_ids,
+    }))
+    .map_err(|error| format!("serialize audit arguments: {error}"))?;
     let working_directory = std::env::current_dir()
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_else(|_| ".".to_string());

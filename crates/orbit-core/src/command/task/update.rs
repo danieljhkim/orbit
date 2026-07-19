@@ -99,7 +99,9 @@ impl OrbitRuntime {
             params.dependencies = Some(normalized_dependencies);
         }
         if let Some(tags) = params.tags.take() {
-            params.tags = Some(normalize_task_tags(tags));
+            let tags = normalize_task_tags(tags);
+            crate::command::tag_vocabulary::validate_workspace_tags(self, "task", &tags)?;
+            params.tags = Some(tags);
         }
         if let Some(crew) = &params.crew {
             self.validate_crew_name(crew.as_deref())?;

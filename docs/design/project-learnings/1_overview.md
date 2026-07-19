@@ -3,7 +3,7 @@ summary: "Project Learnings — Overview"
 type: design
 title: "Project Learnings — Overview"
 owner: claude
-last_updated: 2026-05-17
+last_updated: 2026-07-19
 status: Draft
 feature: project-learnings
 doc_role: overview
@@ -56,11 +56,11 @@ Records persist as YAML on disk under `.orbit/learnings/<id>/learning.yaml`, wit
 
 Learnings reach agents through three injection points, layered from coarsest to finest:
 
-1. **Engine pre-prompt injection.** When `orbit-engine` spawns an agent for a task, it queries learnings whose scope matches the task's `context_files` and prepends matching summaries to the agent prompt. Universal across agents because it happens above the agent boundary ([2_design.md §4](./2_design.md)).
+1. **Engine pre-prompt injection.** At job-run start, `orbit-engine` matches the task's canonical tags against learning tags and prepends the top configured number of summaries. Match count, priority, and recency determine rank. Universal across agents because it happens above the agent boundary ([2_design.md §4](./2_design.md)).
 2. **MCP tool-call injection.** When an agent calls an Orbit MCP tool that references file paths (`orbit_graph_show`, `orbit_task_show`, etc.), the tool response carries a sidecar `learnings` field listing relevant entries. Works for any agent that speaks MCP.
-3. **Claude Code `PreToolUse` hook.** Finer-grained per-edit injection on `Edit | Write | Read`. Covers Claude Code's built-in editor tools, which the MCP layer doesn't see. Optional: a layer of precision on top of (1) and (2), not a replacement.
+3. **Claude Code `PreToolUse` hook.** Finer-grained path injection on `Edit | Write`. Reads deliberately do not fire the hook. Covers Claude Code's built-in write tools, which the MCP layer doesn't see.
 
-Cap injection at 3–5 learnings per call and dedupe per session to keep context bounded ([4_decisions.md ADR-005](./4_decisions.md)).
+Upfront injection defaults to 5 learnings per run from the committed workspace config; per-session dedup keeps context bounded ([4_decisions.md ADR-0237](./4_decisions.md)).
 
 ### 2.3 Pull surface
 

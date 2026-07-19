@@ -3,7 +3,7 @@ summary: "Project Learnings — Design"
 type: design
 title: "Project Learnings — Design"
 owner: claude
-last_updated: 2026-05-21
+last_updated: 2026-07-19
 status: Draft
 feature: project-learnings
 doc_role: design
@@ -12,7 +12,7 @@ tags: ["project-learnings"]
 
 # Project Learnings — Design
 
-This document specifies phase-1 project-learnings: the placement of learning storage in `orbit-store`, the schema of a learning record plus sidecars, the phase-1 scope-matching algorithm (path globs + tags), the three-layer push-injection pipeline (engine pre-prompt + MCP sidecar + optional Claude Code hook), the pull surface (skill + tools), the curation lifecycle, and the concerns the design deliberately leaves to follow-ups.
+This document specifies project-learnings storage, path and tag matching, the three-layer push-injection pipeline (tag-matched engine pre-prompt + MCP sidecar + optional write-only Claude Code hook), the pull surface, the curation lifecycle, and the concerns deliberately left to follow-ups.
 
 Phase 2 (semantic ranking, symbol-aware scope) is out of scope for this document and is captured in [3_vision.md §1.2](./3_vision.md). The schema in [§2](#2-learning-record-schema) is forward-compatible with phase 2.
 
@@ -33,11 +33,11 @@ orbit-store/
 
 `orbit-tools` gains a `learning::` submodule that exposes `orbit.learning.add | list | search | show | update | supersede | upvote` as MCP tools. `orbit-cli` exposes the corresponding `orbit learning <subcommand>` shell surface.
 
-`orbit-engine` gains the **pre-prompt injection** logic: before invoking an agent runtime for a task, it queries the learning store for entries whose `scope` matches the task's `context_files` and prepends formatted summaries to the agent prompt. This is the layer that makes push-based discovery cross-agent, because injection happens above the agent boundary ([§4](#4-push-injection-pipeline), [4_decisions.md ADR-005](./4_decisions.md)).
+`orbit-engine` owns **upfront pre-prompt injection**: before invoking an agent runtime for a task, it matches the task's canonical tags against learning tags and prepends ranked summaries. This is the cross-agent baseline because injection happens above the agent boundary ([§4](#4-push-injection-pipeline), [4_decisions.md ADR-0237](./4_decisions.md)).
 
 `orbit-mcp` gains a thin shim that, for tool responses referencing file paths, attaches a `learnings` sidecar field with up to N matching entries. This is the second push layer; it works for any agent that calls Orbit's MCP tools.
 
-The third push layer — a Claude Code `PreToolUse` hook on `Edit | Write | Read` — is not part of any Orbit crate; it ships as a hook configuration in [.claude/settings.json](../../../.claude/settings.json) (or whichever scope is appropriate; see [§4.3](#43-layer-3-claude-code-pretooluse-hook-optional)).
+The third push layer — a Claude Code `PreToolUse` hook on `Edit | Write` — is implemented by `orbit-cmd` and installed into [.claude/settings.json](../../../.claude/settings.json); `Read` does not trigger learning injection (see [§4.3](#43-layer-3-claude-code-pretooluse-hook-optional)).
 
 No cross-crate dependencies that violate the architecture diagram in [CLAUDE.md](../../../CLAUDE.md) are introduced. The dependency edges added are `orbit-store` (extended internally), `orbit-tools → orbit-store` (already present), and `orbit-engine → orbit-store` (already present). `orbit-mcp` remains a transport adapter that depends only on `orbit-common`; Layer 2 asks the injected host to run `orbit.search` (with `kind: "learning"`) instead of reading the learning store directly.
 
@@ -133,21 +133,20 @@ Vote rows are source-of-truth sidecars, not SQLite projections in v1. `orbit lea
 
 ## 3. Scope Matching (phase 1)
 
-Phase 1 supports two scope axes, evaluated as a logical OR:
+Learning search supports two scope axes, evaluated as a logical OR. Delivery surfaces choose the axis appropriate to their timing: upfront job-run injection is tag-only; MCP and PreToolUse path injection are path-only.
 
 ### 3.1 Path globs
 
 Glob patterns over repo-relative paths. Matched against any file path that:
 
-- Appears in a task's `context_files` (engine pre-prompt path).
 - Is referenced in an MCP tool argument or response (MCP-sidecar path).
-- Is the target of `Edit | Write | Read` (Claude Code hook path).
+- Is the target of `Edit | Write` (Claude Code hook path).
 
 Glob syntax: standard `**`/`*`/`?` semantics (the same matcher `orbit-policy` uses for `read`/`modify` rules — reused, not reimplemented). A learning matches if **any** of its `scope.paths` matches the candidate path.
 
 ### 3.2 Tags
 
-Free-form string labels. Matched against:
+Canonical lowercase string labels. The allowed vocabulary is committed under `.orbit/config.yaml` at `learnings.tag_vocabulary`; changing it therefore requires a PR. Task and learning create/update normalize tags and reject any unknown value with an error naming the rejected tags. Tagged writes also reject a missing config because they cannot prove vocabulary membership; job-run startup separately fails open without injection. A present explicit empty vocabulary disables upfront matching. Tags are matched against:
 
 - Tags on the task itself (when in the engine pre-prompt path).
 - Tags supplied by the caller in an explicit `orbit learning list --tag` query (structural filter; post-[ORB-00202]).
@@ -156,7 +155,7 @@ Tags are not auto-derived from anything in phase 1. They exist for the cases whe
 
 ### 3.3 Combination
 
-A learning matches a candidate if **(path glob matches) OR (any tag matches)**. The OR is deliberate: the two axes capture different shapes of relevance and shouldn't gate each other.
+A general search candidate matches if **(path glob matches) OR (any tag matches)**. Upfront delivery intentionally supplies only task tags, while path-triggered delivery intentionally supplies only the touched path; neither surface unions paths and tags.
 
 ### 3.4 Why not symbol-aware in phase 1
 
@@ -172,11 +171,11 @@ Three layers, from coarsest to finest. Each layer adds precision on top of the l
 
 `orbit-engine` is the layer that spawns agents for tasks. Before the agent runtime starts, the engine:
 
-1. Reads the task's `context_files`.
-2. Reads the task's `tags` (if any).
-3. Queries the runtime-side `search_learnings` helper (equivalent to `orbit.search` with `kind: "learning"`) with the union of (paths from `context_files`) and (tags from the task).
-4. Takes the top-K (default 5) results.
-5. Prepends a `<system-reminder>` block to the agent prompt:
+1. Reads `.orbit/config.yaml`. If the file is missing, the run proceeds without upfront injection.
+2. Intersects the task's normalized tags with `learnings.tag_vocabulary`. A no-tag task or an explicit empty vocabulary produces no reminders.
+3. Finds active learnings sharing at least one task tag.
+4. Sorts by matched-tag count descending, then `priority` descending, `updated_at` descending, and ID ascending.
+5. Takes `learnings.upfront_injection_cap` results (default 5) and prepends a `<system-reminder>` block to the agent prompt:
 
    ```
    <system-reminder>
@@ -189,8 +188,6 @@ Three layers, from coarsest to finest. Each layer adds precision on top of the l
    Read full body via `orbit.learning.show <id>` if needed.
    </system-reminder>
    ```
-
-**Prerequisite.** The tag-matching half of step 3 depends on the `Task` schema carrying a `tags: Vec<String>` field, which does not exist today. That schema change is tracked separately as [T20260510-12] and is a hard prerequisite for this layer's tag axis. Path-glob matching against `context_files` works regardless and is what Layer 1 falls back to until [T20260510-12] lands.
 
 This is the universal layer because every supported agent runtime (Claude, Codex, Gemini, Anthropic API, OpenAI-compat, Ollama, mock) consumes a prompt. The injection is invisible to the runtime.
 
@@ -214,11 +211,11 @@ For tools whose arguments or responses reference file paths — `orbit_graph_sho
 
 The agent's MCP client surfaces the sidecar however it normally surfaces tool output. Modern agents read structured tool responses; the sidecar is part of that response, so it lands in agent context naturally.
 
-This layer covers any agent that talks to Orbit's MCP server. It does not cover agent-vendor-specific tools (e.g. Claude Code's built-in `Edit`/`Write`/`Read`), which `orbit-mcp` doesn't see. Layer 3 fills that gap for Claude Code specifically.
+This layer covers any agent that talks to Orbit's MCP server. It does not cover agent-vendor-specific write tools, which `orbit-mcp` doesn't see. Layer 3 fills that gap for Claude Code specifically.
 
 ### 4.3 Layer 3 — Claude Code `PreToolUse` hook (optional)
 
-A `PreToolUse` hook in [.claude/settings.json](../../../.claude/settings.json) intercepts `Edit | Write | Read`, extracts the target path from the tool input, calls `orbit learning list --path <path>` (post-[ORB-00202] glob-containment semantics), and emits a `<system-reminder>` with the matching learnings before the tool runs.
+A `PreToolUse` hook in [.claude/settings.json](../../../.claude/settings.json) intercepts `Edit | Write`, extracts the target path from the tool input, calls the path-glob matcher, and emits a `<system-reminder>` before the tool runs. `Read` is excluded because the relevancy audit found high fire volume without direct relevance.
 
 This is the only layer that surfaces learnings on Claude Code's built-in editor tools, which agents use far more than they call MCP file tools. It's the most precise layer (per-edit, per-target) but the least universal (Claude Code only).
 
@@ -230,7 +227,7 @@ A naive implementation injects the same learning multiple times across layers (e
 
 - The agent process tracks injected learning IDs in a per-session set.
 - Each layer consults the set before emitting a `<system-reminder>`; already-injected IDs are skipped.
-- Per-call cap of **5** learnings (configurable via `ORBIT_LEARNING_PER_CALL_CAP`). Hard cap of **20** per session (configurable via `ORBIT_LEARNING_SESSION_CAP`) to bound total context cost.
+- Upfront cap from `.orbit/config.yaml` (`learnings.upfront_injection_cap`, default **5**). Path-triggered calls retain `ORBIT_LEARNING_PER_CALL_CAP`; the hard session cap remains `ORBIT_LEARNING_SESSION_CAP` (default **20**).
 
 Implementation note: the per-session set lives in the agent's working memory. The Orbit-side store does not need to track session state; it just provides idempotent search. Layers consult the set; the store is stateless.
 
@@ -241,6 +238,10 @@ Cross-process deduplication is best-effort via `ORBIT_SESSION_ID` plus `.orbit/s
 `summary` is always injected. `body` is **not** — bodies are loaded on demand via `orbit.learning.show`. This keeps per-injection token cost small (a few dozen tokens per learning, not a few hundred), which is what makes the 5-per-call cap workable.
 
 If an agent decides a summary is relevant, it pulls the body explicitly. This separates "alerting the agent that a learning exists" from "spending context on the full content." Most learnings will be summary-only in any given session.
+
+### 4.6 Injection audit evidence
+
+Both delivery surfaces append command-audit rows to the host-global `~/.orbit/orbit.db` with `target_type = "learning_injected"`. `arguments_json` contains `surface` (`job_run_start` or `pretooluse_path`) and the admitted `learning_ids`. Upfront rows use `command = "job"`, `subcommand = "run-start"`, `tool_name = "agent_invoke"`, plus task/run/session correlation. PreToolUse rows use `command = "hook"`, `subcommand = "pretooluse"`, the actual tool name, the target path, and available task/run/session correlation. The hook fails open if audit persistence fails; upfront delivery fails the dispatch because its durable run evidence and injected context must agree.
 
 ---
 
@@ -412,7 +413,7 @@ Phase 2's semantic-similarity ranking from orbit-search may complement or replac
 
 ### 8.4 Layer 3 hook is Claude-Code-only
 
-The `PreToolUse` hook covers Claude Code's built-in `Edit | Write | Read`, which are the most frequent agent actions. Other agents that gain comparable hooks can layer in equivalent integrations, but as of phase 1, agents without hook support get only layers 1 and 2 — coarser-grained injection. This is uneven coverage by agent vendor; the design accepts the unevenness because layer 1 is universal and gives a baseline that's strictly better than today.
+The `PreToolUse` hook covers Claude Code's built-in `Edit | Write`. Other agents that gain comparable hooks can layer in equivalent integrations, but agents without hook support get only layers 1 and 2 — coarser-grained injection. Reads deliberately do not fire the hook because the path-relevancy audit showed high volume with no direct relevance.
 
 ### 8.5 Per-session deduplication state is agent-local
 

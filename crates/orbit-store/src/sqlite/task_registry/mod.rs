@@ -25,13 +25,14 @@ const REGISTRY_SCHEMA_VERSION: u32 = 4;
 pub use store::TaskRegistryStore;
 pub(crate) use store::parse_orb_task_number;
 pub use types::{
-    AllocatorSeedOutcome, BindWorkspaceParams, DanglingRelationTarget, ProjectionRebuildResult,
-    RegisterWorkspaceParams, TaskBundleBinding, TaskIndexFilter, WorkspaceBinding,
-    WorkspaceCheckoutBinding, WorkspaceConfig,
+    AllocatorSeedOutcome, BindWorkspaceParams, DanglingRelationTarget, LearningDeliveryConfig,
+    ProjectionRebuildResult, RegisterWorkspaceParams, TaskBundleBinding, TaskIndexFilter,
+    WorkspaceBinding, WorkspaceCheckoutBinding, WorkspaceConfig,
 };
 pub use workspace_config::{
-    assign_workspace_id, home_task_workspace_dir, read_workspace_config,
-    read_workspace_config_optional, task_registry_path, workspace_config_path,
+    DEFAULT_LEARNING_TAG_VOCABULARY, DEFAULT_UPFRONT_LEARNING_INJECTION_CAP, assign_workspace_id,
+    home_task_workspace_dir, read_workspace_config, read_workspace_config_optional,
+    task_registry_path, validate_learning_delivery_config, workspace_config_path,
     workspace_id_for_orbit_dir, write_workspace_config,
 };
 

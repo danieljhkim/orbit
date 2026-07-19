@@ -7,6 +7,13 @@ use orbit_common::types::{TaskPriority, TaskStatus};
 pub struct WorkspaceConfig {
     pub schema_version: u32,
     pub workspace_id: String,
+    pub learnings: LearningDeliveryConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LearningDeliveryConfig {
+    pub tag_vocabulary: Vec<String>,
+    pub upfront_injection_cap: usize,
 }
 
 #[derive(Debug, Clone)]

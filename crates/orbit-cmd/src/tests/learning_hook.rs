@@ -28,10 +28,7 @@ fn parse_payload_accepts_tool_and_path_variants() {
     assert_eq!(camel.tool_name, "Write");
     assert_eq!(camel.target_path, "README.md");
 
-    let top_level =
-        parse_payload(r#"{"tool_name":"Read","path":"Cargo.toml"}"#).expect("top-level payload");
-    assert_eq!(top_level.tool_name, "Read");
-    assert_eq!(top_level.target_path, "Cargo.toml");
+    assert!(parse_payload(r#"{"tool_name":"Read","path":"Cargo.toml"}"#).is_none());
 }
 
 #[test]

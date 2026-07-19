@@ -836,12 +836,37 @@ fn workspace_config_round_trips_and_validates() {
         &WorkspaceConfig {
             schema_version: 1,
             workspace_id: "orbit-test-abcdef".into(),
+            learnings: Default::default(),
         },
     )
     .expect("write config");
 
     let read = read_workspace_config(&orbit_dir).expect("read config");
     assert_eq!(read.workspace_id, "orbit-test-abcdef");
+    assert_eq!(read.learnings.upfront_injection_cap, 5);
+    assert!(
+        read.learnings
+            .tag_vocabulary
+            .contains(&"testing".to_string())
+    );
+
+    atomic_write_text(
+        &workspace_config_path(&orbit_dir),
+        "schema_version: 1\nworkspace_id: orbit-test-abcdef\nlearnings:\n  tag_vocabulary: []\n  upfront_injection_cap: 0\n",
+    )
+    .expect("write disabled learning delivery");
+    let disabled = read_workspace_config(&orbit_dir).expect("read disabled config");
+    assert!(disabled.learnings.tag_vocabulary.is_empty());
+    assert_eq!(disabled.learnings.upfront_injection_cap, 0);
+
+    atomic_write_text(
+        &workspace_config_path(&orbit_dir),
+        "schema_version: 1\nworkspace_id: orbit-test-abcdef\n",
+    )
+    .expect("write legacy config");
+    let legacy = read_workspace_config(&orbit_dir).expect("read legacy config");
+    assert_eq!(legacy.learnings.upfront_injection_cap, 5);
+    assert!(!legacy.learnings.tag_vocabulary.is_empty());
 
     atomic_write_text(
         &workspace_config_path(&orbit_dir),
@@ -893,6 +918,7 @@ fn workspace_id_for_orbit_dir_returns_id_from_config() {
         &WorkspaceConfig {
             schema_version: 1,
             workspace_id: "ws-test-abcdef".into(),
+            learnings: Default::default(),
         },
     )
     .expect("write config");
@@ -912,6 +938,7 @@ fn workspace_id_for_orbit_dir_accepts_canonical_logical_registry_id() {
         &WorkspaceConfig {
             schema_version: 1,
             workspace_id: "ws_orbit-main".into(),
+            learnings: Default::default(),
         },
     )
     .expect("write config");
