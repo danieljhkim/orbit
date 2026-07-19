@@ -3,7 +3,6 @@
 //! See `docs/design/CONVENTIONS.md` §4 for the authoring rules and `.orbit/adrs/`
 //! for the persisted artifact store.
 
-use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use orbit_common::types::{
@@ -11,7 +10,6 @@ use orbit_common::types::{
     OrbitError, audit_execution_id, normalize_optional_attribution_label, optional_string,
     optional_string_alias, optional_string_list_alias, required_string,
 };
-use orbit_common::utility::git::{GitCommandOutput, run_git};
 use orbit_store::{
     AdrArtifact, AdrArtifactResolution, AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry,
     RemoteArtifactStub,
@@ -207,14 +205,6 @@ pub(super) fn update(
                 task_id.as_deref(),
                 None,
             )?;
-
-            // ADR auto-publication v1 (ORB-10303): once an ADR is approved
-            // (proposed -> accepted), commit the now-tracked accepted bundle,
-            // push it, and sync the index. Failures surface to the caller
-            // rather than being swallowed.
-            if target == AdrStatus::Accepted {
-                publish_accepted_adr(runtime, &id)?;
-            }
         }
     }
 
@@ -222,86 +212,6 @@ pub(super) fn update(
         .get(&id)?
         .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id.clone()))?;
     Ok(adr_to_json(&updated))
-}
-
-/// Auto-publishes a freshly-accepted ADR: stage the accepted bundle only,
-/// commit it, push, and resync the ADR index (ORB-10303).
-///
-/// Publication only runs when the accepted bundle lives inside a git worktree;
-/// a file-only (non-git) workspace has nothing to publish and is a silent
-/// no-op. Once a worktree is found, any failure of the commit / push / sync
-/// steps is returned as an error so the operator sees it — the on-disk status
-/// transition has already landed, so a surfaced error is the signal to finish
-/// publishing manually.
-fn publish_accepted_adr(runtime: &OrbitRuntime, id: &str) -> Result<(), OrbitError> {
-    // ADR bundles are written under the *local* root (which equals the shared
-    // `orbit_dir` in the common single-checkout case, but diverges to the
-    // linked-worktree root when a job run owns a separate local root), so the
-    // published bundle and the git worktree to commit into both live there.
-    let adr_dir = runtime
-        .paths()
-        .local_dir
-        .join("adrs")
-        .join(AdrStatus::Accepted.cli_name())
-        .join(id);
-
-    let Some(repo_root) = git_worktree_root(&adr_dir) else {
-        // Not a git-backed workspace: the accepted ADR stays as local file
-        // state, nothing to publish.
-        return Ok(());
-    };
-
-    let adr_pathspec = adr_dir.to_string_lossy().into_owned();
-
-    // Stage only the accepted ADR bundle — no unrelated working-tree changes.
-    let staged = run_git(&repo_root, &["add", "--", &adr_pathspec])?;
-    if !staged.success {
-        return Err(publish_git_error("stage", id, &staged));
-    }
-
-    // Commit only this pathspec: a trailing `-- <path>` makes `git commit`
-    // ignore anything else already in the index, so nothing unrelated is
-    // committed even when the operator has other staged work.
-    let message = format!("Publish {id}\n\nAuto-committed on ADR approval (ORB-10303).");
-    let committed = run_git(&repo_root, &["commit", "-m", &message, "--", &adr_pathspec])?;
-    if !committed.success {
-        return Err(publish_git_error("commit", id, &committed));
-    }
-
-    let pushed = run_git(&repo_root, &["push"])?;
-    if !pushed.success {
-        return Err(publish_git_error("push", id, &pushed));
-    }
-
-    // Sync: reconcile the searchable ADR index with the committed filesystem
-    // source of truth (the orbit `sync` = rebuild-index-from-disk convention).
-    runtime.stores().adrs().rebuild_index()?;
-    Ok(())
-}
-
-/// Resolves the git worktree root containing `path`, or `None` when `path` is
-/// not inside a git repository (or `git` cannot be run).
-fn git_worktree_root(path: &Path) -> Option<PathBuf> {
-    let output = run_git(path, &["rev-parse", "--show-toplevel"]).ok()?;
-    if !output.success {
-        return None;
-    }
-    let root = output.stdout.trim();
-    if root.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(root))
-    }
-}
-
-fn publish_git_error(step: &str, id: &str, output: &GitCommandOutput) -> OrbitError {
-    let detail = output.stderr.trim();
-    let detail = if detail.is_empty() {
-        output.stdout.trim()
-    } else {
-        detail
-    };
-    OrbitError::Execution(format!("ADR publication failed to {step} {id}: {detail}"))
 }
 
 pub(super) fn supersede(
@@ -1163,173 +1073,6 @@ mod tests {
         let supersedes = after_new["supersedes"].as_array().unwrap();
         assert_eq!(supersedes.len(), 1);
         assert_eq!(supersedes[0], old["id"]);
-    }
-
-    fn git_ok(dir: &Path, args: &[&str]) {
-        let output = run_git(dir, args).expect("run git");
-        assert!(output.success, "git {args:?} failed: {}", output.stderr);
-    }
-
-    /// Builds a runtime whose `.orbit` lives inside a real git work repo with a
-    /// seeded initial commit. When `with_remote` is set, a local bare remote is
-    /// wired as `origin` with upstream tracking so `git push` succeeds.
-    fn publish_runtime(base: &Path, with_remote: bool) -> (OrbitRuntime, PathBuf) {
-        let global_root = base.join("global");
-        let work = base.join("work");
-        let workspace_root = work.join(".orbit");
-        std::fs::create_dir_all(&global_root).expect("global root");
-        std::fs::create_dir_all(&work).expect("work root");
-
-        git_ok(&work, &["init", "-q", "-b", "agent-main"]);
-        git_ok(&work, &["config", "user.email", "test@orbit.local"]);
-        git_ok(&work, &["config", "user.name", "orbit-test"]);
-        git_ok(&work, &["config", "commit.gpgsign", "false"]);
-        std::fs::write(work.join("README.md"), "seed\n").expect("seed file");
-        git_ok(&work, &["add", "README.md"]);
-        git_ok(&work, &["commit", "-q", "-m", "seed"]);
-
-        if with_remote {
-            let bare = base.join("origin.git");
-            git_ok(
-                base,
-                &["init", "--bare", "-q", bare.to_string_lossy().as_ref()],
-            );
-            git_ok(
-                &work,
-                &["remote", "add", "origin", bare.to_string_lossy().as_ref()],
-            );
-            git_ok(&work, &["push", "-q", "-u", "origin", "HEAD"]);
-        }
-
-        std::fs::create_dir_all(&workspace_root).expect("workspace root");
-        let runtime =
-            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
-        (runtime, work)
-    }
-
-    fn accept_new_adr(runtime: &OrbitRuntime) -> String {
-        let created = add(
-            runtime,
-            json!({"title": "Publishable", "owner": "claude", "body": "Body"}),
-            None,
-            None,
-        )
-        .expect("add proposed");
-        let id = created["id"].as_str().expect("id").to_string();
-        update(
-            runtime,
-            json!({"id": id.clone(), "status": "accepted", "related_tasks": ["ORB-10303"]}),
-            None,
-            None,
-        )
-        .expect("accept + publish");
-        id
-    }
-
-    #[test]
-    fn accept_auto_commits_only_the_adr_and_pushes() {
-        let base = tempdir().expect("tempdir");
-        let (runtime, work) = publish_runtime(base.path(), true);
-
-        // An unrelated staged change must survive untouched — publication stages
-        // and commits only the approved ADR.
-        std::fs::write(work.join("unrelated.txt"), "dirty\n").expect("unrelated file");
-        git_ok(&work, &["add", "unrelated.txt"]);
-
-        let id = accept_new_adr(&runtime);
-
-        // The accepted bundle is committed at HEAD.
-        let committed_doc = format!("HEAD:.orbit/adrs/accepted/{id}/adr.yaml");
-        git_ok(&work, &["cat-file", "-e", &committed_doc]);
-
-        // The publish commit touches only the ADR partition.
-        let changed = run_git(&work, &["show", "--name-only", "--pretty=format:", "HEAD"])
-            .expect("show head");
-        assert!(changed.success, "git show failed: {}", changed.stderr);
-        let files: Vec<&str> = changed
-            .stdout
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .collect();
-        assert!(
-            files
-                .iter()
-                .all(|file| file.starts_with(&format!(".orbit/adrs/accepted/{id}/"))),
-            "publish commit must touch only the ADR bundle, saw {files:?}"
-        );
-
-        // The unrelated staged file was never committed and is still staged.
-        let status =
-            run_git(&work, &["status", "--porcelain", "unrelated.txt"]).expect("status unrelated");
-        assert_eq!(
-            status.stdout.trim(),
-            "A  unrelated.txt",
-            "unrelated staged change must be preserved, not committed"
-        );
-
-        // The commit was pushed: local HEAD matches the remote-tracking ref.
-        let head = run_git(&work, &["rev-parse", "HEAD"]).expect("rev-parse HEAD");
-        let remote = run_git(&work, &["rev-parse", "origin/agent-main"]).expect("rev-parse remote");
-        assert!(head.success && remote.success);
-        assert_eq!(
-            head.stdout.trim(),
-            remote.stdout.trim(),
-            "accepted ADR must be pushed to origin"
-        );
-    }
-
-    #[test]
-    fn accept_surfaces_push_failure_instead_of_swallowing_it() {
-        let base = tempdir().expect("tempdir");
-        // No remote configured: the local commit lands but `git push` must fail
-        // and the failure must propagate out of the update call.
-        let (runtime, _work) = publish_runtime(base.path(), false);
-
-        let created = add(
-            &runtime,
-            json!({"title": "Unpushable", "owner": "claude", "body": "Body"}),
-            None,
-            None,
-        )
-        .expect("add proposed");
-        let id = created["id"].as_str().expect("id").to_string();
-
-        let error = update(
-            &runtime,
-            json!({"id": id, "status": "accepted", "related_tasks": ["ORB-10303"]}),
-            None,
-            None,
-        )
-        .expect_err("push failure must surface");
-        match error {
-            OrbitError::Execution(message) => assert!(
-                message.contains("push"),
-                "error should name the failed publish step: {message}"
-            ),
-            other => panic!("expected Execution error, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn accept_without_git_worktree_is_a_silent_no_op() {
-        // The default test runtime's `.orbit` is not inside a git repo, so
-        // acceptance must succeed without attempting any git publication.
-        let (_guard, runtime, _repo_root) = test_runtime();
-        let created = add(
-            &runtime,
-            json!({"title": "Local-only", "owner": "claude", "body": "Body"}),
-            None,
-            None,
-        )
-        .expect("add");
-        let response = update(
-            &runtime,
-            json!({"id": created["id"], "status": "accepted", "related_tasks": ["ORB-10303"]}),
-            None,
-            None,
-        )
-        .expect("accept without git worktree");
-        assert_adr_field(&response, "status", "accepted");
     }
 
     #[test]
