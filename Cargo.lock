@@ -2276,7 +2276,7 @@ dependencies = [
  "orbit-common",
  "orbit-engine",
  "orbit-policy",
- "orbit-registry",
+ "orbit-remote",
  "orbit-search",
  "orbit-store",
  "orbit-tools",
@@ -2437,7 +2437,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "orbit-registry"
+name = "orbit-remote"
 version = "0.9.2"
 dependencies = [
  "chrono",

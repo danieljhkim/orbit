@@ -6,7 +6,7 @@ members = [
   "crates/orbit-common",
   "crates/orbit-search",
   "crates/orbit-search-companion",
-  "crates/orbit-registry",
+  "crates/orbit-remote",
   "crates/orbit-core",
   "crates/orbit-engine",
   "crates/orbit-graph",

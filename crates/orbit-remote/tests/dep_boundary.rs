@@ -26,7 +26,7 @@ fn only_common_and_store_are_internal_dependencies() {
     assert_eq!(
         orbit_deps,
         vec!["orbit-common".to_string(), "orbit-store".to_string()],
-        "orbit-registry owns the registry domain and may depend only on orbit-common and orbit-store internally"
+        "orbit-remote owns the registry domain and may depend only on orbit-common and orbit-store internally"
     );
 
     for forbidden in ["orbit-core", "orbit-tools", "orbit-policy", "orbit-exec"] {

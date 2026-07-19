@@ -10,7 +10,7 @@ allowed_internal_deps() {
     orbit-common)
       echo ""
       ;;
-    orbit-registry)
+    orbit-remote)
       # ADR-0235: registry domain may call store APIs; store must never depend back.
       echo "orbit-common orbit-store"
       ;;
@@ -43,7 +43,7 @@ allowed_internal_deps() {
       echo "orbit-agent orbit-common orbit-exec orbit-store orbit-tools"
       ;;
     orbit-core)
-      echo "orbit-common orbit-search orbit-engine orbit-policy orbit-registry orbit-store orbit-tools"
+      echo "orbit-common orbit-search orbit-engine orbit-policy orbit-remote orbit-store orbit-tools"
       ;;
     orbit-cmd)
       # ORB-10016: CLI-facing command layer extracted from orbit-core.

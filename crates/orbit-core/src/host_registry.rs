@@ -1,10 +1,10 @@
 //! Execution-profile construction retained in `orbit-core`.
 //!
-//! The host/workspace registry domain lives in `orbit-registry`; this module
+//! The host/workspace registry domain lives in `orbit-remote`; this module
 //! keeps the runtime/catalog/ship-closure logic and temporarily re-exports the
 //! registry service for existing `orbit-core` consumers.
 
-pub use orbit_registry::host_registry::*;
+pub use orbit_remote::host_registry::*;
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{

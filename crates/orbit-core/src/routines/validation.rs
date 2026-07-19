@@ -10,7 +10,7 @@ use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::{HostStatus, OrbitError, RegistryHostV1, RegistrySnapshotV1};
-use orbit_registry::{
+use orbit_remote::{
     HostIdentity, HostMode, HostRegistryService, RegistryCacheService, RegistryCacheState,
 };
 use orbit_store::Store;

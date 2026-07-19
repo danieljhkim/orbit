@@ -8,7 +8,7 @@ use orbit_common::types::{
     RegistryAliasV1, RegistryCacheV1, RegistryHostV1, RegistrySnapshotV1, RoutineDefinition,
     parse_routine_yaml,
 };
-use orbit_registry::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, RegistryCacheService};
+use orbit_remote::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, RegistryCacheService};
 use orbit_store::{RoutineFireIntentParams, Store};
 use tempfile::tempdir;
 

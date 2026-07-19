@@ -1,5 +1,5 @@
 [package]
-name = "orbit-registry"
+name = "orbit-remote"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
