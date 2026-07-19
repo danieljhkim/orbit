@@ -1,0 +1,27 @@
+schema_version: 1
+id: L-0102
+status: active
+scope:
+  paths:
+  - crates/orbit-tools/src/builtin/**
+  - crates/orbit-cli/src/command/mcp/**
+  - docs/design/mcp-bridge/**
+  tags:
+  - mcp
+  - tooling
+summary: 'Adding/removing a builtin MCP tool must update four canaries: the mcp_tools_list.json snapshot (ORBIT_MCP_UPDATE_SNAPSHOT=1), the definition count in orbit-tools mcp_definitions.rs, the name lists in orbit-cli command/mcp/tests, and the mcp-bridge conformance-v1.yaml fixture.'
+body: |-
+  The agent MCP surface is guarded by four independent breaking-change canaries; registering a tool in crates/orbit-tools/src/builtin/orbit/mod.rs alone fails three test suites in non-obvious places:
+
+  1. `crates/orbit-cli/tests/snapshots/mcp_tools_list.json` — full name+schema snapshot; regenerate with `ORBIT_MCP_UPDATE_SNAPSHOT=1 cargo test -p orbit-cli --test mcp_roundtrip mcp_serve_tools_list_matches_production_snapshot`.
+  2. `crates/orbit-tools/tests/mcp_definitions.rs` — asserts the exact builtin definition count (`canonical_builtin_definitions_are_workspace_independent`).
+  3. `crates/orbit-cli/src/command/mcp/tests/mod.rs` — `REQUIRED_AGENT_FACING_TOOL_NAMES` / `EXPECTED_INACTIVE_TOOL_NAMES` (with a length canary), plus `canonical_mcp_policy_conforms_to_frozen_v1_fixture` which compares against the fixture in (4).
+  4. `docs/design/mcp-bridge/references/conformance-v1.yaml` — the frozen mcp-bridge v1 contract fixture; the new tool needs a `placement`/`scope`/`allowed_capabilities` entry matching its registration exactly.
+
+  Discovered in ORB-10316 when adding `orbit.learning.ack` (placement owner): each canary failed in a separate test binary, so a plain `cargo test -p orbit-tools` run looked green while orbit-cli suites failed. Grep for an existing tool name (e.g. `orbit.learning.show`) to find every canary before running tests.
+evidence:
+- kind: task
+  reference: ORB-10316
+created_at: 2026-07-19T01:07:19.030891501Z
+updated_at: 2026-07-19T01:07:19.030891501Z
+created_by: claude

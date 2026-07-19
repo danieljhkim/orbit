@@ -91,6 +91,7 @@ pub enum OrbitBuiltinAction {
     FrictionTags,
     FrictionUpdate,
     HostList,
+    LearningAck,
     LearningAdd,
     LearningList,
     LearningPrune,

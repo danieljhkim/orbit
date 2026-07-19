@@ -3,11 +3,13 @@ use orbit_core::{OrbitError, OrbitRuntime};
 
 use crate::command::Execute;
 
+use super::ack::LearningAckArgs;
 use super::add::LearningAddArgs;
 use super::list::LearningListArgs;
 use super::migrate_layout::LearningMigrateLayoutArgs;
 use super::prune::LearningPruneArgs;
 use super::show::LearningShowArgs;
+use super::stats::LearningStatsArgs;
 use super::supersede::LearningSupersedeArgs;
 use super::sync::LearningSyncArgs;
 use super::update::LearningUpdateArgs;
@@ -27,12 +29,16 @@ impl Execute for LearningCommand {
 
 #[derive(Subcommand)]
 pub enum LearningSubcommand {
+    /// Ack injected learnings as used (default) or explicitly ignored
+    Ack(LearningAckArgs),
     /// Create a new active learning
     Add(LearningAddArgs),
     /// List learnings filtered by status, tag, or path
     List(LearningListArgs),
     /// Show a single learning by ID
     Show(LearningShowArgs),
+    /// Per-learning usage rollup from injection and ack audit events
+    Stats(LearningStatsArgs),
     /// Update an existing active learning
     Update(LearningUpdateArgs),
     /// Mark a learning as superseded by another
@@ -48,9 +54,11 @@ pub enum LearningSubcommand {
 impl Execute for LearningSubcommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         match self {
+            LearningSubcommand::Ack(args) => args.execute(runtime),
             LearningSubcommand::Add(args) => args.execute(runtime),
             LearningSubcommand::List(args) => args.execute(runtime),
             LearningSubcommand::Show(args) => args.execute(runtime),
+            LearningSubcommand::Stats(args) => args.execute(runtime),
             LearningSubcommand::Update(args) => args.execute(runtime),
             LearningSubcommand::Supersede(args) => args.execute(runtime),
             LearningSubcommand::Sync(args) => args.execute(runtime),

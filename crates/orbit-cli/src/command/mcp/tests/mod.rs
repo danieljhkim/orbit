@@ -423,6 +423,7 @@ const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.adr.show",
     "orbit.adr.supersede",
     "orbit.adr.update",
+    "orbit.learning.ack",
     "orbit.learning.add",
     "orbit.learning.show",
     "orbit.learning.update",

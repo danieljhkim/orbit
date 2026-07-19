@@ -155,6 +155,10 @@ pub fn register(registry: &mut ToolRegistry) {
     // compatibility stub were decommissioned. The agent graph surface is now
     // served by the in-process orbit-graph (v2) adapter in orbit-mcp.
     registry.register_mcp(
+        learning::ack::OrbitLearningAckTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
+    registry.register_mcp(
         learning::add::OrbitLearningAddTool,
         agent_operator(McpToolPlacement::Composite),
     );

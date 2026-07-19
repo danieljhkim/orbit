@@ -42,6 +42,7 @@ pub(super) fn execute(
         OrbitBuiltinAction::FrictionTags => super::friction_tools::tags(runtime),
         OrbitBuiltinAction::FrictionUpdate => super::friction_tools::update(runtime, input),
         OrbitBuiltinAction::HostList => super::registry_tools::host_list(runtime),
+        OrbitBuiltinAction::LearningAck => super::learning_tools::ack(runtime, input),
         OrbitBuiltinAction::LearningAdd => super::learning_tools::add(runtime, input, agent, model),
         OrbitBuiltinAction::LearningList => super::learning_tools::list(runtime, input),
         OrbitBuiltinAction::LearningPrune => super::learning_tools::prune(runtime, input),

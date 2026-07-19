@@ -3,7 +3,7 @@ summary: "Project Learnings — Decisions"
 type: design
 title: "Project Learnings — Decisions"
 owner: claude
-last_updated: 2026-07-11
+last_updated: 2026-07-19
 status: Draft
 feature: project-learnings
 doc_role: decisions
@@ -229,9 +229,35 @@ Alternatives considered:
 
 ---
 
+## ADR-0238 — Learning usage feedback via audit-store acks with ignored-by-default semantics
+
+**Status:** Accepted · 2026-07 · [ORB-10316]
+
+**Context.** The 2026-07-18 relevancy audit (friction F2026-07-092) found the learning PreToolUse hook fired 2,374 times over two weeks with 13 injections and **zero usage signal**: nothing recorded whether an injected learning shaped the receiving agent's work, so nothing could drive deprecation of stale learnings. ADR-0210 had removed the vote/comment feedback surfaces for lack of real usage, ending with an explicit reopening clause: a scoped feedback primitive can return "with real usage data behind it." The audit is that data. Separately, per-session injection dedup was dead in interactive sessions — `ORBIT_SESSION_ID` was exported on 0/2,374 observed fires, and the ppid-tmpfile fallback re-keys per invocation because every hook fire runs under a fresh parent shell (L-0077 injected 10× in one session).
+
+Alternatives considered:
+
+| Approach | Profile |
+|----------|---------|
+| **Dedicated ack table or per-learning sidecar** | Recreates the disproportionate infrastructure ADR-0210 removed; a new durable schema for what is an observability signal. |
+| **Absent ack counts as used** | Optimistic default makes the rollup useless for deprecation — silence would defend stale learnings. |
+| **Session-end Stop-hook auto-ack** | Cannot know used-ness automatically; bulk auto-acks fabricate the signal. |
+| **Audit-store acks, ignored by default (this ADR)** | One audit row per ack in the store that already carries the per-fire injection events; silence biases toward deprecation, never away from it. |
+
+**Decision.** Record the feedback signal as `learning_ack` audit events in the existing host-global audit store (`target_id` = learning ID, `arguments_json.outcome` = `used` \| `ignored`), written by `orbit learning ack <id>... [--ignored]` or the `orbit.learning.ack` MCP tool (an additive entry in the frozen mcp-bridge conformance-v1 fixture). The injected reminder block documents the ack call inline, so the mechanism travels with the injection. `orbit learning stats` folds `learning_injected` + `learning_ack` events into the per-learning rollup (injected, used, derived ignored = injected − used, used ratio, last-injected/last-used). Instrumentation fails open end to end: an unavailable audit backend logs a warning and injection still renders; `ack` warns and exits 0 on backend failure while caller mistakes (unknown IDs) still fail closed. Session dedup keys on the first resolvable anchor: `ORBIT_SESSION_ID` env → the `session_id` field the hook payload itself carries → ppid-tmpfile last resort.
+
+**Consequences.**
+- The rollup is the designed input for downstream deprecation policy; decay/TTL is deliberately follow-up work, not implemented at this layer.
+- The `learning_ack` contract lives in audit-event conventions (`target_type` + `arguments_json`) enforced by store-level fold tests, not a schema migration — consistent with the injection events it joins against.
+- Used-ratio quality depends on agent ack discipline, but the ignored-by-default rule makes the failure mode conservative: a silent agent population produces over-deprecation *pressure*, surfaced in `stats` long before any automated deprecation exists.
+- Cost: one extra reminder-block footer line per injection, one audit row per ack, and one additive tool in the MCP surface canaries (builtin definition count 29 → 30; conformance-v1 gains `orbit.learning.ack`).
+
+---
+
 ## Task References
 
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
 - [ORB-10046] — Remove the vote and comment surfaces from the learning subsystem (ADR-0210 supersedes ADR-0157).
+- [ORB-10316] — Learning-hook usage instrumentation: `learning_ack` events, usage rollup, payload-derived session dedup (ADR-0238).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

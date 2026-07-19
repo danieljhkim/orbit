@@ -123,6 +123,7 @@ mod reminders {
 Project learnings relevant to this task:\n\n\
 - [L-0001] Verify output equivalence before freezing a result.\n\n\
 Read full body via `orbit.learning.show <id>` if needed.\n\
+If a learning shaped your work, ack it: `orbit learning ack <id>` (unacked injections count as ignored).\n\
 </system-reminder>"
         );
     }

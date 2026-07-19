@@ -8,10 +8,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{EvidenceKind, Learning, LearningStatus, NotFoundKind, OrbitError};
+use orbit_common::types::{
+    AuditEventStatus, EvidenceKind, Learning, LearningAckOutcome, LearningStatus, NotFoundKind,
+    OrbitError, audit_execution_id,
+};
 use orbit_store::{
-    LearningCreateParams, LearningListEntry, LearningSearchParams, LearningSearchResult,
-    LearningUpdateParams, RemoteArtifactStub, learning_layout::LearningLayoutMigrationReport,
+    AuditEventInsertParams, LEARNING_ACK_TARGET_TYPE, LearningCreateParams, LearningListEntry,
+    LearningSearchParams, LearningSearchResult, LearningUpdateParams, LearningUsageStat,
+    RemoteArtifactStub, learning_layout::LearningLayoutMigrationReport,
 };
 use serde::Deserialize;
 
@@ -94,6 +98,111 @@ impl OrbitRuntime {
 
     pub fn learning_search_config(&self) -> Result<LearningSearchConfig, OrbitError> {
         read_learning_search_config_from_config_path(&self.config_path())
+    }
+
+    /// Record a used/ignored feedback ack for injected learnings as
+    /// `learning_ack` audit events in the global audit store.
+    ///
+    /// IDs are validated against the learning store when it is readable;
+    /// an unknown ID is a hard `InvalidInput` (typo protection). A store
+    /// that cannot be read skips validation instead of blocking the ack —
+    /// the ack is instrumentation and must not depend on more backends
+    /// than the audit write itself.
+    pub fn ack_learnings(
+        &self,
+        ids: &[String],
+        outcome: LearningAckOutcome,
+        session_id: Option<&str>,
+    ) -> Result<(), OrbitError> {
+        if ids.is_empty() {
+            return Err(OrbitError::InvalidInput(
+                "learning ack requires at least one learning ID".to_string(),
+            ));
+        }
+        for id in ids {
+            if let Ok(None) = self.stores().learnings().get_federated(id) {
+                if self
+                    .stores()
+                    .learnings()
+                    .remote_stub(id)
+                    .ok()
+                    .flatten()
+                    .is_some()
+                {
+                    continue;
+                }
+                return Err(OrbitError::not_found(
+                    NotFoundKind::Learning,
+                    id.to_string(),
+                ));
+            }
+        }
+
+        let working_directory = std::env::current_dir()
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string());
+        for id in ids {
+            let arguments_json = serde_json::to_string(&serde_json::json!({
+                "learning_id": id,
+                "outcome": outcome.as_str(),
+            }))
+            .map_err(|error| {
+                OrbitError::Execution(format!("serialize learning ack arguments: {error}"))
+            })?;
+            self.record_audit_event(&AuditEventInsertParams {
+                execution_id: audit_execution_id("learning"),
+                command: "learning".to_string(),
+                subcommand: Some("ack".to_string()),
+                tool_name: None,
+                target_type: Some(LEARNING_ACK_TARGET_TYPE.to_string()),
+                target_id: Some(id.clone()),
+                role: "agent".to_string(),
+                status: AuditEventStatus::Success,
+                exit_code: 0,
+                duration_ms: 0,
+                working_directory: working_directory.clone(),
+                arguments_json: Some(arguments_json),
+                stdout_truncated: None,
+                stderr_truncated: None,
+                error_message: None,
+                host: std::env::var("HOSTNAME").ok(),
+                pid: std::process::id(),
+                session_id: session_id.map(ToOwned::to_owned),
+                workspace_id: None,
+                caller_machine_id: None,
+                caller_host_id: None,
+                process_machine_id: None,
+                process_host_id: None,
+                transport: None,
+                effective_capabilities: Default::default(),
+                origin_session_id: None,
+                mcp_call_id: None,
+                lease_id: None,
+                task_id: std::env::var("ORBIT_TASK_ID")
+                    .ok()
+                    .filter(|value| !value.is_empty()),
+                job_run_id: std::env::var("ORBIT_RUN_ID")
+                    .ok()
+                    .filter(|value| !value.is_empty()),
+                activity_id: std::env::var("ORBIT_ACTIVITY_ID")
+                    .ok()
+                    .filter(|value| !value.is_empty()),
+                step_index: std::env::var("ORBIT_STEP_INDEX")
+                    .ok()
+                    .and_then(|value| value.parse().ok()),
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Per-learning usage rollup over the global audit store: injection
+    /// counts from `learning_injected` events, used/ignored feedback from
+    /// `learning_ack` events.
+    pub fn learning_usage_stats(
+        &self,
+        since: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Vec<LearningUsageStat>, OrbitError> {
+        self.stores().audit_events().learning_usage(since.as_ref())
     }
 
     pub fn update_learning(

@@ -35,6 +35,29 @@ fn parse_payload_accepts_tool_and_path_variants() {
 }
 
 #[test]
+fn parse_payload_extracts_session_id_when_present() {
+    let with_session = parse_payload(
+        r#"{"tool_name":"Edit","tool_input":{"file_path":"src/lib.rs"},"session_id":" sess-123 "}"#,
+    )
+    .expect("payload with session id");
+    assert_eq!(with_session.session_id.as_deref(), Some("sess-123"));
+
+    let camel = parse_payload(
+        r#"{"toolName":"Write","toolInput":{"filePath":"README.md"},"sessionId":"sess-camel"}"#,
+    )
+    .expect("payload with camelCase session id");
+    assert_eq!(camel.session_id.as_deref(), Some("sess-camel"));
+
+    let without = parse_payload(r#"{"tool_name":"Read","path":"Cargo.toml"}"#)
+        .expect("payload without session id");
+    assert_eq!(without.session_id, None);
+
+    let blank = parse_payload(r#"{"tool_name":"Read","path":"Cargo.toml","session_id":"  "}"#)
+        .expect("payload with blank session id");
+    assert_eq!(blank.session_id, None);
+}
+
+#[test]
 fn parse_payload_rejects_malformed_irrelevant_or_pathless_payloads() {
     assert!(parse_payload("").is_none());
     assert!(parse_payload("not-json").is_none());

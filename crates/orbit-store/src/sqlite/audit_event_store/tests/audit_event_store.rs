@@ -187,6 +187,105 @@ fn list_audit_events_filters_by_target_type_kind() {
     assert_eq!(events[0].execution_id, "exec-hook");
 }
 
+fn learning_injected_params(execution_id: &str, learning_ids: &[&str]) -> AuditEventInsertParams {
+    AuditEventInsertParams {
+        execution_id: execution_id.to_string(),
+        command: "hook".to_string(),
+        subcommand: Some("pretooluse".to_string()),
+        target_type: Some(LEARNING_INJECTED_TARGET_TYPE.to_string()),
+        target_id: Some("src/lib.rs".to_string()),
+        arguments_json: Some(serde_json::json!({ "learning_ids": learning_ids }).to_string()),
+        ..sample_params()
+    }
+}
+
+fn learning_ack_params(
+    execution_id: &str,
+    learning_id: &str,
+    outcome: &str,
+) -> AuditEventInsertParams {
+    AuditEventInsertParams {
+        execution_id: execution_id.to_string(),
+        command: "learning".to_string(),
+        subcommand: Some("ack".to_string()),
+        target_type: Some(LEARNING_ACK_TARGET_TYPE.to_string()),
+        target_id: Some(learning_id.to_string()),
+        arguments_json: Some(
+            serde_json::json!({ "learning_id": learning_id, "outcome": outcome }).to_string(),
+        ),
+        ..sample_params()
+    }
+}
+
+#[test]
+fn learning_usage_stats_fold_injections_and_acks_per_learning() {
+    let store = Store::open_in_memory().expect("open store");
+    for (execution_id, ids) in [
+        ("exec-inject-1", vec!["L-0001", "L-0002"]),
+        ("exec-inject-2", vec!["L-0001"]),
+        ("exec-inject-3", vec!["L-0001"]),
+    ] {
+        store
+            .insert_audit_event_record(&learning_injected_params(execution_id, &ids))
+            .expect("insert injection event");
+    }
+    store
+        .insert_audit_event_record(&learning_ack_params("exec-ack-1", "L-0001", "used"))
+        .expect("insert used ack");
+    store
+        .insert_audit_event_record(&learning_ack_params("exec-ack-2", "L-0002", "ignored"))
+        .expect("insert ignored ack");
+
+    let stats = store
+        .get_learning_usage_stats(None)
+        .expect("learning usage stats");
+    assert_eq!(stats.len(), 2);
+
+    let first = &stats[0];
+    assert_eq!(first.learning_id, "L-0001");
+    assert_eq!(first.injected_count, 3);
+    assert_eq!(first.used_count, 1);
+    assert_eq!(first.ignored_ack_count, 0);
+    assert_eq!(first.ignored_count(), 2);
+    assert_eq!(first.used_ratio(), Some(1.0 / 3.0));
+    assert!(first.last_injected_at.is_some());
+    assert!(first.last_used_at.is_some());
+
+    let second = &stats[1];
+    assert_eq!(second.learning_id, "L-0002");
+    assert_eq!(second.injected_count, 1);
+    assert_eq!(second.used_count, 0);
+    assert_eq!(second.ignored_ack_count, 1);
+    assert_eq!(second.ignored_count(), 1);
+    assert_eq!(second.used_ratio(), Some(0.0));
+    assert!(second.last_used_at.is_none());
+}
+
+#[test]
+fn learning_usage_stats_skip_malformed_arguments_and_respect_since() {
+    let store = Store::open_in_memory().expect("open store");
+    let mut malformed = learning_injected_params("exec-malformed", &["L-0001"]);
+    malformed.arguments_json = Some("not-json".to_string());
+    store
+        .insert_audit_event_record(&malformed)
+        .expect("insert malformed event");
+    store
+        .insert_audit_event_record(&learning_injected_params("exec-ok", &["L-0002"]))
+        .expect("insert valid event");
+
+    let stats = store
+        .get_learning_usage_stats(None)
+        .expect("learning usage stats");
+    assert_eq!(stats.len(), 1);
+    assert_eq!(stats[0].learning_id, "L-0002");
+
+    let future = chrono::Utc::now() + chrono::Duration::days(1);
+    let stats = store
+        .get_learning_usage_stats(Some(&future))
+        .expect("learning usage stats since future");
+    assert!(stats.is_empty());
+}
+
 #[test]
 fn migration_adds_correlation_columns_to_legacy_table() {
     let conn = rusqlite::Connection::open_in_memory().expect("open in-memory connection");

@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use crate::sqlite::audit_event_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
     AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
+    LearningUsageStat,
 };
 use crate::sqlite::v2_audit_store::{
     V2AuditEventFilter, V2AuditEventInsertParams, V2AuditEventRow,
@@ -655,6 +656,10 @@ pub trait AuditEventStoreBackend: Send + Sync {
         &self,
         since: &DateTime<Utc>,
     ) -> Result<Vec<AuditRoleAggregate>, OrbitError>;
+    fn get_learning_usage_stats(
+        &self,
+        since: Option<&DateTime<Utc>>,
+    ) -> Result<Vec<LearningUsageStat>, OrbitError>;
     fn prune_audit_events(&self, older_than: &DateTime<Utc>) -> Result<usize, OrbitError>;
 }
 

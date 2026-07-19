@@ -163,6 +163,43 @@ pub struct Learning {
     pub priority: Option<u8>,
 }
 
+/// Receiving-agent verdict on one injected learning, recorded as a
+/// `learning_ack` audit event. Absent ack degrades safely: an injection with
+/// no `Used` ack counts as ignored in the usage rollup.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LearningAckOutcome {
+    Used,
+    Ignored,
+}
+
+impl LearningAckOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LearningAckOutcome::Used => "used",
+            LearningAckOutcome::Ignored => "ignored",
+        }
+    }
+}
+
+impl Display for LearningAckOutcome {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for LearningAckOutcome {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "used" => Ok(LearningAckOutcome::Used),
+            "ignored" => Ok(LearningAckOutcome::Ignored),
+            other => Err(format!("unknown learning ack outcome: {other}")),
+        }
+    }
+}
+
 pub const DEFAULT_LEARNING_REMINDER_PER_CALL_CAP: usize = 5;
 pub const DEFAULT_LEARNING_REMINDER_SESSION_CAP: usize = 20;
 
@@ -284,6 +321,10 @@ pub fn render_reminder_block(reminders: &[LearningReminder]) -> String {
     }
     out.push('\n');
     out.push_str("Read full body via `orbit.learning.show <id>` if needed.\n");
+    out.push_str(
+        "If a learning shaped your work, ack it: `orbit learning ack <id>` \
+         (unacked injections count as ignored).\n",
+    );
     out.push_str("</system-reminder>");
     out
 }

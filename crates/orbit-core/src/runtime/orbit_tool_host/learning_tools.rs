@@ -9,8 +9,8 @@
 use std::str::FromStr;
 
 use orbit_common::types::{
-    EvidenceKind, LearningEvidence, LearningScope, LearningStatus, NotFoundKind, OrbitError,
-    optional_string, optional_string_alias, required_string,
+    EvidenceKind, LearningAckOutcome, LearningEvidence, LearningScope, LearningStatus,
+    NotFoundKind, OrbitError, optional_string, optional_string_alias, required_string,
 };
 use orbit_store::{
     LearningCreateParams, LearningListEntry, LearningUpdateParams, RemoteArtifactStub,
@@ -48,6 +48,31 @@ pub(super) fn add(
         priority,
     })?;
     Ok(learning_to_json(&learning))
+}
+
+/// `orbit.learning.ack` — record a used/ignored feedback signal for one or
+/// more injected learnings. `ids` accepts a string or array; `outcome`
+/// defaults to `used` (an absent ack already records as ignored, so the
+/// explicit call is normally the positive signal).
+pub(super) fn ack(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+    let ids = match input.get("ids").or_else(|| input.get("id")) {
+        Some(value) => parse_string_list("ids", value)?,
+        None => Vec::new(),
+    };
+    let outcome = match optional_string(&input, "outcome")? {
+        Some(raw) => LearningAckOutcome::from_str(&raw).map_err(OrbitError::InvalidInput)?,
+        None => LearningAckOutcome::Used,
+    };
+    let session_id = optional_string_alias(&input, &["session_id", "sessionId"])?.or_else(|| {
+        std::env::var("ORBIT_SESSION_ID")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    });
+    runtime.ack_learnings(&ids, outcome, session_id.as_deref())?;
+    Ok(json!({
+        "acked": ids,
+        "outcome": outcome.as_str(),
+    }))
 }
 
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {

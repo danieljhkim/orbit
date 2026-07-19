@@ -797,6 +797,31 @@
     "name": "orbit_graph_trace"
   },
   {
+    "description": "Record a used/ignored feedback ack for injected learnings. Feeds the per-learning usage rollup (`orbit learning stats`) that drives deprecation decisions.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "ids": {
+          "description": "Learning ID or array of learning IDs to ack (e.g. the IDs listed in an injected reminder block).",
+          "type": "array"
+        },
+        "outcome": {
+          "description": "`used` (default) when the learning shaped the work, `ignored` to record an explicit dismissal. Injections with no ack already count as ignored.",
+          "type": "string"
+        },
+        "session_id": {
+          "description": "Session the ack belongs to. Defaults to `ORBIT_SESSION_ID` when exported.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_learning_ack"
+  },
+  {
     "description": "Create an active project learning. Returns `{ id, created_at }` plus the full record.",
     "inputSchema": {
       "additionalProperties": true,

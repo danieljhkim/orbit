@@ -3,7 +3,7 @@ summary: "Project Learnings — Design"
 type: design
 title: "Project Learnings — Design"
 owner: claude
-last_updated: 2026-05-21
+last_updated: 2026-07-19
 status: Draft
 feature: project-learnings
 doc_role: design
@@ -224,6 +224,10 @@ This is the only layer that surfaces learnings on Claude Code's built-in editor 
 
 The hook is shipped as part of the design, but it is **layered on top of** layers 1 and 2, not a replacement. Other agent vendors that gain analogous hook capabilities can plug in equivalent layers without touching the Orbit-side store.
 
+Every hook fire that admits at least one learning records a `learning_injected` audit event in the host-global `~/.orbit/orbit.db` (`arguments_json.learning_ids`, target path, session id). The instrumentation **fails open**: an unavailable audit backend logs a warning and the reminder still renders — injection never depends on the observability write ([ORB-10316]). The per-learning rollup over these events is described in [§5.5](#55-usage-instrumentation-and-feedback).
+
+The hook resolves its session identity in priority order: `ORBIT_SESSION_ID` from the environment (engine-managed runs export it, pre-seeded with layer-1 injections) → the `session_id` field carried by the hook payload itself (Claude Code sends it on every hook event) → a tmpdir file keyed by parent pid as the last resort. The payload fallback matters: interactive sessions never export `ORBIT_SESSION_ID`, and each hook fire runs under a fresh shell, so the ppid fallback re-keys per invocation and cannot dedup (the 2026-07-18 relevancy audit observed one learning injected 10× in a single session; F2026-07-092).
+
 ### 4.4 Deduplication and budget
 
 A naive implementation injects the same learning multiple times across layers (e.g. once at layer 1, once at layer 2 for a tool call referencing the same file, once at layer 3 for the eventual edit). To prevent this:
@@ -234,7 +238,7 @@ A naive implementation injects the same learning multiple times across layers (e
 
 Implementation note: the per-session set lives in the agent's working memory. The Orbit-side store does not need to track session state; it just provides idempotent search. Layers consult the set; the store is stateless.
 
-Cross-process deduplication is best-effort via `ORBIT_SESSION_ID` plus `.orbit/state/sessions/<id>/learnings.json`. In-process Layer 1 + Layer 2 dedup is exact; when Layer 2 or Layer 3 runs without `ORBIT_SESSION_ID` (for example, an `orbit-mcp` server started outside an engine-spawned session, or a Claude session not initiated through Orbit), they fall back to per-process state and may double-emit. The dedup layer is belt-and-braces; the agent's own context window remains the practical backstop.
+Cross-process deduplication is best-effort and keyed on a session id: `ORBIT_SESSION_ID` when exported, else (for Layer 3) the `session_id` field the hook payload carries ([ORB-10316]). With a session id, dedup state lives in the `session_learning_state` table of the host-global `orbit.db`; without one, Layer 3 falls back to a tmpdir state file keyed by parent pid, which cannot dedup across fires from an interactive agent (each fire gets a fresh parent shell). In-process Layer 1 + Layer 2 dedup is exact; an `orbit-mcp` server started outside an engine-spawned session still falls back to per-process state and may double-emit. The dedup layer is belt-and-braces; the agent's own context window remains the practical backstop.
 
 ### 4.5 What gets injected
 
@@ -257,6 +261,8 @@ orbit learning supersede <id> --with <new-id>
 orbit learning upvote --id <id> --model <agent-family> --task <task-id>
 orbit learning sync                       # reconcile SQLite index from YAML
 orbit learning prune [--stale-only]       # report or delete stale learnings
+orbit learning ack <id>... [--ignored] [--session S]  # used/ignored feedback for injected learnings
+orbit learning stats [--since 30d]        # per-learning usage rollup (see §5.5)
 
 # Free-text content match (formerly the per-domain `learning` subcommand of `orbit search`) lives on the unified search surface:
 orbit search <text> --kind learning [--tag T] [--all] [--status learning:active] [--limit N]
@@ -276,6 +282,7 @@ orbit search path <path> --kind learning [--tag T] [--all] [--status learning:ac
 | `orbit.learning.update` | `id`, fields | updated record |
 | `orbit.learning.supersede` | `id`, `with` | both records updated |
 | `orbit.learning.upvote` | `id`, `model`, `task?` | vote summary |
+| `orbit.learning.ack` | `ids`, `outcome?` (`used`\|`ignored`), `session_id?` | `{ acked, outcome }` |
 
 `orbit.learning.list` and the runtime-side `search_learnings` helper drive the injection-layer hot path; both must stay sub-10ms at expected scale. The standalone per-domain learning-search MCP tool (phase-1 surface) was retired by [ORB-00202] in favor of `orbit.search` with `kind: "learning"`.
 
@@ -322,6 +329,17 @@ Search ranking remains scope-filtered first. Within the matched set, rows sort b
 4. `id` asc.
 
 `ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS=0` disables decay and uses raw vote count. Vote files are scanned at query time in v1; a SQLite vote-summary mirror is a follow-up only if measured matched-set sizes make the per-file scan visible.
+
+### 5.5 Usage instrumentation and feedback
+
+Two audit event kinds in the host-global `~/.orbit/orbit.db` carry the usage signal ([ORB-10316]; the scoped reintroduction of a feedback primitive anticipated by [ADR-0210]):
+
+- **`learning_injected`** — one event per hook fire that admitted learnings; `arguments_json.learning_ids` lists the injected IDs, `target_id` is the tool-target path, `session_id` the resolved session.
+- **`learning_ack`** — the receiving agent's verdict on one learning: `target_id` is the learning ID, `arguments_json.outcome` is `used` or `ignored`. Recorded via `orbit learning ack <id>...` (one CLI call; `--ignored` for an explicit dismissal) or the `orbit.learning.ack` MCP tool. The injected reminder block itself tells the agent how to ack.
+
+**The ack contract degrades safely, not optimistically.** An injection with no `used` ack counts as **ignored** in the rollup — agents that never ack bias learnings toward deprecation, never away from it. Recording an ack fails open on an unavailable audit backend (CLI warns and exits 0) so a scripted ack in a session-end hook can never break the agent's main work; only caller mistakes (unknown ID, empty input) fail closed.
+
+`orbit learning stats [--since ..] [--json]` folds both event kinds into a per-learning rollup: injected count, used count, derived ignored count (`injected − used`, floored at 0), explicit ignored-ack count, used ratio, last-injected and last-used timestamps. This rollup is the designed input for downstream deprecation policy (decay/TTL is follow-up work, deliberately not implemented at this layer).
 
 ---
 
@@ -414,9 +432,9 @@ Phase 2's semantic-similarity ranking from orbit-search may complement or replac
 
 The `PreToolUse` hook covers Claude Code's built-in `Edit | Write | Read`, which are the most frequent agent actions. Other agents that gain comparable hooks can layer in equivalent integrations, but as of phase 1, agents without hook support get only layers 1 and 2 — coarser-grained injection. This is uneven coverage by agent vendor; the design accepts the unevenness because layer 1 is universal and gives a baseline that's strictly better than today.
 
-### 8.5 Per-session deduplication state is agent-local
+### 8.5 Per-session deduplication depends on a resolvable session id
 
-The dedup set lives in the agent's working memory. If an agent's context is compressed or the agent crashes and restarts, the set resets and the same learning may inject twice. Hardening this would require a session-keyed cache in `orbit-store`, which trades complexity for a marginal context-token saving. Not worth it in phase 1.
+Cross-process dedup state is session-keyed in `orbit-store` (`session_learning_state`), but it only engages when a session id resolves — from `ORBIT_SESSION_ID` or, for Layer 3, the hook payload ([ORB-10316]). Agents whose hook payloads carry no session id and that run outside engine management still fall back to the per-invocation ppid state file and may re-inject. Separately, the agent's own in-context dedup set resets on context compression or crash-restart; the store-side state is the backstop for exactly the sessions that can be keyed.
 
 ### 8.6 No write-time validation that learnings are non-obvious
 
@@ -434,5 +452,6 @@ Learnings are workspace-scoped and checked into the repo. They travel exactly wh
 - [T20260510-12] — Add `tags` field to `Task` schema. Hard prerequisite for Layer 1's tag-axis matching ([§4.1](#41-layer-1--engine-pre-prompt-injection-universal)).
 - [ORB-00061] — Add Knowledge tab and Learnings subtab to dashboard.
 - [ORB-00090] — Aligned learning identity examples with the agent-family convention.
+- [ORB-10316] — Learning-hook usage instrumentation: `learning_injected`/`learning_ack` audit events, `orbit learning ack`/`stats`, payload-derived session dedup ([§4.3](#43-layer-3--claude-code-pretooluse-hook-optional), [§5.5](#55-usage-instrumentation-and-feedback)).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

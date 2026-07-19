@@ -59,6 +59,7 @@ tools:
   orbit.adr.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.adr.supersede: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.adr.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.learning.ack: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.learning.add: { placement: composite, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.learning.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.learning.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }

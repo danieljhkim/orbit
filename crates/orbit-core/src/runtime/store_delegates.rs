@@ -603,6 +603,13 @@ impl AuditEventRecords<'_> {
         self.store.prune_audit_events(older_than)
     }
 
+    pub(crate) fn learning_usage(
+        &self,
+        since: Option<&chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Vec<orbit_store::LearningUsageStat>, OrbitError> {
+        self.store.get_learning_usage_stats(since)
+    }
+
     pub(crate) fn stats(
         &self,
         since: Option<&chrono::DateTime<chrono::Utc>>,

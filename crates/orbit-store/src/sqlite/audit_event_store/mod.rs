@@ -123,6 +123,55 @@ pub struct AuditRoleAggregate {
     pub cli: i64,
 }
 
+/// `target_type` of the per-fire injection audit event emitted by the
+/// learning PreToolUse hook.
+pub const LEARNING_INJECTED_TARGET_TYPE: &str = "learning_injected";
+/// `target_type` of the used/ignored feedback audit event recorded by
+/// `orbit learning ack`.
+pub const LEARNING_ACK_TARGET_TYPE: &str = "learning_ack";
+
+/// Per-learning rollup of injection and ack audit events. Raw counts only;
+/// the derived ignored count and used ratio live on the accessor methods so
+/// the "absent ack counts as ignored" semantics stay in one place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LearningUsageStat {
+    pub learning_id: String,
+    /// Number of `learning_injected` events that included this learning.
+    pub injected_count: u64,
+    /// Number of `learning_ack` events with outcome `used`.
+    pub used_count: u64,
+    /// Number of explicit `learning_ack` events with outcome `ignored`.
+    /// Informational — the derived [`Self::ignored_count`] already counts
+    /// every non-used injection as ignored.
+    pub ignored_ack_count: u64,
+    pub last_injected_at: Option<DateTime<Utc>>,
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+impl LearningUsageStat {
+    fn new(learning_id: String) -> Self {
+        Self {
+            learning_id,
+            injected_count: 0,
+            used_count: 0,
+            ignored_ack_count: 0,
+            last_injected_at: None,
+            last_used_at: None,
+        }
+    }
+
+    /// Injections not covered by a `used` ack. Absent ack degrades safely:
+    /// it records as ignored, not as used.
+    pub fn ignored_count(&self) -> u64 {
+        self.injected_count.saturating_sub(self.used_count)
+    }
+
+    /// `used_count / injected_count`, or `None` when nothing was injected.
+    pub fn used_ratio(&self) -> Option<f64> {
+        (self.injected_count > 0).then(|| self.used_count as f64 / self.injected_count as f64)
+    }
+}
+
 fn audit_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEvent> {
     let ts_raw: String = row.get(2)?;
     let status_raw: String = row.get(9)?;
@@ -857,6 +906,102 @@ impl Store {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| OrbitError::Store(e.to_string()))
+    }
+
+    /// Fold `learning_injected` and `learning_ack` audit events into a
+    /// per-learning usage rollup. Malformed `arguments_json` payloads are
+    /// skipped rather than failing the whole aggregation — the rollup is an
+    /// observability surface over best-effort instrumentation.
+    pub fn get_learning_usage_stats(
+        &self,
+        since: Option<&DateTime<Utc>>,
+    ) -> Result<Vec<LearningUsageStat>, OrbitError> {
+        let conn = self.read()?;
+
+        let (since_clause, since_params) = match since {
+            Some(since) => (
+                " AND timestamp >= ?1",
+                vec![Box::new(since.to_rfc3339()) as Box<dyn rusqlite::types::ToSql>],
+            ),
+            None => ("", Vec::new()),
+        };
+        let sql = format!(
+            "SELECT timestamp, target_type, target_id, arguments_json \
+             FROM audit_events \
+             WHERE target_type IN ('{LEARNING_INJECTED_TARGET_TYPE}', '{LEARNING_ACK_TARGET_TYPE}') \
+             AND status = 'success'{since_clause} ORDER BY id ASC"
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            since_params.iter().map(|b| b.as_ref()).collect();
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .map_err(|e| OrbitError::Store(e.to_string()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+        let mut stats = std::collections::BTreeMap::<String, LearningUsageStat>::new();
+        for (ts_raw, target_type, target_id, arguments_json) in rows {
+            let Ok(timestamp) = parse_timestamp(&ts_raw) else {
+                continue;
+            };
+            let arguments = arguments_json
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
+            if target_type == LEARNING_INJECTED_TARGET_TYPE {
+                let Some(learning_ids) = arguments
+                    .as_ref()
+                    .and_then(|value| value.get("learning_ids"))
+                    .and_then(serde_json::Value::as_array)
+                else {
+                    continue;
+                };
+                for learning_id in learning_ids.iter().filter_map(serde_json::Value::as_str) {
+                    let stat = stats
+                        .entry(learning_id.to_string())
+                        .or_insert_with(|| LearningUsageStat::new(learning_id.to_string()));
+                    stat.injected_count += 1;
+                    stat.last_injected_at = Some(timestamp);
+                }
+            } else {
+                let Some(learning_id) = target_id.as_deref().filter(|id| !id.is_empty()) else {
+                    continue;
+                };
+                let outcome = arguments
+                    .as_ref()
+                    .and_then(|value| value.get("outcome"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                let stat = stats
+                    .entry(learning_id.to_string())
+                    .or_insert_with(|| LearningUsageStat::new(learning_id.to_string()));
+                match outcome {
+                    "used" => {
+                        stat.used_count += 1;
+                        stat.last_used_at = Some(timestamp);
+                    }
+                    "ignored" => stat.ignored_ack_count += 1,
+                    _ => {}
+                }
+            }
+        }
+
+        let mut stats = stats.into_values().collect::<Vec<_>>();
+        stats.sort_by(|a, b| {
+            b.injected_count
+                .cmp(&a.injected_count)
+                .then_with(|| a.learning_id.cmp(&b.learning_id))
+        });
+        Ok(stats)
     }
 
     pub fn prune_audit_events(&self, older_than: &DateTime<Utc>) -> Result<usize, OrbitError> {
