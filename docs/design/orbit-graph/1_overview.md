@@ -3,12 +3,14 @@ summary: "Orbit Graph — Overview"
 type: design
 title: "Orbit Graph — Overview"
 owner: claude
-last_updated: 2026-06-13
+last_updated: 2026-07-18
 status: Draft
 feature: orbit-graph
 doc_role: overview
 tags: ["orbit-graph"]
+paths: ["crates/orbit-graph/**", "crates/orbit-graph-extract/**", "crates/orbit-graph-cli/**", "crates/orbit-remote/src/mcp/graph.rs"]
 related_features: [knowledge-graph]
+related_artifacts: [ORB-00391, ORB-00396, ORB-10011, ORB-10225, ORB-10319]
 ---
 
 # Orbit Graph — Overview
@@ -47,15 +49,16 @@ The root cause: the graph was designed as a versioned store when the actual job 
 
 ## 3. At a Glance
 
-| Concern | File / module (planned) | Tracking task |
+| Concern | File / module | Tracking task |
 |---|---|---|
 | Pure extraction per language | `crates/orbit-graph-extract/src/languages/` | (unscheduled) |
 | ExtractedFile shape, Extractor trait | `crates/orbit-graph-extract/src/lib.rs` | (unscheduled) |
 | SQLite schema, transactions | `crates/orbit-graph/src/store/` | (unscheduled) |
 | Build pipeline, scanner, diff | `crates/orbit-graph/src/sync/` | (unscheduled) |
 | Query API: search/show/refs/callees/impact/trace | `crates/orbit-graph/src/query/` | (unscheduled) |
-| CLI subcommands + MCP wrappers | `crates/orbit-graph-cli/src/` | (unscheduled) |
-| Selector parser (back-compat with skills) | `crates/orbit-graph-extract/src/selector.rs` | (unscheduled) |
+| Human/script CLI subcommands | `crates/orbit-graph-cli/src/` | [ORB-00396] |
+| Agent MCP graph extension and policy composition | `crates/orbit-remote/src/mcp/graph.rs` | [ORB-10225], [ORB-10319] |
+| Canonical selector parser (re-exported by extract) | `crates/orbit-common/src/utility/selector.rs` | [ORB-10011] |
 
 The four-step migration plan — landing orbit-graph alongside orbit-knowledge, dual-running them through an equivalence harness, then measuring effectiveness head-to-head before any phase-out decision — is laid out in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16.
 
@@ -63,6 +66,6 @@ The four-step migration plan — landing orbit-graph alongside orbit-knowledge, 
 
 ## Task References
 
-The orbit-graph design and migration shipped across ORB-00294, ORB-00331, ORB-00344, ORB-00377, ORB-00385, and ORB-00391 (the v2 cutover + orbit-knowledge decommission). The per-ADR task mapping is in [4_decisions.md](./4_decisions.md) § Task References.
+The orbit-graph design and migration shipped across ORB-00294, ORB-00331, ORB-00344, ORB-00377, ORB-00385, and ORB-00391 (the v2 cutover + orbit-knowledge decommission). ORB-10319 moved the agent MCP composition into the vertical Remote feature crate without changing graph semantics. The per-ADR task mapping is in [4_decisions.md](./4_decisions.md) § Task References.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

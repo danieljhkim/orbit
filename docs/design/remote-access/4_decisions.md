@@ -8,9 +8,9 @@ doc_role: decisions
 type: design
 summary: "ADR log: why live viewing supersedes a git-sync registry, why remote access is SSH-over-loopback rather than a network bind with auth, and why orbit-web reloads the registry per request rather than watching it."
 tags: [remote-access]
-paths: ["crates/orbit-dashboard/**"]
-related_features: [remote-access]
-related_artifacts: [ADR-0200, ADR-0201, ADR-0234, ORB-00029, ORB-00030, ORB-00360, ORB-10294]
+paths: ["crates/orbit-dashboard/**", "crates/orbit-remote/src/runtime.rs", "crates/orbit-remote/src/workspace_registry.rs"]
+related_features: [remote-access, host-registry]
+related_artifacts: [ADR-0200, ADR-0201, ADR-0234, ORB-00029, ORB-00030, ORB-00360, ORB-10294, ORB-10319]
 ---
 
 # Remote Access — Decisions
@@ -76,5 +76,6 @@ The workspace-keyed-state machinery (the `Ws` extractor vs. path-prefixed routes
 - [ORB-00360] — Loopback-only bind guard and stored-XSS fix.
 - [ORB-10029] — Made global mode the default and only mode for `orbit web serve` (single mode is no longer reachable from the CLI); `--global` is now a deprecated no-op kept for `connect` passthrough compatibility. Does not change either ADR above — the security posture and viewing-not-sync boundary are unaffected — but evolves the `web serve --global` behavior both describe.
 - [ORB-10294] — Live per-request registry refresh for `orbit web serve` ([ADR-0234]): native workspace add/remove/rebind without a restart.
+- [ORB-10319] — Moved the dashboard's catalog/runtime dependencies into `orbit-remote`; this is an implementation-ownership change, not a new remote-access decision.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -1,5 +1,5 @@
 #![deny(clippy::print_stderr, clippy::print_stdout)]
-// ORB-00004: legacy registry surfaces still need a focused documentation pass.
+// ORB-00004: internal feature surfaces still need a focused documentation pass.
 #![allow(missing_docs)]
 // ORB-00013: Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
@@ -12,12 +12,14 @@
 //!
 //! This crate owns strict machine identity, the path-free logical workspace
 //! catalog plus machine-local checkout roles, the atomic satellite cache, the
-//! host/workspace registry service, and remote MCP broker/hub/link composition.
+//! host/workspace registry service, registry persistence, and remote MCP
+//! contract/broker/hub/link/registration composition. It also owns the
+//! feature-specific graph and learning extensions and global discovery tools.
 //! Shared DTOs remain in `orbit-common`; generic MCP framing remains in
-//! `orbit-mcp`; generic builtin definitions remain in `orbit-tools`; registry
-//! persistence, feature migrations, revision advancement, and transactional
+//! `orbit-mcp`; generic workspace-scoped builtin definitions remain in
+//! `orbit-tools`; registry migrations, revision advancement, and transactional
 //! snapshot queries are encapsulated here over `orbit-store`'s generic SQLite
-//! connection infrastructure.
+//! connection and namespaced migration-ledger infrastructure.
 
 pub mod host_identity;
 pub mod host_registry;

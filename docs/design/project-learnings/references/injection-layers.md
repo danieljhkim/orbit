@@ -1,6 +1,6 @@
 # Injection-Layer Coverage Matrix
 
-**Last updated:** 2026-05-17
+**Last updated:** 2026-07-18
 
 A coverage map of the project-learnings push-injection pipeline against Orbit's two agent tool surfaces. Quick-reference companion to [2_design.md §4](../2_design.md), which is the design itself. Look here to answer "does *my* surface get learning X?"; look there to understand how each layer is built.
 
@@ -26,7 +26,7 @@ Same tools, same JSON I/O. The transports differ only in what wraps the response
 Three observations:
 
 1. **Every cell that should be covered, is.** L1 covers the engine-driven path. L2 covers MCP. L3 covers Claude Code's file-touch surface. Humans and scripts intentionally get nothing — auto-injection in a shell is noise, not signal.
-2. **L2 lives in `orbit-mcp`, not in the tool layer.** That is correct; see Rule 2 below.
+2. **L2 lives in `orbit-remote` composition, not in the generic MCP kernel or tool layer.** That is correct; see Rule 2 below.
 3. **Uneven coverage by agent vendor is by design.** [§8.4](../2_design.md) accepts the unevenness because L1 is universal and forms a baseline that is strictly better than today.
 
 ## Rules for new enrichments

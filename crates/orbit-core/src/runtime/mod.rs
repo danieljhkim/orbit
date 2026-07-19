@@ -557,7 +557,7 @@ impl OrbitRuntime {
     ///
     /// ORB-00391: this is the registry's builtin schemas plus the v2 graph
     /// adapter tools (`orbit.graph.*`). The latter are served in-process by the
-    /// orbit-mcp graph adapter rather than registered as builtins, so they are
+    /// `orbit-remote` graph extension rather than registered as builtins, so they are
     /// absent from `tool_registry().schemas()` but are still legitimate targets
     /// under the `orbit.graph.` wildcard root.
     /// `pub` for the direct v2 activity runner in `orbit-cmd` [ORB-10016].

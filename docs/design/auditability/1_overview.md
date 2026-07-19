@@ -66,6 +66,7 @@ The default tracing subscriber appends redacted structured events to `~/.orbit/s
 |---------|----------------|-----------------|
 | Audit design ownership | `docs/design/auditability/` | [T20260426-0605] |
 | Command audit records and queries | `crates/orbit-common/src/types/audit_event.rs`, `crates/orbit-cli/src/command/observe/audit.rs`, `crates/orbit-store/src/sqlite/audit_event_store.rs` | [T20260426-0605] |
+| Remote MCP preflight, placement denials, and checkoutless global audit writes | `crates/orbit-remote/src/mcp/host.rs`, `crates/orbit-remote/src/lib.rs` | [ORB-10228], [ORB-10262], [ORB-10319] |
 | V2 activity/job envelopes and JSONL sink | `crates/orbit-common/src/types/activity_job/audit_envelope.rs`, `crates/orbit-engine/src/activity_job/audit_writer.rs` | [T20260419-0002], [T20260426-0519] |
 | Run trace inspection CLI | `crates/orbit-cli/src/command/run/mod.rs`, `crates/orbit-core/src/runtime/run_audit.rs` | [T20260426-0705], [T20260426-0709] |
 | Loop audit events and blobs | `crates/orbit-agent/src/loop_engine/audit/mod.rs`, `crates/orbit-common/src/utility/blob_store.rs` | [T20260426-0605] |
@@ -95,5 +96,6 @@ The default tracing subscriber appends redacted structured events to `~/.orbit/s
 - **[T20260508-22]** — Use `task.implemented_by` to set git commit authors for automated task commits.
 - **[T20260509-12]** — Scope workflow git author and committer identity to the spawned commit process without writing repo-local Git config.
 - **[ORB-00062]** — Surface first-class friction artifacts in the dashboard Knowledge tab and add triage endpoints.
+- **[ORB-10319]** — Consolidate Remote MCP policy/preflight and global audit composition in `orbit-remote`, retaining Core's shared runtime audit boundary.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

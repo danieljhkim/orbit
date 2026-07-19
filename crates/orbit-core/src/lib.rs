@@ -13,14 +13,15 @@
 //!
 //! This is the library crate that assembles all subsystems into the
 //! [`OrbitRuntime`] — the single entry point used by the CLI, the dashboard,
-//! and the extracted `orbit-cmd` command layer. It handles initialization
+//! the extracted `orbit-cmd` command layer, and vertical feature crates such as
+//! `orbit-remote`. It handles initialization
 //! from disk (two-root layout: global + workspace), config loading and
 //! merging, and default asset seeding via embedded YAML templates.
 //!
 //! # Role
 //! Depends on the lower Orbit crates (never on `orbit-cmd`). Consumed by
-//! `orbit-cmd`, `orbit-cli`, and `orbit-dashboard`; nothing below this layer
-//! imports from `orbit-core`.
+//! `orbit-cmd`, `orbit-cli`, `orbit-dashboard`, and `orbit-remote`; neutral
+//! kernels below this layer do not import from `orbit-core`.
 //!
 //! Command groups that runtime internals invoke (tool hosts, engine hosts,
 //! bootstrap seeding) live in [`command`]; CLI-only command groups were
@@ -41,8 +42,8 @@
 //! - `skill_catalog` — re-exported skill store for CLI skill lookup
 //!
 //! # Dependency direction
-//! orbit-common, orbit-store, orbit-policy, orbit-exec, orbit-tools, orbit-agent, orbit-engine
-//! → `orbit-core` → orbit-cmd → orbit-cli / orbit-dashboard
+//! orbit-common, orbit-store, orbit-policy, orbit-tools, orbit-search, orbit-engine
+//! → `orbit-core` → orbit-cmd / orbit-remote → orbit-cli / orbit-dashboard
 
 pub mod auto_tasks;
 pub mod command;

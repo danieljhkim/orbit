@@ -8,9 +8,9 @@ doc_role: overview
 type: design
 summary: First-class, validated machine identity plus a main-host inventory, enabling pull-based orchestrator-selected execution placement and a strict per-record data-placement split.
 tags: [host-registry, multi-host, dispatch, routines]
-paths: ["crates/orbit-registry/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
+paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access]
-related_artifacts: [ORB-00424, ORB-10248, ORB-10249, ORB-10268, ORB-10302, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10248, ORB-10249, ORB-10268, ORB-10302, ORB-10319, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Host Registry — Overview
@@ -24,6 +24,14 @@ The topology is a star: the hub queues, satellites poll, and no machine ever tal
 another machine. On top of that identity, the orchestrator selects *where* a task
 executes — defaulting to the workspace's owner — and git-committed routine
 definitions become authoritative host assignments.
+
+The implementation is one vertical feature crate, `orbit-remote`. It owns host and
+workspace identity, registry persistence, profiles and caches, MCP contract
+composition, the placement broker, hub authority/link, and registration. It builds
+on neutral `orbit-store` and `orbit-mcp` kernels rather than spreading one remote
+feature across those crates; `orbit-cli` is the thin command/configuration edge and
+`orbit-core` retains transport-independent coordination execution ([ORB-10319],
+[ADR-0240]).
 
 ## 1. Motivation
 
@@ -95,12 +103,13 @@ authority — that direction was already rejected ([ADR-0200], the archived
 
 | Concern | File | Task |
 |---------|------|------|
-| Host identity file (`host.toml`) | [crates/orbit-registry/src/host_identity.rs](../../../crates/orbit-registry/src/host_identity.rs) | [ORB-10302] |
-| Global/workspace seeding (`orbit init`) | [crates/orbit-core/src/command/init.rs](../../../crates/orbit-core/src/command/init.rs) | — |
-| Versioned logical-workspace catalog + local checkout bindings | [crates/orbit-registry/src/workspace_registry.rs](../../../crates/orbit-registry/src/workspace_registry.rs) | [ORB-10248], [ORB-10302] |
-| Host/workspace registry service + satellite cache | [crates/orbit-registry/src/](../../../crates/orbit-registry/src/) | [ORB-10302] |
+| Host identity file (`host.toml`) | [crates/orbit-remote/src/host_identity.rs](../../../crates/orbit-remote/src/host_identity.rs) | [ORB-10302], [ORB-10319] |
+| Global/workspace seeding (`orbit init`) | [crates/orbit-cli/src/command/init.rs](../../../crates/orbit-cli/src/command/init.rs) | [ORB-10319] |
+| Versioned logical-workspace catalog + local checkout bindings | [crates/orbit-remote/src/workspace_registry.rs](../../../crates/orbit-remote/src/workspace_registry.rs) | [ORB-10248], [ORB-10302], [ORB-10319] |
+| Host/workspace registry service, persistence, profiles, and satellite cache | [crates/orbit-remote/src/](../../../crates/orbit-remote/src/) | [ORB-10302], [ORB-10319] |
 | Logical task coordination registry + single-authority allocator | [crates/orbit-store/src/sqlite/task_registry/](../../../crates/orbit-store/src/sqlite/task_registry/) | [ORB-10249] |
-| MCP hub trust/server and placement surface | [mcp-bridge/2_design.md](../mcp-bridge/2_design.md) | [ORB-10262], [ORB-10268] |
+| MCP composition, broker, hub trust/server/link, and registration | [crates/orbit-remote/src/mcp/](../../../crates/orbit-remote/src/mcp/) | [ORB-10262], [ORB-10268], [ORB-10269], [ORB-10271], [ORB-10319] |
+| Generic MCP framing and raw client | [crates/orbit-mcp/](../../../crates/orbit-mcp/) | [ORB-10319] |
 | Routine sweep host filter | [docs/design/routines/2_design.md](../routines/2_design.md) | — |
 
 Detailed mechanisms in [2_design.md](./2_design.md); open directions in
@@ -120,5 +129,9 @@ Detailed mechanisms in [2_design.md](./2_design.md); open directions in
 - [ORB-10302] — established `orbit-registry` as the host/workspace domain crate,
   retaining execution-profile construction in `orbit-core` and persistence in
   `orbit-store` ([ADR-0235]).
+- [ORB-10319] — replaces that horizontal boundary with the vertical
+  `orbit-remote` feature crate: registry behavior, feature-owned SQLite access,
+  profile/cache composition, MCP routing, hub/link, and registration now evolve
+  together over neutral Store, MCP, Core, Tools, and Common kernels ([ADR-0240]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

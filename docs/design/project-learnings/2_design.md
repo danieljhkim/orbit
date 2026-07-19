@@ -3,7 +3,7 @@ summary: "Project Learnings — Design"
 type: design
 title: "Project Learnings — Design"
 owner: claude
-last_updated: 2026-05-21
+last_updated: 2026-07-18
 status: Draft
 feature: project-learnings
 doc_role: design

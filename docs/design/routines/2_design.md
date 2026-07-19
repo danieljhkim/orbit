@@ -1,16 +1,16 @@
 ---
 title: Routines — Design
 owner: claude
-last_updated: 2026-07-15
+last_updated: 2026-07-18
 status: Accepted
 feature: routines
 doc_role: design
 type: design
 summary: Proposed contract for routine definitions, sweep dispatch, host-local state, and OS clock integration.
 tags: [routines, scheduler]
-paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**"]
-related_features: [routines, activity-job]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ADR-0223]
+paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs", "crates/orbit-store/src/sqlite/routine_store/**"]
+related_features: [routines, activity-job, host-registry]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223]
 ---
 
 # Routines — Design
@@ -127,6 +127,12 @@ versioned `machine_id`, human-facing `host_id`, and `mode`. `orbit init` owns id
 creation and legacy migration; `orbit routine init --install-clock` only installs the OS
 clock unit (§5). A malformed `host.toml` is an error, not a fallback; a `[routines] role`
 value other than `"source"` is a config error (fail-closed on both).
+
+The implementation boundary is vertical: `crates/orbit-remote/src/routines.rs` reads host
+identity, the logical workspace catalog, the hub snapshot or spoke cache, and constructs
+registered checkout runtimes. It projects those inputs through `RoutinePlacementProvider`
+and `RoutineWorkspaceProvider` into `crates/orbit-core/src/routines/`. Core owns the
+registry-neutral scheduler and never reaches back into Remote persistence. [ORB-10319]
 
 ---
 
@@ -269,6 +275,8 @@ out of v1 scope for this reason.
 - [ORB-10021] — implemented routines v1 (types, store, sweep, CLI, clock units).
 - [ORB-10270] — implemented registry-aware validation before scheduler mutation,
   cache-degraded offline behavior, stable diagnostics, and no-backfill reassignment.
+- [ORB-10319] — extracted Remote-specific routine placement/workspace composition from
+  Core while preserving the v1 sweep contract.
 - [ORB-10207] — added disabled-by-default seeding and workspace-local ship sweep.
 - [ORB-00374] — removed the `shell` activity variant and `run_shell` dispatch (fail-closed);
   routines inherit this constraint.

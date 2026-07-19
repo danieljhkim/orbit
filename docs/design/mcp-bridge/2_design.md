@@ -8,9 +8,9 @@ doc_role: design
 type: design
 summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-only coordination, owner-bound knowledge, checkout-local indexes, role-aware search, capability sets, provenance, and Bridge parity retirement.
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
-paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
+paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10302, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10302, ORB-10319, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Orbit MCP Bridge — Design
@@ -18,13 +18,15 @@ related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-1
 This document specifies the **target** design. The host-registry identity,
 workspace, registry core/projections, C3 discovery tools, and typed placement,
 capability, scope, and trusted-session metadata they depend on have landed. C4
-places identity, catalog, cache, and the store-backed registry service in the
-dedicated `orbit-registry` domain crate ([ORB-10302], [ADR-0235]). The local
-checkout-aware broker, exact-worktree runtime cache, and effective-capability
-filtering landed in [ORB-10262]. Strict machine-global trust configuration and the
-fixed checkoutless hub endpoint landed in [ORB-10268]. The bounded negotiated SSH
-connector landed in [ORB-10269], and private spoke registration plus the first
-end-to-end coordination slice landed in [ORB-10271]. It replaces both
+first placed identity, catalog, cache, and the store-backed registry service in
+`orbit-registry` ([ORB-10302], [ADR-0235]); [ORB-10319] renames and widens that
+crate into the vertical `orbit-remote` feature boundary proposed by [ADR-0240].
+The local checkout-aware broker, exact-worktree runtime cache, and effective-
+capability filtering landed in [ORB-10262]. Strict machine-global trust
+configuration and the fixed checkoutless hub endpoint landed in [ORB-10268]. The
+bounded negotiated SSH connector landed in [ORB-10269], and private spoke
+registration plus the first end-to-end coordination slice landed in [ORB-10271].
+It replaces both
 Bridge's HTTP parity layer and the earlier
 per-workspace-authority draft with a local broker that has one remote destination:
 the coordination hub. It covers client→hub transport and local tool placement. The
@@ -47,6 +49,36 @@ The two features have a strict ownership split:
 | How does a spoke reach the hub? | MCP bridge (`mcp.toml` trust + SSH-carried MCP) |
 | Which tools may this client or runner invoke? | MCP bridge (capability set) |
 | How are hub and local results composed? | MCP bridge (tool-specific composite implementation) |
+
+### 1.1 One vertical implementation boundary
+
+The conceptual split above does not require a crate split. Host registry and MCP
+bridge are one vertical feature in `orbit-remote`:
+
+```text
+orbit-cli / orbit-dashboard
+  └── orbit-remote
+        ├── registry identity, catalog, cache, profiles, routines
+        ├── persistence over the shared orbit.db
+        └── MCP schema composition, broker, hub, link, registration
+              ├── orbit-core
+              ├── orbit-store
+              ├── orbit-tools
+              ├── orbit-mcp
+              ├── orbit-graph
+              ├── orbit-graph-extract
+              └── orbit-common
+```
+
+Remote owns every registry-aware policy and SQL statement. Store owns generic
+SQLite connection/transaction lifecycle and the namespaced feature-migration
+ledger; MCP owns generic RMCP framing, structural schema resolution, and raw client
+transport; Tools owns generic builtin definitions; Core owns transport-independent
+runtime and `HubCoordinationExecutor`; Graph owns local-derived indexing and queries;
+Common owns shared DTOs. None of those neutral kernels imports Remote. `orbit-cli`
+keeps Clap, client setup/removal, and delegation.
+The same config-resolved `orbit.db` is reused, and Remote v1 adopts the existing
+registry tables in place rather than creating `remote.db` ([ORB-10319], [ADR-0240]).
 
 The topology is an invariant, not a routing algorithm:
 
@@ -321,9 +353,11 @@ v1 rule.
 
 ### 4.3 Contract ownership and version skew
 
-Orbit's registered tool definitions remain the only schema source. Bridge does not
-vendor a snapshot, duplicate Pydantic arguments, or recreate errors. The local
-broker advertises schemas from its installed Orbit binary and includes an MCP
+Remote's canonical composition of generic builtin definitions plus Remote-owned
+discovery and graph definitions is the only production schema source. Bridge does
+not vendor a snapshot, duplicate Pydantic arguments, or recreate errors. Neither
+the generic MCP kernel nor Core owns registry-aware placement/schema policy. The
+local broker advertises schemas from its installed Orbit binary and includes an MCP
 contract revision plus a digest for the hub-routed subset when opening the hub link.
 
 The hub binary may differ in release version only when the contract revision and
@@ -606,11 +640,13 @@ proxy. `orbit.crew.list`, task crew validation, and workflow preflight all read 
 same projection. Missing/stale owner profile fails dispatch with the owner named;
 the hub never asks the owner synchronously.
 
-The publication/ownership/presence/freshness service lives in `orbit-registry`.
-`OrbitRuntime::build_execution_profile_v1`, catalog validation, and ship-closure
-hashing remain in `orbit-core`; snapshot SQL, revision advancement, and the
-single-transaction sanitized query remain in `orbit-store`. This one-way boundary
-prevents the broker work from creating a store/domain dependency cycle.
+The publication/ownership/presence/freshness service, profile construction, and
+registry persistence live in `orbit-remote`. Remote combines the workspace binding
+with Core's neutral execution-environment snapshot and ship-closure digest. Its
+`RemoteStore` owns snapshot SQL, row codecs, revision advancement, and the single-
+transaction sanitized query over Store's generic connection and transaction
+kernel. This one-way feature boundary prevents Core, Store, or MCP from depending
+back on remote registry/routing policy.
 
 ### 8.2 Operator tools and placement
 
@@ -720,6 +756,11 @@ schemas.
   executor; `task.show(with_context=true)` remains explicitly local-derived and a
   spoke fails closed instead of reading local coordination state.
 
+- [ORB-10319] moves the broker, hub, link, trust, registration, graph/learning
+  composition, and associated tests from CLI/MCP horizontal layers into
+  `orbit-remote` without changing this routing contract. CLI keeps only command
+  parsing, client setup/removal, and binary black-box tests.
+
 ### Phase 3 — singular hub link
 
 - Implemented by [ORB-10268, ORB-10269, ORB-10271]: add `[hub]` trusted config and
@@ -793,6 +834,11 @@ Required validation:
 - **One MCP surface contains a router.** Orbit owns hub connection lifecycle,
   owner-role preflight, composite knowledge creation, role-aware search, and split
   audit. The star topology bounds this to one remote destination.
+- **The Remote feature crate is intentionally broad.** Registry persistence and MCP
+  routing change together, so they share one vertical owner. Internal modules must
+  still keep protocol, persistence, registry, and broker seams explicit; unrelated
+  shared machinery belongs in the neutral kernels rather than accumulating in
+  Remote.
 - **Global ID allocation can leave gaps.** A local finalize failure after hub
   allocation consumes an ID. Gaps are the explicit cost of avoiding reservations
   and distributed commit.
@@ -814,6 +860,10 @@ Required validation:
 - [ORB-10302] — established the `orbit-registry` domain boundary used by future
   broker registration, discovery, profile, and cache flows while preserving the
   MCP adapter as serialization/dispatch only ([ADR-0235]).
+- [ORB-10319] — replaces that horizontal boundary with vertical `orbit-remote`,
+  owning registry persistence plus MCP composition/broker/hub/link/registration
+  while preserving neutral acyclic Store, MCP, Core, Tools, and Common kernels
+  ([ADR-0240]).
 - [ORB-10268] — implemented strict machine-global hub trust and the non-recursive,
   checkoutless fixed-capability hub endpoint.
 - [ORB-10269] — implemented the fixed SSH argv connector, contract/digest

@@ -2,10 +2,10 @@ schema_version: 1
 contract: orbit-mcp-bridge-v1
 source_of_truth:
   exposed_tool_list:
-    - crates/orbit-tools/src/registry.rs::canonical_builtin_mcp_tool_definitions
-    - crates/orbit-remote/src/mcp/discovery.rs::discovery_tool_definitions
-    - crates/orbit-remote/src/mcp/graph.rs::graph_tool_definitions
+    - crates/orbit-remote/src/mcp/host.rs::canonical_mcp_tool_definitions
   canonical_schema_registry:
+    - crates/orbit-remote/src/mcp/host.rs::canonical_mcp_tool_definitions
+  composed_from:
     - crates/orbit-tools/src/registry.rs::canonical_builtin_mcp_tool_definitions
     - crates/orbit-remote/src/mcp/discovery.rs::discovery_tool_definitions
     - crates/orbit-remote/src/mcp/graph.rs::graph_tool_definitions

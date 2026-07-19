@@ -1,16 +1,16 @@
 ---
 title: "Remote Access — Vision"
 owner: claude
-last_updated: 2026-07-02
+last_updated: 2026-07-18
 status: Accepted
 feature: remote-access
 doc_role: vision
 type: design
 summary: "Open questions for remote viewing, the prior art it draws on, and where the writable-sync boundary might be revisited."
 tags: [remote-access]
-paths: ["crates/orbit-dashboard/**"]
-related_features: [remote-access, user-interface]
-related_artifacts: [ORB-00029, ORB-00030, ADR-0200]
+paths: ["crates/orbit-dashboard/**", "crates/orbit-remote/src/runtime.rs", "crates/orbit-remote/src/workspace_registry.rs"]
+related_features: [remote-access, user-interface, host-registry]
+related_artifacts: [ORB-00029, ORB-00030, ORB-10319, ADR-0200]
 ---
 
 # Remote Access — Vision

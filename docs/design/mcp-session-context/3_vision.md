@@ -8,9 +8,9 @@ status: Accepted
 feature: mcp-session-context
 doc_role: vision
 tags: ["mcp-session-context", "mcp", "workspace"]
-paths: ["crates/orbit-mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-cli/src/command/mcp/**"]
+paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool.rs"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-10228", "ADR-0181", "ADR-0149"]
+related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10319", "ADR-0181", "ADR-0149"]
 ---
 
 # MCP Session Context — Vision
@@ -54,5 +54,6 @@ Orbit treats session context as a safety mechanism rather than a convenience cac
 - [ORB-00255] motivated reducing repetitive workspace boilerplate.
 - [ORB-00256] implemented the session context channel.
 - [ORB-10228] implemented trusted session provenance and correlation.
+- [ORB-10319] made `orbit-remote` the owner of trusted broker/session composition over the generic MCP transport kernel.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -9,25 +9,63 @@ sidebar:
 
 | Crate | Responsibility |
 |-------|----------------|
-| `orbit-cli` | Clap-based CLI entrypoint. |
+| `orbit-cli` | Clap-based entrypoint and local client-configuration surface; delegates Remote behavior to `orbit-remote`. |
 | `orbit-cmd` | CLI-facing command layer extracted from `orbit-core` (ORB-10016): doctor, migrate, diagnostics, task templates, hooks, agent-rules, direct v2 activity runs. Exposes `*Commands` extension traits over `OrbitRuntime`. |
-| `orbit-core` | Runtime bootstrap, config layering, default asset seeding, and the runtime-integrated command modules. Surfaces `OrbitRuntime` to `orbit-cmd`, `orbit-cli`, and `orbit-dashboard`. Does **not** depend on `orbit-agent` or `orbit-cmd`. |
+| `orbit-core` | Neutral runtime bootstrap, config layering, default asset seeding, and runtime-integrated command modules. Surfaces `OrbitRuntime` to `orbit-cmd`, `orbit-cli`, `orbit-dashboard`, and `orbit-remote`. Does **not** depend on `orbit-agent`, `orbit-cmd`, or `orbit-remote`. |
+| `orbit-remote` | Vertical host/workspace registry, registry persistence, MCP contract/extensions, broker, hub, bounded SSH link, and spoke-registration composition. |
+| `orbit-dashboard` | Read-only web dashboard over Core runtime projections and Remote registry state. |
 | `orbit-engine` | Activity and job execution, template rendering, retry logic. Owns the `backend: cli` subprocess runner, which references `orbit-agent::{Agent, AgentConfig}` directly. |
 | `orbit-agent` | Per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, openai_compat, anthropic, ollama, mock_agent). Hosts HTTP `LoopTransport` primitives. |
-| `orbit-tools` | Tool registry plus built-in graph, fs, and policy-aware exec tools. |
-| `orbit-knowledge` | Knowledge/graph parsing and storage helpers. Multi-language source parsing (Rust, Go, Java, JavaScript, Python). |
+| `orbit-tools` | Generic tool registry plus workspace-scoped builtins, filesystem tools, and policy-aware exec tools. |
+| `orbit-graph-extract` | Language extractors and raw graph row contracts. |
+| `orbit-graph` | Worktree-local derived graph index and query API. |
+| `orbit-graph-cli` | Shared clap/JSON command surface for the standalone and embedded `orbit graph` commands. |
 | `orbit-policy` | Filesystem-scoping policy engine. Owns `FsProfile` resolution and `denyRead` / `denyModify` evaluation. |
 | `orbit-exec` | Process / sandbox / supervision primitives for shell-command execution under an `FsProfile`. |
-| `orbit-store` | Layered store pattern (YAML + SQLite). |
-| `orbit-mcp` | Model Context Protocol adapter using `rmcp`. Consumed by `orbit-cli` via `orbit mcp serve`. |
+| `orbit-store` | Generic YAML/SQLite stores, connection primitives, namespaced feature-migration ledger, and immutable historical bootstrap migrations. Feature crates own their active schemas and queries. |
+| `orbit-mcp` | Generic RMCP framing, server composition, and raw-client kernel. Remote contract and routing policy live in `orbit-remote`. |
+| `orbit-search` | Retrieval/ranking feature and workspace-local semantic index. |
+| `orbit-search-companion` | Separately installed embedding companion binary. |
 | `orbit-common` | Leaf — shared domain types (`OrbitError`, IDs, activity/job schemas) and generic utilities (fs, redaction, logging, blob storage). |
 
 ## Dependency Direction
 
-```
-orbit-common → orbit-policy, orbit-exec, orbit-knowledge → orbit-tools → orbit-agent → orbit-engine → orbit-core → orbit-cmd → orbit-cli
-            ↘ orbit-store ──────────────────────────────────────────────────↗            ↗
-            ↘ orbit-mcp ─────────────────────────────────────────────────────────────────────────────────────────↗
+```mermaid
+flowchart LR
+  CLI["orbit-cli"] --> Cmd["orbit-cmd"]
+  CLI --> Core["orbit-core"]
+  CLI --> Remote["orbit-remote"]
+  Dashboard["orbit-dashboard"] --> Core
+  Dashboard --> Remote
+  Cmd --> Core
+  Core --> Engine["orbit-engine"]
+  Core --> Store["orbit-store"]
+  Core --> Tools["orbit-tools"]
+  Engine --> Agent["orbit-agent"]
+  Engine --> Store
+  Engine --> Tools
+  Agent --> Tools
+  Tools --> Exec["orbit-exec"]
+  Tools --> Policy["orbit-policy"]
+  Remote --> Core
+  Remote --> Store
+  Remote --> Tools
+  Remote --> MCP["orbit-mcp"]
+  Remote --> Graph["orbit-graph"]
+  Remote --> Extract["orbit-graph-extract"]
+  Remote --> Common["orbit-common"]
+  Graph --> Extract["orbit-graph-extract"]
+  MCP --> Common["orbit-common"]
+  Store --> Common
+  Exec --> Common
+  Policy --> Common
 ```
 
-Do not add cross-crate dependencies that violate this direction. Lower layers stay reusable and free of higher-level runtime concerns. In particular, `orbit-core` must not depend on `orbit-agent` (the `backend: cli` subprocess runner in `orbit-engine` is the bridge) and must never depend on `orbit-cmd` (the extracted command layer depends on the runtime, not the other way around).
+Arrows point from consumer to dependency. Do not add cross-crate dependencies that
+violate this direction. Layering constrains dependency direction, not feature
+ownership: vertical feature crates may own their domain model, persistence schema,
+transport policy, and composition end to end while reusing neutral kernels. Lower
+layers stay reusable and never depend back on the feature. In particular,
+`orbit-core` must not depend on `orbit-agent` (the `backend: cli` subprocess runner
+in `orbit-engine` is the bridge) and must never depend on `orbit-cmd` or
+`orbit-remote`.

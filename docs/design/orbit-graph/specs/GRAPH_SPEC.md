@@ -1,7 +1,7 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
-**Last updated:** 2026-07-16 (ORB-10225 routed the MCP graph surface through the explicit allowlist and shared runtime audit boundary; previously ORB-10011 consolidated the `Selector` parser)
+**Last updated:** 2026-07-18 (ORB-10319 consolidated graph MCP composition in `orbit-remote`; previously ORB-10225 routed the surface through the explicit allowlist and shared runtime audit boundary)
 **Relation to `orbit-knowledge`:** Decommissioned. `orbit-knowledge` (v1) was removed in ORB-00391; orbit-graph is the sole graph backend. The two no longer coexist. See §16 for the migration outcome.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../_archive/knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
@@ -89,7 +89,7 @@ Layered the same way as the rest of the workspace per [`../../../../ARCHITECTURE
           ┌────────────────────────┐
           │   orbit-graph-cli      │
           │  orbit graph <cmd>     │
-          │  MCP tool wrappers     │
+          │  human/script surface  │
           └────────────────────────┘
 ```
 
@@ -107,7 +107,6 @@ crates/
 │   └── src/
 │       ├── lib.rs              # Graph public API
 │       ├── error.rs
-│       ├── selector.rs         # selector parser kept for shared addressing
 │       ├── store/              # schema, transactions, row reads/writes
 │       ├── sync/               # scanner, diff, extraction pipeline, resolver
 │       └── query/              # search, show, refs, callees, impact, trace, overview, implementors, deps
@@ -115,9 +114,14 @@ crates/
 └── orbit-graph-cli/
     └── src/
         ├── main.rs
-        ├── commands/           # sync, search, show, refs, callees, impact, trace, overview, implementors, deps
-        └── mcp/                # 1:1 tool wrappers over command/query surfaces
+        └── commands/           # sync, search, show, refs, callees, impact, trace, overview, implementors, deps
 ```
+
+The agent-facing wrappers are not part of `orbit-graph-cli`: Remote owns them in
+`crates/orbit-remote/src/mcp/graph.rs` and composes them over the generic `orbit-mcp`
+kernel. The selector parser is canonical in
+`crates/orbit-common/src/utility/selector.rs`; `orbit-graph-extract/src/selector.rs`
+re-exports it for graph consumers. [ORB-10011], [ORB-10319]
 
 ## 6. Storage
 
@@ -632,7 +636,7 @@ Estimated landing: ~24k → ~10k LOC. More capability (string / command / config
 
 ## 16. Migration plan
 
-> **Status — completed (ORB-00391, 2026-06).** The migration is done: `orbit-graph` (v2) is the sole graph surface and the `orbit-knowledge` (v1) crate has been removed. The agent-facing `orbit.graph.*` tools are served by the in-process orbit-graph adapter in `orbit-remote` over the generic MCP kernel; the v1 builtins, the `orbit graph` CLI command, the init-time graph build, and the v1 metrics pipeline were decommissioned (the knowledge-stats computation moved to `orbit_core::metrics`). Step 4's automated effectiveness/equivalence harness was never rebuilt after ADR-0197 removed it; the accepted measurement bar for the final cutover was **manual QA plus a v1-vs-v2 spot-check**, not the harness described below. See ADR-0192 (superseded by ADR-0198). The four-step plan below is retained as the historical design record.
+> **Status — completed (ORB-00391, 2026-06).** The migration is done: `orbit-graph` (v2) is the sole graph surface and the `orbit-knowledge` (v1) crate has been removed. The agent-facing `orbit.graph.*` tools are served by the in-process orbit-graph adapter in `orbit-remote` over the generic MCP kernel; the v1 builtins, the `orbit graph` CLI command, the init-time graph build, and the v1 metrics pipeline were decommissioned (the knowledge-stats computation moved to `orbit_core::metrics`). ADR-0199 / [ORB-00396] later reintroduced `orbit graph` as a thin human/script wrapper over `orbit-graph-cli`; the agent surface remains Remote-composed MCP. Step 4's automated effectiveness/equivalence harness was never rebuilt after ADR-0197 removed it; the accepted measurement bar for the final cutover was **manual QA plus a v1-vs-v2 spot-check**, not the harness described below. See ADR-0192 (superseded by ADR-0198). The four-step plan below is retained as the historical design record.
 
 A four-step Orbit epic. Each step is one or more tasks; each task is independently shippable.
 
