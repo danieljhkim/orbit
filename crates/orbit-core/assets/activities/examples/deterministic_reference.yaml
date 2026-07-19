@@ -28,6 +28,6 @@ spec:
         type: string
   action: orbit_tool_call
   config:
-    tool_name: orbit.graph.search
+    tool_name: orbit.search
     args:
       query: "Activity"

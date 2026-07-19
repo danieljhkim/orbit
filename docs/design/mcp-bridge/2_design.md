@@ -329,7 +329,6 @@ Initial classification:
 | `orbit.adr.show/update/supersede` | `owner` | Current content/lifecycle belongs to the workspace owner |
 | `orbit.learning.add`, `orbit.adr.add` | `composite` | Hub allocates the ID; owner finalizes locally (§6) |
 | `orbit.auto_task.add/list/show/update/toggle` | `owner` | MCP CRUD manages the Git-versioned definition; it does not mint tasks |
-| `orbit.graph.*` | `local-derived` | Index represents the caller's checkout/worktree |
 | Docs/semantic index operations if later exposed | `local-derived` | Rebuildable checkout-derived state |
 | `orbit.search` | `composite` | Hub task branch + local docs + role-aware knowledge branches (§7) |
 
@@ -752,7 +751,8 @@ Orbit:
 
 | Capability | Owner after migration |
 |------------|-----------------------|
-| Tasks, frictions, learnings, ADRs, Orbit search/graph | Orbit MCP |
+| Tasks, frictions, learnings, ADRs, Orbit search | Orbit MCP |
+| Code graph queries | Local `orbit graph` CLI only |
 | Host/workspace/crew discovery and workflow submit/observe | Orbit MCP |
 | Sextant search and document retrieval | Bridge/Sextant |
 | Raw one-shot Worker invocation and non-pipeline run control | Bridge/Worker |
@@ -801,10 +801,10 @@ schemas.
   executor; `task.show(with_context=true)` remains explicitly local-derived and a
   spoke fails closed instead of reading local coordination state.
 
-- [ORB-10319] moves the broker, hub, link, trust, registration, graph/learning
-  composition, and associated tests from CLI/MCP horizontal layers into
-  `orbit-remote` without changing this routing contract. CLI keeps only command
-  parsing, client setup/removal, and binary black-box tests.
+- [ORB-10319] moved the broker, hub, link, trust, registration, and former
+  graph/learning composition from CLI/MCP horizontal layers into `orbit-remote`.
+  [ORB-10325] subsequently removed graph composition from Remote and MCP; the
+  routing contract now applies only to registered tools.
 
 ### Phase 3 — singular hub link
 

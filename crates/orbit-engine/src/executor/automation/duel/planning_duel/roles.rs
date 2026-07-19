@@ -35,16 +35,18 @@ Steps:
    - Your active planning-duel slot is in input.planning_duel_slot.
    - Your plan artifact path must be `planning-duel/<slot>.md`.
 
-3. Gather context BEFORE drafting. Reading symbol bodies alone is not enough —
-   you must also map the call and import graph around every change. Establish
-   breadth over the task's directories and each task.context_files entry, then:
-   - For every symbol the task proposes to move, rename, remove, or add:
-     enumerate its callers and consumers BY NAME and bound the blast radius.
-   - For every module boundary you are drawing (new crate, new module, extracted
-     file, renamed type): find the call sites of the moved types and helpers
-     across the workspace, and confirm the import direction.
+3. Gather plan-level context BEFORE drafting. Start from the task's directories
+   and each task.context_files entry. Use `orbit.search` for related tasks,
+   decisions, and indexed docs, and use `fs.read` for the named source files,
+   nearby module roots, and manifests. Establish enough breadth to:
+   - Name the files, modules, and symbols the proposal will change.
+   - Identify directly visible consumers, imports, and integration points in
+     the inspected files without claiming exhaustive caller coverage.
    - Read the full body of every symbol you intend to change.
    - Map an unfamiliar area before you draft against it.
+   - Mark transitive blast-radius claims that need implementation/review
+     verification as risks, with exact `orbit graph` or `rg` commands that will
+     verify them later.
    - If you discover pub(crate) imports, helper coupling, call sites, or
      dependency edges not reflected in the task description, treat them as
      hidden coupling — they belong in step 1 of your plan body.
@@ -59,10 +61,12 @@ Steps:
    - The plan MUST:
      - Name every symbol being moved, renamed, removed, or added (functions,
        types, modules, constants) BY IDENTIFIER, not by category.
-     - Enumerate the consumers and call sites you discovered BY NAME.
+     - Name the directly visible consumers and integration points established
+       by the inspected files. Treat unverified transitive consumers as an
+       implementation/review risk rather than inventing exhaustive coverage.
      - Specify exact verification commands the implementer should run — e.g.
        `cargo build -p <crate>`, `cargo test -p <crate> <test_name>`,
-       `make ci-fast`, `rg '<symbol>' <path>`, or
+       `make ci-fast`, `orbit graph refs <selector>`, `rg '<symbol>' <path>`, or
        `curl -s http://localhost:<port>/<route>` — that prove the change works.
      - If hidden coupling exists (imports, helpers, call sites the task
        description did not name), open the plan with step 1 enumerating it.
@@ -72,8 +76,8 @@ Steps:
        similar. Replace each with the exact command above that proves it.
      - Defer evidence to the implementer ("the implementer will discover X")
        when inspecting the code now could have surfaced X.
-   - Length is not the goal. Named identifiers, enumerated consumers, and exact
-     verification commands are.
+   - Length is not the goal. Named identifiers, grounded integration points,
+     and exact verification commands are.
 
 5. Persist the proposal as a task artifact:
    - Use orbit.duel.plan.add to write the artifact under the slot-derived path. Orbit stamps the signature line.
@@ -108,8 +112,13 @@ Steps:
    - The artifact signature is the canonical planner identity source.
 
 4. Verify claims against the codebase:
-   - Spot-check the winning proposal's named symbols, call sites, and
-     blast-radius claims against the actual code before deciding.
+   - Use `fs.read` to spot-check the winning proposal's named symbols, files,
+     and directly visible integration points. Use `orbit.search` when related
+     tasks or indexed decisions can resolve ambiguity.
+   - Treat exhaustive caller and blast-radius verification as an
+     implementation/review gate. Require the proposal to name exact
+     `orbit graph` or `rg` commands for that later verification instead of
+     rejecting a plan because the shell-less arbiter cannot prove it now.
 
 5. Decide the winner:
    - Choose the artifact proposal that is more feasible, complete, scoped, and aligned
@@ -244,14 +253,7 @@ pub(super) fn planner_activity() -> Activity {
         &[
             "orbit.task.show",
             "orbit.duel.plan.add",
-            "orbit.graph.overview",
-            "orbit.graph.search",
-            "orbit.graph.show",
-            "orbit.graph.refs",
-            "orbit.graph.callees",
-            "orbit.graph.impact",
-            "orbit.graph.implementors",
-            "orbit.graph.deps",
+            "orbit.search",
             "fs.read",
         ],
     )
@@ -265,14 +267,7 @@ pub(super) fn arbiter_activity() -> Activity {
         &[
             "orbit.task.show",
             "orbit.duel.plan.winner",
-            "orbit.graph.overview",
-            "orbit.graph.search",
-            "orbit.graph.show",
-            "orbit.graph.refs",
-            "orbit.graph.callees",
-            "orbit.graph.impact",
-            "orbit.graph.implementors",
-            "orbit.graph.deps",
+            "orbit.search",
             "fs.read",
         ],
     )

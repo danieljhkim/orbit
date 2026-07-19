@@ -3,7 +3,7 @@ summary: "Auditability — Design"
 type: design
 title: "Auditability — Design"
 owner: codex
-last_updated: 2026-07-18
+last_updated: 2026-07-19
 status: Draft
 feature: auditability
 doc_role: design
@@ -42,9 +42,9 @@ The CLI RAII guard in `crates/orbit-cli/src/audit_middleware.rs` defaults to fai
 
 For `orbit tool run`, [T20260427-52] first collapsed duplicate `agent` + `model` inputs. [ORB-00080] later made the family the durable identity: agent-facing `model` inputs should be `codex`, `claude`, `gemini`, or `grok`, while full model strings remain accepted for compatibility and normalize to the family before persistence. Missing identity falls back to `agent` for tool dispatch, while direct non-tool CLI commands use `admin`.
 
-After [T20260428-4], tool-invocation audit is written at the OrbitRuntime dispatch boundary for CLI, MCP, and future entry points. A `ToolEntryPoint` discriminator surfaces as `subcommand: "run"` or `"run-mcp"`, setup failures inside dispatch are audited, and `duration_ms` is clamped to at least `1`. [ORB-10225] extracted the shared boundary behind registry-backed dispatch and added `execute_in_process_tool_dispatch` for adapter-owned implementations: the in-process `orbit.graph.*` tools now cross the same MCP allowlist and success/failure audit bracket instead of calling their handler directly. The legacy CLI guard skips its own emission when the runtime sets a per-thread `mark_tool_audit_recorded` signal; pre-runtime CLI failures such as invalid JSON still produce the existing guard-side row.
+After [T20260428-4], tool-invocation audit is written at the OrbitRuntime dispatch boundary for registered CLI/MCP tools. A `ToolEntryPoint` discriminator surfaces as `subcommand: "run"` or `"run-mcp"`, setup failures inside dispatch are audited, and `duration_ms` is clamped to at least `1`. [ORB-10225] extracted the shared boundary behind registry-backed dispatch and temporarily routed adapter-owned graph implementations through it; [ORB-10325] later removed graph from the registered tool and MCP surfaces. `orbit graph` remains a direct CLI command. The legacy CLI guard skips its own emission when the runtime sets a per-thread `mark_tool_audit_recorded` signal; pre-runtime CLI failures such as invalid JSON still produce the existing guard-side row.
 
-[ORB-10228] makes the MCP boundary fail closed against provenance spoofing. Only the external legacy workspace address selector is accepted. Standalone MCP is `transport=local`, has exactly `{agent}`, and records `role=unverified`; ambient engine provenance is ignored unless the existing managed-run marker authenticates it. Managed identity then wins over caller JSON. The adapter generates one `mcp_call_id` before preflight and preserves it across unknown/unexposed denial and registry/graph success or failure. Capability filtering and authorization use membership in the complete canonical set, never a selected member or scalar maximum.
+[ORB-10228] makes the MCP boundary fail closed against provenance spoofing. Only the external legacy workspace address selector is accepted. Standalone MCP is `transport=local`, has exactly `{agent}`, and records `role=unverified`; ambient engine provenance is ignored unless the existing managed-run marker authenticates it. Managed identity then wins over caller JSON. The adapter generates one `mcp_call_id` before preflight and preserves it across unknown/unexposed denial and registry success or failure. Capability filtering and authorization use membership in the complete canonical set, never a selected member or scalar maximum.
 
 Compatibility remains deliberate: legacy `host` is the executing-process hostname; caller/process display and machine IDs are separate. `session_id` is unchanged and `origin_session_id` is additive. `job_run_id` remains canonical; a trusted `leased_run.run_id` fills it when empty or must match it, while only `lease_id` gets a new column.
 
@@ -55,7 +55,7 @@ Compatibility remains deliberate: legacy `host` is the executing-process hostnam
 Some runtime paths write targeted command-audit rows directly:
 
 - `crates/orbit-core/src/command/tool.rs` records runtime-backed and in-process CLI/MCP tool invocations as `command: tool` with `subcommand: "run"` or `"run-mcp"`.
-- `crates/orbit-remote/src/mcp/host.rs` owns MCP safe-surface, capability, placement, and checkout preflight. Remote-owned graph/discovery implementations run inside Core's shared runtime audit boundary; pre-runtime and checkoutless failures are recorded through Remote's config-resolved global audit seam. Unknown or unexposed names therefore produce denied rows without invoking either implementation.
+- `crates/orbit-remote/src/mcp/host.rs` owns MCP safe-surface, capability, placement, and checkout preflight. Remote-owned discovery implementations run inside Core's shared runtime audit boundary; pre-runtime and checkoutless failures are recorded through Remote's config-resolved global audit seam. Unknown or unexposed names therefore produce denied rows without invoking them.
 - `crates/orbit-core/src/runtime/orbit_tool_host/mod.rs` records task lock reservation checks, reservations, releases, and denials.
 - `crates/orbit-core/src/runtime/v2_host/pipeline_actions.rs` records gate-starvation failures for task bundles.
 
@@ -184,5 +184,6 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[ORB-10228]** — Add trusted MCP context, anti-spoofing, full capability-set audit, per-call correlation, and additive audit migration v7.
 - **[ORB-10262]** — Enforce MCP capability and exact-checkout placement preflight, retaining one trusted call ID and one denial row before runtime/store mutation, including global checkoutless denials.
 - **[ORB-10319]** — Move Remote MCP policy/preflight and global audit composition out of CLI/Core ownership while preserving the shared `ToolEntryPoint::Mcp` audit contract.
+- **[ORB-10325]** — Remove graph from MCP and registered tool dispatch while preserving the direct `orbit graph` CLI.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

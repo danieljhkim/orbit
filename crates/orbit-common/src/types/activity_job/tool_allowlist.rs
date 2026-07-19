@@ -6,12 +6,11 @@ use super::activity_v2::{ActivityV2, ActivityV2Spec};
 
 /// Explicit list of permitted wildcard roots (§6 / §12 Q7).
 ///
-/// Any wildcard like `orbit.graph.*` must have its root prefix on this list.
+/// Any wildcard must have its root prefix on this list.
 /// Top-level `orbit.*` is deliberately NOT permitted — the max-depth-2 rule
 /// the design doc mentions is implemented here as an explicit allowlist so the
 /// set grows deliberately and every reviewer sees the full scope.
 pub const V2_TOOL_WILDCARD_ROOTS: &[&str] = &[
-    "orbit.graph.",
     "orbit.friction.",
     "orbit.learning.",
     "orbit.task.",
@@ -25,27 +24,6 @@ pub const V2_TOOL_WILDCARD_ROOTS: &[&str] = &[
 ];
 
 pub const V2_INTENTIONALLY_EMPTY_TOOL_WILDCARD_ROOTS: &[&str] = &["orbit.audit."];
-
-/// Agent-facing graph tool names served in-process by the orbit-graph (v2) MCP
-/// adapter (`orbit-mcp` `GraphToolRegistry`).
-///
-/// ORB-00391: these are NOT `orbit-tools` builtins, so they never appear in the
-/// runtime tool registry — but they ARE valid allowlist targets under the
-/// `orbit.graph.` wildcard root. Allowlist validation folds these into the
-/// registered-tool set so default activities (and explicit planner/arbiter
-/// allowlists) resolve. Kept in sync with the adapter's `GRAPH_TOOL_NAMES`.
-pub const V2_GRAPH_ADAPTER_TOOL_NAMES: &[&str] = &[
-    "orbit.graph.sync",
-    "orbit.graph.search",
-    "orbit.graph.show",
-    "orbit.graph.refs",
-    "orbit.graph.callees",
-    "orbit.graph.impact",
-    "orbit.graph.trace",
-    "orbit.graph.overview",
-    "orbit.graph.implementors",
-    "orbit.graph.deps",
-];
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ToolAllowlistError {

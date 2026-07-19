@@ -439,12 +439,12 @@ fn summary_passes_top_tools_through_unchanged() {
     let rows = vec![
         AuditTopToolCall {
             role: TEST_CODEX_MODEL.to_string(),
-            tool_name: "orbit.graph.show".to_string(),
+            tool_name: "orbit.task.show".to_string(),
             total: 355,
         },
         AuditTopToolCall {
             role: TEST_CLAUDE_MODEL.to_string(),
-            tool_name: "orbit.graph.search".to_string(),
+            tool_name: "orbit.search".to_string(),
             total: 45,
         },
     ];
@@ -464,12 +464,12 @@ fn summary_passes_top_tools_through_unchanged() {
         vec![
             TopToolCall {
                 role: TEST_CODEX_MODEL.to_string(),
-                tool_name: "orbit.graph.show".to_string(),
+                tool_name: "orbit.task.show".to_string(),
                 count: 355,
             },
             TopToolCall {
                 role: TEST_CLAUDE_MODEL.to_string(),
-                tool_name: "orbit.graph.search".to_string(),
+                tool_name: "orbit.search".to_string(),
                 count: 45,
             },
         ]

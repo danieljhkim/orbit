@@ -24,8 +24,8 @@ use super::host::{
     canonical_mcp_tool_definitions, mcp_preflight_failure_params, normalize_trusted_call_context,
 };
 
-/// A fixed hub-only host. It owns no broker, runtime cache, graph adapter,
-/// connector, owner resolver, or transport factory.
+/// A fixed hub-only host. It owns no broker, runtime cache, connector, owner
+/// resolver, or transport factory.
 #[derive(Debug)]
 pub(super) struct HubMcpHost {
     global_root: PathBuf,
@@ -636,20 +636,6 @@ impl McpHost for HubMcpHost {
             .unwrap_or(denial);
         self.record_denial(name, &context, &denial);
         denial
-    }
-
-    fn call_in_process_tool(
-        &self,
-        name: &str,
-        input: Value,
-        session_context: ToolSessionContext,
-        _dispatch: &mut dyn FnMut(Value, ToolSessionContext) -> Result<Value, OrbitError>,
-    ) -> Result<Value, OrbitError> {
-        // Known graph names remain recognizable to the adapter even though
-        // hub mode deliberately omits their implementations and schemas. Send
-        // them through the same canonical placement denial + audit boundary;
-        // never invoke the adapter's local-checkout closure.
-        self.resolved_call(name, input, session_context)
     }
 }
 

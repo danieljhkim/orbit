@@ -3,7 +3,7 @@ summary: "MCP Session Context — Design"
 type: design
 title: "MCP Session Context — Design"
 owner: codex
-last_updated: 2026-07-18
+last_updated: 2026-07-19
 status: Accepted
 feature: mcp-session-context
 doc_role: design
@@ -37,9 +37,9 @@ Clients announce workspace with:
 
 ## 2. Storage And Thread-Through
 
-`OrbitToolServer` stores a `ToolSessionContext` in an `RwLock` for the lifetime of the stdio session. Each `tools/call` snapshots that context, generates exactly one unique `mcp_call_id` before name/exposure preflight, and passes the same snapshot through registry-backed or graph dispatch.
+`OrbitToolServer` stores a `ToolSessionContext` in an `RwLock` for the lifetime of the stdio session. Each `tools/call` snapshots that context, generates exactly one unique `mcp_call_id` before name/exposure preflight, and passes the same snapshot through registry-backed dispatch.
 
-The Remote-owned `BrokerMcpHost` resolves and validates the logical workspace plus any exact local checkout before constructing or selecting an `OrbitRuntime`, then forwards the trusted context into `OrbitRuntime::execute_tool_command_dispatch_with_session_context`, which places it on `ToolContext` and audit. Unknown/unexposed denial, runtime success/failure, and graph success/failure retain the same per-call context. `orbit-cli` only delegates `mcp serve` into this composition.
+The Remote-owned `BrokerMcpHost` resolves and validates the logical workspace plus any exact local checkout before constructing or selecting an `OrbitRuntime`, then forwards the trusted context into `OrbitRuntime::execute_tool_command_dispatch_with_session_context`, which places it on `ToolContext` and audit. Unknown/unexposed denial and runtime success/failure retain the same per-call context. `orbit-cli` only delegates `mcp serve` into this composition. Graph commands are outside MCP and use `orbit graph`.
 
 The trusted fields are `workspace_id`, caller/process `machine_id` and display `host_id`, `transport`, the complete sorted `effective_capabilities` set, `origin_session_id`, `mcp_call_id`, and optional typed `leased_run {run_id, lease_id}`. A standalone stdio session is always `transport=local`, has exactly `{agent}`, and audits as `role=unverified`. Ambient `ORBIT_*` identity/correlation is ignored unless `ORBIT_MANAGED_RUN_CONTEXT` authenticates the existing managed envelope.
 

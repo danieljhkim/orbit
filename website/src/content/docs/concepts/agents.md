@@ -35,7 +35,7 @@ spec:
   type: agent_loop
   tools:
     - orbit.task.show
-    - orbit.graph.search
+    - orbit.search
 ```
 
 `on_denial` controls whether a denied tool call terminates the loop or returns a structured error for the agent to handle. In v1 (CLI backend) the agent CLI executes inside a supervised subprocess; tool allowlist enforcement is delegated to the harness and recorded as a `tool_allowlist.harness_delegated` envelope event in the audit trail.

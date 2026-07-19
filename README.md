@@ -220,7 +220,7 @@ codex plugin add orbit@orbit
 - `orbit-workflow` — use jobs, activities, routines, and `orbit sweep`/`orbit run`; diagnose failed, stuck, or cancelled runs
 - `orbit-search` — search tasks, docs, learnings, and ADRs; dedup and related-task lookups; docs-corpus admin
 - `orbit-knowledge` — author, accept, or supersede learnings and Architecture Decision Records
-- `orbit-graph` — query the parsed code graph (refs, callees, impact, implementors)
+Code-graph exploration is available directly through the CLI-only `orbit graph` command (refs, callees, impact, implementors); it is not a separate skill or MCP tool family.
 
 First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are handled by the `orbit` skill itself, via its bundled setup reference.
 
@@ -228,17 +228,19 @@ First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are h
 
 ---
 
-## Orbit MCP Tool Surface
+## Orbit MCP and Graph CLI Surfaces
 
-`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin. The table below is a tool reference; inactive or CLI/operator-only rows are called out separately from the active agent MCP surface. Run `orbit tool list` for the live registry (it's the source of truth; this table can drift).
+`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin. The table below is a registered-tool reference; inactive or CLI/operator-only rows are called out separately from the active agent MCP surface. Run `orbit tool list` for the live registry (it's the source of truth; this table can drift).
 
-Not every tool is intended for agent calls. Lifecycle/admin operations (`docs.index`, `docs.migrate`, `semantic.*`, `learning.sync`, `task.locks.*`, `friction.*` reads/updates, `graph.history`) are typically driven by humans via the CLI; the recommended agent permission profile auto-allows discovery/write tools and prompts on the rest. See `.claude/settings.json` (and `.codex/`, `.grok/`, `.gemini/` equivalents) in the seeded workspace for the default agent-facing subset.
+The parsed code graph is deliberately CLI-only. Use `orbit graph search|show|overview|refs|callees|impact|trace|implementors|deps|sync` from a shell. Graph commands are not advertised by MCP and are not available through `orbit tool run orbit.graph.*`.
+
+Not every tool is intended for agent calls. Lifecycle/admin operations (`docs.index`, `docs.migrate`, `semantic.*`, `learning.sync`, `task.locks.*`, and `friction.*` reads/updates) are typically driven by humans via the CLI; the recommended agent permission profile auto-allows discovery/write tools and prompts on the rest. See `.claude/settings.json` (and `.codex/`, `.grok/`, `.gemini/` equivalents) in the seeded workspace for the default agent-facing subset.
 
 <details>
-<summary><strong>Full tool reference</strong> — task, review, graph, search, semantic, adr, docs, learning, friction (click to expand)
+<summary><strong>Full tool reference</strong> — task, review, search, semantic, adr, docs, learning, friction (click to expand)
 </summary>
 
-Agents discover project docs through `orbit.search`; docs, lock, semantic setup/index/status, graph history, learning sync/list, and friction stats operations are CLI-only admin/setup workflows. Five further admin/destructive tools — `orbit.task.delete`, `orbit.task.lint`, `orbit.semantic.uninstall`, `orbit.adr.list` (use `orbit search --kind adr` from agents), `orbit.learning.prune` — remain registered for admin use via `orbit tool run` and the `orbit adr list` / `orbit task lint` CLI surfaces, but are hidden from the agent MCP surface (ORB-00289). ORB-10046 removed the learning vote and comment surfaces entirely — corrections go through `update`/`supersede`, provenance through `evidence`.
+Agents discover project docs through `orbit.search`; docs, lock, semantic setup/index/status, learning sync/list, and friction stats operations are CLI-only admin/setup workflows. Five further admin/destructive tools — `orbit.task.delete`, `orbit.task.lint`, `orbit.semantic.uninstall`, `orbit.adr.list` (use `orbit search --kind adr` from agents), `orbit.learning.prune` — remain registered for admin use via `orbit tool run` and the `orbit adr list` / `orbit task lint` CLI surfaces, but are hidden from the agent MCP surface (ORB-00289). ORB-10046 removed the learning vote and comment surfaces entirely — corrections go through `update`/`supersede`, provenance through `evidence`.
 
 | Namespace | Tool | Purpose |
 |---|---|---|
@@ -255,16 +257,6 @@ Agents discover project docs through `orbit.search`; docs, lock, semantic setup/
 | | `orbit.task.review_thread.list` | List review threads on a task |
 | | `orbit.task.review_thread.reply` | Reply to a thread |
 | | `orbit.task.review_thread.resolve` | Close a thread |
-| **graph** | `orbit.graph.search` | Find symbols / strings / config in the parsed graph |
-| | `orbit.graph.show` | Show a node's source and metadata by selector |
-| | `orbit.graph.overview` | Crate / module structural summary |
-| | `orbit.graph.refs` | List inbound references / callers of a symbol |
-| | `orbit.graph.callees` | List outbound calls from a symbol |
-| | `orbit.graph.impact` | Bounded blast-radius traversal for a change |
-| | `orbit.graph.trace` | Trace a command handler's call tree |
-| | `orbit.graph.implementors` | List trait implementors |
-| | `orbit.graph.deps` | List outbound module / import edges |
-| | `orbit.graph.sync` | Refresh the index (auto-syncs on a watcher) |
 | **search** | `orbit.search` | Unified search across tasks, docs, learnings, and ADRs. `kind` narrows the corpus; `hybrid: true` opts task results into BM25 + cosine ranking; `semantic: "<task-id>"` returns cosine neighbors. Cross-kind filters: `tag` (AND), `all` (kind-aware status widener), `status` (`kind:value` tokens), `path` (selector-mapping for tasks, glob-containment for learnings/ADRs; docs remain content-indexed). |
 | **adr** | `orbit.adr.add` | Author an Architecture Decision Record |
 | | `orbit.adr.update` | Edit an ADR |

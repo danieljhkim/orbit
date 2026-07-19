@@ -555,25 +555,15 @@ impl OrbitRuntime {
 
     /// Tool names valid as activity allowlist targets.
     ///
-    /// ORB-00391: this is the registry's builtin schemas plus the v2 graph
-    /// adapter tools (`orbit.graph.*`). The latter are served in-process by the
-    /// `orbit-remote` graph extension rather than registered as builtins, so they are
-    /// absent from `tool_registry().schemas()` but are still legitimate targets
-    /// under the `orbit.graph.` wildcard root.
+    /// This is the registry's builtin schema set. CLI-only features such as
+    /// `orbit graph` are not valid activity tool grants.
     /// `pub` for the direct v2 activity runner in `orbit-cmd` [ORB-10016].
     pub fn allowlist_known_tool_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self
-            .tool_registry()
+        self.tool_registry()
             .schemas()
             .into_iter()
             .map(|schema| schema.name)
-            .collect();
-        names.extend(
-            orbit_common::types::activity_job::V2_GRAPH_ADAPTER_TOOL_NAMES
-                .iter()
-                .map(|name| (*name).to_string()),
-        );
-        names
+            .collect()
     }
 
     fn v2_activity_catalog_dirs(&self) -> Vec<CatalogDirectory<V2ActivityCatalogDirKind>> {

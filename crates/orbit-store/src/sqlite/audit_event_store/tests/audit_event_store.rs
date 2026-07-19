@@ -341,37 +341,35 @@ fn tool_call_counts_by_role_include_failed_and_denied_runs() {
 fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
     let store = Store::open_in_memory().expect("open store");
 
-    let mut graph_search = sample_params_with(
-        "exec-graph-search-1",
+    let mut adr_show = sample_params_with(
+        "exec-adr-show-1",
         TEST_CLAUDE_MODEL,
         AuditEventStatus::Success,
     );
-    graph_search.tool_name = Some("orbit.graph.search".to_string());
-    graph_search.target_id = Some("orbit.graph.search".to_string());
-    store
-        .insert_audit_event_record(&graph_search)
-        .expect("insert");
+    adr_show.tool_name = Some("orbit.adr.show".to_string());
+    adr_show.target_id = Some("orbit.adr.show".to_string());
+    store.insert_audit_event_record(&adr_show).expect("insert");
 
-    let mut graph_search_failed = sample_params_with(
-        "exec-graph-search-2",
+    let mut adr_show_failed = sample_params_with(
+        "exec-adr-show-2",
         TEST_CLAUDE_MODEL,
         AuditEventStatus::Failure,
     );
-    graph_search_failed.tool_name = Some("orbit.graph.search".to_string());
-    graph_search_failed.target_id = Some("orbit.graph.search".to_string());
+    adr_show_failed.tool_name = Some("orbit.adr.show".to_string());
+    adr_show_failed.target_id = Some("orbit.adr.show".to_string());
     store
-        .insert_audit_event_record(&graph_search_failed)
+        .insert_audit_event_record(&adr_show_failed)
         .expect("insert");
 
-    let mut graph_show = sample_params_with(
-        "exec-graph-show",
+    let mut learning_show = sample_params_with(
+        "exec-learning-show",
         TEST_CODEX_MODEL,
         AuditEventStatus::Success,
     );
-    graph_show.tool_name = Some("orbit.graph.show".to_string());
-    graph_show.target_id = Some("orbit.graph.show".to_string());
+    learning_show.tool_name = Some("orbit.learning.show".to_string());
+    learning_show.target_id = Some("orbit.learning.show".to_string());
     store
-        .insert_audit_event_record(&graph_show)
+        .insert_audit_event_record(&learning_show)
         .expect("insert");
 
     let mut task_update = sample_params_with(
@@ -402,8 +400,8 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
         AuditEventStatus::Success,
     );
     non_run.subcommand = Some("show".to_string());
-    non_run.tool_name = Some("orbit.graph.search".to_string());
-    non_run.target_id = Some("orbit.graph.search".to_string());
+    non_run.tool_name = Some("orbit.adr.show".to_string());
+    non_run.target_id = Some("orbit.adr.show".to_string());
     store.insert_audit_event_record(&non_run).expect("insert");
 
     let rows = store
@@ -414,13 +412,13 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
         rows,
         vec![
             AuditToolCallCountsBySurfaceAndRole {
-                surface: "graph".to_string(),
+                surface: "adr".to_string(),
                 role: TEST_CLAUDE_MODEL.to_string(),
                 total: 2,
                 failed: 1,
             },
             AuditToolCallCountsBySurfaceAndRole {
-                surface: "graph".to_string(),
+                surface: "learning".to_string(),
                 role: TEST_CODEX_MODEL.to_string(),
                 total: 1,
                 failed: 0,
@@ -439,27 +437,27 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
 fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
     let store = Store::open_in_memory().expect("open store");
 
-    // gpt-5.5: 3× orbit.graph.show
+    // gpt-5.5: 3x orbit.task.show
     for i in 0..3 {
         let mut p = sample_params_with(
             &format!("exec-show-{i}"),
             TEST_CODEX_MODEL,
             AuditEventStatus::Success,
         );
-        p.tool_name = Some("orbit.graph.show".to_string());
-        p.target_id = Some("orbit.graph.show".to_string());
+        p.tool_name = Some("orbit.task.show".to_string());
+        p.target_id = Some("orbit.task.show".to_string());
         store.insert_audit_event_record(&p).expect("insert");
     }
 
-    // claude-opus-4-7: 2× orbit.graph.search
+    // claude-opus-4-7: 2x orbit.search
     for i in 0..2 {
         let mut p = sample_params_with(
             &format!("exec-claude-search-{i}"),
             TEST_CLAUDE_MODEL,
             AuditEventStatus::Success,
         );
-        p.tool_name = Some("orbit.graph.search".to_string());
-        p.target_id = Some("orbit.graph.search".to_string());
+        p.tool_name = Some("orbit.search".to_string());
+        p.target_id = Some("orbit.search".to_string());
         store.insert_audit_event_record(&p).expect("insert");
     }
 
@@ -495,8 +493,8 @@ fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
             AuditEventStatus::Success,
         );
         p.subcommand = Some("show".to_string());
-        p.tool_name = Some("orbit.graph.show".to_string());
-        p.target_id = Some("orbit.graph.show".to_string());
+        p.tool_name = Some("orbit.task.show".to_string());
+        p.target_id = Some("orbit.task.show".to_string());
         store.insert_audit_event_record(&p).expect("insert");
     }
 
@@ -507,12 +505,12 @@ fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
         rows,
         vec![
             AuditTopToolCall {
-                tool_name: "orbit.graph.show".to_string(),
+                tool_name: "orbit.task.show".to_string(),
                 role: TEST_CODEX_MODEL.to_string(),
                 total: 3,
             },
             AuditTopToolCall {
-                tool_name: "orbit.graph.search".to_string(),
+                tool_name: "orbit.search".to_string(),
                 role: TEST_CLAUDE_MODEL.to_string(),
                 total: 2,
             },
@@ -529,8 +527,8 @@ fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
         .get_audit_top_tool_calls(None, 2)
         .expect("top tool calls limited");
     assert_eq!(limited.len(), 2);
-    assert_eq!(limited[0].tool_name, "orbit.graph.show");
-    assert_eq!(limited[1].tool_name, "orbit.graph.search");
+    assert_eq!(limited[0].tool_name, "orbit.task.show");
+    assert_eq!(limited[1].tool_name, "orbit.search");
 }
 
 #[test]
@@ -540,19 +538,19 @@ fn audit_event_aggregates_by_tool_splits_failures_by_surface() {
 
     let mut cli_ok = sample_params_with("exec-cli-ok", "codex", AuditEventStatus::Success);
     cli_ok.subcommand = Some("run".to_string());
-    cli_ok.tool_name = Some("orbit.graph.search".to_string());
+    cli_ok.tool_name = Some("orbit.search".to_string());
     cli_ok.duration_ms = 50;
     store.insert_audit_event_record(&cli_ok).expect("insert");
 
     let mut cli_fail = sample_params_with("exec-cli-fail", "codex", AuditEventStatus::Failure);
     cli_fail.subcommand = Some("run".to_string());
-    cli_fail.tool_name = Some("orbit.graph.search".to_string());
+    cli_fail.tool_name = Some("orbit.search".to_string());
     cli_fail.duration_ms = 150;
     store.insert_audit_event_record(&cli_fail).expect("insert");
 
     let mut mcp_fail = sample_params_with("exec-mcp-fail", "codex", AuditEventStatus::Failure);
     mcp_fail.subcommand = Some("run-mcp".to_string());
-    mcp_fail.tool_name = Some("orbit.graph.search".to_string());
+    mcp_fail.tool_name = Some("orbit.search".to_string());
     mcp_fail.duration_ms = 250;
     store.insert_audit_event_record(&mcp_fail).expect("insert");
 
@@ -569,8 +567,8 @@ fn audit_event_aggregates_by_tool_splits_failures_by_surface() {
 
     let search = rows
         .iter()
-        .find(|r| r.tool_name == "orbit.graph.search")
-        .expect("orbit.graph.search row");
+        .find(|r| r.tool_name == "orbit.search")
+        .expect("orbit.search row");
     assert_eq!(search.total, 3);
     assert_eq!(search.failures, 2);
     assert_eq!(search.mcp_total, 1);

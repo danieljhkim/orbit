@@ -58,13 +58,13 @@ Exit: task exists with strong description, clear acceptance criteria, and (when 
 
 Carry a task (or human request, once created above) from intent to verified implementation with explicit lifecycle tracking.
 
-**Step 1 — Load or create.** Given an existing ID, `orbit.task.show` and extract `description`/`acceptance_criteria` (required outcome), `plan` (author one if blank/placeholder), `context_files` (resolve via `orbit_graph_show`/`orbit_graph_overview` first, `fs.read` only for unresolved selectors), `status`. Then call `orbit.search` with `semantic: "<task-id>"`, `limit: 5` (non-blocking — skip if the companion is missing or nothing's relevant) to surface prior related decisions. No ID yet → clarify intent with the human, then use Create above.
+**Step 1 — Load or create.** Given an existing ID, `orbit.task.show` and extract `description`/`acceptance_criteria` (required outcome), `plan` (author one if blank/placeholder), `context_files` (with shell access, resolve via `orbit graph show`/`orbit graph overview`; otherwise use `fs.read`), `status`. Then call `orbit.search` with `semantic: "<task-id>"`, `limit: 5` (non-blocking — skip if the companion is missing or nothing's relevant) to surface prior related decisions. No ID yet → clarify intent with the human, then use Create above.
 
 **Step 2 — Plan.** `orbit.task.update` with a concrete markdown `plan` (target files, validation commands, risks) if one doesn't already exist.
 
 **Step 3 — Start.** `orbit.task.start` with a `note`. Moves `backlog`/`proposed` → `in-progress` (records approval automatically). Starting from `proposed` still requires a real plan.
 
-**Step 4 — Implement and validate.** Follow the plan; resolve `context_files` selectors via graph tools before raw reads; run the repo-approved verification commands (honor repo instructions if tests are forbidden).
+**Step 4 — Implement and validate.** Follow the plan; use the CLI-only `orbit graph` surface when shell access is available, otherwise inspect files directly. Verify transitive impact during implementation/review with `orbit graph` or `rg`; run the repo-approved verification commands (honor repo instructions if tests are forbidden).
 
 **Step 5 — Summarize and hand off.** Persist `execution_summary` via `orbit.task.update` first (template below). Learning checkpoint: if the task surfaced a contradicted assumption, recurring failure mode, non-obvious gotcha, or incident root cause, follow `orbit-knowledge` and call `orbit.learning.add`; skip otherwise. Then:
 - **Under an activity envelope** (e.g. `agent_implement`): persist the summary only — the pipeline owns the `review` transition after commit/merge/PR steps succeed.

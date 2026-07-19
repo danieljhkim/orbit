@@ -212,10 +212,7 @@ impl McpResultDecorator for LearningSidecarDecorator {
 }
 
 fn learning_sidecar_tool(canonical: &str) -> bool {
-    matches!(
-        canonical,
-        "orbit.graph.show" | "orbit.graph.refs" | "orbit.task.show"
-    )
+    canonical == "orbit.task.show"
 }
 
 fn collect_learning_candidate_paths(input: &Value, response: &Value) -> Vec<String> {

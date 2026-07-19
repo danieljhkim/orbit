@@ -1,7 +1,6 @@
 use orbit_common::types::McpToolDefinition;
 use serde_json::Value;
 
-use super::super::graph::graph_tool_definitions;
 use super::super::host::canonical_mcp_tool_definitions;
 use super::super::schema::remote_input_schema;
 
@@ -41,36 +40,6 @@ fn task_enum_metadata_is_owned_by_remote_schema_composition() {
             .expect("status enum")
             .iter()
             .all(|value| value != "friction")
-    );
-}
-
-#[test]
-fn graph_enum_metadata_is_owned_by_remote_schema_composition() {
-    let definitions = graph_tool_definitions().expect("graph definitions");
-    let search = definition(&definitions, "orbit.graph.search");
-    let refs = definition(&definitions, "orbit.graph.refs");
-
-    let search_schema = remote_input_schema(search).expect("graph search schema");
-    assert_enum(&search_schema, "kind", &["symbol", "string", "config"]);
-
-    let refs_schema = remote_input_schema(refs).expect("graph refs schema");
-    assert_enum(
-        &refs_schema,
-        "confidence",
-        &["exact", "import", "same_module", "fuzzy"],
-    );
-    assert_enum(
-        &refs_schema,
-        "kind",
-        &[
-            "call",
-            "type",
-            "use",
-            "trait_bound",
-            "impl",
-            "extends",
-            "implements",
-        ],
     );
 }
 

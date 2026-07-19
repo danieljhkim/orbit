@@ -18,7 +18,7 @@ You receive a specific question or exploration goal from the parent and return s
 - `Glob` — file pattern matching.
 
 **Orbit code graph (via `Bash` → `orbit graph`):**
-The Orbit code graph is a pre-parsed, symbol-level index of the codebase. Prefer it over raw grep for symbol lookups — it's faster, more precise, and prints structured JSON to stdout. Agents in-process reach the graph over MCP (`orbit_graph_*`); from a shell you reach the same queries through `orbit graph <subcommand>` (bundled in the main `orbit` binary) or, equivalently, the standalone `orbit-graph-cli` binary. There is no `orbit tool run orbit.graph.*` path.
+The Orbit code graph is a pre-parsed, symbol-level index of the codebase. Prefer it over raw grep for symbol lookups — it's faster, more precise, and prints structured JSON to stdout. Reach it through the CLI-only `orbit graph <subcommand>` surface (bundled in the main `orbit` binary) or, equivalently, the standalone `orbit-graph-cli` binary. It is not exposed through MCP or `orbit tool run orbit.graph.*`.
 
 | Purpose | Command |
 |---|---|

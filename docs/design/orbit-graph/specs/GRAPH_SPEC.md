@@ -1,7 +1,7 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
-**Last updated:** 2026-07-18 (ORB-10319 consolidated graph MCP composition in `orbit-remote`; previously ORB-10225 routed the surface through the explicit allowlist and shared runtime audit boundary)
+**Last updated:** 2026-07-19 (ORB-10325 removed graph from MCP and retained the `orbit graph` CLI surface only)
 **Relation to `orbit-knowledge`:** Decommissioned. `orbit-knowledge` (v1) was removed in ORB-00391; orbit-graph is the sole graph backend. The two no longer coexist. See §16 for the migration outcome.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../_archive/knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
@@ -55,7 +55,7 @@ orbit-graph-extract    pure functions: (bytes, path) -> ExtractedFile
 orbit-graph            SQLite schema, build pipeline, query API
                        depends on -extract
 
-orbit-graph-cli        CLI subcommands + MCP tool surface
+orbit-graph-cli        CLI subcommands (sole external graph surface)
                        depends on -graph
 ```
 
@@ -344,9 +344,9 @@ The full-build path uses `rayon` for parallel extraction, single-writer transact
 
 ### 8.2 Watcher-backed reads
 
-Long-lived graph handles can run `notify` with a debounce and call sync on changes in the background. The MCP daemon uses this model: opening the handle performs one initial auto sync, then reads are pure SQLite queries against the cached graph while file events schedule coalesced auto syncs.
+Long-lived Rust graph handles can run `notify` with a debounce and call sync on changes in the background. No current MCP host owns such a handle; the public CLI uses explicit sync.
 
-Freshness is eventual. After a same-process file edit, a read may return stale graph rows until the watcher observes the event and the debounced sync completes. `Graph::sync`/`orbit.graph.sync` is the hard read-after-write barrier.
+Freshness is eventual for watcher-backed library consumers. After a same-process file edit, a read may return stale graph rows until the watcher observes the event and the debounced sync completes. `Graph::sync` is the library barrier; `orbit graph sync` is the CLI barrier.
 
 ### 8.3 Sync policy
 
@@ -401,7 +401,7 @@ orbit graph implementors <trait-selector>
 orbit graph deps <file:… | dir:…>
 ```
 
-The agent-facing MCP surface uses these same ten canonical names as an explicit `orbit-remote` safe-surface allowlist. `orbit-remote` executes the graph implementations in-process over the generic `orbit-mcp` kernel to retain watcher-backed handles, and every call first crosses the host-owned policy/audit seam. The production host performs allowlist preflight inside OrbitRuntime's shared `ToolEntryPoint::Mcp` audit bracket, recording tool name, role, duration, and success/failure; a rejected name never invokes the graph handler. The broker host asserts at startup that the extension name set is a subset of the intended safe surface. If a host re-exposes a known graph schema, the Remote extension schema and policy/audit route remain authoritative rather than falling back based on schema presence. [ORB-10225]
+These ten commands exist only on the `orbit graph` CLI surface. MCP hosts do not advertise or recognize `orbit.graph.*`, and activity/job tool allowlists reject those names. Agent runtimes with shell access invoke the CLI directly. [ORB-10325, ADR-0241]
 
 ### 9.1 `search`
 
@@ -636,7 +636,7 @@ Estimated landing: ~24k → ~10k LOC. More capability (string / command / config
 
 ## 16. Migration plan
 
-> **Status — completed (ORB-00391, 2026-06).** The migration is done: `orbit-graph` (v2) is the sole graph surface and the `orbit-knowledge` (v1) crate has been removed. The agent-facing `orbit.graph.*` tools are served by the in-process orbit-graph adapter in `orbit-remote` over the generic MCP kernel; the v1 builtins, the `orbit graph` CLI command, the init-time graph build, and the v1 metrics pipeline were decommissioned (the knowledge-stats computation moved to `orbit_core::metrics`). ADR-0199 / [ORB-00396] later reintroduced `orbit graph` as a thin human/script wrapper over `orbit-graph-cli`; the agent surface remains Remote-composed MCP. Step 4's automated effectiveness/equivalence harness was never rebuilt after ADR-0197 removed it; the accepted measurement bar for the final cutover was **manual QA plus a v1-vs-v2 spot-check**, not the harness described below. See ADR-0192 (superseded by ADR-0198). The four-step plan below is retained as the historical design record.
+> **Status — completed (ORB-00391, 2026-06; surface amended by ORB-10325, 2026-07).** The migration is done: `orbit-graph` (v2) is the sole graph implementation and the `orbit-knowledge` (v1) crate has been removed. The v1 builtins, initial CLI, init-time graph build, and v1 metrics pipeline were decommissioned (the knowledge-stats computation moved to `orbit_core::metrics`). ADR-0199 / [ORB-00396] later reintroduced `orbit graph` as a thin human/script wrapper over `orbit-graph-cli`; ORB-10325 and ADR-0241 made that CLI the sole external graph surface and removed `orbit.graph.*` from MCP. Step 4's automated effectiveness/equivalence harness was never rebuilt after ADR-0197 removed it; the accepted measurement bar for the final cutover was **manual QA plus a v1-vs-v2 spot-check**, not the harness described below. See ADR-0192 (superseded by ADR-0198). The four-step plan below is retained as the historical design record.
 
 A four-step Orbit epic. Each step is one or more tasks; each task is independently shippable.
 
