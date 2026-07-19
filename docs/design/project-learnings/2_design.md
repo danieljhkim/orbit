@@ -35,11 +35,11 @@ orbit-store/
 
 `orbit-engine` gains the **pre-prompt injection** logic: before invoking an agent runtime for a task, it queries the learning store for entries whose `scope` matches the task's `context_files` and prepends formatted summaries to the agent prompt. This is the layer that makes push-based discovery cross-agent, because injection happens above the agent boundary ([§4](#4-push-injection-pipeline), [4_decisions.md ADR-005](./4_decisions.md)).
 
-`orbit-mcp` gains a thin shim that, for tool responses referencing file paths, attaches a `learnings` sidecar field with up to N matching entries. This is the second push layer; it works for any agent that calls Orbit's MCP tools.
+`orbit-remote` gains a thin MCP result decorator that, for tool responses referencing file paths, attaches a `learnings` sidecar field with up to N matching entries. This is the second push layer; it works for any agent that calls Orbit's MCP tools.
 
 The third push layer — a Claude Code `PreToolUse` hook on `Edit | Write | Read` — is not part of any Orbit crate; it ships as a hook configuration in [.claude/settings.json](../../../.claude/settings.json) (or whichever scope is appropriate; see [§4.3](#43-layer-3-claude-code-pretooluse-hook-optional)).
 
-No cross-crate dependencies that violate the architecture diagram in [CLAUDE.md](../../../CLAUDE.md) are introduced. The dependency edges added are `orbit-store` (extended internally), `orbit-tools → orbit-store` (already present), and `orbit-engine → orbit-store` (already present). `orbit-mcp` remains a transport adapter that depends only on `orbit-common`; Layer 2 asks the injected host to run `orbit.search` (with `kind: "learning"`) instead of reading the learning store directly.
+No cross-crate dependencies that violate the architecture diagram in [CLAUDE.md](../../../CLAUDE.md) are introduced. The dependency edges added are `orbit-store` (extended internally), `orbit-tools → orbit-store` (already present), and `orbit-engine → orbit-store` (already present). `orbit-mcp` remains a generic transport kernel that depends only on `orbit-common`; `orbit-remote` owns Layer 2 composition and asks the injected host to query learning candidates instead of coupling the result decorator to learning persistence.
 
 ---
 
@@ -198,7 +198,7 @@ This is the universal layer because every supported agent runtime (Claude, Codex
 
 ### 4.2 Layer 2 — MCP tool-call injection (cross-agent, fine-grained)
 
-For tools whose arguments or responses reference file paths — `orbit_graph_show`, `orbit_graph_refs`, `orbit_task_show` (which surfaces `context_files`), `orbit_task_artifact_put`, etc. — `orbit-mcp` attaches a `learnings` sidecar to the tool response:
+For tools whose arguments or responses reference file paths — `orbit_graph_show`, `orbit_graph_refs`, `orbit_task_show` (which surfaces `context_files`), `orbit_task_artifact_put`, etc. — the `orbit-remote` MCP composition attaches a `learnings` sidecar to the tool response:
 
 ```jsonc
 {
@@ -214,7 +214,7 @@ For tools whose arguments or responses reference file paths — `orbit_graph_sho
 
 The agent's MCP client surfaces the sidecar however it normally surfaces tool output. Modern agents read structured tool responses; the sidecar is part of that response, so it lands in agent context naturally.
 
-This layer covers any agent that talks to Orbit's MCP server. It does not cover agent-vendor-specific tools (e.g. Claude Code's built-in `Edit`/`Write`/`Read`), which `orbit-mcp` doesn't see. Layer 3 fills that gap for Claude Code specifically.
+This layer covers any agent that talks to Orbit's Remote-composed MCP server. It does not cover agent-vendor-specific tools (e.g. Claude Code's built-in `Edit`/`Write`/`Read`), which the MCP server doesn't see. Layer 3 fills that gap for Claude Code specifically.
 
 ### 4.3 Layer 3 — Claude Code `PreToolUse` hook (optional)
 

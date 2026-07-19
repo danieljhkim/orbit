@@ -7,21 +7,52 @@ use orbit_common::types::{
 use orbit_common::utility::selector::anchor_path;
 use serde_json::{Value, json};
 
-use super::PROCESS_LEARNING_SESSION_KEY;
-use crate::{
+use orbit_mcp::{
     McpHost, McpResultDecoration, McpResultDecorationError, McpResultDecorationFuture,
     McpResultDecorator,
 };
 
+pub(super) const PROCESS_LEARNING_SESSION_KEY: &str = "__process__";
+
+/// Remote-owned learning lookup and optional cross-process admission state.
+pub(super) trait LearningSidecarHost: McpHost {
+    fn learning_candidates_for_path(
+        &self,
+        path: &str,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        self.call_tool(
+            "orbit.learning.list",
+            serde_json::json!({ "path": path }),
+            session_context,
+        )
+    }
+
+    fn get_session_learning_state(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<LearningInjectionState>, OrbitError> {
+        Ok(None)
+    }
+
+    fn upsert_session_learning_state(
+        &self,
+        _session_id: &str,
+        _state: &LearningInjectionState,
+    ) -> Result<(), OrbitError> {
+        Ok(())
+    }
+}
+
 pub(super) struct LearningSidecarDecorator {
-    host: Arc<dyn McpHost>,
+    host: Arc<dyn LearningSidecarHost>,
     learning_session_id: Option<String>,
     learning_caps: LearningInjectionCaps,
     learning_states: Arc<tokio::sync::Mutex<BTreeMap<String, LearningInjectionState>>>,
 }
 
 impl LearningSidecarDecorator {
-    pub(super) fn from_env(host: Arc<dyn McpHost>) -> Self {
+    pub(super) fn from_env(host: Arc<dyn LearningSidecarHost>) -> Self {
         let learning_session_id = std::env::var("ORBIT_SESSION_ID")
             .ok()
             .map(|value| value.trim().to_string())
@@ -36,7 +67,7 @@ impl LearningSidecarDecorator {
 
     #[cfg(test)]
     pub(super) fn new_for_test(
-        host: Arc<dyn McpHost>,
+        host: Arc<dyn LearningSidecarHost>,
         learning_session_id: Option<String>,
         learning_caps: LearningInjectionCaps,
         initial_state: LearningInjectionState,
@@ -45,7 +76,7 @@ impl LearningSidecarDecorator {
     }
 
     fn new(
-        host: Arc<dyn McpHost>,
+        host: Arc<dyn LearningSidecarHost>,
         learning_session_id: Option<String>,
         learning_caps: LearningInjectionCaps,
         initial_state: LearningInjectionState,
@@ -270,7 +301,7 @@ struct ReminderCandidate {
 }
 
 fn search_learning_reminders(
-    host: &dyn McpHost,
+    host: &dyn LearningSidecarHost,
     paths: &[String],
     caps: LearningInjectionCaps,
     session_context: ToolSessionContext,

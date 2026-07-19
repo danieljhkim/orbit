@@ -292,7 +292,6 @@ fn hub_listing_uses_one_canonical_placement_and_capability_predicate() {
 
     let agent = HubMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("agent");
     let agent_definitions = agent.list_mcp_tool_definitions().expect("agent tools");
-    assert!(!agent.in_process_graph_tools_enabled());
     assert!(agent_definitions.iter().all(|definition| {
         definition.policy.placement() == McpToolPlacement::Hub
             && definition
@@ -363,7 +362,6 @@ fn unknown_remote_caller_can_only_register_and_retirement_invalidates_open_peer(
             spoke_registration("hm_other", "other"),
             remote_context(McpCapability::Operator, "mcall-mismatch"),
         )
-        .expect("private method supported")
         .expect("typed result");
     assert!(!mismatch.complete);
     assert!(mismatch.last_committed_stage.is_none());
@@ -373,7 +371,6 @@ fn unknown_remote_caller_can_only_register_and_retirement_invalidates_open_peer(
             spoke_registration("hm_spoke", "spoke"),
             remote_context(McpCapability::Operator, "mcall-register"),
         )
-        .expect("private method supported")
         .expect("typed result");
     assert!(registered.complete);
     assert_eq!(
@@ -444,7 +441,6 @@ fn registration_reports_registry_commit_before_projection_failure_and_can_repair
             invalid,
             remote_context(McpCapability::Agent, "mcall-register-partial"),
         )
-        .expect("private method supported")
         .expect("typed partial result");
     assert!(!partial.complete);
     assert_eq!(
@@ -478,7 +474,6 @@ fn registration_reports_registry_commit_before_projection_failure_and_can_repair
             repaired,
             remote_context(McpCapability::Agent, "mcall-register-repair"),
         )
-        .expect("private method supported")
         .expect("typed complete result");
     assert!(complete.complete);
     assert_eq!(

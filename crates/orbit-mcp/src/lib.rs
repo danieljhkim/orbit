@@ -8,27 +8,12 @@
     rustdoc::invalid_html_tags,
     rustdoc::private_intra_doc_links
 )]
-//! MCP (Model Context Protocol) server that exposes an Orbit tool surface to
-//! any MCP-capable client.
-//!
-//! The crate is primarily a thin transport adapter between rmcp's server
-//! runtime and an Orbit-supplied [`McpHost`]. Most tool dispatch, policy
-//! evaluation, and audit logging is delegated to the host. The implementation
-//! of the `orbit.graph.*` surface is backed by `orbit-graph` in-process so a
-//! long-running MCP server can reuse one graph handle per worktree and apply
-//! the MCP watcher-backed sync policy. Its policy and audit boundary still
-//! belong to the host. In the default `orbit-cli` wiring the host is
-//! `RuntimeMcpHost`, which applies the safe-surface preflight and brackets both
-//! registry-backed and in-process calls with OrbitRuntime's audit boundary,
-//! tagged with `ToolEntryPoint::Mcp`. The runtime persists a success-or-failure
-//! audit row with the same identity-resolution rules as the CLI path. Audit
-//! rows from MCP calls carry `subcommand = "run-mcp"` so they can be filtered
-//! apart from CLI tool runs (which carry `"run"`).
+//! Generic Model Context Protocol transport kernel for caller-supplied tool,
+//! schema, context, result-decoration, and custom-request compositions.
 //!
 //! # Role
-//! Depends on `orbit-common`, `orbit-graph`, and `orbit-graph-extract`. The
-//! CLI constructs a runtime-backed [`McpHost`] and hands it to [`serve_stdio`].
-//! No dependency on `orbit-core` is introduced.
+//! Depends only on `orbit-common` for Orbit-neutral wire types. Feature and
+//! domain policy belongs in higher-level composition crates.
 //!
 //! # Transport
 //! Only stdio is supported in this cut. HTTP/SSE/streamable-http transports
@@ -37,16 +22,13 @@
 mod adapter;
 mod client;
 mod error;
-mod hub_contract;
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use orbit_common::types::{
-    LearningInjectionState, McpToolDefinition, McpToolPolicyError, NotFoundKind, OrbitError,
-    SpokeRegistrationRequestV1, SpokeRegistrationResultV1, ToolParam, ToolSessionContext,
-    audit_execution_id,
+    McpToolDefinition, NotFoundKind, OrbitError, ToolParam, ToolSessionContext, audit_execution_id,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::io::stdio;
@@ -54,23 +36,8 @@ use serde_json::{Map, Value};
 
 pub use adapter::OrbitToolServer;
 pub use client::{
-    HubClientExpectation, McpClientInitialization, McpClientRequestError, McpToolResponse,
-    OrbitMcpClient, RawOrbitMcpClient, validate_remote_call_context,
+    McpClientInitialization, McpClientRequestError, McpToolResponse, RawOrbitMcpClient,
 };
-pub use hub_contract::{
-    CANONICAL_MCP_REGISTRY_REVISION, HUB_CONTRACT_INSTRUCTIONS_PREFIX, HUB_SCHEMA_DOMAIN,
-    HubServerContractV1, MCP_CONTRACT_REVISION, canonical_hub_schema_bytes, hub_schema_digest,
-};
-
-/// Canonical names implemented by the in-process graph adapter.
-pub fn graph_tool_names() -> &'static [&'static str] {
-    adapter::graph_tool_names()
-}
-
-/// Workspace-independent source for the graph adapter's schema-adjacent policies.
-pub fn graph_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
-    adapter::graph_mcp_tool_definitions()
-}
 
 /// Complete JSON input schema advertised for one MCP tool.
 pub type McpInputSchema = Map<String, Value>;
@@ -97,6 +64,28 @@ where
     F: Fn(&str, &str) -> Option<&'static [&'static str]>,
 {
     adapter::encode_mcp_input_schema_with_enum_values(tool_name, params, enum_values)
+}
+
+/// Resolves the complete wire input schema for host-owned MCP definitions.
+///
+/// The kernel default is deliberately structural: feature crates may attach
+/// schema-adjacent enum metadata without teaching this transport crate any
+/// domain-specific tool names.
+pub trait McpInputSchemaResolver: Send + Sync + 'static {
+    fn input_schema(&self, definition: &McpToolDefinition) -> Result<McpInputSchema, OrbitError>;
+}
+
+/// Structural schema resolver used by generic MCP compositions.
+#[derive(Debug, Default)]
+pub struct StructuralMcpInputSchemaResolver;
+
+impl McpInputSchemaResolver for StructuralMcpInputSchemaResolver {
+    fn input_schema(&self, definition: &McpToolDefinition) -> Result<McpInputSchema, OrbitError> {
+        Ok(encode_mcp_input_schema(
+            &definition.schema.name,
+            &definition.schema.parameters,
+        ))
+    }
 }
 
 /// An in-process MCP tool implementation composed into [`OrbitToolServer`].
@@ -281,6 +270,7 @@ pub struct McpServerComposition {
     tool_extensions: Vec<McpToolExtensionRegistration>,
     result_decorators: Vec<Arc<dyn McpResultDecorator>>,
     call_context_resolver: Arc<dyn McpCallContextResolver>,
+    input_schema_resolver: Arc<dyn McpInputSchemaResolver>,
     custom_request_handlers: Vec<Arc<dyn McpCustomRequestHandler>>,
     metadata: McpServerMetadata,
 }
@@ -289,6 +279,7 @@ pub(crate) struct McpServerCompositionParts {
     pub(crate) tool_extensions: Vec<McpToolExtensionRegistration>,
     pub(crate) result_decorators: Vec<Arc<dyn McpResultDecorator>>,
     pub(crate) call_context_resolver: Arc<dyn McpCallContextResolver>,
+    pub(crate) input_schema_resolver: Arc<dyn McpInputSchemaResolver>,
     pub(crate) custom_request_handlers: Vec<Arc<dyn McpCustomRequestHandler>>,
     pub(crate) metadata: McpServerMetadata,
 }
@@ -299,6 +290,7 @@ impl McpServerComposition {
             tool_extensions: Vec::new(),
             result_decorators: Vec::new(),
             call_context_resolver: Arc::new(LocalMcpCallContextResolver),
+            input_schema_resolver: Arc::new(StructuralMcpInputSchemaResolver),
             custom_request_handlers: Vec::new(),
             metadata: McpServerMetadata::default(),
         }
@@ -327,6 +319,11 @@ impl McpServerComposition {
         self
     }
 
+    pub fn with_input_schema_resolver(mut self, resolver: Arc<dyn McpInputSchemaResolver>) -> Self {
+        self.input_schema_resolver = resolver;
+        self
+    }
+
     pub fn with_custom_request_handler(
         mut self,
         handler: Arc<dyn McpCustomRequestHandler>,
@@ -345,6 +342,7 @@ impl McpServerComposition {
             tool_extensions: self.tool_extensions,
             result_decorators: self.result_decorators,
             call_context_resolver: self.call_context_resolver,
+            input_schema_resolver: self.input_schema_resolver,
             custom_request_handlers: self.custom_request_handlers,
             metadata: self.metadata,
         }
@@ -406,39 +404,6 @@ impl McpToolExtensionRegistration {
 pub trait McpHost: Send + Sync + 'static {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError>;
 
-    /// Whether the adapter may install its local-checkout graph implementations.
-    /// The ordinary broker enables them by default. A checkoutless hub server
-    /// disables them structurally so adapter-owned local-derived tools cannot
-    /// be merged back into its hub-only surface.
-    fn in_process_graph_tools_enabled(&self) -> bool {
-        true
-    }
-
-    /// Private initialize instructions used only by a fixed hub transport.
-    /// Ordinary MCP servers keep the human-readable default.
-    fn private_server_instructions(&self) -> Option<String> {
-        None
-    }
-
-    /// Whether connector-owned per-call metadata may replace the local
-    /// session context. Only the explicit checkoutless hub host enables this.
-    fn accepts_remote_session_context(&self) -> bool {
-        false
-    }
-
-    /// Handle the one connector-private spoke bootstrap request.
-    ///
-    /// `None` is the secure default and makes the adapter return JSON-RPC
-    /// `METHOD_NOT_FOUND`. Only the explicit checkoutless hub host overrides
-    /// this seam. It is never represented by an MCP tool definition.
-    fn private_register_spoke(
-        &self,
-        _request: SpokeRegistrationRequestV1,
-        _session_context: ToolSessionContext,
-    ) -> Option<Result<SpokeRegistrationResultV1, OrbitError>> {
-        None
-    }
-
     /// Validate trusted call identity before the adapter resolves a canonical
     /// tool definition. Hub hosts use this to reject unknown/retired callers
     /// before any registry discovery or domain dispatch.
@@ -481,35 +446,6 @@ pub trait McpHost: Send + Sync + 'static {
         _dispatch: &mut dyn FnMut(Value, ToolSessionContext) -> Result<Value, OrbitError>,
     ) -> Result<Value, OrbitError> {
         Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()))
-    }
-
-    /// L-0043: sidecar internals use host extensions so runtime-backed MCP
-    /// hosts can keep the client safe surface narrow.
-    fn learning_candidates_for_path(
-        &self,
-        path: &str,
-        session_context: ToolSessionContext,
-    ) -> Result<Value, OrbitError> {
-        self.call_tool(
-            "orbit.learning.list",
-            serde_json::json!({ "path": path }),
-            session_context,
-        )
-    }
-
-    fn get_session_learning_state(
-        &self,
-        _session_id: &str,
-    ) -> Result<Option<LearningInjectionState>, OrbitError> {
-        Ok(None)
-    }
-
-    fn upsert_session_learning_state(
-        &self,
-        _session_id: &str,
-        _state: &LearningInjectionState,
-    ) -> Result<(), OrbitError> {
-        Ok(())
     }
 }
 

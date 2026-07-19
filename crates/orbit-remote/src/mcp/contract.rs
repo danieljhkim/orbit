@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::adapter::schema::build_input_schema;
+use super::schema::remote_input_schema;
 
 /// Revision 2 adds the strict connector-private spoke-registration method.
 /// Bumping this fact prevents an E3 client from negotiating successfully with
@@ -69,17 +69,15 @@ pub fn canonical_hub_schema_bytes(
                     .contains(&capability)
         })
         .map(|definition| {
-            json!({
+            let input_schema = remote_input_schema(definition)?;
+            Ok(json!({
                 "advertised_name": mcp_advertised_tool_name(&definition.schema.name),
                 "canonical_name": definition.schema.name,
                 "description": definition.schema.description,
-                "input_schema": build_input_schema(
-                    &definition.schema.name,
-                    &definition.schema.parameters,
-                ),
-            })
+                "input_schema": input_schema,
+            }))
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, OrbitError>>()?;
     tools.sort_by(|left, right| {
         left["canonical_name"]
             .as_str()

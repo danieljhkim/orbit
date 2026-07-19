@@ -16,7 +16,7 @@ use orbit_graph::{
 use orbit_graph_extract::{Selector, selector_error_to_orbit};
 use serde_json::{Value, json};
 
-use crate::McpToolExtension;
+use orbit_mcp::{McpInputSchema, McpToolExtension};
 
 const GRAPH_SYNC_TOOL: &str = "orbit.graph.sync";
 const GRAPH_SEARCH_TOOL: &str = "orbit.graph.search";
@@ -133,6 +133,10 @@ impl McpToolExtension for GraphToolRegistry {
         session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
         self.call_tool(name, input, session_context)
+    }
+
+    fn input_schema(&self, definition: &McpToolDefinition) -> Result<McpInputSchema, OrbitError> {
+        super::schema::remote_input_schema(definition)
     }
 
     fn report_call_failure(&self, name: &str, error: &OrbitError) {

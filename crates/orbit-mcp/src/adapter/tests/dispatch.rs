@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use orbit_common::types::{
     McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, OrbitError, ToolSchema,
@@ -18,10 +18,6 @@ use crate::{McpToolExtension, McpToolExtensionRegistration};
 struct MissingPolicyHost;
 
 struct CapabilityHost;
-
-struct RemoteMetadataHost {
-    called: AtomicBool,
-}
 
 struct ExtensionPolicyHost {
     schemas: Vec<ToolSchema>,
@@ -94,32 +90,6 @@ impl crate::McpHost for ExtensionPolicyHost {
     ) -> Result<Value, OrbitError> {
         self.in_process_calls.fetch_add(1, Ordering::SeqCst);
         dispatch(input, session_context)
-    }
-}
-
-impl crate::McpHost for RemoteMetadataHost {
-    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
-        Ok(vec![
-            McpToolDefinition::new(
-                tool_schema("demo.remote"),
-                McpToolPolicy::agent_and_operator(McpToolPlacement::Hub),
-            )
-            .expect("remote definition"),
-        ])
-    }
-
-    fn accepts_remote_session_context(&self) -> bool {
-        true
-    }
-
-    fn call_tool(
-        &self,
-        _name: &str,
-        _input: Value,
-        _session_context: ToolSessionContext,
-    ) -> Result<Value, OrbitError> {
-        self.called.store(true, Ordering::SeqCst);
-        Ok(json!({ "must_not_execute": true }))
     }
 }
 
@@ -363,25 +333,6 @@ async fn managed_empty_capability_set_is_never_upgraded_and_runner_is_non_hierar
         .map(|schema| schema.name)
         .collect::<Vec<_>>();
     assert_eq!(names, vec!["demo.runner"]);
-}
-
-#[tokio::test]
-async fn hub_tool_call_without_connector_metadata_fails_before_dispatch() {
-    let host = Arc::new(RemoteMetadataHost {
-        called: AtomicBool::new(false),
-    });
-    let mut trusted = ToolSessionContext::trusted_local(None, None, None);
-    trusted.effective_capabilities = [McpCapability::Agent].into_iter().collect();
-    let server_host: Arc<dyn crate::McpHost> = host.clone();
-    let server = OrbitToolServer::new_with_context(server_host, trusted);
-
-    let denied = server
-        .call_tool_request(CallToolRequestParams::new("demo_remote"))
-        .await
-        .expect("missing metadata is a structured tool denial");
-
-    assert_eq!(denied.is_error, Some(true));
-    assert!(!host.called.load(Ordering::SeqCst));
 }
 
 #[tokio::test]

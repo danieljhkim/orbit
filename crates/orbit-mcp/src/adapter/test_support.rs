@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Mutex as StdMutex;
 
 use orbit_common::types::{
-    LearningInjectionState, McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy,
-    OrbitError, ToolParam, ToolSchema, ToolSessionContext,
+    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, OrbitError, ToolParam,
+    ToolSchema, ToolSessionContext,
 };
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
@@ -101,81 +101,6 @@ impl crate::McpHost for EchoArrayHost {
         _session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
         Ok(json!([{ "tool": name }]))
-    }
-}
-
-pub(super) struct LearningSidecarHost {
-    response: Value,
-    search_by_path: HashMap<String, Vec<Value>>,
-    calls: StdMutex<Vec<String>>,
-    session_states: StdMutex<HashMap<String, LearningInjectionState>>,
-}
-
-impl LearningSidecarHost {
-    pub(super) fn new(response: Value, search_by_path: HashMap<String, Vec<Value>>) -> Self {
-        Self {
-            response,
-            search_by_path,
-            calls: StdMutex::new(Vec::new()),
-            session_states: StdMutex::new(HashMap::new()),
-        }
-    }
-}
-
-impl crate::McpHost for LearningSidecarHost {
-    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
-        test_mcp_definitions(vec![
-            tool_schema("orbit.graph.show"),
-            tool_schema("orbit.graph.refs"),
-            tool_schema("orbit.task.show"),
-            tool_schema("orbit.learning.list"),
-        ])
-    }
-
-    fn call_tool(
-        &self,
-        name: &str,
-        input: Value,
-        _session_context: ToolSessionContext,
-    ) -> Result<Value, OrbitError> {
-        self.calls
-            .lock()
-            .expect("calls lock")
-            .push(name.to_string());
-        if name == "orbit.learning.list" {
-            let path = input
-                .get("path")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            return Ok(Value::Array(
-                self.search_by_path.get(path).cloned().unwrap_or_default(),
-            ));
-        }
-        Ok(self.response.clone())
-    }
-
-    fn get_session_learning_state(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<LearningInjectionState>, OrbitError> {
-        Ok(self
-            .session_states
-            .lock()
-            .expect("session states lock")
-            .get(session_id)
-            .cloned())
-    }
-
-    fn upsert_session_learning_state(
-        &self,
-        session_id: &str,
-        state: &LearningInjectionState,
-    ) -> Result<(), OrbitError> {
-        self.session_states
-            .lock()
-            .expect("session states lock")
-            .insert(session_id.to_string(), state.clone());
-        Ok(())
     }
 }
 

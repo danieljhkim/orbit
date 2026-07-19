@@ -5,16 +5,19 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use orbit_common::types::{
-    McpCapability, McpToolDefinition, McpToolPlacement, NotFoundKind, OrbitError,
-    ToolSessionContext,
+    McpCapability, McpToolDefinition, McpToolPlacement, NotFoundKind, OrbitError, ToolParam,
+    ToolSchema, ToolSessionContext,
 };
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-use super::super::OrbitToolServer;
 use super::super::graph::{GraphToolRegistry, graph_tool_definitions};
-use super::super::test_support::{StubHost, request_with_args, test_mcp_definitions, tool_schema};
-use crate::{McpHost, McpToolExtension, McpToolExtensionRegistration};
+use super::support::{StubHost, WireServer, test_mcp_definitions, tool_schema};
+use orbit_mcp::{
+    McpHost, McpServerComposition, McpToolExtension, McpToolExtensionRegistration, OrbitToolServer,
+};
+
+use super::super::schema::RemoteInputSchemaResolver;
 
 #[test]
 fn graph_tool_schemas_cover_cli_parameters() {
@@ -76,7 +79,32 @@ fn graph_tool_schemas_cover_cli_parameters() {
 }
 
 #[test]
-fn combined_schemas_replace_known_host_graph_tools_and_preserve_unknown_ones() {
+fn graph_tool_schema_bytes_stay_under_budget() {
+    const LEGACY_BASELINE_BYTES: usize = 10_995;
+    const MAX_BYTES: usize = 8_246;
+
+    let definitions = graph_tool_definitions().expect("graph definitions are valid");
+    let total = definitions
+        .iter()
+        .map(|definition| {
+            serde_json::to_string(&definition.schema)
+                .expect("serialize graph schema")
+                .len()
+        })
+        .sum::<usize>();
+
+    assert!(
+        total > 0,
+        "the budget must measure the active Remote graph surface"
+    );
+    assert!(
+        total <= MAX_BYTES,
+        "graph tool schema bytes grew to {total} (legacy baseline {LEGACY_BASELINE_BYTES}, max {MAX_BYTES})"
+    );
+}
+
+#[tokio::test]
+async fn combined_schemas_replace_known_host_graph_tools_and_preserve_unknown_ones() {
     let host = Arc::new(StubHost {
         schemas: vec![
             tool_schema("orbit.graph.search"),
@@ -84,33 +112,25 @@ fn combined_schemas_replace_known_host_graph_tools_and_preserve_unknown_ones() {
             tool_schema("orbit.task.show"),
         ],
     });
-    let server = OrbitToolServer::new(host);
-    let schemas = server
-        .combined_tool_schemas()
-        .expect("combined definitions are valid");
-    let names: Vec<_> = schemas.iter().map(|schema| schema.name.as_str()).collect();
+    let (server, _) =
+        server_with_graph_extension(host, ToolSessionContext::trusted_local(None, None, None))
+            .await;
+    let tools = server.list_tools().await.tools;
+    let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
 
     assert_eq!(
-        schemas
+        tools
             .iter()
-            .filter(|schema| schema.name == "orbit.graph.search")
+            .filter(|tool| tool.name.as_ref() == "orbit_graph_search")
             .count(),
         1
     );
-    let search = schemas
-        .iter()
-        .find(|schema| schema.name == "orbit.graph.search")
-        .expect("graph search schema");
-    assert_param_names(
-        search,
-        &with_workspace_params(&["query", "kind", "lang", "limit"]),
-    );
-    assert!(names.contains(&"orbit.graph.pack"));
-    assert!(names.contains(&"orbit.task.show"));
-    assert!(names.contains(&"orbit.graph.sync"));
-    assert!(names.contains(&"orbit.graph.callees"));
-    assert!(names.contains(&"orbit.graph.impact"));
-    assert!(names.contains(&"orbit.graph.trace"));
+    assert!(names.contains(&"orbit_graph_pack"));
+    assert!(names.contains(&"orbit_task_show"));
+    assert!(names.contains(&"orbit_graph_sync"));
+    assert!(names.contains(&"orbit_graph_callees"));
+    assert!(names.contains(&"orbit_graph_impact"));
+    assert!(names.contains(&"orbit_graph_trace"));
 }
 
 #[tokio::test]
@@ -120,7 +140,7 @@ async fn reexposed_graph_schema_still_crosses_in_process_policy_seam() {
         in_process_calls: AtomicUsize,
     }
 
-    impl crate::McpHost for ReexposedGraphHost {
+    impl McpHost for ReexposedGraphHost {
         fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
             test_mcp_definitions(vec![tool_schema("orbit.graph.search")])
         }
@@ -151,36 +171,74 @@ async fn reexposed_graph_schema_still_crosses_in_process_policy_seam() {
         host_calls: AtomicUsize::new(0),
         in_process_calls: AtomicUsize::new(0),
     });
-    let server = OrbitToolServer::new(host.clone());
+    let (server, _) = server_with_graph_extension(
+        host.clone(),
+        ToolSessionContext::trusted_local(None, None, None),
+    )
+    .await;
 
     let result = server
-        .call_tool_request(request_with_args(
-            "orbit.graph.search",
-            json!({ "query": "dispatch" }),
-        ))
-        .await
-        .expect("MCP request returns a structured policy error");
+        .call("orbit.graph.search", json!({ "query": "dispatch" }))
+        .await;
 
     assert!(result.is_error.unwrap_or(false));
     assert_eq!(host.in_process_calls.load(Ordering::SeqCst), 1);
     assert_eq!(host.host_calls.load(Ordering::SeqCst), 0);
 }
 
-#[test]
-fn combined_schemas_use_adapter_graph_tools_when_host_has_no_graph_surface() {
+#[tokio::test]
+async fn combined_schemas_use_adapter_graph_tools_when_host_has_no_graph_surface() {
     let host = Arc::new(StubHost {
         schemas: vec![tool_schema("orbit.task.show")],
     });
-    let server = OrbitToolServer::new(host);
-    let schemas = server
-        .combined_tool_schemas()
-        .expect("combined definitions are valid");
-    let names: Vec<_> = schemas.iter().map(|schema| schema.name.as_str()).collect();
+    let (server, _) =
+        server_with_graph_extension(host, ToolSessionContext::trusted_local(None, None, None))
+            .await;
+    let tools = server.list_tools().await.tools;
+    let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
 
-    assert!(names.contains(&"orbit.task.show"));
-    assert!(names.contains(&"orbit.graph.sync"));
-    assert!(names.contains(&"orbit.graph.search"));
-    assert!(names.contains(&"orbit.graph.trace"));
+    assert!(names.contains(&"orbit_task_show"));
+    assert!(names.contains(&"orbit_graph_sync"));
+    assert!(names.contains(&"orbit_graph_search"));
+    assert!(names.contains(&"orbit_graph_trace"));
+}
+
+#[tokio::test]
+async fn remote_graph_aware_tools_list_matches_wire_snapshot() {
+    let host = Arc::new(StubHost {
+        schemas: vec![
+            ToolSchema {
+                name: "orbit.task.add".to_string(),
+                description: "Create a task record in the fixture store.".to_string(),
+                parameters: vec![
+                    snapshot_param("title", "Task title", "string", true),
+                    snapshot_param("type", "Optional task type", "string", false),
+                    snapshot_param("tags", "Optional tags", "string_list", false),
+                ],
+                builtin: true,
+            },
+            ToolSchema {
+                name: "orbit.task.show".to_string(),
+                description: "Show one task record from the fixture store.".to_string(),
+                parameters: vec![snapshot_param("id", "Task id", "string", true)],
+                builtin: true,
+            },
+            ToolSchema {
+                name: "orbit.task.list".to_string(),
+                description: "List every task record in the fixture store.".to_string(),
+                parameters: Vec::new(),
+                builtin: true,
+            },
+        ],
+    });
+    let (server, _) =
+        server_with_graph_extension(host, ToolSessionContext::trusted_local(None, None, None))
+            .await;
+    let tools = serde_json::to_value(server.list_tools().await.tools).expect("serialize tools");
+    let expected: Value = serde_json::from_str(include_str!("snapshots/wire_tools_list.json"))
+        .expect("parse checked-in Remote wire snapshot");
+
+    assert_eq!(tools, expected, "Remote MCP tools/list schema drift");
 }
 
 #[tokio::test]
@@ -189,9 +247,8 @@ async fn graph_tools_invoke_in_process_fixture() {
     let host = Arc::new(StubHost {
         schemas: Vec::new(),
     });
-    let (server, graph_tools) = server_with_graph_extension(host);
-    // L-0053: graph MCP tests must pin the worktree to their temp fixture.
-    server.replace_session_context(agent_workspace_context(worktree.path()));
+    let (server, graph_tools) =
+        server_with_graph_extension(host, agent_workspace_context(worktree.path())).await;
 
     let sync = call_json(
         &server,
@@ -331,17 +388,12 @@ async fn graph_tool_errors_are_structured_mcp_tool_errors() {
     let host = Arc::new(StubHost {
         schemas: Vec::new(),
     });
-    let server = OrbitToolServer::new(host);
-    // L-0053: graph MCP tests must pin the worktree to their temp fixture.
-    server.replace_session_context(agent_workspace_context(worktree.path()));
+    let (server, _) =
+        server_with_graph_extension(host, agent_workspace_context(worktree.path())).await;
 
     let result = server
-        .call_tool_request(request_with_args(
-            "orbit.graph.show",
-            json!({ "selector": "not-a-selector" }),
-        ))
-        .await
-        .expect("MCP request succeeds with tool error payload");
+        .call("orbit.graph.show", json!({ "selector": "not-a-selector" }))
+        .await;
 
     assert!(result.is_error.unwrap_or(false));
     let payload = result.structured_content.expect("structured error payload");
@@ -365,9 +417,8 @@ async fn graph_show_returns_labeled_byte_fallback_for_non_utf8_source() {
     let host = Arc::new(StubHost {
         schemas: Vec::new(),
     });
-    let server = OrbitToolServer::new(host);
-    // L-0053: graph MCP tests must pin the worktree to their temp fixture.
-    server.replace_session_context(agent_workspace_context(worktree.path()));
+    let (server, _) =
+        server_with_graph_extension(host, agent_workspace_context(worktree.path())).await;
 
     call_json(
         &server,
@@ -409,21 +460,22 @@ async fn graph_show_rejects_out_of_workspace_path_without_session_workspace() {
     let host = Arc::new(StubHost {
         schemas: Vec::new(),
     });
-    let (server, graph_tools) = server_with_graph_extension(host);
+    let (server, graph_tools) =
+        server_with_graph_extension(host, ToolSessionContext::trusted_local(None, None, None))
+            .await;
     // Intentionally do NOT announce a session workspace: session_context.workspace
     // stays None, which is the unguarded path before this fix.
 
     let result = server
-        .call_tool_request(request_with_args(
+        .call(
             "orbit.graph.show",
             json!({
                 "workspace_path": outside.path().display().to_string(),
                 "selector": "symbol:src/lib.rs#secret:function",
                 "max_bytes": 256
             }),
-        ))
-        .await
-        .expect("MCP request resolves with a tool-error payload");
+        )
+        .await;
 
     assert!(result.is_error.unwrap_or(false), "call must be rejected");
     let payload = result.structured_content.expect("structured error payload");
@@ -442,23 +494,34 @@ async fn graph_show_rejects_out_of_workspace_path_without_session_workspace() {
     assert_eq!(graph_tools.cached_worktree_count(), 0);
 }
 
-fn server_with_graph_extension(
+async fn server_with_graph_extension(
     host: Arc<dyn McpHost>,
-) -> (OrbitToolServer, Arc<GraphToolRegistry>) {
+    context: ToolSessionContext,
+) -> (WireServer, Arc<GraphToolRegistry>) {
     let graph_tools = Arc::new(GraphToolRegistry::new());
     let extension: Arc<dyn McpToolExtension> = graph_tools.clone();
-    let server = OrbitToolServer::new_with_extensions(
-        host,
-        vec![McpToolExtensionRegistration::advertised(extension)],
-    );
-    (server, graph_tools)
+    let workspace = context.workspace.clone();
+    let composition = McpServerComposition::new()
+        .with_tool_extension(McpToolExtensionRegistration::advertised(extension))
+        .with_input_schema_resolver(Arc::new(RemoteInputSchemaResolver));
+    let server = OrbitToolServer::new_with_context_and_composition(host, context, composition);
+    (
+        WireServer::new(server, workspace.as_deref()).await,
+        graph_tools,
+    )
 }
 
-async fn call_json(server: &OrbitToolServer, name: &str, args: Value) -> Value {
-    let result = server
-        .call_tool_request(request_with_args(name, args))
-        .await
-        .expect("MCP bridge call succeeds");
+fn snapshot_param(name: &str, description: &str, param_type: &str, required: bool) -> ToolParam {
+    ToolParam {
+        name: name.to_string(),
+        description: description.to_string(),
+        param_type: param_type.to_string(),
+        required,
+    }
+}
+
+async fn call_json(server: &WireServer, name: &str, args: Value) -> Value {
+    let result = server.call(name, args).await;
     assert!(
         !result.is_error.unwrap_or(false),
         "{name} should not return a tool error: {result:?}"

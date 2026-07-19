@@ -8,7 +8,7 @@ doc_role: vision
 type: design
 summary: Open questions and prior art for a singular hub MCP link, owner-bound knowledge, explicit Git-replica reads, execution-profile projection, schema skew, and host identity assurance.
 tags: [mcp, remote-access, host-registry, bridge]
-paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool.rs"]
+paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-core/src/command/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
 related_artifacts: [ORB-00424, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
@@ -60,9 +60,9 @@ Speculation below should not leak into implementation without demonstrated need.
 
 ### Orbit MCP and session context
 
-The current MCP adapter already separates protocol framing from an injected
-`McpHost`, keeps graph tools in process, sanitizes advertised names, and threads
-`ToolSessionContext` into dispatch. [ADR-0181] established deliberate workspace
+The generic MCP adapter already separates protocol framing from an injected
+`McpHost`, sanitizes advertised names, and threads `ToolSessionContext` into
+dispatch; `orbit-remote` composes the in-process graph implementation. [ADR-0181] established deliberate workspace
 context instead of cwd fallback; [ADR-0199] proposed per-call runtime resolution.
 The local broker extends those seams rather than starting a second implementation.
 

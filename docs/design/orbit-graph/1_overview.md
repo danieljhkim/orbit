@@ -15,7 +15,7 @@ related_features: [knowledge-graph]
 
 Orbit Graph is the code-intelligence layer for Orbit: a per-worktree SQLite-backed code index that agents can query for symbols, references, callees, impact, and command traces. It is a derived index — regenerable in seconds from `(file_contents, extractor_version)` — with no durable state beyond a single `.db` file per worktree. It replaced the former `orbit-knowledge` crate, a content-addressed versioned store with mutable refs, locks, and a working-graph layer.
 
-The v2 cutover completed in ORB-00391: `orbit-knowledge` (v1) was decommissioned and orbit-graph is now the sole graph surface, served to agents through the in-process adapter in `orbit-mcp`. See [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16 for the migration outcome.
+The v2 cutover completed in ORB-00391: `orbit-knowledge` (v1) was decommissioned and orbit-graph is now the sole graph surface, served to agents through the in-process adapter composed by `orbit-remote` over the generic MCP kernel. See [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16 for the migration outcome.
 
 This document is the entry point. The prescriptive V1 specification — schema, query surface, build pipeline, performance budgets, migration plan — lives in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) under `specs/`. [2_design.md](./2_design.md) is the long-form design discussion at a higher level of abstraction. [3_vision.md](./3_vision.md) captures the V2 write surface and other forward-looking items. [4_decisions.md](./4_decisions.md) is the ADR log; the v2 cutover + decommission is recorded in ADR-0198 (supersedes ADR-0192).
 

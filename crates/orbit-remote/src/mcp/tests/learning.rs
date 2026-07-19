@@ -4,8 +4,11 @@ use std::sync::Arc;
 use orbit_common::types::{LearningInjectionCaps, LearningInjectionState};
 use serde_json::{Value, json};
 
-use super::super::test_support::{LearningSidecarHost, request_with_args};
-use super::super::{OrbitToolServer, PROCESS_LEARNING_SESSION_KEY};
+use super::super::learning::{LearningSidecarDecorator, LearningSidecarHost as LearningHost};
+use super::support::{LearningSidecarHost, WireServer};
+use orbit_mcp::{McpHost, McpServerComposition, OrbitToolServer};
+
+use super::super::learning::PROCESS_LEARNING_SESSION_KEY;
 
 #[tokio::test]
 async fn learning_sidecar_present_with_summary_only_on_path_match() {
@@ -26,20 +29,20 @@ async fn learning_sidecar_present_with_summary_only_on_path_match() {
         }),
         search_by_path,
     ));
-    let server = OrbitToolServer::new_for_test(
+    let (server, _) = server_with_learning(
         host,
         None,
         LearningInjectionCaps::default(),
         LearningInjectionState::default(),
-    );
+    )
+    .await;
 
     let result = server
-        .call_tool_request(request_with_args(
+        .call(
             "orbit.task.show",
             json!({"selector": "file:crates/orbit-engine/src/lib.rs"}),
-        ))
-        .await
-        .expect("call succeeds");
+        )
+        .await;
     let structured = result
         .structured_content
         .as_ref()
@@ -69,20 +72,20 @@ async fn learning_sidecar_absent_when_no_learning_matches() {
         }),
         search_by_path,
     ));
-    let server = OrbitToolServer::new_for_test(
+    let (server, _) = server_with_learning(
         host,
         None,
         LearningInjectionCaps::default(),
         LearningInjectionState::default(),
-    );
+    )
+    .await;
 
     let result = server
-        .call_tool_request(request_with_args(
+        .call(
             "orbit.task.show",
             json!({"selector": "file:crates/orbit-engine/src/lib.rs"}),
-        ))
-        .await
-        .expect("call succeeds");
+        )
+        .await;
     let structured = result
         .structured_content
         .as_ref()
@@ -110,26 +113,19 @@ async fn l1_seeded_learning_is_suppressed_by_l2_dedup_state() {
         search_by_path,
     ));
     let initial_state = LearningInjectionState::seeded(["L-0001".to_string()]);
-    let server =
-        OrbitToolServer::new_for_test(host, None, LearningInjectionCaps::default(), initial_state);
+    let (server, states) =
+        server_with_learning(host, None, LearningInjectionCaps::default(), initial_state).await;
 
     let result = server
-        .call_tool_request(request_with_args(
-            "orbit.task.show",
-            json!({"id": "ORB-00009"}),
-        ))
-        .await
-        .expect("call succeeds");
+        .call("orbit.task.show", json!({"id": "ORB-00009"}))
+        .await;
     let structured = result
         .structured_content
         .as_ref()
         .expect("structured content");
 
     assert!(structured.get("learnings").is_none());
-    let state = server
-        .learning_state_for_test(PROCESS_LEARNING_SESSION_KEY)
-        .await
-        .expect("state");
+    let state = learning_state(&states, PROCESS_LEARNING_SESSION_KEY).await;
     assert_eq!(state.count, 1);
     assert!(state.emitted_ids.contains("L-0001"));
 }
@@ -153,7 +149,7 @@ async fn learning_sidecar_enforces_per_session_hard_cap() {
         search_by_path.insert(path, rows);
     }
     let host = Arc::new(LearningSidecarHost::new(json!({}), search_by_path));
-    let server = OrbitToolServer::new_for_test(
+    let (server, states) = server_with_learning(
         host,
         None,
         LearningInjectionCaps {
@@ -161,17 +157,17 @@ async fn learning_sidecar_enforces_per_session_hard_cap() {
             per_session_hard: 20,
         },
         LearningInjectionState::default(),
-    );
+    )
+    .await;
     let mut emitted = 0usize;
 
     for call_idx in 0..5 {
         let result = server
-            .call_tool_request(request_with_args(
+            .call(
                 "orbit.task.show",
                 json!({"selector": format!("file:p{call_idx}.rs")}),
-            ))
-            .await
-            .expect("call succeeds");
+            )
+            .await;
         let structured = result
             .structured_content
             .as_ref()
@@ -184,10 +180,7 @@ async fn learning_sidecar_enforces_per_session_hard_cap() {
     }
 
     assert_eq!(emitted, 20);
-    let state = server
-        .learning_state_for_test(PROCESS_LEARNING_SESSION_KEY)
-        .await
-        .expect("state");
+    let state = learning_state(&states, PROCESS_LEARNING_SESSION_KEY).await;
     assert_eq!(state.count, 20);
     assert_eq!(state.emitted_ids.len(), 20);
 }
@@ -214,20 +207,20 @@ async fn learning_sidecar_session_id_persists_admission_through_host_state() {
         per_call: 5,
         per_session_hard: 20,
     };
-    let server = OrbitToolServer::new_for_test(
+    let (server, _) = server_with_learning(
         host.clone(),
         Some("session-1".to_string()),
         caps,
         LearningInjectionState::default(),
-    );
+    )
+    .await;
 
     let result = server
-        .call_tool_request(request_with_args(
+        .call(
             "orbit.task.show",
             json!({"selector": "file:crates/orbit-engine/src/lib.rs"}),
-        ))
-        .await
-        .expect("first call succeeds");
+        )
+        .await;
     let structured = result
         .structured_content
         .as_ref()
@@ -240,22 +233,58 @@ async fn learning_sidecar_session_id_persists_admission_through_host_state() {
         }]))
     );
 
-    let server = OrbitToolServer::new_for_test(
+    let (server, _) = server_with_learning(
         host,
         Some("session-1".to_string()),
         caps,
         LearningInjectionState::default(),
-    );
+    )
+    .await;
     let result = server
-        .call_tool_request(request_with_args(
+        .call(
             "orbit.task.show",
             json!({"selector": "file:crates/orbit-engine/src/lib.rs"}),
-        ))
-        .await
-        .expect("second call succeeds");
+        )
+        .await;
     let structured = result
         .structured_content
         .as_ref()
         .expect("structured content");
     assert!(structured.get("learnings").is_none());
+}
+
+async fn server_with_learning(
+    host: Arc<LearningSidecarHost>,
+    learning_session_id: Option<String>,
+    caps: LearningInjectionCaps,
+    initial_state: LearningInjectionState,
+) -> (
+    WireServer,
+    Arc<tokio::sync::Mutex<std::collections::BTreeMap<String, LearningInjectionState>>>,
+) {
+    let mcp_host: Arc<dyn McpHost> = host.clone();
+    let learning_host: Arc<dyn LearningHost> = host;
+    let decorator = Arc::new(LearningSidecarDecorator::new_for_test(
+        learning_host,
+        learning_session_id,
+        caps,
+        initial_state,
+    ));
+    let states = decorator.states();
+    let composition = McpServerComposition::new().with_result_decorator(decorator);
+    (
+        WireServer::new(
+            OrbitToolServer::new_with_composition(mcp_host, composition),
+            None,
+        )
+        .await,
+        states,
+    )
+}
+
+async fn learning_state(
+    states: &tokio::sync::Mutex<std::collections::BTreeMap<String, LearningInjectionState>>,
+    key: &str,
+) -> LearningInjectionState {
+    states.lock().await.get(key).cloned().expect("state")
 }

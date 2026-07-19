@@ -8,7 +8,7 @@ doc_role: decisions
 type: design
 summary: Accepted ADR log for the coupled MCP Bridge and Host Registry v1 contract.
 tags: [mcp, remote-access, host-registry, bridge]
-paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-registry/**", "crates/orbit-core/src/command/tool.rs"]
+paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-core/src/command/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
 related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10302, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
@@ -203,7 +203,7 @@ adapter, runtime profile/ship construction in `orbit-core`, persistence in
 - [ORB-10268] — added strict `~/.orbit/mcp.toml` trust parsing and the non-recursive
   `orbit mcp serve --hub` endpoint. Hub startup/list/call verify the exact
   `host.toml`/store stamp, canonical hub/capability filtering is singular, graph is
-  not re-merged, checkoutless writes use stable workspace IDs, and every denial or
+  recognition-only in hub composition, checkoutless writes use stable workspace IDs, and every denial or
   outcome keeps one trusted D2 audit identity.
 - [ORB-10269] — added the fixed SSH argv connector, per-capability bounded link
   pool, revision plus canonical hub-schema negotiation, trusted remote call

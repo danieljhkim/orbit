@@ -2412,12 +2412,9 @@ name = "orbit-mcp"
 version = "0.9.2"
 dependencies = [
  "orbit-common",
- "orbit-graph",
- "orbit-graph-extract",
  "rmcp",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "tokio",
  "tracing",
@@ -2443,6 +2440,8 @@ dependencies = [
  "orbit-cmd",
  "orbit-common",
  "orbit-core",
+ "orbit-graph",
+ "orbit-graph-extract",
  "orbit-mcp",
  "orbit-store",
  "rmcp",
@@ -2450,10 +2449,12 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "tempfile",
  "tokio",
  "toml",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

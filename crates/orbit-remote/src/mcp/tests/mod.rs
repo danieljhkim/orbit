@@ -3,6 +3,10 @@
 // Content moved from inline #[cfg(test)] mod tests in mcp/mod.rs per ORB-00221.
 
 mod e1;
+mod graph;
+mod learning;
+mod schema;
+mod support;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -382,7 +386,9 @@ impl McpHost for RuntimeMcpHost {
             )
             .map(|outcome| outcome.value)
     }
+}
 
+impl super::learning::LearningSidecarHost for RuntimeMcpHost {
     fn learning_candidates_for_path(
         &self,
         path: &str,
@@ -471,7 +477,7 @@ const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.task.start",
     // ORB-00391: the v1 orbit.graph.* builtins were decommissioned. The agent
     // graph surface is now served by the in-process orbit-graph (v2) adapter in
-    // orbit-mcp (see crates/orbit-mcp/src/adapter/graph.rs and its tests), not by
+    // orbit-remote (see crates/orbit-remote/src/mcp/graph.rs and its tests), not by
     // the orbit-tools runtime registry, so no orbit.graph.* tool appears here.
     "orbit.adr.add",
     "orbit.adr.show",
@@ -608,7 +614,7 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
 #[test]
 fn graph_adapter_names_have_schema_adjacent_canonical_definitions() {
     let safe_names: BTreeSet<String> = safe_mcp_tool_names().into_iter().collect();
-    let adapter_names: BTreeSet<&str> = orbit_mcp::graph_tool_names().iter().copied().collect();
+    let adapter_names: BTreeSet<&str> = super::graph::GRAPH_TOOL_NAMES.iter().copied().collect();
     let configured_names: BTreeSet<&str> = safe_names
         .iter()
         .map(String::as_str)
@@ -812,15 +818,15 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
     );
     assert_eq!(
         fixture.hub_schema_digest.domain_tag,
-        orbit_mcp::HUB_SCHEMA_DOMAIN
+        super::contract::HUB_SCHEMA_DOMAIN
     );
     assert_eq!(
         fixture.hub_schema_digest.contract_revision,
-        orbit_mcp::MCP_CONTRACT_REVISION
+        super::contract::MCP_CONTRACT_REVISION
     );
     assert_eq!(
         fixture.hub_schema_digest.canonical_registry_revision,
-        orbit_mcp::CANONICAL_MCP_REGISTRY_REVISION
+        super::contract::CANONICAL_MCP_REGISTRY_REVISION
     );
     let vector_definition = McpToolDefinition::new(
         orbit_common::types::ToolSchema {
@@ -841,7 +847,7 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
     let mut expected_bytes = format!("{}\0", fixture.hub_schema_digest.domain_tag).into_bytes();
     expected_bytes.extend_from_slice(vector.canonical_json.as_bytes());
     assert_eq!(
-        orbit_mcp::canonical_hub_schema_bytes(
+        super::contract::canonical_hub_schema_bytes(
             std::slice::from_ref(&vector_definition),
             vector.capability
         )
@@ -849,7 +855,7 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
         expected_bytes
     );
     assert_eq!(
-        orbit_mcp::hub_schema_digest(&[vector_definition], vector.capability)
+        super::contract::hub_schema_digest(&[vector_definition], vector.capability)
             .expect("golden digest"),
         vector.expected_sha256
     );
@@ -976,6 +982,7 @@ mod audited_mcp_call_tests {
     use serde_json::json;
 
     use super::super::host::audited_mcp_call;
+    use super::super::learning::LearningSidecarHost;
     use super::RuntimeMcpHost;
 
     // ORB-00289: the previous `create_task` helper + the three
@@ -1428,7 +1435,7 @@ mod audited_mcp_call_tests {
     // test exercised the v1 orbit-knowledge `orbit.graph.search` builtin over the
     // host dispatch path. That builtin was decommissioned; the v2 graph search is
     // served by the in-process orbit-graph adapter in orbit-mcp and is covered by
-    // `orbit-mcp/src/adapter/tests/graph.rs` (`graph_tools_invoke_in_process_fixture`).
+    // `orbit-remote/src/mcp/tests/graph.rs` (`graph_tools_invoke_in_process_fixture`).
 
     struct EnvGuard {
         _lock: MutexGuard<'static, ()>,

@@ -13,10 +13,11 @@ use orbit_common::types::{
     ToolSessionContext,
 };
 use orbit_common::utility::redaction::redact_sensitive_env_text;
-use orbit_mcp::{HubClientExpectation, OrbitMcpClient};
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
+
+use super::hub_client::{HubClientExpectation, OrbitMcpClient, validate_remote_call_context};
 
 const STDERR_LIMIT: u64 = 8 * 1024;
 
@@ -344,7 +345,7 @@ impl HubLinkPool {
         input: Value,
         context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
-        orbit_mcp::validate_remote_call_context(&context, capability)?;
+        validate_remote_call_context(&context, capability)?;
         let mcp_call_id = context
             .mcp_call_id
             .clone()
@@ -388,7 +389,7 @@ impl HubLinkPool {
         context: ToolSessionContext,
     ) -> Result<SpokeRegistrationResultV1, OrbitError> {
         registration.validate()?;
-        orbit_mcp::validate_remote_call_context(&context, capability)?;
+        validate_remote_call_context(&context, capability)?;
         if context.workspace.is_some() || context.workspace_id.is_some() {
             return Err(OrbitError::InvalidInput(
                 "private spoke registration is global and must not carry a workspace selector"

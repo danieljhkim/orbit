@@ -14,6 +14,7 @@ use orbit_common::types::{
 use orbit_core::OrbitRuntime;
 
 use super::config::load_trusted_mcp_config;
+use super::contract::hub_schema_digest;
 use super::host::canonical_mcp_tool_definitions;
 use super::hub_link::HubLinkPool;
 
@@ -96,7 +97,7 @@ pub fn register_local_spoke(
 
     let definitions = canonical_mcp_tool_definitions()
         .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
-    let schema_digest = orbit_mcp::hub_schema_digest(&definitions, capability)?;
+    let schema_digest = hub_schema_digest(&definitions, capability)?;
     let pool = HubLinkPool::ssh(
         route.host.clone(),
         route.machine_id.clone(),

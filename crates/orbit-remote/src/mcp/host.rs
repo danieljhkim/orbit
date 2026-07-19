@@ -40,7 +40,7 @@ use super::hub_link::HubLinkPool;
 
 pub fn canonical_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
     let mut definitions = orbit_core::canonical_builtin_mcp_tool_definitions()?;
-    definitions.extend(orbit_mcp::graph_mcp_tool_definitions()?);
+    definitions.extend(super::graph::graph_tool_definitions()?);
     validate_mcp_tool_definitions(&definitions)?;
     Ok(definitions)
 }
@@ -750,6 +750,8 @@ impl McpHost for BrokerMcpHost {
         self.resolved_call(name, input, session_context, Some(dispatch))
     }
 }
+
+impl super::learning::LearningSidecarHost for BrokerMcpHost {}
 
 fn git_path(start: &Path, argument: &str) -> Result<PathBuf, OrbitError> {
     let output = Command::new("git")

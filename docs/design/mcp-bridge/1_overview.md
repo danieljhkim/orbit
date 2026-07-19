@@ -8,7 +8,7 @@ doc_role: overview
 type: design
 summary: One canonical local Orbit MCP front door that routes coordination to a single hub, keeps owner-authored knowledge and derived indexes local, and removes Bridge's duplicated Orbit parity layer.
 tags: [mcp, remote-access, host-registry, bridge, multi-host]
-paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
+paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph]
 related_artifacts: [ORB-00424, ORB-10262, ORB-10268, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232]
 ---
@@ -90,10 +90,10 @@ network edge per spoke: spoke → hub.
 
 | Concern | File | Task |
 |---------|------|------|
-| MCP wire adapter and graph wrappers | [crates/orbit-mcp/](../../../crates/orbit-mcp/) | [ORB-00424] |
-| Local broker, trusted hub config/server/link pool, safe surface, and audit boundary | [crates/orbit-cli/src/command/mcp/](../../../crates/orbit-cli/src/command/mcp/) | [ORB-10262], [ORB-10268], [ORB-10269] |
+| Generic MCP wire adapter and raw stream client | [crates/orbit-mcp/](../../../crates/orbit-mcp/) | [ORB-00424] |
+| Local broker, trusted hub config/server/link pool, graph and learning composition, safe surface, and audit boundary | [crates/orbit-remote/src/mcp/](../../../crates/orbit-remote/src/mcp/) | [ORB-10262], [ORB-10268], [ORB-10269] |
 | Canonical builtin schema + placement metadata | [crates/orbit-tools/src/builtin/orbit/mod.rs](../../../crates/orbit-tools/src/builtin/orbit/mod.rs) | [ORB-00424] |
-| Canonical graph schema + placement metadata | [crates/orbit-mcp/src/adapter/graph.rs](../../../crates/orbit-mcp/src/adapter/graph.rs) | [ORB-00424] |
+| Canonical graph schema + placement metadata | [crates/orbit-remote/src/mcp/graph.rs](../../../crates/orbit-remote/src/mcp/graph.rs) | [ORB-00424] |
 | Runtime tool dispatch and audit provenance | [crates/orbit-core/src/command/tool.rs](../../../crates/orbit-core/src/command/tool.rs) | [ORB-00424] |
 | Hub, ownership, replica role, and run placement | [host-registry/2_design.md](../host-registry/2_design.md) | [ORB-00424] |
 | Session workspace and caller-host metadata | [mcp-session-context/2_design.md](../mcp-session-context/2_design.md) | [ORB-00424] |

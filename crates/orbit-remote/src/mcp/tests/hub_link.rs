@@ -15,6 +15,7 @@ use serde_json::json;
 
 use super::super::host::{BrokerMcpHost, canonical_mcp_tool_definitions};
 use super::super::hub::HubMcpHost;
+use super::super::hub_server_composition;
 use super::*;
 
 #[derive(Default)]
@@ -85,7 +86,9 @@ impl HubPeerFactory for RmcpHubFactory {
                 Some(host.identity().host_id.clone()),
             );
             trusted.effective_capabilities = BTreeSet::from([spec.capability]);
-            let server = OrbitToolServer::new_with_context(host, trusted);
+            let composition = hub_server_composition(Arc::clone(&host));
+            let server =
+                OrbitToolServer::new_with_context_and_composition(host, trusted, composition);
             let (server_io, client_io) = tokio::io::duplex(256 * 1024);
             let server_task = tokio::spawn(async move {
                 if let Ok(running) = server.serve(server_io).await {
@@ -637,7 +640,7 @@ fn spoke_rmcp_coordination_canary_is_hub_only_and_preserves_provenance() {
     let digests = [McpCapability::Agent, McpCapability::Operator]
         .into_iter()
         .map(|capability| {
-            orbit_mcp::hub_schema_digest(&definitions, capability)
+            super::super::contract::hub_schema_digest(&definitions, capability)
                 .map(|digest| (capability, digest))
         })
         .collect::<Result<BTreeMap<_, _>, _>>()

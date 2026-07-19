@@ -8,7 +8,7 @@ doc_role: design
 type: design
 summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-only coordination, owner-bound knowledge, checkout-local indexes, role-aware search, capability sets, provenance, and Bridge parity retirement.
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
-paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-registry/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
+paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-core/src/command/tool.rs", "crates/orbit-common/src/types/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
 related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10302, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
@@ -145,7 +145,7 @@ the fixed remote command; `mcp.toml` cannot inject arbitrary shell text.
 mode and verifies that the opened global store is stamped with the exact local
 `machine_id` before stdio begins; listing and every call repeat that authority
 check. The endpoint filters the canonical registry by exactly one `hub` placement
-and one scalar capability, disables the in-process graph re-merge, accepts only
+and one scalar capability, composes graph recognition without a local graph implementation, accepts only
 stable logical workspace IDs, and invokes the checkout-independent coordination
 executor without constructing `OrbitRuntime` or opening any connector. Local calls
 may derive caller identity from the hub. Every `tools/call` accepted by the fixed

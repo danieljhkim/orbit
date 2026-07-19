@@ -11,14 +11,14 @@ use orbit_common::types::{
 };
 use orbit_core::runtime::HubCoordinationExecutor;
 use orbit_core::{NotFoundKind, OrbitError, redact_sensitive_env_text};
-use orbit_mcp::{
-    CANONICAL_MCP_REGISTRY_REVISION, HubServerContractV1, MCP_CONTRACT_REVISION, McpHost,
-    hub_schema_digest,
-};
+use orbit_mcp::McpHost;
 use serde_json::{Value, json};
 
 use crate::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, load_host_identity};
 
+use super::contract::{
+    CANONICAL_MCP_REGISTRY_REVISION, HubServerContractV1, MCP_CONTRACT_REVISION, hub_schema_digest,
+};
 use super::host::{
     canonical_mcp_tool_definitions, mcp_preflight_failure_params, normalize_trusted_call_context,
 };
@@ -66,6 +66,35 @@ impl HubMcpHost {
 
     pub(super) fn identity(&self) -> &HostIdentity {
         &self.identity
+    }
+
+    pub(super) fn private_instructions(&self) -> &str {
+        &self.private_instructions
+    }
+
+    pub(super) fn private_register_spoke(
+        &self,
+        request: SpokeRegistrationRequestV1,
+        session_context: ToolSessionContext,
+    ) -> Result<SpokeRegistrationResultV1, OrbitError> {
+        let context = self.normalize_context(session_context, &self.identity);
+        let result = self.registration_result(request, context.clone());
+        let audit_result = if result.complete {
+            Ok(json!({
+                "complete": true,
+                "last_committed_stage": result.last_committed_stage,
+            }))
+        } else {
+            Err(OrbitError::Execution(
+                result
+                    .failure
+                    .as_ref()
+                    .map(|failure| failure.message.clone())
+                    .unwrap_or_else(|| "private spoke registration failed".to_string()),
+            ))
+        };
+        self.record_outcome(SPOKE_REGISTRATION_METHOD_V1, &context, &audit_result);
+        Ok(result)
     }
 
     fn verify_authority(&self) -> Result<(HostIdentity, RegistrySnapshotV1), OrbitError> {
@@ -531,43 +560,6 @@ impl McpHost for HubMcpHost {
             .collect())
     }
 
-    fn in_process_graph_tools_enabled(&self) -> bool {
-        false
-    }
-
-    fn private_server_instructions(&self) -> Option<String> {
-        Some(self.private_instructions.clone())
-    }
-
-    fn accepts_remote_session_context(&self) -> bool {
-        true
-    }
-
-    fn private_register_spoke(
-        &self,
-        request: SpokeRegistrationRequestV1,
-        session_context: ToolSessionContext,
-    ) -> Option<Result<SpokeRegistrationResultV1, OrbitError>> {
-        let context = self.normalize_context(session_context, &self.identity);
-        let result = self.registration_result(request, context.clone());
-        let audit_result = if result.complete {
-            Ok(json!({
-                "complete": true,
-                "last_committed_stage": result.last_committed_stage,
-            }))
-        } else {
-            Err(OrbitError::Execution(
-                result
-                    .failure
-                    .as_ref()
-                    .map(|failure| failure.message.clone())
-                    .unwrap_or_else(|| "private spoke registration failed".to_string()),
-            ))
-        };
-        self.record_outcome(SPOKE_REGISTRATION_METHOD_V1, &context, &audit_result);
-        Some(Ok(result))
-    }
-
     fn preflight_tool_call(
         &self,
         _name: &str,
@@ -622,6 +614,8 @@ impl McpHost for HubMcpHost {
         self.resolved_call(name, input, session_context)
     }
 }
+
+impl super::learning::LearningSidecarHost for HubMcpHost {}
 
 fn registration_partial(
     stage: SpokeRegistrationStageV1,

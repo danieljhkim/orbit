@@ -14,33 +14,25 @@ use super::super::test_support::{
 };
 
 #[test]
-fn task_add_schema_excludes_legacy_friction_and_status_enums() {
+fn generic_task_schema_is_structural_and_owns_no_domain_enums() {
     let schema = build_input_schema("orbit.task.add", &[param("type"), param("status")]);
     let properties = schema
         .get("properties")
         .and_then(Value::as_object)
         .expect("properties");
 
-    let type_enum = properties["type"]["enum"].as_array().expect("type enum");
-    assert!(!type_enum.iter().any(|value| value == "friction"));
-
-    assert!(
-        properties["status"].get("enum").is_none(),
-        "orbit.task.add no longer advertises status at all"
-    );
+    assert!(properties["type"].get("enum").is_none());
+    assert!(properties["status"].get("enum").is_none());
 }
 
 #[test]
-fn task_update_schema_excludes_friction_status_enum() {
+fn generic_task_update_schema_is_structural() {
     let schema = build_input_schema("orbit.task.update", &[param("status")]);
     let properties = schema
         .get("properties")
         .and_then(Value::as_object)
         .expect("properties");
-    let status_enum = properties["status"]["enum"]
-        .as_array()
-        .expect("status enum");
-    assert!(!status_enum.iter().any(|value| value == "friction"));
+    assert!(properties["status"].get("enum").is_none());
 }
 
 #[test]
@@ -497,7 +489,7 @@ async fn orbit_learning_update_via_mcp_adapter_accepts_evidence_array_live_repro
 /// create-task fields with correct enums (verifiable via debug surfaces or this
 /// direct build).
 #[test]
-fn task_add_mcp_schema_exposes_trimmed_fields_with_complexity_and_model_enums() {
+fn task_add_structural_schema_exposes_trimmed_fields_without_domain_enums() {
     // Use representative params that the real add schema includes (the
     // build_input_schema only cares about the ones passed for enum injection).
     let params = vec![
@@ -539,29 +531,8 @@ fn task_add_mcp_schema_exposes_trimmed_fields_with_complexity_and_model_enums() 
         ]
     );
 
-    // complexity must have the low/medium/hard enum
-    let comp = properties.get("complexity").expect("complexity in schema");
-    let comp_enum = comp
-        .get("enum")
-        .and_then(Value::as_array)
-        .expect("complexity enum array");
-    assert_eq!(
-        comp_enum,
-        &vec![
-            Value::String("low".into()),
-            Value::String("medium".into()),
-            Value::String("hard".into())
-        ]
-    );
-
-    // model must have the four families (injected for any tool's model)
-    let model = properties.get("model").expect("model in schema");
-    let model_enum = model
-        .get("enum")
-        .and_then(Value::as_array)
-        .expect("model enum array");
-    assert!(model_enum.iter().any(|v| v == "codex"));
-    assert!(model_enum.iter().any(|v| v == "grok"));
+    assert!(properties["complexity"].get("enum").is_none());
+    assert!(properties["model"].get("enum").is_none());
 
     for removed in [
         "plan",
