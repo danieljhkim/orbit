@@ -532,14 +532,14 @@ fn task_add_and_show_tools_roundtrip_crew() {
                 "title": "Crew task",
                 "description": "Exercise crew input on the agent-facing create path.",
                 "workspace": ".",
-                "crew": "codex",
+                "crew": "sol",
             }),
             Some("codex".to_string()),
             Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds with a valid crew");
     let task_id = added["id"].as_str().expect("task id");
-    assert_eq!(added.get("crew"), Some(&json!("codex")));
+    assert_eq!(added.get("crew"), Some(&json!("sol")));
 
     let shown = runtime
         .execute_tool_command(
@@ -549,7 +549,7 @@ fn task_add_and_show_tools_roundtrip_crew() {
             Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task show tool succeeds");
-    assert_eq!(shown.get("crew"), Some(&json!("codex")));
+    assert_eq!(shown.get("crew"), Some(&json!("sol")));
 }
 
 #[test]

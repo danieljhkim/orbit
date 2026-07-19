@@ -295,8 +295,13 @@ fn workspace_list_and_show_report_effective_ship_mode() {
     let list = format_workspace_list(&registry);
     assert!(list.contains("SHIP MODE"), "{list}");
     assert!(list.contains("pr"), "{list}");
-    assert_eq!(list.find("STATUS"), list.find("active"), "{list}");
-    assert_eq!(list.find("SHIP MODE"), list.find("pr"), "{list}");
+    let mut lines = list.lines();
+    let header = lines.next().expect("workspace list header");
+    let row = lines.next().expect("workspace list row");
+    let status_column = header.find("STATUS").expect("status column");
+    let ship_mode_column = header.find("SHIP MODE").expect("ship mode column");
+    assert!(row[status_column..].starts_with("active"), "{list}");
+    assert!(row[ship_mode_column..].starts_with("pr"), "{list}");
 
     let show = format_workspace_show(&workspace, &registry.checkouts[0]);
     assert!(show.contains("ship_mode:   pr"), "{show}");

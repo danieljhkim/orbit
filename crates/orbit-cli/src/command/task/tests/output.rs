@@ -38,7 +38,7 @@ fn commented_events_are_suppressed_from_human_history() {
 
 #[test]
 fn human_history_filter_drops_only_commented_entries_and_preserves_order() {
-    let history = vec![
+    let history = [
         entry("status_changed"),
         entry("commented"),
         entry("renamed"),
