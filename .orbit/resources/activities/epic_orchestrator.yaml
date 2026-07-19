@@ -118,7 +118,6 @@ spec:
     - orbit.task.list
     - orbit.task.show
     - orbit.pipeline.invoke
-    - orbit.graph.*
     - orbit.search
   on_denial: terminate
   max_iterations: 8

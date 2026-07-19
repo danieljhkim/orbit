@@ -87,7 +87,6 @@ spec:
   tools:
     - orbit.task.*
     - orbit.friction.*
-    - orbit.graph.*
     - orbit.search
   on_denial: terminate
   max_iterations: 8

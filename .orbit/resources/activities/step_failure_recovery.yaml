@@ -82,7 +82,6 @@ spec:
     - orbit.task.*
     - orbit.friction.*
     - orbit.state.*
-    - orbit.graph.*
     - fs.read
     - fs.delete
     - proc.spawn
