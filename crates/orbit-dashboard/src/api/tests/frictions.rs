@@ -144,6 +144,53 @@ async fn create_persists_and_echoes_fields() {
 }
 
 #[tokio::test]
+async fn create_without_attribution_defaults_model_to_human() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request(
+        runtime,
+        Method::POST,
+        "/frictions".to_string(),
+        Some("http://localhost:7878"),
+        Some(json!({
+            "body": "# No attribution supplied\nDetails.",
+        })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let created = body_json(response).await;
+    assert_eq!(
+        created["model"], "human",
+        "identity-less writes attribute to the human actor label, not a model constant"
+    );
+}
+
+#[tokio::test]
+async fn create_forwards_explicit_model_attribution() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request(
+        runtime,
+        Method::POST,
+        "/frictions".to_string(),
+        Some("http://localhost:7878"),
+        Some(json!({
+            "body": "# Explicit attribution supplied\nDetails.",
+            "model": TEST_CODEX_MODEL,
+        })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let created = body_json(response).await;
+    assert_eq!(
+        created["model"], TEST_CODEX_MODEL,
+        "caller-supplied `model` is forwarded to the tool host unchanged"
+    );
+}
+
+#[tokio::test]
 async fn create_requires_localhost_origin() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
 
