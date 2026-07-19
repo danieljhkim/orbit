@@ -269,19 +269,7 @@ impl HubMcpHost {
     }
 
     fn global_call(name: &str, snapshot: RegistrySnapshotV1) -> Result<Value, OrbitError> {
-        match name {
-            "orbit.host.list" => Ok(json!({
-                "hub_machine_id": snapshot.hub_machine_id,
-                "registry_revision": snapshot.registry_revision,
-                "hosts": snapshot.hosts,
-            })),
-            "orbit.workspace.list" => Ok(json!({
-                "hub_machine_id": snapshot.hub_machine_id,
-                "registry_revision": snapshot.registry_revision,
-                "workspaces": snapshot.workspaces,
-            })),
-            _ => Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string())),
-        }
+        super::discovery::execute_discovery_tool(name, snapshot)
     }
 
     fn record_denial(&self, name: &str, context: &ToolSessionContext, denial: &OrbitError) {

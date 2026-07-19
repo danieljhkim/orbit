@@ -65,7 +65,7 @@ and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
 
 ## ADR-0228 — Local placement broker with capability-set filtering
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] registered the first operator-only, hub-placement canonical discovery tools (`orbit.host.list`, `orbit.workspace.list`) in the canonical registry and the versioned conformance fixture; [ORB-10262] implemented the local exact-checkout broker and capability enforcement; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface; [ORB-10271] implemented active registered-caller validation, operator-only friction reads, and path-free remote artifacts/responses.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] registered the first operator-only, hub-placement canonical discovery tools (`orbit.host.list`, `orbit.workspace.list`) in Remote's canonical composition and the versioned conformance fixture; [ORB-10262] implemented the local exact-checkout broker and capability enforcement; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface; [ORB-10271] implemented active registered-caller validation, operator-only friction reads, and path-free remote artifacts/responses; [ORB-10319] colocated MCP-only discovery schemas and execution in Remote while retaining the dedicated human CLI commands.
 
 ### Context
 
@@ -190,9 +190,9 @@ adapter, runtime profile/ship construction in `orbit-core`, persistence in
 - [ORB-10245] — accepted the coupled contract and recorded this ADR set.
 - [ORB-10267] — registered the `orbit.host.list` and `orbit.workspace.list` operator discovery
   tools (hub placement, operator capability, typed global/workspace-unscoped scope) in the
-  canonical builtin registry and the versioned conformance fixture, with every pre-existing tool
+  Remote-owned discovery registry and the versioned conformance fixture, with every pre-existing tool
   defaulting to typed `workspace-required`. Each discovery tool is backed by one sanitized,
-  path-free registry snapshot. C3 proves the real runtime/store action path with no session
+  path-free registry snapshot. C3 proves the real broker/store action path with no session
   workspace or checkout binding for the enumerated workspace.
 - [ORB-10262] — replaced startup cwd discovery and `EmptyMcpHost` with the canonical
   schema-listing broker, exact-checkout resolution/cache identity, placement preflight, and

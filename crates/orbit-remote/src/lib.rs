@@ -14,9 +14,10 @@
 //! catalog plus machine-local checkout roles, the atomic satellite cache, the
 //! host/workspace registry service, and remote MCP broker/hub/link composition.
 //! Shared DTOs remain in `orbit-common`; generic MCP framing remains in
-//! `orbit-mcp`; registry persistence, feature migrations, revision advancement,
-//! and transactional snapshot queries are encapsulated here over `orbit-store`'s
-//! generic SQLite connection infrastructure.
+//! `orbit-mcp`; generic builtin definitions remain in `orbit-tools`; registry
+//! persistence, feature migrations, revision advancement, and transactional
+//! snapshot queries are encapsulated here over `orbit-store`'s generic SQLite
+//! connection infrastructure.
 
 pub mod host_identity;
 pub mod host_registry;
@@ -27,7 +28,6 @@ pub mod registry_cache;
 pub mod routines;
 pub mod runtime;
 pub mod service;
-mod tools;
 pub mod workspace_registry;
 
 pub use host_identity::{

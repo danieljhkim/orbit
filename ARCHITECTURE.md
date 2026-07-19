@@ -45,6 +45,7 @@ flowchart LR
   Remote --> Core
   Remote --> MCP["orbit-mcp"]
   Remote --> Store
+  Remote --> Tools
   Remote --> Common
   Dashboard --> Remote
 ```
@@ -63,16 +64,18 @@ flowchart LR
   identity, the path-free logical workspace catalog and local checkout roles, the
   atomic satellite registry cache, `HostRegistryService`, remote runtime/routine
   composition, and the MCP broker/hub boundary including trusted `mcp.toml`, bounded
-  SSH links, spoke registration, and execution-profile publication. Shared DTOs
-  remain in `orbit-common`; generic MCP framing/client composition remains in
-  `orbit-mcp`; neutral runtime kernels remain in `orbit-core`; SQL infrastructure
-  remains in `orbit-store`. Those lower layers must never depend back on Remote.
+  SSH links, spoke registration, execution-profile publication, and canonical
+  global host/workspace discovery. Shared DTOs remain in `orbit-common`; generic
+  builtin definitions remain in `orbit-tools`; generic MCP framing/client
+  composition remains in `orbit-mcp`; neutral runtime kernels remain in
+  `orbit-core`; SQL infrastructure remains in `orbit-store`. Those lower layers
+  must never depend back on Remote.
 - **orbit-graph-extract**: pure graph extraction contracts and language-specific tree-sitter extractors for the orbit-graph migration. Owns `Extractor`, `ExtractedFile`, and raw row shapes; re-exports the stable `Selector` parser from `orbit-common::utility::selector` (consolidated in ORB-10011, ADR-0202) so graph consumers keep one import path. Depends only on `orbit-common`; no storage, async, or filesystem traversal.
 - **orbit-graph**: SQLite graph store, sync policy, watcher-backed background refresh, and query API for the orbit-graph migration. Depends on `orbit-graph-extract` for selector/extraction contracts and on `orbit-common` for the `GraphError` → `OrbitError` boundary translator (`graph_error_to_orbit`, ORB-10013); the ORB-00377 watcher work adds only the external `notify` crate and no new internal crate edge.
 - **orbit-graph-cli**: clap-based JSON command surface for orbit-graph. Depends on `orbit-graph` for sync/query dispatch and `orbit-graph-extract` for selector parsing. Exposes a small library surface (the `Command` subcommand enum and its `Command::run` dispatch) alongside the standalone binary, so `orbit-cli` can embed the same command layer under `orbit graph` without duplication (ADR-0199). Tier `internal`; the library surface is consumed only by `orbit-cli`.
 - **orbit-store**: layered store pattern (YAML + SQLite). Match existing modules when adding new ones. Depends only on `orbit-common`; the semantic vector schema is owned by `orbit-search::vector` (not `orbit-store`).
-- **orbit-tools**: tool registry plus built-in fs and policy-aware exec tools. Depends on `orbit-common`, `orbit-exec`, `orbit-policy`. (The v1 `orbit.graph.*` builtins were decommissioned in ORB-00391; the agent graph surface now lives in `orbit-mcp`'s in-process orbit-graph adapter.)
-- **orbit-mcp**: Model Context Protocol server/client adapter using `rmcp`. Depends on `orbit-common` plus `orbit-graph` / `orbit-graph-extract` for the in-process read-only `orbit.graph.*` wrappers — the sole agent-facing graph surface since the ORB-00391 v2 cutover. It owns generic server composition, injected-duplex async client primitives, and the frozen hub contract digest/negotiation without depending on `orbit-core`; `orbit-remote` owns the bounded SSH process/link pool, placement router, and hub authority [ORB-10269].
+- **orbit-tools**: generic tool registry plus built-in fs, policy-aware exec, and workspace-scoped Orbit definitions. It depends on `orbit-common`, `orbit-exec`, and `orbit-policy`; Remote-only discovery and graph definitions are composed by `orbit-remote`.
+- **orbit-mcp**: generic Model Context Protocol server/client kernel using `rmcp`. It depends only on `orbit-common` and owns framing, server composition, raw injected-duplex client primitives, and extension contracts. `orbit-remote` owns contract negotiation, schema composition, graph/learning extensions, the bounded SSH link pool, placement router, and hub authority [ORB-10269].
 - **orbit-dashboard**: read-only web dashboard (axum server + embedded HTML/JS assets + JSON API handlers for tasks, runs, scoreboard, logs, etc.). Depends on `orbit-core` (for OrbitRuntime/OrbitError and the `metrics::aggregate` knowledge-stats summary) plus axum/clap/chrono/serde; consumed by `orbit-cli` via `web serve`. Extracted from orbit-cli in ORB-00146 to isolate compile graph and co-locate assets. Public surface is `ServeArgs` plus two entry points: `serve_from_env(args)` — what `orbit web serve` actually calls; always serves every registered workspace, global mode being the only mode as of ORB-10029 — and `serve(runtime, args)` for callers that already hold an `OrbitRuntime` and want single-workspace mode embedded directly.
 - **orbit-agent**: per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, openai_compat, anthropic, ollama, mock_agent). Implements `backend: cli`, hosts HTTP `LoopTransport` primitives, and routes loop tool calls through the shared `orbit-tools` registry. Depends on `orbit-common` and `orbit-tools`.
 - **orbit-engine**: activity/job execution, template rendering, retry logic, subprocess execution, and tool-aware automation. Owns the `backend: cli` subprocess runner (`activity_job::cli_runner`), which references `orbit-agent::{Agent, AgentConfig}` directly so orbit-core stays clean of orbit-agent types. Depends on `orbit-agent`, `orbit-common`, `orbit-exec`, `orbit-store`, and `orbit-tools`.

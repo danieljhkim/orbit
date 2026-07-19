@@ -92,7 +92,8 @@ network edge per spoke: spoke → hub.
 |---------|------|------|
 | Generic MCP wire adapter and raw stream client | [crates/orbit-mcp/](../../../crates/orbit-mcp/) | [ORB-00424] |
 | Local broker, trusted hub config/server/link pool, graph and learning composition, safe surface, and audit boundary | [crates/orbit-remote/src/mcp/](../../../crates/orbit-remote/src/mcp/) | [ORB-10262], [ORB-10268], [ORB-10269] |
-| Canonical builtin schema + placement metadata | [crates/orbit-tools/src/builtin/orbit/mod.rs](../../../crates/orbit-tools/src/builtin/orbit/mod.rs) | [ORB-00424] |
+| Generic builtin schema + placement metadata | [crates/orbit-tools/src/builtin/orbit/mod.rs](../../../crates/orbit-tools/src/builtin/orbit/mod.rs) | [ORB-00424] |
+| Canonical host/workspace discovery schema, placement, and projection | [crates/orbit-remote/src/mcp/discovery.rs](../../../crates/orbit-remote/src/mcp/discovery.rs) | [ORB-10267] |
 | Canonical graph schema + placement metadata | [crates/orbit-remote/src/mcp/graph.rs](../../../crates/orbit-remote/src/mcp/graph.rs) | [ORB-00424] |
 | Runtime tool dispatch and audit provenance | [crates/orbit-core/src/command/tool.rs](../../../crates/orbit-core/src/command/tool.rs) | [ORB-00424] |
 | Hub, ownership, replica role, and run placement | [host-registry/2_design.md](../host-registry/2_design.md) | [ORB-00424] |

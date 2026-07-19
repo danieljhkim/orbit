@@ -99,7 +99,6 @@ pub enum OrbitBuiltinAction {
     FrictionStats,
     FrictionTags,
     FrictionUpdate,
-    HostList,
     LearningAdd,
     LearningList,
     LearningPrune,
@@ -132,7 +131,6 @@ pub enum OrbitBuiltinAction {
     TaskShow,
     TaskStart,
     TaskUpdate,
-    WorkspaceList,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

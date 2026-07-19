@@ -2,6 +2,7 @@
 
 mod config;
 mod contract;
+mod discovery;
 mod graph;
 mod host;
 mod hub;

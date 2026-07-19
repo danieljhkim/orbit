@@ -23,6 +23,7 @@ orbit-graph = { path = "../orbit-graph" }
 orbit-graph-extract = { path = "../orbit-graph-extract" }
 orbit-mcp = { path = "../orbit-mcp" }
 orbit-store = { path = "../orbit-store" }
+orbit-tools = { path = "../orbit-tools" }
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true

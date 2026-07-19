@@ -29,7 +29,7 @@ impl Tool for TestTool {
 fn canonical_builtin_definitions_are_workspace_independent() {
     let definitions =
         canonical_builtin_mcp_tool_definitions().expect("builtin MCP definitions are valid");
-    assert_eq!(definitions.len(), 31);
+    assert_eq!(definitions.len(), 29);
     assert!(
         definitions
             .iter()
@@ -38,23 +38,19 @@ fn canonical_builtin_definitions_are_workspace_independent() {
 }
 
 #[test]
-fn only_registry_discovery_is_global_scope() {
+fn generic_builtin_definitions_are_workspace_scoped_and_exclude_remote_discovery() {
     let definitions =
         canonical_builtin_mcp_tool_definitions().expect("builtin MCP definitions are valid");
-    let global_names = definitions
-        .iter()
-        .filter(|definition| definition.policy.scope() == McpToolScope::Global)
-        .map(|definition| definition.schema.name.as_str())
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        global_names,
-        ["orbit.host.list", "orbit.workspace.list"],
-        "all existing tools must retain the workspace-required default"
+    assert!(
+        definitions
+            .iter()
+            .all(|definition| definition.policy.scope() == McpToolScope::WorkspaceRequired)
     );
     assert!(definitions.iter().all(|definition| {
-        global_names.contains(&definition.schema.name.as_str())
-            || definition.policy.scope() == McpToolScope::WorkspaceRequired
+        !matches!(
+            definition.schema.name.as_str(),
+            "orbit.host.list" | "orbit.workspace.list"
+        )
     }));
 }
 

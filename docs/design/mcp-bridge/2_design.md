@@ -625,7 +625,9 @@ Bridge's high-level workflow tools move into Orbit:
 
 `orbit.host.list` returns stable machine identity, labels, status, last-seen, and
 workspace presence. `orbit.workspace.list` returns owner and profile freshness
-without exposing spoke absolute paths.
+without exposing spoke absolute paths. Their MCP-only schemas, policies, and
+sanitized snapshot projections live together in `orbit-remote`; dedicated human
+`orbit host list` and `orbit workspace list` commands remain separate CLI surfaces.
 
 `orbit.workflow.ship` receives explicit task IDs. It resolves task `host` through
 the hub registry; unset defaults to workspace owner. It records immutable requested/

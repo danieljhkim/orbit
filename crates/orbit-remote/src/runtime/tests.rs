@@ -1,5 +1,7 @@
 use chrono::Utc;
-use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceStatus};
+use orbit_common::types::{
+    NotFoundKind, OrbitError, Workspace, WorkspaceCheckout, WorkspaceStatus,
+};
 use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
 use serde_json::json;
 
@@ -74,8 +76,11 @@ fn registered_checkout_opens_a_bound_runtime() {
     assert_eq!(binding.repo_root, repo);
     assert_eq!(binding.ship_mode.as_input_value(), "local");
 
-    let registry = runtime
-        .run_tool("orbit.workspace.list", json!({}))
-        .expect("Remote coordination tools are attached");
-    assert_eq!(registry["workspaces"], json!([]));
+    assert!(matches!(
+        runtime.run_tool("orbit.workspace.list", json!({})),
+        Err(OrbitError::NotFound {
+            kind: NotFoundKind::Tool,
+            ..
+        })
+    ));
 }

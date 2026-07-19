@@ -61,9 +61,6 @@ pub use orbit_store::{
     ActivityInvocationMetrics, InvocationInsertParams, InvocationQuery, InvocationRecord,
     TaskInvocationMetrics, ToolInvocationMetrics,
 };
-// Canonical builtin MCP definitions are re-exported for the CLI without requiring
-// an OrbitRuntime or adding a new CLI -> orbit-tools dependency edge.
-pub use orbit_tools::canonical_builtin_mcp_tool_definitions;
 pub use orbit_tools::prepare_remote_task_artifact_put;
 
 // Command-layer types the CLI names in its clap surfaces.

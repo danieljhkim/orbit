@@ -2,6 +2,7 @@
 
 // Content moved from inline #[cfg(test)] mod tests in mcp/mod.rs per ORB-00221.
 
+mod discovery;
 mod e1;
 mod graph;
 mod learning;
@@ -504,6 +505,10 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
         || name.starts_with("orbit.learning.")
 }
 
+fn is_remote_owned_non_runtime_tool(name: &str) -> bool {
+    name.starts_with("orbit.graph.") || matches!(name, "orbit.host.list" | "orbit.workspace.list")
+}
+
 #[test]
 fn inactive_tools_are_not_in_the_mcp_safe_surface() {
     let safe_names: BTreeSet<String> = safe_mcp_tool_names().into_iter().collect();
@@ -522,7 +527,7 @@ fn inactive_tools_are_not_in_the_mcp_safe_surface() {
 }
 
 #[test]
-fn safe_surface_matches_runtime_graph_and_task_tools() {
+fn safe_surface_separates_remote_owned_and_runtime_tools() {
     let runtime = OrbitRuntime::in_memory().expect("build test runtime");
     let names: BTreeSet<String> = runtime
         .list_tools()
@@ -541,11 +546,20 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
 
     for name in safe_mcp_tool_names()
         .into_iter()
-        .filter(|name| !name.starts_with("orbit.graph."))
+        .filter(|name| !is_remote_owned_non_runtime_tool(name))
     {
         assert!(
             names.contains(&name),
             "MCP-candidate tool missing from runtime registry: {name}"
+        );
+    }
+
+    for name in ["orbit.host.list", "orbit.workspace.list"] {
+        assert!(safe_names.contains(name));
+        assert!(is_mcp_tool_exposed(name));
+        assert!(
+            !all_names.contains(name),
+            "Remote discovery must not be re-injected into Core run_tool: {name}"
         );
     }
 
@@ -629,7 +643,7 @@ fn graph_adapter_names_have_schema_adjacent_canonical_definitions() {
 }
 
 #[test]
-fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
+fn runtime_mcp_host_lists_only_core_registry_backed_safe_tools() {
     let runtime = OrbitRuntime::in_memory().expect("build test runtime");
     let host = RuntimeMcpHost { runtime };
     let listed: BTreeSet<String> = host
@@ -641,7 +655,7 @@ fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
 
     for name in safe_mcp_tool_names()
         .into_iter()
-        .filter(|name| !name.starts_with("orbit.graph."))
+        .filter(|name| !is_remote_owned_non_runtime_tool(name))
     {
         assert!(
             listed.contains(&name),
@@ -675,6 +689,12 @@ fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
             .filter(|name| name.starts_with("orbit.graph."))
             .collect::<Vec<_>>()
     );
+    for name in ["orbit.host.list", "orbit.workspace.list"] {
+        assert!(
+            !listed.contains(name),
+            "Core runtime host must not expose Remote discovery: {name}"
+        );
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -981,7 +1001,7 @@ mod audited_mcp_call_tests {
     use orbit_mcp::McpHost;
     use serde_json::json;
 
-    use super::super::host::audited_mcp_call;
+    use super::super::host::{BrokerMcpHost, audited_mcp_call};
     use super::super::learning::LearningSidecarHost;
     use super::RuntimeMcpHost;
 
@@ -1076,7 +1096,7 @@ mod audited_mcp_call_tests {
     }
 
     #[test]
-    fn runtime_mcp_host_executes_global_registry_discovery_without_session_workspace() {
+    fn broker_executes_global_registry_discovery_without_session_workspace() {
         let _guard = EnvGuard::set(&[
             ("ORBIT_AGENT_NAME", None),
             ("ORBIT_AGENT_MODEL", None),
@@ -1122,9 +1142,7 @@ mod audited_mcp_call_tests {
         let expected_revision = store.registry_revision().expect("registry revision");
         assert!(expected_revision > 0);
 
-        let host = RuntimeMcpHost {
-            runtime: runtime.clone(),
-        };
+        let host = BrokerMcpHost::new(global_root);
         let call = |tool_name: &str, call_id: &str| {
             let mut context = ToolSessionContext::trusted_local(
                 None,

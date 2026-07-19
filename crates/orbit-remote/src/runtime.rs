@@ -1,7 +1,6 @@
 //! Registry-aware composition over Core's neutral runtime seams.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use orbit_common::types::{
     OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry,
@@ -12,7 +11,6 @@ use orbit_core::runtime::{
 use orbit_core::{OrbitRuntime, resolved_ship_mode};
 use orbit_store::workspace_id_for_orbit_dir;
 
-use crate::tools::RemoteCoordinationTools;
 use crate::workspace_registry;
 
 /// Remote workspace metadata keeps the logical catalog ID distinct from the
@@ -51,8 +49,7 @@ pub fn resolved_workspace_binding(
     })
 }
 
-/// Registry-aware runtime factory. Every produced runtime has Remote's
-/// coordination tools attached; registered checkouts also carry an explicit
+/// Registry-aware runtime factory. Registered checkouts carry an explicit
 /// Core workspace binding.
 pub struct RemoteRuntimeFactory;
 
@@ -91,28 +88,24 @@ impl RemoteRuntimeFactory {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let roots = Self::resolve_roots_for_cwd(&cwd, root_override)?;
         let binding = binding_for_roots(&roots)?;
-        let global_root = roots.global_root.clone();
-        let runtime = OrbitRuntime::initialize_from_resolved_roots(roots, binding)?;
-        Ok(attach_tools(runtime, global_root))
+        OrbitRuntime::initialize_from_resolved_roots(roots, binding)
     }
 
     pub fn open_resolved_roots(roots: OrbitRuntimeRoots) -> Result<OrbitRuntime, OrbitError> {
         let binding = binding_for_roots(&roots)?;
-        let global_root = roots.global_root.clone();
-        let runtime = match binding {
+        match binding {
             Some(binding) => OrbitRuntime::from_resolved_roots_with_binding(
                 &roots.global_root,
                 &roots.shared_root,
                 &roots.local_root,
                 binding,
-            )?,
+            ),
             None => OrbitRuntime::from_resolved_roots(
                 &roots.global_root,
                 &roots.shared_root,
                 &roots.local_root,
-            )?,
-        };
-        Ok(attach_tools(runtime, global_root))
+            ),
+        }
     }
 
     pub fn open_registered_checkout(
@@ -121,9 +114,7 @@ impl RemoteRuntimeFactory {
         checkout: &WorkspaceCheckout,
     ) -> Result<OrbitRuntime, OrbitError> {
         let binding = workspace_runtime_binding(workspace, checkout)?;
-        let runtime =
-            OrbitRuntime::from_roots_with_binding(global_root, &checkout.orbit_dir, binding)?;
-        Ok(attach_tools(runtime, global_root.to_path_buf()))
+        OrbitRuntime::from_roots_with_binding(global_root, &checkout.orbit_dir, binding)
     }
 
     pub fn open_resolved_checkout(
@@ -132,18 +123,13 @@ impl RemoteRuntimeFactory {
         local_root: &Path,
         binding: WorkspaceRuntimeBinding,
     ) -> Result<OrbitRuntime, OrbitError> {
-        let runtime = OrbitRuntime::from_resolved_roots_with_binding(
+        OrbitRuntime::from_resolved_roots_with_binding(
             global_root,
             shared_root,
             local_root,
             binding,
-        )?;
-        Ok(attach_tools(runtime, global_root.to_path_buf()))
+        )
     }
-}
-
-fn attach_tools(runtime: OrbitRuntime, global_root: PathBuf) -> OrbitRuntime {
-    runtime.with_coordination_dispatcher(Arc::new(RemoteCoordinationTools::new(global_root)))
 }
 
 fn workspace_root_hint(cwd: &Path) -> Option<WorkspaceRootHint> {

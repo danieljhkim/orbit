@@ -3,15 +3,19 @@ contract: orbit-mcp-bridge-v1
 source_of_truth:
   exposed_tool_list:
     - crates/orbit-tools/src/registry.rs::canonical_builtin_mcp_tool_definitions
+    - crates/orbit-remote/src/mcp/discovery.rs::discovery_tool_definitions
     - crates/orbit-remote/src/mcp/graph.rs::graph_tool_definitions
   canonical_schema_registry:
     - crates/orbit-tools/src/registry.rs::canonical_builtin_mcp_tool_definitions
+    - crates/orbit-remote/src/mcp/discovery.rs::discovery_tool_definitions
     - crates/orbit-remote/src/mcp/graph.rs::graph_tool_definitions
   placement_metadata_owner:
     - crates/orbit-tools/src/builtin/orbit/mod.rs::register
+    - crates/orbit-remote/src/mcp/discovery.rs::discovery_tool_definitions
     - crates/orbit-remote/src/mcp/graph.rs::graph_tool_definitions
   scope_metadata_owner:
     - crates/orbit-tools/src/builtin/orbit/mod.rs::register
+    - crates/orbit-remote/src/mcp/discovery.rs::discovery_tool_definitions
     - crates/orbit-remote/src/mcp/graph.rs::graph_tool_definitions
 
 capabilities:

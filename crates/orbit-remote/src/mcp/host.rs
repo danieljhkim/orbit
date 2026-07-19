@@ -1,9 +1,8 @@
 //! MCP host implementations and audit bracketing.
 //!
-//! Registry-backed listing is sourced from
-//! [`OrbitRuntime::list_mcp_tool_definitions`], which filters disabled tools
-//! while preserving each builtin schema's adjacent MCP policy.
-//! Registry-backed and adapter-owned execution both use the runtime audit
+//! Canonical listing composes generic builtin definitions with Remote-owned
+//! discovery and graph definitions while preserving each schema's adjacent
+//! MCP policy. Runtime-backed and Remote-owned execution both use the audit
 //! boundary tagged with [`ToolEntryPoint::Mcp`], so every dispatch has the same
 //! identity-resolution rules as the CLI path. Adapter preflight lives inside
 //! that boundary; registry preflight failures are recorded explicitly before
@@ -31,7 +30,7 @@ use orbit_core::{
 };
 use orbit_mcp::McpHost;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::runtime::RemoteRuntimeFactory;
 use crate::{HostIdentityState, HostMode, inspect_host_identity};
@@ -39,7 +38,11 @@ use crate::{HostIdentityState, HostMode, inspect_host_identity};
 use super::hub_link::HubLinkPool;
 
 pub fn canonical_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
-    let mut definitions = orbit_core::canonical_builtin_mcp_tool_definitions()?;
+    let mut definitions = orbit_tools::canonical_builtin_mcp_tool_definitions()?;
+    definitions.extend(super::discovery::discovery_tool_definitions()?);
+    // Preserve the historical generic-registry order used by generated client
+    // permission arrays; graph definitions remain the trailing extension set.
+    definitions.sort_by(|left, right| left.schema.name.cmp(&right.schema.name));
     definitions.extend(super::graph::graph_tool_definitions()?);
     validate_mcp_tool_definitions(&definitions)?;
     Ok(definitions)
@@ -517,19 +520,7 @@ impl BrokerMcpHost {
 
     fn global_call(&self, name: &str) -> Result<Value, OrbitError> {
         let snapshot = crate::registry_snapshot_at(&self.global_root)?;
-        match name {
-            "orbit.host.list" => Ok(json!({
-                "hub_machine_id": snapshot.hub_machine_id,
-                "registry_revision": snapshot.registry_revision,
-                "hosts": snapshot.hosts,
-            })),
-            "orbit.workspace.list" => Ok(json!({
-                "hub_machine_id": snapshot.hub_machine_id,
-                "registry_revision": snapshot.registry_revision,
-                "workspaces": snapshot.workspaces,
-            })),
-            _ => Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string())),
-        }
+        super::discovery::execute_discovery_tool(name, snapshot)
     }
 
     fn legacy_friction_root(
