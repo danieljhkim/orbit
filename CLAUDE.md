@@ -2,19 +2,6 @@
 
 Project instructions for agents working on Orbit (loaded as both `AGENTS.md` and `CLAUDE.md`).
 
-## Resident agent
-
-**Hohmann** (`agentbase/hohmann/memory`) is Sol's resident systems engineer for Orbit. The shared
-front-door orchestrator owns cross-workspace routing, dispatch, independent review, merge, and task
-closure; Hohmann holds this repository's deep implementation context and executes one scoped Orbit
-mandate at a time.
-
-A direct Hohmann run must use Bridge `agent_invoke` with `provider="codex"` and
-`model="gpt-5.6-sol"`; its prompt reads the on-box Hohmann memory layer first and states "you are
-Hohmann, Sol's Orbit systems engineer." Generic Codex/Claude runs and independent Opus/Fable
-reviewers may work on Orbit, but they do not impersonate Hohmann. The full invocation and
-cross-codebase handoff contract lives in Hohmann's `CLAUDE.md`.
-
 ## Rules
 
 - **Don't commit** until the Orbit task has been explicitly approved by the human.
@@ -32,24 +19,12 @@ cross-codebase handoff contract lives in Hohmann's `CLAUDE.md`.
 
 `make ci-fast` (fmt-check + guardrail scripts; no compile) must pass before a task moves to `review`. The full `make ci` is the canonical merge gate via [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on every PR — don't run it per task locally.
 
-## Agent Read Exclusions
-
-Team-wide `Read()` exclusions (build artifacts, runtime state) live in [`.claude/settings.json`](.claude/settings.json) under `permissions.deny`. If you work on the excluded content itself (e.g. benchmark harness output), override locally in `.claude/settings.local.json` with a matching `allow` rule — don't relax the committed list.
 
 ## Architecture
 
 Crate layering, per-crate responsibilities, and scoping rules live in [`ARCHITECTURE.md`](ARCHITECTURE.md). Read it before adding a new crate, a new dependency edge, or a new persisted artifact.
 
 Reusable codebase-specific patterns (Command, RAII guard, newtype, crate-boundary error translation) live in [`docs/design-patterns/`](docs/design-patterns/). When you reach for one of those shapes, copy from the documented reference instead of inventing a new one.
-
-## Code Navigation
-
-This repo has a semantic graph available via the `orbit` MCP server (no live LSP):
-
-- **Definition / signature lookup** → `orbit_graph_search`, then `orbit_graph_show` for file:line, signature, and doc comment without a `Read`. Selectors take the form `symbol:<file>#<name>:<kind>`; use a method-on-impl selector or `source_regex` when a plain name is ambiguous, and `include_non_code` for doc/config matches.
-- **Find references / callers (who uses X?)** → **`orbit_graph_refs`** with `include: "all"`, *not* `orbit_graph_callers`. The `callers` index misses cross-crate calls that go through `pub use` re-exports (e.g. a symbol defined in `orbit-common`, re-exported from `orbit-core`, called in another crate), so it routinely returns empty for real public functions. `orbit_graph_refs` surfaces the actual call sites plus re-export points.
-- **Ground-truth fallback** → `rg --type rust 'symbol_name'`. Use when `refs` looks incomplete or you need to see exact textual context (macro call sites, doc references, etc.).
-- **From a plain shell (no MCP)** → the same queries are bundled in the main `orbit` binary as `orbit graph <sub>` (`search`/`show`/`refs`/`callees`/`impact`/`deps`/`trace`/`overview`/`implementors`, plus `sync`). In-process the MCP tools are faster — reach for the CLI only when the graph tools aren't available.
 
 ## Design Docs
 
@@ -84,5 +59,3 @@ Conventions (not lint-enforced):
 ## Orbit Workflow
 
 For any Orbit lifecycle work (creating tasks, executing, reviewing, raising PRs), invoke the relevant `orbit-*` skill. The `orbit` skill is the entry point and router. Task authoring quality standards live in `orbit-task`.
-
-Planning-duel scoreboards, when a duel has run, appear under `.orbit/state/scoreboard/` (e.g. `duel_plan.json`) — workspace-local runtime state, gitignored, so the path won't exist until then.
