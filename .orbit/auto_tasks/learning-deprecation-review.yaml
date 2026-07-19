@@ -1,0 +1,69 @@
+schemaVersion: 1
+name: learning-deprecation-review
+description: Recurring report-only review that surfaces potentially stale learnings via execution_summary
+enabled: true
+schedule:
+  cron: 0 5 * * 1
+template:
+  title: Review the learning corpus for deprecation candidates
+  description: |
+    Review this workspace's project learnings and surface the ones that look
+    stale. This is a REPORT-ONLY review: the entire deliverable is a ranked
+    list of candidate learnings, each with evidence, written into this task's
+    `execution_summary`. Do NOT deprecate, delete, supersede, archive, or
+    otherwise change any learning, and do NOT introduce any new learning state
+    — curation decisions are applied separately by a human or the orchestrator
+    through the existing `orbit learning update` / archival surface.
+
+    Gather evidence from two sources and reason from them; there are no
+    hard-coded staleness thresholds, so use judgment.
+
+    1. Usage rollups — run `orbit learning stats --json` (falls back to
+       `orbit tool run orbit.learning.stats` where the CLI is unavailable).
+       Each row carries `injected_count`, `shown_count`, `shown_ratio`,
+       `last_injected_at`, and `last_shown_at`. Combine with each learning's
+       age from `orbit learning list --json` (`created_at` / `updated_at`).
+       A learning that is old and has never been injected or shown, or that is
+       injected but never shown (agents ignore it), is a candidate.
+    2. Anchor health — from `orbit learning list --json`, inspect each active
+       learning's `scope.paths`. Flag:
+         * empty path scopes (`scope.paths == []`) — the injection hook keys on
+           path globs, so an empty scope can never inject on tool use;
+         * path globs that match nothing in the current tree (the anchored
+           file/dir no longer exists, or the glob was written for a different
+           repo layout) — these silently never fire.
+
+    Cross-reference the two signals, then write into `execution_summary` a
+    ranked list of the potentially stale learnings. For each, cite the concrete
+    evidence (counts, ratios, timestamps, the offending glob) and a one-line
+    rationale. Rank by leverage: over-broad or dead globs and never-useful
+    injections first. Note learnings you considered but are keeping, and why.
+
+    Fail open. If `orbit learning stats` reports no events (empty rollup), or
+    the usage/anchor data is otherwise missing or empty, report that nothing
+    looks stale rather than erroring — an empty corpus or a fresh workspace
+    with no audit history is a valid "nothing to deprecate" outcome, not a
+    failure.
+
+    Calibration: the 2026-07-18 learning-hook relevancy audit
+    (`operations/reports/2026-07-18-learning-hook-relevancy-audit.md`) flagged
+    L-0074, L-0077, L-0068, and L-0041 (over-broad / layout-mismatched globs)
+    plus the six empty-path learnings. The first cycle should reproduce that
+    candidate set, or explain in the summary why any candidate now differs
+    (e.g. a glob was already narrowed, or a learning was superseded).
+  acceptance_criteria:
+  - Potentially stale learnings are listed in execution_summary, each with concrete evidence (usage counts/ratios/timestamps and/or anchor-health findings).
+  - No learning was deprecated, deleted, superseded, archived, or given a new state — the run is report-only.
+  - An empty or missing usage rollup produced a "nothing stale" report rather than an error.
+  task_type: chore
+  tags:
+  - learning-deprecation
+  - no-diff-expected
+  priority: medium
+  crew: opus
+  status: backlog
+dedupe: skip_if_open
+created_by: system
+created_at: 2026-07-19T00:00:00Z
+updated_by: claude
+updated_at: 2026-07-19T00:00:00Z

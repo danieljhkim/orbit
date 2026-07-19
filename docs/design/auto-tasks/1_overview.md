@@ -1,7 +1,7 @@
 ---
 title: Auto-tasks — Overview
 owner: claude
-last_updated: 2026-07-12
+last_updated: 2026-07-19
 status: Accepted
 feature: auto-tasks
 doc_role: overview
@@ -10,7 +10,7 @@ summary: Dynamically-defined recurring task templates minted by one generic sche
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ADR-0218, ADR-0217]
+related_artifacts: [ORB-10149, ORB-10318, ADR-0218, ADR-0217]
 ---
 
 # Auto-tasks — Overview
@@ -36,8 +36,11 @@ becomes just the first definition.
 - **Definition** — a `.orbit/auto_tasks/<name>.yaml` record; `name` is identity.
   Modeled on the file-backed routine convention (directory scan, fail-closed
   parse, `deny_unknown_fields`), not the SQLite-indexed learning/ADR convention.
-- **Schedule** — a 5-field `cron` or an `every_minutes` interval. Catch-up
-  always collapses: a downtime gap mints one make-up task, not one per slot.
+- **Schedule (cadence)** — a 5-field `cron` or an `every_minutes` interval, in
+  the definition's `schedule` field. Catch-up always collapses: a downtime gap
+  mints one make-up task, not one per slot. Cadence is per-definition data, not
+  a knob in the identity `config.yaml` ([L-0014] keeps runtime config out of
+  `config.yaml`).
 - **Cursor** — per-definition last-fired state, host-local at
   `<orbit_dir>/state/auto-tasks.json`, so the git-versioned definition is never
   churned by a scheduler fire.
@@ -61,9 +64,17 @@ becomes just the first definition.
 | Deterministic action | `crates/orbit-core/src/runtime/v2_host/dispatch.rs` | ORB-10149 |
 | Seeded assets | `crates/orbit-core/assets/{activities,jobs,routines}/…` | ORB-10149 |
 
+## Definitions shipped in this repo
+
+- `qa-sweep` — hands-on validation of recent changes (ORB-10148).
+- `learning-deprecation-review` — report-only weekly review that lists stale
+  learning candidates (usage rollups + anchor health) via `execution_summary`;
+  never mutates learnings (ORB-10318, [project-learnings §7.6](../project-learnings/2_design.md#76-recurring-deprecation-review-auto-task)).
+
 ## Task References
 
 - ORB-10149 — Auto-task primitive.
 - ORB-10148 — qa-sweep V1 (first definition; depends on this).
+- ORB-10318 — learning-deprecation-review definition (report-only stale-learning review).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
