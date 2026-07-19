@@ -1,26 +1,25 @@
 ## Context
 
-The code graph is currently exposed on two surfaces: the `orbit graph` CLI (`orbit-graph-cli`, structured JSON on stdout/stderr) and 10 `orbit.graph.*` MCP tools served by `orbit-remote/src/mcp/graph.rs` (~600 lines mirroring the CLI, plus schema/e1 tests) off a long-lived `GraphToolRegistry` that caches per-repo `Graph` handles with debounced sync. `orbit-common`'s tool allowlist bakes in the `orbit.graph.` wildcard root, and the allowlist comment notes the tools are served in-process for agent runs.
+The code graph is exposed via the `orbit graph` CLI (`orbit-graph-cli`, structured JSON on stdout/stderr) and 10 `orbit.graph.*` MCP tools served by `orbit-remote/src/mcp/graph.rs` (~588 LOC, `GraphToolRegistry`, 10 schemas) on the broker composition. Investigation during ORB-10325 established the true topology: there is ONE broker surface serving both engine roles and local editors identically; the hub (the only real remote surface) already registers graph `recognition_only` and Bridge omits graph entirely. No separable "external exposure" exists at the broker.
 
-The consumer profile does not match the external MCP surface. Graph is code intel for agents sitting inside a repo checkout with shell access (in-session repo agents, worker leaf runs), all of which can invoke the CLI directly. Orchestrators do not do deep code navigation per the router boundary, and Bridge's MCP surface already omits graph.
+Guiding lesson (2026-07-18): adopt a tool for the smallest footprint where it's the best option — extra capability doesn't justify the extra space it claims.
 
-Guiding lesson (2026-07-18): adopt a tool for the smallest footprint where it's the best option — a tool that's too broad overlaps existing pieces and creates incompatibility, and past a point extra capability doesn't justify the extra space it claims.
+## Decision (second amendment, 2026-07-19)
 
-## Decision (amended 2026-07-19 — see Amendment)
+Full removal restored. Remove the `orbit.graph.*` MCP tools from the broker surface entirely; `orbit graph` CLI (structured JSON) becomes the sole graph surface.
 
-Rescoped: remove `orbit.graph.*` from the **external/remote MCP surface only**. The **in-process graph tool serving for engine-internal shell-less roles is retained** — it is load-bearing (see Amendment). Agents with shell access use `orbit graph <cmd>`, which already emits structured JSON.
+The first amendment kept in-process serving because the planning-duel planner/arbiter roles are shell-less and their instructions mandate graph navigation. Daniel's ruling: that dependency is prompt-imposed, not intrinsic — planning duels do not need call-graph-verified precision at authoring time; blast-radius verification belongs to the implement/review activities, which have shell and can run `orbit graph` directly. Accordingly:
 
-Do not build a separate graph MCP server now. `orbit-graph` is a clean crate boundary, so packaging it later stays cheap. The trigger for a standalone server would be an **external** consumer with MCP access but no shell; internal engine roles are served in-process.
+1. Rewrite `PLANNING_DUEL_INSTRUCTION` and `ARBITER_INSTRUCTION` (`orbit-engine/.../planning_duel/roles.rs`) to plan and adjudicate via `fs.read` and search-level navigation, dropping the mandates that require graph tools; remove the 8 graph tool grants from `planner_activity`/`arbiter_activity`.
+2. Remove `graph.rs`, the broker `advertised(graph)` and hub `recognition_only(graph)` registrations, graph entries in `canonical_mcp_tool_definitions`/`safe_mcp_tool_names`, schema metadata, and the graph-exercising tests/snapshots.
+3. Remove graph entries from `tool_allowlist.rs` (all in-process consumers are gone once duel roles and vestigial grants are cleaned); drop vestigial grants in `dispatch_agent.yaml`/`epic_orchestrator.yaml`; repoint `deterministic_reference.yaml`'s fixture.
+4. Shell-holding activities (agent_implement, agent_review, step_failure_recovery) use the `orbit graph` CLI via `proc.spawn`, as they already can.
 
-## Amendment (2026-07-19)
-
-The original decision assumed no shell-less consumer of the graph MCP tools existed. The ORB-10325 pre-flight audit falsified this: the planning-duel PLANNER and ARBITER roles (`orbit-engine/.../planning_duel/roles.rs`) are deliberately shell-less (`proc_allowed_programs` empty, no `proc.spawn`) and their instructions centrally require graph navigation (enumerate callers by name, bound blast radius, confirm import direction). `fs.read` cannot substitute, and granting them `proc.spawn` on the `orbit` binary would widen two read-only roles to the full orbit CLI including durable writes — a larger footprint violation than the one this ADR removes. Decision rescoped accordingly: external exposure removed, in-process serving retained.
-
-Implementation must first quantify how much code is exclusive to the external exposure versus shared with the in-process path; if the external-only share is trivial, report that instead of making a cosmetic change.
+Do not build a separate graph MCP server. The trigger remains an external consumer with MCP access but no shell; none exists.
 
 ## Consequences
 
-- The external MCP surface stops advertising 10 graph tool schemas; code exclusive to that exposure and its tests are removed. In-process serving for engine roles is unchanged and covered by tests.
-- Vestigial graph grants in shell-less activities that never invoke graph tools (`dispatch_agent.yaml`, `epic_orchestrator.yaml`) are dropped; `deterministic_reference.yaml`'s fixture is repointed. `tool_allowlist.rs` graph entries REMAIN valid for in-process roles.
-- Cost: the split surface (in-process yes, external no) is a subtler contract than "CLI only" — docs must state it explicitly, and the shared `GraphToolRegistry` maintenance largely remains.
-- Cost: any future external shell-less consumer still requires building the deferred separate MCP server.
+- The broker sheds 10 tool schemas from every connecting client's tools/list (engine roles and local editors alike), ~588 LOC of serving code, and the graph test/snapshot surface; the `GraphToolRegistry` cache/staleness class disappears.
+- Planning-duel planner/arbiter lose symbol-graph navigation; their instructions are correspondingly rewritten to a plan-level standard of evidence. Risk accepted by Daniel: plan precision claims are verified downstream at implement/review, which retain full graph access via CLI.
+- Cost: if duel plan quality measurably degrades without graph navigation, the remedy is granting those roles a narrowly scoped capability or revisiting this ADR — a deliberate future decision, not a silent re-add.
+- Cost: any future shell-less consumer requires building the deferred separate MCP server.
