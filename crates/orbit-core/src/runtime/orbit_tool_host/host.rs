@@ -773,6 +773,16 @@ impl HubCoordinationExecutor {
     ) -> Result<Value, OrbitError> {
         let root = self.friction_root()?;
         match action {
+            OrbitBuiltinAction::FrictionList => {
+                let mut value = super::friction_tools::list_at_root(&root, input)?;
+                strip_private_friction_paths(&mut value);
+                Ok(value)
+            }
+            OrbitBuiltinAction::FrictionShow => {
+                let mut value = super::friction_tools::show_at_root(&root, input)?;
+                strip_private_friction_paths(&mut value);
+                Ok(value)
+            }
             OrbitBuiltinAction::FrictionTags => Ok(json!(friction_tags(&root)?)),
             OrbitBuiltinAction::FrictionAdd => {
                 let model = model
@@ -853,6 +863,8 @@ impl OrbitToolHost for HubCoordinationExecutor {
             | OrbitBuiltinAction::ReviewThreadReply
             | OrbitBuiltinAction::ReviewThreadResolve => self.review(action, input, agent, model),
             OrbitBuiltinAction::FrictionAdd
+            | OrbitBuiltinAction::FrictionList
+            | OrbitBuiltinAction::FrictionShow
             | OrbitBuiltinAction::FrictionTags
             | OrbitBuiltinAction::FrictionUpdate => self.friction(action, input, model),
             _ => Err(OrbitError::InvalidInput(format!(
@@ -876,12 +888,18 @@ fn raw_clearable(input: &Value, field: &str) -> Result<Option<Option<String>>, O
 fn friction_json(
     stored: orbit_store::friction_store::StoredFrictionRecord,
 ) -> Result<Value, OrbitError> {
-    let mut value = serde_json::to_value(&stored.record)
-        .map_err(|error| OrbitError::Store(format!("serialize friction record: {error}")))?;
-    if let Some(object) = value.as_object_mut() {
-        object.insert("path".to_string(), json!(stored.path.to_string_lossy()));
+    serde_json::to_value(&stored.record)
+        .map_err(|error| OrbitError::Store(format!("serialize friction record: {error}")))
+}
+
+fn strip_private_friction_paths(value: &mut Value) {
+    match value {
+        Value::Array(items) => items.iter_mut().for_each(strip_private_friction_paths),
+        Value::Object(object) => {
+            object.remove("path");
+        }
+        _ => {}
     }
-    Ok(value)
 }
 
 impl OrbitToolHost for RuntimeOrbitToolHost {
@@ -1056,7 +1074,18 @@ mod checkoutless_hub_tests {
                 context,
             )
             .expect("add friction");
-        let path = PathBuf::from(result["path"].as_str().expect("friction path"));
-        assert!(path.starts_with(root.path().join("frictions/workspaces/ws_checkoutless")));
+        assert!(result.get("path").is_none(), "hub responses are path-free");
+        let month = Utc::now().format("%Y-%m").to_string();
+        let directory = root
+            .path()
+            .join("frictions/workspaces/ws_checkoutless")
+            .join(month);
+        assert!(
+            std::fs::read_dir(directory)
+                .expect("workspace friction month")
+                .flatten()
+                .any(|entry| entry.path().extension().is_some_and(|ext| ext == "md")),
+            "friction persisted in the canonical workspace partition"
+        );
     }
 }

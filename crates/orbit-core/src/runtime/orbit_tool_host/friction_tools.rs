@@ -43,6 +43,10 @@ pub(super) fn add(
 }
 
 pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+    list_at_root(&runtime.data_root().join("frictions"), input)
+}
+
+pub(super) fn list_at_root(root: &std::path::Path, input: Value) -> Result<Value, OrbitError> {
     let month_bounds = optional_string(&input, "month")?
         .map(|raw| parse_month_bounds(&raw))
         .transpose()?;
@@ -67,7 +71,7 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     };
     let limit = optional_usize(&input, "limit")?;
     let offset = optional_usize(&input, "offset")?.unwrap_or(0);
-    let records = list_frictions(&runtime.data_root().join("frictions"), &filter)?;
+    let records = list_frictions(root, &filter)?;
     Ok(Value::Array(
         records
             .into_iter()
@@ -79,8 +83,12 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
 }
 
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+    show_at_root(&runtime.data_root().join("frictions"), input)
+}
+
+pub(super) fn show_at_root(root: &std::path::Path, input: Value) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
-    let Some(stored) = show_friction(&runtime.data_root().join("frictions"), &id)? else {
+    let Some(stored) = show_friction(root, &id)? else {
         return Err(OrbitError::InvalidInput(format!(
             "friction record not found: {id}"
         )));

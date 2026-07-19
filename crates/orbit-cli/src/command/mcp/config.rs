@@ -94,6 +94,35 @@ impl TrustedMcpConfig {
         }
         Ok((hub, effective))
     }
+
+    /// Resolve one deterministic scalar capability for the private bootstrap
+    /// registration request. Registration requires no operator privilege and
+    /// never expands the configured set: agent is preferred for ordinary
+    /// workstations, then operator, then runner-only pollers.
+    pub(super) fn spoke_registration_route(
+        &self,
+        identity: &HostIdentity,
+    ) -> Result<(&TrustedHubConfig, McpCapability), OrbitError> {
+        let hub = self.hub.as_ref().ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "spoke '{}' ({}) has no trusted hub route in machine-global {MCP_TOML_FILE}",
+                identity.host_id, identity.machine_id
+            ))
+        })?;
+        let capability = [
+            McpCapability::Agent,
+            McpCapability::Operator,
+            McpCapability::Runner,
+        ]
+        .into_iter()
+        .find(|capability| hub.allowed_capabilities.contains(capability))
+        .ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "trusted hub route in machine-global {MCP_TOML_FILE} grants no registration capability"
+            ))
+        })?;
+        self.spoke_route(identity, Some(capability))
+    }
 }
 
 impl TrustedHubConfig {

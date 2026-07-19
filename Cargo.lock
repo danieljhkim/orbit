@@ -2207,6 +2207,7 @@ dependencies = [
  "orbit-mcp",
  "predicates",
  "regex",
+ "rmcp",
  "rusqlite",
  "serde",
  "serde_json",

@@ -633,6 +633,18 @@ impl BrokerMcpHost {
                 object.insert("workspace".to_string(), Value::String(workspace_id.clone()));
             }
             if self.is_spoke()? {
+                if name == "orbit.task.artifact.put" {
+                    input = match orbit_core::prepare_remote_task_artifact_put(
+                        input,
+                        std::env::current_dir().ok().as_deref(),
+                    ) {
+                        Ok(prepared) => prepared,
+                        Err(error) => {
+                            self.record_preflight_denial(name, &Value::Null, &context, &error);
+                            return Err(error);
+                        }
+                    };
+                }
                 return self.remote_hub_call(name, input, context, Some(&workspace_id));
             }
             let legacy_root = self.legacy_friction_root(&workspace_id, binding.as_ref());

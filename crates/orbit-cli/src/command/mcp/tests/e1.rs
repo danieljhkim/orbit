@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 
 use chrono::Utc;
 use orbit_common::types::{
-    AuditEventStatus, McpCapability, McpToolPlacement, McpTransport, ToolSessionContext, Workspace,
+    AuditEventStatus, HostRegistration, McpCapability, McpToolPlacement, McpTransport,
+    SPOKE_REGISTRATION_METHOD_V1, SPOKE_REGISTRATION_SCHEMA_VERSION, SpokeRegistrationRequestV1,
+    SpokeRegistrationStageV1, ToolSessionContext, Workspace, WorkspacePresenceDeclaration,
     WorkspaceRegistry, WorkspaceStatus,
 };
 use orbit_core::runtime::HubCoordinationExecutor;
@@ -75,6 +77,31 @@ fn context(capability: McpCapability, call_id: &str) -> ToolSessionContext {
     context.effective_capabilities = BTreeSet::from([capability]);
     context.mcp_call_id = Some(call_id.to_string());
     context
+}
+
+fn remote_context(capability: McpCapability, call_id: &str) -> ToolSessionContext {
+    ToolSessionContext {
+        caller_machine_id: Some("hm_spoke".to_string()),
+        caller_host_id: Some("spoke".to_string()),
+        transport: Some(McpTransport::SshMcp),
+        effective_capabilities: BTreeSet::from([capability]),
+        origin_session_id: Some("remote-session".to_string()),
+        mcp_call_id: Some(call_id.to_string()),
+        ..ToolSessionContext::default()
+    }
+}
+
+fn spoke_registration(machine_id: &str, host_id: &str) -> SpokeRegistrationRequestV1 {
+    SpokeRegistrationRequestV1 {
+        schema_version: SPOKE_REGISTRATION_SCHEMA_VERSION,
+        identity: HostRegistration {
+            machine_id: machine_id.to_string(),
+            host_id: host_id.to_string(),
+            labels: BTreeSet::new(),
+        },
+        presence: Vec::new(),
+        profiles: Vec::new(),
+    }
 }
 
 fn valid_config() -> &'static str {
@@ -294,7 +321,15 @@ fn hub_listing_uses_one_canonical_placement_and_capability_predicate() {
         .map(|definition| definition.schema.name)
         .collect::<BTreeSet<_>>();
     assert!(operator_names.contains("orbit.host.list"));
+    assert!(operator_names.contains("orbit.friction.list"));
+    assert!(operator_names.contains("orbit.friction.show"));
     assert!(operator_names.contains("orbit.friction.update"));
+    assert!(!agent_names.contains("orbit.friction.list"));
+    assert!(!agent_names.contains("orbit.friction.show"));
+    assert!(
+        !operator_names.contains(SPOKE_REGISTRATION_METHOD_V1),
+        "private registration must never enter tools/list definitions"
+    );
 
     let runner = HubMcpHost::new(root.path().to_path_buf(), McpCapability::Runner).expect("runner");
     assert!(
@@ -304,6 +339,153 @@ fn hub_listing_uses_one_canonical_placement_and_capability_predicate() {
             .is_empty(),
         "D1 currently declares no runner-capability hub tools"
     );
+}
+
+#[test]
+fn unknown_remote_caller_can_only_register_and_retirement_invalidates_open_peer() {
+    let root = tempfile::tempdir().expect("global root");
+    write_identity(&root, "hub", "hm_hub");
+    stamp_store(&root, "hm_hub");
+    let host =
+        HubMcpHost::new(root.path().to_path_buf(), McpCapability::Operator).expect("hub host");
+
+    let unknown = host
+        .call_tool(
+            "orbit.host.list",
+            json!({}),
+            remote_context(McpCapability::Operator, "mcall-before-register"),
+        )
+        .expect_err("unknown caller denied before discovery");
+    assert!(unknown.to_string().contains("not registered"));
+
+    let mismatch = host
+        .private_register_spoke(
+            spoke_registration("hm_other", "other"),
+            remote_context(McpCapability::Operator, "mcall-mismatch"),
+        )
+        .expect("private method supported")
+        .expect("typed result");
+    assert!(!mismatch.complete);
+    assert!(mismatch.last_committed_stage.is_none());
+
+    let registered = host
+        .private_register_spoke(
+            spoke_registration("hm_spoke", "spoke"),
+            remote_context(McpCapability::Operator, "mcall-register"),
+        )
+        .expect("private method supported")
+        .expect("typed result");
+    assert!(registered.complete);
+    assert_eq!(
+        registered
+            .snapshot
+            .as_ref()
+            .expect("snapshot")
+            .hosts
+            .iter()
+            .filter(|entry| entry.machine_id == "hm_spoke")
+            .count(),
+        1
+    );
+    let before_hidden_call = orbit_core::host_registry::registry_snapshot_at(root.path())
+        .expect("snapshot before guessed ordinary call");
+    let hidden = host
+        .call_tool(
+            SPOKE_REGISTRATION_METHOD_V1,
+            serde_json::to_value(spoke_registration("hm_spoke", "spoke"))
+                .expect("registration JSON"),
+            remote_context(McpCapability::Operator, "mcall-guessed-registration"),
+        )
+        .expect_err("ordinary tools/call cannot invoke the private method");
+    assert!(hidden.to_string().contains("not found"));
+    let after_hidden_call = orbit_core::host_registry::registry_snapshot_at(root.path())
+        .expect("snapshot after guessed ordinary call");
+    assert_eq!(
+        after_hidden_call.registry_revision, before_hidden_call.registry_revision,
+        "guessed private name created no registry mutation"
+    );
+    host.call_tool(
+        "orbit.host.list",
+        json!({}),
+        remote_context(McpCapability::Operator, "mcall-after-register"),
+    )
+    .expect("registered active caller admitted");
+
+    orbit_core::host_registry::host_registry_service_at(root.path())
+        .expect("service")
+        .retire("hm_spoke")
+        .expect("retire spoke");
+    let retired = host
+        .call_tool(
+            "orbit.host.list",
+            json!({}),
+            remote_context(McpCapability::Operator, "mcall-after-retire"),
+        )
+        .expect_err("retirement invalidates already-open peer");
+    assert!(retired.to_string().contains("retired"));
+}
+
+#[test]
+fn registration_reports_registry_commit_before_projection_failure_and_can_repair() {
+    let root = tempfile::tempdir().expect("global root");
+    write_identity(&root, "hub", "hm_hub");
+    stamp_store(&root, "hm_hub");
+    add_checkoutless_workspace(&root, "ws_checkoutless");
+    let host = HubMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("hub host");
+
+    let mut invalid = spoke_registration("hm_spoke", "spoke");
+    invalid.presence.push(WorkspacePresenceDeclaration {
+        workspace_id: "ws_unknown".to_string(),
+        root: root.path().join("spoke-checkout"),
+        last_verified: Utc::now(),
+    });
+    let partial = host
+        .private_register_spoke(
+            invalid,
+            remote_context(McpCapability::Agent, "mcall-register-partial"),
+        )
+        .expect("private method supported")
+        .expect("typed partial result");
+    assert!(!partial.complete);
+    assert_eq!(
+        partial.last_committed_stage,
+        Some(SpokeRegistrationStageV1::Registry)
+    );
+    assert_eq!(
+        partial.host.as_ref().map(|host| host.machine_id.as_str()),
+        Some("hm_spoke")
+    );
+    assert!(partial.snapshot.is_none());
+
+    let snapshot = orbit_core::host_registry::registry_snapshot_at(root.path())
+        .expect("registry after projection failure");
+    assert!(
+        snapshot
+            .hosts
+            .iter()
+            .any(|host| host.machine_id == "hm_spoke"),
+        "the committed registration is not rolled back"
+    );
+
+    let mut repaired = spoke_registration("hm_spoke", "spoke");
+    repaired.presence.push(WorkspacePresenceDeclaration {
+        workspace_id: "ws_checkoutless".to_string(),
+        root: root.path().join("spoke-checkout"),
+        last_verified: Utc::now(),
+    });
+    let complete = host
+        .private_register_spoke(
+            repaired,
+            remote_context(McpCapability::Agent, "mcall-register-repair"),
+        )
+        .expect("private method supported")
+        .expect("typed complete result");
+    assert!(complete.complete);
+    assert_eq!(
+        complete.last_committed_stage,
+        Some(SpokeRegistrationStageV1::Snapshot)
+    );
+    assert_eq!(complete.presence_workspace_ids, ["ws_checkoutless"]);
 }
 
 #[test]

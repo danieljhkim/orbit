@@ -2,12 +2,16 @@
 
 use std::time::Duration;
 
-use orbit_common::types::{McpCapability, McpTransport, OrbitError, ToolSessionContext};
+use orbit_common::types::{
+    McpCapability, McpTransport, OrbitError, SPOKE_REGISTRATION_METHOD_V1,
+    SpokeRegistrationRequestV1, SpokeRegistrationResultV1, ToolSessionContext,
+};
 use rmcp::ServiceExt;
 use rmcp::model::{
-    CallToolRequest, CallToolRequestParams, ClientInfo, ClientRequest, Meta, ServerResult,
+    CallToolRequest, CallToolRequestParams, ClientInfo, ClientRequest, CustomRequest, ErrorCode,
+    Meta, ServerResult,
 };
-use rmcp::service::{PeerRequestOptions, RoleClient, RunningService};
+use rmcp::service::{PeerRequestOptions, RoleClient, RunningService, ServiceError};
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -145,6 +149,110 @@ impl OrbitMcpClient {
         Ok(structured)
     }
 
+    /// Execute the single connector-private registration request exactly once.
+    ///
+    /// The initialize contract has already been verified by [`Self::connect`].
+    /// A typed partial result is definitive; a transport/protocol loss after
+    /// handoff is outcome-unknown and is never replayed here.
+    pub async fn register_spoke(
+        &self,
+        request: &SpokeRegistrationRequestV1,
+        context: &ToolSessionContext,
+        request_timeout: Duration,
+    ) -> Result<SpokeRegistrationResultV1, OrbitError> {
+        request.validate()?;
+        validate_remote_call_context(context, self.contract.effective_capability)?;
+        if context.workspace.is_some() || context.workspace_id.is_some() {
+            return Err(OrbitError::InvalidInput(
+                "private spoke registration is global and must not carry a workspace selector"
+                    .to_string(),
+            ));
+        }
+        let mcp_call_id = context
+            .mcp_call_id
+            .as_deref()
+            .ok_or_else(|| OrbitError::InvalidInput("remote MCP call requires mcp_call_id".into()))?
+            .to_string();
+        let params = serde_json::to_value(request).map_err(|error| {
+            OrbitError::InvalidInput(format!(
+                "serialize private spoke registration request: {error}"
+            ))
+        })?;
+        if !params.is_object() {
+            return Err(OrbitError::InvalidInput(
+                "private spoke registration request must serialize as a JSON object".to_string(),
+            ));
+        }
+        let request = ClientRequest::CustomRequest(CustomRequest::new(
+            SPOKE_REGISTRATION_METHOD_V1,
+            Some(params),
+        ));
+        let mut meta = Map::new();
+        meta.insert(
+            "orbit".to_string(),
+            json!({ REMOTE_SESSION_META_KEY: context }),
+        );
+        let mut options = PeerRequestOptions::default();
+        options.timeout = Some(request_timeout);
+        options.meta = Some(Meta(meta));
+        let handle = self
+            .service
+            .peer()
+            .send_request_with_option(request, options)
+            .await
+            .map_err(|error| {
+                OrbitError::HubUnavailable(format!(
+                    "hub registration request was not handed to the initialized peer: {error}"
+                ))
+            })?;
+        let response = match handle.await_response().await {
+            Ok(response) => response,
+            Err(ServiceError::McpError(error)) if error.code == ErrorCode::METHOD_NOT_FOUND => {
+                return Err(OrbitError::HubNegotiation(format!(
+                    "verified hub does not implement {SPOKE_REGISTRATION_METHOD_V1}"
+                )));
+            }
+            Err(ServiceError::McpError(error)) if error.code == ErrorCode::INVALID_PARAMS => {
+                return Err(OrbitError::RemoteTool {
+                    code: "invalid_input".to_string(),
+                    message: error.message.into_owned(),
+                    payload: error.data.unwrap_or(Value::Null),
+                });
+            }
+            Err(error) => {
+                return Err(OrbitError::OutcomeUnknown {
+                    mcp_call_id,
+                    message: format!(
+                        "hub registration response failed after request handoff: {error}"
+                    ),
+                });
+            }
+        };
+        let ServerResult::CustomResult(result) = response else {
+            return Err(OrbitError::OutcomeUnknown {
+                mcp_call_id,
+                message: "hub returned a non-registration result after request handoff".to_string(),
+            });
+        };
+        let result = result
+            .result_as::<SpokeRegistrationResultV1>()
+            .map_err(|error| OrbitError::OutcomeUnknown {
+                mcp_call_id: mcp_call_id.clone(),
+                message: format!(
+                    "hub returned a malformed registration result after request handoff: {error}"
+                ),
+            })?;
+        result
+            .validate()
+            .map_err(|error| OrbitError::OutcomeUnknown {
+                mcp_call_id,
+                message: format!(
+                    "hub returned an invalid registration result after request handoff: {error}"
+                ),
+            })?;
+        Ok(result)
+    }
+
     pub async fn close(&mut self, timeout: Duration) -> Result<(), OrbitError> {
         self.service
             .close_with_timeout(timeout)
@@ -252,7 +360,11 @@ mod tests {
     use std::collections::BTreeSet;
     use std::sync::{Arc, Mutex};
 
-    use orbit_common::types::{McpToolDefinition, McpToolPlacement, McpToolPolicy, ToolSchema};
+    use orbit_common::types::{
+        HostRegistration, McpToolDefinition, McpToolPlacement, McpToolPolicy,
+        SPOKE_REGISTRATION_SCHEMA_VERSION, SpokeRegistrationRequestV1, SpokeRegistrationResultV1,
+        ToolSchema,
+    };
     use rmcp::ServiceExt;
     use serde_json::json;
     use tokio::io::duplex;
@@ -267,6 +379,7 @@ mod tests {
         definitions: Vec<McpToolDefinition>,
         instructions: String,
         calls: Mutex<Vec<ToolSessionContext>>,
+        registrations: Mutex<Vec<(SpokeRegistrationRequestV1, ToolSessionContext)>>,
     }
 
     impl McpHost for WireHost {
@@ -280,6 +393,25 @@ mod tests {
 
         fn accepts_remote_session_context(&self) -> bool {
             true
+        }
+
+        fn private_register_spoke(
+            &self,
+            request: SpokeRegistrationRequestV1,
+            context: ToolSessionContext,
+        ) -> Option<Result<SpokeRegistrationResultV1, OrbitError>> {
+            self.registrations
+                .lock()
+                .expect("registrations")
+                .push((request, context));
+            Some(Ok(SpokeRegistrationResultV1::failed(
+                None,
+                None,
+                Vec::new(),
+                Vec::new(),
+                "fixture_rejection",
+                "definitive fixture rejection",
+            )))
         }
 
         fn call_tool(
@@ -325,6 +457,7 @@ mod tests {
                 definitions,
                 instructions: contract.instructions().expect("instructions"),
                 calls: Mutex::new(Vec::new()),
+                registrations: Mutex::new(Vec::new()),
             }),
             HubClientExpectation {
                 hub_machine_id: "hm_hub".to_string(),
@@ -368,6 +501,31 @@ mod tests {
             origin_session_id: Some("session-1".to_string()),
             mcp_call_id: Some("mcall-1".to_string()),
             ..ToolSessionContext::default()
+        }
+    }
+
+    fn registration_context() -> ToolSessionContext {
+        ToolSessionContext {
+            caller_machine_id: Some("hm_spoke".to_string()),
+            caller_host_id: Some("spoke".to_string()),
+            transport: Some(McpTransport::SshMcp),
+            effective_capabilities: BTreeSet::from([McpCapability::Agent]),
+            origin_session_id: Some("session-register".to_string()),
+            mcp_call_id: Some("mcall-register".to_string()),
+            ..ToolSessionContext::default()
+        }
+    }
+
+    fn registration_request() -> SpokeRegistrationRequestV1 {
+        SpokeRegistrationRequestV1 {
+            schema_version: SPOKE_REGISTRATION_SCHEMA_VERSION,
+            identity: HostRegistration {
+                machine_id: "hm_spoke".to_string(),
+                host_id: "spoke".to_string(),
+                labels: BTreeSet::new(),
+            },
+            presence: Vec::new(),
+            profiles: Vec::new(),
         }
     }
 
@@ -427,6 +585,52 @@ mod tests {
         assert!(matches!(
             error,
             OrbitError::RemoteTool { ref code, .. } if code == "invalid_input"
+        ));
+    }
+
+    #[tokio::test]
+    async fn private_registration_uses_typed_custom_request_and_remote_metadata() {
+        let (host, expectation) = wire_host();
+        let client = wire_client(Arc::clone(&host), &expectation).await;
+        let result = client
+            .register_spoke(
+                &registration_request(),
+                &registration_context(),
+                Duration::from_secs(1),
+            )
+            .await
+            .expect("definitive typed registration result");
+        assert!(!result.complete);
+        assert_eq!(
+            result.failure.as_ref().map(|failure| failure.code.as_str()),
+            Some("fixture_rejection")
+        );
+        let registrations = host.registrations.lock().expect("registrations");
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].0.identity.machine_id, "hm_spoke");
+        assert_eq!(
+            registrations[0].1.mcp_call_id.as_deref(),
+            Some("mcall-register")
+        );
+        assert_eq!(registrations[0].1.process_machine_id, None);
+    }
+
+    #[tokio::test]
+    async fn unknown_private_method_is_method_not_found() {
+        let (host, expectation) = wire_host();
+        let client = wire_client(host, &expectation).await;
+        let error = client
+            .service
+            .peer()
+            .send_request(ClientRequest::CustomRequest(CustomRequest::new(
+                "orbit/private/guessed/v1",
+                Some(json!({})),
+            )))
+            .await
+            .expect_err("unknown private method");
+        assert!(matches!(
+            error,
+            ServiceError::McpError(ref data) if data.code == ErrorCode::METHOD_NOT_FOUND
         ));
     }
 

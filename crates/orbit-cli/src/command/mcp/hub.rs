@@ -4,11 +4,14 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::{
-    AuditEventStatus, McpCapability, McpToolDefinition, McpToolPlacement, McpToolScope,
-    McpTransport, RegistrySnapshotV1, ToolSessionContext, WorkspaceStatus,
-    mcp_advertised_tool_name,
+    AuditEventStatus, HostRecord, HostStatus, McpCapability, McpToolDefinition, McpToolPlacement,
+    McpToolScope, McpTransport, RegistrySnapshotV1, SPOKE_REGISTRATION_METHOD_V1,
+    SpokeRegistrationRequestV1, SpokeRegistrationResultV1, SpokeRegistrationStageV1,
+    ToolSessionContext, WorkspaceStatus, mcp_advertised_tool_name,
 };
-use orbit_core::routines::{HostIdentity, HostMode, load_host_identity};
+use orbit_core::routines::{
+    HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, load_host_identity,
+};
 use orbit_core::runtime::HubCoordinationExecutor;
 use orbit_core::{NotFoundKind, OrbitError, redact_sensitive_env_text};
 use orbit_mcp::{
@@ -145,6 +148,46 @@ impl HubMcpHost {
         Ok(())
     }
 
+    fn require_active_remote_caller(
+        context: &ToolSessionContext,
+        snapshot: &RegistrySnapshotV1,
+    ) -> Result<(), OrbitError> {
+        Self::require_authenticated_caller(context)?;
+        if context.transport != Some(McpTransport::SshMcp) {
+            return Ok(());
+        }
+        let (Some(machine_id), Some(host_id)) = (
+            context.caller_machine_id.as_deref(),
+            context.caller_host_id.as_deref(),
+        ) else {
+            return Err(OrbitError::InvalidInput(
+                "SSH-carried hub MCP calls require authenticated caller machine_id and host_id"
+                    .to_string(),
+            ));
+        };
+        let host = snapshot
+            .hosts
+            .iter()
+            .find(|host| host.machine_id == machine_id)
+            .ok_or_else(|| {
+                OrbitError::InvalidInput(format!(
+                    "remote caller machine_id '{machine_id}' is not registered; only the private spoke registration request is allowed"
+                ))
+            })?;
+        if host.status != HostStatus::Active {
+            return Err(OrbitError::InvalidInput(format!(
+                "remote caller machine_id '{machine_id}' is retired"
+            )));
+        }
+        if host.host_id != host_id {
+            return Err(OrbitError::InvalidInput(format!(
+                "remote caller host_id '{host_id}' does not match registered host_id '{}' for machine_id '{machine_id}'",
+                host.host_id
+            )));
+        }
+        Ok(())
+    }
+
     fn selector<'a>(input: &'a Value, context: &'a ToolSessionContext) -> Option<&'a str> {
         input
             .get("workspace")
@@ -264,7 +307,7 @@ impl HubMcpHost {
             }
         };
         let mut context = self.normalize_context(context, &identity);
-        if let Err(error) = Self::require_authenticated_caller(&context) {
+        if let Err(error) = Self::require_active_remote_caller(&context, &snapshot) {
             self.record_denial(inbound, &context, &error);
             return Err(error);
         }
@@ -341,6 +384,146 @@ impl HubMcpHost {
         self.record_outcome(name, &context, &result);
         result
     }
+
+    fn registration_result(
+        &self,
+        request: SpokeRegistrationRequestV1,
+        context: ToolSessionContext,
+    ) -> SpokeRegistrationResultV1 {
+        let (hub_identity, _) = match self.verify_authority() {
+            Ok(authority) => authority,
+            Err(error) => return SpokeRegistrationResultV1::rejected(&error),
+        };
+        let context = self.normalize_context(context, &hub_identity);
+        if let Err(error) = Self::require_authenticated_caller(&context) {
+            return SpokeRegistrationResultV1::rejected(&error);
+        }
+        if context.transport != Some(McpTransport::SshMcp) {
+            return SpokeRegistrationResultV1::rejected(&OrbitError::InvalidInput(
+                "private spoke registration requires ssh-mcp transport".to_string(),
+            ));
+        }
+        if context.workspace.is_some() || context.workspace_id.is_some() {
+            return SpokeRegistrationResultV1::rejected(&OrbitError::InvalidInput(
+                "private spoke registration is global and must not carry a workspace selector"
+                    .to_string(),
+            ));
+        }
+        if let Err(error) = request.validate() {
+            return SpokeRegistrationResultV1::rejected(&error);
+        }
+        let caller_machine_id = context.caller_machine_id.as_deref().unwrap_or_default();
+        let caller_host_id = context.caller_host_id.as_deref().unwrap_or_default();
+        if request.identity.machine_id != caller_machine_id
+            || request.identity.host_id != caller_host_id
+        {
+            return SpokeRegistrationResultV1::rejected(&OrbitError::InvalidInput(format!(
+                "private registration identity '{}/{}' does not match trusted session caller '{}/{}'",
+                request.identity.machine_id,
+                request.identity.host_id,
+                caller_machine_id,
+                caller_host_id
+            )));
+        }
+
+        let service = match orbit_core::host_registry::host_registry_service_at(&self.global_root) {
+            Ok(service) => service,
+            Err(error) => return SpokeRegistrationResultV1::rejected(&error),
+        };
+        let spoke_identity = HostIdentity {
+            schema_version: HOST_IDENTITY_SCHEMA_VERSION,
+            machine_id: request.identity.machine_id.clone(),
+            host_id: request.identity.host_id.clone(),
+            mode: HostMode::Spoke,
+        };
+        let host = match service.register_identity(&spoke_identity, request.identity.labels) {
+            Ok(host) => host,
+            Err(error) => return SpokeRegistrationResultV1::rejected(&error),
+        };
+
+        let registry_path = orbit_core::workspace_registry::registry_path_for(&self.global_root);
+        let registry = match orbit_core::workspace_registry::load_registry_from(&registry_path) {
+            Ok(registry) => registry,
+            Err(error) => {
+                return registration_partial(
+                    SpokeRegistrationStageV1::Registry,
+                    host,
+                    Vec::new(),
+                    Vec::new(),
+                    error,
+                );
+            }
+        };
+        let presence = match service.publish_presence(
+            &registry,
+            &spoke_identity.machine_id,
+            &request.presence,
+        ) {
+            Ok(presence) => presence,
+            Err(error) => {
+                return registration_partial(
+                    SpokeRegistrationStageV1::Registry,
+                    host,
+                    Vec::new(),
+                    Vec::new(),
+                    error,
+                );
+            }
+        };
+        let presence_workspace_ids = presence
+            .into_iter()
+            .map(|presence| presence.workspace_id)
+            .collect::<Vec<_>>();
+
+        let mut profile_workspace_ids = Vec::new();
+        for publication in request.profiles {
+            match service.publish_execution_profile(
+                &spoke_identity.machine_id,
+                publication.expected_generation,
+                &publication.profile,
+            ) {
+                Ok(_) => profile_workspace_ids.push(publication.profile.workspace_id),
+                Err(error) => {
+                    let stage = if profile_workspace_ids.is_empty() {
+                        SpokeRegistrationStageV1::Presence
+                    } else {
+                        SpokeRegistrationStageV1::Profiles
+                    };
+                    return registration_partial(
+                        stage,
+                        host,
+                        presence_workspace_ids,
+                        profile_workspace_ids,
+                        error,
+                    );
+                }
+            }
+        }
+
+        let snapshot = match service.snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                let stage = if profile_workspace_ids.is_empty() {
+                    SpokeRegistrationStageV1::Presence
+                } else {
+                    SpokeRegistrationStageV1::Profiles
+                };
+                return registration_partial(
+                    stage,
+                    host,
+                    presence_workspace_ids,
+                    profile_workspace_ids,
+                    error,
+                );
+            }
+        };
+        SpokeRegistrationResultV1::completed(
+            host,
+            presence_workspace_ids,
+            profile_workspace_ids,
+            snapshot,
+        )
+    }
 }
 
 impl McpHost for HubMcpHost {
@@ -365,6 +548,41 @@ impl McpHost for HubMcpHost {
         true
     }
 
+    fn private_register_spoke(
+        &self,
+        request: SpokeRegistrationRequestV1,
+        session_context: ToolSessionContext,
+    ) -> Option<Result<SpokeRegistrationResultV1, OrbitError>> {
+        let context = self.normalize_context(session_context, &self.identity);
+        let result = self.registration_result(request, context.clone());
+        let audit_result = if result.complete {
+            Ok(json!({
+                "complete": true,
+                "last_committed_stage": result.last_committed_stage,
+            }))
+        } else {
+            Err(OrbitError::Execution(
+                result
+                    .failure
+                    .as_ref()
+                    .map(|failure| failure.message.clone())
+                    .unwrap_or_else(|| "private spoke registration failed".to_string()),
+            ))
+        };
+        self.record_outcome(SPOKE_REGISTRATION_METHOD_V1, &context, &audit_result);
+        Some(Ok(result))
+    }
+
+    fn preflight_tool_call(
+        &self,
+        _name: &str,
+        session_context: &ToolSessionContext,
+    ) -> Result<(), OrbitError> {
+        let (identity, snapshot) = self.verify_authority()?;
+        let context = self.normalize_context(session_context.clone(), &identity);
+        Self::require_active_remote_caller(&context, &snapshot)
+    }
+
     fn call_tool(
         &self,
         name: &str,
@@ -386,7 +604,9 @@ impl McpHost for HubMcpHost {
             .map(|(identity, _)| identity)
             .unwrap_or_else(|_| self.identity.clone());
         let context = self.normalize_context(session_context.clone(), &identity);
-        let denial = Self::require_authenticated_caller(&context)
+        let denial = self
+            .verify_authority()
+            .and_then(|(_, snapshot)| Self::require_active_remote_caller(&context, &snapshot))
             .err()
             .unwrap_or(denial);
         self.record_denial(name, &context, &denial);
@@ -406,6 +626,23 @@ impl McpHost for HubMcpHost {
         // never invoke the adapter's local-checkout closure.
         self.resolved_call(name, input, session_context)
     }
+}
+
+fn registration_partial(
+    stage: SpokeRegistrationStageV1,
+    host: HostRecord,
+    presence_workspace_ids: Vec<String>,
+    profile_workspace_ids: Vec<String>,
+    error: OrbitError,
+) -> SpokeRegistrationResultV1 {
+    SpokeRegistrationResultV1::failed(
+        Some(stage),
+        Some(host),
+        presence_workspace_ids,
+        profile_workspace_ids,
+        "projection_failed",
+        error.to_string(),
+    )
 }
 
 fn placement_label(placement: McpToolPlacement) -> &'static str {

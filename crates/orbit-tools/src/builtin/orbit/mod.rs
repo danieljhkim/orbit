@@ -86,11 +86,17 @@ pub fn register(registry: &mut ToolRegistry) {
         friction::add::OrbitFrictionAddTool,
         agent_operator(McpToolPlacement::Hub),
     );
-    // Triage surface: CLI / dashboard only. Agents file friction via `add`;
-    // listing / inspection / resolution belong to operators.
-    registry.register_inactive(friction::list::OrbitFrictionListTool);
+    // Non-destructive triage reads are canonical hub/operator operations.
+    // Resolution and aggregate administration remain inactive.
+    registry.register_mcp(
+        friction::list::OrbitFrictionListTool,
+        McpToolPolicy::operator_only(McpToolPlacement::Hub),
+    );
     registry.register_inactive(friction::resolve::OrbitFrictionResolveTool);
-    registry.register_inactive(friction::show::OrbitFrictionShowTool);
+    registry.register_mcp(
+        friction::show::OrbitFrictionShowTool,
+        McpToolPolicy::operator_only(McpToolPlacement::Hub),
+    );
     registry.register_inactive(friction::stats::OrbitFrictionStatsTool);
     registry.register_mcp(
         friction::tags::OrbitFrictionTagsTool,

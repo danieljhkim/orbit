@@ -10,7 +10,7 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-registry/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10302, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10302, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Host Registry — Design
@@ -18,9 +18,10 @@ related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-1
 This doc specifies the **target** design. Host identity, the logical workspace
 catalog, registry core/projections, operator administration, sanitized discovery,
 the satellite-cache format, and their dedicated `orbit-registry` domain boundary
-have landed through C4; remote registration,
-spoke transport, placement, and later phases remain pending. E1's strict hub trust
-document and fixed checkoutless hub MCP endpoint have landed [ORB-10268]. The folder
+have landed through C4. E1's strict hub trust document and fixed checkoutless hub
+MCP endpoint, E2's bounded verified spoke link, and E3's private registration plus
+first remote coordination slice have landed [ORB-10268, ORB-10269, ORB-10271]. Run
+placement, polling, and later phases remain pending. The folder
 is Accepted. It covers host identity, the registry, the
 coordination-plane/workspace-ownership split, execution placement (including the
 hub→satellite protocol), the per-record data-placement split, and the revision to
@@ -94,7 +95,12 @@ Per entry: `machine_id` (key), `host_id` (globally reserved across active and re
   after trusted local MCP config pins the hub's out-of-band-copied `machine_id`;
   see [mcp-bridge/2_design.md §1](../mcp-bridge/2_design.md). Registration is
   idempotent on `machine_id`; a name collision with a different `machine_id` is an
-  error.
+  error. The spoke path uses the connector-private
+  `orbit/private/register-spoke/v1` request after MCP negotiation. It is absent
+  from canonical schemas and `tools/list`; an unknown caller may invoke only this
+  typed request. Results name the last committed registry/presence/profile/snapshot
+  stage, never claim distributed rollback, and refresh the local sanitized cache
+  only after a definitive complete response [ORB-10271].
 - **Workspace presence map.** Each entry carries `{workspace_id → {root,
   last_verified}}`: where that host has each workspace checked out, reported from
   the host's own local workspace registry at registration and refreshed on every
@@ -312,6 +318,13 @@ The codec, canonical comparison, freshness, and crash-classification behavior li
 in `orbit-registry::registry_cache`. Shared `RegistryCacheV1` and
 `RegistrySnapshotV1` DTOs stay in `orbit-common`, and `orbit-store` remains the
 sole producer of the transactional sanitized snapshot.
+
+[ORB-10271] wires this cache contract to spoke registration. Identity comes only
+from validated local `host.toml`; presence and owner profiles come only from the
+typed local registry/runtime builders. An `outcome_unknown`, a partial hub result,
+or a local cache-write failure preserves the prior valid cache and is never retried
+as registration. A cache failure after complete hub success reports the confirmed
+hub commit and the local repair requirement separately.
 
 Neither role is ever selected per-task: coordination has one writer by construction,
 and two owners for one workspace is the split-brain the system already rejected
@@ -540,5 +553,12 @@ of that routine.** Consequences:
   moved its domain tests with the implementations, retained runtime profile/ship
   hashing in `orbit-core`, and preserved store ownership of persistence
   ([ADR-0235]).
+- [ORB-10269] — implemented the fixed SSH command, contract/digest negotiation,
+  one bounded peer per scalar capability, trusted remote metadata, and the
+  pre-handoff `hub_unavailable` / post-handoff `outcome_unknown` no-replay split.
+- [ORB-10271] — implemented connector-private spoke registration, current active
+  caller validation on every ordinary hub call, staged projection/snapshot results,
+  definitive-success cache refresh, operator-only friction list/show, and the
+  hermetic two-root coordination/provenance canary.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -10,7 +10,10 @@ use sha2::{Digest, Sha256};
 
 use crate::adapter::schema::build_input_schema;
 
-pub const MCP_CONTRACT_REVISION: u32 = 1;
+/// Revision 2 adds the strict connector-private spoke-registration method.
+/// Bumping this fact prevents an E3 client from negotiating successfully with
+/// an E2 hub that has the same canonical tool schemas but no bootstrap seam.
+pub const MCP_CONTRACT_REVISION: u32 = 2;
 pub const CANONICAL_MCP_REGISTRY_REVISION: u32 = 1;
 pub const HUB_SCHEMA_DOMAIN: &str = "orbit.mcp.hub-schema.v1";
 pub const HUB_CONTRACT_INSTRUCTIONS_PREFIX: &str = "orbit-hub-contract-v1:";

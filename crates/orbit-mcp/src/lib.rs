@@ -43,7 +43,7 @@ use std::sync::Arc;
 
 use orbit_common::types::{
     LearningInjectionState, McpToolDefinition, McpToolPolicyError, NotFoundKind, OrbitError,
-    ToolSessionContext,
+    SpokeRegistrationRequestV1, SpokeRegistrationResultV1, ToolSessionContext,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::io::stdio;
@@ -96,6 +96,30 @@ pub trait McpHost: Send + Sync + 'static {
     /// session context. Only the explicit checkoutless hub host enables this.
     fn accepts_remote_session_context(&self) -> bool {
         false
+    }
+
+    /// Handle the one connector-private spoke bootstrap request.
+    ///
+    /// `None` is the secure default and makes the adapter return JSON-RPC
+    /// `METHOD_NOT_FOUND`. Only the explicit checkoutless hub host overrides
+    /// this seam. It is never represented by an MCP tool definition.
+    fn private_register_spoke(
+        &self,
+        _request: SpokeRegistrationRequestV1,
+        _session_context: ToolSessionContext,
+    ) -> Option<Result<SpokeRegistrationResultV1, OrbitError>> {
+        None
+    }
+
+    /// Validate trusted call identity before the adapter resolves a canonical
+    /// tool definition. Hub hosts use this to reject unknown/retired callers
+    /// before any registry discovery or domain dispatch.
+    fn preflight_tool_call(
+        &self,
+        _name: &str,
+        _session_context: &ToolSessionContext,
+    ) -> Result<(), OrbitError> {
+        Ok(())
     }
 
     fn call_tool(

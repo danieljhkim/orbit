@@ -8,7 +8,10 @@ use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use orbit_common::types::{McpCapability, OrbitError, ToolSessionContext};
+use orbit_common::types::{
+    McpCapability, OrbitError, SpokeRegistrationRequestV1, SpokeRegistrationResultV1,
+    ToolSessionContext,
+};
 use orbit_common::utility::redaction::redact_sensitive_env_text;
 use orbit_mcp::{HubClientExpectation, OrbitMcpClient};
 use serde_json::Value;
@@ -103,6 +106,11 @@ trait HubPeer: Send {
         input: Value,
         context: &'a ToolSessionContext,
     ) -> BoxFuture<'a, Result<Value, OrbitError>>;
+    fn register_spoke<'a>(
+        &'a mut self,
+        request: &'a SpokeRegistrationRequestV1,
+        context: &'a ToolSessionContext,
+    ) -> BoxFuture<'a, Result<SpokeRegistrationResultV1, OrbitError>>;
     fn close<'a>(&'a mut self) -> BoxFuture<'a, ()>;
 }
 
@@ -213,6 +221,30 @@ impl HubPeer for SshHubPeer {
         })
     }
 
+    fn register_spoke<'a>(
+        &'a mut self,
+        request: &'a SpokeRegistrationRequestV1,
+        context: &'a ToolSessionContext,
+    ) -> BoxFuture<'a, Result<SpokeRegistrationResultV1, OrbitError>> {
+        Box::pin(async move {
+            if self
+                .child
+                .try_wait()
+                .map_err(|error| {
+                    OrbitError::HubUnavailable(format!("inspect SSH hub process: {error}"))
+                })?
+                .is_some()
+            {
+                return Err(OrbitError::HubUnavailable(
+                    "SSH hub process exited before registration handoff".to_string(),
+                ));
+            }
+            self.client
+                .register_spoke(request, context, self.request_timeout)
+                .await
+        })
+    }
+
     fn close<'a>(&'a mut self) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             let _ = self.client.close(self.close_timeout).await;
@@ -237,8 +269,17 @@ struct CallRequest {
     response: mpsc::SyncSender<Result<Value, OrbitError>>,
 }
 
+struct RegistrationRequest {
+    capability: McpCapability,
+    registration: SpokeRegistrationRequestV1,
+    context: ToolSessionContext,
+    queued_at: Duration,
+    response: mpsc::SyncSender<Result<SpokeRegistrationResultV1, OrbitError>>,
+}
+
 enum WorkerMessage {
     Call(CallRequest),
+    Register(RegistrationRequest),
     Shutdown,
 }
 
@@ -347,6 +388,61 @@ impl HubLinkPool {
                 message: format!("hub link worker response deadline elapsed: {error}"),
             })?
     }
+
+    pub(super) fn register_spoke(
+        &self,
+        capability: McpCapability,
+        registration: SpokeRegistrationRequestV1,
+        context: ToolSessionContext,
+    ) -> Result<SpokeRegistrationResultV1, OrbitError> {
+        registration.validate()?;
+        orbit_mcp::validate_remote_call_context(&context, capability)?;
+        if context.workspace.is_some() || context.workspace_id.is_some() {
+            return Err(OrbitError::InvalidInput(
+                "private spoke registration is global and must not carry a workspace selector"
+                    .to_string(),
+            ));
+        }
+        if context.caller_machine_id.as_deref() != Some(&registration.identity.machine_id)
+            || context.caller_host_id.as_deref() != Some(&registration.identity.host_id)
+        {
+            return Err(OrbitError::InvalidInput(
+                "private registration identity must exactly match the trusted caller context"
+                    .to_string(),
+            ));
+        }
+        let mcp_call_id = context
+            .mcp_call_id
+            .clone()
+            .ok_or_else(|| OrbitError::InvalidInput("remote call ID is missing".to_string()))?;
+        let (response_tx, response_rx) = mpsc::sync_channel(1);
+        self.tx
+            .as_ref()
+            .ok_or_else(|| {
+                OrbitError::HubUnavailable("hub link pool is shutting down".to_string())
+            })?
+            .try_send(WorkerMessage::Register(RegistrationRequest {
+                capability,
+                registration,
+                context,
+                queued_at: self.clock.now(),
+                response: response_tx,
+            }))
+            .map_err(|error| match error {
+                mpsc::TrySendError::Full(_) => OrbitError::HubUnavailable(
+                    "hub link request queue is saturated before handoff".to_string(),
+                ),
+                mpsc::TrySendError::Disconnected(_) => OrbitError::HubUnavailable(
+                    "hub link worker is unavailable before handoff".to_string(),
+                ),
+            })?;
+        response_rx
+            .recv_timeout(self.limits.caller_wait)
+            .map_err(|error| OrbitError::OutcomeUnknown {
+                mcp_call_id,
+                message: format!("hub link worker response deadline elapsed: {error}"),
+            })?
+    }
 }
 
 impl Drop for HubLinkPool {
@@ -378,12 +474,24 @@ fn run_worker(
     else {
         return;
     };
+    let worker = WorkerRuntime {
+        ssh_alias: &ssh_alias,
+        hub_machine_id: &hub_machine_id,
+        schema_digests: &schema_digests,
+        factory: factory.as_ref(),
+        limits,
+        clock: clock.as_ref(),
+    };
     let mut peers: BTreeMap<McpCapability, CachedPeer> = BTreeMap::new();
     loop {
-        let message = match rx.recv_timeout(limits.idle_poll) {
+        let message = match rx.recv_timeout(worker.limits.idle_poll) {
             Ok(message) => message,
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                runtime.block_on(reap_idle(&mut peers, clock.now(), limits.idle));
+                runtime.block_on(reap_idle(
+                    &mut peers,
+                    worker.clock.now(),
+                    worker.limits.idle,
+                ));
                 continue;
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -391,16 +499,11 @@ fn run_worker(
         match message {
             WorkerMessage::Shutdown => break,
             WorkerMessage::Call(request) => {
-                let result = runtime.block_on(process_call(
-                    &mut peers,
-                    &ssh_alias,
-                    &hub_machine_id,
-                    &schema_digests,
-                    factory.as_ref(),
-                    limits,
-                    clock.as_ref(),
-                    &request,
-                ));
+                let result = runtime.block_on(process_call(&mut peers, &worker, &request));
+                let _ = request.response.send(result);
+            }
+            WorkerMessage::Register(request) => {
+                let result = runtime.block_on(process_registration(&mut peers, &worker, &request));
                 let _ = request.response.send(result);
             }
         }
@@ -408,57 +511,110 @@ fn run_worker(
     runtime.block_on(close_all(&mut peers));
 }
 
-async fn process_call(
-    peers: &mut BTreeMap<McpCapability, CachedPeer>,
-    ssh_alias: &str,
-    hub_machine_id: &str,
-    schema_digests: &BTreeMap<McpCapability, String>,
-    factory: &dyn HubPeerFactory,
+struct WorkerRuntime<'a> {
+    ssh_alias: &'a str,
+    hub_machine_id: &'a str,
+    schema_digests: &'a BTreeMap<McpCapability, String>,
+    factory: &'a dyn HubPeerFactory,
     limits: HubLinkLimits,
-    clock: &dyn HubClock,
-    request: &CallRequest,
-) -> Result<Value, OrbitError> {
-    let now = clock.now();
-    if now.saturating_sub(request.queued_at) > limits.submission {
-        return Err(OrbitError::HubUnavailable(
-            "hub request expired in the bounded queue before transport handoff".to_string(),
-        ));
-    }
-    reap_idle(peers, now, limits.idle).await;
+    clock: &'a dyn HubClock,
+}
+
+async fn ensure_peer(
+    peers: &mut BTreeMap<McpCapability, CachedPeer>,
+    worker: &WorkerRuntime<'_>,
+    capability: McpCapability,
+) -> Result<(), OrbitError> {
     if peers
-        .get(&request.capability)
+        .get(&capability)
         .is_some_and(|cached| cached.peer.is_closed())
-        && let Some(mut stale) = peers.remove(&request.capability)
+        && let Some(mut stale) = peers.remove(&capability)
     {
         stale.peer.close().await;
     }
-    if !peers.contains_key(&request.capability) {
-        let schema_digest = schema_digests.get(&request.capability).ok_or_else(|| {
+    if let std::collections::btree_map::Entry::Vacant(entry) = peers.entry(capability) {
+        let schema_digest = worker.schema_digests.get(&capability).ok_or_else(|| {
             OrbitError::HubNegotiation(format!(
-                "no local schema digest exists for capability '{}'",
-                request.capability
+                "no local schema digest exists for capability '{capability}'"
             ))
         })?;
         let spec = HubSpawnSpec {
-            ssh_alias: ssh_alias.to_string(),
-            hub_machine_id: hub_machine_id.to_string(),
-            capability: request.capability,
+            ssh_alias: worker.ssh_alias.to_string(),
+            hub_machine_id: worker.hub_machine_id.to_string(),
+            capability,
             schema_digest: schema_digest.clone(),
         };
-        let peer = factory.connect(&spec, limits).await?;
-        peers.insert(
-            request.capability,
-            CachedPeer {
-                peer,
-                last_used: clock.now(),
-            },
-        );
+        let peer = worker.factory.connect(&spec, worker.limits).await?;
+        entry.insert(CachedPeer {
+            peer,
+            last_used: worker.clock.now(),
+        });
     }
+    Ok(())
+}
+
+async fn process_registration(
+    peers: &mut BTreeMap<McpCapability, CachedPeer>,
+    worker: &WorkerRuntime<'_>,
+    request: &RegistrationRequest,
+) -> Result<SpokeRegistrationResultV1, OrbitError> {
+    let now = worker.clock.now();
+    if now.saturating_sub(request.queued_at) > worker.limits.submission {
+        return Err(OrbitError::HubUnavailable(
+            "hub registration expired in the bounded queue before transport handoff".to_string(),
+        ));
+    }
+    reap_idle(peers, now, worker.limits.idle).await;
+    ensure_peer(peers, worker, request.capability).await?;
     let cached = peers
         .get_mut(&request.capability)
         .ok_or_else(|| OrbitError::HubUnavailable("hub peer disappeared".to_string()))?;
     let result = match tokio::time::timeout(
-        limits.request,
+        worker.limits.request,
+        cached
+            .peer
+            .register_spoke(&request.registration, &request.context),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(OrbitError::OutcomeUnknown {
+            mcp_call_id: request.context.mcp_call_id.clone().unwrap_or_default(),
+            message: format!(
+                "hub registration response exceeded the {} ms post-handoff deadline",
+                worker.limits.request.as_millis()
+            ),
+        }),
+    };
+    cached.last_used = worker.clock.now();
+    if matches!(
+        result,
+        Err(OrbitError::HubUnavailable(_)) | Err(OrbitError::OutcomeUnknown { .. })
+    ) && let Some(mut failed) = peers.remove(&request.capability)
+    {
+        failed.peer.close().await;
+    }
+    result
+}
+
+async fn process_call(
+    peers: &mut BTreeMap<McpCapability, CachedPeer>,
+    worker: &WorkerRuntime<'_>,
+    request: &CallRequest,
+) -> Result<Value, OrbitError> {
+    let now = worker.clock.now();
+    if now.saturating_sub(request.queued_at) > worker.limits.submission {
+        return Err(OrbitError::HubUnavailable(
+            "hub request expired in the bounded queue before transport handoff".to_string(),
+        ));
+    }
+    reap_idle(peers, now, worker.limits.idle).await;
+    ensure_peer(peers, worker, request.capability).await?;
+    let cached = peers
+        .get_mut(&request.capability)
+        .ok_or_else(|| OrbitError::HubUnavailable("hub peer disappeared".to_string()))?;
+    let result = match tokio::time::timeout(
+        worker.limits.request,
         cached
             .peer
             .call(&request.name, request.input.clone(), &request.context),
@@ -470,11 +626,11 @@ async fn process_call(
             mcp_call_id: request.context.mcp_call_id.clone().unwrap_or_default(),
             message: format!(
                 "hub response exceeded the {} ms post-handoff deadline",
-                limits.request.as_millis()
+                worker.limits.request.as_millis()
             ),
         }),
     };
-    cached.last_used = clock.now();
+    cached.last_used = worker.clock.now();
     if matches!(
         result,
         Err(OrbitError::HubUnavailable(_)) | Err(OrbitError::OutcomeUnknown { .. })
@@ -508,11 +664,24 @@ async fn close_all(peers: &mut BTreeMap<McpCapability, CachedPeer>) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    use chrono::Utc;
+    use orbit_common::types::{
+        AuditEventStatus, HostRegistration, HostStatus, SPOKE_REGISTRATION_SCHEMA_VERSION,
+        Workspace, WorkspacePresenceDeclaration, WorkspaceRegistry, WorkspaceStatus,
+    };
+    use orbit_core::routines::load_host_identity;
+    use orbit_core::{RegistryCacheService, RegistryCacheState};
+    use orbit_mcp::{McpHost, OrbitToolServer};
+    use rmcp::ServiceExt;
     use serde_json::json;
 
+    use super::super::host::{BrokerMcpHost, canonical_mcp_tool_definitions};
+    use super::super::hub::HubMcpHost;
     use super::*;
 
     #[derive(Default)]
@@ -547,6 +716,118 @@ mod tests {
         fail_unknown_once: Arc<Mutex<bool>>,
         silent_once: Arc<Mutex<bool>>,
         closed: bool,
+    }
+
+    #[derive(Default)]
+    struct RmcpHubFactory {
+        hub_root: PathBuf,
+        connects: Mutex<Vec<HubSpawnSpec>>,
+        wire_calls: Arc<Mutex<Vec<(String, Value, ToolSessionContext)>>>,
+    }
+
+    impl RmcpHubFactory {
+        fn new(hub_root: PathBuf) -> Self {
+            Self {
+                hub_root,
+                ..Self::default()
+            }
+        }
+    }
+
+    impl HubPeerFactory for RmcpHubFactory {
+        fn connect<'a>(
+            &'a self,
+            spec: &'a HubSpawnSpec,
+            limits: HubLinkLimits,
+        ) -> BoxFuture<'a, Result<Box<dyn HubPeer>, OrbitError>> {
+            self.connects.lock().expect("connects").push(spec.clone());
+            let hub_root = self.hub_root.clone();
+            let spec = spec.clone();
+            let wire_calls = Arc::clone(&self.wire_calls);
+            Box::pin(async move {
+                let host = Arc::new(HubMcpHost::new(hub_root, spec.capability)?);
+                let mut trusted = ToolSessionContext::trusted_local(
+                    None,
+                    Some(host.identity().machine_id.clone()),
+                    Some(host.identity().host_id.clone()),
+                );
+                trusted.effective_capabilities = BTreeSet::from([spec.capability]);
+                let server = OrbitToolServer::new_with_context(host, trusted);
+                let (server_io, client_io) = tokio::io::duplex(256 * 1024);
+                let server_task = tokio::spawn(async move {
+                    if let Ok(running) = server.serve(server_io).await {
+                        let _ = running.waiting().await;
+                    }
+                });
+                let (read, write) = tokio::io::split(client_io);
+                let client =
+                    OrbitMcpClient::connect(read, write, &spec.expectation(), limits.initialize)
+                        .await?;
+                Ok(Box::new(RmcpHubPeer {
+                    client,
+                    server_task,
+                    wire_calls,
+                    request_timeout: limits.request,
+                    close_timeout: limits.close,
+                }) as Box<dyn HubPeer>)
+            })
+        }
+    }
+
+    struct RmcpHubPeer {
+        client: OrbitMcpClient,
+        server_task: tokio::task::JoinHandle<()>,
+        wire_calls: Arc<Mutex<Vec<(String, Value, ToolSessionContext)>>>,
+        request_timeout: Duration,
+        close_timeout: Duration,
+    }
+
+    impl HubPeer for RmcpHubPeer {
+        fn is_closed(&self) -> bool {
+            self.client.is_closed()
+        }
+
+        fn call<'a>(
+            &'a mut self,
+            name: &'a str,
+            input: Value,
+            context: &'a ToolSessionContext,
+        ) -> BoxFuture<'a, Result<Value, OrbitError>> {
+            self.wire_calls.lock().expect("wire calls").push((
+                name.to_string(),
+                input.clone(),
+                context.clone(),
+            ));
+            Box::pin(async move {
+                self.client
+                    .call_tool(name, input, context, self.request_timeout)
+                    .await
+            })
+        }
+
+        fn register_spoke<'a>(
+            &'a mut self,
+            request: &'a SpokeRegistrationRequestV1,
+            context: &'a ToolSessionContext,
+        ) -> BoxFuture<'a, Result<SpokeRegistrationResultV1, OrbitError>> {
+            self.wire_calls.lock().expect("wire calls").push((
+                orbit_common::types::SPOKE_REGISTRATION_METHOD_V1.to_string(),
+                serde_json::to_value(request).expect("serialize registration"),
+                context.clone(),
+            ));
+            Box::pin(async move {
+                self.client
+                    .register_spoke(request, context, self.request_timeout)
+                    .await
+            })
+        }
+
+        fn close<'a>(&'a mut self) -> BoxFuture<'a, ()> {
+            Box::pin(async move {
+                let _ = self.client.close(self.close_timeout).await;
+                self.server_task.abort();
+            })
+        }
     }
 
     impl HubPeer for FakePeer {
@@ -591,6 +872,49 @@ mod tests {
             })
         }
 
+        fn register_spoke<'a>(
+            &'a mut self,
+            _request: &'a SpokeRegistrationRequestV1,
+            context: &'a ToolSessionContext,
+        ) -> BoxFuture<'a, Result<SpokeRegistrationResultV1, OrbitError>> {
+            self.calls.lock().expect("calls").push((
+                self.capability,
+                orbit_common::types::SPOKE_REGISTRATION_METHOD_V1.to_string(),
+            ));
+            let fail = {
+                let mut guard = self.fail_unknown_once.lock().expect("failure flag");
+                let fail = *guard;
+                *guard = false;
+                fail
+            };
+            let silent = {
+                let mut guard = self.silent_once.lock().expect("silent flag");
+                let silent = *guard;
+                *guard = false;
+                silent
+            };
+            let call_id = context.mcp_call_id.clone().unwrap_or_default();
+            Box::pin(async move {
+                if silent {
+                    std::future::pending::<Result<SpokeRegistrationResultV1, OrbitError>>().await
+                } else if fail {
+                    Err(OrbitError::OutcomeUnknown {
+                        mcp_call_id: call_id,
+                        message: "injected post-handoff registration loss".to_string(),
+                    })
+                } else {
+                    Ok(SpokeRegistrationResultV1::failed(
+                        None,
+                        None,
+                        Vec::new(),
+                        Vec::new(),
+                        "fake",
+                        "fake definitive result",
+                    ))
+                }
+            })
+        }
+
         fn close<'a>(&'a mut self) -> BoxFuture<'a, ()> {
             self.closed = true;
             Box::pin(async {})
@@ -608,6 +932,31 @@ mod tests {
             origin_session_id: Some("session".to_string()),
             mcp_call_id: Some(call_id.to_string()),
             ..ToolSessionContext::default()
+        }
+    }
+
+    fn registration_context(capability: McpCapability, call_id: &str) -> ToolSessionContext {
+        ToolSessionContext {
+            caller_machine_id: Some("hm_spoke".to_string()),
+            caller_host_id: Some("spoke".to_string()),
+            transport: Some(orbit_common::types::McpTransport::SshMcp),
+            effective_capabilities: std::collections::BTreeSet::from([capability]),
+            origin_session_id: Some("session".to_string()),
+            mcp_call_id: Some(call_id.to_string()),
+            ..ToolSessionContext::default()
+        }
+    }
+
+    fn registration() -> SpokeRegistrationRequestV1 {
+        SpokeRegistrationRequestV1 {
+            schema_version: orbit_common::types::SPOKE_REGISTRATION_SCHEMA_VERSION,
+            identity: orbit_common::types::HostRegistration {
+                machine_id: "hm_spoke".to_string(),
+                host_id: "spoke".to_string(),
+                labels: std::collections::BTreeSet::new(),
+            },
+            presence: Vec::new(),
+            profiles: Vec::new(),
         }
     }
 
@@ -740,11 +1089,54 @@ mod tests {
     }
 
     #[test]
+    fn private_registration_is_queued_once_on_one_verified_capability_peer() {
+        let factory = Arc::new(FakeFactory::default());
+        let pool = test_pool(Arc::clone(&factory));
+        let result = pool
+            .register_spoke(
+                McpCapability::Agent,
+                registration(),
+                registration_context(McpCapability::Agent, "mcall-register"),
+            )
+            .expect("definitive registration result");
+        assert!(!result.complete);
+        assert_eq!(factory.connects.lock().expect("connects").len(), 1);
+        assert_eq!(factory.calls.lock().expect("calls").len(), 1);
+        assert_eq!(
+            factory.calls.lock().expect("calls")[0].1,
+            orbit_common::types::SPOKE_REGISTRATION_METHOD_V1
+        );
+    }
+
+    #[test]
+    fn private_registration_outcome_unknown_is_not_replayed() {
+        let factory = Arc::new(FakeFactory::default());
+        *factory.fail_unknown_once.lock().expect("failure flag") = true;
+        let pool = test_pool(Arc::clone(&factory));
+        let error = pool
+            .register_spoke(
+                McpCapability::Agent,
+                registration(),
+                registration_context(McpCapability::Agent, "mcall-register-loss"),
+            )
+            .expect_err("unknown registration outcome");
+        assert!(matches!(
+            error,
+            OrbitError::OutcomeUnknown { ref mcp_call_id, .. }
+                if mcp_call_id == "mcall-register-loss"
+        ));
+        assert_eq!(factory.calls.lock().expect("calls").len(), 1);
+        assert_eq!(factory.connects.lock().expect("connects").len(), 1);
+    }
+
+    #[test]
     fn fake_time_idle_expiry_evicts_and_reconnects() {
         let factory = Arc::new(FakeFactory::default());
         let clock = Arc::new(ManualClock::default());
-        let mut limits = HubLinkLimits::default();
-        limits.idle = Duration::from_secs(10);
+        let limits = HubLinkLimits {
+            idle: Duration::from_secs(10),
+            ..HubLinkLimits::default()
+        };
         let pool = test_pool_with(
             Arc::clone(&factory),
             limits,
@@ -772,10 +1164,12 @@ mod tests {
     fn silent_peer_times_out_and_bounded_queue_saturates_before_handoff() {
         let factory = Arc::new(FakeFactory::default());
         *factory.silent_once.lock().expect("silent flag") = true;
-        let mut limits = HubLinkLimits::default();
-        limits.queue_capacity = 1;
-        limits.request = Duration::from_millis(50);
-        limits.caller_wait = Duration::from_secs(1);
+        let limits = HubLinkLimits {
+            queue_capacity: 1,
+            request: Duration::from_millis(50),
+            caller_wait: Duration::from_secs(1),
+            ..HubLinkLimits::default()
+        };
         let pool = Arc::new(test_pool_with(
             Arc::clone(&factory),
             limits,
@@ -822,5 +1216,481 @@ mod tests {
             OrbitError::OutcomeUnknown { ref mcp_call_id, .. } if mcp_call_id == "mcall-silent"
         ));
         assert!(queued_rx.recv_timeout(Duration::from_secs(1)).is_ok());
+    }
+
+    fn write_canary_identity(root: &Path, mode: &str, machine_id: &str, host_id: &str) {
+        std::fs::write(
+            root.join("host.toml"),
+            format!(
+                "schema_version = 1\nmachine_id = \"{machine_id}\"\nhost_id = \"{host_id}\"\nmode = \"{mode}\"\n"
+            ),
+        )
+        .expect("host identity");
+    }
+
+    fn canary_workspace() -> Workspace {
+        Workspace {
+            id: "ws_canary".to_string(),
+            name: "RMCP canary".to_string(),
+            owner_machine_id: Some("hm_hub".to_string()),
+            git_remote: None,
+            ship_mode: None,
+            base_branch: "agent-main".to_string(),
+            status: WorkspaceStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn save_canary_registry(root: &Path, registry: &WorkspaceRegistry) {
+        orbit_core::workspace_registry::save_registry_to(
+            registry,
+            &orbit_core::workspace_registry::registry_path_for(root),
+        )
+        .expect("workspace registry");
+    }
+
+    fn canary_context(capability: McpCapability, call_id: &str) -> ToolSessionContext {
+        let mut context = ToolSessionContext::trusted_local(
+            None,
+            Some("hm_spoke".to_string()),
+            Some("spoke".to_string()),
+        );
+        context.effective_capabilities = BTreeSet::from([capability]);
+        context.origin_session_id = Some("session-canary".to_string());
+        context.mcp_call_id = Some(call_id.to_string());
+        context
+    }
+
+    #[test]
+    fn spoke_rmcp_coordination_canary_is_hub_only_and_preserves_provenance() {
+        let hub = tempfile::tempdir().expect("hub root");
+        let spoke = tempfile::tempdir().expect("spoke root");
+        write_canary_identity(hub.path(), "hub", "hm_hub", "hub");
+        write_canary_identity(spoke.path(), "spoke", "hm_spoke", "spoke");
+
+        let registry = WorkspaceRegistry {
+            workspaces: vec![canary_workspace()],
+            ..WorkspaceRegistry::default()
+        };
+        save_canary_registry(hub.path(), &registry);
+        save_canary_registry(spoke.path(), &registry);
+
+        let registry_service = orbit_core::host_registry::host_registry_service_at(hub.path())
+            .expect("hub registry service");
+        registry_service
+            .register_hub_identity(
+                &load_host_identity(hub.path()).expect("hub identity"),
+                BTreeSet::new(),
+            )
+            .expect("register hub");
+        registry_service
+            .bind_workspace_owner(&registry, "ws_canary", "hm_hub")
+            .expect("bind owner");
+        orbit_core::runtime::HubCoordinationExecutor::register_workspace(
+            hub.path(),
+            "ws_canary",
+            "canary",
+        )
+        .expect("hub coordination workspace");
+
+        let definitions = canonical_mcp_tool_definitions().expect("canonical definitions");
+        let digests = [McpCapability::Agent, McpCapability::Operator]
+            .into_iter()
+            .map(|capability| {
+                orbit_mcp::hub_schema_digest(&definitions, capability)
+                    .map(|digest| (capability, digest))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()
+            .expect("hub schema digests");
+        let factory = Arc::new(RmcpHubFactory::new(hub.path().to_path_buf()));
+        let pool = HubLinkPool::with_factory(
+            "unused-hermetic-alias".to_string(),
+            "hm_hub".to_string(),
+            digests,
+            Arc::clone(&factory) as Arc<dyn HubPeerFactory>,
+            HubLinkLimits::default(),
+            Arc::new(MonotonicClock::default()),
+        )
+        .expect("hub link pool");
+
+        let spoke_checkout = spoke.path().join("checkout");
+        std::fs::create_dir_all(&spoke_checkout).expect("spoke checkout fixture");
+        let registration = SpokeRegistrationRequestV1 {
+            schema_version: SPOKE_REGISTRATION_SCHEMA_VERSION,
+            identity: HostRegistration {
+                machine_id: "hm_spoke".to_string(),
+                host_id: "spoke".to_string(),
+                labels: BTreeSet::from(["canary".to_string()]),
+            },
+            presence: vec![WorkspacePresenceDeclaration {
+                workspace_id: "ws_canary".to_string(),
+                root: spoke_checkout.clone(),
+                last_verified: Utc::now(),
+            }],
+            profiles: Vec::new(),
+        };
+        let registration_result = pool
+            .register_spoke(McpCapability::Agent, registration, {
+                let mut context = canary_context(McpCapability::Agent, "mcall-canary-register");
+                context.transport = Some(orbit_common::types::McpTransport::SshMcp);
+                context.process_machine_id = None;
+                context.process_host_id = None;
+                context
+            })
+            .expect("register spoke over duplex RMCP");
+        assert!(registration_result.complete);
+        assert_eq!(
+            registration_result
+                .host
+                .as_ref()
+                .map(|host| (&host.machine_id, host.status)),
+            Some((&"hm_spoke".to_string(), HostStatus::Active))
+        );
+        let snapshot = registration_result.snapshot.expect("sanitized snapshot");
+        let snapshot_json = serde_json::to_string(&snapshot).expect("snapshot JSON");
+        assert!(!snapshot_json.contains(&spoke_checkout.to_string_lossy().to_string()));
+        RegistryCacheService::new(spoke.path())
+            .refresh(snapshot, Utc::now())
+            .expect("refresh spoke cache after definitive registration");
+        assert!(matches!(
+            RegistryCacheService::new(spoke.path())
+                .load(Utc::now(), chrono::Duration::minutes(5))
+                .expect("load spoke cache"),
+            RegistryCacheState::Current { .. }
+        ));
+
+        let broker = BrokerMcpHost::new_with_hub_link(spoke.path().to_path_buf(), pool);
+        let mut audited_calls = Vec::<(&str, &str, McpCapability, Option<&str>)>::new();
+        let mut responses = Vec::new();
+        {
+            let mut call = |name: &'static str,
+                            input: Value,
+                            call_id: &'static str,
+                            capability: McpCapability,
+                            workspace: Option<&'static str>| {
+                let result = broker
+                    .call_tool(name, input, canary_context(capability, call_id))
+                    .unwrap_or_else(|error| panic!("{name} through spoke broker: {error}"));
+                audited_calls.push((name, call_id, capability, workspace));
+                responses.push(result.clone());
+                result
+            };
+
+            let hosts = call(
+                "orbit.host.list",
+                json!({}),
+                "mcall-canary-host-list",
+                McpCapability::Operator,
+                None,
+            );
+            assert_eq!(hosts["hub_machine_id"], "hm_hub");
+            assert_eq!(hosts["hosts"].as_array().expect("hosts").len(), 2);
+
+            let workspaces = call(
+                "orbit.workspace.list",
+                json!({}),
+                "mcall-canary-workspace-list",
+                McpCapability::Operator,
+                None,
+            );
+            assert_eq!(workspaces["workspaces"][0]["workspace_id"], "ws_canary");
+            assert_eq!(workspaces["workspaces"][0]["owner_machine_id"], "hm_hub");
+
+            let task = call(
+                "orbit.task.add",
+                json!({
+                    "workspace": "ws_canary",
+                    "title": "RMCP canary",
+                    "description": "Hub only",
+                    "model": "codex"
+                }),
+                "mcall-canary-task-add",
+                McpCapability::Agent,
+                Some("ws_canary"),
+            );
+            let task_id = task["id"].as_str().expect("task id").to_string();
+
+            let tasks = call(
+                "orbit.task.list",
+                json!({"workspace": "ws_canary", "limit": 10}),
+                "mcall-canary-task-list",
+                McpCapability::Agent,
+                Some("ws_canary"),
+            );
+            assert_eq!(tasks["items"][0]["id"], task_id);
+
+            let updated = call(
+                "orbit.task.update",
+                json!({
+                    "workspace": "ws_canary",
+                    "id": task_id,
+                    "plan": "1. Prove hub routing",
+                    "model": "codex"
+                }),
+                "mcall-canary-task-update",
+                McpCapability::Agent,
+                Some("ws_canary"),
+            );
+            assert_eq!(updated["plan"], "1. Prove hub routing");
+
+            let artifact_source = spoke.path().join("caller-artifact.txt");
+            std::fs::write(&artifact_source, "spoke payload").expect("artifact source");
+            call(
+                "orbit.task.artifact.put",
+                json!({
+                    "workspace": "ws_canary",
+                    "id": task_id,
+                    "source_path": artifact_source,
+                    "path": "reports/result.txt",
+                    "model": "codex"
+                }),
+                "mcall-canary-artifact-put",
+                McpCapability::Agent,
+                Some("ws_canary"),
+            );
+
+            let shown = call(
+                "orbit.task.show",
+                json!({
+                    "workspace": "ws_canary",
+                    "id": task_id,
+                    "fields": ["plan", "artifacts"]
+                }),
+                "mcall-canary-task-show",
+                McpCapability::Agent,
+                Some("ws_canary"),
+            );
+            assert_eq!(shown["plan"], "1. Prove hub routing");
+            assert_eq!(shown["artifacts"][0]["path"], "reports/result.txt");
+
+            let reviewed = call(
+                "orbit.task.review_thread.add",
+                json!({
+                    "workspace": "ws_canary",
+                    "id": task_id,
+                    "body": "Canary finding",
+                    "path": "src/lib.rs",
+                    "line": "7",
+                    "model": "codex"
+                }),
+                "mcall-canary-review-add",
+                McpCapability::Agent,
+                Some("ws_canary"),
+            );
+            let thread_id = reviewed["review_threads"][0]["thread_id"]
+                .as_str()
+                .expect("thread id")
+                .to_string();
+            let threads = call(
+                "orbit.task.review_thread.list",
+                json!({"workspace": "ws_canary", "id": task_id, "status": "open"}),
+                "mcall-canary-review-list",
+                McpCapability::Agent,
+                Some("ws_canary"),
+            );
+            assert_eq!(threads["items"][0]["thread_id"], thread_id);
+            let replied = call(
+                "orbit.task.review_thread.reply",
+                json!({
+                    "workspace": "ws_canary",
+                    "id": task_id,
+                    "thread_id": thread_id,
+                    "body": "Canary reply",
+                    "model": "codex"
+                }),
+                "mcall-canary-review-reply",
+                McpCapability::Agent,
+                Some("ws_canary"),
+            );
+            assert_eq!(
+                replied["review_threads"][0]["messages"]
+                    .as_array()
+                    .expect("messages")
+                    .len(),
+                2
+            );
+            let resolved = call(
+                "orbit.task.review_thread.resolve",
+                json!({
+                    "workspace": "ws_canary",
+                    "id": task_id,
+                    "thread_id": thread_id,
+                    "model": "codex"
+                }),
+                "mcall-canary-review-resolve",
+                McpCapability::Agent,
+                Some("ws_canary"),
+            );
+            assert_eq!(resolved["review_threads"][0]["status"], "resolved");
+
+            let friction = call(
+                "orbit.friction.add",
+                json!({
+                    "workspace": "ws_canary",
+                    "body": "RMCP canary friction",
+                    "tags": ["tooling"],
+                    "model": "codex"
+                }),
+                "mcall-canary-friction-add",
+                McpCapability::Agent,
+                Some("ws_canary"),
+            );
+            assert!(friction.get("path").is_none(), "hub response is path-free");
+            let friction_id = friction["id"].as_str().expect("friction id").to_string();
+            let frictions = call(
+                "orbit.friction.list",
+                json!({
+                    "workspace": "ws_canary",
+                    "q": "RMCP canary friction",
+                    "limit": 10
+                }),
+                "mcall-canary-friction-list",
+                McpCapability::Operator,
+                Some("ws_canary"),
+            );
+            assert_eq!(frictions["items"][0]["id"], friction_id);
+            assert!(frictions["items"][0].get("path").is_none());
+            let friction_shown = call(
+                "orbit.friction.show",
+                json!({"workspace": "ws_canary", "id": friction_id}),
+                "mcall-canary-friction-show",
+                McpCapability::Operator,
+                Some("ws_canary"),
+            );
+            assert_eq!(friction_shown["body"], "RMCP canary friction");
+            let friction_updated = call(
+                "orbit.friction.update",
+                json!({
+                    "workspace": "ws_canary",
+                    "id": friction_id,
+                    "status": "triaged",
+                    "body": "RMCP canary triaged"
+                }),
+                "mcall-canary-friction-update",
+                McpCapability::Operator,
+                Some("ws_canary"),
+            );
+            assert_eq!(friction_updated["status"], "triaged");
+            assert_eq!(friction_updated["body"], "RMCP canary triaged");
+        }
+
+        let wire_calls = factory.wire_calls.lock().expect("wire calls");
+        assert_eq!(wire_calls.len(), 16, "one registration plus 15 calls");
+        let (_, artifact_frame, artifact_context) = wire_calls
+            .iter()
+            .find(|(name, _, _)| name == "orbit.task.artifact.put")
+            .expect("artifact frame");
+        assert!(artifact_frame.get("source_path").is_none());
+        assert!(artifact_frame.get("artifacts").is_some());
+        assert_eq!(artifact_context.workspace_id.as_deref(), Some("ws_canary"));
+        let registration_frame = wire_calls
+            .iter()
+            .find(|(name, _, _)| name == orbit_common::types::SPOKE_REGISTRATION_METHOD_V1)
+            .expect("registration frame");
+        assert!(
+            serde_json::to_string(&registration_frame.1)
+                .expect("registration JSON")
+                .contains(&spoke_checkout.to_string_lossy().to_string()),
+            "authenticated presence publication is the sole path-bearing frame"
+        );
+        let ordinary_wire_json = serde_json::to_string(
+            &wire_calls
+                .iter()
+                .filter(|(name, _, _)| name != orbit_common::types::SPOKE_REGISTRATION_METHOD_V1)
+                .collect::<Vec<_>>(),
+        )
+        .expect("ordinary wire JSON");
+        assert!(!ordinary_wire_json.contains(&spoke.path().to_string_lossy().to_string()));
+        assert!(!ordinary_wire_json.contains(&hub.path().to_string_lossy().to_string()));
+        drop(wire_calls);
+
+        let response_json = serde_json::to_string(&responses).expect("response JSON");
+        assert!(!response_json.contains(&spoke.path().to_string_lossy().to_string()));
+        assert!(!response_json.contains(&hub.path().to_string_lossy().to_string()));
+        let cache_bytes = std::fs::read(RegistryCacheService::new(spoke.path()).cache_path())
+            .expect("spoke registry cache");
+        let cache_text = String::from_utf8(cache_bytes).expect("cache UTF-8");
+        assert!(!cache_text.contains(&spoke.path().to_string_lossy().to_string()));
+        assert!(!cache_text.contains(&hub.path().to_string_lossy().to_string()));
+
+        let task_store = hub.path().join("tasks/index.sqlite");
+        let task_connection = rusqlite::Connection::open(task_store).expect("hub task store");
+        let task_count: i64 = task_connection
+            .query_row(
+                "SELECT COUNT(*) FROM task_bundle_index WHERE workspace_id = 'ws_canary'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("hub task count");
+        assert_eq!(task_count, 1);
+        assert!(hub.path().join("frictions/workspaces/ws_canary").exists());
+        assert!(!spoke.path().join("orbit.db").exists());
+        assert!(!spoke.path().join("tasks").exists());
+        assert!(!spoke.path().join("frictions").exists());
+
+        let audit_connection =
+            rusqlite::Connection::open(hub.path().join("orbit.db")).expect("hub audit store");
+        for (name, call_id, capability, workspace) in audited_calls {
+            let row = audit_connection
+                .query_row(
+                    "SELECT COUNT(*), status, workspace_id, caller_machine_id, caller_host_id,
+                            process_machine_id, process_host_id, transport, capabilities_json,
+                            origin_session_id, mcp_call_id, tool_name
+                     FROM audit_events WHERE mcp_call_id = ?1",
+                    [call_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, Option<String>>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, Option<String>>(6)?,
+                            row.get::<_, Option<String>>(7)?,
+                            row.get::<_, Option<String>>(8)?,
+                            row.get::<_, Option<String>>(9)?,
+                            row.get::<_, Option<String>>(10)?,
+                            row.get::<_, Option<String>>(11)?,
+                        ))
+                    },
+                )
+                .unwrap_or_else(|error| panic!("audit row for {call_id}: {error}"));
+            assert_eq!(row.0, 1, "one canonical audit for {call_id}");
+            assert_eq!(row.1, AuditEventStatus::Success.to_string());
+            assert_eq!(row.2.as_deref(), workspace);
+            assert_eq!(row.3.as_deref(), Some("hm_spoke"));
+            assert_eq!(row.4.as_deref(), Some("spoke"));
+            assert_eq!(row.5.as_deref(), Some("hm_hub"));
+            assert_eq!(row.6.as_deref(), Some("hub"));
+            assert_eq!(row.7.as_deref(), Some("ssh-mcp"));
+            assert_eq!(
+                row.8.as_deref(),
+                Some(match capability {
+                    McpCapability::Agent => "[\"agent\"]",
+                    McpCapability::Operator => "[\"operator\"]",
+                    McpCapability::Runner => unreachable!("canary has no runner call"),
+                })
+            );
+            assert_eq!(row.9.as_deref(), Some("session-canary"));
+            assert_eq!(row.10.as_deref(), Some(call_id));
+            assert_eq!(row.11.as_deref(), Some(name));
+        }
+
+        let registration_audit: i64 = audit_connection
+            .query_row(
+                "SELECT COUNT(*) FROM audit_events
+                 WHERE mcp_call_id = 'mcall-canary-register'
+                   AND tool_name = ?1
+                   AND status = 'success'
+                   AND caller_machine_id = 'hm_spoke'
+                   AND process_machine_id = 'hm_hub'",
+                [orbit_common::types::SPOKE_REGISTRATION_METHOD_V1],
+                |row| row.get(0),
+            )
+            .expect("registration audit");
+        assert_eq!(registration_audit, 1);
+        assert_eq!(factory.connects.lock().expect("connects").len(), 2);
     }
 }

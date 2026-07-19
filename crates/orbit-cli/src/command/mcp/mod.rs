@@ -10,10 +10,12 @@ mod config;
 mod host;
 mod hub;
 mod hub_link;
+mod registration;
 mod setup;
 
 pub use command::{McpCommand, McpSubcommand};
 pub(crate) use host::{ORBIT_MCP_SERVER_ID, safe_mcp_tool_names};
+pub(super) use registration::register_local_spoke;
 #[allow(unused_imports)]
 pub(crate) use setup::init_auto_for_workspace;
 

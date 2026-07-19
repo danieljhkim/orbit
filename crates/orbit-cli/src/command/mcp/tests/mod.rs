@@ -392,17 +392,15 @@ const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.task.delete",
     "orbit.task.lint",
     "orbit.learning.prune",
-    // Agent-surface narrowing: triage / human-decision tools — CLI-only.
+    // Agent-surface narrowing: human-decision tools — CLI-only.
     "orbit.task.reject",
-    "orbit.friction.list",
     "orbit.friction.resolve",
-    "orbit.friction.show",
 ];
 
 // ORB-00289 + agent-surface narrowing: admin/destructive and triage tools
 // (`orbit.adr.list`, `orbit.semantic.uninstall`, `orbit.task.delete`,
 // `orbit.task.lint`, `orbit.task.reject`, `orbit.learning.prune`,
-// `orbit.friction.list/show/resolve`) deliberately omitted — retained on
+// `orbit.friction.resolve`) deliberately omitted — retained on
 // the CLI / `runtime.run_tool` path only.
 const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.search",
@@ -429,6 +427,8 @@ const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.learning.show",
     "orbit.learning.update",
     "orbit.friction.add",
+    "orbit.friction.list",
+    "orbit.friction.show",
     "orbit.friction.tags",
     "orbit.friction.update",
 ];
@@ -447,7 +447,7 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
 #[test]
 fn inactive_tools_are_not_in_the_mcp_safe_surface() {
     let safe_names: BTreeSet<String> = safe_mcp_tool_names().into_iter().collect();
-    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 23);
+    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 21);
 
     for name in EXPECTED_INACTIVE_TOOL_NAMES {
         assert!(
@@ -621,8 +621,27 @@ fn runtime_mcp_host_lists_safe_tools_and_no_graph_surface_after_v2_cutover() {
 struct McpConformanceFixture {
     capabilities: McpConformanceCapabilities,
     scopes: McpConformanceScopes,
+    private_connector: McpConformancePrivateConnector,
     hub_schema_digest: McpConformanceHubDigest,
     tools: BTreeMap<String, McpConformancePolicy>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformancePrivateConnector {
+    spoke_registration: McpConformanceSpokeRegistration,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformanceSpokeRegistration {
+    method: String,
+    schema_version: u32,
+    advertised: bool,
+    ordinary_tools_call: bool,
+    allowed_capabilities: BTreeSet<McpCapability>,
+    unknown_caller_only_operation: bool,
+    ordinary_calls_require_active_registration: bool,
+    only_path_bearing_fields: Vec<String>,
+    cache_refresh: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -705,6 +724,38 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
         fixture.scopes.allowed_values,
         BTreeSet::from([McpToolScope::WorkspaceRequired, McpToolScope::Global])
     );
+    let registration = fixture.private_connector.spoke_registration;
+    assert_eq!(
+        registration.method,
+        orbit_common::types::SPOKE_REGISTRATION_METHOD_V1
+    );
+    assert_eq!(
+        registration.schema_version,
+        orbit_common::types::SPOKE_REGISTRATION_SCHEMA_VERSION
+    );
+    assert!(!registration.advertised);
+    assert!(!registration.ordinary_tools_call);
+    assert_eq!(
+        registration.allowed_capabilities,
+        BTreeSet::from([
+            McpCapability::Agent,
+            McpCapability::Operator,
+            McpCapability::Runner,
+        ])
+    );
+    assert!(registration.unknown_caller_only_operation);
+    assert!(registration.ordinary_calls_require_active_registration);
+    assert_eq!(registration.only_path_bearing_fields, ["presence[].root"]);
+    assert_eq!(
+        registration.cache_refresh,
+        "definitive-complete-response-only"
+    );
+    assert!(
+        !fixture
+            .tools
+            .contains_key(orbit_common::types::SPOKE_REGISTRATION_METHOD_V1),
+        "private registration must never enter the canonical tool matrix"
+    );
     assert_eq!(
         fixture.hub_schema_digest.domain_tag,
         orbit_mcp::HUB_SCHEMA_DOMAIN
@@ -736,8 +787,11 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
     let mut expected_bytes = format!("{}\0", fixture.hub_schema_digest.domain_tag).into_bytes();
     expected_bytes.extend_from_slice(vector.canonical_json.as_bytes());
     assert_eq!(
-        orbit_mcp::canonical_hub_schema_bytes(&[vector_definition.clone()], vector.capability)
-            .expect("canonical golden bytes"),
+        orbit_mcp::canonical_hub_schema_bytes(
+            std::slice::from_ref(&vector_definition),
+            vector.capability
+        )
+        .expect("canonical golden bytes"),
         expected_bytes
     );
     assert_eq!(
@@ -1292,14 +1346,11 @@ mod audited_mcp_call_tests {
     }
 
     #[test]
-    fn friction_list_is_not_exposed_to_mcp_dispatch() {
+    fn friction_list_is_active_for_operator_dispatch() {
         let runtime = OrbitRuntime::in_memory().expect("build test runtime");
-        let err = audited_mcp_call(&runtime, "orbit.friction.list", json!({ "limit": 1 }))
-            .expect_err("orbit.friction.list must be hidden from the agent MCP surface");
-        assert!(
-            matches!(err, OrbitError::NotFound { .. }),
-            "expected NotFound for triage-only orbit.friction.list, got: {err}"
-        );
+        let value = audited_mcp_call(&runtime, "orbit.friction.list", json!({ "limit": 1 }))
+            .expect("canonical operator triage read");
+        assert_eq!(value, json!([]));
     }
 
     // ORB-00391: the former `mcp_graph_search_accepts_allow_fuzzy_and_returns_result_shape`

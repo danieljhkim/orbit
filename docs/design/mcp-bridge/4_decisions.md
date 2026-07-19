@@ -10,7 +10,7 @@ summary: Accepted ADR log for the coupled MCP Bridge and Host Registry v1 contra
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-registry/**", "crates/orbit-core/src/command/tool.rs"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10302, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10302, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235]
 ---
 
 # Orbit MCP Bridge — Decisions
@@ -44,7 +44,9 @@ and select execution placement per run with the owner as the default.
 ## ADR-0227 — Stable machine identity, registry, and out-of-band hub pin
 
 **Status:** Accepted · 2026-07 · [ORB-10245] froze the host identity boundary;
-[ORB-10268] implemented the strict machine-global trust document and exact hub/store pin.
+[ORB-10268] implemented the strict machine-global trust document and exact hub/store pin;
+[ORB-10271] implemented private spoke self-registration from validated local identity,
+honest committed stages, and definitive-success cache refresh.
 
 ### Context
 
@@ -63,7 +65,7 @@ and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
 
 ## ADR-0228 — Local placement broker with capability-set filtering
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] registered the first operator-only, hub-placement canonical discovery tools (`orbit.host.list`, `orbit.workspace.list`) in the canonical registry and the versioned conformance fixture; [ORB-10262] implemented the local exact-checkout broker and capability enforcement; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] registered the first operator-only, hub-placement canonical discovery tools (`orbit.host.list`, `orbit.workspace.list`) in the canonical registry and the versioned conformance fixture; [ORB-10262] implemented the local exact-checkout broker and capability enforcement; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface; [ORB-10271] implemented active registered-caller validation, operator-only friction reads, and path-free remote artifacts/responses.
 
 ### Context
 
@@ -196,8 +198,7 @@ adapter, runtime profile/ship construction in `orbit-core`, persistence in
   schema-listing broker, exact-checkout resolution/cache identity, placement preflight, and
   effective-session `tools/list` omission plus hidden-name `tools/call` denial. Hub coordination
   calls now execute by stable workspace ID without `OrbitRuntime` or a fabricated checkout;
-  task artifacts cross the hub boundary as bounded bytes, review persistence is independent of
-  local scoreboard/model configuration, and canonical friction state uses marker-committed
+  review persistence is independent of local scoreboard/model configuration, and canonical friction state uses marker-committed
   migration under the global workspace partition.
 - [ORB-10268] — added strict `~/.orbit/mcp.toml` trust parsing and the non-recursive
   `orbit mcp serve --hub` endpoint. Hub startup/list/call verify the exact
@@ -208,6 +209,10 @@ adapter, runtime profile/ship construction in `orbit-core`, persistence in
   pool, revision plus canonical hub-schema negotiation, trusted remote call
   metadata, and the pre-handoff `hub_unavailable` / post-handoff
   `outcome_unknown` split. Mutations are never replayed automatically.
+- [ORB-10271] — added the connector-private registration protocol, contract
+  revision 2, staged registry/projection/snapshot results, active caller checks,
+  definitive-success cache refresh, path-free artifact/friction handling, and the
+  two-root RMCP canary proving hub-only writes and one trusted audit per call.
 - [ORB-10302] — moved the coupled registry domain into `orbit-registry` and retained
   MCP ownership of serialization/dispatch only ([ADR-0235]).
 

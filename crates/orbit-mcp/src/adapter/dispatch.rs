@@ -2,15 +2,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use orbit_common::types::{
-    McpToolDefinition, OrbitError, ToolSchema, ToolSessionContext, audit_execution_id,
+    McpToolDefinition, OrbitError, SPOKE_REGISTRATION_METHOD_V1, SpokeRegistrationRequestV1,
+    SpokeRegistrationResultV1, ToolSchema, ToolSessionContext, audit_execution_id,
     validate_mcp_tool_definitions,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::ServerHandler;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, Implementation, InitializeRequestParams,
-    InitializeResult, ListToolsResult, Meta, PaginatedRequestParams, ServerCapabilities,
-    ServerInfo,
+    CallToolRequestParams, CallToolResult, CustomRequest, CustomResult, ErrorCode, Implementation,
+    InitializeRequestParams, InitializeResult, ListToolsResult, Meta, PaginatedRequestParams,
+    ServerCapabilities, ServerInfo,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use serde_json::{Map, Value};
@@ -202,6 +203,12 @@ impl OrbitToolServer {
             }
         };
         let inbound = req.name.to_string();
+        if let Err(denial) = self.host.preflight_tool_call(&inbound, &session_context) {
+            let denial =
+                self.host
+                    .reject_tool_call(&inbound, &Value::Null, &session_context, denial);
+            return Ok(tool_error_result(&denial));
+        }
         let canonical = self.canonical_name(&inbound)?;
         let input = req
             .arguments
@@ -341,6 +348,80 @@ impl ServerHandler for OrbitToolServer {
     ) -> Result<CallToolResult, McpError> {
         self.call_tool_request_with_meta(req, &ctx.meta).await
     }
+
+    async fn on_custom_request(
+        &self,
+        request: CustomRequest,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CustomResult, McpError> {
+        let method = request.method.clone();
+        if method != SPOKE_REGISTRATION_METHOD_V1 || !self.host.accepts_remote_session_context() {
+            return Err(McpError::new(ErrorCode::METHOD_NOT_FOUND, method, None));
+        }
+        if remote_session_context_from_meta(&ctx.meta)
+            .map_err(|error| McpError::invalid_params(error.to_string(), None))?
+            .is_none()
+        {
+            return Err(McpError::invalid_params(
+                "private spoke registration requires connector-owned remote session metadata",
+                None,
+            ));
+        }
+        let session_context = self
+            .session_context_for_call(&ctx.meta)
+            .map_err(|error| McpError::invalid_params(error.to_string(), None))?;
+        let registration = request
+            .params_as::<SpokeRegistrationRequestV1>()
+            .map_err(|error| {
+                McpError::invalid_params(
+                    format!("invalid private spoke registration payload: {error}"),
+                    None,
+                )
+            })?
+            .ok_or_else(|| {
+                McpError::invalid_params("private spoke registration requires parameters", None)
+            })?;
+        if let Err(error) = registration.validate() {
+            return registration_custom_result(SpokeRegistrationResultV1::rejected(&error));
+        }
+
+        let host = Arc::clone(&self.host);
+        let outcome = tokio::task::spawn_blocking(move || {
+            host.private_register_spoke(registration, session_context)
+        })
+        .await
+        .map_err(|error| {
+            McpError::internal_error(
+                format!("private spoke registration worker failed: {error}"),
+                None,
+            )
+        })?;
+        let Some(outcome) = outcome else {
+            return Err(McpError::new(ErrorCode::METHOD_NOT_FOUND, method, None));
+        };
+        let result = match outcome {
+            Ok(result) => result,
+            Err(error) => SpokeRegistrationResultV1::rejected(&error),
+        };
+        result.validate().map_err(|error| {
+            McpError::internal_error(
+                format!("invalid private spoke registration result: {error}"),
+                None,
+            )
+        })?;
+        registration_custom_result(result)
+    }
+}
+
+fn registration_custom_result(result: SpokeRegistrationResultV1) -> Result<CustomResult, McpError> {
+    serde_json::to_value(result)
+        .map(CustomResult::new)
+        .map_err(|error| {
+            McpError::internal_error(
+                format!("serialize private spoke registration result: {error}"),
+                None,
+            )
+        })
 }
 
 fn invalid_definitions_mcp_error(error: OrbitError) -> McpError {

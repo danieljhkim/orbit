@@ -66,6 +66,15 @@ pub const TIMEOUT_LONG_MS: u64 = 60_000;
 
 pub use registry::{ToolRegistry, canonical_builtin_mcp_tool_definitions};
 
+/// Materialize a task artifact before a spoke sends the coordination request
+/// to its hub. The returned value contains artifact bytes but no source path.
+pub fn prepare_remote_task_artifact_put(
+    input: Value,
+    cwd: Option<&std::path::Path>,
+) -> Result<Value, OrbitError> {
+    builtin::orbit::task::artifact_put::prepare_remote_payload(input, cwd)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrbitBuiltinAction {
     AdrAdd,

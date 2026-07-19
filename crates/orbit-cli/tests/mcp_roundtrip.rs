@@ -12,6 +12,7 @@
 // ORB-00013: tests use unwrap/expect to keep fixture setup readable.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -407,6 +408,19 @@ fn mcp_serve_lists_canonical_agent_surface_outside_any_checkout() {
 #[test]
 fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
     let workspace = McpWorkspace::init_hub();
+    let global_root = workspace.home.join(".orbit");
+    orbit_core::host_registry::host_registry_service_at(&global_root)
+        .expect("hub registry service")
+        .register_identity(
+            &orbit_core::routines::HostIdentity {
+                schema_version: orbit_core::routines::HOST_IDENTITY_SCHEMA_VERSION,
+                machine_id: "hm_spoke".to_string(),
+                host_id: "spoke".to_string(),
+                mode: orbit_core::routines::HostMode::Spoke,
+            },
+            BTreeSet::new(),
+        )
+        .expect("register remote spoke fixture");
     let scratch = workspace.home.join("hub-scratch");
     std::fs::create_dir_all(&scratch).expect("create hub launch dir");
     let child = McpWorkspace::orbit_command(&scratch, &workspace.home)

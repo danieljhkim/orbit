@@ -47,8 +47,16 @@ const UNSUPPORTED_PROFILE_ENV_OVERRIDES: [&str; 5] = [
 pub fn registry_snapshot_at(
     global_root: &std::path::Path,
 ) -> Result<RegistrySnapshotV1, OrbitError> {
+    host_registry_service_at(global_root)?.snapshot()
+}
+
+/// Open the one store-backed registry service for a machine-global root.
+/// Hub MCP composition uses this without constructing a checkout runtime.
+pub fn host_registry_service_at(
+    global_root: &std::path::Path,
+) -> Result<HostRegistryService, OrbitError> {
     let database = crate::config::resolved_audit_db_path(global_root, global_root)?;
-    HostRegistryService::new(Store::open(&database)?).snapshot()
+    Ok(HostRegistryService::new(Store::open(&database)?))
 }
 
 /// Persist a broker denial into the global coordination audit database when a

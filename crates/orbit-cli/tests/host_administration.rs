@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use tempfile::tempdir;
 
 #[test]
-fn spoke_rejects_every_direct_host_registry_mutation_before_target_lookup() {
+fn spoke_routes_only_self_registration_and_rejects_direct_administration() {
     let temp = tempdir().expect("tempdir");
     let home = temp.path().join("home");
     let work = temp.path().join("work");
@@ -48,15 +48,36 @@ fn spoke_rejects_every_direct_host_registry_mutation_before_target_lookup() {
         .assert()
         .success();
 
-    let mutation_commands = [
-        vec![
+    cargo_bin_cmd!("orbit")
+        .current_dir(&work)
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env_remove("ORBIT_ROOT")
+        .args([
             "host",
             "register",
             "--machine-id",
             "hm_remote",
             "--host-id",
             "remote",
-        ],
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "reads machine_id and host_id only from validated host.toml",
+        ));
+
+    cargo_bin_cmd!("orbit")
+        .current_dir(&work)
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env_remove("ORBIT_ROOT")
+        .args(["host", "register"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("mcp.toml"));
+
+    let mutation_commands = [
         vec!["host", "rename", "missing-host", "new-name"],
         vec!["host", "retire", "missing-host"],
         vec![

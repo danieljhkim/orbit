@@ -189,6 +189,8 @@ fn friction_surface_supports_artifact_triage() {
 
     for retained in [
         "orbit.friction.add",
+        "orbit.friction.list",
+        "orbit.friction.show",
         "orbit.friction.tags",
         "orbit.friction.update",
     ] {
@@ -205,15 +207,8 @@ fn friction_surface_supports_artifact_triage() {
         );
     }
 
-    // Triage surface (list/show/resolve) and stats are CLI / dashboard only:
-    // registered for `runtime.run_tool` but hidden from the default agent
-    // surface.
-    for cli_only in [
-        "orbit.friction.list",
-        "orbit.friction.resolve",
-        "orbit.friction.show",
-        "orbit.friction.stats",
-    ] {
+    // Destructive resolution and aggregate stats remain CLI / dashboard only.
+    for cli_only in ["orbit.friction.resolve", "orbit.friction.stats"] {
         assert!(
             !active.contains(cli_only),
             "{cli_only} must stay hidden from the default registry surface"

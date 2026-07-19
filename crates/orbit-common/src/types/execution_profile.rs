@@ -31,6 +31,7 @@ pub struct HostWorkspacePresence {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspacePresenceDeclaration {
     pub workspace_id: String,
     pub root: PathBuf,
@@ -56,6 +57,7 @@ pub struct SanitizedWorkspacePresence {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionProfileCrewV1 {
     pub name: String,
     pub provider: String,
@@ -132,6 +134,7 @@ impl ExecutionProfileCrewV1 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionProfileShipV1 {
     pub mode: String,
     pub base_branch: String,
