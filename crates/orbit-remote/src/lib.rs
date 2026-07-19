@@ -21,6 +21,7 @@
 //! snapshot queries are encapsulated here over `orbit-store`'s generic SQLite
 //! connection and namespaced migration-ledger infrastructure.
 
+pub mod execution_profile_projection;
 pub mod host_identity;
 pub mod host_registry;
 pub mod knowledge;
@@ -36,6 +37,10 @@ pub mod workspace_registry;
 #[cfg(test)]
 mod tests;
 
+pub use execution_profile_projection::{
+    CREW_PROFILE_FRESHNESS_TTL, ExecutionProfileProjection, FixedProfileClock, ProfileClock,
+    SystemProfileClock,
+};
 pub use host_identity::{
     HOST_IDENTITY_SCHEMA_VERSION, HOST_TOML_FILE, HostIdentity, HostIdentityOutcome,
     HostIdentityState, HostMode, NewHostIdentity, ensure_host_identity, inspect_host_identity,

@@ -2,7 +2,8 @@
 
 use orbit_common::types::{
     McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolPolicyError, McpToolScope,
-    NotFoundKind, OrbitError, RegistrySnapshotV1, ToolSchema, validate_mcp_tool_definitions,
+    NotFoundKind, OrbitError, RegistrySnapshotV1, ToolParam, ToolSchema,
+    validate_mcp_tool_definitions,
 };
 use serde_json::{Value, json};
 
@@ -18,6 +19,7 @@ pub(super) fn discovery_tool_definitions() -> Result<Vec<McpToolDefinition>, Mcp
             "List workspaces with declared owner and sanitized execution-profile freshness \
              (operator, hub placement).",
         )?,
+        crew_list_definition()?,
     ];
     validate_mcp_tool_definitions(&definitions)?;
     Ok(definitions)
@@ -37,6 +39,34 @@ fn discovery_definition(
             builtin: true,
         },
         McpToolPolicy::operator_only(McpToolPlacement::Hub).with_scope(McpToolScope::Global),
+    )
+}
+
+/// `orbit.crew.list` completes the hub discovery surface. Unlike the two
+/// registry-wide, operator-only, global tools above, it resolves a stable
+/// workspace and reads that workspace owner's stored execution-profile
+/// projection, so it is workspace-scoped and its accepted read-only crew
+/// discovery contract permits `agent` and `operator` (never `runner`).
+fn crew_list_definition() -> Result<McpToolDefinition, McpToolPolicyError> {
+    McpToolDefinition::new(
+        ToolSchema {
+            name: "orbit.crew.list".to_string(),
+            description:
+                "List a workspace owner's published execution-profile crews with sanitized \
+                 profile state, generation, and freshness (agent/operator, hub placement)."
+                    .to_string(),
+            parameters: vec![ToolParam {
+                name: "workspace".to_string(),
+                description:
+                    "Stable logical workspace ID. Defaults to the trusted MCP session workspace; \
+                     never resolved from process cwd or a checkout path."
+                        .to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            }],
+            builtin: true,
+        },
+        McpToolPolicy::agent_and_operator(McpToolPlacement::Hub),
     )
 }
 

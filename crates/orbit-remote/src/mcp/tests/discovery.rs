@@ -13,13 +13,13 @@ use super::super::schema::remote_input_schema;
 #[test]
 fn remote_owns_the_exact_global_discovery_definitions() {
     let definitions = discovery_tool_definitions().expect("discovery definitions");
-    assert_eq!(definitions.len(), 2);
+    assert_eq!(definitions.len(), 3);
     assert_eq!(
         definitions
             .iter()
             .map(|definition| definition.schema.name.as_str())
             .collect::<Vec<_>>(),
-        ["orbit.host.list", "orbit.workspace.list"]
+        ["orbit.host.list", "orbit.workspace.list", "orbit.crew.list"]
     );
     assert_eq!(
         definitions[0].schema.description,
@@ -31,7 +31,9 @@ fn remote_owns_the_exact_global_discovery_definitions() {
         "List workspaces with declared owner and sanitized execution-profile freshness \
          (operator, hub placement)."
     );
-    for definition in &definitions {
+    // The two registry-wide tools stay operator-only and global; they do not
+    // treat capability as a hierarchy that the crew tool extends.
+    for definition in &definitions[..2] {
         assert!(definition.schema.builtin);
         assert!(definition.schema.parameters.is_empty());
         assert_eq!(definition.policy.placement(), McpToolPlacement::Hub);
@@ -53,8 +55,26 @@ fn remote_owns_the_exact_global_discovery_definitions() {
         );
     }
 
+    // Crew discovery is workspace-scoped with exactly {agent, operator}; runner
+    // is never in its set.
+    let crew = &definitions[2];
+    assert_eq!(crew.schema.name, "orbit.crew.list");
+    assert!(crew.schema.builtin);
+    assert_eq!(crew.policy.placement(), McpToolPlacement::Hub);
+    assert_eq!(crew.policy.scope(), McpToolScope::WorkspaceRequired);
+    assert_eq!(
+        crew.policy.allowed_capabilities(),
+        &BTreeSet::from([McpCapability::Agent, McpCapability::Operator])
+    );
+    assert!(
+        !crew
+            .policy
+            .allowed_capabilities()
+            .contains(&McpCapability::Runner)
+    );
+
     let canonical = canonical_mcp_tool_definitions().expect("canonical definitions");
-    assert_eq!(canonical.len(), 31, "the frozen production surface changed");
+    assert_eq!(canonical.len(), 32, "the frozen production surface changed");
     assert_eq!(
         canonical
             .iter()

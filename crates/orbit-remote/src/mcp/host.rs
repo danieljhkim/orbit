@@ -520,6 +520,15 @@ impl BrokerMcpHost {
         super::discovery::execute_discovery_tool(name, snapshot)
     }
 
+    /// Project the sanitized crew-discovery response for `orbit.crew.list` from
+    /// C2's stored owner execution-profile projection at this hub-local root.
+    fn crew_discovery(&self, workspace_id: &str) -> Result<Value, OrbitError> {
+        let discovery = crate::ExecutionProfileProjection::at(&self.global_root)?
+            .crew_discovery(workspace_id)?;
+        serde_json::to_value(discovery)
+            .map_err(|error| OrbitError::Execution(format!("serialize crew discovery: {error}")))
+    }
+
     fn legacy_friction_root(
         &self,
         workspace_id: &str,
@@ -651,6 +660,15 @@ impl BrokerMcpHost {
                     };
                 }
                 return self.remote_hub_call(name, input, context, Some(&workspace_id));
+            }
+            // Crew discovery is projection-backed and hub-local; it never opens
+            // the coordination task registry. Standalone task validation keeps
+            // its current local-runtime behavior, so crew validation is not
+            // applied on this non-spoke coordination path.
+            if name == "orbit.crew.list" {
+                let result = self.crew_discovery(&workspace_id);
+                self.record_coordination_outcome(name, &context, &result);
+                return result;
             }
             let legacy_root = self.legacy_friction_root(&workspace_id, binding.as_ref());
             let result = HubCoordinationExecutor::new(&self.global_root, workspace_id, legacy_root)

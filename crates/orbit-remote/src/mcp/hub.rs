@@ -441,10 +441,45 @@ impl HubMcpHost {
         {
             object.insert("workspace".to_string(), Value::String(workspace_id.clone()));
         }
+        // Crew discovery reads the stored owner execution-profile projection at
+        // the hub; it never opens the coordination task registry.
+        if name == "orbit.crew.list" {
+            let result = self.crew_discovery(&workspace_id);
+            self.record_outcome(name, &context, &result);
+            return result;
+        }
+        // Explicit non-empty task-crew assignment is validated against the
+        // owner profile before any allocation/mutation. An omitted or cleared
+        // crew is accepted without a profile, so coordination tasks can still be
+        // filed while an owner is unavailable.
+        if let Some(crew) = explicit_task_crew(name, &input)
+            && let Err(error) = self.validate_task_crew(&workspace_id, &crew)
+        {
+            self.record_denial(name, &context, &error);
+            return Err(error);
+        }
         let result = HubCoordinationExecutor::new(&self.global_root, workspace_id, None)
             .and_then(|executor| executor.execute_tool(name, input, context.clone()));
         self.record_outcome(name, &context, &result);
         result
+    }
+
+    /// Project the sanitized crew-discovery response for `orbit.crew.list` from
+    /// C2's stored owner execution-profile projection.
+    fn crew_discovery(&self, workspace_id: &str) -> Result<Value, OrbitError> {
+        let discovery = crate::ExecutionProfileProjection::at(&self.global_root)?
+            .crew_discovery(workspace_id)?;
+        serde_json::to_value(discovery)
+            .map_err(|error| OrbitError::Execution(format!("serialize crew discovery: {error}")))
+    }
+
+    /// Validate an explicit task crew against the workspace owner's current
+    /// execution profile. Never falls back to hub-local crews, the registry
+    /// cache, a stale replica, or a synchronous owner call.
+    fn validate_task_crew(&self, workspace_id: &str, crew: &str) -> Result<(), OrbitError> {
+        crate::ExecutionProfileProjection::at(&self.global_root)?
+            .validate_task_crew(workspace_id, crew)
+            .map(|_| ())
     }
 
     fn registration_result(
@@ -656,6 +691,20 @@ fn registration_partial(
         "projection_failed",
         error.to_string(),
     )
+}
+
+/// The explicit, non-empty `crew` on a task add/update, or `None` for any other
+/// tool, an omitted crew, or an explicit crew-clearing (empty) value.
+fn explicit_task_crew(name: &str, input: &Value) -> Option<String> {
+    if !matches!(name, "orbit.task.add" | "orbit.task.update") {
+        return None;
+    }
+    input
+        .get("crew")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn placement_label(placement: McpToolPlacement) -> &'static str {

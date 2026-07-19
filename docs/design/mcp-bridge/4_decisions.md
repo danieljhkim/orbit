@@ -10,7 +10,7 @@ summary: ADR log for the coupled MCP Bridge and Host Registry v1 contract and it
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Orbit MCP Bridge — Decisions
@@ -25,7 +25,7 @@ The older entry remains intact as design history.
 
 ## ADR-0226 — Singular coordination hub, workspace owner, and per-run placement
 
-**Status:** Accepted · 2026-07 · [ORB-10245] accepted the coupled v1 contract.
+**Status:** Accepted · 2026-07 · [ORB-10245] accepted the coupled v1 contract; [ORB-10276] added the single projection-backed explicit-task-crew validation path: a non-empty `crew` on task add/update is validated against the resolved workspace owner's current stored execution profile (never hub-local crews, the registry cache, a stale replica, or a synchronous owner call), while an omitted or cleared crew still files without a profile and standalone/auto-task CRUD keep their local-runtime crew validation.
 
 ### Context
 
@@ -67,7 +67,7 @@ and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
 
 ## ADR-0228 — Local placement broker with capability-set filtering
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] registered the first operator-only, hub-placement canonical discovery tools (`orbit.host.list`, `orbit.workspace.list`) in Remote's canonical composition and the versioned conformance fixture; [ORB-10262] implemented the local exact-checkout broker and capability enforcement; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface; [ORB-10271] implemented active registered-caller validation, operator-only friction reads, and path-free remote artifacts/responses; [ORB-10319] colocated MCP-only discovery schemas and execution in Remote while retaining the dedicated human CLI commands.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] registered the first operator-only, hub-placement canonical discovery tools (`orbit.host.list`, `orbit.workspace.list`) in Remote's canonical composition and the versioned conformance fixture; [ORB-10262] implemented the local exact-checkout broker and capability enforcement; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface; [ORB-10271] implemented active registered-caller validation, operator-only friction reads, and path-free remote artifacts/responses; [ORB-10319] colocated MCP-only discovery schemas and execution in Remote while retaining the dedicated human CLI commands; [ORB-10276] completed the discovery surface with the workspace-scoped, `{agent, operator}`, hub-placement `orbit.crew.list` (runner neither advertises nor executes it) beside the two operator-only global registry tools, reading the same profile projection through one service.
 
 ### Context
 
@@ -272,5 +272,17 @@ Remote database or a separate broker crate.
   explicit late-workspace ineligibility. Its private path-free allocation protocol
   advances the connector contract to revision 3. Public issuance remains an F3
   cutover and standalone creation remains unchanged.
+- [ORB-10276] — completed host/workspace/crew discovery and the first
+  projection-backed validation path (Unit H1). Registered the workspace-scoped,
+  `{agent, operator}`, hub-placement `orbit.crew.list` beside the two operator-only
+  global registry tools and in the conformance fixture, and added one reusable
+  `orbit-remote` execution-profile projection service (injected clock, single shared
+  freshness TTL) that both crew discovery and explicit task-crew validation read.
+  A non-empty task crew on add/update now requires the resolved workspace owner's
+  current stored profile and validates against its effective crews; missing/stale
+  profiles and unknown crews fail with actionable workspace/owner/state/age errors
+  and mutate nothing. Standalone and owner-local auto-task CRUD keep their local
+  crew validation. Task `host`/claims (H2), workflow ship/placement (H3), and run
+  lineage/leasing (I1) remain out of scope.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
