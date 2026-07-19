@@ -1,7 +1,7 @@
 ---
 title: Orbit Core — Decisions
 owner: claude
-last_updated: 2026-07-04
+last_updated: 2026-07-19
 status: Accepted
 feature: orbit-core
 doc_role: decisions
@@ -41,13 +41,13 @@ type, and implementing an orbit-engine host trait for `OrbitRuntime` outside
 orbit-core would violate the orphan rule.
 
 **Decision.** Move only the command groups the runtime never calls —
-workspace doctor, migrate status/dry-run, diagnostics readers, task
-templates, agent-rules injection, hook install, the learning/review-thread
-PreToolUse hook, and the direct v2 activity runner (plus their sibling tests
-and the `task_templates/` + `agent-rules.md` embedded assets) — into a new
-internal crate `crates/orbit-cmd`. Former inherent methods become per-module
-extension traits (`DoctorCommands`, `MigrateCommands`, `DiagnosticsCommands`,
-`TaskTemplateCommands`, `LearningHookCommands`, `ActivityV2Commands`;
+workspace doctor, migrate status/dry-run, diagnostics readers, agent-rules
+injection, hook install, the learning/review-thread PreToolUse hook, and the
+direct v2 activity runner (plus their sibling tests and the `agent-rules.md`
+embedded asset) — into a new internal crate `crates/orbit-cmd`. Former inherent
+methods become per-module extension traits (`DoctorCommands`,
+`MigrateCommands`, `DiagnosticsCommands`, `LearningHookCommands`,
+`ActivityV2Commands`;
 `orbit_cmd::prelude::*` imports them all), so call sites keep method syntax.
 Runtime-entangled groups (task, learning, docs, search, semantic, job, tool,
 audit-event, pipeline-run, init/seeding, workflow, skill, activity v1,

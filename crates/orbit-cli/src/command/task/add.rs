@@ -1,5 +1,4 @@
 use clap::{ArgAction, Args};
-use orbit_cmd::TaskTemplateCommands;
 use orbit_core::command::task::TaskAddParams;
 use orbit_core::{
     ExternalRef, OrbitError, OrbitRuntime, TaskComplexity, TaskCreateStatus, TaskPriority, TaskType,
@@ -17,7 +16,7 @@ pub struct TaskAddArgs {
     /// Task title
     #[arg(long)]
     pub title: String,
-    /// Task description (overrides template if --template is also given)
+    /// Task description
     #[arg(long, default_value = "")]
     pub description: String,
     /// Acceptance criteria. Repeat or comma-separate for multiple criteria.
@@ -32,9 +31,6 @@ pub struct TaskAddArgs {
     /// Optional task plan payload. Leave blank for the executing agent or planning activity to author later.
     #[arg(long, default_value = "")]
     pub plan: String,
-    /// Pre-populate description, plan, and instructions from a named template
-    #[arg(long)]
-    pub template: Option<String>,
     /// External tracker reference in `system:id` form. Repeat for multiple refs.
     #[arg(long = "ref", action = ArgAction::Append)]
     pub external_refs: Vec<String>,
@@ -80,49 +76,22 @@ impl Execute for TaskAddArgs {
             eprintln!("warning: parent task '{parent_id}' was not found; creating subtask anyway");
         }
 
-        let (description, plan, priority, task_type) = if let Some(ref tpl_name) = self.template {
-            let tpl = runtime.get_task_template(tpl_name)?;
-            let description = if self.description.is_empty() {
-                tpl.description_template
-            } else {
-                self.description
-            };
-            let plan = if self.plan.is_empty() {
-                format!(
-                    "{}\n\n---\n\n{}",
-                    tpl.plan_template.trim_end(),
-                    tpl.instructions_template.trim_end()
-                )
-            } else {
-                self.plan
-            };
-            let priority = if self.priority == TaskPriority::Medium {
-                tpl.priority
-            } else {
-                self.priority
-            };
-            let task_type = self.task_type.or(Some(tpl.task_type));
-            (description, plan, priority, task_type)
-        } else {
-            (self.description, self.plan, self.priority, self.task_type)
-        };
-
         let task = runtime.add_task_with_identity(
             TaskAddParams {
                 parent_id: self.parent_id,
                 title: self.title,
-                description,
+                description: self.description,
                 acceptance_criteria: self.acceptance_criteria,
                 dependencies: self.dependencies,
                 relations: Vec::new(),
                 tags: self.tags,
-                plan,
+                plan: self.plan,
                 comment: None,
                 context_files: self.context,
                 workspace_path: self.workspace,
-                priority,
+                priority: self.priority,
                 complexity: self.complexity,
-                task_type,
+                task_type: self.task_type,
                 status: self.status.map(Into::into),
                 system_created: false,
                 external_refs: self
