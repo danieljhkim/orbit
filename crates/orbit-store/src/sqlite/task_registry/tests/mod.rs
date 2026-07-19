@@ -285,7 +285,7 @@ fn open_migrates_path_coupled_registry_once_without_changing_coordination_state(
         params![
             "ORB-00041",
             "legacy-workspace-aaaaaa",
-            canonical_path.to_string_lossy(),
+            normalize_path(&canonical_path).to_string_lossy(),
             timestamp,
         ],
     )
