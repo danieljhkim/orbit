@@ -17,6 +17,8 @@ pub struct LearningShowArgs {
 impl Execute for LearningShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let learning = runtime.get_learning(&self.id)?;
+        // Opening the full body is the passive usage signal for this learning.
+        runtime.record_learning_shown(&learning.id)?;
         if self.json {
             crate::output::json::print_pretty(&learning_show_to_json(&learning))
         } else {

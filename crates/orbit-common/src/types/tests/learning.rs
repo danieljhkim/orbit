@@ -28,6 +28,7 @@ mod admission {
             .map(|idx| LearningReminder {
                 id: format!("L{idx}"),
                 summary: format!("summary {idx}"),
+                tags: Vec::new(),
             })
             .collect();
 
@@ -115,6 +116,7 @@ mod reminders {
         let block = render_reminder_block(&[LearningReminder {
             id: "L-0001".to_string(),
             summary: "Verify output equivalence before freezing a result.".to_string(),
+            tags: Vec::new(),
         }]);
 
         assert_eq!(
@@ -122,6 +124,24 @@ mod reminders {
             "<system-reminder>\n\
 Project learnings relevant to this task:\n\n\
 - [L-0001] Verify output equivalence before freezing a result.\n\n\
+Read full body via `orbit.learning.show <id>` if needed.\n\
+</system-reminder>"
+        );
+    }
+
+    #[test]
+    fn render_reminder_block_includes_scope_tags_in_teaser() {
+        let block = render_reminder_block(&[LearningReminder {
+            id: "L-0002".to_string(),
+            summary: "Scope tags ride in the teaser.".to_string(),
+            tags: vec!["hooks".to_string(), "observability".to_string()],
+        }]);
+
+        assert_eq!(
+            block,
+            "<system-reminder>\n\
+Project learnings relevant to this task:\n\n\
+- [L-0002] Scope tags ride in the teaser. [tags: hooks, observability]\n\n\
 Read full body via `orbit.learning.show <id>` if needed.\n\
 </system-reminder>"
         );

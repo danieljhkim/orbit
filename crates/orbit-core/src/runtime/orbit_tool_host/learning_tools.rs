@@ -53,6 +53,8 @@ pub(super) fn add(
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
     let learning = runtime.get_learning(&id)?;
+    // Opening the full body is the passive usage signal for this learning.
+    runtime.record_learning_shown(&learning.id)?;
     Ok(learning_show_to_json(&learning))
 }
 

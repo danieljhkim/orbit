@@ -123,6 +123,47 @@ pub struct AuditRoleAggregate {
     pub cli: i64,
 }
 
+/// `target_type` of the per-fire injection audit event emitted by the
+/// learning PreToolUse hook.
+pub const LEARNING_INJECTED_TARGET_TYPE: &str = "learning_injected";
+/// `target_type` of the passive usage-signal audit event recorded when a
+/// learning's full body is opened via `orbit learning show`.
+pub const LEARNING_SHOWN_TARGET_TYPE: &str = "learning_shown";
+
+/// Per-learning rollup of injection and show audit events. Raw counts only;
+/// the derived shown ratio lives on an accessor so the "shown is the passive
+/// usage signal" semantics stay in one place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LearningUsageStat {
+    pub learning_id: String,
+    /// Number of `learning_injected` events that included this learning.
+    pub injected_count: u64,
+    /// Number of `learning_shown` events for this learning (full body opened
+    /// via `orbit learning show`). The ungameable usage signal.
+    pub shown_count: u64,
+    pub last_injected_at: Option<DateTime<Utc>>,
+    pub last_shown_at: Option<DateTime<Utc>>,
+}
+
+impl LearningUsageStat {
+    fn new(learning_id: String) -> Self {
+        Self {
+            learning_id,
+            injected_count: 0,
+            shown_count: 0,
+            last_injected_at: None,
+            last_shown_at: None,
+        }
+    }
+
+    /// `shown_count / injected_count`, or `None` when nothing was injected.
+    /// A low ratio is the deprecation-candidate signal: injected often, never
+    /// read.
+    pub fn shown_ratio(&self) -> Option<f64> {
+        (self.injected_count > 0).then(|| self.shown_count as f64 / self.injected_count as f64)
+    }
+}
+
 fn audit_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEvent> {
     let ts_raw: String = row.get(2)?;
     let status_raw: String = row.get(9)?;
@@ -878,6 +919,92 @@ impl Store {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| OrbitError::Store(e.to_string()))
+    }
+
+    /// Fold `learning_injected` and `learning_shown` audit events into a
+    /// per-learning usage rollup. Malformed `arguments_json` payloads are
+    /// skipped rather than failing the whole aggregation — the rollup is an
+    /// observability surface over best-effort instrumentation.
+    pub fn get_learning_usage_stats(
+        &self,
+        since: Option<&DateTime<Utc>>,
+    ) -> Result<Vec<LearningUsageStat>, OrbitError> {
+        let conn = self.read()?;
+
+        let (since_clause, since_params) = match since {
+            Some(since) => (
+                " AND timestamp >= ?1",
+                vec![Box::new(since.to_rfc3339()) as Box<dyn rusqlite::types::ToSql>],
+            ),
+            None => ("", Vec::new()),
+        };
+        let sql = format!(
+            "SELECT timestamp, target_type, target_id, arguments_json \
+             FROM audit_events \
+             WHERE target_type IN ('{LEARNING_INJECTED_TARGET_TYPE}', '{LEARNING_SHOWN_TARGET_TYPE}') \
+             AND status = 'success'{since_clause} ORDER BY id ASC"
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            since_params.iter().map(|b| b.as_ref()).collect();
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .map_err(|e| OrbitError::Store(e.to_string()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+        let mut stats = std::collections::BTreeMap::<String, LearningUsageStat>::new();
+        for (ts_raw, target_type, target_id, arguments_json) in rows {
+            let Ok(timestamp) = parse_timestamp(&ts_raw) else {
+                continue;
+            };
+            if target_type == LEARNING_INJECTED_TARGET_TYPE {
+                let arguments = arguments_json
+                    .as_deref()
+                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
+                let Some(learning_ids) = arguments
+                    .as_ref()
+                    .and_then(|value| value.get("learning_ids"))
+                    .and_then(serde_json::Value::as_array)
+                else {
+                    continue;
+                };
+                for learning_id in learning_ids.iter().filter_map(serde_json::Value::as_str) {
+                    let stat = stats
+                        .entry(learning_id.to_string())
+                        .or_insert_with(|| LearningUsageStat::new(learning_id.to_string()));
+                    stat.injected_count += 1;
+                    stat.last_injected_at = Some(timestamp);
+                }
+            } else {
+                // `learning_shown` keys the learning ID directly on target_id.
+                let Some(learning_id) = target_id.as_deref().filter(|id| !id.is_empty()) else {
+                    continue;
+                };
+                let stat = stats
+                    .entry(learning_id.to_string())
+                    .or_insert_with(|| LearningUsageStat::new(learning_id.to_string()));
+                stat.shown_count += 1;
+                stat.last_shown_at = Some(timestamp);
+            }
+        }
+
+        let mut stats = stats.into_values().collect::<Vec<_>>();
+        stats.sort_by(|a, b| {
+            b.injected_count
+                .cmp(&a.injected_count)
+                .then_with(|| a.learning_id.cmp(&b.learning_id))
+        });
+        Ok(stats)
     }
 
     pub fn prune_audit_events(&self, older_than: &DateTime<Utc>) -> Result<usize, OrbitError> {

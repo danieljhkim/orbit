@@ -487,6 +487,7 @@ impl Commands {
                     LearningSubcommand::Add(_) => ("add", RuntimeNeed::Required),
                     LearningSubcommand::List(_) => ("list", RuntimeNeed::Required),
                     LearningSubcommand::Show(_) => ("show", RuntimeNeed::Required),
+                    LearningSubcommand::Stats(_) => ("stats", RuntimeNeed::Required),
                     LearningSubcommand::Update(_) => ("update", RuntimeNeed::Required),
                     LearningSubcommand::Supersede(_) => ("supersede", RuntimeNeed::Required),
                     LearningSubcommand::Sync(_) => ("sync", RuntimeNeed::Required),

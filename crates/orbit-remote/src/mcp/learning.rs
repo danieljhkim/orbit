@@ -339,6 +339,19 @@ fn parse_learning_list_candidates(value: &Value) -> Vec<ReminderCandidate> {
         .filter_map(|item| {
             let id = item.get("id").and_then(Value::as_str)?.to_string();
             let summary = item.get("summary").and_then(Value::as_str)?.to_string();
+            // Tags may ride at the top level or under `scope`; absent tags
+            // render as a path-only teaser.
+            let tags = item
+                .get("tags")
+                .or_else(|| item.get("scope").and_then(|scope| scope.get("tags")))
+                .and_then(Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|value| value.as_str().map(ToOwned::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default();
             let priority = item
                 .get("priority")
                 .and_then(Value::as_u64)
@@ -349,7 +362,7 @@ fn parse_learning_list_candidates(value: &Value) -> Vec<ReminderCandidate> {
                 .unwrap_or_default()
                 .to_string();
             Some(ReminderCandidate {
-                reminder: LearningReminder { id, summary },
+                reminder: LearningReminder { id, summary, tags },
                 priority,
                 updated_at,
             })

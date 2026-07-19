@@ -76,6 +76,7 @@ fn learning_reminders_for_task_snapshot(
         reminders.push(LearningReminder {
             id,
             summary: result.learning.summary,
+            tags: result.learning.scope.tags,
         });
     }
     Ok(reminders)

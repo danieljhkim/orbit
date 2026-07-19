@@ -167,12 +167,18 @@ pub const DEFAULT_LEARNING_REMINDER_PER_CALL_CAP: usize = 5;
 pub const DEFAULT_LEARNING_REMINDER_SESSION_CAP: usize = 20;
 
 /// Envelope projected into agent context by the project-learnings injection
-/// layers. The learning itself carries only the summary; agents open the full
-/// body via `orbit.learning.show` when they need the details.
+/// layers. The teaser carries only the id, one-line summary, and scope tags;
+/// agents open the full body via `orbit.learning.show` when they need the
+/// details — that show is the passive usage signal ([ORB-10316]).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LearningReminder {
     pub id: OrbitId,
     pub summary: String,
+    /// Scope tags for the learning, rendered inline in the teaser. Empty when
+    /// the learning is path-scoped only; `#[serde(default)]` keeps older
+    /// persisted dedup state readable.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 /// Budget controls for project-learning injection.
@@ -280,7 +286,16 @@ pub fn render_reminder_block(reminders: &[LearningReminder]) -> String {
     let mut out = String::from("<system-reminder>\n");
     out.push_str("Project learnings relevant to this task:\n\n");
     for reminder in reminders {
-        out.push_str(&format!("- [{}] {}\n", reminder.id, reminder.summary));
+        if reminder.tags.is_empty() {
+            out.push_str(&format!("- [{}] {}\n", reminder.id, reminder.summary));
+        } else {
+            out.push_str(&format!(
+                "- [{}] {} [tags: {}]\n",
+                reminder.id,
+                reminder.summary,
+                reminder.tags.join(", ")
+            ));
+        }
     }
     out.push('\n');
     out.push_str("Read full body via `orbit.learning.show <id>` if needed.\n");

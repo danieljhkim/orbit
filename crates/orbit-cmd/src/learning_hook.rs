@@ -7,7 +7,7 @@ use fs2::FileExt;
 use orbit_common::types::{
     AuditEventStatus, LearningInjectionCaps, LearningInjectionState, LearningReminder, OrbitError,
 };
-use orbit_store::{AuditEventInsertParams, LearningSearchParams};
+use orbit_store::{AuditEventInsertParams, LEARNING_INJECTED_TARGET_TYPE, LearningSearchParams};
 use serde_json::Value;
 use serde_json::json;
 
@@ -28,6 +28,12 @@ pub type SessionLearningState = LearningInjectionState;
 pub struct HookPayload {
     pub tool_name: String,
     pub target_path: String,
+    /// Session id carried by the hook payload itself (Claude Code sends
+    /// `session_id` on every hook event). Used as the dedup anchor when
+    /// `ORBIT_SESSION_ID` is not exported — interactive sessions spawn a
+    /// fresh shell per hook fire, so the ppid-tmpfile fallback re-keys per
+    /// invocation and never dedups (L-0077 injected 10× in one session).
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,9 +157,12 @@ pub fn parse_payload_with_tools(stdin: &str, accepted_tools: &[&str]) -> Option<
                 .and_then(path_from_shell_command)
         })?;
 
+    let session_id = string_field(&value, &["session_id", "sessionId"]).map(ToOwned::to_owned);
+
     Some(HookPayload {
         tool_name: tool_name.to_string(),
         target_path: target_path.to_string(),
+        session_id,
     })
 }
 
@@ -226,6 +235,7 @@ pub fn reminders_from_search_results(
         .map(|result| LearningReminder {
             id: result.learning.id,
             summary: result.learning.summary,
+            tags: result.learning.scope.tags,
         })
         .collect()
 }
@@ -346,9 +356,13 @@ pub fn run_pretooluse_input(
     };
 
     let caps = caps_from_env();
+    // Engine-managed runs export `ORBIT_SESSION_ID` (pre-seeded with layer-1
+    // injections), so the env var wins; interactive sessions never export it
+    // and fall back to the session id the hook payload itself carries.
     let session_id = std::env::var(ORBIT_SESSION_ID_ENV)
         .ok()
-        .filter(|value| !value.trim().is_empty());
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| payload.session_id.clone());
     let tmpdir = learning_hook_tmpdir();
     let ppid = parent_process_id();
 
@@ -384,25 +398,33 @@ pub fn run_pretooluse_input(
         return Ok(None);
     }
 
-    if !admitted.is_empty() {
-        emit_learning_injected_audit(
+    // Audit instrumentation fails open: an unavailable audit backend must
+    // not suppress reminders that were already admitted for injection.
+    if !admitted.is_empty()
+        && let Err(error) = emit_learning_injected_audit(
             runtime,
             &payload.tool_name,
             &payload.target_path,
             session_id.as_deref(),
             &admitted,
             start.elapsed(),
-        )?;
+        )
+    {
+        tracing::warn!(error = %redact_sensitive_env_text(&error), "learning hook audit emit failed open");
     }
     for reminder in &review_thread_admitted {
-        orbit_core::command::review_thread_hook::emit_review_thread_surfaced_audit(
-            runtime,
-            &payload.tool_name,
-            &payload.target_path,
-            session_id.as_deref(),
-            reminder,
-            start.elapsed(),
-        )?;
+        if let Err(error) =
+            orbit_core::command::review_thread_hook::emit_review_thread_surfaced_audit(
+                runtime,
+                &payload.tool_name,
+                &payload.target_path,
+                session_id.as_deref(),
+                reminder,
+                start.elapsed(),
+            )
+        {
+            tracing::warn!(error = %redact_sensitive_env_text(&error), "review-thread hook audit emit failed open");
+        }
     }
 
     render_hook_reminders(format, &admitted, &review_thread_admitted)
@@ -706,7 +728,7 @@ fn emit_learning_injected_audit(
         command: "hook".to_string(),
         subcommand: Some("pretooluse".to_string()),
         tool_name: Some(tool_name.to_string()),
-        target_type: Some("learning_injected".to_string()),
+        target_type: Some(LEARNING_INJECTED_TARGET_TYPE.to_string()),
         target_id: Some(target_path.to_string()),
         role: "hook".to_string(),
         status: AuditEventStatus::Success,
