@@ -7,6 +7,7 @@ use crate::auto_tasks::crud::AutoTaskAddParams;
 mod crud;
 mod schedule;
 mod scheduler;
+mod shipped;
 
 /// A minimal, valid template for tests.
 pub(super) fn template(title: &str) -> AutoTaskTemplate {

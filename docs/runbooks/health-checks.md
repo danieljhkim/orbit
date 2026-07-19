@@ -87,9 +87,12 @@ orbit routine list
 orbit sweep --json
 ```
 
-The dashboard also exposes `GET /api/routines`. The `qa-sweep` auto-task definition is
-ordinary workspace data under `.orbit/auto_tasks/`, processed by the generic auto-task
-scheduler routine.
+The dashboard also exposes `GET /api/routines`. Auto-task definitions such as
+`qa-sweep` and `learning-deprecation-review` are ordinary workspace data under
+`.orbit/auto_tasks/`, processed by the generic auto-task scheduler routine.
+`learning-deprecation-review` is report-only — it mints a task that lists stale
+learning candidates via `execution_summary` and never mutates learnings
+(ORB-10318).
 
 ## Verification and escalation
 

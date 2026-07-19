@@ -404,6 +404,20 @@ Two agents (or two humans) may author overlapping learnings concurrently. Phase 
 
 When a duplicate concern is already covered by an active learning, the agent should upvote the existing record instead of creating a near-duplicate. The vote says "this learning is still load-bearing in a new task context" and improves search ranking without changing the learning body or `updated_at`.
 
+### 7.6 Recurring deprecation review (auto-task)
+
+`orbit learning prune` ([§7.3](#73-staleness-detection)) is mechanical and anchor-only: it flags a learning stale purely on dead paths / evidence, and it is opportunistic — nothing schedules it. The teaser-injection instrumentation ([ORB-10316], [§5.5](#55-usage-instrumentation-and-feedback)) adds a second, softer signal — *whether a learning is ever injected or shown* — that `prune` does not consider. A learning can be perfectly anchored (its globs still resolve) yet be dead weight: never injected, injected-but-never-opened, or scoped so broadly it only ever matches tangentially.
+
+To surface that class continuously without hard-coding thresholds, orbit ships a **report-only recurring review** as an auto-task ([docs/design/auto-tasks/](../auto-tasks/), [ORB-10318]) — `.orbit/auto_tasks/learning-deprecation-review.yaml`. On its cadence the generic scheduler mints a normal task whose prompt directs the assigned agent to:
+
+1. Read the usage rollups (`orbit learning stats --json`: `injected_count`, `shown_count`, `shown_ratio`, `last_injected_at`, `last_shown_at`) and each learning's age (`orbit learning list --json`).
+2. Inspect **anchor health** from `scope.paths`: empty path scopes (can never inject) and globs that match nothing in the current tree.
+3. Write a ranked list of the potentially stale learnings, each with evidence, into the task's `execution_summary` — that is the entire deliverable.
+
+The run **never** deprecates, deletes, supersedes, archives, or adds a learning state; curation stays human/orchestrator-owned and is applied afterwards through the existing `orbit learning update` / archival surface. It **fails open**: an empty or missing rollup (a fresh workspace with no audit history) reports "nothing stale" rather than erroring. Agent judgment replaces the fixed thresholds a bespoke staleness-scoring engine would have hard-coded — the deliberate choice ([ORB-10318]) not to build one, given the small corpus and the audit's finding that no learning is a proven chronic offender.
+
+The definition is ordinary workspace data (`no-diff-expected` + `learning-deprecation` tags, `skip_if_open` dedupe); its cadence lives in the definition's `schedule` field, not in the identity `config.yaml` ([L-0014] keeps runtime config out of `config.yaml`). First-cycle calibration reproduces the 2026-07-18 hook-relevancy audit's candidate set (L-0074, L-0077, L-0068, L-0041, and the six empty-path learnings) or documents why any now differs.
+
 ---
 
 ## 8. Concerns & Honest Limitations
@@ -451,5 +465,6 @@ Learnings are workspace-scoped and checked into the repo. They travel exactly wh
 - [ORB-00061] — Add Knowledge tab and Learnings subtab to dashboard.
 - [ORB-00090] — Aligned learning identity examples with the agent-family convention.
 - [ORB-10316] — Teaser injection (id + summary + tags), `learning_shown` usage signal on `orbit learning show`, `learning_injected`/`learning_shown` rollup via `orbit learning stats`, payload-derived session dedup ([§4.3](#43-layer-3--claude-code-pretooluse-hook-optional), [§4.5](#45-what-gets-injected), [§5.5](#55-usage-instrumentation-and-feedback); [ADR-0242]).
+- [ORB-10318] — Report-only recurring learning-deprecation review as an auto-task; surfaces stale candidates via `execution_summary` from usage rollups + anchor health, no bespoke sweep engine ([§7.6](#76-recurring-deprecation-review-auto-task)).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
