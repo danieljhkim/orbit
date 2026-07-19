@@ -73,12 +73,17 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "hub_registry_metadata",
         apply: super::apply_hub_registry_metadata,
     },
+    Migration {
+        version: 9,
+        name: "feature_schema_ledger",
+        apply: super::apply_feature_schema_ledger,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 8;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 9;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

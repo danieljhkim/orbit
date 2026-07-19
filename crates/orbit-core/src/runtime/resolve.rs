@@ -21,6 +21,14 @@ pub struct ResolvedOrbitRoots {
     pub local_root: PathBuf,
 }
 
+/// Registry-neutral root candidate supplied by a higher-level workspace
+/// catalog. Resolution applies it at the historical path-override precedence:
+/// after linked-worktree discovery and before filesystem walk-up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceRootHint {
+    pub orbit_dir: PathBuf,
+}
+
 impl ResolvedOrbitRoots {
     fn pinned(root: PathBuf) -> Self {
         Self {
@@ -62,7 +70,22 @@ pub(crate) fn resolve_initialize_roots(
     cwd: &Path,
     root_override: Option<&Path>,
 ) -> Result<ResolvedOrbitRoots, OrbitError> {
-    resolve_roots(cwd, root_override, ExplicitRootMode::RequireInitialized)
+    let hint = legacy_workspace_root_hint(cwd);
+    resolve_initialize_roots_with_hint(cwd, root_override, hint.as_ref())
+}
+
+/// Resolve initialized roots using a caller-supplied workspace catalog hint.
+pub fn resolve_initialize_roots_with_hint(
+    cwd: &Path,
+    root_override: Option<&Path>,
+    hint: Option<&WorkspaceRootHint>,
+) -> Result<ResolvedOrbitRoots, OrbitError> {
+    resolve_roots(
+        cwd,
+        root_override,
+        ExplicitRootMode::RequireInitialized,
+        hint,
+    )
 }
 
 /// Resolves `.orbit` roots for commands that are allowed to create them.
@@ -70,7 +93,22 @@ pub(crate) fn resolve_bootstrap_roots(
     cwd: &Path,
     root_override: Option<&Path>,
 ) -> Result<ResolvedOrbitRoots, OrbitError> {
-    resolve_roots(cwd, root_override, ExplicitRootMode::AllowUninitialized)
+    let hint = legacy_workspace_root_hint(cwd);
+    resolve_bootstrap_roots_with_hint(cwd, root_override, hint.as_ref())
+}
+
+/// Resolve bootstrap roots using a caller-supplied workspace catalog hint.
+pub fn resolve_bootstrap_roots_with_hint(
+    cwd: &Path,
+    root_override: Option<&Path>,
+    hint: Option<&WorkspaceRootHint>,
+) -> Result<ResolvedOrbitRoots, OrbitError> {
+    resolve_roots(
+        cwd,
+        root_override,
+        ExplicitRootMode::AllowUninitialized,
+        hint,
+    )
 }
 
 /// Core implementation for `.orbit` workspace root discovery.
@@ -83,6 +121,7 @@ fn resolve_roots(
     cwd: &Path,
     root_override: Option<&Path>,
     explicit_root_mode: ExplicitRootMode,
+    hint: Option<&WorkspaceRootHint>,
 ) -> Result<ResolvedOrbitRoots, OrbitError> {
     // 1. --root flag (escape hatch)
     if let Some(root) = root_override {
@@ -118,8 +157,8 @@ fn resolve_roots(
         ));
     }
 
-    // 4. path_overrides in global registry (longest prefix match)
-    if let Some(ws) = resolve_from_path_override(cwd) {
+    // 4. caller-supplied catalog hint (legacy adapter uses path_overrides)
+    if let Some(ws) = hint.map(|hint| hint.orbit_dir.clone()) {
         return Ok(log_resolved_roots(
             cwd,
             "path_override",
@@ -177,11 +216,13 @@ enum ExplicitRootMode {
     RequireInitialized,
 }
 
-/// Checks path_overrides in the global registry for a matching workspace.
-fn resolve_from_path_override(cwd: &Path) -> Option<PathBuf> {
+/// Compatibility adapter for path_overrides in the global registry.
+fn legacy_workspace_root_hint(cwd: &Path) -> Option<WorkspaceRootHint> {
     let registry = workspace_registry::load_registry().ok()?;
     let checkout = workspace_registry::find_checkout_by_path(&registry, cwd)?;
-    Some(checkout.orbit_dir.clone())
+    Some(WorkspaceRootHint {
+        orbit_dir: checkout.orbit_dir.clone(),
+    })
 }
 
 fn find_main_worktree_orbit_dir(cwd: &Path) -> Option<PathBuf> {
@@ -375,6 +416,17 @@ pub fn try_resolve_initialized_roots(
     cwd: &Path,
     root_override: Option<&Path>,
 ) -> Result<Option<ResolvedOrbitRoots>, OrbitError> {
+    let hint = legacy_workspace_root_hint(cwd);
+    try_resolve_initialized_roots_with_hint(cwd, root_override, hint.as_ref())
+}
+
+/// Resolve an existing workspace using a caller-supplied catalog hint without
+/// reading the legacy registry compatibility surface.
+pub fn try_resolve_initialized_roots_with_hint(
+    cwd: &Path,
+    root_override: Option<&Path>,
+    hint: Option<&WorkspaceRootHint>,
+) -> Result<Option<ResolvedOrbitRoots>, OrbitError> {
     if let Some(root) = root_override {
         let root = resolve_explicit_root_path_value(
             &root.to_string_lossy(),
@@ -412,7 +464,7 @@ pub fn try_resolve_initialized_roots(
         )));
     }
 
-    if let Some(ws) = resolve_from_path_override(cwd)
+    if let Some(ws) = hint.map(|hint| hint.orbit_dir.clone())
         && is_initialized_orbit_root(&ws)
     {
         return Ok(Some(log_resolved_roots(

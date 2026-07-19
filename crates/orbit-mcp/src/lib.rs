@@ -66,6 +66,70 @@ pub fn graph_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPol
     adapter::graph_mcp_tool_definitions()
 }
 
+/// An in-process MCP tool implementation composed into [`OrbitToolServer`].
+///
+/// Extensions own their canonical definitions and name recognition. Calls
+/// still cross [`McpHost::call_in_process_tool`] before this implementation is
+/// invoked, so composing an extension does not bypass host policy or auditing.
+pub trait McpToolExtension: Send + Sync + 'static {
+    fn definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError>;
+
+    /// Return whether this extension owns the canonical tool name.
+    ///
+    /// Recognition is deliberately independent of advertisement. A hidden or
+    /// disabled extension can therefore keep guessed calls on the host's
+    /// audited in-process denial path.
+    fn recognizes(&self, name: &str) -> bool;
+
+    fn call(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError>;
+
+    /// Preserve implementation-specific diagnostics after the host boundary
+    /// returns a call failure. Generic extensions need not emit anything.
+    fn report_call_failure(&self, _name: &str, _error: &OrbitError) {}
+}
+
+/// Composition metadata for one in-process MCP tool extension.
+#[derive(Clone)]
+pub struct McpToolExtensionRegistration {
+    extension: Arc<dyn McpToolExtension>,
+    advertise_definitions: bool,
+}
+
+impl McpToolExtensionRegistration {
+    /// Register an extension whose definitions are included in `tools/list`.
+    pub fn advertised(extension: Arc<dyn McpToolExtension>) -> Self {
+        Self {
+            extension,
+            advertise_definitions: true,
+        }
+    }
+
+    /// Register name ownership and dispatch without advertising definitions.
+    ///
+    /// This is the fail-closed form for an implementation disabled by local
+    /// composition policy: guessed calls still cross the host's in-process
+    /// policy and audit seam instead of falling through to ordinary dispatch.
+    pub fn recognition_only(extension: Arc<dyn McpToolExtension>) -> Self {
+        Self {
+            extension,
+            advertise_definitions: false,
+        }
+    }
+
+    pub(crate) fn extension(&self) -> &Arc<dyn McpToolExtension> {
+        &self.extension
+    }
+
+    pub(crate) fn advertises_definitions(&self) -> bool {
+        self.advertise_definitions
+    }
+}
+
 /// A pluggable back-end that satisfies MCP `tools/list` and `tools/call`
 /// requests.
 ///
@@ -194,6 +258,19 @@ pub async fn serve_stdio(host: Arc<dyn McpHost>) -> Result<(), OrbitError> {
     serve_stdio_with_context(host, ToolSessionContext::trusted_local(None, None, None)).await
 }
 
+/// Serve stdio MCP with an explicit in-process extension composition.
+pub async fn serve_stdio_with_extensions(
+    host: Arc<dyn McpHost>,
+    extensions: Vec<McpToolExtensionRegistration>,
+) -> Result<(), OrbitError> {
+    serve_stdio_with_context_and_extensions(
+        host,
+        ToolSessionContext::trusted_local(None, None, None),
+        extensions,
+    )
+    .await
+}
+
 /// Serve stdio MCP with adapter-validated trusted context. The external
 /// initialize payload can replace only the legacy `workspace` selector.
 pub async fn serve_stdio_with_context(
@@ -201,6 +278,23 @@ pub async fn serve_stdio_with_context(
     trusted_context: ToolSessionContext,
 ) -> Result<(), OrbitError> {
     let server = OrbitToolServer::new_with_context(host, trusted_context);
+    serve_server(server).await
+}
+
+/// Serve stdio MCP with trusted context and an explicit in-process extension
+/// composition. This is the construction seam for higher-level brokers such
+/// as `orbit-remote`.
+pub async fn serve_stdio_with_context_and_extensions(
+    host: Arc<dyn McpHost>,
+    trusted_context: ToolSessionContext,
+    extensions: Vec<McpToolExtensionRegistration>,
+) -> Result<(), OrbitError> {
+    let server =
+        OrbitToolServer::new_with_context_and_extensions(host, trusted_context, extensions);
+    serve_server(server).await
+}
+
+async fn serve_server(server: OrbitToolServer) -> Result<(), OrbitError> {
     let running = server
         .serve(stdio())
         .await

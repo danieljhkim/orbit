@@ -39,7 +39,9 @@ pub use status::{
 pub use sweep::{RoutineSweepReport, SweepOptions, SweepOutcome, run_sweep, run_sweep_at};
 pub use validation::{
     DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS,
-    RoutineDiagnosticSeverity, RoutinePinValidation, RoutineRegistryStatus, RoutineRegistryView,
+    RegistryRoutinePlacementProvider, RoutineDiagnosticSeverity, RoutineHostIdentity,
+    RoutineHostIdentityView, RoutinePinValidation, RoutinePlacementProjection,
+    RoutinePlacementProvider, RoutineRegistryCacheView, RoutineRegistryStatus, RoutineRegistryView,
     RoutineValidationDiagnostic, load_routine_registry_view, validate_routine_pins,
 };
 

@@ -81,12 +81,76 @@ pub struct RoutinePinValidation {
     pub diagnostics: Vec<RoutineValidationDiagnostic>,
 }
 
-/// The local-only registry input used by the pure pin validator.
+/// Registry-neutral local identity consumed by routine placement logic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoutineHostIdentity {
+    pub machine_id: String,
+    pub host_id: String,
+}
+
+/// Read-only identity surface consumed by the pure pin validator.
+pub trait RoutineHostIdentityView {
+    fn machine_id(&self) -> &str;
+    fn host_id(&self) -> &str;
+}
+
+impl RoutineHostIdentityView for RoutineHostIdentity {
+    fn machine_id(&self) -> &str {
+        &self.machine_id
+    }
+
+    fn host_id(&self) -> &str {
+        &self.host_id
+    }
+}
+
+// Transitional adapter for the legacy Core-owned registry composition. The
+// neutral identity above is the contract a future feature crate supplies.
+impl RoutineHostIdentityView for HostIdentity {
+    fn machine_id(&self) -> &str {
+        &self.machine_id
+    }
+
+    fn host_id(&self) -> &str {
+        &self.host_id
+    }
+}
+
+impl From<&HostIdentity> for RoutineHostIdentity {
+    fn from(identity: &HostIdentity) -> Self {
+        Self {
+            machine_id: identity.machine_id.clone(),
+            host_id: identity.host_id.clone(),
+        }
+    }
+}
+
+/// Registry-neutral spoke cache projection used by routine placement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RoutineRegistryCacheView {
+    Current {
+        snapshot: Box<RegistrySnapshotV1>,
+        age_seconds: u64,
+    },
+    Stale {
+        snapshot: Box<RegistrySnapshotV1>,
+        age_seconds: u64,
+    },
+    Missing,
+    Malformed {
+        reason: String,
+    },
+    UnsupportedFuture {
+        schema_version: u32,
+    },
+}
+
+/// The local-only, registry-neutral input used by the pure pin validator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RoutineRegistryView {
     Standalone,
     Hub { snapshot: RegistrySnapshotV1 },
-    Spoke { cache: RegistryCacheState },
+    Spoke { cache: RoutineRegistryCacheView },
 }
 
 impl RoutineRegistryView {
@@ -106,7 +170,7 @@ impl RoutineRegistryView {
                 diagnostics: Vec::new(),
             },
             Self::Spoke {
-                cache: RegistryCacheState::Current { age_seconds, .. },
+                cache: RoutineRegistryCacheView::Current { age_seconds, .. },
             } => RoutineRegistryStatus {
                 source: "spoke_cache",
                 state: "current",
@@ -114,7 +178,7 @@ impl RoutineRegistryView {
                 diagnostics: Vec::new(),
             },
             Self::Spoke {
-                cache: RegistryCacheState::Stale { age_seconds, .. },
+                cache: RoutineRegistryCacheView::Stale { age_seconds, .. },
             } => RoutineRegistryStatus {
                 source: "spoke_cache",
                 state: "stale",
@@ -128,7 +192,7 @@ impl RoutineRegistryView {
                 )],
             },
             Self::Spoke {
-                cache: RegistryCacheState::Missing,
+                cache: RoutineRegistryCacheView::Missing,
             } => RoutineRegistryStatus {
                 source: "spoke_cache",
                 state: "missing",
@@ -142,7 +206,7 @@ impl RoutineRegistryView {
                 )],
             },
             Self::Spoke {
-                cache: RegistryCacheState::Malformed { reason },
+                cache: RoutineRegistryCacheView::Malformed { reason },
             } => RoutineRegistryStatus {
                 source: "spoke_cache",
                 state: "malformed",
@@ -158,7 +222,7 @@ impl RoutineRegistryView {
                 )],
             },
             Self::Spoke {
-                cache: RegistryCacheState::UnsupportedFuture { schema_version },
+                cache: RoutineRegistryCacheView::UnsupportedFuture { schema_version },
             } => RoutineRegistryStatus {
                 source: "spoke_cache",
                 state: "future_schema",
@@ -174,6 +238,62 @@ impl RoutineRegistryView {
                 )],
             },
         }
+    }
+}
+
+/// Registry-neutral routine placement input. Higher-level composition can
+/// obtain it from any catalog/cache implementation and pass it to Core.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoutinePlacementProjection {
+    pub local_host: RoutineHostIdentity,
+    pub registry: RoutineRegistryView,
+}
+
+/// Provider boundary for routine placement. Core's compatibility adapter is
+/// registry-backed; an extracted remote feature can implement the same input
+/// contract without making scheduling logic depend on that crate.
+pub trait RoutinePlacementProvider {
+    fn load_routine_placement(
+        &self,
+        now: DateTime<Utc>,
+        cache_max_age: Duration,
+    ) -> Result<RoutinePlacementProjection, OrbitError>;
+}
+
+/// Compatibility provider for the current on-disk host registry.
+pub struct RegistryRoutinePlacementProvider<'a> {
+    global_root: &'a Path,
+    store: &'a Store,
+    identity: &'a HostIdentity,
+}
+
+impl<'a> RegistryRoutinePlacementProvider<'a> {
+    pub fn new(global_root: &'a Path, store: &'a Store, identity: &'a HostIdentity) -> Self {
+        Self {
+            global_root,
+            store,
+            identity,
+        }
+    }
+}
+
+impl RoutinePlacementProvider for RegistryRoutinePlacementProvider<'_> {
+    fn load_routine_placement(
+        &self,
+        now: DateTime<Utc>,
+        cache_max_age: Duration,
+    ) -> Result<RoutinePlacementProjection, OrbitError> {
+        let registry = load_routine_registry_view(
+            self.global_root,
+            self.store,
+            self.identity,
+            now,
+            cache_max_age,
+        )?;
+        Ok(RoutinePlacementProjection {
+            local_host: RoutineHostIdentity::from(self.identity),
+            registry,
+        })
     }
 }
 
@@ -193,13 +313,33 @@ pub fn load_routine_registry_view(
             .map(|snapshot| RoutineRegistryView::Hub { snapshot }),
         HostMode::Spoke => RegistryCacheService::new(global_root)
             .load(now, cache_max_age)
-            .map(|cache| RoutineRegistryView::Spoke { cache }),
+            .map(|cache| RoutineRegistryView::Spoke {
+                cache: project_registry_cache(cache),
+            }),
+    }
+}
+
+fn project_registry_cache(cache: RegistryCacheState) -> RoutineRegistryCacheView {
+    match cache {
+        RegistryCacheState::Current { cache, age_seconds } => RoutineRegistryCacheView::Current {
+            snapshot: Box::new(cache.snapshot),
+            age_seconds,
+        },
+        RegistryCacheState::Stale { cache, age_seconds } => RoutineRegistryCacheView::Stale {
+            snapshot: Box::new(cache.snapshot),
+            age_seconds,
+        },
+        RegistryCacheState::Missing => RoutineRegistryCacheView::Missing,
+        RegistryCacheState::Malformed { reason } => RoutineRegistryCacheView::Malformed { reason },
+        RegistryCacheState::UnsupportedFuture { schema_version } => {
+            RoutineRegistryCacheView::UnsupportedFuture { schema_version }
+        }
     }
 }
 
 /// Pure, deterministic validation of one routine's declared pins.
 pub fn validate_routine_pins(
-    identity: &HostIdentity,
+    identity: &dyn RoutineHostIdentityView,
     origin: RoutineOrigin,
     pins: &[String],
     view: &RoutineRegistryView,
@@ -216,7 +356,7 @@ pub fn validate_routine_pins(
     let mut diagnostics = view.status().diagnostics;
     match view {
         RoutineRegistryView::Standalone => RoutinePinValidation {
-            eligible: pins.iter().any(|pin| pin == &identity.host_id),
+            eligible: pins.iter().any(|pin| pin == identity.host_id()),
             diagnostics,
         },
         RoutineRegistryView::Hub { snapshot } => {
@@ -237,12 +377,12 @@ pub fn validate_routine_pins(
             }
         }
         RoutineRegistryView::Spoke {
-            cache: RegistryCacheState::Current { cache, .. },
+            cache: RoutineRegistryCacheView::Current { snapshot, .. },
         } => {
             let eligible = validate_snapshot_pins(
                 identity,
                 pins,
-                &cache.snapshot,
+                snapshot,
                 now,
                 quiet_after,
                 false,
@@ -256,26 +396,26 @@ pub fn validate_routine_pins(
             }
         }
         RoutineRegistryView::Spoke {
-            cache: RegistryCacheState::Stale { cache, .. },
+            cache: RoutineRegistryCacheView::Stale { snapshot, .. },
         } => {
             let eligible = validate_snapshot_pins(
                 identity,
                 pins,
-                &cache.snapshot,
+                snapshot,
                 now,
                 quiet_after,
                 true,
                 false,
                 false,
                 &mut diagnostics,
-            ) || pins.iter().any(|pin| pin == &identity.host_id);
+            ) || pins.iter().any(|pin| pin == identity.host_id());
             RoutinePinValidation {
                 eligible,
                 diagnostics,
             }
         }
         RoutineRegistryView::Spoke { .. } => RoutinePinValidation {
-            eligible: pins.iter().any(|pin| pin == &identity.host_id),
+            eligible: pins.iter().any(|pin| pin == identity.host_id()),
             diagnostics,
         },
     }
@@ -283,7 +423,7 @@ pub fn validate_routine_pins(
 
 #[allow(clippy::too_many_arguments)]
 fn validate_snapshot_pins(
-    identity: &HostIdentity,
+    identity: &dyn RoutineHostIdentityView,
     pins: &[String],
     snapshot: &RegistrySnapshotV1,
     now: DateTime<Utc>,
@@ -298,11 +438,11 @@ fn validate_snapshot_pins(
         match resolve_pin(snapshot, pin) {
             PinResolution::Unknown
                 if allow_unregistered_local_identity
-                    && pin == &identity.host_id
+                    && pin == identity.host_id()
                     && !snapshot
                         .hosts
                         .iter()
-                        .any(|host| host.machine_id == identity.machine_id) =>
+                        .any(|host| host.machine_id == identity.machine_id()) =>
             {
                 // Upgrade compatibility: host.toml predates the registry and
                 // remains trusted machine-local identity. Keep an exact local
@@ -315,7 +455,7 @@ fn validate_snapshot_pins(
                     Some(pin.clone()),
                     format!(
                         "exact local host pin '{pin}' is eligible from host.toml, but machine_id '{}' is not registered; run `orbit host register`",
-                        identity.machine_id
+                        identity.machine_id()
                     ),
                     false,
                 ));
@@ -354,7 +494,7 @@ fn validate_snapshot_pins(
                 stale,
             )),
             PinResolution::Active { host, alias } => {
-                if host.machine_id == identity.machine_id {
+                if host.machine_id == identity.machine_id() {
                     eligible = true;
                 }
                 if alias {

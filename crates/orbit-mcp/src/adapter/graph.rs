@@ -16,6 +16,8 @@ use orbit_graph::{
 use orbit_graph_extract::{Selector, selector_error_to_orbit};
 use serde_json::{Value, json};
 
+use crate::McpToolExtension;
+
 const GRAPH_SYNC_TOOL: &str = "orbit.graph.sync";
 const GRAPH_SEARCH_TOOL: &str = "orbit.graph.search";
 const GRAPH_SHOW_TOOL: &str = "orbit.graph.show";
@@ -53,15 +55,7 @@ impl GraphToolRegistry {
         }
     }
 
-    pub(super) fn definitions(&self) -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
-        graph_tool_definitions()
-    }
-
-    pub(super) fn is_graph_tool(&self, name: &str) -> bool {
-        GRAPH_TOOL_NAMES.contains(&name)
-    }
-
-    pub(super) fn call_tool(
+    fn call_tool(
         &self,
         name: &str,
         input: Value,
@@ -120,6 +114,34 @@ impl GraphToolRegistry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .len()
+    }
+}
+
+impl McpToolExtension for GraphToolRegistry {
+    fn definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
+        graph_tool_definitions().map_err(|error| OrbitError::InvalidInput(error.to_string()))
+    }
+
+    fn recognizes(&self, name: &str) -> bool {
+        GRAPH_TOOL_NAMES.contains(&name)
+    }
+
+    fn call(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        self.call_tool(name, input, session_context)
+    }
+
+    fn report_call_failure(&self, name: &str, error: &OrbitError) {
+        tracing::warn!(
+            target: "orbit.mcp.graph",
+            tool = %name,
+            error = %error,
+            "graph tool call failed"
+        );
     }
 }
 

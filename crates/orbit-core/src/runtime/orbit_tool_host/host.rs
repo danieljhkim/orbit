@@ -54,6 +54,21 @@ struct RuntimeOrbitToolHost {
     task_scope: OrbitTaskScope,
 }
 
+/// Registry- and transport-neutral dispatch seam for coordination tools.
+///
+/// A higher-level broker can depend on this contract without naming the
+/// checkoutless executor's storage composition. The concrete hub executor
+/// remains in Core because its task/friction semantics are transport
+/// independent.
+pub trait CoordinationToolDispatcher: Send + Sync {
+    fn execute_coordination_tool(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError>;
+}
+
 /// Checkout-independent executor for coordination-authoritative hub tools.
 ///
 /// It deliberately has no `OrbitRuntime`, `WorkspacePaths`, local configuration,
@@ -855,6 +870,17 @@ impl HubCoordinationExecutor {
     }
 }
 
+impl CoordinationToolDispatcher for HubCoordinationExecutor {
+    fn execute_coordination_tool(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        HubCoordinationExecutor::execute_tool(self, name, input, session_context)
+    }
+}
+
 impl OrbitToolHost for HubCoordinationExecutor {
     fn execute(
         &self,
@@ -978,6 +1004,21 @@ mod checkoutless_hub_tests {
             Some("hub".to_string()),
         );
         (root, executor, context)
+    }
+
+    #[test]
+    fn coordination_dispatch_is_available_through_the_neutral_seam() {
+        let (_root, executor, context) = executor();
+        let dispatcher: &dyn CoordinationToolDispatcher = &executor;
+        let tasks = dispatcher
+            .execute_coordination_tool(
+                "orbit.task.list",
+                json!({"workspace": "ws_checkoutless"}),
+                context,
+            )
+            .expect("dispatch through neutral seam");
+
+        assert_eq!(tasks, json!([]));
     }
 
     #[test]

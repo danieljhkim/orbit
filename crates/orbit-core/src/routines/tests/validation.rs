@@ -8,9 +8,7 @@ use orbit_common::types::{
     RegistryAliasV1, RegistryCacheV1, RegistryHostV1, RegistrySnapshotV1, RoutineDefinition,
     parse_routine_yaml,
 };
-use orbit_registry::{
-    HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, RegistryCacheService, RegistryCacheState,
-};
+use orbit_registry::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, RegistryCacheService};
 use orbit_store::{RoutineFireIntentParams, Store};
 use tempfile::tempdir;
 
@@ -18,8 +16,8 @@ use crate::OrbitError;
 use crate::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin};
 use crate::routines::sweep::{RoutineDispatch, SweepOptions, run_sweep_core_with_registry};
 use crate::routines::validation::{
-    RoutineDiagnosticSeverity, RoutineRegistryView, load_routine_registry_view,
-    validate_routine_pins,
+    RoutineDiagnosticSeverity, RoutineRegistryCacheView, RoutineRegistryView,
+    load_routine_registry_view, validate_routine_pins,
 };
 
 fn ts(minute: u32, second: u32) -> DateTime<Utc> {
@@ -155,8 +153,8 @@ fn stale_registry_is_warning_only_and_exact_local_fallback_remains_eligible() {
         ]),
     };
     let view = RoutineRegistryView::Spoke {
-        cache: RegistryCacheState::Stale {
-            cache: Box::new(cache),
+        cache: RoutineRegistryCacheView::Stale {
+            snapshot: Box::new(cache.snapshot),
             age_seconds: 1_200,
         },
     };
@@ -289,15 +287,15 @@ fn every_unusable_spoke_cache_keeps_exact_local_committed_pin_eligible() {
     let now = ts(10, 0);
     let local = identity("hm_local", "local", HostMode::Spoke);
     let cases = [
-        (RegistryCacheState::Missing, "registry_cache_missing"),
+        (RoutineRegistryCacheView::Missing, "registry_cache_missing"),
         (
-            RegistryCacheState::Malformed {
+            RoutineRegistryCacheView::Malformed {
                 reason: "invalid fixture".to_string(),
             },
             "registry_cache_malformed",
         ),
         (
-            RegistryCacheState::UnsupportedFuture { schema_version: 2 },
+            RoutineRegistryCacheView::UnsupportedFuture { schema_version: 2 },
             "registry_cache_future_schema",
         ),
     ];
@@ -504,7 +502,7 @@ fn local_origin_bypasses_missing_cache() {
         RoutineOrigin::Local,
         &["local".to_string()],
         &RoutineRegistryView::Spoke {
-            cache: RegistryCacheState::Missing,
+            cache: RoutineRegistryCacheView::Missing,
         },
         ts(10, 0),
         Duration::minutes(5),

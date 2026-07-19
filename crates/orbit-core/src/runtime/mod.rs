@@ -41,16 +41,20 @@ use serde_json::Value;
 
 use crate::command::activity::DEFAULT_ACTIVITY_FILES;
 use crate::command::init::ensure_orbit_root_initialized;
+use crate::command::workflow::ShipMode;
 use crate::context::ActorIdentity;
 use crate::context::OrbitContext;
 use crate::context::OrbitStores;
 
-pub use orbit_tool_host::HubCoordinationExecutor;
 pub(crate) use orbit_tool_host::build_orbit_tool_host;
+pub use orbit_tool_host::{CoordinationToolDispatcher, HubCoordinationExecutor};
 pub(crate) use resolve::{resolve_bootstrap_roots, resolve_initialize_roots};
 // `pub` for the runtime-less `orbit migrate --dry-run` inspection that moved
 // to `orbit-cmd` [ORB-10016].
-pub use resolve::ResolvedOrbitRoots;
+pub use resolve::{
+    ResolvedOrbitRoots, WorkspaceRootHint, resolve_bootstrap_roots_with_hint,
+    resolve_initialize_roots_with_hint, try_resolve_initialized_roots_with_hint,
+};
 // `pub` for the runtime-less `orbit migrate --dry-run` inspection that moved
 // to `orbit-cmd` [ORB-10016].
 pub use resolve::{resolve_global_root, try_resolve_initialized_roots};
@@ -59,6 +63,7 @@ pub(crate) use store_delegates::TaskRecordUpdateParams;
 #[derive(Clone)]
 pub struct OrbitRuntime {
     context: OrbitContext,
+    workspace_binding: Option<Arc<WorkspaceRuntimeBinding>>,
     activity_executors: Arc<ActivityExecutorRegistry>,
     pub event_log: event_bus::EventLog,
     /// Outcome of the [ORB-10012] workspace-layout pre-flight that ran when
@@ -73,6 +78,19 @@ pub struct OrbitRuntimeRoots {
     pub global_root: PathBuf,
     pub shared_root: PathBuf,
     pub local_root: PathBuf,
+}
+
+/// Registry-neutral metadata supplied by a higher-level workspace catalog.
+///
+/// `orbit-core` can construct a runtime without this binding for standalone
+/// compatibility. Multi-host composition supplies it explicitly so runtime
+/// path and ship-mode decisions do not have to reopen a registry owned by a
+/// higher feature crate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceRuntimeBinding {
+    pub workspace_id: String,
+    pub repo_root: PathBuf,
+    pub ship_mode: ShipMode,
 }
 
 impl OrbitRuntimeRoots {
@@ -133,11 +151,31 @@ impl OrbitRuntime {
         Self::roots_from_resolved(resolved, root_override.is_some())
     }
 
+    /// Resolve an initialized workspace using a registry-neutral catalog hint.
+    pub fn resolve_roots_for_cwd_with_hint(
+        cwd: &Path,
+        root_override: Option<&Path>,
+        hint: Option<&WorkspaceRootHint>,
+    ) -> Result<OrbitRuntimeRoots, OrbitError> {
+        let resolved = resolve_initialize_roots_with_hint(cwd, root_override, hint)?;
+        Self::roots_from_resolved(resolved, root_override.is_some())
+    }
+
     pub fn resolve_bootstrap_roots_for_cwd(
         cwd: &Path,
         root_override: Option<&Path>,
     ) -> Result<OrbitRuntimeRoots, OrbitError> {
         let resolved = resolve_bootstrap_roots(cwd, root_override)?;
+        Self::roots_from_resolved(resolved, has_explicit_root_override(root_override))
+    }
+
+    /// Resolve bootstrap roots using a registry-neutral catalog hint.
+    pub fn resolve_bootstrap_roots_for_cwd_with_hint(
+        cwd: &Path,
+        root_override: Option<&Path>,
+        hint: Option<&WorkspaceRootHint>,
+    ) -> Result<OrbitRuntimeRoots, OrbitError> {
+        let resolved = resolve_bootstrap_roots_with_hint(cwd, root_override, hint)?;
         Self::roots_from_resolved(resolved, has_explicit_root_override(root_override))
     }
 
@@ -165,10 +203,39 @@ impl OrbitRuntime {
         Self::from_resolved_roots(global_root, workspace_root, workspace_root)
     }
 
+    /// Construct a runtime with registry-neutral workspace metadata supplied
+    /// by a higher-level catalog owner.
+    pub fn from_roots_with_binding(
+        global_root: &Path,
+        workspace_root: &Path,
+        binding: WorkspaceRuntimeBinding,
+    ) -> Result<Self, OrbitError> {
+        Self::from_resolved_roots_with_binding(global_root, workspace_root, workspace_root, binding)
+    }
+
     pub fn from_resolved_roots(
         global_root: &Path,
         shared_root: &Path,
         local_root: &Path,
+    ) -> Result<Self, OrbitError> {
+        Self::from_resolved_roots_inner(global_root, shared_root, local_root, None)
+    }
+
+    /// Construct a two-root runtime with registry-neutral workspace metadata.
+    pub fn from_resolved_roots_with_binding(
+        global_root: &Path,
+        shared_root: &Path,
+        local_root: &Path,
+        binding: WorkspaceRuntimeBinding,
+    ) -> Result<Self, OrbitError> {
+        Self::from_resolved_roots_inner(global_root, shared_root, local_root, Some(binding))
+    }
+
+    fn from_resolved_roots_inner(
+        global_root: &Path,
+        shared_root: &Path,
+        local_root: &Path,
+        binding: Option<WorkspaceRuntimeBinding>,
     ) -> Result<Self, OrbitError> {
         // [ORB-10012] Workspace-layout pre-flight: compare the `.orbit/`
         // layout marker against this binary before anything opens the store.
@@ -179,10 +246,16 @@ impl OrbitRuntime {
         // restructure state the stores are about to open. Up-to-date cost:
         // one marker-file read.
         let layout_report = orbit_store::layout::upgrade_workspace_layout(shared_root)?;
-        let context = builder::build_context_from_roots(global_root, shared_root, local_root)?;
+        let context = builder::build_context_from_roots(
+            global_root,
+            shared_root,
+            local_root,
+            binding.as_ref(),
+        )?;
         let runtime = Self {
             activity_executors: build_activity_executor_registry(&context)?,
             context,
+            workspace_binding: binding.map(Arc::new),
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(layout_report),
             _temp_dir: None,
@@ -200,6 +273,7 @@ impl OrbitRuntime {
         Ok(Self {
             activity_executors: build_activity_executor_registry(&context)?,
             context,
+            workspace_binding: None,
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(orbit_store::layout::LayoutUpgradeReport::default()),
             _temp_dir: Some(Arc::new(temp_dir)),
@@ -274,6 +348,12 @@ impl OrbitRuntime {
 
     pub fn global_root(&self) -> PathBuf {
         self.context.global_root().to_path_buf()
+    }
+
+    /// Higher-level workspace metadata used to construct this runtime, when
+    /// the caller supplied an authoritative binding.
+    pub fn workspace_runtime_binding(&self) -> Option<&WorkspaceRuntimeBinding> {
+        self.workspace_binding.as_deref()
     }
 
     /// Returns the effective config.toml path.

@@ -28,6 +28,7 @@ use crate::context::OrbitContext;
 use crate::context::{
     ActorIdentity, OrbitExecutionAssets, OrbitPolicyContext, OrbitRuntimeSettings, OrbitStores,
 };
+use crate::runtime::WorkspaceRuntimeBinding;
 use crate::skill_catalog::SkillCatalog;
 use crate::workspace_registry;
 
@@ -38,6 +39,7 @@ pub(crate) fn build_context_from_roots(
     global_root: &Path,
     workspace_root: &Path,
     local_root: &Path,
+    binding: Option<&WorkspaceRuntimeBinding>,
 ) -> Result<OrbitContext, OrbitError> {
     let runtime_config = RuntimeConfig::load_layered(global_root, workspace_root)?;
     // Apply a configured `[tasks] id_start` floor before any task ids are
@@ -51,12 +53,15 @@ pub(crate) fn build_context_from_roots(
 
     // workspace_root IS the .orbit dir. For custom roots outside the repo,
     // prefer the registry's workspace root over the parent-directory fallback.
-    let repo_root = registered_repo_root(global_root, workspace_root).unwrap_or_else(|| {
-        workspace_root
-            .parent()
-            .unwrap_or(workspace_root)
-            .to_path_buf()
-    });
+    let repo_root = binding
+        .map(|binding| binding.repo_root.clone())
+        .or_else(|| registered_repo_root(global_root, workspace_root))
+        .unwrap_or_else(|| {
+            workspace_root
+                .parent()
+                .unwrap_or(workspace_root)
+                .to_path_buf()
+        });
     let paths = WorkspacePaths::new_with_local(
         repo_root,
         workspace_root.to_path_buf(),
@@ -64,7 +69,11 @@ pub(crate) fn build_context_from_roots(
         global_root.to_path_buf(),
     );
 
-    let task_backends = build_v2_task_backends(global_root, &paths)?;
+    let task_backends = build_v2_task_backends(
+        global_root,
+        &paths,
+        binding.map(|binding| binding.workspace_id.as_str()),
+    )?;
     let workspace_id = workspace_id_for_orbit_dir(&paths.orbit_dir)?;
     let import_report = store.ensure_legacy_v2_state_imported(&paths.orbit_dir, &workspace_id)?;
     if import_report.skipped_records() {
@@ -266,11 +275,22 @@ fn record_learning_id_migration_audit(
 fn build_v2_task_backends(
     global_root: &Path,
     paths: &WorkspacePaths,
+    workspace_id_hint: Option<&str>,
 ) -> Result<orbit_store::WorkspaceTaskBackends, OrbitError> {
     let registry = TaskRegistryStore::open(&task_registry_path(global_root))?;
     let config = read_workspace_config_optional(&paths.orbit_dir)?;
     let workspace_id = if let Some(config) = &config {
+        if let Some(hint) = workspace_id_hint
+            && config.workspace_id != hint
+        {
+            return Err(OrbitError::WorkspaceError(format!(
+                "workspace binding id '{}' does not match configured workspace id '{}'",
+                hint, config.workspace_id
+            )));
+        }
         Some(config.workspace_id.clone())
+    } else if let Some(hint) = workspace_id_hint {
+        Some(hint.to_string())
     } else {
         rebind_candidate_workspace_id(&registry, paths)?
     };
@@ -339,7 +359,7 @@ pub(super) fn build_context_in_memory() -> Result<(OrbitContext, TempDir), Orbit
         .map_err(|e| OrbitError::Io(e.to_string()))?;
     let data_root = guard.path().to_path_buf();
 
-    let context = build_context_from_roots(&data_root, &data_root, &data_root)?;
+    let context = build_context_from_roots(&data_root, &data_root, &data_root, None)?;
     Ok((context, guard))
 }
 

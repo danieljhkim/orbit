@@ -1,5 +1,7 @@
 //! Sibling tests for `sqlite/connection.rs` health probes [ORB-10005].
 
+use orbit_common::types::OrbitError;
+
 use crate::Store;
 use crate::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
 
@@ -30,6 +32,58 @@ fn check_writable_acquires_and_releases_write_lock() {
     store
         .with_transaction(|_| Ok(()))
         .expect("store still accepts transactions after the probe");
+}
+
+#[test]
+fn transaction_and_read_callbacks_expose_scoped_sql_connections() {
+    let store = Store::open_in_memory().expect("open in-memory store");
+    store
+        .with_transaction(|tx| {
+            tx.connection()
+                .execute_batch(
+                    "CREATE TABLE feature_callback_fixture(value TEXT NOT NULL);
+                     INSERT INTO feature_callback_fixture VALUES ('committed');",
+                )
+                .map_err(|error| OrbitError::Store(error.to_string()))
+        })
+        .expect("commit feature-owned SQL");
+
+    let value = store
+        .with_read_connection(|conn| {
+            conn.query_row("SELECT value FROM feature_callback_fixture", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|error| OrbitError::Store(error.to_string()))
+        })
+        .expect("read through callback");
+    assert_eq!(value, "committed");
+}
+
+#[test]
+fn file_backed_read_callback_is_query_only() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(&dir.path().join("store.db")).expect("open store");
+
+    store
+        .with_read_connection(|conn| {
+            let write = conn.execute_batch("CREATE TABLE read_callback_write(value TEXT)");
+            assert!(write.is_err(), "pooled read connection must reject writes");
+            Ok(())
+        })
+        .expect("inspect query-only connection");
+
+    let table_count = store
+        .with_read_connection(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name = 'read_callback_write'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))
+        })
+        .expect("verify rejected write");
+    assert_eq!(table_count, 0);
 }
 
 #[test]

@@ -18,15 +18,17 @@ use crate::OrbitRuntime;
 use crate::workspace_registry;
 
 use super::due::{DueDecision, due_decision, parse_cron};
-#[cfg(test)]
-use super::host::{HOST_IDENTITY_SCHEMA_VERSION, HostMode};
-use super::host::{HostIdentity, load_host_identity};
+use super::host::load_host_identity;
 use super::loader::{
     LoadedRoutine, RoutineCollection, RoutineLoadError, collect_routines, discover_workspaces,
 };
+#[cfg(test)]
+use super::validation::RoutineHostIdentity;
 use super::validation::{
-    DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS, RoutinePinValidation,
-    RoutineRegistryStatus, RoutineRegistryView, load_routine_registry_view, validate_routine_pins,
+    DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS,
+    RegistryRoutinePlacementProvider, RoutineHostIdentityView, RoutinePinValidation,
+    RoutinePlacementProjection, RoutinePlacementProvider, RoutineRegistryStatus,
+    RoutineRegistryView, validate_routine_pins,
 };
 
 /// Dispatch seam for the sweep [ORB-00421]. The production impl
@@ -160,20 +162,21 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
 
     let store = super::open_routine_store(global_root)?;
     let now_utc = Utc::now();
-    let registry_view = load_routine_registry_view(
-        global_root,
-        &store,
-        &identity,
-        now_utc,
-        Duration::seconds(DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS),
-    )?;
+    let RoutinePlacementProjection {
+        local_host,
+        registry: registry_view,
+    } = RegistryRoutinePlacementProvider::new(global_root, &store, &identity)
+        .load_routine_placement(
+            now_utc,
+            Duration::seconds(DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS),
+        )?;
     let registry = registry_view.status();
 
     // One runtime per active workspace; discovery and dispatch share them.
     let discovered = discover_workspaces(global_root)?;
     let mut load_errors: Vec<RoutineLoadError> = discovered.errors.clone();
 
-    let mut collection = collect_routines(&discovered.entries, &identity.host_id);
+    let mut collection = collect_routines(&discovered.entries, &local_host.host_id);
     load_errors.append(&mut collection.errors);
 
     let dispatch = RuntimeDispatch {
@@ -186,7 +189,7 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
 
     let reports = run_sweep_core_with_registry(
         &store,
-        &identity,
+        &local_host,
         &registry_view,
         &collection,
         &dispatch,
@@ -195,8 +198,8 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
     )?;
 
     Ok(SweepOutcome {
-        host_id: identity.host_id,
-        machine_id: identity.machine_id,
+        host_id: local_host.host_id,
+        machine_id: local_host.machine_id,
         registry,
         lock_busy: false,
         reports,
@@ -218,11 +221,9 @@ pub(crate) fn run_sweep_core(
     options: SweepOptions,
     now_utc: DateTime<Utc>,
 ) -> Result<Vec<RoutineSweepReport>, OrbitError> {
-    let identity = HostIdentity {
-        schema_version: HOST_IDENTITY_SCHEMA_VERSION,
+    let identity = RoutineHostIdentity {
         machine_id: format!("hm_standalone_{}", sanitize_test_machine_suffix(host_id)),
         host_id: host_id.to_string(),
-        mode: HostMode::Standalone,
     };
     run_sweep_core_with_registry(
         store,
@@ -238,7 +239,7 @@ pub(crate) fn run_sweep_core(
 /// Registry-aware core used by production and deterministic R2 fixtures.
 pub(crate) fn run_sweep_core_with_registry(
     store: &Store,
-    identity: &HostIdentity,
+    identity: &dyn RoutineHostIdentityView,
     registry_view: &RoutineRegistryView,
     collection: &RoutineCollection,
     dispatch: &dyn RoutineDispatch,

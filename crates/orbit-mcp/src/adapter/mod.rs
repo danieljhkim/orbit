@@ -26,7 +26,7 @@ use orbit_common::types::{
     ToolSessionContext, audit_execution_id,
 };
 
-use crate::McpHost;
+use crate::{McpHost, McpToolExtension, McpToolExtensionRegistration};
 
 /// An rmcp [`ServerHandler`] that delegates tool listing and tool execution to
 /// an injected [`McpHost`].
@@ -47,7 +47,7 @@ use crate::McpHost;
 /// ambiguous dispatch.
 pub struct OrbitToolServer {
     host: Arc<dyn McpHost>,
-    graph_tools: Arc<graph::GraphToolRegistry>,
+    extensions: Vec<McpToolExtensionRegistration>,
     name_map: RwLock<HashMap<String, String>>,
     session_context: RwLock<ToolSessionContext>,
     learning_session_id: Option<String>,
@@ -60,9 +60,29 @@ impl OrbitToolServer {
         Self::new_with_context(host, ToolSessionContext::trusted_local(None, None, None))
     }
 
-    pub fn new_with_context(
+    /// Construct a server with an explicit in-process extension composition.
+    pub fn new_with_extensions(
+        host: Arc<dyn McpHost>,
+        extensions: Vec<McpToolExtensionRegistration>,
+    ) -> Self {
+        Self::new_with_context_and_extensions(
+            host,
+            ToolSessionContext::trusted_local(None, None, None),
+            extensions,
+        )
+    }
+
+    pub fn new_with_context(host: Arc<dyn McpHost>, trusted_context: ToolSessionContext) -> Self {
+        let extensions = default_extensions(&host);
+        Self::new_with_context_and_extensions(host, trusted_context, extensions)
+    }
+
+    /// Construct a server with trusted context and an explicit in-process
+    /// extension composition.
+    pub fn new_with_context_and_extensions(
         host: Arc<dyn McpHost>,
         mut trusted_context: ToolSessionContext,
+        extensions: Vec<McpToolExtensionRegistration>,
     ) -> Self {
         if trusted_context.origin_session_id.is_none() {
             trusted_context.origin_session_id = Some(audit_execution_id("mcp-session"));
@@ -80,7 +100,7 @@ impl OrbitToolServer {
         learning_states.insert(key, LearningInjectionState::default());
         Self {
             host,
-            graph_tools: Arc::new(graph::GraphToolRegistry::new()),
+            extensions,
             name_map: RwLock::new(HashMap::new()),
             session_context: RwLock::new(trusted_context),
             learning_session_id,
@@ -96,6 +116,7 @@ impl OrbitToolServer {
         learning_caps: LearningInjectionCaps,
         initial_state: LearningInjectionState,
     ) -> Self {
+        let extensions = default_extensions(&host);
         let key = learning_session_id
             .clone()
             .unwrap_or_else(|| PROCESS_LEARNING_SESSION_KEY.to_string());
@@ -105,7 +126,7 @@ impl OrbitToolServer {
         trusted_context.origin_session_id = Some(audit_execution_id("mcp-session"));
         Self {
             host,
-            graph_tools: Arc::new(graph::GraphToolRegistry::new()),
+            extensions,
             name_map: RwLock::new(HashMap::new()),
             session_context: RwLock::new(trusted_context),
             learning_session_id,
@@ -113,6 +134,16 @@ impl OrbitToolServer {
             learning_states: tokio::sync::Mutex::new(learning_states),
         }
     }
+}
+
+fn default_extensions(host: &Arc<dyn McpHost>) -> Vec<McpToolExtensionRegistration> {
+    let graph: Arc<dyn McpToolExtension> = Arc::new(graph::GraphToolRegistry::new());
+    let registration = if host.in_process_graph_tools_enabled() {
+        McpToolExtensionRegistration::advertised(graph)
+    } else {
+        McpToolExtensionRegistration::recognition_only(graph)
+    };
+    vec![registration]
 }
 
 pub(super) const PROCESS_LEARNING_SESSION_KEY: &str = "__process__";

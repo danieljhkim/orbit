@@ -13,8 +13,9 @@ use super::due::{parse_cron, truncate_to_minute};
 use super::host::load_host_identity;
 use super::loader::{LoadedRoutine, RoutineLoadError, collect_routines, discover_workspaces};
 use super::validation::{
-    DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS, RoutinePinValidation,
-    RoutineRegistryStatus, load_routine_registry_view, validate_routine_pins,
+    DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS,
+    RegistryRoutinePlacementProvider, RoutinePinValidation, RoutinePlacementProjection,
+    RoutinePlacementProvider, RoutineRegistryStatus, validate_routine_pins,
 };
 
 /// Full effective state of one routine on this host.
@@ -62,18 +63,19 @@ pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, Orbit
     let identity = load_host_identity(global_root)?;
     let store = super::open_routine_store(global_root)?;
     let now_utc = Utc::now();
-    let registry_view = load_routine_registry_view(
-        global_root,
-        &store,
-        &identity,
-        now_utc,
-        Duration::seconds(DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS),
-    )?;
+    let RoutinePlacementProjection {
+        local_host,
+        registry: registry_view,
+    } = RegistryRoutinePlacementProvider::new(global_root, &store, &identity)
+        .load_routine_placement(
+            now_utc,
+            Duration::seconds(DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS),
+        )?;
     let registry = registry_view.status();
 
     let discovered = discover_workspaces(global_root)?;
     let mut load_errors = discovered.errors.clone();
-    let mut collection = collect_routines(&discovered.entries, &identity.host_id);
+    let mut collection = collect_routines(&discovered.entries, &local_host.host_id);
     load_errors.append(&mut collection.errors);
 
     let pauses = store.routine_pauses()?;
@@ -91,7 +93,7 @@ pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, Orbit
             .get(&routine.definition.name)
             .map(|pause| pause.paused_at.clone());
         let validation = validate_routine_pins(
-            &identity,
+            &local_host,
             routine.origin,
             &routine.definition.hosts,
             &registry_view,
@@ -110,8 +112,8 @@ pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, Orbit
     }
 
     Ok(RoutineStatusReport {
-        host_id: identity.host_id,
-        machine_id: identity.machine_id,
+        host_id: local_host.host_id,
+        machine_id: local_host.machine_id,
         registry,
         statuses,
         load_errors,

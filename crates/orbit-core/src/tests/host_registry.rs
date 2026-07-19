@@ -6,10 +6,10 @@ use chrono::{TimeZone, Utc};
 use orbit_common::types::{Workspace, WorkspaceStatus};
 use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
 
-use super::reject_execution_profile_env_overrides_from;
 use crate::OrbitRuntime;
 use crate::command::activity::seed_default_activities;
 use crate::command::job::seed_default_jobs;
+use crate::execution_environment::reject_execution_profile_env_overrides_from;
 
 #[test]
 fn compatibility_module_reexports_host_registry_service() {
@@ -94,6 +94,21 @@ fn build_profile(runtime: &OrbitRuntime, workspace: &Workspace) -> super::Execut
                 .expect("timestamp"),
         )
         .expect("build profile")
+}
+
+#[test]
+fn execution_environment_snapshot_contains_only_core_derived_facts() {
+    let (_root, runtime, _global, _workspace_root, _workspace) = profile_runtime(PROFILE_CONFIG);
+
+    let snapshot = runtime
+        .execution_environment_snapshot()
+        .expect("execution environment snapshot");
+
+    assert_eq!(snapshot.workspace_id, PROFILE_WORKSPACE_ID);
+    assert_eq!(snapshot.workflow_base_branch, "agent-main");
+    assert_eq!(snapshot.crews.default_crew.as_deref(), Some("sol"));
+    assert!(snapshot.crews.crews.iter().any(|crew| crew.name == "sol"));
+    assert_eq!(snapshot.ship_closure_digest.len(), 64);
 }
 
 fn append_comment(path: &Path) {

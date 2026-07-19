@@ -20,25 +20,54 @@ use super::OrbitToolServer;
 use super::name_map::{ToolNameCollision, build_name_map};
 use super::schema::schema_to_tool;
 use super::structured::mcp_structured_content;
+use crate::McpToolExtension;
 use crate::error::tool_error_result;
 
 impl OrbitToolServer {
     pub(super) fn combined_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
         let mut definitions = self.host.list_mcp_tool_definitions()?;
-        definitions.retain(|definition| !self.graph_tools.is_graph_tool(&definition.schema.name));
-        // ORB-00391: the v1 orbit-knowledge graph builtins were decommissioned,
-        // so the in-process orbit-graph (v2) adapter owns its known graph
-        // names and their local-derived policies.
-        if self.host.in_process_graph_tools_enabled() {
-            definitions.extend(
-                self.graph_tools
-                    .definitions()
-                    .map_err(|error| OrbitError::InvalidInput(error.to_string()))?,
-            );
+        definitions.retain(|definition| {
+            !self
+                .extensions
+                .iter()
+                .any(|registration| registration.extension().recognizes(&definition.schema.name))
+        });
+        for registration in self
+            .extensions
+            .iter()
+            .filter(|registration| registration.advertises_definitions())
+        {
+            let extension_definitions = registration.extension().definitions()?;
+            for definition in &extension_definitions {
+                if !registration.extension().recognizes(&definition.schema.name) {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "in-process MCP extension definition '{}' is not recognized by its owner",
+                        definition.schema.name
+                    )));
+                }
+                let _owner = self.extension_for(&definition.schema.name)?;
+            }
+            definitions.extend(extension_definitions);
         }
         validate_mcp_tool_definitions(&definitions)
             .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
         Ok(definitions)
+    }
+
+    fn extension_for(&self, name: &str) -> Result<Option<Arc<dyn McpToolExtension>>, OrbitError> {
+        let mut matches = self
+            .extensions
+            .iter()
+            .filter(|registration| registration.extension().recognizes(name));
+        let Some(first) = matches.next() else {
+            return Ok(None);
+        };
+        if matches.next().is_some() {
+            return Err(OrbitError::InvalidInput(format!(
+                "multiple in-process MCP extensions recognize tool '{name}'"
+            )));
+        }
+        Ok(Some(Arc::clone(first.extension())))
     }
 
     #[cfg(test)]
@@ -249,19 +278,21 @@ impl OrbitToolServer {
             return Ok(tool_error_result(&denial));
         }
 
+        let extension = self
+            .extension_for(&canonical)
+            .map_err(invalid_definitions_mcp_error)?;
+        let extension_for_dispatch = extension.clone();
         let host = Arc::clone(&self.host);
-        let graph_tools = Arc::clone(&self.graph_tools);
         let exec_name = canonical.clone();
         let input_for_learning = input.clone();
-        // Dispatch recognition is deliberately independent of host schemas.
-        // Re-exposing a host graph schema must not make
-        // adapter-owned graph calls bypass the host's policy/audit seam.
-        let graph_tool = self.graph_tools.is_graph_tool(&canonical);
+        // Extension recognition is deliberately independent of advertised
+        // schemas. Re-exposing a host schema must not make an in-process call
+        // bypass the host's policy/audit seam.
         let join = tokio::task::spawn_blocking(move || {
-            if graph_tool {
-                let graph_name = exec_name.clone();
+            if let Some(extension) = extension_for_dispatch {
+                let extension_name = exec_name.clone();
                 let mut dispatch = move |input, session_context| {
-                    graph_tools.call_tool(&graph_name, input, session_context)
+                    extension.call(&extension_name, input, session_context)
                 };
                 host.call_in_process_tool(&exec_name, input, session_context, &mut dispatch)
             } else {
@@ -278,13 +309,8 @@ impl OrbitToolServer {
                 Ok(CallToolResult::structured(mcp_structured_content(value)))
             }
             Ok(Err(orbit_err)) => {
-                if graph_tool {
-                    tracing::warn!(
-                        target: "orbit.mcp.graph",
-                        tool = %canonical,
-                        error = %orbit_err,
-                        "graph tool call failed"
-                    );
+                if let Some(extension) = extension.as_ref() {
+                    extension.report_call_failure(&canonical, &orbit_err);
                 }
                 Ok(tool_error_result(&orbit_err))
             }

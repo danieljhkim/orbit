@@ -310,6 +310,20 @@ fn resolve_workspace_ship_input(
     runtime: &OrbitRuntime,
     action: &str,
 ) -> Result<Value, DispatchError> {
+    if let Some(binding) = runtime.workspace_runtime_binding() {
+        return crate::command::workflow::build_ship_input(
+            binding.ship_mode,
+            runtime.workflow_base_branch(),
+            &[],
+            false,
+            None,
+        )
+        .map_err(|error| DispatchError::DeterministicActionFailed {
+            action: action.to_string(),
+            message: format!("resolve workspace ship input: {error}"),
+        });
+    }
+
     let registry_path = crate::workspace_registry::registry_path_for(&runtime.global_root());
     let registry =
         crate::workspace_registry::load_registry_from(&registry_path).map_err(|error| {
@@ -424,6 +438,7 @@ fn non_empty(values: Vec<String>) -> Option<Vec<String>> {
 mod tests {
     use super::*;
     use crate::command::task::{TaskAddParams, TaskUpdateParams};
+    use crate::{ShipMode, WorkspaceRuntimeBinding};
     use chrono::Utc;
     use orbit_common::types::{
         NO_DIFF_EXPECTED_TAG, PipelineState, TaskPriority, TaskStatus, TaskType,
@@ -670,6 +685,36 @@ mod tests {
 
         assert_eq!(input, json!({"mode": "pr", "base_branch": "agent-main"}));
         assert!(input.get("task_ids").is_none());
+    }
+
+    #[test]
+    fn workspace_ship_input_prefers_the_registry_neutral_runtime_binding() {
+        let root = tempdir().expect("tempdir");
+        let global = root.path().join("global");
+        let repo = root.path().join("repo");
+        let workspace = repo.join(".orbit");
+        std::fs::create_dir_all(&global).expect("global orbit");
+        std::fs::create_dir_all(&workspace).expect("workspace orbit");
+        std::fs::write(
+            workspace.join("config.toml"),
+            "[workflow]\nbase_branch = \"agent-main\"\n",
+        )
+        .expect("workspace config");
+
+        let runtime = OrbitRuntime::from_roots_with_binding(
+            &global,
+            &workspace,
+            WorkspaceRuntimeBinding {
+                workspace_id: "ws_bound".to_string(),
+                repo_root: repo,
+                ship_mode: ShipMode::Pr,
+            },
+        )
+        .expect("bound runtime");
+        let input = resolve_workspace_ship_input(&runtime, "resolve_workspace_ship_input")
+            .expect("resolve bound ship input without a workspace registry");
+
+        assert_eq!(input, json!({"mode": "pr", "base_branch": "agent-main"}));
     }
 
     #[test]

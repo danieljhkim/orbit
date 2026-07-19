@@ -12,8 +12,9 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::super::OrbitToolServer;
-use super::super::graph::graph_tool_definitions;
+use super::super::graph::{GraphToolRegistry, graph_tool_definitions};
 use super::super::test_support::{StubHost, request_with_args, test_mcp_definitions, tool_schema};
+use crate::{McpHost, McpToolExtension, McpToolExtensionRegistration};
 
 #[test]
 fn graph_tool_schemas_cover_cli_parameters() {
@@ -188,7 +189,7 @@ async fn graph_tools_invoke_in_process_fixture() {
     let host = Arc::new(StubHost {
         schemas: Vec::new(),
     });
-    let server = OrbitToolServer::new(host);
+    let (server, graph_tools) = server_with_graph_extension(host);
     // L-0053: graph MCP tests must pin the worktree to their temp fixture.
     server.replace_session_context(agent_workspace_context(worktree.path()));
 
@@ -321,7 +322,7 @@ async fn graph_tools_invoke_in_process_fixture() {
     assert_eq!(deps["scope"], "file:src/lib.rs");
     assert_array_field(&deps, "imports");
 
-    assert_eq!(server.graph_tools.cached_worktree_count(), 1);
+    assert_eq!(graph_tools.cached_worktree_count(), 1);
 }
 
 #[tokio::test]
@@ -408,7 +409,7 @@ async fn graph_show_rejects_out_of_workspace_path_without_session_workspace() {
     let host = Arc::new(StubHost {
         schemas: Vec::new(),
     });
-    let server = OrbitToolServer::new(host);
+    let (server, graph_tools) = server_with_graph_extension(host);
     // Intentionally do NOT announce a session workspace: session_context.workspace
     // stays None, which is the unguarded path before this fix.
 
@@ -438,7 +439,19 @@ async fn graph_show_rejects_out_of_workspace_path_without_session_workspace() {
     // out-of-bounds directory.
     assert!(payload.get("bytes").is_none());
     assert!(payload.get("source").is_none());
-    assert_eq!(server.graph_tools.cached_worktree_count(), 0);
+    assert_eq!(graph_tools.cached_worktree_count(), 0);
+}
+
+fn server_with_graph_extension(
+    host: Arc<dyn McpHost>,
+) -> (OrbitToolServer, Arc<GraphToolRegistry>) {
+    let graph_tools = Arc::new(GraphToolRegistry::new());
+    let extension: Arc<dyn McpToolExtension> = graph_tools.clone();
+    let server = OrbitToolServer::new_with_extensions(
+        host,
+        vec![McpToolExtensionRegistration::advertised(extension)],
+    );
+    (server, graph_tools)
 }
 
 async fn call_json(server: &OrbitToolServer, name: &str, args: Value) -> Value {
