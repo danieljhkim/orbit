@@ -79,6 +79,45 @@ fn is_git_repo_root(path: &Path) -> bool {
     path.join(".git").exists()
 }
 
+/// The Orbit-managed `.gitignore` block written by `orbit workspace init`.
+///
+/// Blanket-ignores `.orbit/*`, then re-includes the artifact partitions that
+/// travel with the repo (accepted/deleted ADRs, learnings, auto-tasks,
+/// resources, routines, config). The `proposed/` and `superseded/` ADR
+/// partitions stay ignored — they are local-only until publication
+/// (ORB-10303). `.orbit/**/*.lock` keeps lock files out of the re-included
+/// directories. Order matters: the partition exclusions must follow the
+/// `!.orbit/adrs/` re-include, or git tracks them anyway.
+const ORBIT_GITIGNORE_BLOCK: &[&str] = &[
+    ".orbit/*",
+    "!.orbit/adrs/",
+    ".orbit/adrs/index.sqlite*",
+    ".orbit/adrs/proposed/",
+    ".orbit/adrs/superseded/",
+    "!.orbit/learnings/",
+    "!.orbit/auto_tasks/",
+    "!.orbit/resources/",
+    "!.orbit/routines/",
+    "!.orbit/config.toml",
+    ".orbit/**/*.lock",
+];
+
+/// Legacy bare `.orbit` ignore lines written by earlier `orbit workspace init`
+/// versions. A bare `.orbit` ignores the whole directory, so no `!`-negation
+/// inside it can ever re-include a partition — these must be *replaced* by the
+/// managed block, never merely supplemented.
+const LEGACY_ORBIT_LINES: &[&str] = &[".orbit", ".orbit/", "/.orbit", "/.orbit/"];
+
+/// Renders [`ORBIT_GITIGNORE_BLOCK`] as newline-terminated text.
+pub(super) fn orbit_gitignore_block() -> String {
+    let mut block = String::new();
+    for line in ORBIT_GITIGNORE_BLOCK {
+        block.push_str(line);
+        block.push('\n');
+    }
+    block
+}
+
 fn write_orbit_gitignore_entry(gitignore_path: &Path) -> Result<(), OrbitError> {
     let content = match std::fs::read_to_string(gitignore_path) {
         Ok(content) => content,
@@ -86,21 +125,37 @@ fn write_orbit_gitignore_entry(gitignore_path: &Path) -> Result<(), OrbitError> 
         Err(error) => return Err(OrbitError::Io(error.to_string())),
     };
 
-    if gitignore_has_orbit_entry(&content) {
+    // Idempotent no-op: the full managed block is already present and no legacy
+    // bare `.orbit` line lingers (a bare line would defeat the re-includes).
+    if gitignore_has_managed_block(&content) && !gitignore_has_legacy_orbit_line(&content) {
         return Ok(());
     }
 
-    let mut next = content;
-    if !next.is_empty() && !next.ends_with('\n') {
+    // Rebuild: drop any legacy bare lines and any pre-existing managed-block
+    // lines (partial or full), preserving the operator's other content and
+    // order, then append the canonical block once at the end.
+    let mut next = String::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if LEGACY_ORBIT_LINES.contains(&trimmed) || ORBIT_GITIGNORE_BLOCK.contains(&trimmed) {
+            continue;
+        }
+        next.push_str(line);
         next.push('\n');
     }
-    next.push_str(".orbit\n");
+    next.push_str(&orbit_gitignore_block());
     std::fs::write(gitignore_path, next).map_err(|error| OrbitError::Io(error.to_string()))
 }
 
-fn gitignore_has_orbit_entry(content: &str) -> bool {
-    content.lines().any(|line| {
-        let line = line.trim();
-        matches!(line, ".orbit" | ".orbit/" | "/.orbit" | "/.orbit/")
-    })
+fn gitignore_has_managed_block(content: &str) -> bool {
+    let lines: Vec<&str> = content.lines().map(str::trim).collect();
+    ORBIT_GITIGNORE_BLOCK
+        .iter()
+        .all(|entry| lines.contains(entry))
+}
+
+fn gitignore_has_legacy_orbit_line(content: &str) -> bool {
+    content
+        .lines()
+        .any(|line| LEGACY_ORBIT_LINES.contains(&line.trim()))
 }

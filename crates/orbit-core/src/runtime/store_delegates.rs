@@ -798,6 +798,12 @@ impl AdrRecords<'_> {
         self.store.update_adr_status(id, new_status)
     }
 
+    /// Rebuilds the ADR searchable index from the filesystem source of truth.
+    /// Used as the `sync` step of ADR publication (ORB-10303).
+    pub(crate) fn rebuild_index(&self) -> Result<(), OrbitError> {
+        self.store.rebuild_index()
+    }
+
     pub(crate) fn update_document(
         &self,
         id: &str,

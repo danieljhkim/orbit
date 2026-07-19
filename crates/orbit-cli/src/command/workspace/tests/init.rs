@@ -14,6 +14,7 @@ use super::super::init::{WorkspaceInitArgs, canonical_workspace_id};
 use super::super::list::format_workspace_list;
 use super::super::role::CliCheckoutRole;
 use super::super::show::format_workspace_show;
+use super::super::support::orbit_gitignore_block;
 
 #[test]
 fn workspace_reinit_merges_explicit_registration_updates_without_resetting_authored_state() {
@@ -530,7 +531,7 @@ fn workspace_init_under_home_with_global_orbit_creates_repo_orbit() {
     assert!(!home.path().join(".orbit").join("knowledge").exists());
     assert_eq!(
         std::fs::read_to_string(workspace.join(".gitignore")).expect("read .gitignore"),
-        ".orbit\n"
+        orbit_gitignore_block()
     );
 }
 
@@ -561,12 +562,15 @@ fn workspace_init_appends_orbit_to_existing_gitignore() {
     result.expect("workspace init");
     assert_eq!(
         std::fs::read_to_string(workspace.path().join(".gitignore")).expect("read .gitignore"),
-        "target/\n.DS_Store\n.orbit\n"
+        format!("target/\n.DS_Store\n{}", orbit_gitignore_block())
     );
 }
 
 #[test]
-fn workspace_init_does_not_duplicate_existing_orbit_gitignore_entry() {
+fn workspace_init_replaces_legacy_bare_orbit_gitignore_line_with_managed_block() {
+    // A bare `.orbit` line (written by earlier init versions) ignores the whole
+    // directory, so the ADR / learning re-includes can never apply. Init must
+    // replace the legacy line with the managed block, not merely append.
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
     std::fs::create_dir_all(workspace.path().join(".git")).expect("create .git");
@@ -575,7 +579,7 @@ fn workspace_init_does_not_duplicate_existing_orbit_gitignore_entry() {
 
     let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
-    let result = WorkspaceInitArgs {
+    let init = || WorkspaceInitArgs {
         name: None,
         base_branch: Some("main".to_string()),
         ship_mode: None,
@@ -586,13 +590,26 @@ fn workspace_init_does_not_duplicate_existing_orbit_gitignore_entry() {
         hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
-    }
-    .execute_without_runtime(None);
+    };
 
-    result.expect("workspace init");
+    init()
+        .execute_without_runtime(None)
+        .expect("workspace init");
+    let expected = format!("target/\n{}", orbit_gitignore_block());
     assert_eq!(
         std::fs::read_to_string(workspace.path().join(".gitignore")).expect("read .gitignore"),
-        "target/\n/.orbit/\n"
+        expected,
+        "legacy bare `.orbit` must be replaced by the managed block"
+    );
+
+    // Re-init is idempotent: the block is not duplicated or reordered.
+    init()
+        .execute_without_runtime(None)
+        .expect("workspace re-init");
+    assert_eq!(
+        std::fs::read_to_string(workspace.path().join(".gitignore")).expect("read .gitignore"),
+        expected,
+        "re-init must be idempotent once the managed block is present"
     );
 }
 
@@ -623,7 +640,7 @@ fn workspace_init_from_git_subdir_gitignores_repo_orbit_dir() {
     result.expect("workspace init");
     assert_eq!(
         std::fs::read_to_string(repo.path().join(".gitignore")).expect("read repo .gitignore"),
-        ".orbit\n"
+        orbit_gitignore_block()
     );
     assert!(!nested.join(".gitignore").exists());
 }
