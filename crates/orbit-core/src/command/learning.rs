@@ -56,6 +56,34 @@ impl OrbitRuntime {
         Ok(learning)
     }
 
+    /// [ORB-10330] Finalize a hub-preallocated learning at the caller-supplied
+    /// canonical `id` in this checkout-bound runtime.
+    ///
+    /// The multi-host broker calls this once ORB-10272's hub sequence has
+    /// allocated the id: it never allocates, abandons, retries, or renumbers.
+    /// Unlike [`Self::create_learning`], no local id-allocation audit is written
+    /// here — the hub records the canonical allocation audit transactionally and
+    /// the broker writes the correlated owner-finalization audit with trusted
+    /// provenance.
+    pub fn finalize_preallocated_learning(
+        &self,
+        id: &str,
+        params: LearningCreateParams,
+    ) -> Result<Learning, OrbitError> {
+        self.stores().learnings().finalize_preallocated(id, params)
+    }
+
+    /// [ORB-10330] Finalize a hub-preallocated ADR at the caller-supplied
+    /// canonical `id` in this checkout-bound runtime. See
+    /// [`Self::finalize_preallocated_learning`] for the invariants.
+    pub fn finalize_preallocated_adr(
+        &self,
+        id: &str,
+        params: orbit_store::AdrCreateParams,
+    ) -> Result<orbit_common::types::Adr, OrbitError> {
+        self.stores().adrs().finalize_preallocated(id, params)
+    }
+
     pub fn get_learning(&self, id: &str) -> Result<Learning, OrbitError> {
         match self.stores().learnings().get_federated(id)? {
             Some(learning) => Ok(learning),

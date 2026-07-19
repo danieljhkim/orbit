@@ -767,3 +767,138 @@ fn concurrent_creation_yields_two_distinct_records() {
     let ids: BTreeSet<String> = [id_a, id_b].into_iter().collect();
     assert_eq!(ids.len(), 2);
 }
+
+// [ORB-10330] Preallocated owner-finalizer tests: the id is chosen upstream by
+// the hub sequence, so the finalizer never allocates, abandons, retries, or
+// selects a second id after a collision.
+
+#[test]
+fn finalize_preallocated_learning_writes_supplied_id_without_allocating() {
+    let (dir, store) = store_with_index();
+    // A non-sequential id: a local allocation would have produced L-0001.
+    let learning = store
+        .finalize_preallocated_learning("L-0042", create_params("hub-preallocated", vec![], vec![]))
+        .expect("finalize preallocated learning");
+    assert_eq!(learning.id, "L-0042");
+    assert_eq!(learning.status, LearningStatus::Active);
+
+    // Body landed under the requested owner root.
+    assert!(dir.path().join("L-0042/learning.yaml").is_file());
+
+    // Exactly the supplied id is projected — no stray L-0001 from a hidden
+    // allocation.
+    let allocations = store
+        .id_allocator
+        .learning_allocations()
+        .expect("allocations");
+    assert_eq!(allocations.len(), 1, "no extra allocation was selected");
+    assert_eq!(allocations[0].id, "L-0042");
+    assert_eq!(
+        allocations[0].body_path.as_deref(),
+        Some(std::path::Path::new("L-0042/learning.yaml"))
+    );
+
+    // Lifecycle read works through the projection.
+    let listed = store
+        .list_learnings(Some(LearningStatus::Active))
+        .expect("list");
+    assert_eq!(
+        listed.iter().map(|l| l.id.clone()).collect::<Vec<_>>(),
+        vec!["L-0042".to_string()]
+    );
+}
+
+#[test]
+fn finalize_preallocated_learning_rejects_existing_artifact_without_adopting() {
+    let (dir, store) = store_with_index();
+    let original = store
+        .finalize_preallocated_learning("L-0007", create_params("original", vec![], vec![]))
+        .expect("seed original");
+    let original_bytes =
+        std::fs::read(dir.path().join("L-0007/learning.yaml")).expect("original yaml");
+
+    let err = store
+        .finalize_preallocated_learning("L-0007", create_params("intruder", vec![], vec![]))
+        .expect_err("collision must fail");
+    assert!(
+        matches!(err, orbit_common::types::OrbitError::InvalidInput(_)),
+        "got {err:?}"
+    );
+
+    // Original artifact + allocation stay inspectable and byte-identical.
+    assert_eq!(
+        std::fs::read(dir.path().join("L-0007/learning.yaml")).expect("still there"),
+        original_bytes
+    );
+    let reread = store.get_learning("L-0007").expect("get").expect("exists");
+    assert_eq!(reread.summary, original.summary);
+    let allocations = store
+        .id_allocator
+        .learning_allocations()
+        .expect("allocations");
+    assert_eq!(allocations.len(), 1);
+    assert_eq!(allocations[0].id, "L-0007");
+}
+
+#[test]
+fn finalize_preallocated_learning_cleans_up_partial_body_on_projection_failure() {
+    let (dir, store) = store_with_index();
+    // Pre-seed a conflicting projection so the projection insert fails *after*
+    // the body is written; the partial body must be removed.
+    store
+        .id_allocator
+        .project_preallocated_learning("L-0099", std::path::Path::new("L-0099/learning.yaml"))
+        .expect("seed conflicting projection");
+
+    let err = store
+        .finalize_preallocated_learning("L-0099", create_params("doomed", vec![], vec![]))
+        .expect_err("projection conflict must fail");
+    assert!(
+        matches!(err, orbit_common::types::OrbitError::Store(_)),
+        "got {err:?}"
+    );
+
+    // No partial body/dir remains; the pre-existing projection is untouched.
+    assert!(!dir.path().join("L-0099").exists());
+    let allocations = store
+        .id_allocator
+        .learning_allocations()
+        .expect("allocations");
+    assert_eq!(allocations.len(), 1);
+    assert_eq!(allocations[0].id, "L-0099");
+}
+
+#[test]
+fn finalize_preallocated_learning_targets_only_the_selected_worktree() {
+    let shared = tempdir().expect("shared orbit");
+    let shared_orbit = shared.path().join("hub/.orbit");
+    std::fs::create_dir_all(&shared_orbit).expect("shared orbit dir");
+    let local = tempdir().expect("local worktree");
+    let sibling = tempdir().expect("sibling worktree");
+
+    let local_store = learning_store_for_worktree(&shared_orbit, local.path());
+    let sibling_store = learning_store_for_worktree(&shared_orbit, sibling.path());
+
+    let learning = local_store
+        .finalize_preallocated_learning("L-0100", create_params("owner local", vec![], vec![]))
+        .expect("finalize in local checkout");
+    assert_eq!(learning.id, "L-0100");
+
+    // Body materialized only under the local worktree learning root.
+    assert!(
+        local
+            .path()
+            .join(".orbit/learnings/L-0100/learning.yaml")
+            .is_file()
+    );
+    // The sibling checkout filesystem is untouched.
+    assert!(!sibling.path().join(".orbit/learnings/L-0100").exists());
+    // The shared allocator sees the row but the sibling store treats it as
+    // non-local (body under the local worktree, not the sibling).
+    assert!(
+        sibling_store
+            .get_learning("L-0100")
+            .expect("sibling get")
+            .is_none()
+    );
+}

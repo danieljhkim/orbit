@@ -402,6 +402,16 @@ pub trait TaskStoreBackend: Send + Sync {
 
 pub trait AdrStoreBackend: Send + Sync {
     fn add_adr(&self, params: AdrCreateParams) -> Result<Adr, OrbitError>;
+
+    /// [ORB-10330] Finalize a hub-preallocated ADR at the caller-supplied
+    /// canonical `id`. Unlike [`Self::add_adr`], the id is chosen upstream by
+    /// the hub sequence, so this never allocates, abandons, retries, or selects
+    /// a second id; a pre-existing artifact at `id` fails deterministically.
+    fn finalize_preallocated_adr(
+        &self,
+        id: &str,
+        params: AdrCreateParams,
+    ) -> Result<Adr, OrbitError>;
     fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError>;
     fn resolve_adr_artifact(&self, id: &str) -> Result<AdrArtifactResolution, OrbitError>;
     fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError>;
@@ -752,6 +762,17 @@ pub struct LearningSearchResult {
 
 pub trait LearningStoreBackend: Send + Sync {
     fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError>;
+
+    /// [ORB-10330] Finalize a hub-preallocated learning at the caller-supplied
+    /// canonical `id`. Unlike [`Self::create_learning`], there is no allocation
+    /// loop and the id is never selected, abandoned, retried, or replaced; a
+    /// path collision fails deterministically and preserves the existing
+    /// artifact.
+    fn finalize_preallocated_learning(
+        &self,
+        id: &str,
+        params: LearningCreateParams,
+    ) -> Result<Learning, OrbitError>;
     fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
     fn get_learning_federated(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
     fn list_learnings(

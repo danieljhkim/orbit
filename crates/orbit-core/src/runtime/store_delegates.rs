@@ -734,6 +734,16 @@ impl AdrRecords<'_> {
         self.store.add_adr(params)
     }
 
+    /// [ORB-10330] Finalize a hub-preallocated ADR at the caller-supplied
+    /// canonical id in this checkout-bound store. Never allocates or renumbers.
+    pub(crate) fn finalize_preallocated(
+        &self,
+        id: &str,
+        params: AdrCreateParams,
+    ) -> Result<Adr, OrbitError> {
+        self.store.finalize_preallocated_adr(id, params)
+    }
+
     pub(crate) fn get(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
         self.store.get_adr(id)
     }
@@ -825,6 +835,16 @@ pub(crate) struct LearningRecords<'a> {
 impl LearningRecords<'_> {
     pub(crate) fn add(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
         self.store.create_learning(params)
+    }
+
+    /// [ORB-10330] Finalize a hub-preallocated learning at the caller-supplied
+    /// canonical id in this checkout-bound store. Never allocates or renumbers.
+    pub(crate) fn finalize_preallocated(
+        &self,
+        id: &str,
+        params: LearningCreateParams,
+    ) -> Result<Learning, OrbitError> {
+        self.store.finalize_preallocated_learning(id, params)
     }
 
     pub(crate) fn get(&self, id: &str) -> Result<Option<Learning>, OrbitError> {
