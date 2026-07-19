@@ -25,6 +25,7 @@ pub mod execution_profile_projection;
 pub mod host_identity;
 pub mod host_registry;
 pub mod knowledge;
+pub mod knowledge_broker;
 pub mod mcp;
 pub mod persistence;
 pub mod profile;

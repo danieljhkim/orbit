@@ -437,3 +437,57 @@ fn ids_from_array(value: &Value) -> Vec<String> {
         .map(|item| item["id"].as_str().expect("id present").to_string())
         .collect()
 }
+
+// --- [ORB-10330] runtime preallocated finalizers -------------------------
+
+#[test]
+fn finalize_preallocated_learning_lands_supplied_id_and_lists() {
+    let (_guard, runtime, _repo) = test_runtime();
+    // A non-sequential id proves the runtime path never selects a local id.
+    let learning = runtime
+        .finalize_preallocated_learning(
+            "L-0055",
+            LearningCreateParams {
+                summary: "hub preallocated learning".to_string(),
+                scope: LearningScope::default(),
+                body: "body".to_string(),
+                evidence: Vec::new(),
+                created_by: Some("test".to_string()),
+                priority: None,
+            },
+        )
+        .expect("finalize preallocated learning");
+    assert_eq!(learning.id, "L-0055");
+
+    // Lifecycle read/list work through the owner-local projection.
+    let fetched = runtime.get_learning("L-0055").expect("get learning");
+    assert_eq!(fetched.summary, "hub preallocated learning");
+    let ids: Vec<String> = runtime
+        .list_learnings(Some(LearningStatus::Active))
+        .expect("list learnings")
+        .into_iter()
+        .map(|learning| learning.id)
+        .collect();
+    assert!(ids.contains(&"L-0055".to_string()));
+}
+
+#[test]
+fn finalize_preallocated_adr_lands_supplied_id() {
+    let (_guard, runtime, _repo) = test_runtime();
+    let adr = runtime
+        .finalize_preallocated_adr(
+            "ADR-0055",
+            orbit_store::AdrCreateParams {
+                title: "Hub preallocated ADR".to_string(),
+                owner: "test".to_string(),
+                related_features: Vec::new(),
+                related_tasks: Vec::new(),
+                tags: Vec::new(),
+                paths: Vec::new(),
+                body: "decision body".to_string(),
+            },
+        )
+        .expect("finalize preallocated ADR");
+    assert_eq!(adr.id, "ADR-0055");
+    assert_eq!(adr.status, orbit_common::types::AdrStatus::Proposed);
+}

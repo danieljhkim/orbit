@@ -26,7 +26,6 @@ fn schema_is_idempotent_for_preexisting_semantic_db() {
         .expect("table exists");
     assert_eq!(exists, 1);
     assert!(id_allocations_has_column(&conn, "body_path"));
-    assert!(id_allocations_has_column(&conn, "is_projection"));
 }
 
 #[test]
@@ -97,69 +96,6 @@ fn allocates_dense_adr_and_learning_ids() {
     assert_eq!(
         allocator.allocate_learning().expect("learning").id,
         "L-0002"
-    );
-}
-
-#[test]
-fn preallocated_projection_is_visible_without_advancing_compatibility_sequences() {
-    let temp = TempDir::new().expect("tempdir");
-    let allocator = IdAllocator::open(allocator_config(temp.path())).expect("allocator");
-    let adr_body = temp.path().join(".orbit/adrs/proposed/ADR-9000/body.md");
-    let learning_body = temp.path().join(".orbit/learnings/L-8000/learning.yaml");
-
-    allocator
-        .install_preallocated_adr_projection("ADR-9000", &adr_body)
-        .expect("ADR projection");
-    allocator
-        .install_preallocated_learning_projection("L-8000", &learning_body)
-        .expect("learning projection");
-
-    let adr = allocator
-        .adr_allocation("ADR-9000")
-        .expect("ADR lookup")
-        .expect("ADR projection row");
-    let learning = allocator
-        .learning_allocation("L-8000")
-        .expect("learning lookup")
-        .expect("learning projection row");
-    assert!(adr.is_projection);
-    assert!(learning.is_projection);
-    assert_eq!(
-        adr.resolved_body_path().as_deref(),
-        Some(adr_body.as_path())
-    );
-    assert_eq!(
-        learning.resolved_body_path().as_deref(),
-        Some(learning_body.as_path())
-    );
-
-    assert_eq!(allocator.allocate_adr().expect("compat ADR").id, "ADR-0001");
-    assert_eq!(
-        allocator.allocate_learning().expect("compat learning").id,
-        "L-0001"
-    );
-
-    assert!(
-        allocator
-            .remove_preallocated_adr_projection("ADR-9000")
-            .expect("remove ADR projection")
-    );
-    assert!(
-        allocator
-            .remove_preallocated_learning_projection("L-8000")
-            .expect("remove learning projection")
-    );
-    assert!(
-        allocator
-            .adr_allocation("ADR-9000")
-            .expect("removed ADR lookup")
-            .is_none()
-    );
-    assert!(
-        allocator
-            .learning_allocation("L-8000")
-            .expect("removed learning lookup")
-            .is_none()
     );
 }
 

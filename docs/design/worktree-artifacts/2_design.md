@@ -10,7 +10,7 @@ doc_role: design
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10273", "ORB-10297", "ADR-0177", "ADR-0229"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ADR-0177", "ADR-0229"]
 ---
 
 # Worktree Artifacts - Design
@@ -64,15 +64,36 @@ F1 leaves the substrate dormant and exposes no public allocation tool. F3 alone
 activates public issuance and cuts owner creation over; standalone hosts cannot
 enter hub authority.
 
-F2 [ORB-10273] adds an owner-local projection row for a successfully finalized
-hub ID. The row is explicitly non-authoritative: it records the selected
-checkout/body path for ordinary list and lifecycle operations but is excluded from
-compatibility sequence selection. The supplied-ID finalizers write only under the
-D3-selected `local_root`, never infer placement from process cwd, and never accept
-an absolute checkout path as request data. Collision refuses overwrite/adoption;
-failure removes every partial body, sidecar, index entry, and projection while the
-hub allocation remains a valid consumed gap. The public create paths still use the
-compatibility allocator until F3 enables the dormant broker atomically.
+### 2.2 Preallocated owner finalizers
+
+[ORB-10330] adds the owner-side finalizer that consumes a hub allocation without
+becoming an allocation authority. Each owner file store gains a
+`finalize_preallocated(id, payload)` path beside its standalone create path: it
+takes the caller-supplied canonical id (chosen upstream by the §2.1 hub
+sequence), so it never calls the compatibility allocator, abandons, retries, or
+selects a second id. It preserves the existing validation, exclusive bundle
+creation, sidecar/index update, and local partial-write cleanup, and it installs
+a **non-authoritative** owner-local body-path projection in the standalone
+`id_allocations` table so ADR/learning list, show, and lifecycle resolve the
+finalized body. The projection is inserted directly for the given id; it never
+advances the local sequence and never claims canonical allocation authority.
+
+A pre-existing artifact at the supplied id fails the finalization
+deterministically and is never overwritten or adopted. A failure after the id is
+fixed removes only the local partial bundle and projection; it never rolls back
+or abandons the immutable hub allocation, which stays consumed as a valid gap.
+The finalizer takes no absolute path — it operates on the D3-selected
+checkout-bound owner store, so process cwd and remote paths cannot redirect it.
+
+The composite `orbit.learning.add` / `orbit.adr.add` broker path pairs one hub
+allocation with one owner finalization: for a local (hub-owned) workspace it
+allocates through §2.1 then finalizes in the selected owner checkout; a foreign
+spoke owner or a local replica is rejected by D3 owner preflight *before*
+allocation, so no avoidable gap is burned. Allocation and owner finalization
+correlate through the original trusted `mcp_call_id`, workspace id, kind, and
+allocated id. [ORB-10330] adds and tests these finalizers and the broker
+composition behind an inactive cutover gate; public creation stays on the
+compatibility path until F3 activates issuance and cuts the callers over.
 
 ## 3. Write Path
 
@@ -128,8 +149,10 @@ The `worktree_root` column preserves historical rows from earlier phases, so old
 - [ORB-10272] added the dormant, path-free Remote-v2 hub sequence and reconciliation
   substrate while preserving the standalone shared-root allocator and owner-local
   body/federation semantics; F3 owns activation and caller cutover.
-- [ORB-10273] added exact-checkout supplied-ID body finalization and removable,
-  non-authoritative owner-local projections without advancing or replacing the
-  compatibility allocator; the public F2 gate stays inactive.
+- [ORB-10330] added the owner-side preallocated finalizers (`finalize_preallocated`
+  on the ADR and learning stores) and the gated broker composition: they consume a
+  hub allocation into the exact owner checkout via a non-authoritative body-path
+  projection, never allocate/abandon/retry, and reject replica/foreign-spoke owners
+  before allocation. Public creation stays on the compatibility path until F3.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

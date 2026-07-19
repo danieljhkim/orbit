@@ -50,55 +50,38 @@ struct LearningSearchConfigSection {
 }
 
 impl OrbitRuntime {
-    /// Verify that a multi-host owner finalizer is operating through the exact
-    /// checkout-bound runtime capability selected by the broker. The caller
-    /// supplies only the stable runtime workspace ID; checkout paths come from
-    /// the trusted runtime binding, never from public request data or cwd.
-    pub fn verify_preallocated_owner_runtime(
-        &self,
-        expected_runtime_workspace_id: &str,
-    ) -> Result<(), OrbitError> {
-        let binding = self.workspace_runtime_binding().ok_or_else(|| {
-            OrbitError::InvalidInput(
-                "preallocated knowledge finalization requires a registered exact-checkout runtime binding"
-                    .to_string(),
-            )
-        })?;
-        let persisted_workspace_id = self.workspace_id()?;
-        if binding.workspace_id != expected_runtime_workspace_id
-            || persisted_workspace_id != expected_runtime_workspace_id
-        {
-            return Err(OrbitError::InvalidInput(format!(
-                "preallocated knowledge workspace mismatch: expected '{expected_runtime_workspace_id}', runtime binding is '{}', persisted checkout identity is '{persisted_workspace_id}'",
-                binding.workspace_id
-            )));
-        }
-        let bound_repo = binding.repo_root.canonicalize().map_err(|error| {
-            OrbitError::InvalidInput(format!(
-                "preallocated owner checkout '{}' is unavailable: {error}",
-                binding.repo_root.display()
-            ))
-        })?;
-        let runtime_repo = self.paths().repo_root.canonicalize().map_err(|error| {
-            OrbitError::InvalidInput(format!(
-                "runtime checkout '{}' is unavailable: {error}",
-                self.paths().repo_root.display()
-            ))
-        })?;
-        if bound_repo != runtime_repo {
-            return Err(OrbitError::InvalidInput(format!(
-                "preallocated owner checkout binding drifted: bound '{}', runtime '{}'",
-                bound_repo.display(),
-                runtime_repo.display()
-            )));
-        }
-        Ok(())
-    }
-
     pub fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
         let learning = self.stores().learnings().add(params)?;
         self.record_id_allocation_audit("learning", &learning.id)?;
         Ok(learning)
+    }
+
+    /// [ORB-10330] Finalize a hub-preallocated learning at the caller-supplied
+    /// canonical `id` in this checkout-bound runtime.
+    ///
+    /// The multi-host broker calls this once ORB-10272's hub sequence has
+    /// allocated the id: it never allocates, abandons, retries, or renumbers.
+    /// Unlike [`Self::create_learning`], no local id-allocation audit is written
+    /// here — the hub records the canonical allocation audit transactionally and
+    /// the broker writes the correlated owner-finalization audit with trusted
+    /// provenance.
+    pub fn finalize_preallocated_learning(
+        &self,
+        id: &str,
+        params: LearningCreateParams,
+    ) -> Result<Learning, OrbitError> {
+        self.stores().learnings().finalize_preallocated(id, params)
+    }
+
+    /// [ORB-10330] Finalize a hub-preallocated ADR at the caller-supplied
+    /// canonical `id` in this checkout-bound runtime. See
+    /// [`Self::finalize_preallocated_learning`] for the invariants.
+    pub fn finalize_preallocated_adr(
+        &self,
+        id: &str,
+        params: orbit_store::AdrCreateParams,
+    ) -> Result<orbit_common::types::Adr, OrbitError> {
+        self.stores().adrs().finalize_preallocated(id, params)
     }
 
     pub fn get_learning(&self, id: &str) -> Result<Learning, OrbitError> {

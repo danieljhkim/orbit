@@ -4,6 +4,7 @@ mod execution_profile_projection;
 mod host_identity;
 mod host_registry;
 mod knowledge;
+mod knowledge_broker;
 mod profile;
 mod registry_cache;
 mod routines;
