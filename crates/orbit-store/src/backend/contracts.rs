@@ -402,6 +402,12 @@ pub trait TaskStoreBackend: Send + Sync {
 
 pub trait AdrStoreBackend: Send + Sync {
     fn add_adr(&self, params: AdrCreateParams) -> Result<Adr, OrbitError>;
+    fn finalize_preallocated_adr(
+        &self,
+        id: &str,
+        params: AdrCreateParams,
+    ) -> Result<Adr, OrbitError>;
+    fn rollback_preallocated_adr(&self, id: &str) -> Result<bool, OrbitError>;
     fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError>;
     fn resolve_adr_artifact(&self, id: &str) -> Result<AdrArtifactResolution, OrbitError>;
     fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError>;
@@ -752,6 +758,12 @@ pub struct LearningSearchResult {
 
 pub trait LearningStoreBackend: Send + Sync {
     fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError>;
+    fn finalize_preallocated_learning(
+        &self,
+        id: &str,
+        params: LearningCreateParams,
+    ) -> Result<Learning, OrbitError>;
+    fn rollback_preallocated_learning(&self, id: &str) -> Result<bool, OrbitError>;
     fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
     fn get_learning_federated(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
     fn list_learnings(

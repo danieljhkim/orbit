@@ -281,10 +281,7 @@ impl LearningFileStore {
     }
 
     pub(super) fn upsert_index_row(&self, learning: &Learning) {
-        let Some(index) = &self.index else {
-            return;
-        };
-        if let Err(err) = index.upsert_learning_index_row(&self.workspace_id, learning) {
+        if let Err(err) = self.upsert_index_row_strict(learning) {
             orbit_common::tracing::warn!(
                 target: "orbit.store.learning",
                 learning_id = learning.id.as_str(),
@@ -292,6 +289,20 @@ impl LearningFileStore {
                 "failed to upsert learning envelope into index; filesystem is source of truth",
             );
         }
+    }
+
+    pub(super) fn upsert_index_row_strict(&self, learning: &Learning) -> Result<(), OrbitError> {
+        let Some(index) = &self.index else {
+            return Ok(());
+        };
+        index.upsert_learning_index_row(&self.workspace_id, learning)
+    }
+
+    pub(super) fn delete_index_row_strict(&self, id: &str) -> Result<(), OrbitError> {
+        let Some(index) = &self.index else {
+            return Ok(());
+        };
+        index.delete_learning_index_row(&self.workspace_id, id)
     }
 }
 

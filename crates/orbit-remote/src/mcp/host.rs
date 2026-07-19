@@ -16,9 +16,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use orbit_common::types::{
-    AuditEventStatus, McpToolDefinition, McpToolPlacement, McpToolPolicyError, McpToolScope,
-    McpTransport, ToolSessionContext, WorkspaceCheckoutRole, WorkspaceStatus, audit_execution_id,
-    validate_mcp_tool_definitions,
+    AuditEventStatus, HUB_KNOWLEDGE_ALLOCATION_SCHEMA_VERSION, HubKnowledgeAllocationRequestV1,
+    HubKnowledgeAllocationV1, KnowledgeIdKind, McpToolDefinition, McpToolPlacement,
+    McpToolPolicyError, McpToolScope, McpTransport, ToolSessionContext, WorkspaceCheckoutRole,
+    WorkspaceStatus, audit_execution_id, validate_mcp_tool_definitions,
 };
 use orbit_core::command::tool::{
     ToolEntryPoint, audit_role_label_for_entry_point, trusted_mcp_audit_context,
@@ -30,12 +31,16 @@ use orbit_core::{
 };
 use orbit_mcp::McpHost;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::runtime::RemoteRuntimeFactory;
-use crate::{HostIdentityState, HostMode, inspect_host_identity};
+use crate::{HostIdentityState, HostMode, HubKnowledgeSequenceService, inspect_host_identity};
 
 use super::hub_link::HubLinkPool;
+
+/// F2 composes and validates the forward-only path without switching public
+/// authoring. F3 owns the atomic cutover of every legacy caller.
+pub(super) const PREALLOCATED_KNOWLEDGE_CUTOVER_ENABLED: bool = false;
 
 pub fn canonical_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
     let mut definitions = orbit_tools::canonical_builtin_mcp_tool_definitions()?;
@@ -102,6 +107,11 @@ struct ExactCheckoutBinding {
     key: RuntimeCacheKey,
     role: WorkspaceCheckoutRole,
     owner_machine_id: Option<String>,
+}
+
+enum KnowledgeOwnerRoute {
+    Local(ExactCheckoutBinding),
+    Hub,
 }
 
 #[derive(Debug, Deserialize)]
@@ -493,6 +503,203 @@ impl BrokerMcpHost {
         }
     }
 
+    fn preflight_knowledge_owner(
+        &self,
+        selector: &str,
+    ) -> Result<(String, KnowledgeOwnerRoute), OrbitError> {
+        let (workspace_id, selected_binding) = self.resolve_workspace(selector, false)?;
+        let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
+        let registry = crate::workspace_registry::load_registry_from(&registry_path)?;
+        let workspace = registry
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == workspace_id)
+            .ok_or_else(|| {
+                OrbitError::InvalidInput(format!(
+                    "unknown logical workspace ID '{workspace_id}' during knowledge owner preflight"
+                ))
+            })?;
+        let owner_machine_id = workspace.owner_machine_id.as_deref().ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "workspace '{workspace_id}' has no declared knowledge owner; refusing allocation"
+            ))
+        })?;
+        let identity = inspect_host_identity(&self.global_root)?;
+        let HostIdentityState::Present(identity) = identity else {
+            return Err(OrbitError::InvalidInput(format!(
+                "workspace '{workspace_id}' requires managed hub/spoke ownership before global knowledge allocation"
+            )));
+        };
+
+        if owner_machine_id == identity.machine_id {
+            let binding = match selected_binding {
+                Some(binding) => binding,
+                None => self
+                    .resolve_workspace(&workspace_id, true)?
+                    .1
+                    .ok_or_else(|| self.local_checkout_unavailable(&workspace_id))?,
+            };
+            self.preflight_placement(McpToolPlacement::Owner, &workspace_id, Some(&binding))?;
+            return Ok((workspace_id, KnowledgeOwnerRoute::Local(binding)));
+        }
+
+        if identity.mode == HostMode::Spoke
+            && self
+                .hub_links
+                .as_ref()
+                .is_some_and(|pool| pool.hub_machine_id() == owner_machine_id)
+        {
+            return Ok((workspace_id, KnowledgeOwnerRoute::Hub));
+        }
+
+        let local_role = selected_binding
+            .as_ref()
+            .map(|binding| match binding.role {
+                WorkspaceCheckoutRole::Owner => "owner",
+                WorkspaceCheckoutRole::Replica => "replica",
+            })
+            .unwrap_or("absent");
+        Err(OrbitError::InvalidInput(format!(
+            "workspace '{workspace_id}' is owned by machine '{owner_machine_id}'; local role is '{local_role}', so this host cannot finalize knowledge and no owner/spoke connection was opened"
+        )))
+    }
+
+    /// Dormant F2 composition seam. Public dispatch reaches this only after F3
+    /// flips the atomic cutover gate; focused tests exercise it directly.
+    pub(super) fn preallocated_knowledge_call(
+        &self,
+        name: &str,
+        input: Value,
+        context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        let kind = preallocated_knowledge_kind(name).ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "tool '{name}' is not a preallocated knowledge mutation"
+            ))
+        })?;
+        let definition = self.definition(name)?;
+        let mut context = normalize_trusted_call_context(context);
+        self.authorize_capability(&definition, &context)?;
+        let selector = Self::selector(&input, &context)
+            .ok_or_else(|| {
+                OrbitError::InvalidInput(format!(
+                    "tool '{name}' requires a workspace selector before knowledge allocation"
+                ))
+            })?
+            .to_string();
+        let (workspace_id, route) = self.preflight_knowledge_owner(&selector)?;
+
+        context.workspace_id = Some(workspace_id.clone());
+        let model = input
+            .get("model")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        match route {
+            KnowledgeOwnerRoute::Hub => {
+                context.workspace = Some(workspace_id.clone());
+                self.remote_hub_call(name, input, context, Some(&workspace_id))
+            }
+            KnowledgeOwnerRoute::Local(binding) => {
+                // Runtime construction is part of owner-binding preflight and
+                // must finish before a forward-only hub allocation is consumed.
+                let runtime = self.runtime_for(&binding)?;
+                let allocation_request = HubKnowledgeAllocationRequestV1 {
+                    schema_version: HUB_KNOWLEDGE_ALLOCATION_SCHEMA_VERSION,
+                    workspace_id: workspace_id.clone(),
+                    kind,
+                    model: model.clone(),
+                };
+                let allocation = if self.is_spoke()? {
+                    let pool = self.hub_links.as_ref().ok_or_else(|| {
+                        OrbitError::HubUnavailable(
+                            "local owner cannot allocate a global knowledge ID because no hub link is configured"
+                                .to_string(),
+                        )
+                    })?;
+                    let capability = Self::scalar_capability(&context)?;
+                    let mut allocation_context = context.clone();
+                    allocation_context.workspace = Some(workspace_id.clone());
+                    allocation_context.transport = Some(McpTransport::SshMcp);
+                    allocation_context.process_machine_id = None;
+                    allocation_context.process_host_id = None;
+                    pool.allocate_knowledge_id(capability, allocation_request, allocation_context)?
+                } else {
+                    context.workspace = Some(workspace_id.clone());
+                    HubKnowledgeSequenceService::at(&self.global_root)?
+                        .allocate(&allocation_request, &context)?
+                };
+                validate_preallocated_correlation(&allocation, &context, &workspace_id, kind)?;
+                self.finalize_owner_knowledge(
+                    &runtime,
+                    &binding,
+                    name,
+                    input,
+                    context,
+                    model,
+                    &allocation,
+                )
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn finalize_owner_knowledge(
+        &self,
+        runtime: &OrbitRuntime,
+        binding: &ExactCheckoutBinding,
+        name: &str,
+        input: Value,
+        context: ToolSessionContext,
+        model: Option<String>,
+        allocation: &HubKnowledgeAllocationV1,
+    ) -> Result<Value, OrbitError> {
+        let result = match allocation.kind {
+            KnowledgeIdKind::Adr => runtime.finalize_preallocated_adr_tool(
+                &binding.key.workspace_id,
+                &allocation.id,
+                input,
+                model,
+            ),
+            KnowledgeIdKind::Learning => runtime.finalize_preallocated_learning_tool(
+                &binding.key.workspace_id,
+                &allocation.id,
+                input,
+                model,
+            ),
+        };
+        let audit = record_owner_finalization_audit(runtime, name, &context, allocation, &result);
+        match (result, audit) {
+            (Ok(value), Ok(())) => Ok(value),
+            (Ok(_), Err(audit_error)) => {
+                let rollback = match allocation.kind {
+                    KnowledgeIdKind::Adr => runtime.rollback_preallocated_adr(&allocation.id),
+                    KnowledgeIdKind::Learning => {
+                        runtime.rollback_preallocated_learning(&allocation.id)
+                    }
+                };
+                match rollback {
+                    Ok(true) => Err(audit_error),
+                    Ok(false) => Err(OrbitError::Store(format!(
+                        "owner audit failed for consumed {} {} and no projection was available to roll back: {audit_error}",
+                        allocation.kind.as_str(),
+                        allocation.id
+                    ))),
+                    Err(cleanup_error) => Err(OrbitError::Store(format!(
+                        "owner audit failed for consumed {} {}: {audit_error}; local cleanup failed: {cleanup_error}",
+                        allocation.kind.as_str(),
+                        allocation.id
+                    ))),
+                }
+            }
+            (Err(error), _) => Err(OrbitError::Execution(format!(
+                "hub allocated {} {} for workspace '{}', but owner finalization failed and the allocation remains consumed: {error}",
+                allocation.kind.as_str(),
+                allocation.id,
+                allocation.workspace_id
+            ))),
+        }
+    }
+
     fn runtime_for(&self, binding: &ExactCheckoutBinding) -> Result<OrbitRuntime, OrbitError> {
         let mut runtimes = self
             .runtimes
@@ -583,6 +790,9 @@ impl BrokerMcpHost {
         if let Err(error) = self.authorize_capability(&definition, &context) {
             self.record_preflight_denial(name, &input, &context, &error);
             return Err(error);
+        }
+        if PREALLOCATED_KNOWLEDGE_CUTOVER_ENABLED && preallocated_knowledge_kind(name).is_some() {
+            return self.preallocated_knowledge_call(name, input, context);
         }
         if definition.policy.scope() == McpToolScope::Global {
             if self.is_spoke()? {
@@ -758,6 +968,102 @@ impl McpHost for BrokerMcpHost {
 }
 
 impl super::learning::LearningSidecarHost for BrokerMcpHost {}
+
+pub(super) fn preallocated_knowledge_kind(name: &str) -> Option<KnowledgeIdKind> {
+    match name {
+        "orbit.adr.add" => Some(KnowledgeIdKind::Adr),
+        "orbit.learning.add" => Some(KnowledgeIdKind::Learning),
+        _ => None,
+    }
+}
+
+fn validate_preallocated_correlation(
+    allocation: &HubKnowledgeAllocationV1,
+    context: &ToolSessionContext,
+    workspace_id: &str,
+    kind: KnowledgeIdKind,
+) -> Result<(), OrbitError> {
+    allocation.validate()?;
+    if allocation.workspace_id != workspace_id
+        || allocation.kind != kind
+        || context.mcp_call_id.as_deref() != Some(allocation.mcp_call_id.as_str())
+    {
+        return Err(OrbitError::InvalidInput(format!(
+            "hub allocation correlation mismatch for workspace '{workspace_id}', kind '{}', mcp_call_id '{}'",
+            kind.as_str(),
+            context.mcp_call_id.as_deref().unwrap_or("<missing>")
+        )));
+    }
+    Ok(())
+}
+
+fn record_owner_finalization_audit(
+    runtime: &OrbitRuntime,
+    name: &str,
+    context: &ToolSessionContext,
+    allocation: &HubKnowledgeAllocationV1,
+    result: &Result<Value, OrbitError>,
+) -> Result<(), OrbitError> {
+    let (audit_context, correlation_error) = trusted_mcp_audit_context(context);
+    if let Some(error) = correlation_error {
+        return Err(error);
+    }
+    let arguments_json = serde_json::to_string(&json!({
+        "workspace_id": allocation.workspace_id,
+        "kind": allocation.kind.as_str(),
+        "allocated_id": allocation.id,
+        "mcp_call_id": allocation.mcp_call_id,
+        "allocation_remains_consumed": true,
+    }))
+    .map_err(|error| {
+        OrbitError::Execution(format!("serialize owner finalization audit: {error}"))
+    })?;
+    let (status, exit_code, error_message) = match result {
+        Ok(_) => (AuditEventStatus::Success, 0, None),
+        Err(error) => (
+            AuditEventStatus::Failure,
+            1,
+            Some(redact_sensitive_env_text(&error.to_string())),
+        ),
+    };
+    runtime.record_audit_event(&AuditEventInsertParams {
+        execution_id: audit_execution_id("audit-owner-knowledge-finalization"),
+        command: "knowledge".to_string(),
+        subcommand: Some("finalize-preallocated".to_string()),
+        tool_name: Some(name.to_string()),
+        target_type: Some("knowledge_finalization".to_string()),
+        target_id: Some(allocation.id.clone()),
+        role: audit_role_label_for_entry_point(&Value::Null, None, None, ToolEntryPoint::Mcp),
+        status,
+        exit_code,
+        duration_ms: 1,
+        working_directory: runtime.paths().repo_root.to_string_lossy().into_owned(),
+        arguments_json: Some(arguments_json),
+        stdout_truncated: None,
+        stderr_truncated: None,
+        error_message,
+        host: std::env::var("HOSTNAME").ok(),
+        pid: std::process::id(),
+        session_id: None,
+        workspace_id: Some(allocation.workspace_id.clone()),
+        caller_machine_id: context.caller_machine_id.clone(),
+        caller_host_id: context.caller_host_id.clone(),
+        process_machine_id: context.process_machine_id.clone(),
+        process_host_id: context.process_host_id.clone(),
+        transport: context.transport,
+        effective_capabilities: context.effective_capabilities.clone(),
+        origin_session_id: context.origin_session_id.clone(),
+        mcp_call_id: Some(allocation.mcp_call_id.clone()),
+        lease_id: context
+            .leased_run
+            .as_ref()
+            .map(|leased_run| leased_run.lease_id.clone()),
+        task_id: audit_context.task_id,
+        job_run_id: audit_context.job_run_id,
+        activity_id: audit_context.activity_id,
+        step_index: audit_context.step_index,
+    })
+}
 
 fn git_path(start: &Path, argument: &str) -> Result<PathBuf, OrbitError> {
     let output = Command::new("git")

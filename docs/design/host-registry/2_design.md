@@ -10,7 +10,7 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10273, ORB-10302, ORB-10319, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Host Registry — Design
@@ -23,9 +23,10 @@ private registration plus first remote coordination slice have landed
 [ORB-10268, ORB-10269, ORB-10271]. [ORB-10319] then consolidated those coupled
 pieces into the vertical `orbit-remote` feature crate described by [ADR-0240],
 superseding the earlier horizontal boundary in [ADR-0235]. [ORB-10272] adds the
-dormant hub-global ADR/learning sequence substrate inside that boundary; public
-knowledge creation remains on the standalone compatibility path until the F3
-cutover. Run
+dormant hub-global ADR/learning sequence substrate inside that boundary, and
+[ORB-10273] adds exact-owner preallocated finalizers plus dormant broker
+composition. Public knowledge creation remains on the standalone compatibility
+path until the F3 cutover. Run
 placement, polling, and later phases remain pending. The folder is Accepted. It
 covers host identity, the registry, the
 coordination-plane/workspace-ownership split, execution placement (including the
@@ -508,6 +509,22 @@ Notes:
   abandon, expiry, reuse, or remote-finalize API. Owner finalization may fail after
   allocation and leave a valid unused ID. That gap is deliberate and does not
   grant the hub a route to a spoke owner.
+- **F2 validates the exact owner checkout before allocation.** [ORB-10273]
+  resolves one active, unambiguous D3 owner binding and constructs its bound
+  runtime before requesting an ID. Local replicas, another-spoke ownership, and
+  missing/stale/ambiguous/unavailable bindings fail before allocation and before
+  any owner/spoke connection. A local owner makes one path-free hub allocation and
+  finalizes that exact ID locally; a hub owner receives one public hub mutation
+  whose hub-local broker performs both steps. No route proxies from the hub to a
+  spoke owner.
+- **Owner finalization cannot choose or return an ID.** The supplied-ID ADR and
+  learning finalizers exclusively create the body, sidecars, index rows, and a
+  non-authoritative owner-local lookup projection. They never advance the local
+  compatibility sequence, allocate, abandon, retry, adopt a collision, or select
+  a replacement. Failure removes their partial local state while the immutable
+  hub allocation remains consumed; response loss is `outcome_unknown` and is not
+  retried automatically. The original `mcp_call_id`, stable workspace ID, kind,
+  allocated ID, and D2 provenance correlate the hub and owner audits.
 
 - **Knowledge is one-writer per workspace — the owner.** The owner authors the file
   in its own checkout and commits there; the global ID comes from the hub in a
@@ -655,5 +672,8 @@ of that routine.** Consequences:
   forward-only activation, replay-safe immutable correlation ledger, atomic audit,
   and explicit late-workspace ineligibility without changing standalone creation
   or activating the F3 cutover.
+- [ORB-10273] — adds exact-checkout supplied-ID owner finalizers, owner-local
+  projections and cleanup, and the preflighted local-owner/hub-owner composite
+  broker behind an inactive F2 gate; F3 still owns the atomic public cutover.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

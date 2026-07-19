@@ -14,7 +14,10 @@ use orbit_common::utility::glob::{compile_glob_regex, normalize_glob_path};
 use orbit_common::utility::redaction::credential_safe_location;
 use rusqlite::params;
 
-use super::bundle::{AdrBundle, bundle_to_adr, read_bundle_at, validate_bundle, write_bundle_at};
+use super::bundle::{
+    AdrBundle, bundle_to_adr, create_bundle_exclusive, read_bundle_at, validate_bundle,
+    write_bundle_at,
+};
 use super::constants::ADR_SCHEMA_VERSION;
 use super::doc::AdrFileDocument;
 use super::layout::{AdrStateDir, adr_dir, state_dir_path, validate_adr_id};
@@ -72,45 +75,8 @@ impl AdrFileStore {
     /// back the filesystem: the filesystem is the source of truth and the index
     /// can be rebuilt from it.
     pub(crate) fn add_adr(&self, params: AdrCreateParams) -> Result<Adr, OrbitError> {
-        if params.title.trim().is_empty() {
-            return Err(OrbitError::InvalidInput(
-                "ADR title must not be empty".to_string(),
-            ));
-        }
-        if params.owner.trim().is_empty() {
-            return Err(OrbitError::InvalidInput(
-                "ADR owner must not be empty".to_string(),
-            ));
-        }
-
         let id = self.id_allocator.allocate_adr()?.id;
-        let now = Utc::now();
-        let adr = Adr {
-            id: id.clone(),
-            title: params.title,
-            status: AdrStatus::Proposed,
-            owner: params.owner,
-            created_at: now,
-            accepted_at: None,
-            last_updated: now,
-            related_features: params.related_features,
-            related_tasks: params.related_tasks,
-            tags: normalize_adr_tags(params.tags),
-            paths: normalize_adr_paths(params.paths),
-            supersedes: Vec::new(),
-            superseded_by: None,
-            legacy_ids: Vec::new(),
-            validation_warnings: Vec::new(),
-            legacy_validation: LegacyValidation::None,
-        };
-        let bundle = AdrBundle {
-            doc: AdrFileDocument {
-                schema_version: ADR_SCHEMA_VERSION,
-                adr,
-            },
-            body: params.body,
-        };
-        validate_bundle(&bundle)?;
+        let bundle = new_adr_bundle(id.clone(), params, Utc::now())?;
 
         let target_dir = adr_dir(&self.root, AdrStateDir::Proposed, &id);
         if let Err(error) = write_bundle_at(&target_dir, &bundle) {
@@ -128,6 +94,77 @@ impl AdrFileStore {
         let adr = bundle_to_adr(bundle);
         self.upsert_index_row(&adr);
         Ok(adr)
+    }
+
+    /// Finalize one caller-supplied hub allocation in this store's already
+    /// bound checkout. This path never selects, abandons, adopts, retries, or
+    /// replaces an ID.
+    pub(crate) fn finalize_preallocated_adr(
+        &self,
+        id: &str,
+        params: AdrCreateParams,
+    ) -> Result<Adr, OrbitError> {
+        let bundle = new_adr_bundle(id.to_string(), params, Utc::now())?;
+        let _lock = acquire_adr_lock(&self.root, id)?;
+        if self.locate_adr(id)?.is_some() {
+            return Err(preallocated_adr_collision(id));
+        }
+
+        let target_dir = adr_dir(&self.root, AdrStateDir::Proposed, id);
+        if !create_bundle_exclusive(&target_dir, &bundle)? {
+            return Err(preallocated_adr_collision(id));
+        }
+        let body_path = super::layout::body_path(&target_dir);
+        if let Err(error) = self
+            .id_allocator
+            .install_preallocated_adr_projection(id, &body_path)
+        {
+            let _ = fs::remove_dir_all(&target_dir);
+            return Err(OrbitError::Store(format!(
+                "finalize preallocated ADR {id}: {error}"
+            )));
+        }
+        if let Err(error) = self.upsert_index_row_strict(&bundle.doc.adr) {
+            let cleanup = self.cleanup_preallocated_adr(id, &target_dir);
+            return match cleanup {
+                Ok(()) => Err(error),
+                Err(cleanup_error) => Err(OrbitError::Store(format!(
+                    "finalize preallocated ADR {id} failed: {error}; cleanup failed: {cleanup_error}"
+                ))),
+            };
+        }
+        Ok(bundle_to_adr(bundle))
+    }
+
+    /// Remove a just-finalized preallocated ADR when a later composition step
+    /// fails. Compatibility rows and ordinary ADRs are never eligible.
+    pub(crate) fn rollback_preallocated_adr(&self, id: &str) -> Result<bool, OrbitError> {
+        validate_adr_id(id)?;
+        let _lock = acquire_adr_lock(&self.root, id)?;
+        let Some(record) = self.id_allocator.adr_allocation(id)? else {
+            return Ok(false);
+        };
+        if !record.is_projection || record.worktree_root != self.id_allocator.worktree_root() {
+            return Err(OrbitError::Store(format!(
+                "refusing to roll back non-projection ADR {id}"
+            )));
+        }
+        let target_dir = adr_dir(&self.root, AdrStateDir::Proposed, id);
+        self.cleanup_preallocated_adr(id, &target_dir)?;
+        Ok(true)
+    }
+
+    fn cleanup_preallocated_adr(&self, id: &str, target_dir: &Path) -> Result<(), OrbitError> {
+        self.delete_index_row_strict(id)?;
+        if target_dir.exists() {
+            fs::remove_dir_all(target_dir).map_err(|error| OrbitError::Io(error.to_string()))?;
+        }
+        if !self.id_allocator.remove_preallocated_adr_projection(id)? {
+            return Err(OrbitError::Store(format!(
+                "owner-local ADR projection missing during cleanup for {id}"
+            )));
+        }
+        Ok(())
     }
 
     /// [ORB-00413] Best-effort rollback of a partially-created ADR: remove the
@@ -623,17 +660,7 @@ impl AdrFileStore {
     }
 
     fn upsert_index_row(&self, adr: &Adr) {
-        let Some(index) = &self.index else {
-            return;
-        };
-        let result = index.with_transaction(|tx| {
-            tx.tx
-                .execute("DELETE FROM adrs WHERE id = ?1", params![adr.id])
-                .map_err(|e| OrbitError::Store(e.to_string()))?;
-            insert_adr_row(&tx.tx, adr)?;
-            Ok(())
-        });
-        if let Err(err) = result {
+        if let Err(err) = self.upsert_index_row_strict(adr) {
             orbit_common::tracing::warn!(
                 target: "orbit.store.adr",
                 adr_id = adr.id.as_str(),
@@ -643,17 +670,21 @@ impl AdrFileStore {
         }
     }
 
-    fn delete_index_row(&self, id: &str) {
+    fn upsert_index_row_strict(&self, adr: &Adr) -> Result<(), OrbitError> {
         let Some(index) = &self.index else {
-            return;
+            return Ok(());
         };
-        let result = index.with_transaction(|tx| {
+        index.with_transaction(|tx| {
             tx.tx
-                .execute("DELETE FROM adrs WHERE id = ?1", params![id])
+                .execute("DELETE FROM adrs WHERE id = ?1", params![adr.id])
                 .map_err(|e| OrbitError::Store(e.to_string()))?;
+            insert_adr_row(&tx.tx, adr)?;
             Ok(())
-        });
-        if let Err(err) = result {
+        })
+    }
+
+    fn delete_index_row(&self, id: &str) {
+        if let Err(err) = self.delete_index_row_strict(id) {
             orbit_common::tracing::warn!(
                 target: "orbit.store.adr",
                 adr_id = id,
@@ -661,6 +692,18 @@ impl AdrFileStore {
                 "failed to delete ADR envelope from index; filesystem is source of truth",
             );
         }
+    }
+
+    fn delete_index_row_strict(&self, id: &str) -> Result<(), OrbitError> {
+        let Some(index) = &self.index else {
+            return Ok(());
+        };
+        index.with_transaction(|tx| {
+            tx.tx
+                .execute("DELETE FROM adrs WHERE id = ?1", params![id])
+                .map_err(|e| OrbitError::Store(e.to_string()))?;
+            Ok(())
+        })
     }
 
     fn query_filtered_ids(&self, filter: AdrListFilter<'_>) -> Result<Vec<String>, OrbitError> {
@@ -724,6 +767,55 @@ impl AdrFileStore {
         }
         Ok(ids)
     }
+}
+
+fn new_adr_bundle(
+    id: String,
+    params: AdrCreateParams,
+    now: chrono::DateTime<Utc>,
+) -> Result<AdrBundle, OrbitError> {
+    if params.title.trim().is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "ADR title must not be empty".to_string(),
+        ));
+    }
+    if params.owner.trim().is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "ADR owner must not be empty".to_string(),
+        ));
+    }
+    let bundle = AdrBundle {
+        doc: AdrFileDocument {
+            schema_version: ADR_SCHEMA_VERSION,
+            adr: Adr {
+                id,
+                title: params.title,
+                status: AdrStatus::Proposed,
+                owner: params.owner,
+                created_at: now,
+                accepted_at: None,
+                last_updated: now,
+                related_features: params.related_features,
+                related_tasks: params.related_tasks,
+                tags: normalize_adr_tags(params.tags),
+                paths: normalize_adr_paths(params.paths),
+                supersedes: Vec::new(),
+                superseded_by: None,
+                legacy_ids: Vec::new(),
+                validation_warnings: Vec::new(),
+                legacy_validation: LegacyValidation::None,
+            },
+        },
+        body: params.body,
+    };
+    validate_bundle(&bundle)?;
+    Ok(bundle)
+}
+
+fn preallocated_adr_collision(id: &str) -> OrbitError {
+    OrbitError::Store(format!(
+        "preallocated ADR {id} already has an owner-local artifact or allocation projection; refusing overwrite, adoption, or replacement ID"
+    ))
 }
 
 fn read_complete_bundle(dir: &Path, expected_id: &str) -> Result<AdrBundle, OrbitError> {

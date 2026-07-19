@@ -10,7 +10,7 @@ summary: ADR log for the coupled MCP Bridge and Host Registry v1 contract and it
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10273, ORB-10276, ORB-10302, ORB-10319, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Orbit MCP Bridge — Decisions
@@ -87,7 +87,7 @@ filtered non-empty capability set.
 
 ## ADR-0229 — Owner-authored knowledge with hub-global IDs and explicit replicas
 
-**Status:** Accepted · 2026-07 · [ORB-10245] fixed the one-writer knowledge rule; [ORB-10272] implemented the dormant Remote-v2 hub sequence, reconciliation, immutable-ledger, and atomic-audit substrate without activating the F3 public cutover.
+**Status:** Accepted · 2026-07 · [ORB-10245] fixed the one-writer knowledge rule; [ORB-10272] implemented the dormant Remote-v2 hub sequence, reconciliation, immutable-ledger, and atomic-audit substrate; [ORB-10273] implemented exact-owner supplied-ID finalization and dormant composition without activating the F3 public cutover.
 
 ### Context
 
@@ -101,6 +101,9 @@ replicas are opt-in reads marked as replicas. The hub never proxies to a spoke o
 Activation validates every registered workspace's complete hub-local legacy
 inventory before mutation; missing sources or cross-workspace duplicate IDs fail
 closed, and a late workspace remains ineligible until reconciled under the hub lock.
+Owner preflight selects one exact checkout before allocation. Finalization consumes
+only the hub-supplied ID, installs a non-authoritative local projection, and never
+turns a checkout path into request data or a hub-to-owner route.
 
 ### Consequences
 
@@ -109,6 +112,8 @@ closed, and a late workspace remains ineligible until reconciled under the hub l
   one transaction; exact request-identity replay is idempotent.
 - Standalone/worktree allocation remains unchanged until F3 activates and cuts over
   public knowledge creation.
+- Finalization cleanup cannot abandon or replace the immutable hub allocation;
+  collision, partial-write failure, and unknown response outcomes preserve allowed gaps.
 - Cost: finalize failure consumes a valid unused ID, and current spoke-owned knowledge is unavailable off-owner.
 
 ## ADR-0230 — Pull-based leases with immutable placement and explicit recovery
@@ -284,5 +289,8 @@ Remote database or a separate broker crate.
   and mutate nothing. Standalone and owner-local auto-task CRUD keep their local
   crew validation. Task `host`/claims (H2), workflow ship/placement (H3), and run
   lineage/leasing (I1) remain out of scope.
+- [ORB-10273] — implements ADR-0229's path-free exact-owner finalizers,
+  non-authoritative projections, correlated owner audit, and dormant broker
+  composition without weakening the one-writer or no-proxy boundary.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

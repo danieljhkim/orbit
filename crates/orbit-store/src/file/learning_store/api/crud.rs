@@ -30,39 +30,11 @@ impl LearningFileStore {
         params: LearningCreateParams,
         now: DateTime<Utc>,
     ) -> Result<Learning, OrbitError> {
-        if params.summary.trim().is_empty() {
-            return Err(OrbitError::InvalidInput(
-                "learning summary must not be empty".to_string(),
-            ));
-        }
-        if params.summary.chars().count() > 280 {
-            return Err(OrbitError::InvalidInput(format!(
-                "learning summary must be at most 280 characters (got {})",
-                params.summary.chars().count()
-            )));
-        }
-
-        let mut scope = params.scope;
-        scope.paths = normalize_learning_paths(scope.paths);
-        scope.tags = normalize_learning_tags(scope.tags);
+        let params = normalize_learning_create_params(params)?;
 
         loop {
             let id = self.id_allocator.allocate_learning()?.id;
-            let learning = Learning {
-                id: id.clone(),
-                status: LearningStatus::Active,
-                scope: scope.clone(),
-                summary: params.summary.clone(),
-                body: params.body.clone(),
-                evidence: params.evidence.clone(),
-                supersedes: None,
-                superseded_by: None,
-                legacy_ids: Vec::new(),
-                created_at: now,
-                updated_at: now,
-                created_by: params.created_by.clone(),
-                priority: params.priority,
-            };
+            let learning = new_learning(id.clone(), &params, now);
 
             let path = learning_doc_path(&self.root, &id);
 
@@ -97,6 +69,82 @@ impl LearningFileStore {
                 }
             }
         }
+    }
+
+    /// Finalize exactly one learning ID allocated by the hub in this store's
+    /// already-bound checkout. Supplied-ID collisions are deterministic
+    /// failures; this path never adopts, abandons, retries, or allocates.
+    pub(crate) fn finalize_preallocated_learning(
+        &self,
+        id: &str,
+        params: LearningCreateParams,
+    ) -> Result<Learning, OrbitError> {
+        validate_learning_id(id)?;
+        let params = normalize_learning_create_params(params)?;
+        let learning = new_learning(id.to_string(), &params, Utc::now());
+        let _lock = super::super::lock::acquire_learning_lock(&self.root, id)?;
+        let path = learning_doc_path(&self.root, id);
+        if path.exists() || self.id_allocator.learning_allocation(id)?.is_some() {
+            return Err(preallocated_learning_collision(id));
+        }
+        if !create_learning_file_exclusive(&path, &learning, LearningStatus::Active)? {
+            return Err(preallocated_learning_collision(id));
+        }
+        if let Err(error) = self
+            .id_allocator
+            .install_preallocated_learning_projection(id, &path)
+        {
+            remove_learning_body(&path);
+            return Err(OrbitError::Store(format!(
+                "finalize preallocated learning {id}: {error}"
+            )));
+        }
+        if let Err(error) = self.upsert_index_row_strict(&learning) {
+            let cleanup = self.cleanup_preallocated_learning(id, &path);
+            return match cleanup {
+                Ok(()) => Err(error),
+                Err(cleanup_error) => Err(OrbitError::Store(format!(
+                    "finalize preallocated learning {id} failed: {error}; cleanup failed: {cleanup_error}"
+                ))),
+            };
+        }
+        self.invalidate_envelope_cache();
+        Ok(learning)
+    }
+
+    pub(crate) fn rollback_preallocated_learning(&self, id: &str) -> Result<bool, OrbitError> {
+        validate_learning_id(id)?;
+        let _lock = super::super::lock::acquire_learning_lock(&self.root, id)?;
+        let Some(record) = self.id_allocator.learning_allocation(id)? else {
+            return Ok(false);
+        };
+        if !record.is_projection || record.worktree_root != self.id_allocator.worktree_root() {
+            return Err(OrbitError::Store(format!(
+                "refusing to roll back non-projection learning {id}"
+            )));
+        }
+        let path = learning_doc_path(&self.root, id);
+        self.cleanup_preallocated_learning(id, &path)?;
+        Ok(true)
+    }
+
+    fn cleanup_preallocated_learning(
+        &self,
+        id: &str,
+        path: &std::path::Path,
+    ) -> Result<(), OrbitError> {
+        self.delete_index_row_strict(id)?;
+        remove_learning_body(path);
+        if !self
+            .id_allocator
+            .remove_preallocated_learning_projection(id)?
+        {
+            return Err(OrbitError::Store(format!(
+                "owner-local learning projection missing during cleanup for {id}"
+            )));
+        }
+        self.invalidate_envelope_cache();
+        Ok(())
     }
 
     /// Finalize a freshly-created learning body: write its empty sidecars,
@@ -341,6 +389,56 @@ impl LearningFileStore {
         self.upsert_index_row(&existing);
         self.invalidate_envelope_cache();
         Ok(())
+    }
+}
+
+fn normalize_learning_create_params(
+    mut params: LearningCreateParams,
+) -> Result<LearningCreateParams, OrbitError> {
+    if params.summary.trim().is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "learning summary must not be empty".to_string(),
+        ));
+    }
+    if params.summary.chars().count() > 280 {
+        return Err(OrbitError::InvalidInput(format!(
+            "learning summary must be at most 280 characters (got {})",
+            params.summary.chars().count()
+        )));
+    }
+    params.scope.paths = normalize_learning_paths(params.scope.paths);
+    params.scope.tags = normalize_learning_tags(params.scope.tags);
+    Ok(params)
+}
+
+fn new_learning(id: String, params: &LearningCreateParams, now: DateTime<Utc>) -> Learning {
+    Learning {
+        id,
+        status: LearningStatus::Active,
+        scope: params.scope.clone(),
+        summary: params.summary.clone(),
+        body: params.body.clone(),
+        evidence: params.evidence.clone(),
+        supersedes: None,
+        superseded_by: None,
+        legacy_ids: Vec::new(),
+        created_at: now,
+        updated_at: now,
+        created_by: params.created_by.clone(),
+        priority: params.priority,
+    }
+}
+
+fn preallocated_learning_collision(id: &str) -> OrbitError {
+    OrbitError::Store(format!(
+        "preallocated learning {id} already has an owner-local artifact or allocation projection; refusing overwrite, adoption, or replacement ID"
+    ))
+}
+
+fn remove_learning_body(path: &std::path::Path) {
+    let _ = std::fs::remove_file(path);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::remove_dir(dir);
     }
 }
 
