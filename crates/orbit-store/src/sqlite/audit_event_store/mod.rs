@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use orbit_common::types::{AuditEvent, AuditEventStatus, McpCapability, McpTransport, OrbitError};
 use rusqlite::params;
 
-use crate::{Store, now_string, parse_timestamp};
+use crate::{Store, StoreTx, now_string, parse_timestamp};
 
 #[derive(Debug, Clone)]
 pub struct AuditEventInsertParams {
@@ -209,61 +209,82 @@ impl Store {
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
 
-        let capabilities_json = serde_json::to_string(&params.effective_capabilities)
-            .map_err(|error| OrbitError::Store(format!("serialize MCP capability set: {error}")))?;
+        insert_audit_event_record_on_connection(&conn, params)
+    }
+}
 
-        conn.execute(
-            r#"INSERT INTO audit_events(
-                execution_id, timestamp, command, subcommand, tool_name,
-                target_type, target_id, role, status, exit_code,
-                duration_ms, working_directory, arguments_json,
-                stdout_truncated, stderr_truncated, error_message,
-                host, pid, session_id, workspace_id, caller_machine_id,
-                caller_host_id, process_machine_id, process_host_id, transport,
-                capabilities_json, origin_session_id, mcp_call_id, lease_id,
-                task_id, job_run_id, activity_id, step_index
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)"#,
-            rusqlite::params![
-                params.execution_id,
-                now_string(),
-                params.command,
-                params.subcommand,
-                params.tool_name,
-                params.target_type,
-                params.target_id,
-                params.role,
-                params.status.to_string(),
-                params.exit_code,
-                params.duration_ms,
-                params.working_directory,
-                params.arguments_json,
-                params.stdout_truncated,
-                params.stderr_truncated,
-                params.error_message,
-                params.host,
-                params.pid,
-                params.session_id,
-                params.workspace_id,
-                params.caller_machine_id,
-                params.caller_host_id,
-                params.process_machine_id,
-                params.process_host_id,
-                params.transport.map(|transport| transport.to_string()),
-                capabilities_json,
-                params.origin_session_id,
-                params.mcp_call_id,
-                params.lease_id,
-                params.task_id,
-                params.job_run_id,
-                params.activity_id,
-                params.step_index,
-            ],
-        )
+impl StoreTx<'_> {
+    /// Insert one canonical audit row inside the caller's existing Store
+    /// transaction. Vertical features use this when their domain mutation and
+    /// its audit outcome must commit or roll back together.
+    pub fn insert_audit_event_record(
+        &mut self,
+        params: &AuditEventInsertParams,
+    ) -> Result<(), OrbitError> {
+        insert_audit_event_record_on_connection(self.connection(), params)
+    }
+}
+
+fn insert_audit_event_record_on_connection(
+    conn: &rusqlite::Connection,
+    params: &AuditEventInsertParams,
+) -> Result<(), OrbitError> {
+    let capabilities_json = serde_json::to_string(&params.effective_capabilities)
+        .map_err(|error| OrbitError::Store(format!("serialize MCP capability set: {error}")))?;
+
+    conn.execute(
+        r#"INSERT INTO audit_events(
+            execution_id, timestamp, command, subcommand, tool_name,
+            target_type, target_id, role, status, exit_code,
+            duration_ms, working_directory, arguments_json,
+            stdout_truncated, stderr_truncated, error_message,
+            host, pid, session_id, workspace_id, caller_machine_id,
+            caller_host_id, process_machine_id, process_host_id, transport,
+            capabilities_json, origin_session_id, mcp_call_id, lease_id,
+            task_id, job_run_id, activity_id, step_index
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)"#,
+        rusqlite::params![
+            params.execution_id,
+            now_string(),
+            params.command,
+            params.subcommand,
+            params.tool_name,
+            params.target_type,
+            params.target_id,
+            params.role,
+            params.status.to_string(),
+            params.exit_code,
+            params.duration_ms,
+            params.working_directory,
+            params.arguments_json,
+            params.stdout_truncated,
+            params.stderr_truncated,
+            params.error_message,
+            params.host,
+            params.pid,
+            params.session_id,
+            params.workspace_id,
+            params.caller_machine_id,
+            params.caller_host_id,
+            params.process_machine_id,
+            params.process_host_id,
+            params.transport.map(|transport| transport.to_string()),
+            capabilities_json,
+            params.origin_session_id,
+            params.mcp_call_id,
+            params.lease_id,
+            params.task_id,
+            params.job_run_id,
+            params.activity_id,
+            params.step_index,
+        ],
+    )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
 
-        Ok(())
-    }
+    Ok(())
+}
 
+impl Store {
     pub fn list_audit_events(
         &self,
         filter: &AuditEventFilter,

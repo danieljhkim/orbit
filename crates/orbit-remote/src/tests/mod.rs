@@ -2,6 +2,7 @@
 
 mod host_identity;
 mod host_registry;
+mod knowledge;
 mod profile;
 mod registry_cache;
 mod routines;

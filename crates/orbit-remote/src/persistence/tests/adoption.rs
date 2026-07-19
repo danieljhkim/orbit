@@ -4,15 +4,27 @@ use orbit_store::Store;
 use super::super::{REMOTE_SCHEMA_FEATURE, REMOTE_SCHEMA_MIGRATIONS, RemoteStore};
 
 #[test]
-fn remote_store_adopts_shipped_registry_schema_as_feature_v1() {
+fn remote_store_adopts_registry_and_installs_dormant_knowledge_schema_as_feature_v2() {
     let store = RemoteStore::open_in_memory().expect("remote store");
     let status = store.schema_status().expect("remote schema status");
 
     assert_eq!(status.feature, REMOTE_SCHEMA_FEATURE);
-    assert_eq!(status.current_version, 1);
-    assert_eq!(status.applied.len(), 1);
+    assert_eq!(status.current_version, 2);
+    assert_eq!(status.applied.len(), 2);
     assert_eq!(status.applied[0].name, "adopt_global_v8_registry_schema");
+    assert_eq!(status.applied[1].name, "dormant_hub_knowledge_sequences");
     assert!(status.pending.is_empty());
+
+    let allocator = store
+        .knowledge_allocator_state()
+        .expect("dormant allocator state");
+    assert_eq!(
+        allocator.status,
+        super::super::HubKnowledgeAllocatorStatus::Dormant
+    );
+    assert_eq!(allocator.activation_generation, 0);
+    assert_eq!(allocator.adr_next_sequence, 1);
+    assert_eq!(allocator.learning_next_sequence, 1);
 }
 
 #[test]
@@ -66,7 +78,7 @@ fn remote_store_refuses_a_future_remote_feature_version() {
             tx.connection()
                 .execute(
                     "INSERT INTO feature_schema_meta(feature, version, name, applied_at)
-                     VALUES (?1, 2, 'future_remote_schema', '2026-07-19T00:00:00Z')",
+                     VALUES (?1, 3, 'future_remote_schema', '2026-07-19T00:00:00Z')",
                     [REMOTE_SCHEMA_FEATURE],
                 )
                 .map_err(|error| OrbitError::Store(error.to_string()))?;

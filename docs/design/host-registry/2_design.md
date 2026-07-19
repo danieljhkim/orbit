@@ -1,7 +1,7 @@
 ---
 title: Host Registry — Design
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-07-19
 status: Accepted
 feature: host-registry
 doc_role: design
@@ -10,7 +10,7 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10302, ORB-10319, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Host Registry — Design
@@ -20,9 +20,12 @@ catalog, registry core/projections, operator administration, sanitized discovery
 and the satellite-cache format landed through C4. E1's strict hub trust document
 and fixed checkoutless hub MCP endpoint, E2's bounded verified spoke link, and E3's
 private registration plus first remote coordination slice have landed
-[ORB-10268, ORB-10269, ORB-10271]. [ORB-10319] then consolidates those coupled
+[ORB-10268, ORB-10269, ORB-10271]. [ORB-10319] then consolidated those coupled
 pieces into the vertical `orbit-remote` feature crate described by [ADR-0240],
-superseding the earlier horizontal boundary in [ADR-0235] when it lands. Run
+superseding the earlier horizontal boundary in [ADR-0235]. [ORB-10272] adds the
+dormant hub-global ADR/learning sequence substrate inside that boundary; public
+knowledge creation remains on the standalone compatibility path until the F3
+cutover. Run
 placement, polling, and later phases remain pending. The folder is Accepted. It
 covers host identity, the registry, the
 coordination-plane/workspace-ownership split, execution placement (including the
@@ -181,6 +184,13 @@ and namespaced feature-migration machinery; it does not import Remote. Remote v1
 adopts the immutable global v5/v6/v8 registry tables in place and refuses an unknown
 future Remote schema instead of copying rows or creating a second database
 ([ORB-10319], [ADR-0240]).
+
+Remote feature migration v2 adds the dormant hub knowledge-ID tables in that same
+config-resolved database ([ORB-10272]). Opening `RemoteStore` applies only the
+schema: it does not inspect a checkout, reconcile a workspace, advance either
+sequence, or activate hub authority. This preserves standalone creation and makes
+activation an explicit, restart-safe transition rather than a side effect of
+opening the hub.
 
 **Boundary with `~/.orbit/mcp.toml`.** The registry is server-side *inventory*;
 `mcp.toml` is the client's trust policy for its one hub route. They stay separate:
@@ -462,6 +472,43 @@ Per-record placement rules, chosen to dissolve sync rather than implement it:
 
 Notes:
 
+- **F1 installs the hub-global allocator but does not cut callers over.** Remote
+  feature migration v2 creates independent monotonic `adr` and `learning`
+  sequences, a reconciliation projection, an immutable allocation ledger, and a
+  dormant/active authority marker in the hub's shared `orbit.db` [ORB-10272]. The
+  existing standalone/worktree allocator and all current ADR/learning create paths
+  remain unchanged. F3 alone activates public issuance and replaces those callers;
+  a standalone host cannot enter hub authority merely by opening the database.
+- **Activation validates the complete hub-local inventory before mutation.** The
+  hub inventories every registered workspace from locally available migration
+  sources: ADR and learning files in every valid lifecycle state plus every legacy
+  allocation row, including reserved, unfinalized, and abandoned rows. A missing
+  source fails precondition with the workspace named; the hub never contacts or
+  proxies to its owner. The full inventory is validated before a sequence,
+  reconciliation row, ledger row, or audit row changes. Every cross-workspace
+  duplicate `(kind, id)` is reported with all conflicting workspace/source
+  evidence and is never renumbered.
+- **Seeding is forward-only and restart-safe.** Under one hub write lock, a final
+  reseed advances each sequence above its independently computed global maximum,
+  records the reconciled workspace/source digest, and activates authority in one
+  durable transition. Repeating or reopening that transition is idempotent and
+  can never decrease a sequence. A workspace registered after activation is
+  knowledge-ineligible until the same complete local reconciliation succeeds
+  under the allocator lock; registration cannot make an unscanned workspace
+  eligible.
+- **Allocation is one atomic hub transaction.** A successful allocation advances
+  exactly one kind's sequence, appends an immutable row keyed by `mcp_call_id`, and
+  writes one canonical SQLite audit carrying the trusted ORB-10271 caller/process
+  provenance. Exact replay is idempotent only when the full stored request identity
+  matches; reusing a correlation ID for another request fails without advancement.
+  Internal lookup exists by correlation and by `(workspace, kind, id)`. Invalid
+  kind/workspace/correlation, ineligible workspace, and overflow likewise leave
+  both sequences unchanged.
+- **Allocated IDs are final gaps, not reservations.** There is no release,
+  abandon, expiry, reuse, or remote-finalize API. Owner finalization may fail after
+  allocation and leave a valid unused ID. That gap is deliberate and does not
+  grant the hub a route to a spoke owner.
+
 - **Knowledge is one-writer per workspace — the owner.** The owner authors the file
   in its own checkout and commits there; the global ID comes from the hub in a
   single allocation call first (in-process when the owner *is* the hub). Allocation
@@ -603,5 +650,10 @@ of that routine.** Consequences:
   caller validation on every ordinary hub call, staged projection/snapshot results,
   definitive-success cache refresh, operator-only friction list/show, and the
   hermetic two-root coordination/provenance canary.
+- [ORB-10272] — adds Remote feature migration v2 and the dormant hub-global ADR and
+  learning sequence service: complete validated hub-local reconciliation,
+  forward-only activation, replay-safe immutable correlation ledger, atomic audit,
+  and explicit late-workspace ineligibility without changing standalone creation
+  or activating the F3 cutover.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Design
 owner: codex
-last_updated: 2026-07-18
+last_updated: 2026-07-19
 status: Accepted
 feature: mcp-bridge
 doc_role: design
@@ -10,7 +10,7 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10302, ORB-10319, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Orbit MCP Bridge — Design
@@ -26,6 +26,9 @@ capability filtering landed in [ORB-10262]. Strict machine-global trust
 configuration and the fixed checkoutless hub endpoint landed in [ORB-10268]. The
 bounded negotiated SSH connector landed in [ORB-10269], and private spoke
 registration plus the first end-to-end coordination slice landed in [ORB-10271].
+[ORB-10272] adds the dormant Remote-v2 hub sequence and connector-private
+allocation substrate for ADR/learning IDs; it deliberately does not cut the public
+knowledge-create paths over before F3.
 It replaces both
 Bridge's HTTP parity layer and the earlier
 per-workspace-authority draft with a local broker that has one remote destination:
@@ -369,6 +372,12 @@ The connector-private registration method is a negotiated protocol input even
 though it is deliberately absent from the canonical tool registry. Adding
 `orbit/private/register-spoke/v1` therefore advanced the MCP contract revision to
 2; an E3 spoke refuses an E2-only hub before any registration mutation [ORB-10271].
+The F1 knowledge allocator follows the same connector-private rule: its typed
+request is absent from the canonical registry and `tools/list`, carries only stable
+workspace/kind/correlation identity, and advances the private connector contract to
+revision 3. A revision-2 peer therefore fails negotiation before allocation, and
+the method becomes reachable from public composite creation only when F3 activates
+and cuts over that path [ORB-10272].
 
 ## 5. Hub Transport and Trusted Configuration
 
@@ -485,6 +494,42 @@ does not accept inline artifacts, so this private form is reachable only through
 backing-file path [ORB-10271].
 
 ### 6.2 Knowledge creation
+
+#### F1 dormant allocation substrate
+
+[ORB-10272] installs Remote feature migration v2 in the hub's config-resolved
+`orbit.db`. It creates independent monotonic ADR and learning sequences, an
+immutable allocation ledger, per-workspace reconciliation state, and a dormant
+authority marker. Merely opening Remote applies the schema but never scans files,
+advances a sequence, or activates authority; standalone/worktree allocators and
+the existing creation paths continue unchanged.
+
+Before activation, the hub validates every registered workspace's complete set of
+hub-local migration sources: all ADR/learning files in valid lifecycle states and
+all legacy allocation rows regardless of reserved, unfinalized, or abandoned
+status. A missing source fails precondition and names its workspace without
+contacting the owner. All cross-workspace `(kind, id)` collisions are collected and
+reported with their workspace/source evidence before any sequence, ledger,
+reconciliation, or audit mutation; no ID is renumbered. The final reseed and
+authority flip run under one hub lock and commit as one forward-only, restart-safe
+transition. A workspace registered afterward remains explicitly
+knowledge-ineligible until its complete local sources reconcile under the same
+lock. A standalone host cannot enter hub authority.
+
+Once active, one successful connector-private allocation transaction advances only
+the requested kind, appends the immutable request-identity ledger row, and writes
+one canonical hub audit with trusted caller/process provenance. `mcp_call_id` is
+unique; an exact replay returns the original result only when the full request
+identity matches, while a mismatch fails without advancing either sequence.
+Internal outcome probes can read by correlation or `(workspace, kind, id)`.
+Invalid workspace/kind/correlation, ineligible workspace, and overflow also leave
+both sequences unchanged. Requests and results contain no checkout or owner path.
+
+F1 exposes no public agent allocation tool, no reservation/finalize/release API,
+and no owner proxy. F3 alone activates public issuance and cuts the following
+composite create flow over to the hub sequence.
+
+#### F3 composite creation target
 
 `orbit.learning.add` and `orbit.adr.add` are composite owner operations:
 
@@ -771,7 +816,12 @@ schemas.
 
 ### Phase 4 — knowledge and search split
 
-- Add hub global-ID allocation consumed by owner learning/ADR creation.
+- [ORB-10272] installs the dormant Remote-v2 hub global-ID sequence, complete
+  reconciliation/activation service, replay-safe ledger, atomic audit, and private
+  path-free allocation request. It does not activate authority or cut over public
+  creation.
+- F3 activates the authority through the final forward-only reseed and cuts owner
+  learning/ADR creation over to hub allocation.
 - Add explicit replica knowledge reads plus reindex/freshness metadata.
 - Implement role-aware search and learning-sidecar availability behavior.
 
@@ -798,26 +848,34 @@ Required validation:
    owner. The separate human ID-plus-PR path does not enable replica-store writes.
 4. Knowledge add allocates globally at the hub and finalizes in the owner's exact
    checkout; finalize failure creates only an allowed ID gap.
-5. Current knowledge for a spoke-owned workspace is never served or proxied by the
+5. Activation validates every registered workspace's complete hub-local files and
+   legacy allocation rows before mutation; missing sources and every duplicate
+   conflict are reported, and late workspaces remain ineligible until reconciled.
+6. Concurrent/interleaved ADR and learning allocations are globally unique and
+   independently increasing; exact correlation replay is idempotent, while
+   mismatched replay, invalid input, and overflow do not advance either sequence.
+7. Allocation commits sequence, immutable ledger, and one canonical hub audit in
+   one transaction; requests/results and audit contain no checkout path.
+8. Current knowledge for a spoke-owned workspace is never served or proxied by the
    hub.
-6. Graph/docs observe the exact session checkout/worktree, never a base or hub
+9. Graph/docs observe the exact session checkout/worktree, never a base or hub
    checkout.
-7. Search requires explicit replica/omit semantics when current knowledge is
+10. Search requires explicit replica/omit semantics when current knowledge is
    unavailable, rejects `kind=doc|all` without a local checkout, and preserves
    current round-robin ranking when branches resolve.
-8. Ordinary routing, session, coordination, response, cache, audit, and lease
+11. Ordinary routing, session, coordination, response, cache, audit, and lease
    frames carry stable IDs, never spoke absolute paths. Authenticated
    registration/poll presence publication is the sole path-bearing exception and
    stores the reporting root only in the hub-private host-keyed projection.
-9. Hub audits distinguish caller and process machine identity; composite knowledge
+12. Hub audits distinguish caller and process machine identity; composite knowledge
    audit events correlate by `mcp_call_id`.
-10. `agent`, `operator`, and `runner` advertise/enforce the intended surfaces across
+13. `agent`, `operator`, and `runner` advertise/enforce the intended surfaces across
     the capability × placement matrix; runner polling and leased-run agent work use
     separate filtered and audited sessions.
-11. Crew/host discovery and task validation read the same fresh hub projections.
-12. Auto-task CRUD stays owner-placed while the scheduler pass reads local
+14. Crew/host discovery and task validation read the same fresh hub projections.
+15. Auto-task CRUD stays owner-placed while the scheduler pass reads local
     definition/cursor state and dedupes/creates tasks only through the hub.
-13. Bridge passes its remaining suite without an Orbit schema snapshot or Orbit
+16. Bridge passes its remaining suite without an Orbit schema snapshot or Orbit
    HTTP dependency.
 
 ## 12. Concerns & Honest Limitations
@@ -872,5 +930,10 @@ Required validation:
 - [ORB-10271] — implemented private staged spoke registration, contract revision 2,
   current active-caller enforcement, definitive-success cache refresh, path-free
   task artifact/friction coordination, and the two-root RMCP canary.
+- [ORB-10272] — adds the dormant Remote-v2 hub-global ADR/learning sequence service,
+  complete pre-mutation hub-local reconciliation, forward-only activation,
+  correlation-safe immutable ledger and atomic audit, plus contract revision 3's
+  private path-free request/result used by the two-workspace canary. Public
+  issuance/caller cutover remains F3, and standalone creation is unchanged.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

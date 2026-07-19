@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Decisions
 owner: codex
-last_updated: 2026-07-18
+last_updated: 2026-07-19
 status: Accepted
 feature: mcp-bridge
 doc_role: decisions
@@ -10,7 +10,7 @@ summary: ADR log for the coupled MCP Bridge and Host Registry v1 contract and it
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10302, ORB-10319, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Orbit MCP Bridge — Decisions
@@ -20,7 +20,7 @@ Orbit ADR store owns allocation, status, and task links; this log records the
 complete seven-decision v1 behavior contract shared with
 [host-registry](../host-registry/4_decisions.md), plus the crate boundary that
 keeps its implementation singular. ADR-0235 records the intermediate registry-only
-extraction; proposed ADR-0240 records [ORB-10319]'s vertical Remote replacement.
+extraction; accepted ADR-0240 records [ORB-10319]'s vertical Remote replacement.
 The older entry remains intact as design history.
 
 ## ADR-0226 — Singular coordination hub, workspace owner, and per-run placement
@@ -87,7 +87,7 @@ filtered non-empty capability set.
 
 ## ADR-0229 — Owner-authored knowledge with hub-global IDs and explicit replicas
 
-**Status:** Accepted · 2026-07 · [ORB-10245] fixed the one-writer knowledge rule.
+**Status:** Accepted · 2026-07 · [ORB-10245] fixed the one-writer knowledge rule; [ORB-10272] implemented the dormant Remote-v2 hub sequence, reconciliation, immutable-ledger, and atomic-audit substrate without activating the F3 public cutover.
 
 ### Context
 
@@ -98,10 +98,17 @@ author.
 
 The hub allocates global IDs, the declared owner authors current knowledge, and Git
 replicas are opt-in reads marked as replicas. The hub never proxies to a spoke owner.
+Activation validates every registered workspace's complete hub-local legacy
+inventory before mutation; missing sources or cross-workspace duplicate IDs fail
+closed, and a late workspace remains ineligible until reconciled under the hub lock.
 
 ### Consequences
 
 - A non-owner agent routes actionable work as a task to the owner.
+- Sequence advancement, immutable correlation ledger, and canonical hub audit are
+  one transaction; exact request-identity replay is idempotent.
+- Standalone/worktree allocation remains unchanged until F3 activates and cuts over
+  public knowledge creation.
 - Cost: finalize failure consumes a valid unused ID, and current spoke-owned knowledge is unavailable off-owner.
 
 ## ADR-0230 — Pull-based leases with immutable placement and explicit recovery
@@ -186,13 +193,12 @@ adapter, runtime profile/ship construction in `orbit-core`, persistence in
 - The retired replicated-writer API cannot reappear as a second authority beside the singular hub.
 - Cost: `orbit-registry` gains a store dependency and is no longer a consumer-agnostic leaf.
 
-**Planned replacement:** [ADR-0240] proposes superseding this horizontal boundary
-when [ORB-10319] lands. Until that task is approved and merged, ADR-0235 remains the
-accepted historical decision.
+**Replacement:** [ADR-0240] superseded this horizontal boundary when [ORB-10319]
+landed. ADR-0235 remains the accepted historical decision.
 
 ## ADR-0240 — Consolidate remote coordination in one vertical feature crate
 
-**Status:** Proposed · 2026-07 · [ORB-10319] implements the candidate boundary.
+**Status:** Accepted · 2026-07 · [ORB-10319] implemented the boundary.
 
 ### Context
 
@@ -218,6 +224,9 @@ Remote database or a separate broker crate.
   the MCP kernel remains unaware of registry, graph, learning, or routing policy.
 - Remote owns its registry SQL through `RemoteStore`; Store owns generic connection,
   transaction, and namespaced feature-migration infrastructure.
+- Remote feature migration v2 owns the dormant hub-global knowledge sequence and
+  reconciliation transaction [ORB-10272], while Store remains a neutral SQLite
+  kernel.
 - CLI retains command parsing, client setup/removal, and black-box binary tests;
   broker/hub/link/registration behavior evolves inside the feature crate.
 - Cost: `orbit-remote` is intentionally broad and needs disciplined internal seams;
@@ -257,5 +266,11 @@ Remote database or a separate broker crate.
 - [ORB-10319] — implements proposed ADR-0240 by renaming and widening the registry
   crate into vertical `orbit-remote`, adopting registry persistence in place and
   moving MCP composition/broker/hub/link/registration out of CLI and the MCP kernel.
+- [ORB-10272] — implements ADR-0229's dormant Remote-v2 hub allocation substrate:
+  complete validated legacy reconciliation, forward-only activation, independent
+  sequences, immutable correlation ledger plus atomic audit, no owner proxy, and
+  explicit late-workspace ineligibility. Its private path-free allocation protocol
+  advances the connector contract to revision 3. Public issuance remains an F3
+  cutover and standalone creation remains unchanged.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

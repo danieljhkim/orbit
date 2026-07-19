@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use orbit_common::types::{
+    HUB_KNOWLEDGE_ALLOCATION_METHOD_V1, HubKnowledgeAllocationRequestV1, HubKnowledgeAllocationV1,
     McpCapability, McpTransport, OrbitError, SPOKE_REGISTRATION_METHOD_V1,
     SpokeRegistrationRequestV1, SpokeRegistrationResultV1, ToolSessionContext,
 };
@@ -219,6 +220,103 @@ impl OrbitMcpClient {
                 ),
             })?;
         Ok(result)
+    }
+
+    /// Execute the connector-private hub knowledge allocation exactly once.
+    ///
+    /// The caller retains `mcp_call_id` on every post-handoff failure and must
+    /// use the allocation lookup seam to resolve an outcome-unknown response;
+    /// this client never replays the request automatically.
+    pub(super) async fn allocate_knowledge_id(
+        &self,
+        request: &HubKnowledgeAllocationRequestV1,
+        context: &ToolSessionContext,
+        request_timeout: Duration,
+    ) -> Result<HubKnowledgeAllocationV1, OrbitError> {
+        request.validate()?;
+        validate_remote_call_context(context, self.contract.effective_capability)?;
+        if context.workspace_id.as_deref() != Some(request.workspace_id.as_str()) {
+            return Err(OrbitError::InvalidInput(
+                "private hub knowledge allocation workspace must exactly match the trusted remote context"
+                    .to_string(),
+            ));
+        }
+        let mcp_call_id = context
+            .mcp_call_id
+            .as_deref()
+            .ok_or_else(|| OrbitError::InvalidInput("remote MCP call requires mcp_call_id".into()))?
+            .to_string();
+        let params = serde_json::to_value(request).map_err(|error| {
+            OrbitError::InvalidInput(format!(
+                "serialize private hub knowledge allocation request: {error}"
+            ))
+        })?;
+        let mut meta = Map::new();
+        meta.insert(
+            "orbit".to_string(),
+            json!({ REMOTE_SESSION_META_KEY: context }),
+        );
+        let response = self
+            .raw
+            .custom_request(
+                HUB_KNOWLEDGE_ALLOCATION_METHOD_V1,
+                Some(params),
+                meta,
+                request_timeout,
+            )
+            .await
+            .map_err(|error| match error {
+                McpClientRequestError::PreHandoff { message } => {
+                    OrbitError::HubUnavailable(format!(
+                        "hub allocation request was not handed to the initialized peer: {message}"
+                    ))
+                }
+                McpClientRequestError::Protocol { code, .. }
+                    if code == JSON_RPC_METHOD_NOT_FOUND =>
+                {
+                    OrbitError::HubNegotiation(format!(
+                        "verified hub does not implement {HUB_KNOWLEDGE_ALLOCATION_METHOD_V1}"
+                    ))
+                }
+                McpClientRequestError::Protocol {
+                    code,
+                    message,
+                    data,
+                } if code == JSON_RPC_INVALID_PARAMS => OrbitError::RemoteTool {
+                    code: "invalid_input".to_string(),
+                    message,
+                    payload: data.unwrap_or(Value::Null),
+                },
+                McpClientRequestError::UnexpectedResponse { .. } => OrbitError::OutcomeUnknown {
+                    mcp_call_id: mcp_call_id.clone(),
+                    message: "hub returned a non-allocation result after request handoff"
+                        .to_string(),
+                },
+                error => OrbitError::OutcomeUnknown {
+                    mcp_call_id: mcp_call_id.clone(),
+                    message: format!(
+                        "hub allocation response failed after request handoff: {error}"
+                    ),
+                },
+            })?;
+        let allocation =
+            serde_json::from_value::<HubKnowledgeAllocationV1>(response).map_err(|error| {
+                OrbitError::OutcomeUnknown {
+                    mcp_call_id: mcp_call_id.clone(),
+                    message: format!(
+                        "hub returned a malformed allocation result after request handoff: {error}"
+                    ),
+                }
+            })?;
+        allocation
+            .validate()
+            .map_err(|error| OrbitError::OutcomeUnknown {
+                mcp_call_id,
+                message: format!(
+                    "hub returned an invalid allocation result after request handoff: {error}"
+                ),
+            })?;
+        Ok(allocation)
     }
 
     pub(super) async fn close(&mut self, timeout: Duration) -> Result<(), OrbitError> {

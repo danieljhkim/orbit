@@ -3,14 +3,14 @@ summary: "Worktree Artifacts - Design"
 type: design
 title: "Worktree Artifacts - Design"
 owner: codex
-last_updated: 2026-07-18
+last_updated: 2026-07-19
 status: Accepted
 feature: worktree-artifacts
 doc_role: design
 tags: ["worktree-artifacts"]
-paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
-related_features: ["worktree-artifacts"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10297", "ADR-0177"]
+paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
+related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ADR-0177", "ADR-0229"]
 ---
 
 # Worktree Artifacts - Design
@@ -25,13 +25,44 @@ Explicit `--root` and `ORBIT_ROOT` overrides pin both roots to preserve the old 
 
 ## 2. Allocation Metadata
 
-`id_allocations` lives in `shared_root/.orbit/state/semantic.db`. The allocator serializes ID creation with a shared lock, then body writes update the row with:
+In standalone/worktree mode, `id_allocations` lives in
+`shared_root/.orbit/state/semantic.db`. The allocator serializes ID creation with a
+shared lock, then body writes update the row with:
 
 - `worktree_root`: the recorded worktree root for the body.
 - `branch`: best-effort current branch.
 - `body_path`: the body file path relative to `worktree_root`.
 
 Backfilled shared-root artifacts receive `body_path` during allocator initialization so old ADRs and migrated learnings remain readable from any worktree.
+
+This remains the compatibility allocator and every current create path continues to
+use it during F1. [ORB-10272] does not redirect standalone or worktree creation.
+
+### 2.1 Hub-global sequence substrate
+
+Multi-host authority is separate from worktree federation. Remote feature migration
+v2 installs dormant, independent ADR and learning sequences in the hub's
+config-resolved `orbit.db`, together with per-workspace reconciliation state and an
+immutable `mcp_call_id` allocation ledger. Those rows are path-free; they neither
+replace `body_path` nor make the hub a reader of a spoke owner's worktree.
+
+Before hub authority can activate, every registered workspace's complete hub-local
+legacy inventory is validated: all valid lifecycle files and all legacy allocation
+rows in every status. Missing sources and cross-workspace duplicate IDs fail before
+any mutation. The final forward-only reseed and authority flip are one restart-safe
+transition. A late workspace stays knowledge-ineligible until the same complete
+local reconciliation succeeds. The hub never contacts an owner to repair a missing
+source.
+
+After activation, allocation advances one kind's sequence and commits its immutable
+correlation ledger plus canonical audit atomically. It still does not write the
+artifact body: the owner writes the branch-local bundle under `local_root`. A
+finalize failure therefore consumes a valid unused global ID. There is no
+reservation, release, reuse, or remote-finalize protocol.
+
+F1 leaves the substrate dormant and exposes no public allocation tool. F3 alone
+activates public issuance and cuts owner creation over; standalone hosts cannot
+enter hub authority.
 
 ## 3. Write Path
 
@@ -84,5 +115,8 @@ The `worktree_root` column preserves historical rows from earlier phases, so old
 - [ORB-00200] introduced allocation metadata and the learning ID migration.
 - [ORB-00201] implemented local body writes and read federation.
 - [ORB-10297] made ADR federation body-preserving and typed the read/mutation boundary.
+- [ORB-10272] added the dormant, path-free Remote-v2 hub sequence and reconciliation
+  substrate while preserving the standalone shared-root allocator and owner-local
+  body/federation semantics; F3 owns activation and caller cutover.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

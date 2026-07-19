@@ -1,8 +1,9 @@
-//! Connector-private MCP context and registration composition.
+//! Connector-private MCP context and request composition.
 
 use std::sync::Arc;
 
 use orbit_common::types::{
+    HUB_KNOWLEDGE_ALLOCATION_METHOD_V1, HubKnowledgeAllocationRequestV1, HubKnowledgeAllocationV1,
     McpTransport, OrbitError, SPOKE_REGISTRATION_METHOD_V1, SpokeRegistrationRequestV1,
     SpokeRegistrationResultV1, ToolSessionContext,
 };
@@ -28,6 +29,11 @@ impl McpCallContextResolver for RemoteCallContextResolver {
             let message = match request {
                 McpRequestKind::Custom { method } if method == SPOKE_REGISTRATION_METHOD_V1 => {
                     "private spoke registration requires connector-owned remote session metadata"
+                }
+                McpRequestKind::Custom { method }
+                    if method == HUB_KNOWLEDGE_ALLOCATION_METHOD_V1 =>
+                {
+                    "private hub knowledge allocation requires connector-owned remote session metadata"
                 }
                 _ => "hub tool calls require connector-owned remote session metadata",
             };
@@ -60,29 +66,48 @@ impl McpCallContextResolver for RemoteCallContextResolver {
     }
 }
 
-/// Typed custom handler for the connector-private spoke bootstrap method.
-pub(super) struct SpokeRegistrationHandler {
+/// Typed custom handler for connector-private hub methods.
+pub(super) struct PrivateHubRequestHandler {
     host: Arc<HubMcpHost>,
 }
 
-impl SpokeRegistrationHandler {
+impl PrivateHubRequestHandler {
     pub(super) fn new(host: Arc<HubMcpHost>) -> Self {
         Self { host }
     }
 }
 
-impl McpCustomRequestHandler for SpokeRegistrationHandler {
+impl McpCustomRequestHandler for PrivateHubRequestHandler {
     fn recognizes(&self, method: &str) -> bool {
-        method == SPOKE_REGISTRATION_METHOD_V1
+        matches!(
+            method,
+            SPOKE_REGISTRATION_METHOD_V1 | HUB_KNOWLEDGE_ALLOCATION_METHOD_V1
+        )
     }
 
     fn worker_label(&self) -> &'static str {
-        "private spoke registration"
+        "private hub request"
     }
 
     fn call(
         &self,
-        _method: &str,
+        method: &str,
+        params: Option<Value>,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, McpCustomRequestError> {
+        match method {
+            SPOKE_REGISTRATION_METHOD_V1 => self.call_registration(params, session_context),
+            HUB_KNOWLEDGE_ALLOCATION_METHOD_V1 => {
+                self.call_knowledge_allocation(params, session_context)
+            }
+            _ => Err(McpCustomRequestError::MethodNotFound),
+        }
+    }
+}
+
+impl PrivateHubRequestHandler {
+    fn call_registration(
+        &self,
         params: Option<Value>,
         session_context: ToolSessionContext,
     ) -> Result<Value, McpCustomRequestError> {
@@ -112,6 +137,35 @@ impl McpCustomRequestHandler for SpokeRegistrationHandler {
         })?;
         serialize_registration_result(result)
     }
+
+    fn call_knowledge_allocation(
+        &self,
+        params: Option<Value>,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, McpCustomRequestError> {
+        let params = params.ok_or_else(|| {
+            McpCustomRequestError::invalid_params(
+                "private hub knowledge allocation requires parameters",
+            )
+        })?;
+        let request: HubKnowledgeAllocationRequestV1 =
+            serde_json::from_value(params).map_err(|error| {
+                McpCustomRequestError::invalid_params(format!(
+                    "invalid private hub knowledge allocation payload: {error}"
+                ))
+            })?;
+        request
+            .validate()
+            .map_err(|error| McpCustomRequestError::invalid_params(error.to_string()))?;
+        let allocation = self
+            .host
+            .private_allocate_knowledge_id(request, session_context)
+            .map_err(|error| match error {
+                OrbitError::InvalidInput(message) => McpCustomRequestError::invalid_params(message),
+                error => McpCustomRequestError::internal(error.to_string()),
+            })?;
+        serialize_allocation(allocation)
+    }
 }
 
 fn serialize_registration_result(
@@ -120,6 +174,16 @@ fn serialize_registration_result(
     serde_json::to_value(result).map_err(|error| {
         McpCustomRequestError::internal(format!(
             "serialize private spoke registration result: {error}"
+        ))
+    })
+}
+
+fn serialize_allocation(
+    allocation: HubKnowledgeAllocationV1,
+) -> Result<Value, McpCustomRequestError> {
+    serde_json::to_value(allocation).map_err(|error| {
+        McpCustomRequestError::internal(format!(
+            "serialize private hub knowledge allocation result: {error}"
         ))
     })
 }
