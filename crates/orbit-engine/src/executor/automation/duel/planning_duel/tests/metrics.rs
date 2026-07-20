@@ -23,6 +23,7 @@ fn invocation_record(
         input_tokens,
         cache_read_tokens,
         cache_create_tokens,
+        cache_create_1h_tokens: 0,
         output_tokens,
         total_tokens: input_tokens
             .saturating_add(cache_read_tokens)

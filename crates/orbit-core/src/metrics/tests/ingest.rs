@@ -9,6 +9,7 @@ fn merge_invocation_trace_records_fs_read_metrics() {
             input: 100,
             cache_read: 20,
             cache_create: 5,
+            cache_create_1h: 0,
             output: 50,
         },
         tool_calls: vec![ToolCallTrace {
@@ -48,6 +49,7 @@ fn merge_invocation_trace_without_measured_tool_or_existing_returns_none() {
             input: 100,
             cache_read: 0,
             cache_create: 0,
+            cache_create_1h: 0,
             output: 10,
         },
         tool_calls: vec![ToolCallTrace {

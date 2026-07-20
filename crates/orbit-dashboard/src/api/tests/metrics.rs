@@ -162,6 +162,7 @@ fn seed_invocation(runtime: &OrbitRuntime, seed: SeedInvocation<'_>) {
                     input: seed.input_tokens,
                     cache_read: seed.cache_read_tokens,
                     cache_create: seed.cache_create_tokens,
+                    cache_create_1h: 0,
                     output: seed.output_tokens,
                 },
                 tool_calls: seed
@@ -331,6 +332,7 @@ async fn metrics_invocation_ingestion_preserves_worker_runs_and_aggregates() {
                     input: 120,
                     cache_read: 80,
                     cache_create: 3,
+                    cache_create_1h: 0,
                     output: 14,
                 },
                 tool_calls: Vec::new(),
@@ -350,6 +352,7 @@ async fn metrics_invocation_ingestion_preserves_worker_runs_and_aggregates() {
                     input: 70,
                     cache_read: 5,
                     cache_create: 1,
+                    cache_create_1h: 0,
                     output: 9,
                 },
                 tool_calls: Vec::new(),

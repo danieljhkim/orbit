@@ -7,8 +7,19 @@ pub struct TokenUsage {
     pub input: u64,
     #[serde(default)]
     pub cache_read: u64,
+    /// Cache-creation (write) tokens billed at the standard 5-minute-TTL rate.
+    /// Providers that report a single cache-creation counter (or that don't
+    /// distinguish TTLs) fold everything here.
     #[serde(default)]
     pub cache_create: u64,
+    /// Cache-creation (write) tokens billed at the premium 1-hour-TTL rate
+    /// (Anthropic `ephemeral_1h_input_tokens`). Kept separate from
+    /// [`Self::cache_create`] so the price table can charge the 1h rate (2x
+    /// input) distinctly from the 5m rate (1.25x input). Zero when the provider
+    /// doesn't split TTLs, or until the ingest path learns to populate it
+    /// (ORB-10338 follow-up).
+    #[serde(default)]
+    pub cache_create_1h: u64,
     #[serde(default)]
     pub output: u64,
 }

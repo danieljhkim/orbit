@@ -99,6 +99,7 @@ fn add_usage(usage: &mut TokenUsage, found: TokenUsage) {
     usage.input = usage.input.saturating_add(found.input);
     usage.cache_read = usage.cache_read.saturating_add(found.cache_read);
     usage.cache_create = usage.cache_create.saturating_add(found.cache_create);
+    usage.cache_create_1h = usage.cache_create_1h.saturating_add(found.cache_create_1h);
     usage.output = usage.output.saturating_add(found.output);
 }
 
@@ -152,6 +153,11 @@ fn usage_from_map(map: &JsonMap, key_mode: UsageKeyMode) -> Option<TokenUsage> {
         input: input.unwrap_or(0),
         cache_read: cache_read.unwrap_or(0),
         cache_create: cache_create.unwrap_or(0),
+        // The generic usage flattener reads a single cache-creation counter; the
+        // Anthropic ephemeral_1h/ephemeral_5m split isn't parsed here yet, so
+        // cache_create_1h stays zero and all cache-creation tokens price at the
+        // standard (5m) rate downstream (ORB-10338 follow-up).
+        cache_create_1h: 0,
         output: output.unwrap_or(0),
     })
 }

@@ -138,6 +138,7 @@ fn parse_cli_invocation_trace_extracts_gemini_cli_stats_tokens() {
             input: 12,
             cache_read: 3,
             cache_create: 0,
+            cache_create_1h: 0,
             output: 4,
         })
     );

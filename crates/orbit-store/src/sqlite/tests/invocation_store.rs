@@ -172,9 +172,57 @@ fn invocation_records_derive_cost_from_price_table_and_keep_provider_cost() {
     let derived = records[0]
         .derived_cost_usd
         .expect("claude-opus-4-7 is priced in the shipped table");
+    // claude-opus-4-7: 1M input @ $5 + 1M output @ $25 = $30.
     assert!(
-        (derived - 90.0).abs() < f64::EPSILON,
+        (derived - 30.0).abs() < f64::EPSILON,
         "derived cost was {derived}"
+    );
+}
+
+#[test]
+fn invocation_records_round_trip_one_hour_cache_writes_and_derive_ground_truth() {
+    // End-to-end ground truth: persist the exact token split from worker run
+    // 91d7ef01 (claude-opus-4-8[1m]) and confirm the `cache_create_1h_tokens`
+    // column round-trips so the read-time derivation reproduces the
+    // provider-reported cost of $1.014018.
+    let store = Store::open_in_memory().expect("open store");
+
+    store
+        .insert_invocation_trace_record(&InvocationInsertParams {
+            job_run_id: "jrun-1h".to_string(),
+            activity_id: "implement_one".to_string(),
+            agent: "claude".to_string(),
+            model: Some("claude-opus-4-8[1m]".to_string()),
+            slot: None,
+            task_ids: vec!["ORB-5".to_string()],
+            trace: InvocationTrace {
+                usage: TokenUsage {
+                    input: 36,
+                    cache_read: 858_526,
+                    cache_create: 0,
+                    cache_create_1h: 37_795,
+                    output: 8_265,
+                },
+                provider_cost_usd: Some(1.014_018),
+                ..Default::default()
+            },
+        })
+        .expect("insert 1h-cache invocation");
+
+    let records = store
+        .list_invocation_records(&InvocationQuery {
+            job_run_id: Some("jrun-1h".to_string()),
+            limit: 10,
+            ..Default::default()
+        })
+        .expect("list records");
+
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].cache_create_1h_tokens, 37_795);
+    let derived = records[0].derived_cost_usd.expect("priced");
+    assert!(
+        (derived - 1.014_018).abs() < 1e-6,
+        "derived cost was {derived}, expected ~1.014018"
     );
 }
 

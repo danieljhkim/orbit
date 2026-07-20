@@ -49,6 +49,8 @@ pub struct InvocationRecord {
     pub input_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_create_tokens: u64,
+    /// Premium 1-hour-TTL cache-creation tokens (`TokenUsage::cache_create_1h`).
+    pub cache_create_1h_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
     pub tool_call_count: u64,

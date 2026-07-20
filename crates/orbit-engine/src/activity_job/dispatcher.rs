@@ -595,6 +595,10 @@ pub(crate) fn loop_outcome_trace(
             input: outcome.usage.input_tokens,
             cache_read: outcome.usage.cache_read_input_tokens,
             cache_create: outcome.usage.cache_creation_input_tokens,
+            // The agent loop reports a single cache-creation counter; the 1h/5m
+            // TTL split isn't surfaced here yet, so all cache-creation tokens
+            // are treated as the standard (5m) rate (ORB-10338 follow-up).
+            cache_create_1h: 0,
             output: outcome.usage.output_tokens,
         },
         tool_calls,

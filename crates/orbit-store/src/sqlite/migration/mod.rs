@@ -174,6 +174,7 @@ fn apply_baseline_schema(conn: &Connection) -> Result<(), OrbitError> {
                 input_tokens INTEGER NOT NULL DEFAULT 0,
                 cache_read_tokens INTEGER NOT NULL DEFAULT 0,
                 cache_create_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_create_1h_tokens INTEGER NOT NULL DEFAULT 0,
                 output_tokens INTEGER NOT NULL DEFAULT 0,
                 tool_call_count INTEGER NOT NULL DEFAULT 0,
                 provider_cost_usd REAL
@@ -589,6 +590,10 @@ fn ensure_invocation_schema(conn: &Connection) -> Result<(), OrbitError> {
     add_column_if_missing(
         conn,
         "ALTER TABLE invocations ADD COLUMN provider_cost_usd REAL",
+    )?;
+    add_column_if_missing(
+        conn,
+        "ALTER TABLE invocations ADD COLUMN cache_create_1h_tokens INTEGER NOT NULL DEFAULT 0",
     )?;
     conn.execute_batch(
         r#"

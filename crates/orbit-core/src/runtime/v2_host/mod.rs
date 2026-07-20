@@ -440,6 +440,7 @@ mod tests {
                 input: input_tokens,
                 cache_read: 0,
                 cache_create: 0,
+                cache_create_1h: 0,
                 output: 0,
             },
             tool_calls,
