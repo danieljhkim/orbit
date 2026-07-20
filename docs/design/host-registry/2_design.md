@@ -10,7 +10,7 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ORB-10330, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10274, ORB-10302, ORB-10319, ORB-10330, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Host Registry — Design
@@ -22,10 +22,10 @@ and fixed checkoutless hub MCP endpoint, E2's bounded verified spoke link, and E
 private registration plus first remote coordination slice have landed
 [ORB-10268, ORB-10269, ORB-10271]. [ORB-10319] then consolidated those coupled
 pieces into the vertical `orbit-remote` feature crate described by [ADR-0240],
-superseding the earlier horizontal boundary in [ADR-0235]. [ORB-10272] adds the
-dormant hub-global ADR/learning sequence substrate inside that boundary; public
-knowledge creation remains on the standalone compatibility path until the F3
-cutover. Run
+superseding the earlier horizontal boundary in [ADR-0235]. [ORB-10272] added the
+hub-global ADR/learning sequence substrate inside that boundary; [ORB-10330] added
+exact-owner finalizers, and [ORB-10274] activated managed public creation while
+preserving standalone compatibility. Run
 placement, polling, and later phases remain pending. The folder is Accepted. It
 covers host identity, the registry, the
 coordination-plane/workspace-ownership split, execution placement (including the
@@ -472,13 +472,18 @@ Per-record placement rules, chosen to dissolve sync rather than implement it:
 
 Notes:
 
-- **F1 installs the hub-global allocator but does not cut callers over.** Remote
+- **F1 installed the hub-global allocator; F3 cut managed callers over.** Remote
   feature migration v2 creates independent monotonic `adr` and `learning`
   sequences, a reconciliation projection, an immutable allocation ledger, and a
   dormant/active authority marker in the hub's shared `orbit.db` [ORB-10272]. The
-  existing standalone/worktree allocator and all current ADR/learning create paths
-  remain unchanged. F3 alone activates public issuance and replaces those callers;
-  a standalone host cannot enter hub authority merely by opening the database.
+  standalone/worktree allocation remains unchanged. [ORB-10274] activates public
+  issuance only in explicit hub/spoke mode after complete reseed; opening the
+  database in standalone mode cannot enter hub authority.
+- **The cutover is durable and forward-only.** Remote feature migration v3 records
+  `pre-activation`, `reconciling`, `active`, and `failed-incomplete`. Retries resume
+  reconciliation, the final reseed and allocator activation serialize under one
+  exclusive store transaction, and managed authoring never falls back to the
+  compatibility allocator while a cutover is incomplete.
 - **Activation validates the complete hub-local inventory before mutation.** The
   hub inventories every registered workspace from locally available migration
   sources: ADR and learning files in every valid lifecycle state plus every legacy
@@ -537,8 +542,9 @@ Notes:
   multi-machine story and reverts to what it is: a migration tool.
 - **Replica knowledge reads have a catch.** The learning envelope *index* lives in
   each machine's local `orbit.db`; a non-owner reading learnings from its checkout
-  needs a reindex-from-files pass after pull. Until that exists, replica learning
-  reads go over MCP (hub-owned workspaces) — correctness before convenience.
+  needs `orbit knowledge sync` after pull. Sync validates every selected file
+  against the readable immutable hub occupancy projection before atomically
+  replacing derived indexes; it never makes the replica current.
 
 ## 6. Routine Ownership Revision
 

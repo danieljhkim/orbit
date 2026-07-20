@@ -3,15 +3,52 @@ use std::collections::{BTreeSet, HashSet};
 use orbit_common::types::{
     HUB_KNOWLEDGE_ALLOCATION_METHOD_V1, HUB_KNOWLEDGE_ALLOCATION_SCHEMA_VERSION,
     HubKnowledgeAllocationRequestV1, KnowledgeIdKind, McpCapability, McpLeasedRun, McpTransport,
-    ToolSessionContext,
+    OrbitError, ToolSessionContext,
 };
 use rusqlite::params;
 
 use crate::HubKnowledgeSequenceService;
 
 use super::super::{
-    HubKnowledgeAllocatorStatus, KnowledgeWorkspaceInventory, LegacyKnowledgeId, RemoteStore,
+    HubKnowledgeAllocatorStatus, KnowledgeAuthorityCutoverStatus, KnowledgeWorkspaceInventory,
+    LegacyKnowledgeId, RemoteStore,
 };
+
+#[test]
+fn authority_cutover_state_is_restart_safe_and_forward_only() {
+    let store = RemoteStore::open_in_memory().expect("store");
+    let first = store.begin_knowledge_cutover().expect("begin cutover");
+    assert_eq!(first.status, KnowledgeAuthorityCutoverStatus::Reconciling);
+    assert_eq!(first.generation, 1);
+
+    let failed = store
+        .fail_knowledge_cutover(&OrbitError::Migration("source unavailable".into()))
+        .expect("record incomplete cutover");
+    assert_eq!(
+        failed.status,
+        KnowledgeAuthorityCutoverStatus::FailedIncomplete
+    );
+    assert_eq!(
+        failed.last_error.as_deref(),
+        Some("schema migration failed: source unavailable")
+    );
+
+    let resumed = store.begin_knowledge_cutover().expect("resume cutover");
+    assert_eq!(resumed.status, KnowledgeAuthorityCutoverStatus::Reconciling);
+    assert_eq!(resumed.generation, 2);
+    store
+        .activate_knowledge_allocator(vec![inventory("ws_alpha", Vec::new())])
+        .expect("activate allocator");
+    let active = store
+        .complete_knowledge_cutover()
+        .expect("complete cutover");
+    assert_eq!(active.status, KnowledgeAuthorityCutoverStatus::Active);
+
+    assert_eq!(
+        store.begin_knowledge_cutover().expect("active is terminal"),
+        active
+    );
+}
 
 fn evidence(values: &[&str]) -> BTreeSet<String> {
     values.iter().map(|value| (*value).to_string()).collect()

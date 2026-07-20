@@ -220,6 +220,14 @@ impl IdAllocator {
         self.project_preallocated(IdAllocationKind::Learning, id, body_path)
     }
 
+    pub fn remove_preallocated_adr_projection(&self, id: &str) -> Result<(), OrbitError> {
+        self.remove_preallocated_projection(IdAllocationKind::Adr, id)
+    }
+
+    pub fn remove_preallocated_learning_projection(&self, id: &str) -> Result<(), OrbitError> {
+        self.remove_preallocated_projection(IdAllocationKind::Learning, id)
+    }
+
     pub fn abandon_learning(&self, id: &str) -> Result<(), OrbitError> {
         self.abandon(IdAllocationKind::Learning, id)
     }
@@ -535,6 +543,22 @@ impl IdAllocator {
         )?;
         tx.commit()
             .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(())
+    }
+
+    fn remove_preallocated_projection(
+        &self,
+        kind: IdAllocationKind,
+        id: &str,
+    ) -> Result<(), OrbitError> {
+        let _lock = self.acquire_lock()?;
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "DELETE FROM id_allocations
+             WHERE kind = ?1 AND id = ?2 AND status = ?3 AND body_path IS NOT NULL",
+            params![kind.as_str(), id, STATUS_MERGED],
+        )
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
         Ok(())
     }
 

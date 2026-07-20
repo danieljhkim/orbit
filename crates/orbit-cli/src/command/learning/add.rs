@@ -5,6 +5,7 @@ use clap::{ArgAction, Args};
 use orbit_core::{
     EvidenceKind, LearningCreateParams, LearningEvidence, LearningScope, OrbitError, OrbitRuntime,
 };
+use serde_json::json;
 
 use crate::command::Execute;
 
@@ -57,14 +58,41 @@ impl Execute for LearningAddArgs {
             .map(parse_evidence_spec)
             .collect::<Result<Vec<_>, _>>()?;
 
+        let input = json!({
+            "summary": self.summary,
+            "scope": {"paths": self.paths, "tags": self.tags},
+            "body": body,
+            "evidence": evidence.iter().map(|item| json!({
+                "kind": item.kind.to_string(), "ref": item.reference
+            })).collect::<Vec<_>>(),
+            "priority": self.priority,
+        });
+        if let Some(value) = super::managed_tool(runtime, "orbit.learning.add", input.clone())? {
+            if self.json {
+                return crate::output::json::print_pretty(&value);
+            }
+            println!("{}", value["id"].as_str().unwrap_or_default());
+            return Ok(());
+        }
+
         let learning = runtime.create_learning(LearningCreateParams {
-            summary: self.summary,
+            summary: input["summary"].as_str().unwrap_or_default().to_string(),
             scope: LearningScope {
-                paths: self.paths,
-                tags: self.tags,
+                paths: input["scope"]["paths"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect(),
+                tags: input["scope"]["tags"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect(),
                 ..Default::default()
             },
-            body,
+            body: input["body"].as_str().unwrap_or_default().to_string(),
             evidence,
             created_by: None,
             priority: self.priority,

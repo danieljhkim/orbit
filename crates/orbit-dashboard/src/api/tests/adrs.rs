@@ -7,6 +7,7 @@ use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_core::OrbitRuntime;
+use orbit_core::command::knowledge_policy::KnowledgeOwnerAccess;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -48,6 +49,19 @@ fn accept_adr(runtime: &OrbitRuntime, id: &str) -> Value {
 
 fn adr_id(adr: &Value) -> &str {
     adr["id"].as_str().expect("ADR id")
+}
+
+#[tokio::test]
+async fn replica_dashboard_adr_read_fails_closed() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let adr = seed_adr(&runtime, "Owner-only dashboard ADR", vec![]);
+    let replica = runtime.with_knowledge_owner_access(KnowledgeOwnerAccess::Replica {
+        owner_machine_id: "hm-owner".to_string(),
+    });
+    let response = request_get(replica, adr_id(&adr)).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(response).await;
+    assert!(body.to_string().contains("owner=hm-owner"), "{body}");
 }
 
 async fn request_create(

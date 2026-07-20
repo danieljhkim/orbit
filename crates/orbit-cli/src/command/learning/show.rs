@@ -1,5 +1,6 @@
 use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime};
+use serde_json::json;
 
 use crate::command::Execute;
 
@@ -16,6 +17,22 @@ pub struct LearningShowArgs {
 
 impl Execute for LearningShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        if let Some(value) = super::managed_tool(
+            runtime,
+            "orbit.learning.show",
+            json!({"id": self.id.clone()}),
+        )? {
+            if self.json {
+                return crate::output::json::print_pretty(&value);
+            }
+            println!("ID: {}", value["id"].as_str().unwrap_or_default());
+            println!("Status: {}", value["status"].as_str().unwrap_or_default());
+            println!("Summary: {}", value["summary"].as_str().unwrap_or_default());
+            if let Some(body) = value["body"].as_str().filter(|body| !body.is_empty()) {
+                println!("Body:\n{body}");
+            }
+            return Ok(());
+        }
         let learning = runtime.get_learning(&self.id)?;
         // Opening the full body is the passive usage signal for this learning.
         runtime.record_learning_shown(&learning.id)?;

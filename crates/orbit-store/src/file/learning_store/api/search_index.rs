@@ -293,6 +293,13 @@ impl LearningFileStore {
             );
         }
     }
+
+    pub(super) fn upsert_index_row_strict(&self, learning: &Learning) -> Result<(), OrbitError> {
+        let Some(index) = &self.index else {
+            return Ok(());
+        };
+        index.upsert_learning_index_row(&self.workspace_id, learning)
+    }
 }
 
 fn build_envelope(

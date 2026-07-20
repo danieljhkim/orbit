@@ -1,4 +1,5 @@
 use clap::{Args, ValueEnum};
+use orbit_core::command::knowledge_policy::KnowledgeOwnerAccess;
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Map, Value};
 
@@ -82,8 +83,31 @@ impl Execute for ToolRunArgs {
             return Ok(());
         }
 
-        let output =
-            runtime.execute_tool_command(&self.name, input.clone(), self.agent, self.model)?;
+        let model = self.model.or(self.agent);
+        let output = if !matches!(
+            runtime.knowledge_owner_access(),
+            KnowledgeOwnerAccess::Standalone
+        ) && matches!(
+            self.name.as_str(),
+            "orbit.adr.add"
+                | "orbit.adr.show"
+                | "orbit.adr.update"
+                | "orbit.adr.supersede"
+                | "orbit.learning.add"
+                | "orbit.learning.show"
+                | "orbit.learning.update"
+                | "orbit.learning.supersede"
+        ) {
+            orbit_remote::execute_managed_knowledge_tool(
+                &runtime.global_root(),
+                &runtime.paths().repo_root.to_string_lossy(),
+                &self.name,
+                input.clone(),
+                model,
+            )?
+        } else {
+            runtime.execute_tool_command(&self.name, input.clone(), None, model)?
+        };
         let output = shape_tool_output(&self.name, &input, output, self.full, &self.fields);
 
         match self.output {

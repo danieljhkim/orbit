@@ -1,0 +1,18 @@
+schema_version: 1
+id: L-0104
+status: active
+scope:
+  paths:
+  - crates/orbit-remote/src/mcp/**
+  tags:
+  - mcp
+  - routing
+  - knowledge
+summary: MCP result decorators receive pre-broker session context
+body: Result decoration runs with the original server-call ToolSessionContext, not the broker-normalized copy. A decorator that performs a workspace-scoped follow-up lookup must recover the stable workspace selector from the original tool input (or otherwise carry it explicitly) before invoking owner routing. Assuming the broker mutation is visible causes hub-side follow-up calls to lose workspace identity; swallowing that error can silently suppress knowledge sidecars, while propagating it breaks otherwise-valid hub calls.
+evidence:
+- kind: task
+  reference: ORB-10274
+created_at: 2026-07-20T00:22:38.497693738Z
+updated_at: 2026-07-20T00:22:38.497693738Z
+created_by: codex

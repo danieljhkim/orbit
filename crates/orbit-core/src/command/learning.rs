@@ -20,6 +20,7 @@ use orbit_store::{
 use serde::Deserialize;
 
 use crate::OrbitRuntime;
+use crate::command::knowledge_policy::KnowledgeSurfaceClass;
 
 #[derive(Debug, Deserialize)]
 struct LearningConfigFile {
@@ -50,7 +51,52 @@ struct LearningSearchConfigSection {
 }
 
 impl OrbitRuntime {
+    /// Verify that a hub-issued knowledge id is being finalized through the
+    /// exact checkout-bound runtime selected by the owner broker.  Public
+    /// request data never supplies this path.
+    pub fn verify_preallocated_owner_runtime(
+        &self,
+        expected_runtime_workspace_id: &str,
+    ) -> Result<(), OrbitError> {
+        let binding = self.workspace_runtime_binding().ok_or_else(|| {
+            OrbitError::InvalidInput(
+                "preallocated knowledge finalization requires a registered exact-checkout runtime binding"
+                    .to_string(),
+            )
+        })?;
+        let persisted_workspace_id = self.workspace_id()?;
+        if binding.workspace_id != expected_runtime_workspace_id
+            || persisted_workspace_id != expected_runtime_workspace_id
+        {
+            return Err(OrbitError::InvalidInput(format!(
+                "preallocated knowledge workspace mismatch: expected '{expected_runtime_workspace_id}', runtime binding is '{}', persisted checkout identity is '{persisted_workspace_id}'",
+                binding.workspace_id
+            )));
+        }
+        let bound_repo = binding.repo_root.canonicalize().map_err(|error| {
+            OrbitError::InvalidInput(format!(
+                "preallocated owner checkout '{}' is unavailable: {error}",
+                binding.repo_root.display()
+            ))
+        })?;
+        let runtime_repo = self.paths().repo_root.canonicalize().map_err(|error| {
+            OrbitError::InvalidInput(format!(
+                "runtime checkout '{}' is unavailable: {error}",
+                self.paths().repo_root.display()
+            ))
+        })?;
+        if bound_repo != runtime_repo {
+            return Err(OrbitError::InvalidInput(format!(
+                "preallocated owner checkout binding drifted: bound '{}', runtime '{}'",
+                bound_repo.display(),
+                runtime_repo.display()
+            )));
+        }
+        Ok(())
+    }
+
     pub fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
+        self.enforce_knowledge_surface(KnowledgeSurfaceClass::CompositeCreate)?;
         let learning = self.stores().learnings().add(params)?;
         self.record_id_allocation_audit("learning", &learning.id)?;
         Ok(learning)
@@ -85,6 +131,7 @@ impl OrbitRuntime {
     }
 
     pub fn get_learning(&self, id: &str) -> Result<Learning, OrbitError> {
+        self.enforce_knowledge_surface(KnowledgeSurfaceClass::CurrentRead)?;
         match self.stores().learnings().get_federated(id)? {
             Some(learning) => Ok(learning),
             None => {
@@ -103,6 +150,7 @@ impl OrbitRuntime {
         &self,
         status: Option<LearningStatus>,
     ) -> Result<Vec<Learning>, OrbitError> {
+        self.enforce_knowledge_surface(KnowledgeSurfaceClass::CurrentRead)?;
         self.stores().learnings().list(status)
     }
 
@@ -111,6 +159,7 @@ impl OrbitRuntime {
         status: Option<LearningStatus>,
         include_remote: bool,
     ) -> Result<Vec<LearningListEntry>, OrbitError> {
+        self.enforce_knowledge_surface(KnowledgeSurfaceClass::CurrentRead)?;
         self.stores()
             .learnings()
             .list_entries(status, include_remote)
@@ -120,6 +169,7 @@ impl OrbitRuntime {
         &self,
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
+        self.enforce_knowledge_surface(KnowledgeSurfaceClass::CurrentRead)?;
         let params = normalize_learning_search_params(&self.paths().repo_root, params)?;
         self.stores().learnings().search(params)
     }
@@ -210,10 +260,12 @@ impl OrbitRuntime {
         id: &str,
         params: LearningUpdateParams,
     ) -> Result<Learning, OrbitError> {
+        self.enforce_knowledge_surface(KnowledgeSurfaceClass::CurrentMutation)?;
         self.stores().learnings().update(id, params)
     }
 
     pub fn supersede_learning(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
+        self.enforce_knowledge_surface(KnowledgeSurfaceClass::CurrentMutation)?;
         if old_id == new_id {
             return Err(OrbitError::InvalidInput(format!(
                 "learning '{old_id}' cannot supersede itself"
@@ -227,10 +279,39 @@ impl OrbitRuntime {
     }
 
     pub fn sync_learnings(&self) -> Result<(), OrbitError> {
+        self.enforce_knowledge_surface(KnowledgeSurfaceClass::LocalDerived)?;
         self.stores().learnings().sync()
     }
 
+    pub fn sync_adr_index(&self) -> Result<(), OrbitError> {
+        self.enforce_knowledge_surface(KnowledgeSurfaceClass::LocalDerived)?;
+        self.stores().adrs().rebuild_index()
+    }
+
+    /// Atomically replace selected checkout-derived knowledge projections.
+    /// Both corpora are fully read before the shared SQLite transaction begins.
+    pub fn sync_knowledge_indexes(
+        &self,
+        include_adrs: bool,
+        include_learnings: bool,
+    ) -> Result<(), OrbitError> {
+        self.enforce_knowledge_surface(KnowledgeSurfaceClass::LocalDerived)?;
+        let adrs = include_adrs
+            .then(|| self.stores().adrs().list())
+            .transpose()?;
+        let learnings = include_learnings
+            .then(|| self.stores().learnings().list(None))
+            .transpose()?;
+        let workspace_id = self.workspace_id()?;
+        self.sqlite_store()?.replace_knowledge_indexes(
+            &workspace_id,
+            adrs.as_deref(),
+            learnings.as_deref(),
+        )
+    }
+
     pub fn migrate_learning_layout(&self) -> Result<LearningLayoutMigrationReport, OrbitError> {
+        self.enforce_knowledge_surface(KnowledgeSurfaceClass::CurrentMutation)?;
         migrate_learning_layout_at(&self.paths().orbit_dir)
     }
 
@@ -255,6 +336,11 @@ impl OrbitRuntime {
     /// Archive every stale active learning per `stale_learning_ids`. Returns
     /// `{ stale, deleted }` as a parallel pair of ID lists.
     pub fn prune_learnings(&self, delete: bool) -> Result<(Vec<String>, Vec<String>), OrbitError> {
+        self.enforce_knowledge_surface(if delete {
+            KnowledgeSurfaceClass::CurrentMutation
+        } else {
+            KnowledgeSurfaceClass::CurrentRead
+        })?;
         let stale = self.stale_learning_ids()?;
         let mut deleted = Vec::new();
         if delete {

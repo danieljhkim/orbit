@@ -481,6 +481,25 @@ impl Commands {
                     runtime_dispatch!(Friction),
                 )
             }
+            Commands::Knowledge(command) => {
+                use super::knowledge::KnowledgeSubcommand;
+                let (subcommand, json) = match &command.command {
+                    KnowledgeSubcommand::Allocate(args) => ("allocate", args.json),
+                    KnowledgeSubcommand::Sync(args) => ("sync", args.json),
+                };
+                CommandOperation::new(
+                    RuntimeNeed::Forbidden,
+                    Some(admin_meta(
+                        "knowledge",
+                        Some(subcommand),
+                        Some("knowledge"),
+                        None,
+                    )),
+                    json.then_some(true),
+                    false,
+                    dispatch_knowledge,
+                )
+            }
             Commands::Learning(command) => {
                 use super::learning::LearningSubcommand;
                 let (subcommand, runtime_need) = match &command.command {
@@ -849,6 +868,13 @@ impl Commands {
                 runtime_dispatch!(Artifacts),
             ),
         }
+    }
+}
+
+fn dispatch_knowledge(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+    match command {
+        Commands::Knowledge(command) => command.execute_without_runtime(context),
+        _ => dispatch_mismatch("Knowledge"),
     }
 }
 

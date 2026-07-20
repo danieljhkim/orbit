@@ -10,7 +10,7 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10274, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Orbit MCP Bridge — Design
@@ -26,9 +26,9 @@ capability filtering landed in [ORB-10262]. Strict machine-global trust
 configuration and the fixed checkoutless hub endpoint landed in [ORB-10268]. The
 bounded negotiated SSH connector landed in [ORB-10269], and private spoke
 registration plus the first end-to-end coordination slice landed in [ORB-10271].
-[ORB-10272] adds the dormant Remote-v2 hub sequence and connector-private
-allocation substrate for ADR/learning IDs; it deliberately does not cut the public
-knowledge-create paths over before F3.
+[ORB-10272] added the Remote-v2 hub sequence and connector-private allocation
+substrate for ADR/learning IDs; [ORB-10330] added owner finalizers and [ORB-10274]
+cut managed public knowledge creation over to those seams.
 It replaces both
 Bridge's HTTP parity layer and the earlier
 per-workspace-authority draft with a local broker that has one remote destination:
@@ -525,21 +525,23 @@ Invalid workspace/kind/correlation, ineligible workspace, and overflow also leav
 both sequences unchanged. Requests and results contain no checkout or owner path.
 
 F1 exposes no public agent allocation tool, no reservation/finalize/release API,
-and no owner proxy. F3 alone activates public issuance and cuts the following
+and no owner proxy. [ORB-10274] activates public issuance and cuts the following
 composite create flow over to the hub sequence.
 
 #### F3 composite creation target
 
-[ORB-10330] implements and tests this composite shape behind an inactive cutover
-gate as unit F2: the owner file stores gain a `finalize_preallocated` path (hub
+[ORB-10330] implemented and tested the composite foundation as unit F2: the owner file stores gained a `finalize_preallocated` path (hub
 id in, no local allocation/abandon/retry, non-authoritative body-path
-projection, deterministic collision failure), and the broker composition pairs
-one hub allocation with one owner finalization and rejects replica/foreign-spoke
-owners before allocation. F3 (ORB-10274) alone activates hub issuance and cuts
-the public `orbit.learning.add` / `orbit.adr.add` callers over to the flow below;
-until then they stay on the standalone compatibility path.
+projection, deterministic collision failure). [ORB-10274] consumed that seam in
+the live broker, activated hub issuance after forward-only reseed, and cut managed
+`orbit.learning.add` / `orbit.adr.add` callers over. Standalone callers retain the
+workspace-local compatibility allocator.
 
 `orbit.learning.add` and `orbit.adr.add` are composite owner operations:
+
+Current ADR/learning `list`, `show`, `update`, and `supersede` tools use Owner
+placement (canonical registry revision 2). Manual `orbit knowledge allocate` and
+`orbit knowledge sync` remain CLI-only and are absent from MCP and generic tools.
 
 1. resolve the workspace owner;
 2. if the owner is local, request the next global ID from the hub, then finalize in
@@ -844,8 +846,8 @@ schemas.
   reconciliation/activation service, replay-safe ledger, atomic audit, and private
   path-free allocation request. It does not activate authority or cut over public
   creation.
-- F3 activates the authority through the final forward-only reseed and cuts owner
-  learning/ADR creation over to hub allocation.
+- [ORB-10274] activates authority through the final forward-only reseed and cuts
+  managed owner learning/ADR creation over to hub allocation.
 - Add explicit replica knowledge reads plus reindex/freshness metadata.
 - Implement role-aware search and learning-sidecar availability behavior.
 
@@ -958,13 +960,13 @@ Required validation:
   complete pre-mutation hub-local reconciliation, forward-only activation,
   correlation-safe immutable ledger and atomic audit, plus contract revision 3's
   private path-free request/result used by the two-workspace canary. Public
-  issuance/caller cutover remains F3, and standalone creation is unchanged.
+  issuance/caller cutover landed in [ORB-10274], and standalone creation is unchanged.
 - [ORB-10330] — adds and tests the F2 owner preallocated finalizers
   (`finalize_preallocated` on the ADR/learning stores; hub id in, no local
   allocation/abandon/retry, non-authoritative body-path projection, deterministic
   collision failure, local-only partial cleanup) and the gated broker composition
   (one hub allocation, one exact-owner finalization, correlated by `mcp_call_id`;
   replica/foreign-spoke rejected before allocation). Public issuance/caller cutover
-  remains F3, and standalone creation is unchanged.
+  landed in [ORB-10274], and standalone creation is unchanged.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

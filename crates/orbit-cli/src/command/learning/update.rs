@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args};
 use orbit_core::{LearningScope, LearningUpdateParams, OrbitError, OrbitRuntime};
+use serde_json::{Map, Value};
 
 use crate::command::Execute;
 
@@ -72,6 +73,38 @@ impl Execute for LearningUpdateArgs {
         } else {
             self.priority.map(Some)
         };
+
+        let mut input = Map::new();
+        input.insert("id".to_string(), Value::String(self.id.clone()));
+        if let Some(summary) = &self.summary {
+            input.insert("summary".to_string(), Value::String(summary.clone()));
+        }
+        if let Some(scope) = &scope {
+            input.insert(
+                "scope".to_string(),
+                serde_json::json!({
+                    "paths": scope.paths, "tags": scope.tags
+                }),
+            );
+        }
+        if let Some(body) = &body {
+            input.insert("body".to_string(), Value::String(body.clone()));
+        }
+        if let Some(priority) = priority {
+            input.insert(
+                "priority".to_string(),
+                priority.map_or(Value::Null, Value::from),
+            );
+        }
+        if let Some(value) =
+            super::managed_tool(runtime, "orbit.learning.update", Value::Object(input))?
+        {
+            if self.json {
+                return crate::output::json::print_pretty(&value);
+            }
+            println!("{}", value["id"].as_str().unwrap_or_default());
+            return Ok(());
+        }
 
         let learning = runtime.update_learning(
             &self.id,

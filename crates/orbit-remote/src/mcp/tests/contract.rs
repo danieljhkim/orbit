@@ -34,11 +34,11 @@ fn frozen_hub_schema_golden_vector() {
         String::from_utf8(bytes).expect("utf8"),
         concat!(
             "orbit.mcp.hub-schema.v1\0",
-            r#"{"canonical_registry_revision":1,"capability":"agent","tools":[{"advertised_name":"orbit_task_show","canonical_name":"orbit.task.show","description":"Show one task","input_schema":{"additionalProperties":true,"properties":{"id":{"description":"Task ID","type":"string"}},"required":["id"],"type":"object"}}]}"#,
+            r#"{"canonical_registry_revision":2,"capability":"agent","tools":[{"advertised_name":"orbit_task_show","canonical_name":"orbit.task.show","description":"Show one task","input_schema":{"additionalProperties":true,"properties":{"id":{"description":"Task ID","type":"string"}},"required":["id"],"type":"object"}}]}"#,
         )
     );
     assert_eq!(
         hub_schema_digest(&fixture_definitions(), McpCapability::Agent).expect("digest"),
-        "ec8ef56c153562d0f4125cee1b3932c33ed30eb8509601aa5652a351a7b6a8f7"
+        "8c5856e3838ac33eab4e66401d846b9cc6f262a23d30af964c843496c0fe4ee8"
     );
 }

@@ -228,7 +228,11 @@ impl AdrFileStore {
         }
 
         let adr = bundle_to_adr(bundle);
-        self.upsert_index_row(&adr);
+        if let Err(error) = self.upsert_index_row_strict(&adr) {
+            let _ = self.id_allocator.remove_preallocated_adr_projection(id);
+            let _ = fs::remove_dir_all(&target_dir);
+            return Err(error);
+        }
         Ok(adr)
     }
 
@@ -725,6 +729,19 @@ impl AdrFileStore {
                 "failed to upsert ADR envelope into index; filesystem is source of truth",
             );
         }
+    }
+
+    fn upsert_index_row_strict(&self, adr: &Adr) -> Result<(), OrbitError> {
+        let Some(index) = &self.index else {
+            return Ok(());
+        };
+        index.with_transaction(|tx| {
+            tx.tx
+                .execute("DELETE FROM adrs WHERE id = ?1", params![adr.id])
+                .map_err(|e| OrbitError::Store(e.to_string()))?;
+            insert_adr_row(&tx.tx, adr)?;
+            Ok(())
+        })
     }
 
     fn delete_index_row(&self, id: &str) {

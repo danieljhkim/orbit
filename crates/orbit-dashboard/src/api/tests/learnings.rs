@@ -6,6 +6,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
+use orbit_core::command::knowledge_policy::KnowledgeOwnerAccess;
 use orbit_core::{
     EvidenceKind, Learning, LearningCreateParams, LearningEvidence, LearningScope, LearningStatus,
     OrbitRuntime,
@@ -34,6 +35,28 @@ fn seed_learning(runtime: &OrbitRuntime, summary: &str) -> Learning {
             priority: Some(3),
         })
         .expect("seed learning")
+}
+
+#[tokio::test]
+async fn replica_dashboard_learning_read_fails_closed() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let learning = seed_learning(&runtime, "Owner-only dashboard learning");
+    let replica = runtime.with_knowledge_owner_access(KnowledgeOwnerAccess::Replica {
+        owner_machine_id: "hm-owner".to_string(),
+    });
+    let response = router()
+        .with_state(crate::state::DashboardState::single(Arc::new(replica)))
+        .oneshot(
+            Request::builder()
+                .uri(format!("/learnings/{}", learning.id))
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(response).await;
+    assert!(body.to_string().contains("owner=hm-owner"), "{body}");
 }
 
 async fn request_supersede(

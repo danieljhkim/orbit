@@ -95,6 +95,38 @@ async fn learning_sidecar_absent_when_no_learning_matches() {
 }
 
 #[tokio::test]
+async fn learning_sidecar_propagates_current_state_unavailable() {
+    let host = Arc::new(
+        LearningSidecarHost::new(
+            json!({
+                "code_refs": [{"file": "crates/orbit-engine/src/lib.rs"}]
+            }),
+            HashMap::new(),
+        )
+        .with_search_error("current-state unavailable; owner=hm-owner"),
+    );
+    let (server, _) = server_with_learning(
+        host,
+        None,
+        LearningInjectionCaps::default(),
+        LearningInjectionState::default(),
+    )
+    .await;
+
+    let error = server
+        .call_error(
+            "orbit.task.show",
+            json!({"selector": "file:crates/orbit-engine/src/lib.rs"}),
+        )
+        .await;
+
+    assert!(
+        error.contains("current-state unavailable; owner=hm-owner"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
 async fn l1_seeded_learning_is_suppressed_by_l2_dedup_state() {
     let mut search_by_path = HashMap::new();
     search_by_path.insert(

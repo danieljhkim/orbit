@@ -618,12 +618,18 @@ fn spoke_rmcp_coordination_canary_is_hub_only_and_preserves_provenance() {
     write_canary_identity(hub.path(), "hub", "hm_hub", "hub");
     write_canary_identity(spoke.path(), "spoke", "hm_spoke", "spoke");
 
-    let registry = WorkspaceRegistry {
+    let hub_checkout = super::knowledge_allocation::init_owner_checkout(hub.path(), "ws_canary");
+    let hub_registry = WorkspaceRegistry {
+        workspaces: vec![canary_workspace()],
+        checkouts: vec![hub_checkout],
+        ..WorkspaceRegistry::default()
+    };
+    let spoke_registry = WorkspaceRegistry {
         workspaces: vec![canary_workspace()],
         ..WorkspaceRegistry::default()
     };
-    save_canary_registry(hub.path(), &registry);
-    save_canary_registry(spoke.path(), &registry);
+    save_canary_registry(hub.path(), &hub_registry);
+    save_canary_registry(spoke.path(), &spoke_registry);
 
     let registry_service =
         crate::host_registry_service_at(hub.path()).expect("hub registry service");
@@ -634,7 +640,7 @@ fn spoke_rmcp_coordination_canary_is_hub_only_and_preserves_provenance() {
         )
         .expect("register hub");
     registry_service
-        .bind_workspace_owner(&registry, "ws_canary", "hm_hub")
+        .bind_workspace_owner(&hub_registry, "ws_canary", "hm_hub")
         .expect("bind owner");
     orbit_core::runtime::HubCoordinationExecutor::register_workspace(
         hub.path(),

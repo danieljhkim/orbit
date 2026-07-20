@@ -17,8 +17,8 @@ use rusqlite::{Connection, OpenFlags};
 use serde_json::{Value, json};
 
 use crate::persistence::{
-    HubKnowledgeAllocatorState, HubKnowledgeRequestIdentityV1, KnowledgeWorkspaceInventory,
-    LegacyKnowledgeId,
+    HubKnowledgeAllocatorState, HubKnowledgeAllocatorStatus, HubKnowledgeRequestIdentityV1,
+    KnowledgeAuthorityCutoverStatus, KnowledgeWorkspaceInventory, LegacyKnowledgeId,
 };
 use crate::{RemoteStore, workspace_registry};
 
@@ -57,8 +57,6 @@ impl HubKnowledgeSequenceService {
         }
     }
 
-    // F1 deliberately installs a dormant substrate; F3 will call this during cutover.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn activate(
         &self,
         inventories: Vec<KnowledgeWorkspaceInventory>,
@@ -71,9 +69,49 @@ impl HubKnowledgeSequenceService {
         self.store.activate_knowledge_allocator(inventories)
     }
 
-    // F1 deliberately installs a dormant substrate; F3 will call this for late workspaces.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn reconcile_workspace(
+    /// Perform F3's forward-only public-authoring cutover exactly once.
+    ///
+    /// The persistence transaction revalidates the complete inventory under
+    /// the allocator write lock and is idempotent after activation.  Scanning
+    /// happens before that transaction, so an unavailable or invalid source
+    /// cannot expose a partially seeded authority.
+    pub(crate) fn ensure_public_cutover_active(
+        &self,
+    ) -> Result<HubKnowledgeAllocatorState, OrbitError> {
+        self.require_hub_mode()?;
+        let state = self.store.knowledge_allocator_state()?;
+        if state.status == HubKnowledgeAllocatorStatus::Active {
+            if self.store.knowledge_cutover_state()?.status
+                != KnowledgeAuthorityCutoverStatus::Active
+            {
+                self.store.complete_knowledge_cutover()?;
+            }
+            return Ok(state);
+        }
+        let global_root = self.global_root.as_deref().ok_or_else(|| {
+            OrbitError::InvalidInput(
+                "public knowledge cutover requires the authoritative hub root".to_string(),
+            )
+        })?;
+        self.store.begin_knowledge_cutover()?;
+        let outcome = scan_registered_knowledge_inventories(global_root)
+            .and_then(|inventories| self.activate(inventories));
+        match outcome {
+            Ok(state) => {
+                self.store.complete_knowledge_cutover()?;
+                Ok(state)
+            }
+            Err(error) => {
+                // Preserve the original source/activation diagnostic. A
+                // secondary persistence failure is visible in the hub logs
+                // but must not disguise why the cutover did not complete.
+                let _ = self.store.fail_knowledge_cutover(&error);
+                Err(error)
+            }
+        }
+    }
+
+    pub fn reconcile_workspace(
         &self,
         inventory: KnowledgeWorkspaceInventory,
     ) -> Result<HubKnowledgeAllocatorState, OrbitError> {
@@ -258,6 +296,110 @@ pub fn scan_registered_knowledge_inventories(
         .into_values()
         .map(KnowledgeWorkspaceInventory::validated)
         .collect()
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct KnowledgeSyncCounts {
+    pub adrs: usize,
+    pub learnings: usize,
+}
+
+/// Prevalidate one exact local checkout against F1's immutable hub occupancy
+/// projection. This is a local read only: it never opens a hub transport,
+/// allocates, finalizes, or edits the corpus.
+pub fn validate_local_knowledge_for_sync(
+    global_root: &Path,
+    exact_checkout: &Path,
+    include_adrs: bool,
+    include_learnings: bool,
+) -> Result<KnowledgeSyncCounts, OrbitError> {
+    if !include_adrs && !include_learnings {
+        return Err(OrbitError::InvalidInput(
+            "knowledge sync must select at least one kind".to_string(),
+        ));
+    }
+    let selected = exact_checkout.canonicalize().map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "knowledge sync checkout '{}' is unavailable: {error}",
+            exact_checkout.display()
+        ))
+    })?;
+    let registry = workspace_registry::load_registry_from(&workspace_registry::registry_path_for(
+        global_root,
+    ))?;
+    let checkout = registry
+        .checkouts
+        .iter()
+        .find(|checkout| {
+            checkout
+                .repo_root
+                .canonicalize()
+                .is_ok_and(|registered| registered == selected)
+        })
+        .ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "knowledge sync requires one exact registered checkout path; '{}' is not an exact binding",
+                selected.display()
+            ))
+        })?;
+    let workspace = registry
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == checkout.workspace_id)
+        .ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "knowledge sync checkout names unknown workspace '{}'",
+                checkout.workspace_id
+            ))
+        })?;
+    if workspace.status != WorkspaceStatus::Active {
+        return Err(OrbitError::InvalidInput(format!(
+            "knowledge sync workspace '{}' is not active",
+            workspace.id
+        )));
+    }
+
+    let store = crate::remote_store_at(global_root)?;
+    if store.knowledge_allocator_state()?.status != HubKnowledgeAllocatorStatus::Active {
+        return Err(OrbitError::InvalidInput(
+            "knowledge sync requires a readable active hub allocation ledger; prior indexes were preserved"
+                .to_string(),
+        ));
+    }
+    let mut ids = BTreeMap::new();
+    if include_adrs {
+        scan_adr_files(&checkout.orbit_dir, &mut ids)?;
+    }
+    if include_learnings {
+        scan_learning_files(&checkout.orbit_dir, &mut ids)?;
+    }
+    let mut counts = KnowledgeSyncCounts::default();
+    for ((kind, id), _) in ids {
+        let allocated_workspace =
+            store
+                .hub_knowledge_id_workspace(kind, &id)?
+                .ok_or_else(|| {
+                    OrbitError::InvalidInput(format!(
+                        "knowledge sync rejected unallocated {} '{}'; prior indexes were preserved",
+                        kind.as_str(),
+                        id
+                    ))
+                })?;
+        if allocated_workspace != workspace.id {
+            return Err(OrbitError::InvalidInput(format!(
+                "knowledge sync allocation mismatch for {} '{}': hub workspace is '{}', selected workspace is '{}'; prior indexes were preserved",
+                kind.as_str(),
+                id,
+                allocated_workspace,
+                workspace.id
+            )));
+        }
+        match kind {
+            KnowledgeIdKind::Adr => counts.adrs += 1,
+            KnowledgeIdKind::Learning => counts.learnings += 1,
+        }
+    }
+    Ok(counts)
 }
 
 fn registered_workspace_ids(registry: &WorkspaceRegistry) -> BTreeSet<String> {

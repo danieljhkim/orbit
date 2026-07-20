@@ -20,6 +20,21 @@ pub struct LearningSupersedeArgs {
 
 impl Execute for LearningSupersedeArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        if let Some(value) = super::managed_tool(
+            runtime,
+            "orbit.learning.supersede",
+            json!({"id": self.id.clone(), "with": self.with.clone()}),
+        )? {
+            if self.json {
+                return crate::output::json::print_pretty(&value);
+            }
+            println!(
+                "{} superseded by {}",
+                value["old"]["id"].as_str().unwrap_or_default(),
+                value["new"]["id"].as_str().unwrap_or_default()
+            );
+            return Ok(());
+        }
         runtime.supersede_learning(&self.id, &self.with)?;
         let old = runtime.get_learning(&self.id)?;
         let new = runtime.get_learning(&self.with)?;

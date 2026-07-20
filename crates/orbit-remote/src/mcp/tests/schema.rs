@@ -43,6 +43,23 @@ fn task_enum_metadata_is_owned_by_remote_schema_composition() {
     );
 }
 
+#[test]
+fn human_knowledge_maintenance_is_never_advertised_as_an_mcp_tool() {
+    let definitions = canonical_mcp_tool_definitions().expect("canonical definitions");
+    let names = definitions
+        .iter()
+        .map(|definition| definition.schema.name.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    for forbidden in [
+        "orbit.knowledge.allocate",
+        "orbit.knowledge.sync",
+        "orbit.learning.allocate",
+        "orbit.adr.allocate",
+    ] {
+        assert!(!names.contains(forbidden), "advertised {forbidden}");
+    }
+}
+
 fn definition<'a>(definitions: &'a [McpToolDefinition], name: &str) -> &'a McpToolDefinition {
     definitions
         .iter()

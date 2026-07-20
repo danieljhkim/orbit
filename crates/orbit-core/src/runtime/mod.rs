@@ -64,6 +64,7 @@ pub(crate) use store_delegates::TaskRecordUpdateParams;
 pub struct OrbitRuntime {
     context: OrbitContext,
     workspace_binding: Option<Arc<WorkspaceRuntimeBinding>>,
+    knowledge_owner_access: Arc<crate::command::knowledge_policy::KnowledgeOwnerAccess>,
     activity_executors: Arc<ActivityExecutorRegistry>,
     pub event_log: event_bus::EventLog,
     /// Outcome of the [ORB-10012] workspace-layout pre-flight that ran when
@@ -276,6 +277,7 @@ impl OrbitRuntime {
             activity_executors: build_activity_executor_registry(&context)?,
             context,
             workspace_binding: binding.map(Arc::new),
+            knowledge_owner_access: Arc::new(Default::default()),
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(layout_report),
             _temp_dir: None,
@@ -294,6 +296,7 @@ impl OrbitRuntime {
             activity_executors: build_activity_executor_registry(&context)?,
             context,
             workspace_binding: None,
+            knowledge_owner_access: Arc::new(Default::default()),
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(orbit_store::layout::LayoutUpgradeReport::default()),
             _temp_dir: Some(Arc::new(temp_dir)),
@@ -314,6 +317,27 @@ impl OrbitRuntime {
     pub fn with_actor(mut self, actor: ActorIdentity) -> Self {
         self.context.set_actor(actor);
         self
+    }
+
+    pub fn with_knowledge_owner_access(
+        mut self,
+        access: crate::command::knowledge_policy::KnowledgeOwnerAccess,
+    ) -> Self {
+        self.knowledge_owner_access = Arc::new(access);
+        self
+    }
+
+    pub fn enforce_knowledge_surface(
+        &self,
+        class: crate::command::knowledge_policy::KnowledgeSurfaceClass,
+    ) -> Result<(), OrbitError> {
+        crate::command::knowledge_policy::enforce(&self.knowledge_owner_access, class)
+    }
+
+    pub fn knowledge_owner_access(
+        &self,
+    ) -> &crate::command::knowledge_policy::KnowledgeOwnerAccess {
+        &self.knowledge_owner_access
     }
 
     /// Returns in-process events recorded during this session only. Not persisted across process

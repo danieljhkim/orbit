@@ -15,11 +15,59 @@ use super::{
     docs::DocsSubcommand,
     friction::FrictionSubcommand,
     hook::HookSubcommand,
+    knowledge::{AllocateKind, KnowledgeSubcommand, SyncKind},
     mcp::McpSubcommand,
     search::{SearchKindArg, SearchSubcommand},
     semantic::{SemanticIndexKindArg, SemanticSubcommand},
     web::WebSubcommand,
 };
+
+#[test]
+fn cli_parses_human_knowledge_allocate_and_sync() {
+    let allocate = Cli::parse_from([
+        "orbit",
+        "knowledge",
+        "allocate",
+        "--kind",
+        "adr",
+        "--workspace",
+        "ws_alpha",
+        "--json",
+    ]);
+    match allocate.command {
+        Commands::Knowledge(command) => match command.command {
+            KnowledgeSubcommand::Allocate(args) => {
+                assert!(matches!(args.kind, AllocateKind::Adr));
+                assert_eq!(args.workspace, "ws_alpha");
+                assert!(args.json);
+            }
+            _ => panic!("expected knowledge allocate"),
+        },
+        _ => panic!("expected knowledge command"),
+    }
+
+    let sync = Cli::parse_from([
+        "orbit",
+        "knowledge",
+        "sync",
+        "--kind",
+        "all",
+        "--workspace",
+        "/tmp/worktree",
+        "--json",
+    ]);
+    match sync.command {
+        Commands::Knowledge(command) => match command.command {
+            KnowledgeSubcommand::Sync(args) => {
+                assert!(matches!(args.kind, SyncKind::All));
+                assert_eq!(args.workspace, std::path::PathBuf::from("/tmp/worktree"));
+                assert!(args.json);
+            }
+            _ => panic!("expected knowledge sync"),
+        },
+        _ => panic!("expected knowledge command"),
+    }
+}
 
 fn assert_cli_rejects(args: &[&str], kind: ErrorKind, expected: &str) {
     let error = match Cli::try_parse_from(args.iter().copied()) {

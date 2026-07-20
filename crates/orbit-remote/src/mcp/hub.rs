@@ -21,17 +21,29 @@ use super::contract::{
     CANONICAL_MCP_REGISTRY_REVISION, HubServerContractV1, MCP_CONTRACT_REVISION, hub_schema_digest,
 };
 use super::host::{
-    canonical_mcp_tool_definitions, mcp_preflight_failure_params, normalize_trusted_call_context,
+    BrokerMcpHost, canonical_mcp_tool_definitions, is_current_knowledge_tool,
+    mcp_preflight_failure_params, normalize_trusted_call_context, preallocated_knowledge_kind,
 };
 
-/// A fixed hub-only host. It owns no broker, runtime cache, connector, owner
-/// resolver, or transport factory.
-#[derive(Debug)]
+/// A fixed hub-only host. Its owner broker has no connector, so composite
+/// knowledge calls can terminate only in a validated hub-owned checkout.
 pub(super) struct HubMcpHost {
     global_root: PathBuf,
     identity: HostIdentity,
     capability: McpCapability,
     private_instructions: String,
+    knowledge_broker: BrokerMcpHost,
+}
+
+impl std::fmt::Debug for HubMcpHost {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HubMcpHost")
+            .field("global_root", &self.global_root)
+            .field("identity", &self.identity)
+            .field("capability", &self.capability)
+            .finish_non_exhaustive()
+    }
 }
 
 impl HubMcpHost {
@@ -53,11 +65,13 @@ impl HubMcpHost {
             hub_schema_digest: hub_schema_digest(&definitions, capability)?,
         };
         let private_instructions = contract.instructions()?;
+        let knowledge_broker = BrokerMcpHost::new(global_root.clone());
         let host = Self {
             global_root,
             identity,
             capability,
             private_instructions,
+            knowledge_broker,
         };
         // Fail before stdio is opened. Listing and every call repeat this
         // check so a long-lived server cannot outlive an authority change.
@@ -136,7 +150,9 @@ impl HubMcpHost {
                         .to_string(),
                 ));
             }
-            crate::HubKnowledgeSequenceService::at(&self.global_root)?.allocate(&request, &context)
+            let allocator = crate::HubKnowledgeSequenceService::at(&self.global_root)?;
+            allocator.ensure_public_cutover_active()?;
+            allocator.allocate(&request, &context)
         })();
         if let Err(error) = &result {
             self.record_denial(HUB_KNOWLEDGE_ALLOCATION_METHOD_V1, &context, error);
@@ -176,11 +192,33 @@ impl HubMcpHost {
     }
 
     fn admitted(&self, definition: &McpToolDefinition) -> bool {
-        definition.policy.placement() == McpToolPlacement::Hub
+        (definition.policy.placement() == McpToolPlacement::Hub
+            || (definition.policy.placement() == McpToolPlacement::Composite
+                && preallocated_knowledge_kind(&definition.schema.name).is_some())
+            || (definition.policy.placement() == McpToolPlacement::Owner
+                && is_current_knowledge_tool(&definition.schema.name)))
             && definition
                 .policy
                 .allowed_capabilities()
                 .contains(&self.capability)
+    }
+
+    pub(super) fn compose_preallocated_knowledge_add(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        let (identity, snapshot) = self.verify_authority()?;
+        let context = self.normalize_context(session_context, &identity);
+        Self::require_active_remote_caller(&context, &snapshot)?;
+        if preallocated_knowledge_kind(name).is_none() {
+            return Err(OrbitError::InvalidInput(format!(
+                "tool '{name}' is not a preallocated knowledge add"
+            )));
+        }
+        self.knowledge_broker
+            .preallocated_knowledge_call(name, input, context)
     }
 
     fn definition(&self, inbound: &str) -> Result<McpToolDefinition, OrbitError> {
@@ -457,6 +495,18 @@ impl HubMcpHost {
         {
             self.record_denial(name, &context, &error);
             return Err(error);
+        }
+        if preallocated_knowledge_kind(name).is_some() || is_current_knowledge_tool(name) {
+            let result = if preallocated_knowledge_kind(name).is_some() {
+                self.compose_preallocated_knowledge_add(name, input, context.clone())
+            } else {
+                self.knowledge_broker
+                    .call_tool(name, input, context.clone())
+            };
+            if let Err(error) = &result {
+                self.record_denial(name, &context, error);
+            }
+            return result;
         }
         let result = HubCoordinationExecutor::new(&self.global_root, workspace_id, None)
             .and_then(|executor| executor.execute_tool(name, input, context.clone()));

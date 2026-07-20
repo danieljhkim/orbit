@@ -37,10 +37,12 @@ pub fn register(registry: &mut ToolRegistry) {
         adr::add::OrbitAdrAddTool,
         agent_operator(McpToolPlacement::Composite),
     );
-    // ORB-00289: agents query ADR metadata via `orbit search --kind adr`;
-    // `orbit.adr.list` stays available on the CLI / dashboard `runtime.run_tool`
-    // path for admin workflows.
-    registry.register_inactive(adr::list::OrbitAdrListTool);
+    // F3 classifies list as a current-state read. Owner placement prevents a
+    // replica index from becoming authoritative while retaining MCP/tool use.
+    registry.register_mcp(
+        adr::list::OrbitAdrListTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
     registry.register_mcp(
         adr::show::OrbitAdrShowTool,
         agent_operator(McpToolPlacement::Owner),
@@ -149,7 +151,10 @@ pub fn register(registry: &mut ToolRegistry) {
         learning::add::OrbitLearningAddTool,
         agent_operator(McpToolPlacement::Composite),
     );
-    registry.register_inactive(learning::list::OrbitLearningListTool);
+    registry.register_mcp(
+        learning::list::OrbitLearningListTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
     // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
     registry.register_inactive(learning::prune::OrbitLearningPruneTool);
     registry.register_inactive(learning::sync::OrbitLearningSyncTool);

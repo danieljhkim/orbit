@@ -293,11 +293,13 @@ fn hub_listing_uses_one_canonical_placement_and_capability_predicate() {
     let agent = HubMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("agent");
     let agent_definitions = agent.list_mcp_tool_definitions().expect("agent tools");
     assert!(agent_definitions.iter().all(|definition| {
-        definition.policy.placement() == McpToolPlacement::Hub
-            && definition
-                .policy
-                .allowed_capabilities()
-                .contains(&McpCapability::Agent)
+        matches!(
+            definition.policy.placement(),
+            McpToolPlacement::Hub | McpToolPlacement::Owner | McpToolPlacement::Composite
+        ) && definition
+            .policy
+            .allowed_capabilities()
+            .contains(&McpCapability::Agent)
     }));
     let agent_names = agent_definitions
         .iter()

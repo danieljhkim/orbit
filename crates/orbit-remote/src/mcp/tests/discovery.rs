@@ -74,7 +74,7 @@ fn remote_owns_the_exact_global_discovery_definitions() {
     );
 
     let canonical = canonical_mcp_tool_definitions().expect("canonical definitions");
-    assert_eq!(canonical.len(), 32, "the frozen production surface changed");
+    assert_eq!(canonical.len(), 34, "the frozen production surface changed");
     assert_eq!(
         canonical
             .iter()

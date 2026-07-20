@@ -51,6 +51,7 @@ pub(super) fn request_with_args(name: &str, args: Value) -> CallToolRequestParam
 pub(super) struct LearningSidecarHost {
     response: Value,
     search_by_path: HashMap<String, Vec<Value>>,
+    search_error: Option<String>,
     calls: Mutex<Vec<String>>,
     session_states: Mutex<HashMap<String, LearningInjectionState>>,
 }
@@ -60,9 +61,15 @@ impl LearningSidecarHost {
         Self {
             response,
             search_by_path,
+            search_error: None,
             calls: Mutex::new(Vec::new()),
             session_states: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub(super) fn with_search_error(mut self, error: impl Into<String>) -> Self {
+        self.search_error = Some(error.into());
+        self
     }
 }
 
@@ -85,6 +92,9 @@ impl McpHost for LearningSidecarHost {
             .expect("calls lock")
             .push(name.to_string());
         if name == "orbit.learning.list" {
+            if let Some(error) = &self.search_error {
+                return Err(OrbitError::InvalidInput(error.clone()));
+            }
             let path = input
                 .get("path")
                 .and_then(Value::as_str)
@@ -162,6 +172,15 @@ impl WireServer {
             .call_tool(request_with_args(name, args))
             .await
             .expect("MCP fixture call")
+    }
+
+    pub(super) async fn call_error(&self, name: &str, args: Value) -> String {
+        self.client
+            .peer()
+            .call_tool(request_with_args(name, args))
+            .await
+            .expect_err("MCP fixture call must fail")
+            .to_string()
     }
 }
 

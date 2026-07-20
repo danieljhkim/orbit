@@ -28,26 +28,51 @@ pub(super) fn add(
     _agent: Option<String>,
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
-    let summary = required_string(&input, &["summary"], "summary")?;
+    let params = learning_create_params(&input, model)?;
+    let learning = runtime.create_learning(params)?;
+    Ok(learning_to_json(&learning))
+}
+
+impl OrbitRuntime {
+    /// Parse the public add payload and finalize one hub-issued learning in
+    /// this runtime's exact owner checkout without touching the local allocator.
+    pub fn finalize_preallocated_learning_tool(
+        &self,
+        expected_runtime_workspace_id: &str,
+        id: &str,
+        input: Value,
+        model: Option<String>,
+    ) -> Result<Value, OrbitError> {
+        self.verify_preallocated_owner_runtime(expected_runtime_workspace_id)?;
+        let params = learning_create_params(&input, model)?;
+        let learning = self.finalize_preallocated_learning(id, params)?;
+        Ok(learning_to_json(&learning))
+    }
+}
+
+fn learning_create_params(
+    input: &Value,
+    model: Option<String>,
+) -> Result<LearningCreateParams, OrbitError> {
+    let summary = required_string(input, &["summary"], "summary")?;
     let scope_value = input
         .get("scope")
         .cloned()
         .unwrap_or(Value::Object(Default::default()));
     let scope = parse_scope_value(scope_value)?;
-    let body = optional_string(&input, "body")?.unwrap_or_default();
+    let body = optional_string(input, "body")?.unwrap_or_default();
     let evidence = parse_evidence_value(input.get("evidence"))?;
-    let priority = parse_optional_priority(&input)?;
-    let created_by = optional_string_alias(&input, &["created_by", "createdBy"])?.or(model);
+    let priority = parse_optional_priority(input)?;
+    let created_by = optional_string_alias(input, &["created_by", "createdBy"])?.or(model);
 
-    let learning = runtime.create_learning(LearningCreateParams {
+    Ok(LearningCreateParams {
         summary,
         scope,
         body,
         evidence,
         created_by,
         priority,
-    })?;
-    Ok(learning_to_json(&learning))
+    })
 }
 
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {

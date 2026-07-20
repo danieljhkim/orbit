@@ -10,7 +10,7 @@ summary: ADR log for the coupled MCP Bridge and Host Registry v1 contract and it
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10274, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Orbit MCP Bridge — Decisions
@@ -87,7 +87,7 @@ filtered non-empty capability set.
 
 ## ADR-0229 — Owner-authored knowledge with hub-global IDs and explicit replicas
 
-**Status:** Accepted · 2026-07 · [ORB-10245] fixed the one-writer knowledge rule; [ORB-10272] implemented the dormant Remote-v2 hub sequence, reconciliation, immutable-ledger, and atomic-audit substrate without activating the F3 public cutover; [ORB-10330] added the owner-side preallocated finalizers and the gated broker composition (one hub allocation, one exact-owner finalization, correlated by `mcp_call_id`; replica/foreign-spoke rejected before allocation) while public creation stays on the compatibility path until F3.
+**Status:** Accepted · 2026-07 · [ORB-10245] fixed the one-writer knowledge rule; [ORB-10272] implemented the Remote-v2 hub sequence, reconciliation, immutable ledger, and atomic allocation audit; [ORB-10330] added exact-owner preallocated finalizers; [ORB-10274] activated live composite creation and current-state routing, correlated owner-finalization audit, fail-closed replica policy, and the human-only allocation/sync surface.
 
 ### Context
 
@@ -107,8 +107,10 @@ closed, and a late workspace remains ineligible until reconciled under the hub l
 - A non-owner agent routes actionable work as a task to the owner.
 - Sequence advancement, immutable correlation ledger, and canonical hub audit are
   one transaction; exact request-identity replay is idempotent.
-- Standalone/worktree allocation remains unchanged until F3 activates and cuts over
-  public knowledge creation.
+- Standalone/worktree allocation remains unchanged; only explicit hub/spoke mode
+  uses hub-global issuance and owner-bound finalization.
+- Allocation is absent from MCP and generic tool registries; the manual CLI path
+  allocates without narrative/finalization, and sync is local-derived only.
 - Cost: finalize failure consumes a valid unused ID, and current spoke-owned knowledge is unavailable off-owner.
 
 ## ADR-0230 — Pull-based leases with immutable placement and explicit recovery

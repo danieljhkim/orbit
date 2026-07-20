@@ -449,10 +449,8 @@ const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.semantic.install",
     "orbit.semantic.stats",
     "orbit.learning.sync",
-    "orbit.learning.list",
     "orbit.friction.stats",
     // ORB-00289: trimmed admin/destructive tools — CLI path retains them.
-    "orbit.adr.list",
     "orbit.semantic.uninstall",
     "orbit.task.delete",
     "orbit.task.lint",
@@ -514,7 +512,7 @@ fn is_remote_owned_non_runtime_tool(name: &str) -> bool {
 #[test]
 fn inactive_tools_are_not_in_the_mcp_safe_surface() {
     let safe_names: BTreeSet<String> = safe_mcp_tool_names().into_iter().collect();
-    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 21);
+    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 19);
 
     for name in EXPECTED_INACTIVE_TOOL_NAMES {
         assert!(
@@ -1471,14 +1469,14 @@ mod audited_mcp_call_tests {
     #[test]
     fn inactive_tool_is_rejected_over_mcp_dispatch() {
         let runtime = OrbitRuntime::in_memory().expect("build test runtime");
-        let error = audited_mcp_call(&runtime, "orbit.learning.list", json!({ "model": "codex" }))
+        let error = audited_mcp_call(&runtime, "orbit.learning.sync", json!({ "model": "codex" }))
             .expect_err("inactive tool is not callable over MCP");
         assert!(error.to_string().contains("tool"));
 
         let events = runtime
             .list_audit_events(
                 None,
-                Some("orbit.learning.list".to_string()),
+                Some("orbit.learning.sync".to_string()),
                 None,
                 None,
                 16,

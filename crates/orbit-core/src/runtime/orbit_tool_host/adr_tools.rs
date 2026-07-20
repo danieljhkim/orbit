@@ -24,20 +24,49 @@ pub(super) fn add(
     agent: Option<String>,
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
-    let title = required_string(&input, &["title"], "title")?;
-    let owner = match optional_string(&input, "owner")? {
-        Some(value) => value,
-        None => actor_label(runtime, agent.as_deref(), model.as_deref()),
-    };
-    let body = required_string(&input, &["body"], "body")?;
-    let related_features =
-        optional_string_list_alias(&input, &["related_features", "features"])?.unwrap_or_default();
-    let related_tasks =
-        optional_string_list_alias(&input, &["related_tasks", "tasks"])?.unwrap_or_default();
-    let tags = optional_string_list_alias(&input, &["tags"])?.unwrap_or_default();
-    let paths = optional_string_list_alias(&input, &["paths"])?.unwrap_or_default();
+    let params = adr_create_params(runtime, &input, agent.as_deref(), model.as_deref())?;
+    let adr = runtime.stores().adrs().add(params)?;
+    runtime.record_id_allocation_audit("adr", &adr.id)?;
+    Ok(adr_to_json(&adr))
+}
 
-    let adr = runtime.stores().adrs().add(AdrCreateParams {
+impl OrbitRuntime {
+    /// Parse the public add payload and finalize one hub-issued ADR in this
+    /// runtime's exact owner checkout without touching the local allocator.
+    pub fn finalize_preallocated_adr_tool(
+        &self,
+        expected_runtime_workspace_id: &str,
+        id: &str,
+        input: Value,
+        model: Option<String>,
+    ) -> Result<Value, OrbitError> {
+        self.verify_preallocated_owner_runtime(expected_runtime_workspace_id)?;
+        let params = adr_create_params(self, &input, None, model.as_deref())?;
+        let adr = self.finalize_preallocated_adr(id, params)?;
+        Ok(adr_to_json(&adr))
+    }
+}
+
+fn adr_create_params(
+    runtime: &OrbitRuntime,
+    input: &Value,
+    agent: Option<&str>,
+    model: Option<&str>,
+) -> Result<AdrCreateParams, OrbitError> {
+    let title = required_string(input, &["title"], "title")?;
+    let owner = match optional_string(input, "owner")? {
+        Some(value) => value,
+        None => actor_label(runtime, agent, model),
+    };
+    let body = required_string(input, &["body"], "body")?;
+    let related_features =
+        optional_string_list_alias(input, &["related_features", "features"])?.unwrap_or_default();
+    let related_tasks =
+        optional_string_list_alias(input, &["related_tasks", "tasks"])?.unwrap_or_default();
+    let tags = optional_string_list_alias(input, &["tags"])?.unwrap_or_default();
+    let paths = optional_string_list_alias(input, &["paths"])?.unwrap_or_default();
+
+    Ok(AdrCreateParams {
         title,
         owner,
         related_features,
@@ -45,9 +74,7 @@ pub(super) fn add(
         tags,
         paths,
         body,
-    })?;
-    runtime.record_id_allocation_audit("adr", &adr.id)?;
-    Ok(adr_to_json(&adr))
+    })
 }
 
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {

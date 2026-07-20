@@ -13,6 +13,9 @@ pub(super) fn execute(
     model: Option<String>,
     reservation_owner: Option<ReservationOwnerContext>,
 ) -> Result<Value, OrbitError> {
+    runtime.enforce_knowledge_surface(crate::command::knowledge_policy::classify_builtin(
+        action, &input,
+    ))?;
     let (input, redaction_report) = super::artifact_redaction::sanitize_tool_input(action, input)?;
     let agent_for_audit = agent.clone();
     let model_for_audit = model.clone();

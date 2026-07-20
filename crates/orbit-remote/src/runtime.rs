@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use orbit_common::types::{
     OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry,
 };
+use orbit_core::command::knowledge_policy::KnowledgeOwnerAccess;
 use orbit_core::runtime::{
     OrbitRuntimeRoots, ResolvedOrbitRoots, WorkspaceRootHint, WorkspaceRuntimeBinding,
 };
@@ -88,24 +89,28 @@ impl RemoteRuntimeFactory {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let roots = Self::resolve_roots_for_cwd(&cwd, root_override)?;
         let binding = binding_for_roots(&roots)?;
+        let access = knowledge_access_for_roots(&roots)?;
         OrbitRuntime::initialize_from_resolved_roots(roots, binding)
+            .map(|runtime| runtime.with_knowledge_owner_access(access))
     }
 
     pub fn open_resolved_roots(roots: OrbitRuntimeRoots) -> Result<OrbitRuntime, OrbitError> {
         let binding = binding_for_roots(&roots)?;
-        match binding {
+        let access = knowledge_access_for_roots(&roots)?;
+        let runtime = match binding {
             Some(binding) => OrbitRuntime::from_resolved_roots_with_binding(
                 &roots.global_root,
                 &roots.shared_root,
                 &roots.local_root,
                 binding,
-            ),
+            )?,
             None => OrbitRuntime::from_resolved_roots(
                 &roots.global_root,
                 &roots.shared_root,
                 &roots.local_root,
-            ),
-        }
+            )?,
+        };
+        Ok(runtime.with_knowledge_owner_access(access))
     }
 
     pub fn open_registered_checkout(
@@ -114,7 +119,9 @@ impl RemoteRuntimeFactory {
         checkout: &WorkspaceCheckout,
     ) -> Result<OrbitRuntime, OrbitError> {
         let binding = workspace_runtime_binding(workspace, checkout)?;
+        let access = knowledge_access(global_root, workspace, checkout)?;
         OrbitRuntime::from_roots_with_binding(global_root, &checkout.orbit_dir, binding)
+            .map(|runtime| runtime.with_knowledge_owner_access(access))
     }
 
     pub fn open_resolved_checkout(
@@ -123,12 +130,14 @@ impl RemoteRuntimeFactory {
         local_root: &Path,
         binding: WorkspaceRuntimeBinding,
     ) -> Result<OrbitRuntime, OrbitError> {
+        let access = knowledge_access_for_shared_root(global_root, shared_root)?;
         OrbitRuntime::from_resolved_roots_with_binding(
             global_root,
             shared_root,
             local_root,
             binding,
         )
+        .map(|runtime| runtime.with_knowledge_owner_access(access))
     }
 }
 
@@ -146,6 +155,100 @@ fn binding_for_roots(
     let registry_path = workspace_registry::registry_path_for(&roots.global_root);
     let registry = workspace_registry::load_registry_from(&registry_path)?;
     binding_for_registry_roots(&registry, &roots.shared_root)
+}
+
+fn knowledge_access_for_roots(
+    roots: &OrbitRuntimeRoots,
+) -> Result<KnowledgeOwnerAccess, OrbitError> {
+    knowledge_access_for_shared_root(&roots.global_root, &roots.shared_root)
+}
+
+fn knowledge_access_for_shared_root(
+    global_root: &Path,
+    shared_root: &Path,
+) -> Result<KnowledgeOwnerAccess, OrbitError> {
+    let registry_path = workspace_registry::registry_path_for(global_root);
+    let registry = workspace_registry::load_registry_from(&registry_path)?;
+    let shared = std::fs::canonicalize(shared_root).unwrap_or_else(|_| shared_root.to_path_buf());
+    for (workspace, checkout) in workspace_registry::local_workspaces(&registry) {
+        let registered = std::fs::canonicalize(&checkout.orbit_dir)
+            .unwrap_or_else(|_| checkout.orbit_dir.clone());
+        if registered == shared {
+            return knowledge_access(global_root, workspace, checkout);
+        }
+    }
+    Ok(KnowledgeOwnerAccess::Standalone)
+}
+
+fn knowledge_access(
+    global_root: &Path,
+    workspace: &Workspace,
+    checkout: &WorkspaceCheckout,
+) -> Result<KnowledgeOwnerAccess, OrbitError> {
+    let identity = crate::inspect_host_identity(global_root)?;
+    let crate::HostIdentityState::Present(identity) = identity else {
+        return Ok(KnowledgeOwnerAccess::Standalone);
+    };
+    if identity.mode == crate::HostMode::Standalone {
+        return Ok(KnowledgeOwnerAccess::Standalone);
+    }
+    let owner_machine_id = workspace.owner_machine_id.clone().ok_or_else(|| {
+        OrbitError::InvalidInput(format!(
+            "workspace '{}' has no declared owner in {} mode",
+            workspace.id, identity.mode
+        ))
+    })?;
+    match checkout.role {
+        Some(WorkspaceCheckoutRole::Owner) if owner_machine_id == identity.machine_id => {
+            Ok(KnowledgeOwnerAccess::Owner { owner_machine_id })
+        }
+        Some(WorkspaceCheckoutRole::Replica) => {
+            Ok(KnowledgeOwnerAccess::Replica { owner_machine_id })
+        }
+        _ => Ok(KnowledgeOwnerAccess::Unavailable { owner_machine_id }),
+    }
+}
+
+/// Runtime-free owner guard for compatibility commands that must inspect or
+/// migrate a checkout before opening its normal runtime.
+pub fn require_local_knowledge_owner(
+    global_root: &Path,
+    selected_path: &Path,
+) -> Result<(), OrbitError> {
+    match crate::inspect_host_identity(global_root)? {
+        crate::HostIdentityState::Present(identity)
+            if identity.mode != crate::HostMode::Standalone => {}
+        _ => return Ok(()),
+    }
+    let registry = workspace_registry::load_registry_from(&workspace_registry::registry_path_for(
+        global_root,
+    ))?;
+    let checkout =
+        workspace_registry::find_checkout_by_path(&registry, selected_path).ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "knowledge operation path '{}' is not inside a registered checkout",
+                selected_path.display()
+            ))
+        })?;
+    let workspace = registry
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == checkout.workspace_id)
+        .ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "knowledge checkout names unknown workspace '{}'",
+                checkout.workspace_id
+            ))
+        })?;
+    match knowledge_access(global_root, workspace, checkout)? {
+        KnowledgeOwnerAccess::Standalone | KnowledgeOwnerAccess::Owner { .. } => Ok(()),
+        KnowledgeOwnerAccess::Replica { owner_machine_id }
+        | KnowledgeOwnerAccess::Unavailable { owner_machine_id } => {
+            Err(OrbitError::InvalidInput(format!(
+                "current-state unavailable; owner={owner_machine_id}; replica layout mutation is forbidden"
+            )))
+        }
+    }
 }
 
 fn binding_for_registry_roots(

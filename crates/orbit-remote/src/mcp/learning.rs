@@ -106,7 +106,7 @@ impl LearningSidecarDecorator {
         canonical: &str,
         input: Value,
         value: Value,
-        session_context: ToolSessionContext,
+        mut session_context: ToolSessionContext,
     ) -> Result<Value, McpResultDecorationError> {
         if !learning_sidecar_tool(canonical) {
             return Ok(value);
@@ -115,6 +115,15 @@ impl LearningSidecarDecorator {
         if paths.is_empty() {
             return Ok(value);
         }
+        // Result decoration receives the immutable server-call context, not
+        // the broker's normalized copy. Preserve the stable selector carried
+        // by ordinary tool input so the sidecar follows the same owner route.
+        if session_context.workspace.is_none()
+            && let Some(workspace) = input.get("workspace").and_then(Value::as_str)
+        {
+            session_context.workspace = Some(workspace.to_string());
+            session_context.workspace_id = Some(workspace.to_string());
+        }
 
         let host = Arc::clone(&self.host);
         let caps = self.learning_caps;
@@ -122,25 +131,17 @@ impl LearningSidecarDecorator {
             search_learning_reminders(&*host, &paths, caps, session_context)
         })
         .await;
-        let reminders = match join {
-            Ok(Ok(reminders)) => reminders,
-            Ok(Err(error)) => {
-                tracing::warn!(
-                    target: "orbit.mcp.learnings",
-                    error = %error,
-                    "failed to search learning sidecar",
-                );
-                Vec::new()
-            }
-            Err(error) => {
-                tracing::warn!(
-                    target: "orbit.mcp.learnings",
-                    error = %error,
-                    "learning sidecar worker failed",
-                );
-                Vec::new()
-            }
-        };
+        let reminders = join
+            .map_err(|error| {
+                McpResultDecorationError::new(format!(
+                    "learning sidecar current-state lookup worker failed: {error}"
+                ))
+            })?
+            .map_err(|error| {
+                McpResultDecorationError::new(format!(
+                    "learning sidecar current-state unavailable: {error}"
+                ))
+            })?;
         if reminders.is_empty() {
             return Ok(value);
         }

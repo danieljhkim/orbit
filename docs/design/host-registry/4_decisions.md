@@ -10,7 +10,7 @@ summary: ADR log for the coupled Host Registry and MCP Bridge v1 contract and it
 tags: [host-registry, mcp-bridge, multi-host, placement]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10274, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Host Registry — Decisions
@@ -91,7 +91,7 @@ filtered non-empty capability set.
 
 ## ADR-0229 — Owner-authored knowledge with hub-global IDs and explicit replicas
 
-**Status:** Accepted · 2026-07 · [ORB-10245] fixed the one-writer knowledge rule; [ORB-10272] implemented its dormant hub-global sequence, validated reconciliation, and immutable allocation-ledger substrate without activating public issuance; [ORB-10330] added the owner-side preallocated finalizers and the gated broker composition (hub allocation → exact-owner finalization) while keeping public creation on the compatibility path until F3.
+**Status:** Accepted · 2026-07 · [ORB-10245] fixed the one-writer knowledge rule; [ORB-10272] implemented its dormant hub-global sequence, validated reconciliation, and immutable allocation ledger; [ORB-10330] added exact-owner preallocated finalizers; [ORB-10274] activated the forward-only multi-host cutover, live owner broker, shared lifecycle policy, and human allocation/sync path while retaining standalone allocation.
 
 ### Context
 
@@ -112,8 +112,10 @@ reconciliation succeeds under the allocator lock.
 - A non-owner agent routes actionable work as a task to the owner.
 - Exact `mcp_call_id` replay is idempotent only for the same full request identity;
   sequence advance, immutable ledger append, and canonical hub audit commit atomically.
-- Standalone/worktree allocation remains the compatibility path until F3 performs
-  the explicit activation and caller cutover.
+- Standalone/worktree allocation remains the compatibility path; explicit hub/spoke
+  mode activates global issuance on first authoring after complete reseed.
+- Human allocation is CLI-only and narrative-free; local sync prevalidates committed
+  files against immutable hub occupancy before rebuilding derived indexes.
 - Cost: finalize failure consumes a valid unused ID, and current spoke-owned knowledge is unavailable off-owner.
 
 ## ADR-0230 — Pull-based leases with immutable placement and explicit recovery

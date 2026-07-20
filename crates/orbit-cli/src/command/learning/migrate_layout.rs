@@ -19,6 +19,7 @@ impl LearningMigrateLayoutArgs {
     ) -> Result<(), OrbitError> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let roots = RemoteRuntimeFactory::resolve_roots_for_cwd(&cwd, root_override)?;
+        orbit_remote::runtime::require_local_knowledge_owner(&roots.global_root, &cwd)?;
         let report = migrate_learning_layout_at(&roots.shared_root)?;
         if !report.already_migrated {
             let runtime = RemoteRuntimeFactory::open_resolved_roots(roots)?;

@@ -734,6 +734,10 @@ impl AdrRecords<'_> {
         self.store.add_adr(params)
     }
 
+    pub(crate) fn rebuild_index(&self) -> Result<(), OrbitError> {
+        self.store.rebuild_index()
+    }
+
     /// [ORB-10330] Finalize a hub-preallocated ADR at the caller-supplied
     /// canonical id in this checkout-bound store. Never allocates or renumbers.
     pub(crate) fn finalize_preallocated(
@@ -754,7 +758,6 @@ impl AdrRecords<'_> {
 
     /// Unfiltered list. The tool surface uses [`Self::list_filtered`]; this
     /// helper exists for maintenance / CLI tooling layered on top later.
-    #[allow(dead_code)]
     pub(crate) fn list(&self) -> Result<Vec<Adr>, OrbitError> {
         self.store.list_adrs()
     }

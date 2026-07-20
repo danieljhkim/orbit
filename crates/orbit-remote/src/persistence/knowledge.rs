@@ -26,6 +26,21 @@ pub enum HubKnowledgeAllocatorStatus {
     Active,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KnowledgeAuthorityCutoverStatus {
+    PreActivation,
+    Reconciling,
+    Active,
+    FailedIncomplete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnowledgeAuthorityCutoverState {
+    pub status: KnowledgeAuthorityCutoverStatus,
+    pub generation: u64,
+    pub last_error: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HubKnowledgeAllocatorState {
     pub status: HubKnowledgeAllocatorStatus,
@@ -150,8 +165,101 @@ impl RemoteStore {
         self.read(read_allocator_state)
     }
 
-    // F1 deliberately installs a dormant substrate; F3 will call this during cutover.
-    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn knowledge_cutover_state(
+        &self,
+    ) -> Result<KnowledgeAuthorityCutoverState, OrbitError> {
+        self.read(read_cutover_state)
+    }
+
+    /// Enter (or resume) reconciliation before source discovery. Managed
+    /// authoring consults the hub before this point, so retrying an interrupted
+    /// generation cannot expose the legacy allocator as a second authority.
+    pub(crate) fn begin_knowledge_cutover(
+        &self,
+    ) -> Result<KnowledgeAuthorityCutoverState, OrbitError> {
+        self.store
+            .with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+                let current = read_cutover_state(tx.connection())?;
+                if current.status == KnowledgeAuthorityCutoverStatus::Active {
+                    return Ok(current);
+                }
+                let generation = current.generation.checked_add(1).ok_or_else(|| {
+                    OrbitError::Store("knowledge cutover generation overflow".into())
+                })?;
+                tx.connection()
+                    .execute(
+                        "UPDATE hub_knowledge_cutover_state
+                         SET status = 'reconciling', generation = ?1,
+                             last_error = NULL, updated_at = ?2 WHERE id = 0",
+                        params![
+                            u64_to_i64(generation, "knowledge cutover generation")?,
+                            super::now_string()
+                        ],
+                    )
+                    .map_err(|error| {
+                        OrbitError::Store(format!("begin knowledge authority cutover: {error}"))
+                    })?;
+                read_cutover_state(tx.connection())
+            })
+    }
+
+    pub(crate) fn complete_knowledge_cutover(
+        &self,
+    ) -> Result<KnowledgeAuthorityCutoverState, OrbitError> {
+        self.store
+            .with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+                let allocator = read_allocator_state(tx.connection())?;
+                if allocator.status != HubKnowledgeAllocatorStatus::Active {
+                    return Err(OrbitError::Store(
+                        "cannot complete knowledge cutover before allocator activation".into(),
+                    ));
+                }
+                tx.connection()
+                    .execute(
+                        "UPDATE hub_knowledge_cutover_state
+                         SET status = 'active', generation = MAX(generation, ?1),
+                             last_error = NULL, updated_at = ?2 WHERE id = 0",
+                        params![
+                            u64_to_i64(
+                                allocator.activation_generation,
+                                "knowledge activation generation"
+                            )?,
+                            super::now_string()
+                        ],
+                    )
+                    .map_err(|error| {
+                        OrbitError::Store(format!("complete knowledge authority cutover: {error}"))
+                    })?;
+                read_cutover_state(tx.connection())
+            })
+    }
+
+    pub(crate) fn fail_knowledge_cutover(
+        &self,
+        error: &OrbitError,
+    ) -> Result<KnowledgeAuthorityCutoverState, OrbitError> {
+        self.store
+            .with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+                let current = read_cutover_state(tx.connection())?;
+                if current.status == KnowledgeAuthorityCutoverStatus::Active {
+                    return Ok(current);
+                }
+                tx.connection()
+                    .execute(
+                        "UPDATE hub_knowledge_cutover_state
+                         SET status = 'failed-incomplete', last_error = ?1,
+                             updated_at = ?2 WHERE id = 0",
+                        params![error.to_string(), super::now_string()],
+                    )
+                    .map_err(|store_error| {
+                        OrbitError::Store(format!(
+                            "record failed knowledge authority cutover: {store_error}"
+                        ))
+                    })?;
+                read_cutover_state(tx.connection())
+            })
+    }
+
     pub(crate) fn activate_knowledge_allocator(
         &self,
         inventories: Vec<KnowledgeWorkspaceInventory>,
@@ -365,6 +473,28 @@ impl RemoteStore {
                  WHERE workspace_id = ?1 AND kind = ?2 AND id = ?3",
                 params![workspace_id, kind.as_str(), id],
                 allocation_row,
+            )
+            .optional()
+            .map_err(|error| OrbitError::Store(error.to_string()))
+        })
+    }
+
+    pub(crate) fn hub_knowledge_id_workspace(
+        &self,
+        kind: KnowledgeIdKind,
+        id: &str,
+    ) -> Result<Option<String>, OrbitError> {
+        if kind.parse_id(id).is_none() {
+            return Err(OrbitError::InvalidInput(format!(
+                "invalid {} id '{id}'",
+                kind.as_str()
+            )));
+        }
+        self.read(|conn| {
+            conn.query_row(
+                "SELECT workspace_id FROM hub_knowledge_ids WHERE kind = ?1 AND id = ?2",
+                params![kind.as_str(), id],
+                |row| row.get(0),
             )
             .optional()
             .map_err(|error| OrbitError::Store(error.to_string()))
@@ -704,6 +834,35 @@ fn read_allocator_state(conn: &Connection) -> Result<HubKnowledgeAllocatorState,
         activated_at,
         adr_next_sequence: read_next_sequence(conn, KnowledgeIdKind::Adr)?,
         learning_next_sequence: read_next_sequence(conn, KnowledgeIdKind::Learning)?,
+    })
+}
+
+fn read_cutover_state(conn: &Connection) -> Result<KnowledgeAuthorityCutoverState, OrbitError> {
+    let (status, generation, last_error): (String, i64, Option<String>) = conn
+        .query_row(
+            "SELECT status, generation, last_error
+             FROM hub_knowledge_cutover_state WHERE id = 0",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|error| OrbitError::Store(format!("read knowledge cutover state: {error}")))?;
+    let status = match status.as_str() {
+        "pre-activation" => KnowledgeAuthorityCutoverStatus::PreActivation,
+        "reconciling" => KnowledgeAuthorityCutoverStatus::Reconciling,
+        "active" => KnowledgeAuthorityCutoverStatus::Active,
+        "failed-incomplete" => KnowledgeAuthorityCutoverStatus::FailedIncomplete,
+        other => {
+            return Err(OrbitError::Store(format!(
+                "invalid knowledge cutover status '{other}'"
+            )));
+        }
+    };
+    Ok(KnowledgeAuthorityCutoverState {
+        status,
+        generation: u64::try_from(generation).map_err(|error| {
+            OrbitError::Store(format!("invalid knowledge cutover generation: {error}"))
+        })?,
+        last_error,
     })
 }
 

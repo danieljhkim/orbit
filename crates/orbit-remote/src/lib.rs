@@ -48,9 +48,13 @@ pub use host_identity::{
     load_host_identity, os_hostname, rename_current_host_identity,
 };
 pub use host_registry::{HostRegistryService, WorkspaceLink, require_local_hub_identity};
-pub use knowledge::{HubKnowledgeSequenceService, scan_registered_knowledge_inventories};
+pub use knowledge::{
+    HubKnowledgeSequenceService, KnowledgeSyncCounts, scan_registered_knowledge_inventories,
+    validate_local_knowledge_for_sync,
+};
 pub use mcp::{
-    canonical_mcp_tool_definitions, register_local_spoke, safe_mcp_tool_names, serve_mcp_stdio,
+    allocate_knowledge_id_for_human, canonical_mcp_tool_definitions,
+    execute_managed_knowledge_tool, register_local_spoke, safe_mcp_tool_names, serve_mcp_stdio,
 };
 pub use persistence::RemoteStore;
 pub use profile::build_execution_profile_v1;

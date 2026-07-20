@@ -14,7 +14,9 @@ use super::schema::remote_input_schema;
 /// Bumping this fact prevents a newer client from negotiating successfully
 /// with a hub that has the same canonical tool schemas but no allocation seam.
 pub const MCP_CONTRACT_REVISION: u32 = 3;
-pub const CANONICAL_MCP_REGISTRY_REVISION: u32 = 1;
+/// Revision 2 adds owner-routed ADR and learning list reads for F3. Manual
+/// allocation and sync remain outside the MCP registry.
+pub const CANONICAL_MCP_REGISTRY_REVISION: u32 = 2;
 pub const HUB_SCHEMA_DOMAIN: &str = "orbit.mcp.hub-schema.v1";
 pub const HUB_CONTRACT_INSTRUCTIONS_PREFIX: &str = "orbit-hub-contract-v1:";
 

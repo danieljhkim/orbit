@@ -21,7 +21,6 @@ const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.semantic.install",
     "orbit.semantic.stats",
     "orbit.learning.sync",
-    "orbit.learning.list",
     "orbit.friction.stats",
 ];
 
@@ -235,7 +234,7 @@ fn tool_run_rejects_inactive_tools() {
         .args([
             "tool",
             "run",
-            "orbit.learning.list",
+            "orbit.learning.sync",
             "--input",
             "{\"model\":\"codex\"}",
         ])

@@ -1,4 +1,5 @@
 use clap::Args;
+use orbit_core::command::knowledge_policy::KnowledgeOwnerAccess;
 use orbit_core::{LearningStatus, OrbitError, OrbitRuntime};
 use serde_json::json;
 
@@ -13,6 +14,17 @@ pub struct LearningSyncArgs {
 
 impl Execute for LearningSyncArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        if !matches!(
+            runtime.knowledge_owner_access(),
+            KnowledgeOwnerAccess::Standalone
+        ) {
+            orbit_remote::validate_local_knowledge_for_sync(
+                &runtime.global_root(),
+                &runtime.paths().repo_root,
+                false,
+                true,
+            )?;
+        }
         runtime.sync_learnings()?;
         let active = runtime.list_learnings(Some(LearningStatus::Active))?.len();
         let superseded = runtime

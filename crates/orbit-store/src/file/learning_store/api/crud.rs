@@ -193,7 +193,12 @@ impl LearningFileStore {
         learning: &Learning,
     ) -> Result<(), OrbitError> {
         self.id_allocator.project_preallocated_learning(id, path)?;
-        self.upsert_index_row(learning);
+        if let Err(error) = self.upsert_index_row_strict(learning) {
+            let _ = self
+                .id_allocator
+                .remove_preallocated_learning_projection(id);
+            return Err(error);
+        }
         self.invalidate_envelope_cache();
         Ok(())
     }

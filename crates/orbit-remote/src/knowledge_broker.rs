@@ -26,7 +26,6 @@ use crate::HubKnowledgeSequenceService;
 /// a request that could never finalize locally never consumes a global id and
 /// never opens an owner/spoke connection.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) enum KnowledgeOwnerPlacement {
     /// This hub owns the workspace: allocate here and finalize in the validated
     /// owner checkout the hub controls.
@@ -71,7 +70,6 @@ impl KnowledgeOwnerPlacement {
 /// finalization correlate through the original trusted `allocation.mcp_call_id`
 /// (equal to `context.mcp_call_id`), plus the workspace id, knowledge kind, and
 /// allocated id carried on the returned allocation.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn compose_preallocated_knowledge_add<F>(
     allocator: &HubKnowledgeSequenceService,
     request: &HubKnowledgeAllocationRequestV1,

@@ -3,6 +3,7 @@ pub mod connection;
 pub mod id_allocator;
 pub(crate) mod invocation_store;
 pub mod job_run_store;
+pub mod knowledge_index;
 pub mod learning_index;
 pub mod migration;
 pub(crate) mod read_pool;

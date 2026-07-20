@@ -19,7 +19,8 @@ mod snapshot;
 
 pub use knowledge::{
     HubKnowledgeAllocatorState, HubKnowledgeAllocatorStatus, HubKnowledgeRequestIdentityV1,
-    KnowledgeWorkspaceInventory, LegacyKnowledgeId,
+    KnowledgeAuthorityCutoverState, KnowledgeAuthorityCutoverStatus, KnowledgeWorkspaceInventory,
+    LegacyKnowledgeId,
 };
 
 const REMOTE_SCHEMA_FEATURE: &str = "orbit-remote";
@@ -33,6 +34,11 @@ const REMOTE_SCHEMA_MIGRATIONS: &[FeatureMigration] = &[
         2,
         "dormant_hub_knowledge_sequences",
         apply_dormant_hub_knowledge_sequences,
+    ),
+    FeatureMigration::new(
+        3,
+        "knowledge_authority_cutover_state",
+        apply_knowledge_authority_cutover_state,
     ),
 ];
 
@@ -383,6 +389,47 @@ fn apply_dormant_hub_knowledge_sequences(conn: &Connection) -> Result<(), OrbitE
     .map_err(|error| {
         OrbitError::Migration(format!(
             "apply orbit-remote dormant hub knowledge sequence schema: {error}"
+        ))
+    })?;
+    Ok(())
+}
+
+/// Remote v3 records F3's exclusive, forward-only authority cutover.  This is
+/// separate from allocator activation so a process restart can distinguish an
+/// untouched installation from an interrupted reconciliation and resume it
+/// without re-enabling compatibility authoring.
+fn apply_knowledge_authority_cutover_state(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE hub_knowledge_cutover_state (
+            id          INTEGER PRIMARY KEY CHECK (id = 0),
+            status      TEXT NOT NULL CHECK (
+                status IN ('pre-activation', 'reconciling', 'active', 'failed-incomplete')
+            ),
+            generation  INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+            last_error  TEXT,
+            updated_at  TEXT NOT NULL,
+            CHECK (
+                (status = 'failed-incomplete' AND last_error IS NOT NULL)
+                OR (status != 'failed-incomplete' AND last_error IS NULL)
+            )
+        );
+
+        INSERT INTO hub_knowledge_cutover_state(
+            id, status, generation, last_error, updated_at
+        )
+        SELECT 0,
+               CASE status WHEN 'active' THEN 'active' ELSE 'pre-activation' END,
+               activation_generation,
+               NULL,
+               updated_at
+        FROM hub_knowledge_allocator_state
+        WHERE id = 0;
+        "#,
+    )
+    .map_err(|error| {
+        OrbitError::Migration(format!(
+            "apply orbit-remote knowledge authority cutover schema: {error}"
         ))
     })?;
     Ok(())

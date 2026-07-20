@@ -22,6 +22,7 @@ pub mod docs;
 pub mod executor;
 pub mod init;
 pub mod job;
+pub mod knowledge_policy;
 pub mod learning;
 pub mod pipeline_run;
 pub mod policy;

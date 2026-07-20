@@ -12,6 +12,7 @@ pub mod hook;
 pub mod host;
 pub mod init;
 pub mod job;
+pub mod knowledge;
 pub mod learning;
 pub mod locks;
 pub mod log;
@@ -72,6 +73,7 @@ Operate:
   docs        Search and manage the indexed docs corpus
   adr         List and inspect Architecture Decision Records
   friction    Report, list, and triage friction records
+  knowledge   Allocate global knowledge IDs and rebuild local indexes
   learning    Create, search, and curate project learnings
 
 Observe:
@@ -126,6 +128,7 @@ pub enum Commands {
     Docs(docs::DocsCommand),
     Adr(adr::AdrCommand),
     Friction(friction::FrictionCommand),
+    Knowledge(knowledge::KnowledgeCommand),
     Learning(learning::LearningCommand),
 
     // ── Observe ──
