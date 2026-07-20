@@ -17,7 +17,7 @@ pub struct InvocationQuery {
     pub limit: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InvocationInsertParams {
     pub job_run_id: String,
     pub activity_id: String,

@@ -396,7 +396,10 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
         .route("/metrics/activity", get(metrics::activity_metrics))
         .route("/metrics/tools", get(metrics::tool_metrics))
         .route("/metrics/task/:id", get(metrics::task_metrics))
-        .route("/metrics/invocations", get(metrics::invocation_metrics))
+        .route(
+            "/metrics/invocations",
+            get(metrics::invocation_metrics).post(metrics::ingest_invocation),
+        )
         .route(
             "/diagnostics/metrics",
             get(diagnostics::list_diagnostics_metrics),
