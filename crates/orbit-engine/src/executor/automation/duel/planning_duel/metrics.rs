@@ -1,8 +1,8 @@
 use orbit_common::types::{
     OrbitError, PlanningDuelRun, PlanningEfficiency, PlanningOutcome, PlanningRoleAssignment,
-    PlanningRoles, RoleSlot,
+    PlanningRoles, RoleSlot, TokenUsage,
 };
-use orbit_store::planning_duel_scoreboard;
+use orbit_store::{InvocationQuery, InvocationRecord, planning_duel_scoreboard};
 use serde_json::{Value, json};
 
 use crate::context::{ActivityInvocationResult, RuntimeHost, TaskHost};
@@ -22,18 +22,49 @@ fn efficiency_from_invocation(invocation: &ActivityInvocationResult) -> Planning
         // wall clock separately from the invocation trace payload.
         wall_clock_ms: invocation.duration_ms,
         tool_call_count: trace.tool_calls.len() as u64,
-        input_tokens: trace.usage.input,
-        cache_read_tokens: trace.usage.cache_read,
-        cache_create_tokens: trace.usage.cache_create,
-        output_tokens: trace.usage.output,
-        total_tokens: trace
-            .usage
-            .input
-            .saturating_add(trace.usage.cache_read)
-            .saturating_add(trace.usage.cache_create)
-            .saturating_add(trace.usage.output),
+        // Token usage is taken from the persisted invocation telemetry below.
+        // The direct activity result is not the durable telemetry source.
+        token_usage: None,
         byte_proxy_total: trace.tool_calls.iter().map(|call| call.result_bytes).sum(),
     }
+}
+
+pub(super) fn aggregate_token_usage(records: &[InvocationRecord]) -> TokenUsage {
+    records
+        .iter()
+        .fold(TokenUsage::default(), |mut usage, record| {
+            usage.input = usage.input.saturating_add(record.input_tokens);
+            usage.cache_read = usage.cache_read.saturating_add(record.cache_read_tokens);
+            usage.cache_create = usage
+                .cache_create
+                .saturating_add(record.cache_create_tokens);
+            usage.output = usage.output.saturating_add(record.output_tokens);
+            usage
+        })
+}
+
+fn token_usage_from_run_telemetry<H: RuntimeHost + ?Sized>(
+    host: &H,
+    job_run_id: &str,
+    task_id: &str,
+    activity_id: &str,
+    slot: RoleSlot,
+) -> Result<TokenUsage, OrbitError> {
+    let records = host.invocation_records(InvocationQuery {
+        job_run_id: Some(job_run_id.to_string()),
+        activity_id: Some(activity_id.to_string()),
+        task_id: Some(task_id.to_string()),
+        slot: Some(slot),
+        limit: 1_000_000,
+        ..InvocationQuery::default()
+    })?;
+    if records.is_empty() {
+        return Err(OrbitError::Execution(format!(
+            "missing invocation telemetry for planning-duel {slot} in job run '{job_run_id}'"
+        )));
+    }
+
+    Ok(aggregate_token_usage(&records))
 }
 
 pub(super) fn role_metrics_from_invocation(
@@ -92,22 +123,52 @@ pub(super) fn record_planning_duel_scores<H: RuntimeHost + TaskHost + ?Sized>(
 
     let PlanningDuelRoleMetrics {
         family: planner_a_family,
-        slot: _,
-        activity_id: _,
-        efficiency: planner_a_efficiency,
+        slot: planner_a_slot,
+        activity_id: planner_a_activity_id,
+        efficiency: mut planner_a_efficiency,
     } = planner_a_role;
     let PlanningDuelRoleMetrics {
         family: planner_b_family,
-        slot: _,
-        activity_id: _,
-        efficiency: planner_b_efficiency,
+        slot: planner_b_slot,
+        activity_id: planner_b_activity_id,
+        efficiency: mut planner_b_efficiency,
     } = planner_b_role;
     let PlanningDuelRoleMetrics {
         family: arbiter_family,
-        slot: _,
-        activity_id: _,
-        efficiency: arbiter_efficiency,
+        slot: arbiter_slot,
+        activity_id: arbiter_activity_id,
+        efficiency: mut arbiter_efficiency,
     } = arbiter_role;
+    if planner_a_slot != RoleSlot::PlannerA
+        || planner_b_slot != RoleSlot::PlannerB
+        || arbiter_slot != RoleSlot::Arbiter
+    {
+        return Err(OrbitError::InvalidInput(
+            "planning-duel role metrics must use planner_a, planner_b, and arbiter slots"
+                .to_string(),
+        ));
+    }
+    planner_a_efficiency.token_usage = Some(token_usage_from_run_telemetry(
+        host,
+        &job_run_id,
+        task_id,
+        &planner_a_activity_id,
+        planner_a_slot,
+    )?);
+    planner_b_efficiency.token_usage = Some(token_usage_from_run_telemetry(
+        host,
+        &job_run_id,
+        task_id,
+        &planner_b_activity_id,
+        planner_b_slot,
+    )?);
+    arbiter_efficiency.token_usage = Some(token_usage_from_run_telemetry(
+        host,
+        &job_run_id,
+        task_id,
+        &arbiter_activity_id,
+        arbiter_slot,
+    )?);
     let roles = PlanningRoles {
         planner_a: PlanningRoleAssignment {
             family: planner_a_family,

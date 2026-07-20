@@ -1,4 +1,6 @@
-use orbit_common::types::{AgentFamily, EfficiencyMetrics, PlanningRoleAssignment, RoleSlot};
+use orbit_common::types::{
+    AgentFamily, EfficiencyMetrics, PlanningRoleAssignment, RoleSlot, TokenUsage,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,11 +16,7 @@ pub(super) struct PlanningDuelEfficiency {
     pub invocation_count: u64,
     pub wall_clock_ms: u64,
     pub tool_call_count: u64,
-    pub input_tokens: u64,
-    pub cache_read_tokens: u64,
-    pub cache_create_tokens: u64,
-    pub output_tokens: u64,
-    pub total_tokens: u64,
+    pub token_usage: Option<TokenUsage>,
     pub byte_proxy_total: u64,
 }
 
@@ -59,22 +57,13 @@ pub(super) struct PlanningDuelPlanArtifact {
 }
 
 pub(super) fn into_efficiency_metrics(value: PlanningDuelEfficiency) -> EfficiencyMetrics {
-    let token_usage = orbit_common::types::TokenUsage {
-        input: value.input_tokens,
-        cache_read: value.cache_read_tokens,
-        cache_create: value.cache_create_tokens,
-        output: value.output_tokens,
-    };
-    let has_exact_tokens = token_usage.input > 0
-        || token_usage.cache_read > 0
-        || token_usage.cache_create > 0
-        || token_usage.output > 0;
+    let has_token_usage = value.token_usage.is_some();
 
     EfficiencyMetrics {
         wall_clock_ms: value.wall_clock_ms,
         tool_call_count: value.tool_call_count.min(u32::MAX as u64) as u32,
-        token_usage: has_exact_tokens.then_some(token_usage),
-        byte_proxy_total: (!has_exact_tokens && value.byte_proxy_total > 0)
+        token_usage: value.token_usage,
+        byte_proxy_total: (!has_token_usage && value.byte_proxy_total > 0)
             .then_some(value.byte_proxy_total),
     }
 }
