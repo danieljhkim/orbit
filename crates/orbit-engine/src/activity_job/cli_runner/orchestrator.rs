@@ -203,6 +203,17 @@ pub fn run_cli_backend(
         child_env.push(("ORBIT_TASK_ID".to_string(), task_id.to_string()));
         child_env.push(("ORBIT_ACTIVE_TASK_ID".to_string(), task_id.to_string()));
     }
+    // Telemetry trailers (ORB-10342, mirrors ORB-10340's worker-side spawn):
+    // the shared prepare-commit-msg injector reads these to stamp
+    // Agent-Run/Agent-Model/Agent-Task on every commit a pipeline-gate
+    // provider CLI makes. Omitted (not empty) when unknown.
+    child_env.push(("AGENT_RUN_ID".to_string(), run_id.to_string()));
+    if let Some(model_name) = model.as_deref() {
+        child_env.push(("AGENT_MODEL".to_string(), model_name.to_string()));
+    }
+    if let Some(task_id) = task_id_from_input(input) {
+        child_env.push(("AGENT_TASK".to_string(), task_id.to_string()));
+    }
     let spawn_result = spawn_with_timeout(SpawnWithTimeoutRequest {
         program: &invocation.program,
         args: &subprocess_args,

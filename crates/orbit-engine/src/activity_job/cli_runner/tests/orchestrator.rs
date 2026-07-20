@@ -1649,6 +1649,110 @@ fi
     assert_eq!(outcome.output["provider"], "grok");
 }
 
+/// ORB-10342: pipeline-gate provider spawns must carry the same
+/// AGENT_RUN_ID/AGENT_MODEL/AGENT_TASK trio the worker path sets
+/// (ORB-10340), so the shared prepare-commit-msg injector can stamp commit
+/// trailers regardless of which spawner produced the commit.
+#[test]
+fn run_cli_backend_sets_agent_telemetry_env_vars_for_commit_trailers() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("grok");
+    write_executable(
+        &script,
+        r#"#!/bin/sh
+cat > /dev/null
+if [ "$AGENT_RUN_ID" = "job-grok-telemetry" ] && [ "$AGENT_MODEL" = "grok-build" ] && [ "$AGENT_TASK" = "ORB-10342" ]; then
+  printf '%s\n' '{"schemaVersion":1,"status":"success","result":{"identity":"ok"},"error":null}'
+else
+  printf '%s\n' '{"schemaVersion":1,"status":"failed","error":{"code":"telemetry_env_missing","message":"agent telemetry env was not propagated","details":null}}'
+  exit 1
+fi
+"#,
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-grok-telemetry",
+        "grok:grok-build",
+        sink_for_writer,
+    ));
+    let host = TestHost {
+        command: script.display().to_string(),
+        executor_args: Vec::new(),
+        provider_config: HashMap::new(),
+        sandbox: None,
+        task_context: None,
+        workspace_root: None,
+    };
+    let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
+    spec.model = Some("grok-build".to_string());
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-grok-telemetry",
+        audit,
+        &serde_json::json!({"prompt": "hi", "task_id": "ORB-10342"}),
+        None,
+    )
+    .expect("run succeeds");
+
+    assert!(outcome.success);
+    assert_eq!(outcome.output["provider"], "grok");
+}
+
+/// AGENT_MODEL/AGENT_TASK must be omitted (unset), not set to an empty
+/// string, when the model or task id is unknown — mirrors ORB-10340's
+/// worker-side semantics. AGENT_RUN_ID is always known for a dispatched run.
+#[test]
+fn run_cli_backend_omits_agent_model_and_task_env_vars_when_unknown() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("grok");
+    write_executable(
+        &script,
+        r#"#!/bin/sh
+cat > /dev/null
+if [ "$AGENT_RUN_ID" = "job-grok-telemetry-unknown" ] && [ -z "${AGENT_MODEL+x}" ] && [ -z "${AGENT_TASK+x}" ]; then
+  printf '%s\n' '{"schemaVersion":1,"status":"success","result":{"identity":"ok"},"error":null}'
+else
+  printf '%s\n' '{"schemaVersion":1,"status":"failed","error":{"code":"telemetry_env_unexpected","message":"agent telemetry env should be unset when unknown","details":null}}'
+  exit 1
+fi
+"#,
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-grok-telemetry-unknown",
+        "grok",
+        sink_for_writer,
+    ));
+    let host = TestHost {
+        command: script.display().to_string(),
+        executor_args: Vec::new(),
+        provider_config: HashMap::new(),
+        sandbox: None,
+        task_context: None,
+        workspace_root: None,
+    };
+    let spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-grok-telemetry-unknown",
+        audit,
+        &serde_json::json!({"prompt": "hi"}),
+        None,
+    )
+    .expect("run succeeds");
+
+    assert!(outcome.success);
+    assert_eq!(outcome.output["provider"], "grok");
+}
+
 struct EnvVarGuard {
     key: &'static str,
     previous: Option<OsString>,
