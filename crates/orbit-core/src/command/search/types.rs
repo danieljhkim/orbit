@@ -2,6 +2,8 @@ use std::str::FromStr;
 
 use serde::Serialize;
 
+use orbit_search::ScoreBreakdown;
+
 use super::DEFAULT_LIMIT;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -129,6 +131,8 @@ pub struct GlobalSearchHit {
     pub snippet: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score_breakdown: Option<ScoreBreakdown>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub matched_by: Option<Vec<String>>,
 }

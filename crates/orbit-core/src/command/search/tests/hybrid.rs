@@ -2,6 +2,68 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn global_search_task_hybrid_preserves_retriever_breakdown() {
+    let runtime = OrbitRuntime::in_memory().expect("runtime");
+    let id = add_task_with_status(&runtime, "task hybrid breakdown", TaskStatus::Backlog);
+
+    let response = with_task_semantic_override(Ok(vec![task_semantic_hit(&id, 0.75)]), || {
+        runtime
+            .global_search(GlobalSearchParams {
+                query: Some("task hybrid breakdown".to_string()),
+                hybrid: true,
+                kind: GlobalSearchKind::Task,
+                limit: 3,
+                ..Default::default()
+            })
+            .expect("task hybrid search")
+    });
+
+    assert_eq!(response.mode, GlobalSearchMode::Hybrid);
+    assert_eq!(
+        serde_json::to_value(&response.results[0]).expect("serialize hit"),
+        json!({
+            "kind": "task",
+            "source": "semantic",
+            "id": id,
+            "status": "backlog",
+            "best_field": "title",
+            "snippet": "semantic task snippet",
+            "score": 0.75,
+            "score_breakdown": {
+                "rrf": 0.75,
+                "bm25_rank": 2,
+                "cosine_rank": 1
+            }
+        })
+    );
+}
+
+#[test]
+fn global_search_task_hybrid_falls_back_to_lexical_on_semantic_error() {
+    let runtime = OrbitRuntime::in_memory().expect("runtime");
+    let id = add_task_with_status(&runtime, "task fallback needle", TaskStatus::Backlog);
+
+    let response = with_task_semantic_override(Err("companion missing".to_string()), || {
+        runtime
+            .global_search(GlobalSearchParams {
+                query: Some("task fallback needle".to_string()),
+                hybrid: true,
+                kind: GlobalSearchKind::Task,
+                limit: 3,
+                ..Default::default()
+            })
+            .expect("task lexical fallback")
+    });
+
+    assert_eq!(response.mode, GlobalSearchMode::Lexical);
+    assert!(response.notes.iter().any(|note| {
+        note.contains("falling back to lexical task search") && note.contains("companion missing")
+    }));
+    assert_eq!(response.results[0].source, "lexical");
+    assert_eq!(response.results[0].id.as_deref(), Some(id.as_str()));
+}
+
+#[test]
 fn global_search_doc_hybrid_uses_docs_semantic_weight() {
     let runtime = OrbitRuntime::in_memory().expect("runtime");
     add_doc_with_tags(&runtime, "docs/z-lexical.md", "Literal primary", &["foo"]);
@@ -375,6 +437,7 @@ fn adr_hybrid_handles_single_candidate_side() {
         best_field: None,
         snippet: None,
         score: None,
+        score_breakdown: None,
         matched_by: None,
     };
     let out = blend_adr_hybrid_candidates(
@@ -403,6 +466,7 @@ fn hybrid_handles_single_candidate_side() {
         best_field: None,
         snippet: None,
         score: None,
+        score_breakdown: None,
         matched_by: None,
     };
     let out = blend_doc_hybrid_candidates(
@@ -605,6 +669,7 @@ fn learning_hybrid_handles_single_candidate_side() {
         best_field: None,
         snippet: None,
         score: None,
+        score_breakdown: None,
         matched_by: None,
     };
     let out = blend_learning_hybrid_candidates(

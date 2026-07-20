@@ -6,7 +6,7 @@ use super::convert::doc_result_to_global;
 use super::types::GlobalSearchHit;
 use super::{
     ADR_HYBRID_FALLBACK_NOTE, DOC_HYBRID_FALLBACK_NOTE, DOC_SEARCH_MIN_CANDIDATES,
-    DOC_SEARCH_OVERFETCH, LEARNING_HYBRID_FALLBACK_NOTE,
+    DOC_SEARCH_OVERFETCH, LEARNING_HYBRID_FALLBACK_NOTE, TASK_HYBRID_FALLBACK_NOTE,
 };
 
 pub(super) fn doc_search_candidate_limit(limit: usize) -> usize {
@@ -271,6 +271,19 @@ pub(super) fn warn_learning_hybrid_fallback(notes: &mut Vec<String>, reason: &st
         notes,
         "learning hybrid vector",
         &format!("{LEARNING_HYBRID_FALLBACK_NOTE}: {reason}"),
+    );
+}
+
+pub(super) fn warn_task_hybrid_fallback(notes: &mut Vec<String>, reason: &str) {
+    orbit_common::tracing::warn!(
+        target: "orbit.search.tasks",
+        reason,
+        "falling back to lexical task search"
+    );
+    push_skip_note(
+        notes,
+        "task hybrid vector",
+        &format!("{TASK_HYBRID_FALLBACK_NOTE}: {reason}"),
     );
 }
 

@@ -33,6 +33,7 @@ mod review_threads;
 mod routines;
 mod runs;
 mod scoreboard;
+mod search;
 mod tasks;
 mod workspaces;
 
@@ -331,6 +332,7 @@ async fn require_localhost_origin(request: Request<Body>, next: Next) -> Respons
 
 pub(super) fn router() -> Router<crate::state::DashboardState> {
     Router::new()
+        .route("/search", get(search::search))
         .route(
             "/tasks",
             get(tasks::list_tasks).post(tasks::create_task_action),
