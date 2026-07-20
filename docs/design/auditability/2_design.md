@@ -3,7 +3,7 @@ summary: "Auditability — Design"
 type: design
 title: "Auditability — Design"
 owner: codex
-last_updated: 2026-07-19
+last_updated: 2026-07-20
 status: Draft
 feature: auditability
 doc_role: design
@@ -118,6 +118,8 @@ The audit CLI exposes command rows through `orbit audit list`, `show`, `stats`, 
 
 V2 traces are exposed separately: `orbit run events` prints chronological envelopes, `orbit run trace` renders the parent tree, and `orbit run logs` extracts CLI stdout/stderr blobs. `orbit run history` and `orbit run show` expose job-run state rather than the full envelope stream. Metrics and scoreboard commands read invocation records; they summarize cost and usage, not transcript structure.
 
+After [ORB-10337], `POST /api/metrics/invocations` accepts the existing `InvocationInsertParams` shape and writes directly to the invocation store, with no additional schema. Worker bridges use the worker run id as `job_run_id`, pass every task id from run coupling, and preserve the provider's exact model string and input/cache-read/cache-create/output token splits. Each post creates one invocation row, so multiple worker runs coupled to one task remain independently queryable and contribute separately to task and agent aggregates. Like every dashboard mutation, ingestion requires an `Origin` header for `http://localhost` or `http://127.0.0.1`.
+
 The local dashboard exposes two read-only API surfaces for these traces after [T20260508-14]: `GET /api/runs/:id/logs` returns bounded per-step CLI invocation previews, and `GET /api/diagnostics/errors` returns recent process ERROR rows plus structured agent-stderr error rows sorted newest first. Both endpoints use existing dashboard limit conventions and tolerate missing v2 audit files, malformed lines, and missing blobs by returning empty or partial arrays.
 
 After [T20260428-11], compact `summary.json` counts all audited tool-run attempts and failed attempts from command-audit rows where `command: tool`, `subcommand` is `"run"` or `"run-mcp"`, and `tool_name` is present. Token totals still come from invocation/token scoreboards, with legacy tool-call totals used only as a max overlay to avoid obvious double counting.
@@ -178,6 +180,7 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[T20260510-13]** — Move friction reports from task lifecycle state to append-only `.orbit/frictions/` records.
 - **[ORB-00062]** — Surface first-class friction artifacts in the dashboard Knowledge tab and add triage endpoints.
 - **[ORB-00090]** — Aligned agent-facing provenance wording with the family-as-identity convention.
+- **[ORB-10337]** — Added dashboard HTTP ingestion for worker invocation records without changing the invocation schema.
 - **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
 - **[ORB-10200]** — Derive CLI audit metadata and the other cross-cutting command policies from one exhaustive command-operation registry.
 - **[ORB-10225]** — Route in-process graph MCP calls through the safe-surface allowlist and shared runtime audit boundary.

@@ -2,11 +2,12 @@
 
 use crate::state::Ws;
 use axum::extract::{Path, Query};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
-use orbit_core::InvocationQuery;
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::metrics::aggregate as aggregate_knowledge_stats;
+use orbit_core::{InvocationInsertParams, InvocationQuery};
 use serde::Deserialize;
 
 use super::{LimitQuery, map_runtime_error, non_empty_string};
@@ -76,6 +77,16 @@ pub(super) async fn invocation_metrics(
     };
     match runtime.invocation_records(query) {
         Ok(rows) => Json(rows).into_response(),
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+pub(super) async fn ingest_invocation(
+    Ws(runtime): Ws,
+    Json(params): Json<InvocationInsertParams>,
+) -> Response {
+    match runtime.insert_invocation_trace_record(&params) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => map_runtime_error(e),
     }
 }
