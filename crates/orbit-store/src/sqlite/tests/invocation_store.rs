@@ -5,6 +5,11 @@
 use orbit_common::test_fixtures::{TEST_CODEX_MODEL, TEST_GEMINI_MODEL};
 use orbit_common::types::{InvocationTrace, RoleSlot, TokenUsage, ToolCallTrace};
 
+// Frozen production Claude model literal, chosen because the shipped
+// `assets/model_prices.yaml` prices it (unlike the frozen test fixtures,
+// which are deliberately kept out of the production price table).
+const PRICED_MODEL: &str = "claude-opus-4-7";
+
 use super::super::invocation_store::{InvocationInsertParams, InvocationQuery};
 use crate::Store;
 
@@ -88,6 +93,7 @@ fn invocation_records_filter_by_nested_task_and_tool() {
                     result_payload: None,
                 }],
                 duration_ms: 100,
+                provider_cost_usd: Some(0.5),
             },
         })
         .expect("insert matching invocation");
@@ -124,4 +130,79 @@ fn invocation_records_filter_by_nested_task_and_tool() {
     assert_eq!(records[0].job_run_id, "jrun-filter-match");
     assert_eq!(records[0].task_ids, vec!["ORB-1"]);
     assert_eq!(records[0].tool_calls[0].tool_name, "fs.read");
+    assert_eq!(records[0].provider_cost_usd, Some(0.5));
+}
+
+#[test]
+fn invocation_records_derive_cost_from_price_table_and_keep_provider_cost() {
+    let store = Store::open_in_memory().expect("open store");
+
+    store
+        .insert_invocation_trace_record(&InvocationInsertParams {
+            job_run_id: "jrun-priced".to_string(),
+            activity_id: "implement_one".to_string(),
+            agent: "claude".to_string(),
+            model: Some(PRICED_MODEL.to_string()),
+            slot: None,
+            task_ids: vec!["ORB-3".to_string()],
+            trace: InvocationTrace {
+                usage: TokenUsage {
+                    input: 1_000_000,
+                    output: 1_000_000,
+                    ..Default::default()
+                },
+                // Deliberately different from the derived figure so the test
+                // proves the two never collapse into one number.
+                provider_cost_usd: Some(123.45),
+                ..Default::default()
+            },
+        })
+        .expect("insert priced invocation");
+
+    let records = store
+        .list_invocation_records(&InvocationQuery {
+            job_run_id: Some("jrun-priced".to_string()),
+            limit: 10,
+            ..Default::default()
+        })
+        .expect("list priced records");
+
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].provider_cost_usd, Some(123.45));
+    let derived = records[0]
+        .derived_cost_usd
+        .expect("claude-opus-4-7 is priced in the shipped table");
+    assert!(
+        (derived - 90.0).abs() < f64::EPSILON,
+        "derived cost was {derived}"
+    );
+}
+
+#[test]
+fn invocation_records_leave_derived_cost_none_for_an_unpriced_model() {
+    let store = Store::open_in_memory().expect("open store");
+
+    store
+        .insert_invocation_trace_record(&InvocationInsertParams {
+            job_run_id: "jrun-unpriced".to_string(),
+            activity_id: "implement_one".to_string(),
+            agent: "codex".to_string(),
+            model: Some("some-unpriced-model".to_string()),
+            slot: None,
+            task_ids: vec!["ORB-4".to_string()],
+            trace: InvocationTrace::default(),
+        })
+        .expect("insert unpriced invocation");
+
+    let records = store
+        .list_invocation_records(&InvocationQuery {
+            job_run_id: Some("jrun-unpriced".to_string()),
+            limit: 10,
+            ..Default::default()
+        })
+        .expect("list unpriced records");
+
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].provider_cost_usd, None);
+    assert_eq!(records[0].derived_cost_usd, None);
 }

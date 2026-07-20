@@ -444,6 +444,7 @@ mod tests {
             },
             tool_calls,
             duration_ms: 10,
+            provider_cost_usd: None,
         }
     }
 

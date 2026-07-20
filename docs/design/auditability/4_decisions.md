@@ -3,7 +3,7 @@ summary: "Auditability — Decisions"
 type: design
 title: "Auditability — Decisions"
 owner: codex
-last_updated: 2026-07-18
+last_updated: 2026-07-20
 status: Draft
 feature: auditability
 doc_role: decisions
@@ -343,6 +343,22 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ---
 
+## ADR-0245 — Derive invocation cost at query time from a versioned price table
+
+**Status:** Accepted · 2026-07 · [ORB-10338]
+
+**Context.** The invocation store already retained exact per-invocation token splits, but had no notion of USD cost — cost existed only as a provider-reported total buried in the worker's unparsed per-run JSON, never joined to a model or token split. [ORB-10338] adds cost. Two real alternatives existed: (a) compute cost once at ingest time and store it as a frozen column, or (b) keep rows token-only and derive cost from a versioned price table looked up by exact model string and the invocation's timestamp on every read/aggregate.
+
+**Decision.** Cost is derived at query time, not stored. `orbit_common::types::pricing` ships a versioned price table as an in-repo YAML asset (`crates/orbit-common/assets/model_prices.yaml`), keyed by exact model string plus an `effective_from`/`effective_until` date range, parsed once behind a `OnceLock` cache. `InvocationRecord` gains `derived_cost_usd` (computed at read time from the row's token splits, model, and timestamp against the price table) alongside a new `provider_cost_usd` column that persists the provider's own reported total verbatim for monthly manual reconciliation. Adding or correcting a price row is a YAML edit, not a Rust code change.
+
+**Consequences.**
+- Historical invocation rows re-price automatically when a price row is corrected or backfilled — no migration/backfill script needed to fix a wrong rate.
+- `derived_cost_usd` is `None` whenever no price row covers a model/date, so unpriced or newly-launched models degrade to "unknown" rather than a silently wrong number.
+- `provider_cost_usd` never changes once written, so it stays the ground truth Daniel reconciles against monthly even if `derived_cost_usd` for the same row changes later.
+- Cost: because derived cost is recomputed on every read instead of frozen at ingest, editing a price row after the fact silently changes the reported cost of every past invocation under that model/date range — there is no record of what a row's derived cost "used to be", unlike the immutable `provider_cost_usd`.
+
+---
+
 ## Task References
 
 - **[T20260419-0002]** — Add workspace provenance and v2 audit envelope events for activity/job execution.
@@ -382,5 +398,6 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[ORB-00090]** — Align agent-facing docs and tool descriptions with the family-as-identity convention.
 - **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
 - **[ORB-10202]** — Remove the retired friction task status and consolidate task mutation attribution and record-parameter construction.
+- **[ORB-10338]** — Add the versioned model price table and query-time `derived_cost_usd`, plus a persisted `provider_cost_usd` column for reconciliation.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

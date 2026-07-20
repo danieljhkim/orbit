@@ -31,6 +31,8 @@ fn invocation_record(
         tool_call_count: 0,
         task_ids: vec!["ORB-10339".to_string()],
         tool_calls: Vec::new(),
+        provider_cost_usd: None,
+        derived_cost_usd: None,
     }
 }
 

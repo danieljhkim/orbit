@@ -176,6 +176,7 @@ fn seed_invocation(runtime: &OrbitRuntime, seed: SeedInvocation<'_>) {
                     })
                     .collect(),
                 duration_ms: seed.duration_ms,
+                provider_cost_usd: None,
             },
         })
         .expect("insert invocation");
@@ -334,6 +335,7 @@ async fn metrics_invocation_ingestion_preserves_worker_runs_and_aggregates() {
                 },
                 tool_calls: Vec::new(),
                 duration_ms: 1_500,
+                provider_cost_usd: Some(0.42),
             },
         },
         InvocationInsertParams {
@@ -352,6 +354,7 @@ async fn metrics_invocation_ingestion_preserves_worker_runs_and_aggregates() {
                 },
                 tool_calls: Vec::new(),
                 duration_ms: 900,
+                provider_cost_usd: None,
             },
         },
     ];
@@ -384,6 +387,7 @@ async fn metrics_invocation_ingestion_preserves_worker_runs_and_aggregates() {
             expected.trace.usage.cache_create
         );
         assert_eq!(record.output_tokens, expected.trace.usage.output);
+        assert_eq!(record.provider_cost_usd, expected.trace.provider_cost_usd);
     }
 
     let task_records = runtime

@@ -39,4 +39,11 @@ pub struct InvocationTrace {
     pub tool_calls: Vec<ToolCallTrace>,
     #[serde(default)]
     pub duration_ms: u64,
+    /// Provider-reported total cost in USD for this invocation, when the
+    /// caller has it (e.g. Claude CLI `total_cost_usd`). Kept verbatim
+    /// alongside the token-derived cost computed from the price table at
+    /// query time — it never overwrites the derived figure and is the
+    /// ground truth for monthly manual reconciliation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_cost_usd: Option<f64>,
 }

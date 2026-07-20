@@ -18,6 +18,7 @@ fn merge_invocation_trace_records_fs_read_metrics() {
             result_payload: None,
         }],
         duration_ms: 1_234,
+        provider_cost_usd: None,
     };
 
     let metrics = merge_invocation_trace(None, &trace).expect("fs.read metrics");
@@ -56,6 +57,7 @@ fn merge_invocation_trace_without_measured_tool_or_existing_returns_none() {
             result_payload: None,
         }],
         duration_ms: 5,
+        provider_cost_usd: None,
     };
 
     assert!(merge_invocation_trace(None, &trace).is_none());
