@@ -313,7 +313,6 @@ pub(super) fn update(
                 &["context_files", "context"],
             )?,
             upsert_artifacts: parse_artifacts(&input)?,
-            ..Default::default()
         },
         agent,
         model,
