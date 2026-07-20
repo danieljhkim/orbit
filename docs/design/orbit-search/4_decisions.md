@@ -3,7 +3,7 @@ summary: "Semantic Search — Decisions"
 type: design
 title: "Semantic Search — Decisions"
 owner: claude
-last_updated: 2026-05-21
+last_updated: 2026-07-20
 status: Accepted
 feature: orbit-search
 doc_role: decisions
@@ -286,6 +286,21 @@ Compare to the analogous knowledge-graph crate: `orbit-knowledge` owns its data 
 
 ---
 
+## ADR-0244 — Expose unified search through a thin HTTP adapter
+
+**Status:** Accepted · 2026-07-20 · [ORB-10304]
+
+**Context.** Bridge needs hybrid Orbit search but can only proxy the dashboard HTTP surface. The alternatives were to keep reconstructing lexical results in Bridge, expose a generic tool-execution HTTP endpoint, or add a narrow search endpoint backed by the same runtime pipeline as the CLI.
+
+**Decision.** Expose `GET /api/search` as a thin transport adapter over `OrbitRuntime::global_search`. The endpoint accepts the unified query, kind, status, tag, path, hybrid, and semantic parameters and returns the runtime response unchanged, including the effective mode and per-hit retriever rank breakdown. If hybrid infrastructure is unavailable, the shared runtime pipeline degrades to lexical so CLI and HTTP callers observe the same behavior.
+
+**Consequences.**
+- Bridge can proxy one authoritative endpoint instead of owning a second search implementation.
+- CLI, tool, and HTTP search share filtering, ranking, result ordering, and fallback semantics.
+- Cost: the unified search parameter names and serialized result shape become an HTTP compatibility contract; future search changes must preserve or deliberately version that surface.
+
+---
+
 ## Task References
 
 - [T20260510-3] — Design semantic search over task artifacts and graph (v2). The task that produced this folder.
@@ -298,5 +313,6 @@ Compare to the analogous knowledge-graph crate: `orbit-knowledge` owns its data 
 - [ORB-00203] — Add ADR envelope `tags` and `paths` so ADRs participate in cross-kind `--tag` / `--path` search filters.
 - [ORB-00205] — Split `orbit search` into query / similar / path forms and require per-kind `--status` syntax. The task that accepted and implemented ADR-0179.
 - [ORB-00206] — Add doc-corpus embeddings through `orbit docs index` and `orbit search --kind doc --hybrid`. The task that accepted and implemented ADR-0180.
+- [ORB-10304] — Expose unified lexical, hybrid, and neighbor search through `GET /api/search`.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

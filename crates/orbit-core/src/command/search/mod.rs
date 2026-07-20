@@ -47,6 +47,7 @@ const DOC_SEARCH_OVERFETCH: usize = 4;
 const DOC_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical doc search";
 const ADR_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical ADR search";
 const LEARNING_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical learning search";
+const TASK_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical task search";
 const DOC_SEARCH_MIN_CANDIDATES: usize = DEFAULT_LIMIT * DOC_SEARCH_OVERFETCH;
 
 #[cfg(test)]
@@ -59,6 +60,9 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
     static LEARNING_SEMANTIC_SEARCH_OVERRIDE:
         std::cell::RefCell<Option<Result<Vec<LearningSemanticHit>, String>>> =
+        const { std::cell::RefCell::new(None) };
+    static TASK_SEMANTIC_SEARCH_OVERRIDE:
+        std::cell::RefCell<Option<Result<Vec<orbit_search::SemanticHit>, String>>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -132,12 +136,6 @@ impl OrbitRuntime {
             ));
         }
 
-        let mode = if params.hybrid {
-            GlobalSearchMode::Hybrid
-        } else {
-            GlobalSearchMode::Lexical
-        };
-
         let mut branches = Vec::new();
 
         if params.kind.includes_tasks() {
@@ -147,6 +145,7 @@ impl OrbitRuntime {
                 query_owned.as_deref(),
                 &tag_filter,
                 limit,
+                &mut notes,
             )?);
         }
 
@@ -192,6 +191,15 @@ impl OrbitRuntime {
         }
 
         let results = merge_round_robin(branches, limit);
+        let mode = if params.hybrid
+            && results
+                .iter()
+                .any(|hit| matches!(hit.source.as_str(), "hybrid" | "semantic"))
+        {
+            GlobalSearchMode::Hybrid
+        } else {
+            GlobalSearchMode::Lexical
+        };
         Ok(GlobalSearchResponse {
             mode,
             kind: params.kind,
@@ -207,33 +215,33 @@ impl OrbitRuntime {
         query: Option<&str>,
         tag_filter: &[String],
         limit: usize,
+        notes: &mut Vec<String>,
     ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
         let statuses = resolve_task_statuses(params, status_filters);
 
         let candidates = if params.hybrid
             && let Some(query) = query
         {
-            let search = self.semantic_search(SemanticSearchParams {
-                query: query.to_string(),
-                limit: limit.saturating_mul(2).max(limit),
-                field: None,
-                kind: Some("task".to_string()),
-                model: None,
-            })?;
-            // Resolve task records so we can apply the post-filters.
-            let mut hits: Vec<(GlobalSearchHit, Option<orbit_common::types::Task>)> = Vec::new();
-            for hit in search.results.into_iter() {
-                let task = self.get_task(&hit.source_id).ok();
-                hits.push((semantic_hit_to_global(hit), task));
+            let semantic = self.task_semantic_hits(query, limit.saturating_mul(2).max(limit));
+            match semantic {
+                Ok(hits) if !hits.is_empty() => hits
+                    .into_iter()
+                    .map(|hit| {
+                        let task = self.get_task(&hit.source_id).ok();
+                        (semantic_hit_to_global(hit), task)
+                    })
+                    .collect(),
+                Ok(_) => {
+                    hybrid::warn_task_hybrid_fallback(notes, "no task embeddings found");
+                    self.lexical_task_candidates(query, limit)?
+                }
+                Err(error) => {
+                    hybrid::warn_task_hybrid_fallback(notes, &error.to_string());
+                    self.lexical_task_candidates(query, limit)?
+                }
             }
-            hits
         } else if let Some(query) = query {
-            let mut tasks = self.search_tasks_filtered(query, &[])?;
-            tasks.truncate(limit.saturating_mul(2).max(limit));
-            tasks
-                .into_iter()
-                .map(|task| (lexical_task_hit(&task), Some(task)))
-                .collect()
+            self.lexical_task_candidates(query, limit)?
         } else {
             // No query → enumerate tasks (used by `--path` and `--tag`).
             let tasks = self.list_tasks()?;
@@ -265,6 +273,40 @@ impl OrbitRuntime {
         }
         out.truncate(limit);
         Ok(out)
+    }
+
+    fn lexical_task_candidates(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(GlobalSearchHit, Option<orbit_common::types::Task>)>, OrbitError> {
+        let mut tasks = self.search_tasks_filtered(query, &[])?;
+        tasks.truncate(limit.saturating_mul(2).max(limit));
+        Ok(tasks
+            .into_iter()
+            .map(|task| (lexical_task_hit(&task), Some(task)))
+            .collect())
+    }
+
+    fn task_semantic_hits(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<orbit_search::SemanticHit>, OrbitError> {
+        #[cfg(test)]
+        if let Some(result) = TASK_SEMANTIC_SEARCH_OVERRIDE.with(|cell| cell.borrow().clone()) {
+            return result.map_err(OrbitError::Execution);
+        }
+
+        Ok(self
+            .semantic_search(SemanticSearchParams {
+                query: query.to_string(),
+                limit,
+                field: None,
+                kind: Some("task".to_string()),
+                model: None,
+            })?
+            .results)
     }
 
     fn doc_branch(
@@ -299,6 +341,7 @@ impl OrbitRuntime {
                     best_field: None,
                     snippet: None,
                     score: None,
+                    score_breakdown: None,
                     matched_by: Some(tag_filter.iter().map(|tag| format!("tag:{tag}")).collect()),
                 });
             }
@@ -454,6 +497,7 @@ impl OrbitRuntime {
                         best_field: None,
                         snippet: None,
                         score: None,
+                        score_breakdown: None,
                         matched_by: None,
                     },
                     lexical_score: None,
@@ -764,6 +808,7 @@ impl OrbitRuntime {
                     best_field: None,
                     snippet: None,
                     score: None,
+                    score_breakdown: None,
                     matched_by: Some(result.matched_by),
                 });
             }
@@ -805,6 +850,7 @@ impl OrbitRuntime {
                     best_field: None,
                     snippet: None,
                     score: None,
+                    score_breakdown: None,
                     matched_by: None,
                 });
             }
@@ -892,6 +938,7 @@ impl OrbitRuntime {
                         best_field: None,
                         snippet: None,
                         score: None,
+                        score_breakdown: None,
                         matched_by: None,
                     },
                     lexical_score: None,
