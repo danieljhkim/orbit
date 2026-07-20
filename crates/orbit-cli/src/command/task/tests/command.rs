@@ -2,25 +2,15 @@ use clap::{Parser, error::ErrorKind};
 
 use crate::command::Cli;
 
-/// The trimmed `orbit task` surface (ORB-10000): 12 subcommands. Lock
+/// The trimmed `orbit task` surface (ORB-10000): 11 subcommands. Lock
 /// administration lives under the top-level `orbit locks` command (ORB-00420),
 /// not here.
-const EXPECTED_TASK_SUBCOMMANDS: [&str; 12] = [
-    "add",
-    "artifact",
-    "list",
-    "show",
-    "lint",
-    "update",
-    "start",
-    "archive",
-    "review-thread",
-    "export",
-    "import",
+const EXPECTED_TASK_SUBCOMMANDS: [&str; 11] = [
+    "add", "artifact", "list", "show", "lint", "update", "start", "archive", "export", "import",
     "reindex",
 ];
 
-const REMOVED_TASK_SUBCOMMANDS: [&str; 7] = [
+const REMOVED_TASK_SUBCOMMANDS: [&str; 8] = [
     "locks",
     "approve",
     "reject",
@@ -28,6 +18,7 @@ const REMOVED_TASK_SUBCOMMANDS: [&str; 7] = [
     "delete",
     "templates",
     "prune-context",
+    "review-thread",
 ];
 
 fn task_help() -> String {

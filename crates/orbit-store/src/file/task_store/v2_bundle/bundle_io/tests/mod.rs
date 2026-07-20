@@ -6,16 +6,13 @@ use chrono::{TimeZone, Utc};
 use orbit_common::types::{
     ArtifactManifestFileV2, ArtifactManifestV2, NotFoundKind, OrbitError,
     TASK_ARTIFACT_FILES_DIR_NAME, TASK_ARTIFACT_SCHEMA_VERSION, TASK_ARTIFACTS_DIR_NAME,
-    TASK_ENVELOPE_FILE_NAME, TASK_EVENTS_FILE_NAME, TASK_REVIEW_THREADS_DIR_NAME, TaskEventRowV2,
-    TaskStatus,
+    TASK_ENVELOPE_FILE_NAME, TASK_EVENTS_FILE_NAME, TaskEventRowV2, TaskStatus,
 };
 use orbit_common::utility::fs::atomic_write_text;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
-use super::super::super::tests::test_support::{
-    bundle_store, sample_bundle, sample_review_threads,
-};
+use super::super::super::tests::test_support::{bundle_store, sample_bundle};
 use super::super::*;
 use super::read_task_events;
 
@@ -23,8 +20,7 @@ use super::read_task_events;
 fn write_and_read_bundle_round_trips_v2_shape() {
     let temp = TempDir::new().expect("tempdir");
     let store = bundle_store(&temp);
-    let mut bundle = sample_bundle("ORB-00000");
-    bundle.review_threads = sample_review_threads();
+    let bundle = sample_bundle("ORB-00000");
 
     let created = store.create_bundle(&bundle).expect("create bundle");
     assert_eq!(created.binding.task_id, "ORB-00000");
@@ -36,14 +32,6 @@ fn write_and_read_bundle_round_trips_v2_shape() {
     assert_eq!(read.plan, bundle.plan);
     assert_eq!(read.events, bundle.events);
     assert_eq!(read.comments, bundle.comments);
-    assert_eq!(
-        read.review_threads
-            .iter()
-            .map(|thread| thread.metadata.thread_id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["RT-0001", "RT-0002"]
-    );
-    assert_eq!(read.review_threads[0].body, "First thread body");
     assert!(
         created
             .binding
@@ -55,32 +43,9 @@ fn write_and_read_bundle_round_trips_v2_shape() {
         created
             .binding
             .canonical_path
-            .join(TASK_REVIEW_THREADS_DIR_NAME)
-            .is_dir()
-    );
-    assert!(
-        created
-            .binding
-            .canonical_path
             .join(TASK_ARTIFACTS_DIR_NAME)
             .join(TASK_ARTIFACT_FILES_DIR_NAME)
             .is_dir()
-    );
-    assert!(
-        created
-            .binding
-            .canonical_path
-            .join(TASK_REVIEW_THREADS_DIR_NAME)
-            .join("RT-0001.yaml")
-            .is_file()
-    );
-    assert!(
-        created
-            .binding
-            .canonical_path
-            .join(TASK_REVIEW_THREADS_DIR_NAME)
-            .join("RT-0001.md")
-            .is_file()
     );
 }
 
@@ -259,28 +224,6 @@ fn read_bundle_reports_missing_envelope_as_task_not_found() {
             kind: NotFoundKind::Task,
             id: task_id,
         }) if task_id == "ORB-00000"
-    ));
-}
-
-#[test]
-fn read_bundle_rejects_review_thread_metadata_without_body() {
-    let temp = TempDir::new().expect("tempdir");
-    let store = bundle_store(&temp);
-    let mut bundle = sample_bundle("ORB-00000");
-    bundle.review_threads = sample_review_threads();
-    let created = store.create_bundle(&bundle).expect("create bundle");
-    fs::remove_file(
-        created
-            .binding
-            .canonical_path
-            .join(TASK_REVIEW_THREADS_DIR_NAME)
-            .join("RT-0001.md"),
-    )
-    .expect("remove thread body");
-
-    assert!(matches!(
-        store.read_bundle("ORB-00000"),
-        Err(OrbitError::Store(message)) if message.contains("missing task bundle file")
     ));
 }
 

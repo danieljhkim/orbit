@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use orbit_common::types::{
-    ArtifactManifestFileV2, ExternalRef, NotFoundKind, OrbitError, ReviewThread, Task,
-    TaskArtifact, TaskComment, TaskHistoryEntry, prune_missing_context_files,
+    ArtifactManifestFileV2, ExternalRef, NotFoundKind, OrbitError, Task, TaskArtifact, TaskComment,
+    TaskHistoryEntry, prune_missing_context_files,
 };
 
 use crate::OrbitRuntime;
@@ -53,13 +53,6 @@ impl OrbitRuntime {
         self.stores()
             .tasks()
             .get_history(id)?
-            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
-    }
-
-    pub fn get_task_review_threads(&self, id: &str) -> Result<Vec<ReviewThread>, OrbitError> {
-        self.stores()
-            .tasks()
-            .get_review_threads(id)?
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
     }
 

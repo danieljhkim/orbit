@@ -1,6 +1,6 @@
 //! Per-role agent settings resolver (ADR-029).
 //!
-//! Bridges the role tag on an `agent_loop` / `groundhog` activity (or its
+//! Bridges the role tag on an `agent_loop` activity (or its
 //! enclosing `TargetStep`) to the selected `[crews.<name>]` role assignment.
 //! The host returns parsed [`AgentRoleConfig`] values, and this module
 //! collapses them with the inline `provider`, `model`, and `backend` fields

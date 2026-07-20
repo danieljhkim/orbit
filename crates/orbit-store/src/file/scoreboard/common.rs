@@ -6,7 +6,7 @@
 //! - **Append-only run logs** (`duel.json`, `duel_plan.json`) — a
 //!   `{ "schema_version": 1, "runs": [...] }` envelope rewritten atomically
 //!   under an exclusive lock. See [`append_run_entry`] / [`load_run_entries`].
-//! - **Per-model counter maps** (`pr.json`, `task_review.json`) — a
+//! - **Per-model counter maps** (`pr.json`) — a
 //!   `{ "<metric>": { "<model>": <count> } }` map incremented under the same
 //!   lock. See [`increment_model_metric`].
 
@@ -24,13 +24,6 @@ use orbit_common::utility::fs::{
 
 /// Schema version stamped into newly created run-log envelopes.
 const CURRENT_RUN_LOG_SCHEMA_VERSION: u32 = 1;
-
-/// Canonical metric key for local task-review feedback. Written by
-/// `task_review_scoreboard` and read back by `scoreboard_summary`.
-pub(crate) const TASK_REVIEW_THREADS_METRIC: &str = "task-review-threads";
-/// Pre-threads metric key still found in old `task_review.json` files;
-/// folded into [`TASK_REVIEW_THREADS_METRIC`] wherever it is encountered.
-pub(crate) const LEGACY_TASK_REVIEW_MESSAGES_METRIC: &str = "task-review-messages";
 
 /// On-disk envelope shared by the append-only run-log scoreboards.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

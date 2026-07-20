@@ -337,12 +337,3 @@ fn agent_loop_spec_proc_allowed_programs_accepts_empty_seq() {
     let parsed: AgentLoopSpec = serde_yaml::from_str(yaml).expect("parse spec");
     assert_eq!(parsed.proc_allowed_programs, Some(Vec::<String>::new()));
 }
-
-#[test]
-fn groundhog_spec_mirrors_proc_allowed_programs_into_agent_loop() {
-    let yaml = "instruction: hi\nproc_allowed_programs:\n  - git\n";
-    let parsed: GroundhogSpec = serde_yaml::from_str(yaml).expect("parse groundhog spec");
-    assert_eq!(parsed.proc_allowed_programs, Some(vec!["git".to_string()]));
-    let derived = parsed.as_agent_loop_spec();
-    assert_eq!(derived.proc_allowed_programs, parsed.proc_allowed_programs);
-}

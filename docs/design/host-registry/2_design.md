@@ -1,7 +1,7 @@
 ---
 title: Host Registry — Design
 owner: claude
-last_updated: 2026-07-19
+last_updated: 2026-07-20
 status: Accepted
 feature: host-registry
 doc_role: design
@@ -10,7 +10,7 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ORB-10330, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Host Registry — Design
@@ -115,12 +115,13 @@ Per entry: `machine_id` (key), `host_id` (globally reserved across active and re
   workspace. The leased run carries the stable workspace ID; the satellite resolves
   its execution path through its own local registry. The hub's absolute paths never
   cross into satellite execution.
-- **Enumeration.** `orbit.host.list` (operator capability set), parallel to
-  `orbit.workspace.list`, returning entries with labels, presence, and freshness so
-  the orchestrator can right-size placement the way `orbit.crew.list` supports crew.
-  The hub-local human `orbit host list` command renders the same single-transaction
-  `RegistrySnapshotV1`, including retired identities; a spoke fails closed instead of
-  presenting its local shadow database as the hub inventory.
+- **Enumeration.** The hub-local human `orbit host list` command renders the
+  single-transaction `RegistrySnapshotV1`, including retired identities; a spoke fails
+  closed instead of presenting its local shadow database as the hub inventory. The
+  `orbit.host.list` MCP discovery tool was removed in [ORB-10332]; the parallel
+  `orbit.workspace.list` and `orbit.crew.list` MCP discovery tools remain and return
+  entries with labels, presence, and freshness so the orchestrator can right-size
+  placement and crew.
 - **Liveness.** `last_seen` is updated by registration and by every runner poll
   (§4) — the poll *is* the heartbeat, at the same minute cadence as the sweep. It is
   **not** derived from existing audit rows: the audit `host` column records the
@@ -172,9 +173,9 @@ Resolution returns an explicit active, alias-with-warning, retired, unknown, or
 fail-closed collision projection. `HostRegistryService` binds these operations to
 B1's `HostIdentity` declaration. CLI/MCP administration and local `host.toml`
 rename coordination landed in C3 ([ORB-10267]): `orbit host register/list/rename/retire`,
-the `orbit.host.list`/`orbit.workspace.list` discovery tools, one path-free
-`RegistrySnapshotV1` projection, the atomic satellite registry cache, and the
-hub-global `registry_revision` (store schema v8).
+the `orbit.host.list` (since removed in [ORB-10332]) and `orbit.workspace.list` discovery
+tools, one path-free `RegistrySnapshotV1` projection, the atomic satellite registry cache,
+and the hub-global `registry_revision` (store schema v8).
 
 `HostRegistryService` now lives in `orbit_remote::host_registry`, backed by
 `RemoteStore` in `orbit_remote::persistence`. Remote owns the registry SQL, row
@@ -655,5 +656,8 @@ of that routine.** Consequences:
   forward-only activation, replay-safe immutable correlation ledger, atomic audit,
   and explicit late-workspace ineligibility without changing standalone creation
   or activating the F3 cutover.
+- [ORB-10332] — removed the `orbit.host.list` MCP discovery tool as unused; the
+  `orbit host list` CLI command and the `orbit.workspace.list` / `orbit.crew.list`
+  MCP discovery tools remain.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

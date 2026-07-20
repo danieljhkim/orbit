@@ -9,7 +9,6 @@ pub mod agent_role;
 pub mod audit_writer;
 pub mod cli_runner;
 pub mod dispatcher;
-pub mod groundhog;
 pub mod job_executor;
 pub mod orbit_tool_executor;
 pub mod sqlite_sink;

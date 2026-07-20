@@ -161,7 +161,6 @@ pub(crate) fn build_context_from_roots(
             task_backends.task,
             task_backends.document,
             task_backends.history,
-            task_backends.review,
             task_backends.artifact,
             adr_store,
             learning_store,

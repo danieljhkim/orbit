@@ -7,7 +7,7 @@ description: How to use Orbit's execution layer — jobs, activities, routines, 
 
 ## Concepts
 
-- **Job** — a deterministic, multi-step pipeline (schemaVersion 2 YAML) from the installed job catalog; discover it with `orbit job list` / `orbit job show <id>` (e.g. `task_pr_pipeline`, `task_auto_pipeline`, `task_gate_pipeline`, `task_epic_pipeline`, `job_duel_plan_pipeline`). Jobs compose **activities**.
+- **Job** — a deterministic, multi-step pipeline (schemaVersion 2 YAML) from the installed job catalog; discover it with `orbit job list` / `orbit job show <id>` (e.g. `task_pr_pipeline`, `task_auto_pipeline`, `task_gate_pipeline`, `job_duel_plan_pipeline`). Jobs compose **activities**.
 - **Activity** — one named step definition referenced by a job's step list (`agent_implement`, `agent_review`, `git_commit`, `git_push`, `pr_open`, `worktree_setup`, `reserve_locks`, ...). Activities aren't invoked directly by CLI; a job's step list references them.
 - **Routine** — a git-versioned cron trigger (`.orbit/routines/*.yaml`) pointing at a `job:<name>` target, with host pinning and a retry/overlap policy.
 - **Sweep** — the stateless per-minute clock tick (`orbit sweep`, fired by an OS timer) that fires whatever routine is due on this host. All scheduler state (last fires, pauses, locks) is host-local in `~/.orbit/orbit.db`, never synced; routine *definitions* sync via git.

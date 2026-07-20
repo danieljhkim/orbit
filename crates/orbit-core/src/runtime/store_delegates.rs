@@ -1,8 +1,8 @@
 use orbit_common::types::{
     Adr, AdrStatus, ArtifactManifestFileV2, AuditEvent, ExecutorDef, ExternalRef, JobRun,
     JobRunState, KnowledgeRunMetrics, Learning, LearningStatus, NotFoundKind, OrbitError,
-    PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity,
-    TaskHistoryEntry, TaskPriority, TaskRelation, TaskStatus, TaskType,
+    PolicyDef, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry,
+    TaskPriority, TaskRelation, TaskStatus, TaskType,
 };
 use orbit_search::{EmbedWorker, VectorStore};
 use orbit_store::{
@@ -17,8 +17,7 @@ use orbit_store::{
     TaskReservationOwnedConflictsParams, TaskReservationOwnedConflictsResult,
     TaskReservationReleaseByOwnerParams, TaskReservationReleaseByOwnerResult,
     TaskReservationReleaseParams, TaskReservationReleaseResult, TaskReservationReserveParams,
-    TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
-    TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend,
+    TaskReservationReserveResult, TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend,
 };
 use std::collections::BTreeMap;
 
@@ -52,8 +51,6 @@ pub(crate) struct TaskRecordUpdateParams {
     pub(crate) status_note: Option<String>,
     pub(crate) append_history: Vec<TaskHistoryEntry>,
     pub(crate) append_comments: Vec<TaskComment>,
-    pub(crate) append_review_threads: Vec<ReviewThread>,
-    pub(crate) replace_review_threads: Option<Vec<ReviewThread>>,
     pub(crate) upsert_artifacts: Vec<TaskArtifact>,
 }
 
@@ -89,10 +86,6 @@ impl TaskRecordUpdateParams {
             || !self.append_comments.is_empty()
     }
 
-    fn has_review_changes(&self) -> bool {
-        self.replace_review_threads.is_some() || !self.append_review_threads.is_empty()
-    }
-
     fn has_artifact_changes(&self) -> bool {
         !self.upsert_artifacts.is_empty()
     }
@@ -104,7 +97,6 @@ impl OrbitStores {
             store: self.task.as_ref(),
             document: self.task_document.as_ref(),
             history: self.task_history.as_ref(),
-            review: self.task_review.as_ref(),
             artifact: self.task_artifact.as_ref(),
             semantic_vector: self.semantic_vector.as_ref(),
             semantic_worker: self.semantic_worker.as_ref(),
@@ -164,7 +156,6 @@ pub(crate) struct TaskRecords<'a> {
     store: &'a dyn TaskStoreBackend,
     document: &'a dyn TaskDocumentStoreBackend,
     history: &'a dyn TaskHistoryStoreBackend,
-    review: &'a dyn TaskReviewStoreBackend,
     artifact: &'a dyn TaskArtifactStoreBackend,
     semantic_vector: &'a VectorStore,
     semantic_worker: &'a EmbedWorker,
@@ -213,13 +204,6 @@ impl TaskRecords<'_> {
         id: &str,
     ) -> Result<Option<Vec<TaskHistoryEntry>>, OrbitError> {
         self.history.get_task_history(id)
-    }
-
-    pub(crate) fn get_review_threads(
-        &self,
-        id: &str,
-    ) -> Result<Option<Vec<ReviewThread>>, OrbitError> {
-        self.review.get_task_review_threads(id)
     }
 
     pub(crate) fn list(&self) -> Result<Vec<Task>, OrbitError> {
@@ -301,16 +285,6 @@ impl TaskRecords<'_> {
             )?;
         }
 
-        if params.has_review_changes() {
-            self.review.update_task_reviews(
-                id,
-                TaskReviewUpdateParams {
-                    append_review_threads: params.append_review_threads.clone(),
-                    replace_review_threads: params.replace_review_threads.clone(),
-                },
-            )?;
-        }
-
         if params.has_artifact_changes() {
             self.artifact.upsert_task_artifacts(
                 id,
@@ -326,7 +300,6 @@ impl TaskRecords<'_> {
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))?;
         if params.has_document_changes()
             || params.has_history_changes()
-            || params.has_review_changes()
             || params.has_artifact_changes()
         {
             self.semantic_worker.enqueue(task.clone());

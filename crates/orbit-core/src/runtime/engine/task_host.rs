@@ -1,6 +1,6 @@
 use orbit_common::types::{
-    ExternalRef, OrbitError, OrbitEvent, ReviewThread, Task, TaskComment, TaskHistoryEntry,
-    TaskPriority, TaskStatus, push_external_ref_if_missing,
+    ExternalRef, OrbitError, OrbitEvent, Task, TaskComment, TaskHistoryEntry, TaskPriority,
+    TaskStatus, push_external_ref_if_missing,
 };
 use orbit_engine::{
     RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
@@ -30,10 +30,6 @@ impl TaskReadHost for OrbitRuntime {
 
     fn get_task_history(&self, task_id: &str) -> Result<Vec<TaskHistoryEntry>, OrbitError> {
         OrbitRuntime::get_task_history(self, task_id)
-    }
-
-    fn get_task_review_threads(&self, task_id: &str) -> Result<Vec<ReviewThread>, OrbitError> {
-        OrbitRuntime::get_task_review_threads(self, task_id)
     }
 
     fn list_tasks_filtered(
@@ -130,7 +126,6 @@ impl TaskWriteHost for OrbitRuntime {
                     status_event: update.status_event.clone(),
                     status_note: update.status_note.clone(),
                     append_comments: update.append_comments.clone(),
-                    replace_review_threads: update.review_threads.clone(),
                     ..StoreTaskUpdateParams::from(TaskUpdateParams {
                         execution_summary: update.execution_summary.clone(),
                         plan: update.plan.clone(),

@@ -29,7 +29,7 @@ impl Tool for TestTool {
 fn canonical_builtin_definitions_are_workspace_independent() {
     let definitions =
         canonical_builtin_mcp_tool_definitions().expect("builtin MCP definitions are valid");
-    assert_eq!(definitions.len(), 29);
+    assert_eq!(definitions.len(), 25);
     assert!(
         definitions
             .iter()
@@ -46,12 +46,11 @@ fn generic_builtin_definitions_are_workspace_scoped_and_exclude_remote_discovery
             .iter()
             .all(|definition| definition.policy.scope() == McpToolScope::WorkspaceRequired)
     );
-    assert!(definitions.iter().all(|definition| {
-        !matches!(
-            definition.schema.name.as_str(),
-            "orbit.host.list" | "orbit.workspace.list"
-        )
-    }));
+    assert!(
+        definitions.iter().all(|definition| {
+            !matches!(definition.schema.name.as_str(), "orbit.workspace.list")
+        })
+    );
 }
 
 #[test]

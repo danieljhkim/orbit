@@ -215,20 +215,6 @@ fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
             path_arrays: &[],
             nested_arrays: &[],
         }),
-        OrbitBuiltinAction::ReviewThreadAdd => Some(ActionPolicy {
-            free_text_fields: &["body"],
-            free_text_arrays: &[],
-            path_fields: &["path"],
-            path_arrays: &[],
-            nested_arrays: &[],
-        }),
-        OrbitBuiltinAction::ReviewThreadReply => Some(ActionPolicy {
-            free_text_fields: &["body"],
-            free_text_arrays: &[],
-            path_fields: &[],
-            path_arrays: &[],
-            nested_arrays: &[],
-        }),
         OrbitBuiltinAction::FrictionAdd => Some(ActionPolicy {
             free_text_fields: &["body", "description"],
             free_text_arrays: &[],
@@ -268,8 +254,6 @@ fn is_covered_mutating_action(action: OrbitBuiltinAction) -> bool {
             | OrbitBuiltinAction::TaskAdd
             | OrbitBuiltinAction::TaskUpdate
             | OrbitBuiltinAction::TaskReject
-            | OrbitBuiltinAction::ReviewThreadAdd
-            | OrbitBuiltinAction::ReviewThreadReply
             | OrbitBuiltinAction::FrictionAdd
             | OrbitBuiltinAction::FrictionUpdate
     )
@@ -519,14 +503,6 @@ fn artifact_target(
                 task_id: Some(id),
             })
         }
-        OrbitBuiltinAction::ReviewThreadAdd | OrbitBuiltinAction::ReviewThreadReply => {
-            let id = response_string(response, "id")?;
-            Ok(ArtifactTarget {
-                artifact_type: "review_thread",
-                artifact_id: id,
-                task_id: Some(id),
-            })
-        }
         OrbitBuiltinAction::FrictionAdd | OrbitBuiltinAction::FrictionUpdate => {
             Ok(ArtifactTarget {
                 artifact_type: "friction",
@@ -570,8 +546,6 @@ fn tool_name(action: OrbitBuiltinAction) -> &'static str {
         OrbitBuiltinAction::TaskAdd => "orbit.task.add",
         OrbitBuiltinAction::TaskUpdate => "orbit.task.update",
         OrbitBuiltinAction::TaskReject => "orbit.task.reject",
-        OrbitBuiltinAction::ReviewThreadAdd => "orbit.task.review_thread.add",
-        OrbitBuiltinAction::ReviewThreadReply => "orbit.task.review_thread.reply",
         OrbitBuiltinAction::FrictionAdd => "orbit.friction.add",
         OrbitBuiltinAction::FrictionUpdate => "orbit.friction.update",
         _ => "orbit.unknown",
@@ -677,13 +651,6 @@ mod tests {
                     "title": "xoxb-0123456789",
                     "description": "Body",
                     "workspace": ".",
-                }),
-            ),
-            (
-                OrbitBuiltinAction::ReviewThreadAdd,
-                json!({
-                    "id": "ORB-00001",
-                    "body": "sk-abcdefghijklmnopqrstuvwxyz",
                 }),
             ),
             (
@@ -895,7 +862,6 @@ mod tests {
             )
             .expect("task add succeeds");
         assert_eq!(task["redactions_applied"], false);
-        let task_id = task["id"].as_str().expect("task id");
 
         let adr = runtime
             .execute_tool_command(
@@ -923,20 +889,6 @@ mod tests {
             )
             .expect("learning add succeeds");
         assert_eq!(learning["redactions_applied"], false);
-
-        let review = runtime
-            .execute_tool_command(
-                "orbit.task.review_thread.add",
-                json!({
-                    "id": task_id,
-                    "body": "Please tighten this.",
-                    "path": "src/lib.rs",
-                }),
-                Some("codex".to_string()),
-                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
-            )
-            .expect("review thread add succeeds");
-        assert_eq!(review["redactions_applied"], false);
 
         let friction = runtime
             .execute_tool_command(

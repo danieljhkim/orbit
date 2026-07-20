@@ -256,35 +256,4 @@ impl TaskV2Store {
             Ok(())
         })
     }
-
-    pub(crate) fn update_task_reviews(
-        &self,
-        id: &str,
-        fields: &TaskReviewUpdateParams,
-    ) -> Result<(), OrbitError> {
-        orbit_common::types::validate_orb_task_id(id)?;
-        self.with_task_lock(id, || {
-            let mut bundle = self.read_existing_bundle(id)?;
-            let mut threads = std::mem::take(&mut bundle.review_threads)
-                .into_iter()
-                .map(review_thread_from_v2)
-                .collect::<Vec<_>>();
-
-            if let Some(replacement) = &fields.replace_review_threads {
-                threads = replacement.clone();
-            } else if !fields.append_review_threads.is_empty() {
-                merge_review_threads_v2(&mut threads, fields.append_review_threads.clone());
-            }
-
-            let threads = threads
-                .into_iter()
-                .map(review_thread_to_v2)
-                .collect::<Result<Vec<_>, _>>()?;
-            self.bundle_store.rewrite_review_threads(id, &threads)?;
-            bundle.envelope.updated_at = Utc::now();
-            self.bundle_store.rewrite_envelope(id, &bundle.envelope)?;
-            self.replace_index_best_effort(&bundle.envelope, "task review update");
-            Ok(())
-        })
-    }
 }

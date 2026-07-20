@@ -101,9 +101,8 @@ const DELIVERY_SCOREBOARD_COLUMNS = [
   { key: "tasks_completed", label: "completed", num: true },
 ];
 
-const REVIEW_SCOREBOARD_COLUMNS = [
+const PR_REVIEW_COLUMNS = [
   { key: "agent", label: "agent", num: false },
-  { key: "task_review.threads", label: "review threads", num: true },
   { key: "pr.review_comments", label: "pr rev", num: true },
 ];
 
@@ -178,7 +177,7 @@ const PLANNING_SCOREBOARD_COLUMNS = [
 
 const ALL_SCOREBOARD_SECTIONS = [
   { title: "Delivery", badge: "tasks created · planned · completed", columns: DELIVERY_SCOREBOARD_COLUMNS },
-  { title: "Review", badge: "review threads · PR comments", columns: REVIEW_SCOREBOARD_COLUMNS },
+  { title: "Review", badge: "review threads · PR comments", columns: PR_REVIEW_COLUMNS },
   { title: "Knowledge", badge: "learnings · ADRs · votes", columns: KNOWLEDGE_SCOREBOARD_COLUMNS },
   { title: "Operations", badge: "tool calls · failures · friction", columns: OPERATIONS_SCOREBOARD_COLUMNS },
   { title: "Planning Duels", badge: "wins · losses · roles", columns: PLANNING_SCOREBOARD_COLUMNS },
@@ -287,7 +286,6 @@ function agentActivityTotal(agent) {
     asScoreboardNumber(agent?.tasks_created) +
     asScoreboardNumber(agent?.tasks_planned) +
     asScoreboardNumber(agent?.tasks_completed) +
-    asScoreboardNumber(agent?.task_review?.threads) +
     asScoreboardNumber(agent?.pr?.review_comments) +
     asScoreboardNumber(knowledge.learnings_created) +
     asScoreboardNumber(knowledge.adrs_created) +

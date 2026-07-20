@@ -9,7 +9,6 @@ mod lint;
 mod list;
 pub(crate) mod output;
 mod reindex;
-mod review;
 mod show;
 mod update;
 

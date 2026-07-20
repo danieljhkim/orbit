@@ -24,7 +24,7 @@
 //!
 //! # Key exports
 //! - Backend trait types: [`TaskStoreBackend`], [`TaskDocumentStoreBackend`],
-//!   [`TaskHistoryStoreBackend`], [`TaskReviewStoreBackend`],
+//!   [`TaskHistoryStoreBackend`],
 //!   [`TaskArtifactStoreBackend`], [`TaskReservationStoreBackend`],
 //!   [`JobRunStoreBackend`], [`AuditEventStoreBackend`], [`ToolStoreBackend`]
 //! - Factory functions: `workspace_task_backends`, `workspace_job_run_store`,
@@ -66,15 +66,11 @@ pub mod pr_scoreboard {
     };
 }
 
-pub mod task_review_scoreboard {
-    pub use crate::file::scoreboard::task_review_scoreboard::record_task_review_thread;
-}
-
 pub mod scoreboard_summary {
     pub use crate::file::scoreboard::scoreboard_summary::{
         AgentSummary, DuelSummary, FrictionSummary, KnowledgeSummary, PlanningDuelSummary,
         PrSummary, RecentSummary, ScoreboardInputs, ScoreboardSummary, ScoreboardWindow,
-        TaskReviewSummary, TokenSummary, TopToolCall, WorkflowRunCount, generate_summary,
+        TokenSummary, TopToolCall, WorkflowRunCount, generate_summary,
         generate_summary_with_audit_tool_calls, generate_summary_with_inputs, summary_path,
         write_summary,
     };
@@ -132,13 +128,13 @@ pub use backend::{
     TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
     TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
     TaskReservationReleaseReason, TaskReservationReleaseResult, TaskReservationReserveParams,
-    TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
-    TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend, V2AuditEnvelopeStoreBackend,
-    WorkspaceTaskBackends, audit_event_store_sqlite, coordination_task_backends,
-    global_executor_def_store, global_policy_def_store, layered_policy_def_store,
-    session_learning_state_store_sqlite, task_reservation_store_sqlite, tool_store_sqlite,
-    v2_audit_event_store_sqlite, workspace_adr_backends, workspace_job_run_store,
-    workspace_learning_backend, workspace_policy_def_store, workspace_task_backends,
+    TaskReservationReserveResult, TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend,
+    V2AuditEnvelopeStoreBackend, WorkspaceTaskBackends, audit_event_store_sqlite,
+    coordination_task_backends, global_executor_def_store, global_policy_def_store,
+    layered_policy_def_store, session_learning_state_store_sqlite, task_reservation_store_sqlite,
+    tool_store_sqlite, v2_audit_event_store_sqlite, workspace_adr_backends,
+    workspace_job_run_store, workspace_learning_backend, workspace_policy_def_store,
+    workspace_task_backends,
 };
 pub use file_lock::{LockHolderInfo, read_lock_holder};
 pub use json_schema::{validate_instance_against_schema, validate_schema_document};

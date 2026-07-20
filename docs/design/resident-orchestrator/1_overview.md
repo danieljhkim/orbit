@@ -1,7 +1,7 @@
 ---
 title: Resident Orchestrator — Overview
 owner: codex
-last_updated: 2026-07-18
+last_updated: 2026-07-20
 status: Draft
 feature: resident-orchestrator
 doc_role: overview
@@ -40,10 +40,11 @@ tagged tasks, parent/child task relationships, dependencies, CLI agent activitie
 and explicit-ID shipment workflows. The missing mechanism is a convention and a thin pickup cycle
 that hand ownership of a high-level task to the workspace's specialized orchestrator.
 
-The existing `task_epic_pipeline` is not that mechanism. It assumes child tasks already exist,
-uses an HTTP agent loop with retained session state, and treats `review` as the end of automated
+The former `task_epic_pipeline` was not that mechanism. It assumed child tasks already existed,
+used an HTTP agent loop with retained session state, and treated `review` as the end of automated
 shipment. Orbit v1 supports CLI agent invocation; the resident must also own decomposition and the
-post-review delivery loop. This design replaces the HTTP epic path instead of porting it.
+post-review delivery loop. This design supersedes the HTTP epic path, which was removed as unused
+in [ORB-10332], rather than porting it.
 
 ## 2. Core Concepts
 
@@ -80,10 +81,11 @@ conflict/finding resolution, merge verification, child closure, and finally pare
 | Bounded ownership cycle | proposed `resident_epic_cycle` job | Not allocated |
 | Scheduled pickup | workspace `.orbit/routines/resident_epic.yaml` | Not allocated |
 | Child delivery | existing `task_gate_pipeline` / explicit-ID shipment workflows | Existing mechanism |
-| HTTP epic retirement | existing `task_epic_pipeline` and `epic_orchestrator` assets | Not allocated |
+| HTTP epic retirement | former `task_epic_pipeline` and `epic_orchestrator` assets (removed in [ORB-10332]) | [ORB-10332] |
 
 ## Task References
 
-- None yet — implementation tasks will be allocated after this Draft is accepted.
+- **[ORB-10332]** — Remove the unused HTTP epic pipeline assets (`task_epic_pipeline`, `epic_orchestrator`) this design supersedes.
+- Further implementation tasks will be allocated after this Draft is accepted.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

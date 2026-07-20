@@ -1,7 +1,6 @@
 //! Task bundle v2 persistence is split into focused submodules while this root keeps store orchestration and re-exports.
 //! The `task_bundle_types` submodule owns bundle value types and document filename mapping.
 //! The `bundle_io` submodule owns bundle assembly, validation, JSONL repair, artifact manifest checks, and partial-bundle cleanup.
-//! The `review_threads` submodule owns review-thread sidecar files and tombstone recovery for interrupted rewrites.
 //! The `lock` submodule owns bundle create/delete lock ordering, sentinel cleanup, and projection-entry crash recovery checks.
 
 use std::fs;
@@ -18,7 +17,6 @@ use crate::sqlite::task_registry::{ProjectionRebuildResult, TaskRegistryStore};
 
 pub(crate) mod bundle_io;
 pub(crate) mod lock;
-pub(crate) mod review_threads;
 pub(crate) mod task_bundle_types;
 
 pub(crate) use bundle_io::{
@@ -29,10 +27,7 @@ pub(crate) use lock::{
     ensure_projection_entry_removable, remove_projection_entry, remove_task_bundle_lock_sentinel,
     task_bundle_lock_sentinel_path,
 };
-pub(crate) use review_threads::rewrite_review_threads;
-pub(crate) use task_bundle_types::{
-    TaskBundleCreateResult, TaskBundleV2, TaskDocumentV2, TaskReviewThreadV2,
-};
+pub(crate) use task_bundle_types::{TaskBundleCreateResult, TaskBundleV2, TaskDocumentV2};
 
 pub(crate) struct TaskBundleStoreV2 {
     // pub(crate) fields widened to allow sibling `tests/v2_bundle.rs` (and promoted
@@ -242,15 +237,6 @@ impl TaskBundleStoreV2 {
             &self.bundle_path(task_id)?.join(TASK_ENVELOPE_FILE_NAME),
             envelope,
         )
-    }
-
-    pub(crate) fn rewrite_review_threads(
-        &self,
-        task_id: &str,
-        threads: &[TaskReviewThreadV2],
-    ) -> Result<(), OrbitError> {
-        let bundle_dir = self.bundle_path(task_id)?;
-        rewrite_review_threads(&bundle_dir, threads)
     }
 
     pub(crate) fn rewrite_artifact_manifest(

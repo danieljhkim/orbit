@@ -134,7 +134,6 @@ pub fn tool_allowed(tool_name: &str, allowlist: &[String]) -> bool {
 fn activity_tool_allowlist(activity: &ActivityV2) -> Option<&[String]> {
     match &activity.spec {
         ActivityV2Spec::AgentLoop(spec) => Some(&spec.tools),
-        ActivityV2Spec::Groundhog(spec) => Some(&spec.tools),
         ActivityV2Spec::Deterministic(_) => None,
     }
 }

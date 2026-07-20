@@ -1,5 +1,5 @@
 // Test support helpers extracted from the old nested v2_bundle/tests/test_support.rs
-// and shared by v2_bundle sibling tests + the internal bundle_io/review_threads tests.
+// and shared by v2_bundle sibling tests + the internal bundle_io tests.
 // Promoted here per docs/design-patterns/test_layout.md guidance for shared test helpers.
 
 use std::fs;
@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
 use orbit_common::types::{
-    ReviewThreadMessageMetadataV2, ReviewThreadMetadataV2, ReviewThreadStatus,
     TASK_ARTIFACT_SCHEMA_VERSION, TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2, TaskPriority,
     TaskStatus, TaskType,
 };
@@ -61,53 +60,8 @@ pub(crate) fn sample_bundle(id: &str) -> TaskBundleV2 {
             by: "daniel".to_string(),
             body: "Looks good.".to_string(),
         }],
-        review_threads: Vec::new(),
         artifact_manifest: None,
     }
-}
-
-pub(crate) fn sample_review_threads() -> Vec<TaskReviewThreadV2> {
-    let now = Utc.with_ymd_and_hms(2026, 5, 11, 12, 0, 0).unwrap();
-    vec![
-        TaskReviewThreadV2 {
-            metadata: ReviewThreadMetadataV2 {
-                schema_version: TASK_ARTIFACT_SCHEMA_VERSION,
-                thread_id: "RT-0002".to_string(),
-                status: ReviewThreadStatus::Open,
-                path: Some("src/lib.rs".to_string()),
-                line: Some(42),
-                github_thread_id: None,
-                messages: vec![ReviewThreadMessageMetadataV2 {
-                    message_id: "RM-0002".to_string(),
-                    at: now,
-                    by: "codex:gpt-5.5".to_string(),
-                    github_comment_id: None,
-                }],
-                created_at: now,
-                updated_at: now,
-            },
-            body: "Second thread body".to_string(),
-        },
-        TaskReviewThreadV2 {
-            metadata: ReviewThreadMetadataV2 {
-                schema_version: TASK_ARTIFACT_SCHEMA_VERSION,
-                thread_id: "RT-0001".to_string(),
-                status: ReviewThreadStatus::Resolved,
-                path: None,
-                line: None,
-                github_thread_id: Some(123),
-                messages: vec![ReviewThreadMessageMetadataV2 {
-                    message_id: "RM-0001".to_string(),
-                    at: now,
-                    by: "daniel".to_string(),
-                    github_comment_id: Some(456),
-                }],
-                created_at: now,
-                updated_at: now,
-            },
-            body: "First thread body".to_string(),
-        },
-    ]
 }
 
 pub(crate) fn bundle_store(temp: &TempDir) -> TaskBundleStoreV2 {

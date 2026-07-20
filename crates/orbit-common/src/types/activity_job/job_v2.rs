@@ -204,7 +204,7 @@ pub struct TargetStep {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
     /// Step-level role tag (ADR-029). Wins over the activity-level role on
-    /// `AgentLoopSpec`/`GroundhogSpec` when both are present. The dispatcher
+    /// `AgentLoopSpec` when present. The dispatcher
     /// resolves the effective role to a `(provider, model, backend)` triple
     /// from `[agent.<role>]` in `config.toml` and overrides the inline values
     /// on the cloned spec before invoking the runner.

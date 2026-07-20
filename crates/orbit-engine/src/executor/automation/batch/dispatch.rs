@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use crate::context::{TaskAutomationUpdate, TaskHost};
 
 use super::super::input::required_input_string;
-use super::parallel::{parse_parallelism, tasks_conflict};
+use super::support::{parse_parallelism, tasks_conflict};
 
 const SYSTEM_ACTOR_LABEL: &str = "system";
 

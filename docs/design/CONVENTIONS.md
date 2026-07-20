@@ -1,7 +1,7 @@
 ---
 title: Design Doc Conventions
 owner: daniel
-last_updated: 2026-07-17
+last_updated: 2026-07-20
 status: Accepted
 ---
 
@@ -27,7 +27,7 @@ docs/design/<feature>/
     └── glossary.md     recommended; other lookup-style docs allowed
 ```
 
-- Folder name: lowercase, hyphenated, singular (`knowledge-graph`, `groundhog`).
+- Folder name: lowercase, hyphenated, singular (`knowledge-graph`, `host-registry`).
 - No `README.md`, `roadmap.md`, `changelog.md`, `tutorial.md` at this level.
 - No top-level narrative files outside the numbered four (`1_`–`4_`). Existing folders may vary; new work should prefer the layout for coherence.
 
@@ -50,7 +50,7 @@ Every numbered design doc starts with the YAML frontmatter carried by the [`_tem
 - `owner` is the accountable agent family, not a committer list or full model string.
 - `last_updated` is the calendar date of the last meaningful content change. Trivial reformat commits should not reset it.
 - `status` is `Draft` until the doc is approved by the feature lead, then `Accepted`. It moves back to `Draft` if a structural rewrite is in flight.
-- `feature` is the folder slug (e.g. `groundhog`, `knowledge-graph`). Lets tooling group docs by feature without parsing paths.
+- `feature` is the folder slug (e.g. `host-registry`, `knowledge-graph`). Lets tooling group docs by feature without parsing paths.
 - `doc_role` is one of `overview`, `design`, `vision`, `decisions` — corresponds 1:1 with the filename prefix `1_`/`2_`/`3_`/`4_`.
 
 The template frontmatter also carries the orbit-docs retrieval fields (`type`, `summary`, `tags`, `paths`, `related_features`, `related_artifacts`) so the doc is indexable on day one. `type` and `summary` are required by the strict parser. `summary` must be a non-empty single line. `related_artifacts` accepts `ORB-NNNNN`, `L-NNNN`, `FYYYY-MM-NNN`, and `ADR-NNNN` strings. The tolerant indexer infers these fields for legacy design docs and pattern docs, but new docs should write them explicitly. The docs indexer does not index `.orbit/`; ADR bodies remain owned by the ADR tool surface (see the `orbit-knowledge` skill).
@@ -192,7 +192,6 @@ Retired features stay listed with their `_archive/` path as a historical record.
 | Auditability | [docs/design/auditability/](./auditability/) | codex |
 | Executors | [docs/design/executors/](./executors/) | claude |
 | Global Store Consolidation | [docs/design/_archive/global-store-consolidation/](./_archive/global-store-consolidation/) | codex |
-| Groundhog | [docs/design/groundhog/](./groundhog/) | codex |
 | Host Registry | [docs/design/host-registry/](./host-registry/) | claude |
 | Knowledge graph | [docs/design/_archive/knowledge-graph/](./_archive/knowledge-graph/) | claude |
 | MCP Bridge | [docs/design/mcp-bridge/](./mcp-bridge/) | codex |

@@ -86,11 +86,6 @@ pub(crate) fn task_to_json_with_sidecars(
             .map_err(|e| OrbitError::Io(e.to_string()))?,
     );
     object.insert(
-        "review_threads".to_string(),
-        serde_json::to_value(runtime.get_task_review_threads(&task.id)?)
-            .map_err(|e| OrbitError::Io(e.to_string()))?,
-    );
-    object.insert(
         "artifacts".to_string(),
         task_artifact_manifest_to_json(&runtime.get_task_artifact_manifest(&task.id)?),
     );

@@ -1,6 +1,6 @@
 use orbit_common::types::{
-    ExternalRef, OrbitId, ReviewThread, TaskArtifact, TaskComplexity, TaskPriority, TaskRelation,
-    TaskStatus, TaskType,
+    ExternalRef, OrbitId, TaskArtifact, TaskComplexity, TaskPriority, TaskRelation, TaskStatus,
+    TaskType,
 };
 
 use crate::runtime::TaskRecordUpdateParams;
@@ -77,7 +77,6 @@ pub struct TaskUpdateParams {
     pub crew: Option<Option<String>>,
     pub context_files: Option<Vec<String>>,
     pub upsert_artifacts: Vec<TaskArtifact>,
-    pub append_review_threads: Vec<ReviewThread>,
 }
 
 impl TaskUpdateParams {
@@ -104,7 +103,6 @@ impl TaskUpdateParams {
             || self.crew.is_some()
             || self.context_files.is_some()
             || !self.upsert_artifacts.is_empty()
-            || !self.append_review_threads.is_empty()
     }
 
     pub(crate) fn has_any_mutation(&self) -> bool {
@@ -133,7 +131,6 @@ impl From<TaskUpdateParams> for TaskRecordUpdateParams {
             crew: p.crew,
             context_files: p.context_files,
             upsert_artifacts: p.upsert_artifacts,
-            append_review_threads: p.append_review_threads,
             ..Default::default()
         }
     }

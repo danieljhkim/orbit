@@ -20,7 +20,6 @@ use thiserror::Error;
 use super::agent_loop_driver::drive_agent_loop;
 use super::audit_writer::V2AuditWriter;
 use super::cli_runner::run_cli_backend;
-use super::groundhog::run_groundhog_activity;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedCliExecutor {
@@ -264,9 +263,6 @@ pub enum DispatchError {
     #[error("agent_loop run failed: {0}")]
     AgentLoopFailed(String),
 
-    #[error("groundhog run failed: {0}")]
-    GroundhogFailed(String),
-
     /// §3.1 no-silent-fallback: `backend: http` requested a provider whose
     /// HTTP transport is not wired. Must surface as a structured error rather
     /// than silently dispatching to CLI.
@@ -403,7 +399,6 @@ fn dispatch_v2_activity_inner(
     };
     let activity_type = match input.spec {
         ActivityV2Spec::AgentLoop(_) => "agent_loop",
-        ActivityV2Spec::Groundhog(_) => "groundhog",
         ActivityV2Spec::Deterministic(_) => "deterministic",
     };
 
@@ -430,25 +425,6 @@ fn dispatch_v2_activity_inner(
                 input.fs_profile,
             ),
             None => Err(DispatchError::HostRequired("agent_loop")),
-        },
-        ActivityV2Spec::Groundhog(spec) => match input.host {
-            Some(host) => {
-                if !spec.provider.has_http_transport() {
-                    return Err(DispatchError::UnwiredHttpTransport {
-                        provider: spec.provider.as_str().to_string(),
-                    });
-                }
-                run_groundhog_activity(
-                    host,
-                    input.activity_name,
-                    spec,
-                    input.run_id,
-                    input.audit.clone(),
-                    &activity_input,
-                    input.fs_profile,
-                )
-            }
-            None => Err(DispatchError::HostRequired("groundhog")),
         },
         ActivityV2Spec::Deterministic(spec) => match input.host {
             Some(host) => run_deterministic(

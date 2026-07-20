@@ -24,7 +24,7 @@ Registered Orbit tools are reachable via two surfaces. Both accept identical JSO
 | **MCP** | Claude Code with the orbit plugin (or any MCP client connected to `orbit mcp serve`); look for `orbit_*` tools in your toolbox | `orbit_task_add({"title": "...", "model": "<agent-family>"})` |
 | **CLI** | Shell access (inside an activity step, or with the `orbit` binary on `PATH`) | `orbit tool run orbit.task.add --input '{"title": "...", "model": "<agent-family>"}'` |
 
-**Mapping rule**: `orbit.<group>.<action>` ↔ `orbit_<group>_<action>` (dots become underscores; JSON args identical). For multi-segment names like `orbit.task.review_thread.add`, every dot becomes an underscore: `orbit_task_review_thread_add`.
+**Mapping rule**: `orbit.<group>.<action>` ↔ `orbit_<group>_<action>` (dots become underscores; JSON args identical). For multi-segment names like `orbit.task.artifact.put`, every dot becomes an underscore: `orbit_task_artifact_put`.
 
 **Environment parity**: the registered `orbit.*` tool surface is identical across MCP and `orbit tool run`. Some deployments front the orbit MCP behind a gateway that mirrors the surface exactly and may add an optional `workspace` routing param on tools that lack one. The code graph is deliberately outside this parity contract: it is available only through `orbit graph` in a shell. Any non-standard tools a gateway adds beyond the Orbit surface are documented by that gateway, not here — consult its own reference before relying on them.
 
@@ -57,7 +57,6 @@ orbit tool run orbit.task.add --input '{"title": "...", "description": "...", "a
 orbit tool run orbit.task.update --input '{"id": "<id>", "plan": "...", "model": "<agent-family>"}'
 orbit tool run orbit.task.start --input '{"id": "<id>", "note": "...", "model": "<agent-family>"}'            # backlog -> in-progress
 orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "...", "model": "<agent-family>"}'          # proposed -> backlog, review -> done
-orbit tool run orbit.task.review_thread.add --input '{"id": "<id>", "body": "...", "path": "<path>", "line": "<line>", "model": "<agent-family>"}'
 ```
 
 ## Common Mistakes — DO NOT

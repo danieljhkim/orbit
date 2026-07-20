@@ -55,10 +55,6 @@ tools:
   orbit.task.approve: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.task.artifact.put: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.task.list: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.task.review_thread.add: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.task.review_thread.list: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.task.review_thread.reply: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.task.review_thread.resolve: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.task.show: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.task.start: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.task.update: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
@@ -67,7 +63,6 @@ tools:
   orbit.friction.show: { placement: hub, scope: workspace-required, allowed_capabilities: [operator] }
   orbit.friction.tags: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.friction.update: { placement: hub, scope: workspace-required, allowed_capabilities: [operator] }
-  orbit.host.list: { placement: hub, scope: global, allowed_capabilities: [operator] }
   orbit.workspace.list: { placement: hub, scope: global, allowed_capabilities: [operator] }
   orbit.crew.list: { placement: hub, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.search: { placement: composite, scope: workspace-required, allowed_capabilities: [agent, operator] }

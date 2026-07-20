@@ -1,7 +1,7 @@
 ---
 title: Host Registry — Decisions
 owner: claude
-last_updated: 2026-07-19
+last_updated: 2026-07-20
 status: Accepted
 feature: host-registry
 doc_role: decisions
@@ -10,7 +10,7 @@ summary: ADR log for the coupled Host Registry and MCP Bridge v1 contract and it
 tags: [host-registry, mcp-bridge, multi-host, placement]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Host Registry — Decisions
@@ -71,7 +71,7 @@ and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
 
 ## ADR-0228 — Local placement broker with capability-set filtering
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] added the `orbit.host.list` and `orbit.workspace.list` canonical discovery tools (hub placement, operator capability, workspace-unscoped) reading one sanitized path-free registry snapshot; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface; [ORB-10271] enforced current registered/active caller identity before every ordinary remote call and exposed path-free operator friction list/show; [ORB-10319] colocates MCP-only discovery schema and execution in Remote while retaining dedicated human CLI commands; [ORB-10276] added the workspace-scoped, `{agent, operator}` `orbit.crew.list` (never `runner`) beside the two operator-only global registry tools, reading the owner execution-profile projection through one service that also backs explicit task-crew validation.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] added the `orbit.host.list` and `orbit.workspace.list` canonical discovery tools (hub placement, operator capability, workspace-unscoped) reading one sanitized path-free registry snapshot; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface; [ORB-10271] enforced current registered/active caller identity before every ordinary remote call and exposed path-free operator friction list/show; [ORB-10319] colocates MCP-only discovery schema and execution in Remote while retaining dedicated human CLI commands; [ORB-10276] added the workspace-scoped, `{agent, operator}` `orbit.crew.list` (never `runner`) beside the two operator-only global registry tools, reading the owner execution-profile projection through one service that also backs explicit task-crew validation; [ORB-10332] removed the `orbit.host.list` MCP discovery tool as unused (the `orbit host list` CLI command and the `orbit.workspace.list` / `orbit.crew.list` MCP tools remain).
 
 ### Context
 
@@ -258,8 +258,9 @@ crate.
   local fallback, and reassignment preserves A while B baselines without backfill.
 - [ORB-10267] — implemented Unit C3 of ORB-10246: operator host administration
   (`orbit host register/list/rename/retire`), hub-side workspace `link` and machine-local
-  `role` (owner/replica) operations, the `orbit.host.list`/`orbit.workspace.list` canonical
-  discovery tools, one path-free `RegistrySnapshotV1` projection read in a single store
+  `role` (owner/replica) operations, the `orbit.host.list` (removed in [ORB-10332]) and
+  `orbit.workspace.list` canonical discovery tools, one path-free `RegistrySnapshotV1`
+  projection read in a single store
   transaction, typed `workspace-required|global` tool scope metadata, the versioned atomic
   satellite registry cache (stable canonical payload plus local receipt; derived age/freshness
   does not create same-revision conflicts), and store schema v8's singleton
@@ -302,3 +303,6 @@ crate.
   resolved crew, generation, config digest, ship-closure digest). Standalone and
   owner-local auto-task CRUD keep their local crew validation. Task `host`/claims
   (H2), workflow ship/placement (H3), and run lineage/leasing (I1) stay out of scope.
+- [ORB-10332] — removed the `orbit.host.list` MCP discovery tool as unused; the
+  `orbit host list` CLI command and the `orbit.workspace.list` / `orbit.crew.list`
+  MCP discovery tools remain.

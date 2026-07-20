@@ -5,8 +5,7 @@ use axum::response::Response;
 use crate::{
     DASHBOARD_CSP, serve_app_js, serve_audit_js, serve_common_js, serve_diagnostics_js,
     serve_index, serve_log_tail_js, serve_markdown_js, serve_marked_js, serve_purify_js,
-    serve_review_threads_js, serve_router_js, serve_run_detail_js, serve_runs_js,
-    serve_scoreboard_js, serve_tasks_js,
+    serve_router_js, serve_run_detail_js, serve_runs_js, serve_scoreboard_js, serve_tasks_js,
 };
 
 #[tokio::test]
@@ -26,7 +25,6 @@ async fn dashboard_html_and_js_routes_emit_csp() {
         ("router", serve_router_js().await),
         ("runs", serve_runs_js().await),
         ("run_detail", serve_run_detail_js().await),
-        ("review_threads", serve_review_threads_js().await),
     ];
 
     for (name, response) in routes {
@@ -127,7 +125,7 @@ fn dashboard_task_actions_route_to_selected_workspace() {
 fn dashboard_guards_per_workspace_panels_in_aggregate_view() {
     // ORB-00039: in the aggregate "All workspaces" view there is no concrete
     // workspace, so the per-workspace endpoints (/api/crews, /api/tasks/locks,
-    // /api/audit/summary, /api/review-threads, /api/scoreboard) must not be
+    // /api/audit/summary, /api/scoreboard) must not be
     // fetched — they'd 400 — and their panels show a placeholder instead.
     // Asserted against the embedded asset sources since the dashboard has no JS
     // test runner (see dashboard_markdown_call_sites above).
@@ -160,7 +158,7 @@ fn dashboard_guards_per_workspace_panels_in_aggregate_view() {
     );
 
     // Aggregate mode renders placeholders instead of fetching the per-workspace
-    // summary / review-threads panels.
+    // summary panel.
     assert!(
         app.contains("renderAggregatePlaceholders()"),
         "aggregate mode must render panel placeholders"
@@ -174,9 +172,9 @@ fn dashboard_guards_per_workspace_panels_in_aggregate_view() {
         "the aggregate placeholder must be styled"
     );
 
-    // The per-workspace summary + review-thread jobs are pushed only in the
-    // non-aggregate branch (previously unconditional array literals with a
-    // trailing comma) — the old unconditional form must be gone.
+    // The per-workspace summary job is pushed only in the non-aggregate branch
+    // (previously an unconditional array literal with a trailing comma) — the
+    // old unconditional form must be gone.
     assert!(
         app.contains("jobs.push(fetchAndRenderSummary());"),
         "fetchAndRenderSummary must be pushed conditionally, not unconditionally"
@@ -184,12 +182,6 @@ fn dashboard_guards_per_workspace_panels_in_aggregate_view() {
     assert!(
         !app.contains("fetchAndRenderSummary(),"),
         "fetchAndRenderSummary must no longer be an unconditional job"
-    );
-    // The review-thread panel (per-workspace) is likewise pushed only in the
-    // non-aggregate branch, wrapped in the same conditional jobs.push.
-    assert!(
-        app.contains("fetchAndRenderReviewThreads().then(() => {"),
-        "review-threads job must still exist for the concrete-workspace path"
     );
 
     // Task locks and crews are skipped in aggregate mode; the aggregate task list

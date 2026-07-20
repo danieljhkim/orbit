@@ -360,7 +360,6 @@ pub(super) async fn update_task_action(
         crew: body.crew,
         context_files: body.context_files,
         upsert_artifacts: Vec::new(),
-        append_review_threads: Vec::new(),
     };
     match runtime.update_task_with_identity(id, params, None, None) {
         Ok(task) => match dashboard_status_index(&runtime) {

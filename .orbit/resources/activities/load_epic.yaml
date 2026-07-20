@@ -5,7 +5,7 @@ metadata:
 spec:
   type: deterministic
   description: >
-    Materialize the working set for `epic_orchestrator`: the epic task
+    Materialize the working set for epic orchestration: the epic task
     itself plus all subtasks that still need automated shipment
     (reverse-parent lookup). Filters out Done / Review / Blocked /
     Archived / Rejected — the orchestrator only needs to drive the open

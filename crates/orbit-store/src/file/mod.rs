@@ -22,7 +22,6 @@ pub(crate) mod scoreboard {
     pub(crate) mod planning_duel_scoreboard;
     pub(crate) mod pr_scoreboard;
     pub(crate) mod scoreboard_summary;
-    pub(crate) mod task_review_scoreboard;
     pub(crate) mod token_scoreboard;
 }
 pub(crate) mod skill_store;

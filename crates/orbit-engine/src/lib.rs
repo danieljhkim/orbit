@@ -32,12 +32,10 @@
 //! → `orbit-engine` → orbit-core
 
 mod activity_job;
-mod checkpoint_verifier;
 mod context;
 mod executor;
 mod job_runner;
 mod template;
-mod workspace_snapshot;
 
 pub use activity_job::{
     DispatchError, DispatchOutcome, EnforcedAuditSink, EnforcementDecision, JobOutcome,
@@ -47,10 +45,6 @@ pub use activity_job::{
     drive_agent_loop_with_session, drive_agent_loop_with_tool_context, execute_job,
     execute_job_with_resume, reset_replay_transport, resolve_agent_settings,
     resolve_job_catalog_refs_for_execution, resolve_subprocess_cwd, run_cli_backend, validate_job,
-};
-pub use checkpoint_verifier::{
-    Criterion, CriterionOutcome, CriterionRun, DEFAULT_OUTPUT_CAP_BYTES, VerifierConfig,
-    VerifierResult, verify_checkpoint, verify_checkpoint_with_config,
 };
 pub use context::{
     ACTIVITY_EXECUTION_FAILED, AGENT_COMMIT_FAILED, AGENT_INVOCATION_FAILED,
@@ -67,4 +61,3 @@ pub use executor::automation::{
     StateExecutionContext, execute_action as execute_deterministic_action,
 };
 pub use executor::registry::ActivityExecutorRegistry;
-pub use workspace_snapshot::{WorkspaceSnapshot, WorkspaceSnapshotRef};

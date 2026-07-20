@@ -7,8 +7,8 @@ use crate::executor::registry::ActivityExecutorRegistry;
 use orbit_common::types::activity_job::AgentRole;
 use orbit_common::types::{
     Activity, AgentModelPair, ExecutorDef, ExternalRef, InvocationTrace, Job, JobTargetType,
-    OrbitError, OrbitEvent, ReviewThread, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
-    TaskPriority, TaskStatus,
+    OrbitError, OrbitEvent, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority,
+    TaskStatus,
 };
 use orbit_store::{InvocationQuery, InvocationRecord};
 use orbit_tools::ToolContext;
@@ -97,10 +97,6 @@ impl TaskReadHost for AgentExecutorHost<'_> {
 
     fn get_task_history(&self, task_id: &str) -> Result<Vec<TaskHistoryEntry>, OrbitError> {
         self.task_reader.get_task_history(task_id)
-    }
-
-    fn get_task_review_threads(&self, task_id: &str) -> Result<Vec<ReviewThread>, OrbitError> {
-        self.task_reader.get_task_review_threads(task_id)
     }
 
     fn list_tasks_filtered(
@@ -193,10 +189,6 @@ impl TaskReadHost for CliCommandExecutorHost<'_> {
         self.task_reader.get_task_history(task_id)
     }
 
-    fn get_task_review_threads(&self, task_id: &str) -> Result<Vec<ReviewThread>, OrbitError> {
-        self.task_reader.get_task_review_threads(task_id)
-    }
-
     fn list_tasks_filtered(
         &self,
         status: Option<TaskStatus>,
@@ -271,10 +263,6 @@ impl TaskReadHost for AutomationExecutorHost<'_> {
 
     fn get_task_history(&self, task_id: &str) -> Result<Vec<TaskHistoryEntry>, OrbitError> {
         self.task_reader.get_task_history(task_id)
-    }
-
-    fn get_task_review_threads(&self, task_id: &str) -> Result<Vec<ReviewThread>, OrbitError> {
-        self.task_reader.get_task_review_threads(task_id)
     }
 
     fn list_tasks_filtered(

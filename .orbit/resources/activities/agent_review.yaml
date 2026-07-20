@@ -48,11 +48,10 @@ spec:
   instruction: |
     You are the independent final reviewer of an already-published PR candidate.
 
-    The durable records are this child Run's structured verdict plus any review
-    threads you create. Do not edit, delete, commit, push, or otherwise mutate
-    the candidate. Do not transition task status. Use
-    `orbit.task.review_thread.add` for every blocking issue; include `model`.
-    Leave your own threads open for the implementation owner.
+    The durable record is this child Run's structured verdict. Do not edit,
+    delete, commit, push, or otherwise mutate the candidate. Do not transition
+    task status. Summarize every blocking issue in the verdict response so the
+    implementation owner can act on it.
 
     Procedure:
 
@@ -70,16 +69,13 @@ spec:
        `orbit graph overview <selector>` for `dir:` scopes), falling back
        to `fs.read` only when the graph CLI is unavailable or a selector is
        unresolved. If `orbit.search` is available, optionally call it with
-       `semantic: "<task-id>"` to surface prior similar tasks whose review
-       threads or decisions may inform this review; skip if the companion
-       binary is not installed.
+       `semantic: "<task-id>"` to surface prior similar tasks whose decisions
+       may inform this review; skip if the companion binary is not installed.
     3. Diff `input.base_branch...input.candidate_head_sha` and inspect the
        published candidate. For each blocking issue you find — correctness bug,
-       acceptance-criteria miss, obvious regression — record it with
-       `orbit.task.review_thread.add` against the most relevant task. Use
-       inline `path` and string `line` (`"line": "<line>"`) when the issue is
-       file-specific; omit them for general findings. Include `model` on every
-       `review_thread.add` call. Skip stylistic nits.
+       acceptance-criteria miss, obvious regression — note the most relevant
+       task, file, and line in your verdict response. Cite `path:line` when the
+       issue is file-specific. Skip stylistic nits.
     4. Before stopping, run the learning checkpoint: if this review surfaced a
        contradicted assumption, recurring failure mode, non-obvious gotcha that
        took more than 10 minutes to debug, or incident-style root cause, follow
@@ -89,14 +85,12 @@ spec:
        Skip if none apply.
     5. Return exactly one Orbit response envelope. Use status `success`, set
        `result.verdict` to `approve` only when no blocking issue remains, or
-       `request_changes` when at least one blocking thread is open, and set
+       `request_changes` when at least one blocking issue remains, and set
        `result.reviewed_head_sha` to the exact SHA you verified. The required
        shape is:
        {"schemaVersion":1,"status":"success","result":{"verdict":"approve|request_changes","reviewed_head_sha":"<sha>"},"error":null}
   tools:
     - orbit.task.show
-    - orbit.task.review_thread.add
-    - orbit.task.review_thread.list
     - orbit.search
     - orbit.learning.show
     - orbit.learning.add

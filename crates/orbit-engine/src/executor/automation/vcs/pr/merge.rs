@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use orbit_common::types::{ExternalRef, OrbitError, ReviewThreadStatus, Role, Task, TaskStatus};
+use orbit_common::types::{ExternalRef, OrbitError, Role, Task, TaskStatus};
 use orbit_store::pr_scoreboard;
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
@@ -177,7 +177,6 @@ fn resolve_batch_workspace_path<H: RuntimeHost + ?Sized>(
 
 fn task_required_revision<H: TaskHost + ?Sized>(host: &H, task: &Task) -> Result<bool, OrbitError> {
     let history = host.get_task_history(&task.id)?;
-    let review_threads = host.get_task_review_threads(&task.id)?;
     Ok(history.iter().any(|entry| {
         entry.event == "status_changed"
             && entry.from_status == Some(TaskStatus::Review)
@@ -185,7 +184,5 @@ fn task_required_revision<H: TaskHost + ?Sized>(host: &H, task: &Task) -> Result
                 entry.to_status,
                 Some(TaskStatus::Backlog | TaskStatus::InProgress | TaskStatus::Rejected)
             )
-    }) || review_threads
-        .iter()
-        .any(|thread| thread.status == ReviewThreadStatus::Resolved))
+    }))
 }
