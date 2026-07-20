@@ -1211,7 +1211,8 @@ mod audited_mcp_call_tests {
         assert_eq!(workspace_rows[0]["owner_machine_id"], "hm_owner");
         assert_eq!(workspace_rows[0]["owner_host_id"], "owner");
 
-        for (tool_name, call_id) in [("orbit.workspace.list", "mcall-workspace-list")] {
+        {
+            let (tool_name, call_id) = ("orbit.workspace.list", "mcall-workspace-list");
             let events = runtime
                 .list_audit_events(None, Some(tool_name.to_string()), None, None, 16)
                 .expect("list discovery audit events");

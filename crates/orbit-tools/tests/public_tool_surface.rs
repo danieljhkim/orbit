@@ -89,12 +89,11 @@ fn remote_discovery_is_not_registered_in_the_generic_tool_surface() {
         .map(|schema| schema.name)
         .collect::<BTreeSet<_>>();
 
-    for remote_owned in ["orbit.workspace.list"] {
-        assert!(
-            !all_names.contains(remote_owned),
-            "Remote-owned discovery leaked into generic ToolRegistry: {remote_owned}"
-        );
-    }
+    let remote_owned = "orbit.workspace.list";
+    assert!(
+        !all_names.contains(remote_owned),
+        "Remote-owned discovery leaked into generic ToolRegistry: {remote_owned}"
+    );
 }
 
 #[test]
