@@ -10,11 +10,6 @@ use serde_json::{Value, json};
 pub(super) fn discovery_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
     let definitions = vec![
         discovery_definition(
-            "orbit.host.list",
-            "List registered hub hosts with sanitized lifecycle, aliases, and workspace-presence \
-             freshness (operator, hub placement).",
-        )?,
-        discovery_definition(
             "orbit.workspace.list",
             "List workspaces with declared owner and sanitized execution-profile freshness \
              (operator, hub placement).",
@@ -75,11 +70,6 @@ pub(super) fn execute_discovery_tool(
     snapshot: RegistrySnapshotV1,
 ) -> Result<Value, OrbitError> {
     match name {
-        "orbit.host.list" => Ok(json!({
-            "hub_machine_id": snapshot.hub_machine_id,
-            "registry_revision": snapshot.registry_revision,
-            "hosts": snapshot.hosts,
-        })),
         "orbit.workspace.list" => Ok(json!({
             "hub_machine_id": snapshot.hub_machine_id,
             "registry_revision": snapshot.registry_revision,

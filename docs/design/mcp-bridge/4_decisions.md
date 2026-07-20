@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Decisions
 owner: codex
-last_updated: 2026-07-19
+last_updated: 2026-07-20
 status: Accepted
 feature: mcp-bridge
 doc_role: decisions
@@ -10,7 +10,7 @@ summary: ADR log for the coupled MCP Bridge and Host Registry v1 contract and it
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Orbit MCP Bridge — Decisions
@@ -67,7 +67,7 @@ and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
 
 ## ADR-0228 — Local placement broker with capability-set filtering
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] registered the first operator-only, hub-placement canonical discovery tools (`orbit.host.list`, `orbit.workspace.list`) in Remote's canonical composition and the versioned conformance fixture; [ORB-10262] implemented the local exact-checkout broker and capability enforcement; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface; [ORB-10271] implemented active registered-caller validation, operator-only friction reads, and path-free remote artifacts/responses; [ORB-10319] colocated MCP-only discovery schemas and execution in Remote while retaining the dedicated human CLI commands; [ORB-10276] completed the discovery surface with the workspace-scoped, `{agent, operator}`, hub-placement `orbit.crew.list` (runner neither advertises nor executes it) beside the two operator-only global registry tools, reading the same profile projection through one service.
+**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] registered the first operator-only, hub-placement canonical discovery tools (`orbit.host.list`, `orbit.workspace.list`) in Remote's canonical composition and the versioned conformance fixture; [ORB-10262] implemented the local exact-checkout broker and capability enforcement; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface; [ORB-10271] implemented active registered-caller validation, operator-only friction reads, and path-free remote artifacts/responses; [ORB-10319] colocated MCP-only discovery schemas and execution in Remote while retaining the dedicated human CLI commands; [ORB-10276] completed the discovery surface with the workspace-scoped, `{agent, operator}`, hub-placement `orbit.crew.list` (runner neither advertises nor executes it) beside the two operator-only global registry tools, reading the same profile projection through one service; [ORB-10332] removed the `orbit.host.list` MCP discovery tool as unused (the `orbit host list` CLI command and the `orbit.workspace.list` / `orbit.crew.list` MCP tools remain).
 
 ### Context
 
@@ -236,7 +236,8 @@ Remote database or a separate broker crate.
 
 - [ORB-00424] — completed design proposal for canonical Orbit MCP and Bridge parity retirement.
 - [ORB-10245] — accepted the coupled contract and recorded this ADR set.
-- [ORB-10267] — registered the `orbit.host.list` and `orbit.workspace.list` operator discovery
+- [ORB-10267] — registered the `orbit.host.list` (later removed in [ORB-10332]) and
+  `orbit.workspace.list` operator discovery
   tools (hub placement, operator capability, typed global/workspace-unscoped scope) in the
   Remote-owned discovery registry and the versioned conformance fixture, with every pre-existing tool
   defaulting to typed `workspace-required`. Each discovery tool is backed by one sanitized,
@@ -284,5 +285,8 @@ Remote database or a separate broker crate.
   and mutate nothing. Standalone and owner-local auto-task CRUD keep their local
   crew validation. Task `host`/claims (H2), workflow ship/placement (H3), and run
   lineage/leasing (I1) remain out of scope.
+- [ORB-10332] — removed the `orbit.host.list` MCP discovery tool as unused; the
+  `orbit host list` CLI command and the `orbit.workspace.list` / `orbit.crew.list`
+  MCP discovery tools remain.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

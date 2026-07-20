@@ -12,7 +12,7 @@ use crate::OrbitRuntime;
 /// Shippable default workflow assets, seeded under
 /// `<orbit_root>/resources/jobs/<name>.yaml` on `orbit init`. The entries
 /// here are the admission-controlled task shipment workflows
-/// (auto / epic / gate / local / pr), the planning-duel workflow, and the
+/// (auto / gate / local / pr), the planning-duel workflow, and the
 /// failed-run triage workflow [ORB-10129].
 /// Example and smoke fixtures live
 /// under `crates/orbit-core/assets/jobs/examples/` and are NOT seeded —
@@ -30,10 +30,6 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
     (
         "task_auto_pipeline",
         include_str!("../../../assets/jobs/task_auto_pipeline.yaml"),
-    ),
-    (
-        "task_epic_pipeline",
-        include_str!("../../../assets/jobs/task_epic_pipeline.yaml"),
     ),
     (
         "task_gate_pipeline",
@@ -1098,11 +1094,6 @@ spec:
             })
             .collect::<BTreeSet<_>>();
         let allowed_handoffs = BTreeSet::from([
-            (
-                "task_epic_pipeline",
-                "orchestrator_iter",
-                "steps.orchestrator_iter.output.dispatched_run_ids",
-            ),
             // [ORB-10129] The triage agent's dispositions flow into the
             // deterministic `apply_triage_dispositions` step, which bounds
             // them (candidates-only, environmental-only re-backlog, durable
@@ -1212,7 +1203,6 @@ spec:
         for job_name in [
             "job_duel_plan_pipeline",
             "task_auto_pipeline",
-            "task_epic_pipeline",
             "task_gate_pipeline",
             "task_triage_pipeline",
             "workspace_ship_pipeline",

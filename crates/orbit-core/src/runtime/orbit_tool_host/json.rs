@@ -88,11 +88,6 @@ pub(super) fn serialize_task(runtime: &OrbitRuntime, task: &Task) -> Result<Valu
         "history".to_string(),
         serialize_history(&runtime.get_task_history(&task.id)?)?,
     );
-    object.insert(
-        "review_threads".to_string(),
-        serde_json::to_value(runtime.get_task_review_threads(&task.id)?)
-            .map_err(serialize_error("serialize review threads"))?,
-    );
     insert_resolved_crew(runtime, task, object)?;
     Ok(value)
 }

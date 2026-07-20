@@ -124,8 +124,8 @@ fn role_slot_from_input(input: &Value) -> Option<RoleSlot> {
 
 /// Drive a v2 agent_loop activity with a caller-supplied ToolContext.
 ///
-/// Groundhog uses this entry to attach an in-memory Groundhog verb host to the
-/// per-attempt tool context while reusing the shared HTTP loop driver.
+/// Callers use this entry to attach an in-memory verb host to the tool context
+/// while reusing the shared HTTP loop driver.
 pub fn drive_agent_loop_with_tool_context(
     spec: &AgentLoopSpec,
     api_key: Option<&str>,

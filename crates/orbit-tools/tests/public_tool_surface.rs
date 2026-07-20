@@ -53,7 +53,6 @@ fn unused_tools_are_not_registered_in_public_surface() {
         "github.pr.close",
         "github.repo.view",
         "net.http",
-        "orbit.groundhog.checkpoint_deviate",
         "proc.which",
         "time.now",
         "time.sleep",
@@ -90,7 +89,7 @@ fn remote_discovery_is_not_registered_in_the_generic_tool_surface() {
         .map(|schema| schema.name)
         .collect::<BTreeSet<_>>();
 
-    for remote_owned in ["orbit.host.list", "orbit.workspace.list"] {
+    for remote_owned in ["orbit.workspace.list"] {
         assert!(
             !all_names.contains(remote_owned),
             "Remote-owned discovery leaked into generic ToolRegistry: {remote_owned}"
@@ -117,9 +116,6 @@ fn workflow_critical_tools_remain_registered() {
         "github.pr.view",
         // ORB-00391 removed the v1 orbit.graph.* builtins; ORB-10325 confirms
         // the v2 graph remains exclusively on the `orbit graph` CLI surface.
-        "orbit.groundhog.checkpoint_failure",
-        "orbit.groundhog.checkpoint_success",
-        "orbit.groundhog.side_effect",
         "orbit.pipeline.invoke",
         "orbit.pipeline.wait",
         "orbit.search",

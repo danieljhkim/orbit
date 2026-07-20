@@ -20,7 +20,6 @@ use crate::context::{ACTIVITY_EXECUTION_FAILED, AttemptOutcome, ExecutionContext
 
 // ---- retained internal actions (still referenced by duel/worker jobs) ----
 const UPDATE_TASK_ACTION: &str = "update_task";
-const RUN_PARALLEL_TASK_PIPELINE_ACTION: &str = "run_parallel_task_pipeline";
 const SELECT_DUEL_TASK_ACTION: &str = "select_duel_task";
 const SELECT_DUEL_ROLES_ACTION: &str = "select_duel_roles";
 const RECORD_DUEL_SCORES_ACTION: &str = "record_duel_scores";
@@ -37,7 +36,6 @@ const WORKTREE_CLEANUP_ACTION: &str = "worktree_cleanup";
 const PR_OPEN_ACTION: &str = "pr_open";
 const PR_PREPARE_ACTION: &str = "pr_prepare";
 const PR_PROMOTE_ACTION: &str = "pr_promote";
-const PR_SYNC_REVIEWS_ACTION: &str = "pr_sync_reviews";
 const CHECK_TASK_VALUE_ACTION: &str = "check_task_value";
 const DISPATCH_BATCH_ACTION: &str = "dispatch_batch";
 const RUN_COMMAND_ACTION: &str = "run_command";
@@ -164,7 +162,6 @@ pub fn execute_action<
     match action {
         // ---- retained internal actions ----
         UPDATE_TASK_ACTION => task_update::update_task(host, input, state_context),
-        RUN_PARALLEL_TASK_PIPELINE_ACTION => batch::run_parallel_task_pipeline(host, input, debug),
         SELECT_DUEL_TASK_ACTION => duel::select_duel_task(host, input),
         SELECT_DUEL_ROLES_ACTION => duel::select_duel_roles(host, input),
         RECORD_DUEL_SCORES_ACTION => duel::record_duel_scores(host, input),
@@ -181,7 +178,6 @@ pub fn execute_action<
         PR_OPEN_ACTION => vcs::pr_open(host, input),
         PR_PREPARE_ACTION => vcs::prepare_pr_handoff(host, input),
         PR_PROMOTE_ACTION => vcs::pr_promote(host, input),
-        PR_SYNC_REVIEWS_ACTION => review::sync_batch_review_to_github(host, input),
         CHECK_TASK_VALUE_ACTION => review::check_task_value(host, input),
         DISPATCH_BATCH_ACTION => batch::dispatch_batch(host, input),
         RUN_COMMAND_ACTION => command::run_command(host, input, steps_outputs, state_context),

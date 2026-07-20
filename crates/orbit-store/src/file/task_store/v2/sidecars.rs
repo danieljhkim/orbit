@@ -53,25 +53,4 @@ impl TaskV2Store {
             Err(err) => Err(err),
         }
     }
-
-    pub(crate) fn get_task_review_threads(
-        &self,
-        id: &str,
-    ) -> Result<Option<Vec<ReviewThread>>, OrbitError> {
-        orbit_common::types::validate_orb_task_id(id)?;
-        match self.bundle_store.read_bundle(id) {
-            Ok(bundle) => Ok(Some(
-                bundle
-                    .review_threads
-                    .into_iter()
-                    .map(review_thread_from_v2)
-                    .collect(),
-            )),
-            Err(OrbitError::NotFound {
-                kind: NotFoundKind::Task,
-                ..
-            }) => Ok(None),
-            Err(err) => Err(err),
-        }
-    }
 }

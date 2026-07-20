@@ -3,7 +3,7 @@
 //!
 //! [`RegistrySnapshotV1`] is the single typed projection read from the hub
 //! coordination store in one transaction. It is the sole input to the
-//! `orbit.host.list` / `orbit.workspace.list` discovery tools and to the
+//! `orbit.workspace.list` discovery tool, the `orbit host list` CLI, and the
 //! satellite [`RegistryCacheV1`] serialization. It deliberately carries no
 //! presence root, checkout/worktree path, raw execution-profile payload,
 //! crew/model identity, secret, credential, SSH configuration, or repository

@@ -2,7 +2,7 @@
 //! snapshot read [ORB-10267].
 //!
 //! The snapshot is the one typed, path-free projection consumed by the
-//! `orbit.host.list` / `orbit.workspace.list` discovery tools and by the
+//! `orbit.workspace.list` discovery tool, the `orbit host list` CLI, and by the
 //! satellite registry cache. It is read with the hub `machine_id` and the
 //! hub-global `registry_revision` inside one read transaction so a concurrent
 //! mutation can never tear identity, revision, and content apart.

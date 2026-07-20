@@ -6,7 +6,6 @@ mod lint;
 mod params;
 mod paths;
 mod query;
-mod review;
 mod transitions;
 mod update;
 

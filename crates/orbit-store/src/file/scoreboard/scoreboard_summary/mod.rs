@@ -11,7 +11,6 @@ use orbit_common::types::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::common::{LEGACY_TASK_REVIEW_MESSAGES_METRIC, TASK_REVIEW_THREADS_METRIC};
 use super::planning_duel_scoreboard;
 use crate::friction_store::StoredFrictionRecord;
 use crate::{AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall};
@@ -128,12 +127,6 @@ pub struct PrSummary {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TaskReviewSummary {
-    #[serde(default, alias = "messages")]
-    pub threads: u64,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KnowledgeSummary {
     pub learnings_created: u64,
     pub adrs_created: u64,
@@ -160,8 +153,6 @@ pub struct AgentSummary {
     pub tokens: TokenSummary,
     pub duels: DuelSummary,
     pub pr: PrSummary,
-    #[serde(default)]
-    pub task_review: TaskReviewSummary,
     #[serde(default)]
     pub knowledge: KnowledgeSummary,
     #[serde(default)]
@@ -395,16 +386,6 @@ pub fn generate_summary_with_inputs(
             |summary, value| {
                 summary.pr.merged_with_revision =
                     summary.pr.merged_with_revision.saturating_add(value);
-            },
-        );
-
-        let task_review = read_model_scoreboard(scoreboard_dir, "task_review.json")?;
-        overlay_nested_metric(
-            &mut agents,
-            &task_review,
-            TASK_REVIEW_THREADS_METRIC,
-            |summary, value| {
-                summary.task_review.threads = summary.task_review.threads.saturating_add(value);
             },
         );
 
@@ -828,9 +809,7 @@ fn normalize_model_scoreboard(parsed: Value) -> Result<FamilyScoreboard, OrbitEr
         let Value::Object(entries) = metric_value else {
             continue;
         };
-        let family_entries = normalized
-            .entry(canonical_scoreboard_metric(&metric).to_string())
-            .or_default();
+        let family_entries = normalized.entry(metric).or_default();
         for (first_key, first_value) in entries {
             match first_value {
                 Value::Number(number) => {
@@ -856,13 +835,6 @@ fn normalize_model_scoreboard(parsed: Value) -> Result<FamilyScoreboard, OrbitEr
     }
 
     Ok(normalized)
-}
-
-fn canonical_scoreboard_metric(metric: &str) -> &str {
-    match metric {
-        LEGACY_TASK_REVIEW_MESSAGES_METRIC => TASK_REVIEW_THREADS_METRIC,
-        _ => metric,
-    }
 }
 
 #[cfg(test)]

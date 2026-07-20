@@ -1,6 +1,6 @@
 ---
 name: orbit-task
-description: The task-lifecycle skill — create a task, execute an existing Orbit task or human request through the lifecycle with explicit status tracking, review someone else's work and leave inline feedback as review threads, and file self-reported friction when Orbit tooling or skill instructions cause operational problems. Triggers on "create a task", "review T-id", "review this PR", "leave review feedback", tool failures, wrong CLI behavior, or misleading skill guidance. Not for task content issues like vague descriptions (fix those by re-authoring) or ordinary user-requested work/generic bugs (use friction only for self-reported Orbit tooling/workflow friction).
+description: The task-lifecycle skill — create a task, execute an existing Orbit task or human request through the lifecycle with explicit status tracking, review someone else's work and surface findings in a review summary, and file self-reported friction when Orbit tooling or skill instructions cause operational problems. Triggers on "create a task", "review T-id", "review this PR", "leave review feedback", tool failures, wrong CLI behavior, or misleading skill guidance. Not for task content issues like vague descriptions (fix those by re-authoring) or ordinary user-requested work/generic bugs (use friction only for self-reported Orbit tooling/workflow friction).
 ---
 
 # Orbit Task
@@ -87,13 +87,13 @@ Exit: task started via `orbit.task.start`; execution summary persisted; learning
 
 ## 3. Review
 
-Review someone else's work and surface issues as review threads — read plus write-only-into-threads; **never** transition the reviewed task's lifecycle.
+Review someone else's work and surface issues in your review summary — read-only; **never** transition the reviewed task's lifecycle.
 
 **Load context.** `orbit.task.show` for `description`/`acceptance_criteria`/`plan`/`execution_summary`; inspect the diff and changed files; run the target repo's build and the relevant test commands (from its own instructions/configuration). Optionally `orbit.search` with `semantic: "<task-id>"` for prior similar decisions.
 
-**Two-stage review — stage 1 first:** spec compliance (does the change satisfy every acceptance criterion? anything missing or added beyond scope? interpretation gaps?). If it fails, file those threads and stop — don't spend time on stage 2. **Stage 2** (only if stage 1 passes): maintainability, patterns, performance, test-coverage gaps, risks/edge cases/security.
+**Two-stage review — stage 1 first:** spec compliance (does the change satisfy every acceptance criterion? anything missing or added beyond scope? interpretation gaps?). If it fails, report those findings and stop — don't spend time on stage 2. **Stage 2** (only if stage 1 passes): maintainability, patterns, performance, test-coverage gaps, risks/edge cases/security.
 
-**File threads** one per distinct issue — inline (`path` + string `line`) when location-specific, general otherwise:
+**Record findings** one per distinct issue — cite `path:line` when location-specific, general otherwise:
 
 ```text
 **[Spec compliance | Code quality | Nit] — short headline.**
@@ -101,22 +101,15 @@ Why this matters / what's wrong.
 Suggested fix.
 ```
 
-```bash
-orbit tool run orbit.task.review_thread.add --input '{"id":"<task-id>","body":"<finding>","path":"<path>","line":"<line>","model":"<agent-family>"}'
-orbit tool run orbit.task.review_thread.list --input '{"id":"<task-id>","status":"open","model":"<agent-family>"}'
-orbit tool run orbit.task.review_thread.reply --input '{"id":"<task-id>","thread_id":"<id>","body":"<reply>","model":"<agent-family>"}'
-orbit tool run orbit.task.review_thread.resolve --input '{"id":"<task-id>","thread_id":"<id>","model":"<agent-family>"}'
-```
+**Summarize** in chat: finding count, which are blockers, overall verdict (approve/request changes).
 
-**Summarize** in chat: thread count, which are blockers, overall verdict (approve/request changes). Don't add a task `comment` — threads are the persistent surface.
+**Meta-review.** After recording findings, check whether they reveal a gap in an Orbit-authored instruction asset (an activity definition or a `SKILL.md`). Trigger: ≥2 findings map to the same instruction gap, or one finding is clearly a recurring class. When it fires, file a friction (see §4) *in addition to* the individual findings — never as a replacement. Skip for a single nit, a style preference, or a one-off mistake with no link to instruction text.
 
-**Meta-review.** After filing threads, check whether they reveal a gap in an Orbit-authored instruction asset (an activity definition or a `SKILL.md`). Trigger: ≥2 threads map to the same instruction gap, or one thread is clearly a recurring class. When it fires, file a friction (see §4) *in addition to* the individual threads — never as a replacement. Skip for a single nit, a style preference, or a one-off mistake with no link to instruction text.
-
-**Rules:** never transition the reviewed task's status; never resolve threads you authored (exception: retracting your own thread); always include `model` on `review_thread.add`/`.reply` (rejected without it — `list`/`.resolve` don't require it); replies don't create new findings, only `.add` counts toward the scoreboard. No PR yet → threads stay local; with a PR, they mirror as PR review comments.
+**Rules:** never transition the reviewed task's status; skip stylistic nits when a blocking issue already stops the change.
 
 **Not for:** implementing a task (§2); a task lifecycle approval (`orbit.task.approve`, owned by the reviewee/human).
 
-Exit: all findings filed with `model` attribution; no status transitions/resolutions on the reviewed task; chat summary names blocker count and verdict.
+Exit: all findings recorded with a clear verdict; no status transitions on the reviewed task; chat summary names blocker count and verdict.
 
 ## 4. Friction (self-reported tooling/skill issues)
 

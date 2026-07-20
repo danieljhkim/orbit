@@ -38,7 +38,6 @@ use std::sync::OnceLock;
 
 use chrono::{DateTime, Utc};
 use regex::Regex;
-use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -307,107 +306,6 @@ impl FromStr for TaskType {
 impl TaskType {
     pub fn valid_names() -> &'static [&'static str] {
         &["feature", "bug", "refactor", "chore"]
-    }
-}
-
-/// Status of a review thread (open or resolved).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ReviewThreadStatus {
-    Open,
-    Resolved,
-}
-
-impl Display for ReviewThreadStatus {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ReviewThreadStatus::Open => write!(f, "open"),
-            ReviewThreadStatus::Resolved => write!(f, "resolved"),
-        }
-    }
-}
-
-impl FromStr for ReviewThreadStatus {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "open" => Ok(ReviewThreadStatus::Open),
-            "resolved" => Ok(ReviewThreadStatus::Resolved),
-            other => Err(format!("unknown review thread status: {other}")),
-        }
-    }
-}
-
-/// A single message within a [`ReviewThread`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ReviewMessage {
-    pub message_id: String,
-    pub at: DateTime<Utc>,
-    pub by: String,
-    pub body: String,
-    /// GitHub comment ID, set after sync. `None` means pending sync.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub github_comment_id: Option<u64>,
-}
-
-/// Anchor kind for a [`ReviewThread`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ReviewThreadAnchor {
-    Inline { path: String, line: u64 },
-    TaskLevel,
-}
-
-/// A review thread on a task, replacing direct GitHub review comments.
-///
-/// Threads with `path` and `line` are inline (file-specific) comments.
-/// Threads without are general comments (e.g. review summaries).
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct ReviewThread {
-    pub thread_id: String,
-    /// File path relative to repo root. `None` for general comments.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    /// Line number in the file. `None` for general comments.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub line: Option<u64>,
-    pub status: ReviewThreadStatus,
-    pub messages: Vec<ReviewMessage>,
-    /// GitHub review thread/comment ID, set after first sync.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub github_thread_id: Option<u64>,
-}
-
-impl ReviewThread {
-    pub fn anchor(&self) -> ReviewThreadAnchor {
-        match (&self.path, self.line) {
-            (Some(path), Some(line)) => ReviewThreadAnchor::Inline {
-                path: path.clone(),
-                line,
-            },
-            _ => ReviewThreadAnchor::TaskLevel,
-        }
-    }
-}
-
-impl Serialize for ReviewThread {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("ReviewThread", 7)?;
-        state.serialize_field("thread_id", &self.thread_id)?;
-        state.serialize_field("anchor", &self.anchor())?;
-        if let Some(path) = &self.path {
-            state.serialize_field("path", path)?;
-        }
-        if let Some(line) = self.line {
-            state.serialize_field("line", &line)?;
-        }
-        state.serialize_field("status", &self.status)?;
-        state.serialize_field("messages", &self.messages)?;
-        if let Some(github_thread_id) = self.github_thread_id {
-            state.serialize_field("github_thread_id", &github_thread_id)?;
-        }
-        state.end()
     }
 }
 

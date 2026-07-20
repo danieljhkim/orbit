@@ -286,9 +286,6 @@ pub(super) fn run_deterministic(
         "invoke_and_wait" => {
             pipeline_actions::invoke_and_wait(runtime, action, input, tool_context)
         }
-        // Join already-submitted child v2 Jobs without keeping the
-        // dispatching agent activity open.
-        "pipeline_wait" => pipeline_actions::pipeline_wait(runtime, action, input, tool_context),
         // Fail a workflow if one or more child pipeline wait results did not
         // reach `succeeded`.
         "pipeline_success_guard" => pipeline_actions::pipeline_success_guard(action, input),
@@ -567,30 +564,6 @@ mod tests {
                 assert_eq!(action, "run_planning_duel");
                 assert!(
                     message.contains("missing required input.task_id"),
-                    "unexpected validation message: {message}"
-                );
-            }
-            other => panic!("expected registered action failure, got {other}"),
-        }
-    }
-
-    #[test]
-    fn pipeline_wait_is_registered_for_v2_deterministic_dispatch() {
-        let runtime = OrbitRuntime::in_memory().expect("build runtime");
-        let err = runtime
-            .run_deterministic(
-                "pipeline_wait",
-                &json!({}),
-                &json!({}),
-                ToolContext::default(),
-            )
-            .expect_err("empty input should fail validation inside the action");
-
-        match err {
-            DispatchError::DeterministicActionFailed { action, message } => {
-                assert_eq!(action, "pipeline_wait");
-                assert!(
-                    message.contains("missing `run_ids`"),
                     "unexpected validation message: {message}"
                 );
             }

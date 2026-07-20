@@ -38,7 +38,6 @@ fn summary_includes_zero_rows_for_known_families() {
     let grok = summary.agents.get("grok").expect("grok summary");
     assert_eq!(grok.tasks_completed, 0);
     assert_eq!(grok.duels.participated, 0);
-    assert_eq!(grok.task_review.threads, 0);
 }
 
 #[test]
@@ -146,14 +145,9 @@ fn audit_tool_calls_win_when_larger_than_token_scoreboard_tool_calls() {
 }
 
 #[test]
-fn summary_exposes_task_review_threads_separately_from_pr_comments() {
+fn summary_exposes_pr_comments() {
     let temp = tempfile::tempdir().expect("create tempdir");
     fs::create_dir_all(temp.path()).expect("create scoreboard dir");
-    fs::write(
-        temp.path().join("task_review.json"),
-        r#"{"task-review-threads":{"gpt-reviewer":2}}"#,
-    )
-    .expect("write task review scoreboard");
     fs::write(
         temp.path().join("pr.json"),
         r#"{"pr-review-comments":{"gpt-reviewer":1}}"#,
@@ -164,7 +158,6 @@ fn summary_exposes_task_review_threads_separately_from_pr_comments() {
 
     assert_eq!(summary.schema_version, CURRENT_SCHEMA_VERSION);
     let reviewer = summary.agents.get("codex").expect("reviewer summary");
-    assert_eq!(reviewer.task_review.threads, 2);
     assert_eq!(reviewer.pr.review_comments, 1);
 }
 
@@ -588,22 +581,6 @@ fn test_job_run(
         crew_model: None,
         steps: Vec::new(),
     }
-}
-
-#[test]
-fn summary_reads_legacy_task_review_messages_as_threads() {
-    let temp = tempfile::tempdir().expect("create tempdir");
-    fs::create_dir_all(temp.path()).expect("create scoreboard dir");
-    fs::write(
-        temp.path().join("task_review.json"),
-        r#"{"task-review-messages":{"gpt-reviewer":2}}"#,
-    )
-    .expect("write legacy task review scoreboard");
-
-    let summary = generate_summary(temp.path(), &[]).expect("generate summary");
-
-    let reviewer = summary.agents.get("codex").expect("reviewer summary");
-    assert_eq!(reviewer.task_review.threads, 2);
 }
 
 #[test]

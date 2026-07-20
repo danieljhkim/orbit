@@ -323,36 +323,6 @@ function buildRelations(relations, context) {
   return wrap;
 }
 
-function reviewThreadStatus(thread) {
-  const status = String(thread.status || "open").toLowerCase();
-  return status === "resolved" ? "resolved" : "open";
-}
-
-function buildReviewThreads(threads, context) {
-  const wrap = el("div", { class: "review-threads" });
-  for (const thread of threads) {
-    const messages = Array.isArray(thread.messages) ? thread.messages : [];
-    const location = thread.path && thread.line != null
-      ? `${thread.path}:${thread.line}`
-      : "task-level";
-    const block = el("div", { class: "review-thread" });
-    block.appendChild(el("div", {
-      class: "review-thread-header",
-      text: `[${reviewThreadStatus(thread)}] ${location} · ${messages.length} messages`,
-    }));
-    for (const msg of messages) {
-      const line = el("div", { class: "comment-line" }, [
-        document.createTextNode(`[${fmtAbsTimeValue(context, msg.at)}] `),
-        el("span", { class: "author", text: msg.by || "?" }),
-        document.createTextNode(`: ${msg.body || ""}`),
-      ]);
-      block.appendChild(line);
-    }
-    wrap.appendChild(block);
-  }
-  return wrap;
-}
-
 function fmtSize(bytes) {
   const value = Number(bytes);
   if (!Number.isFinite(value) || value < 0) return "0 bytes";
@@ -514,10 +484,6 @@ function buildTaskDetail(task, context) {
       view.textContent = task.execution_summary;
     }
     addField(leftCol, "execution summary", view, true, true);
-  }
-
-  if (Array.isArray(task.review_threads) && task.review_threads.length > 0) {
-    addField(leftCol, "review threads", buildReviewThreads(task.review_threads, context), true, true);
   }
 
   if (Array.isArray(task.artifacts) && task.artifacts.length > 0) {

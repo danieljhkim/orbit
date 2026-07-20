@@ -5,7 +5,6 @@ import { el, statusPill, stateCell, fetchJson, requestJson, postJson, patchJson,
 import { buildChips, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, setPinnedExternalTask, wireSearch } from './tasks.js';
 import { applyAuditHashQuery, buildAuditChips, buildAuditHash, fetchAndRenderAudit, fetchAndRenderPolicy, getActiveAuditSubtab, navigateToAuditExecution, renderAuditSummary, setActiveAuditSubtabFromButton, setAuditSubtab, syncAuditControls, wireAuditSearch, } from './audit.js';
 import { renderScoreboard } from './scoreboard.js';
-import { fetchAndRender as fetchAndRenderReviewThreads, initReviewThreads, markCurrentAgentThreadsSeen } from './review-threads.js';
 import { initLogTail, fitLogPanelToViewport } from './log-tail.js';
 import { renderDiagnostics, renderImplementOneCard as renderImplOne, } from './diagnostics.js';
 import { renderMarkdown } from './markdown.js';
@@ -1316,20 +1315,13 @@ function activeRefreshJobs() {
   const aggregate = isAggregateView();
 
   // The health strip is global; refresh on every tick alongside the active tab.
-  // Threads also refresh globally so the unread badge updates without visiting
-  // the Threads tab; mark-seen only fires while that tab is active (below). Both
-  // are per-workspace (/api/audit/summary, /api/review-threads), so in aggregate
-  // mode they're replaced by placeholders instead of fetched.
+  // The per-workspace summary (/api/audit/summary) is replaced by a placeholder
+  // instead of fetched in aggregate mode.
   const jobs = [];
   if (aggregate) {
     renderAggregatePlaceholders();
   } else {
     jobs.push(fetchAndRenderSummary());
-    jobs.push(
-      fetchAndRenderReviewThreads().then(() => {
-        if (activeTab === "threads") markCurrentAgentThreadsSeen();
-      }),
-    );
   }
 
   if (activeTab === "tasks") {
@@ -1658,7 +1650,6 @@ $("refresh-btn").addEventListener("click", refreshDashboard);
 
 initRuns(runsContext());
 initRunDetail(runDetailContext());
-initReviewThreads();
 const rctx = routerContext();
 initRouter(rctx);
 // Resolve workspaces before the router fires its first refresh so the initial

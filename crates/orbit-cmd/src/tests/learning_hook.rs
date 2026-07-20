@@ -2,11 +2,8 @@ use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use chrono::Utc;
 use fs2::FileExt;
-use orbit_common::types::{
-    LearningInjectionCaps, LearningReminder, ReviewMessage, ReviewThread, ReviewThreadStatus,
-};
+use orbit_common::types::{LearningInjectionCaps, LearningReminder};
 
 use crate::learning_hook::{
     CODEX_PRETOOLUSE_TOOLS, HookOutputFormat, ORBIT_LEARNING_PER_CALL_CAP_ENV,
@@ -14,7 +11,6 @@ use crate::learning_hook::{
     parse_payload, parse_payload_with_tools, parse_state_json, render_codex, render_gemini,
     render_reminders, state_file_path, update_state_file,
 };
-use orbit_core::command::review_thread_hook::reminders_from_threads;
 
 #[test]
 fn parse_payload_accepts_tool_and_path_variants() {
@@ -295,77 +291,6 @@ fn renderers_preserve_per_agent_hook_output() {
     assert_eq!(
         gemini["hookSpecificOutput"]["hookEventName"].as_str(),
         Some("BeforeTool")
-    );
-}
-
-#[test]
-fn render_hook_reminders_combines_learnings_and_review_threads() {
-    let learnings = reminders(&["L-0017"]);
-    let review_threads = reminders_from_threads(
-        "ORB-00001",
-        vec![ReviewThread {
-            thread_id: "rt-1".to_string(),
-            path: None,
-            line: None,
-            status: ReviewThreadStatus::Open,
-            messages: vec![ReviewMessage {
-                message_id: "rm-1".to_string(),
-                at: Utc::now(),
-                by: "human".to_string(),
-                body: "Please adjust course.".to_string(),
-                github_comment_id: None,
-            }],
-            github_thread_id: None,
-        }],
-    );
-
-    let claude = crate::learning_hook::render_hook_reminders(
-        HookOutputFormat::Claude,
-        &learnings,
-        &review_threads,
-    )
-    .expect("render claude");
-    assert!(claude.contains("Project learnings relevant to this task"));
-    assert!(claude.contains("Review threads awaiting agent attention"));
-    assert!(claude.contains("Please adjust course."));
-
-    let grok = crate::learning_hook::render_hook_reminders(
-        HookOutputFormat::Grok,
-        &learnings,
-        &review_threads,
-    )
-    .expect("render grok");
-    assert_eq!(grok, claude);
-
-    let codex = crate::learning_hook::render_hook_reminders(
-        HookOutputFormat::Codex,
-        &learnings,
-        &review_threads,
-    )
-    .expect("render codex");
-    let codex: serde_json::Value = serde_json::from_str(&codex).expect("parse codex");
-    let additional_context = codex["hookSpecificOutput"]["additionalContext"]
-        .as_str()
-        .expect("additional context");
-    assert!(additional_context.contains("Project learnings relevant to this task"));
-    assert!(additional_context.contains("Review threads awaiting agent attention"));
-
-    let gemini = crate::learning_hook::render_hook_reminders(
-        HookOutputFormat::Gemini,
-        &learnings,
-        &review_threads,
-    )
-    .expect("render gemini");
-    let gemini: serde_json::Value = serde_json::from_str(&gemini).expect("parse gemini");
-    assert_eq!(
-        gemini["hookSpecificOutput"]["hookEventName"].as_str(),
-        Some("BeforeTool")
-    );
-    assert!(
-        gemini["hookSpecificOutput"]["additionalContext"]
-            .as_str()
-            .expect("additional context")
-            .contains("Review threads awaiting agent attention")
     );
 }
 

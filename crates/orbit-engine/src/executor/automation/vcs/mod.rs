@@ -13,9 +13,6 @@ pub(super) use pr::{git_merge, pr_open, pr_promote};
 pub(super) use pull::pull_batch_changes;
 pub(super) use push::push_batch_changes;
 pub(super) use worktree::{cleanup_worktree, setup_worktree};
-pub(in crate::executor::automation) use worktree::{
-    ensure_shared_worktree, resolve_shared_worktree_path,
-};
 
 #[cfg(test)]
 mod tests;

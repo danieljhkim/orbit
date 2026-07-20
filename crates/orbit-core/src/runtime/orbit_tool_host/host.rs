@@ -4,12 +4,12 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use orbit_common::types::{
-    FrictionStatus, NotFoundKind, OrbitError, ReviewMessage, ReviewThread, ReviewThreadStatus,
-    Task, TaskComment, TaskPriority, TaskStatus, TaskType, ToolSessionContext,
-    is_valid_friction_id, normalize_optional_attribution_label, normalize_task_dependencies,
-    normalize_task_tags, optional_csv_or_string_list_alias, optional_raw_string, optional_string,
-    optional_string_alias, required_string, resolve_task_dependencies, task_dependencies_ready,
-    task_matches_tags, validate_task_dependencies,
+    FrictionStatus, NotFoundKind, OrbitError, Task, TaskComment, TaskPriority, TaskStatus,
+    TaskType, ToolSessionContext, is_valid_friction_id, normalize_optional_attribution_label,
+    normalize_task_dependencies, normalize_task_tags, optional_csv_or_string_list_alias,
+    optional_raw_string, optional_string, optional_string_alias, required_string,
+    resolve_task_dependencies, task_dependencies_ready, task_matches_tags,
+    validate_task_dependencies,
 };
 use orbit_common::utility::redaction::redact_all;
 use orbit_common::utility::selector::canonical_selector;
@@ -23,7 +23,7 @@ use orbit_store::sqlite::task_registry::{
 };
 use orbit_store::{
     TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentUpdateParams, TaskHistoryUpdateParams,
-    TaskReviewUpdateParams, WorkspaceTaskBackends, coordination_task_backends,
+    WorkspaceTaskBackends, coordination_task_backends,
 };
 use orbit_tools::{
     OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, ReservationOwnerContext, ToolContext,
@@ -165,17 +165,6 @@ impl HubCoordinationExecutor {
                     .unwrap_or_default(),
             )
             .map_err(|error| OrbitError::Execution(format!("serialize history: {error}")))?,
-        );
-        object.insert(
-            "review_threads".to_string(),
-            serde_json::to_value(
-                self.inner
-                    .tasks
-                    .review
-                    .get_task_review_threads(&task.id)?
-                    .unwrap_or_default(),
-            )
-            .map_err(|error| OrbitError::Execution(format!("serialize review threads: {error}")))?,
         );
         Ok(value)
     }
@@ -625,139 +614,6 @@ impl HubCoordinationExecutor {
         Ok(Value::Array(tasks))
     }
 
-    fn review(
-        &self,
-        action: OrbitBuiltinAction,
-        input: Value,
-        agent: Option<String>,
-        model: Option<String>,
-    ) -> Result<Value, OrbitError> {
-        let id = required_string(&input, &["id", "task_id"], "id")?;
-        let actor = Self::actor(agent.as_deref(), model.as_deref());
-        let mut threads = self
-            .inner
-            .tasks
-            .review
-            .get_task_review_threads(&id)?
-            .unwrap_or_default();
-        match action {
-            OrbitBuiltinAction::ReviewThreadList => {
-                let filter = optional_string(&input, "status")?
-                    .map(|value| {
-                        ReviewThreadStatus::from_str(&value).map_err(OrbitError::InvalidInput)
-                    })
-                    .transpose()?;
-                threads.retain(|thread| filter.is_none_or(|status| thread.status == status));
-                return serde_json::to_value(threads)
-                    .map_err(|error| OrbitError::Execution(error.to_string()));
-            }
-            OrbitBuiltinAction::ReviewThreadAdd => {
-                if model.as_deref().is_none_or(|value| value.trim().is_empty()) {
-                    return Err(OrbitError::InvalidInput(
-                        "orbit.task.review_thread.add requires `model`".to_string(),
-                    ));
-                }
-                let now = Utc::now();
-                let suffix = now.timestamp_subsec_nanos();
-                let path = optional_string(&input, "path")?;
-                let line = optional_string(&input, "line")?
-                    .map(|value| {
-                        value.parse::<u64>().map_err(|error| {
-                            OrbitError::InvalidInput(format!(
-                                "`line` must be an unsigned integer: {error}"
-                            ))
-                        })
-                    })
-                    .transpose()?;
-                self.inner.tasks.review.update_task_reviews(
-                    &id,
-                    TaskReviewUpdateParams {
-                        append_review_threads: vec![ReviewThread {
-                            thread_id: format!("rt-{}-{suffix:09}", now.format("%Y%m%d-%H%M%S")),
-                            path,
-                            line,
-                            status: ReviewThreadStatus::Open,
-                            messages: vec![ReviewMessage {
-                                message_id: format!(
-                                    "rm-{}-{suffix:09}",
-                                    now.format("%Y%m%d-%H%M%S")
-                                ),
-                                at: now,
-                                by: actor,
-                                body: redact_all(&required_string(&input, &["body"], "body")?),
-                                github_comment_id: None,
-                            }],
-                            github_thread_id: None,
-                        }],
-                        replace_review_threads: None,
-                    },
-                )?;
-            }
-            OrbitBuiltinAction::ReviewThreadReply => {
-                if model.as_deref().is_none_or(|value| value.trim().is_empty()) {
-                    return Err(OrbitError::InvalidInput(
-                        "orbit.task.review_thread.reply requires `model`".to_string(),
-                    ));
-                }
-                let thread_id = required_string(&input, &["thread_id"], "thread_id")?;
-                if !threads.iter().any(|thread| thread.thread_id == thread_id) {
-                    return Err(OrbitError::InvalidInput(format!(
-                        "review thread '{thread_id}' not found on task '{id}'"
-                    )));
-                }
-                let now = Utc::now();
-                self.inner.tasks.review.update_task_reviews(
-                    &id,
-                    TaskReviewUpdateParams {
-                        append_review_threads: vec![ReviewThread {
-                            thread_id,
-                            path: None,
-                            line: None,
-                            status: ReviewThreadStatus::Open,
-                            messages: vec![ReviewMessage {
-                                message_id: format!(
-                                    "rm-{}-{:09}",
-                                    now.format("%Y%m%d-%H%M%S"),
-                                    now.timestamp_subsec_nanos()
-                                ),
-                                at: now,
-                                by: actor,
-                                body: redact_all(&required_string(&input, &["body"], "body")?),
-                                github_comment_id: None,
-                            }],
-                            github_thread_id: None,
-                        }],
-                        replace_review_threads: None,
-                    },
-                )?;
-            }
-            OrbitBuiltinAction::ReviewThreadResolve => {
-                let thread_id = required_string(&input, &["thread_id"], "thread_id")?;
-                if !threads.iter().any(|thread| thread.thread_id == thread_id) {
-                    return Err(OrbitError::InvalidInput(format!(
-                        "review thread '{thread_id}' not found on task '{id}'"
-                    )));
-                }
-                self.inner.tasks.review.update_task_reviews(
-                    &id,
-                    TaskReviewUpdateParams {
-                        append_review_threads: vec![ReviewThread {
-                            thread_id,
-                            path: None,
-                            line: None,
-                            status: ReviewThreadStatus::Resolved,
-                            messages: Vec::new(),
-                            github_thread_id: None,
-                        }],
-                        replace_review_threads: None,
-                    },
-                )?;
-            }
-            _ => unreachable!(),
-        }
-        self.task_json(&self.task(&id)?)
-    }
-
     fn friction_root(&self) -> Result<PathBuf, OrbitError> {
         prepare_hub_friction_root(
             &self.inner.global_root,
@@ -873,10 +729,6 @@ impl OrbitToolHost for HubCoordinationExecutor {
             OrbitBuiltinAction::TaskShow => self.show_task(input),
             OrbitBuiltinAction::TaskList => self.list_tasks(input),
             OrbitBuiltinAction::TaskUpdate => self.update_task(input, agent, model),
-            OrbitBuiltinAction::ReviewThreadAdd
-            | OrbitBuiltinAction::ReviewThreadList
-            | OrbitBuiltinAction::ReviewThreadReply
-            | OrbitBuiltinAction::ReviewThreadResolve => self.review(action, input, agent, model),
             OrbitBuiltinAction::FrictionAdd
             | OrbitBuiltinAction::FrictionList
             | OrbitBuiltinAction::FrictionShow
@@ -1029,40 +881,6 @@ mod checkoutless_hub_tests {
             )
             .expect("put artifact bytes");
         assert_eq!(with_artifact["execution_summary"], "Outcome: success");
-
-        let reviewed = executor
-            .execute_tool(
-                "orbit.task.review_thread.add",
-                json!({"id": id, "body": "Looks good", "model": "codex"}),
-                context.clone(),
-            )
-            .expect("create review thread");
-        assert_eq!(reviewed["review_threads"].as_array().unwrap().len(), 1);
-        let thread_id = reviewed["review_threads"][0]["thread_id"]
-            .as_str()
-            .expect("thread id");
-        executor
-            .execute_tool(
-                "orbit.task.review_thread.reply",
-                json!({"id": id, "thread_id": thread_id, "body": "Confirmed", "model": "codex"}),
-                context.clone(),
-            )
-            .expect("reply without local scoring config");
-        let resolved = executor
-            .execute_tool(
-                "orbit.task.review_thread.resolve",
-                json!({"id": id, "thread_id": thread_id, "model": "codex"}),
-                context.clone(),
-            )
-            .expect("resolve review thread");
-        assert_eq!(resolved["review_threads"][0]["status"], "resolved");
-        assert_eq!(
-            resolved["review_threads"][0]["messages"]
-                .as_array()
-                .unwrap()
-                .len(),
-            2
-        );
 
         let artifact = executor
             .execute_tool(

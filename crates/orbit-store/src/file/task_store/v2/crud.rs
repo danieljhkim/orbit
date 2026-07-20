@@ -69,7 +69,6 @@ impl TaskV2Store {
                 to_status: Some(params.status),
             }],
             comments,
-            review_threads: Vec::new(),
             artifact_manifest: None,
         };
 

@@ -391,7 +391,7 @@ fn reuses_one_peer_per_scalar_capability_and_separates_capabilities() {
     .expect("reused call");
     pool.call(
         McpCapability::Operator,
-        "orbit.host.list",
+        "orbit.workspace.list",
         json!({}),
         context(McpCapability::Operator, "mcall-3"),
     )
@@ -726,16 +726,6 @@ fn spoke_rmcp_coordination_canary_is_hub_only_and_preserves_provenance() {
             result
         };
 
-        let hosts = call(
-            "orbit.host.list",
-            json!({}),
-            "mcall-canary-host-list",
-            McpCapability::Operator,
-            None,
-        );
-        assert_eq!(hosts["hub_machine_id"], "hm_hub");
-        assert_eq!(hosts["hosts"].as_array().expect("hosts").len(), 2);
-
         let workspaces = call(
             "orbit.workspace.list",
             json!({}),
@@ -813,66 +803,6 @@ fn spoke_rmcp_coordination_canary_is_hub_only_and_preserves_provenance() {
         assert_eq!(shown["plan"], "1. Prove hub routing");
         assert_eq!(shown["artifacts"][0]["path"], "reports/result.txt");
 
-        let reviewed = call(
-            "orbit.task.review_thread.add",
-            json!({
-                "workspace": "ws_canary",
-                "id": task_id,
-                "body": "Canary finding",
-                "path": "src/lib.rs",
-                "line": "7",
-                "model": "codex"
-            }),
-            "mcall-canary-review-add",
-            McpCapability::Agent,
-            Some("ws_canary"),
-        );
-        let thread_id = reviewed["review_threads"][0]["thread_id"]
-            .as_str()
-            .expect("thread id")
-            .to_string();
-        let threads = call(
-            "orbit.task.review_thread.list",
-            json!({"workspace": "ws_canary", "id": task_id, "status": "open"}),
-            "mcall-canary-review-list",
-            McpCapability::Agent,
-            Some("ws_canary"),
-        );
-        assert_eq!(threads["items"][0]["thread_id"], thread_id);
-        let replied = call(
-            "orbit.task.review_thread.reply",
-            json!({
-                "workspace": "ws_canary",
-                "id": task_id,
-                "thread_id": thread_id,
-                "body": "Canary reply",
-                "model": "codex"
-            }),
-            "mcall-canary-review-reply",
-            McpCapability::Agent,
-            Some("ws_canary"),
-        );
-        assert_eq!(
-            replied["review_threads"][0]["messages"]
-                .as_array()
-                .expect("messages")
-                .len(),
-            2
-        );
-        let resolved = call(
-            "orbit.task.review_thread.resolve",
-            json!({
-                "workspace": "ws_canary",
-                "id": task_id,
-                "thread_id": thread_id,
-                "model": "codex"
-            }),
-            "mcall-canary-review-resolve",
-            McpCapability::Agent,
-            Some("ws_canary"),
-        );
-        assert_eq!(resolved["review_threads"][0]["status"], "resolved");
-
         let friction = call(
             "orbit.friction.add",
             json!({
@@ -925,7 +855,7 @@ fn spoke_rmcp_coordination_canary_is_hub_only_and_preserves_provenance() {
     }
 
     let wire_calls = factory.wire_calls.lock().expect("wire calls");
-    assert_eq!(wire_calls.len(), 16, "one registration plus 15 calls");
+    assert_eq!(wire_calls.len(), 11, "one registration plus 10 calls");
     let (_, artifact_frame, artifact_context) = wire_calls
         .iter()
         .find(|(name, _, _)| name == "orbit.task.artifact.put")

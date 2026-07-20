@@ -1,7 +1,7 @@
 ---
 title: Resident Orchestrator — Design
 owner: codex
-last_updated: 2026-07-18
+last_updated: 2026-07-20
 status: Draft
 feature: resident-orchestrator
 doc_role: design
@@ -10,7 +10,7 @@ summary: CLI-backed pickup, checkpoint, decomposition, and shepherding contract 
 tags: [resident-orchestrator, epic, routines, cli]
 paths: [".orbit/resources/activities/**", ".orbit/resources/jobs/**", ".orbit/routines/**", "crates/orbit-core/assets/**"]
 related_features: [resident-orchestrator, activity-job, routines, agent-families, host-registry]
-related_artifacts: []
+related_artifacts: [ORB-10332]
 ---
 
 # Resident Orchestrator — Design
@@ -41,13 +41,10 @@ The `epic` tag is deliberately behavioral only at the resident pickup boundary. 
 the task schema or create a new task type. Child tasks are recognized by `parent_id`, not by a
 special child tag.
 
-This differs from the legacy `task_epic_pipeline`, whose `load_epic` path recognizes a root by
-`TaskType::Feature`. During retirement stages 1–3, the two selectors are disjoint by workspace:
-enabling the resident routine marks that workspace resident-owned and must make legacy epic-pipeline
-admission reject runs from the same workspace. A workspace without the resident capability may
-continue using the legacy Feature-typed path. Task type and tag may coexist on one task, but the
-workspace capability chooses exactly one claimant; neither selector may treat the other marker as
-permission to bypass that boundary. The proposed marker choice and coexistence rule are named in
+This differs from the former `task_epic_pipeline`, whose `load_epic` path recognized a root by
+`TaskType::Feature`. That HTTP epic pipeline was removed as unused in [ORB-10332], so the resident's
+`epic` tag is now the only epic selector; the earlier plan to keep the two selectors disjoint by
+workspace during a staged retirement no longer applies. The marker choice is named in
 [4_decisions.md](./4_decisions.md).
 
 ## 2. Workspace-Local Resident Identity
@@ -252,28 +249,27 @@ The parent does not become `done` merely because all children reached `review`. 
 
 ## 8. Phasing Out the HTTP Epic Pipeline
 
-`task_epic_pipeline` and its `epic_orchestrator` activity are legacy after the resident CLI path is
-available. They should not be converted in place because their contract differs materially:
+`task_epic_pipeline` and its `epic_orchestrator` activity were removed as unused in [ORB-10332];
+they were never converted in place because their contract differed materially from the resident
+path:
 
-| HTTP epic path | Resident CLI path |
+| Former HTTP epic path | Resident CLI path |
 |----------------|-------------------|
-| Requires pre-existing children | Owns decomposition and child creation |
-| Uses `backend: http` and a retained `session:` loop | Uses bounded `backend: cli` cycles |
-| Keeps progress partly in provider conversation state | Derives progress from durable Orbit state |
-| Dispatches child gates | Shepherds dispatch, review, merge, and closure |
-| Treats `review` as shipped/terminal | Requires verified task and integration completion |
+| Required pre-existing children | Owns decomposition and child creation |
+| Used `backend: http` and a retained `session:` loop | Uses bounded `backend: cli` cycles |
+| Kept progress partly in provider conversation state | Derives progress from durable Orbit state |
+| Dispatched child gates | Shepherds dispatch, review, merge, and closure |
+| Treated `review` as shipped/terminal | Requires verified task and integration completion |
 
-Retirement proceeds in four stages:
+Because [ORB-10332] already removed the legacy epic-pipeline assets, the resident path can be built
+greenfield without the earlier planned disjoint-selector migration:
 
 1. ship the resident selector, CLI activity contract, cycle job, and disabled routine;
 2. canary one workspace and verify crash/resume, duplicate-dispatch prevention, review repair, and
-   final parent closure;
-3. remove `task_epic_pipeline` from seeded/default catalog references and migrate active users; and
-4. delete the HTTP-only epic activities/actions once no live run or workspace references them,
-   updating the Activity / Job decisions and task references in the same change.
+   final parent closure; and
+3. enable the routine per workspace as the resident capability proves out.
 
-Historical run records remain readable after catalog retirement. Removal must fail closed for a
-workspace that still has an enabled routine or job reference to the legacy pipeline.
+Historical run records for the removed pipeline remain readable after that catalog retirement.
 
 ## 9. Security and Authority
 

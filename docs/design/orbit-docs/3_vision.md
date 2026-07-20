@@ -1,7 +1,7 @@
 ---
 title: "Orbit Docs — Vision"
 owner: claude
-last_updated: 2026-05-21
+last_updated: 2026-07-20
 status: Draft
 feature: orbit-docs
 doc_role: vision
@@ -59,7 +59,7 @@ The right answer is probably (a) share the walk between learning and doc lookup,
 
 ### 1.5 Should there be doc IDs?
 
-Currently docs are referenced by repo-relative path. That works for human authors and survives renames if `git log --follow` is run, but it's brittle as a stable cross-reference: when `docs/design/groundhog/2_design.md` becomes `docs/design/groundhog/architecture.md`, every `related_artifacts` entry pointing at the old path needs updating.
+Currently docs are referenced by repo-relative path. That works for human authors and survives renames if `git log --follow` is run, but it's brittle as a stable cross-reference: when `docs/design/host-registry/2_design.md` becomes `docs/design/host-registry/architecture.md`, every `related_artifacts` entry pointing at the old path needs updating.
 
 The alternative is to mint allocation IDs (`D<YYYYMMDD>-N` analogous to learnings, or a UUID stamped into frontmatter). This adds an `orbit.docs.add` allocation step, makes deletion a status flip rather than a file remove, and turns docs into a tool-managed artifact — at which point they belong under `.orbit/`, not `docs/`.
 

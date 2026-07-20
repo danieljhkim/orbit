@@ -11,7 +11,7 @@ use serde_json::Value;
 /// metadata:
 ///   name: <name>
 /// spec:
-///   type: agent_loop | groundhog | deterministic
+///   type: agent_loop | deterministic
 ///   description: <text>
 ///   input_schema_json: {...}
 ///   output_schema_json: {...}
@@ -33,12 +33,11 @@ pub struct ActivityV2 {
 }
 
 /// v2 activity type discriminator. Serialized as
-/// `type: agent_loop|groundhog|deterministic`.
+/// `type: agent_loop|deterministic`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ActivityV2Spec {
     AgentLoop(AgentLoopSpec),
-    Groundhog(GroundhogSpec),
     Deterministic(DeterministicSpec),
 }
 
@@ -90,60 +89,6 @@ pub struct AgentLoopSpec {
     /// programs (fail-closed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proc_allowed_programs: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct GroundhogSpec {
-    /// System prompt / instruction delivered to each Groundhog attempt.
-    #[serde(default)]
-    pub instruction: String,
-    /// Additional tool allowlist entries. Groundhog-required tools are
-    /// injected by the runner even when omitted here.
-    #[serde(default)]
-    pub tools: Vec<String>,
-    /// Behavior when a denied tool is requested.
-    #[serde(default)]
-    pub on_denial: OnDenial,
-    /// Optional model override (provider-specific name).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    /// Upper bound on loop iterations per attempt.
-    #[serde(default = "default_max_iterations")]
-    pub max_iterations: u32,
-    /// Provider whose HTTP runtime executes each attempt.
-    #[serde(default)]
-    pub provider: Provider,
-    /// Wall-clock timeout for one Groundhog attempt.
-    #[serde(default = "default_cli_wall_clock_timeout_seconds")]
-    pub wall_clock_timeout_seconds: u64,
-    /// Fallback attempt budget when a checkpoint omits `attempt_budget`.
-    #[serde(default = "default_groundhog_attempt_budget")]
-    pub attempt_budget_default: u32,
-    /// Optional role tag (ADR-029). Mirrors `AgentLoopSpec::role`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role: Option<AgentRole>,
-    /// Program allowlist enforced before `proc.spawn` executes a request.
-    /// Mirrors [`AgentLoopSpec::proc_allowed_programs`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proc_allowed_programs: Option<Vec<String>>,
-}
-
-impl GroundhogSpec {
-    pub fn as_agent_loop_spec(&self) -> AgentLoopSpec {
-        AgentLoopSpec {
-            instruction: self.instruction.clone(),
-            tools: self.tools.clone(),
-            on_denial: self.on_denial,
-            model: self.model.clone(),
-            max_iterations: self.max_iterations,
-            backend: Backend::Http,
-            provider: self.provider,
-            wall_clock_timeout_seconds: self.wall_clock_timeout_seconds,
-            require_response_envelope: false,
-            role: self.role,
-            proc_allowed_programs: self.proc_allowed_programs.clone(),
-        }
-    }
 }
 
 /// Execution backend for an `agent_loop` activity (§3.1). `Auto` resolves at
@@ -668,7 +613,7 @@ pub struct DeterministicSpec {
     pub config: Value,
 }
 
-/// Role tag for an `agent_loop` / `groundhog` activity (ADR-029). Maps to
+/// Role tag for an `agent_loop` activity (ADR-029). Maps to
 /// `[agent.<role>]` blocks in `config.toml`; the dispatcher resolves the
 /// effective role to a `(provider, model, backend)` triple before invoking
 /// the runner. The set is closed because `orbit init` only prompts for these
@@ -716,8 +661,4 @@ const fn default_max_iterations() -> u32 {
 
 const fn default_cli_wall_clock_timeout_seconds() -> u64 {
     300
-}
-
-const fn default_groundhog_attempt_budget() -> u32 {
-    3
 }

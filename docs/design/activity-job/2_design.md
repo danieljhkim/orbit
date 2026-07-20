@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-07-18
+last_updated: 2026-07-20
 status: Draft
 feature: activity-job
 doc_role: design
@@ -40,7 +40,6 @@ The loader in `crates/orbit-common/src/types/activity_job/asset_loader.rs` reads
 and then flattens one `ActivityV2Spec` variant:
 
 - `AgentLoop(AgentLoopSpec)`
-- `Groundhog(GroundhogSpec)`
 - `Deterministic(DeterministicSpec)`
 
 The common `agent_loop` fields are:
@@ -56,7 +55,7 @@ The common `agent_loop` fields are:
 - `require_response_envelope` (default `false`; opt in only when downstream
   templates consume structured response fields)
 
-Groundhog has its own `GroundhogSpec`, but `as_agent_loop_spec()` projects it into an HTTP-backed agent loop when the runner needs the shared transport path. That sibling kind landed in [T20260420-0510-2].
+A former `Groundhog(GroundhogSpec)` variant (a sibling activity kind from [T20260420-0510-2]) was removed as unused in [ORB-10332]; activity specs are now only `agent_loop` and `deterministic`.
 
 `DeterministicSpec` is just `{ action, config }`. A fourth variant, `Shell(ShellSpec)`, was removed in [ORB-00374] as a fail-closed security fix (see [ADR-0194](./4_decisions.md)); `type: shell` now fails to deserialize at load rather than spawning an unsandboxed subprocess.
 
@@ -152,7 +151,7 @@ The seeded `list_backlog_tasks` deterministic activity starts `task_auto_pipelin
 
 `task_gate_pipeline` reserves a bundle's context files before it dispatches `task_pr_pipeline` or `task_local_pipeline` through `invoke_and_wait`. The reservation owner is the gate run that executed `reserve_locks`, not the child shipment run. Seeded defaults keep `ttl_seconds` aligned with `dispatch_timeout_seconds` at 7200 seconds, so the admission reservation covers the full child wait budget; workspace overrides must preserve `ttl_seconds >= dispatch_timeout_seconds` [T20260427-36]. Owned reservations are engine-cleaned when that owner run reaches a terminal state (`success`, `failed`, `cancelled`, or `timeout`), so correctness does not depend on every workspace override preserving a YAML release step. The seeded deterministic `release_locks` activity still calls `orbit.task.locks.release` after a terminal child wait as an early-release optimization; idempotent terminal cleanup then finds nothing left to release. After [T20260427-34], `invoke_and_wait` remains a raw child-status join primitive, and seeded shipment parents use `pipeline_success_guard` to fail after required cleanup whenever a child run reports anything other than `succeeded`. `task_gate_pipeline` guards the direct child after release; `task_auto_pipeline` guards collected gate results after fan-in and skips that guard for an empty backlog. Unowned/manual reservations remain explicit-release-or-TTL only. TTL is the fallback for abandoned/manual reservations or cases where no terminal cleanup or reserve-pressure reconciliation trigger runs. This lifecycle was tightened in [T20260430-26] and made engine-owned in [T20260505-10].
 
-`task_epic_pipeline` loops over deterministic `load_epic` snapshots rather than trusting the orchestrator's prose response. The orchestrator's structured output is limited to the child gate run IDs it just dispatched; after [T20260427-40], a deterministic `pipeline_wait` step joins those runs before `refresh_epic` reloads task state, so the premium HTTP agent is not held open for child shipment. After [T20260427-38], `load_epic` treats `review` as a shipped stop state for epic automation: normal PR/local child workflows stop at that human handoff, so review subtasks are omitted from the next orchestrator input and can satisfy `all_terminal`. The final snapshot still preserves raw `status: "review"` while mapping the epic state to `done` for summary counters; this is pipeline completion, not human approval of the task lifecycle.
+The HTTP epic pipeline layer — the `task_epic_pipeline` job, its `epic_orchestrator` activity, and the deterministic `pipeline_wait` join — was removed as unused in [ORB-10332]. The live gate/auto/PR/workspace-ship pipelines retain `invoke_and_wait` and the `orbit.pipeline.invoke` / `orbit.pipeline.wait` tools for child dispatch and joining.
 
 Reserve conflict checking also performs bounded, opportunistic stale-owned-reservation reconciliation before reporting reservation conflicts. It inspects only overlapping owned reservations under current reserve pressure; it is not a background sweeper. Existing job-run list/show reconciliation remains in place, and both paths release run-owned reservations with `release_reason: stale_run_reconciled` when they prove the owner is already terminal or stale. Release audit rows use the task-lock audit surface and include `reservation_id`, `owner_run_id` when present, and `release_reason` (`explicit`, `run_terminal`, `stale_run_reconciled`, or TTL expiration).
 
@@ -194,7 +193,6 @@ That host wiring arrived in [T20260418-2143]. The cleanup in [T20260418-2210] ke
 `dispatch_v2_activity(...)` is the central per-activity entry. It emits `ActivityStarted` / `ActivityFinished` envelope events, then delegates by spec kind:
 
 - `agent_loop` → HTTP or CLI path
-- `groundhog` → Groundhog runner
 - `deterministic` → host callback
 
 That keeps the dispatch tree readable while provider/session construction stays below the boundary.
@@ -242,7 +240,7 @@ After [T20260427-51], macOS CLI invocations declaring `sandbox: macos-sandbox-ex
 
 After [T20260509-40], bare Unix CLI subprocesses enter their own process group, matching the macOS sandbox wrapper's kill boundary. The supervisor kills that process group on timeout, also kills any remaining group members after the main child exits before joining output readers, and bounds timeout-path reader joins so a leaked pipe writer cannot hang the activity supervisor. Non-Unix platforms keep the immediate-child kill fallback until Orbit has an equivalent process-tree primitive there.
 
-After [T20260430-15], the CLI stdin envelope carries rendered activity input and durable `run_id` beside instruction, prompt, tools, and model. When input identifies one task, orbit-core embeds a canonical task snapshot with `input.workspace_path` / `input.repo_root` taking precedence over stored paths. After [T20260508-8], `backend: cli` also uses a shared workspace resolver for subprocess cwd: `input.workspace_path`, then `task.workspace_path`, then best-effort `ToolContext.workspace_root`. Declared input/task paths must already be directories; stale worktrees fail as `CliInvocationFailed` before `CliInvocationStarted` is emitted. `groundhog` delegates to the same resolver so task execution and attempt orchestration do not drift. After [T20260505-10], Orbit-managed CLI subprocesses receive `ORBIT_RUN_ID` plus an Orbit-managed run-context marker; `orbit tool run` requires both before it populates `ToolContext` reservation ownership. Direct manual CLI tool calls, including calls with only `ORBIT_RUN_ID`, remain unowned.
+After [T20260430-15], the CLI stdin envelope carries rendered activity input and durable `run_id` beside instruction, prompt, tools, and model. When input identifies one task, orbit-core embeds a canonical task snapshot with `input.workspace_path` / `input.repo_root` taking precedence over stored paths. After [T20260508-8], `backend: cli` also uses a shared workspace resolver for subprocess cwd: `input.workspace_path`, then `task.workspace_path`, then best-effort `ToolContext.workspace_root`. Declared input/task paths must already be directories; stale worktrees fail as `CliInvocationFailed` before `CliInvocationStarted` is emitted. After [T20260505-10], Orbit-managed CLI subprocesses receive `ORBIT_RUN_ID` plus an Orbit-managed run-context marker; `orbit tool run` requires both before it populates `ToolContext` reservation ownership. Direct manual CLI tool calls, including calls with only `ORBIT_RUN_ID`, remain unowned.
 
 The older `AgentRuntime` trait and `providers/*_cli.rs` files are not deprecated leftovers; they are the shipped `backend: cli` implementation.
 
@@ -444,9 +442,8 @@ This feature spans a migration, so the retained surfaces are explicit.
 | v2 `agent_loop` CLI path | Kept | Implemented by the retained `AgentRuntime` trait and `providers/*_cli.rs` after [T20260419-0104]. |
 | `TargetRef` authoring form | Kept at authoring/load time only | Human-friendly YAML surface; resolved away before execution since [T20260418-2019]. |
 | v1 `crate::job_runner` | Kept | Older sequential/DAG runtime still exists beside the v2 executor; Phase 3 was additive in [T20260418-2018]. |
-| Legacy `run_parallel_task_pipeline` | Kept behind automation | After [T20260509-38], its workers are launched as durable pipeline runs and waited through `orbit.pipeline.wait`; timeouts cancel active child runs before blocking timed-out tasks, so the parent no longer waits on never-returning scoped threads. |
+| Legacy `run_parallel_task_pipeline` | Removed | The legacy parallel-batch executor was removed as unused in [ORB-10332]; the live pipelines still dispatch and join children through `orbit.pipeline.invoke` / `orbit.pipeline.wait`. |
 | Seeded reference activities and jobs | Kept | They act as runnable contracts and examples, and were moved into init seeding in [T20260419-2347]. |
-| Groundhog as a dedicated activity kind | Kept | Explicit sibling activity after [T20260420-0510-2], not an `agent_loop` toggle. |
 
 ### 10.2 Seeded Assets in Practice
 
@@ -454,9 +451,9 @@ Seeded assets are part of the design. Today they include:
 
 - small reference activities such as `agent_loop_reference` and `agent_loop_cli_reference`
 - control-plane jobs such as `task_gate_pipeline`
-- higher-level dispatch workflows such as `task_auto_pipeline`, `task_epic_pipeline`, and `job_duel_plan_pipeline`
+- higher-level dispatch workflows such as `task_auto_pipeline` and `job_duel_plan_pipeline`
 
-The gate/auto/epic assets from [T20260419-0622-3], [T20260419-0623], and [T20260419-0623-2] exercise real v2 constructs:
+The gate/auto assets from [T20260419-0622-3] and [T20260419-0623] exercise real v2 constructs:
 
 - `loop + break_when`
 - `fan_out + fan_in`
@@ -517,10 +514,8 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260419-0503]** — Enforce `fsProfile` rules across runtime and CLI surfaces.
 - **[T20260419-0622-3]** — Add `task_gate_pipeline`.
 - **[T20260419-0623]** — Add `task_auto_pipeline`.
-- **[T20260419-0623-2]** — Add `task_epic_pipeline`.
 - **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
 - **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
-- **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
 - **[T20260421-0542-2]** — Add pre-gate lock-overlap exclusion attribution to `list_backlog_tasks`.
 - **[T20260423-0114]** — Expose the `backend: cli` executor-args gap during a local task ship run.
 - **[T20260423-0445]** — Merge object-valued job defaults over explicit run input and persist synthetic failed job steps for early v2 pipeline failures.
@@ -538,7 +533,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260426-2349]** — Move CLI tracing output redaction from `cli_runner` call sites into the default tracing formatter layer.
 - **[T20260427-34]** — Add seeded pipeline success guards so non-succeeded child runs fail parent shipment workflows.
 - **[T20260427-36]** — Align task-gate reservation TTL with the child dispatch wait budget.
-- **[T20260427-38]** — Treat review as a shipped stop state for epic automation.
 - **[T20260427-45]** — Use freshly fetched remote base refs for default task-shipping worktrees.
 - **[T20260427-48]** — Thread provider config into the v2 CLI backend and keep Codex dynamic flags exec-compatible.
 - **[T20260427-51]** — Wrap cli-backend agent invocations in `sandbox-exec` on macOS.
@@ -567,5 +561,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[ORB-00016]** — Treat no-repository-diff `task_pr_pipeline` handoffs as successful no-PR completions.
 - **[ORB-00374]** — Remove the `shell` activity variant and `run_shell` dispatch (fail-closed resolution of security bug [ORB-00363]).
 - **[ORB-10232]** — Model recoverable PR handoff as checkpointed job activities with exact-SHA force-push provenance.
+- **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer (`task_epic_pipeline`, `epic_orchestrator`, `pipeline_wait`, legacy parallel-batch executor).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

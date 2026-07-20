@@ -12,8 +12,6 @@
 //!
 //! The public surface is intentionally split into four namespaces:
 //! - [`friction`] for shared friction taxonomy defaults
-//! - [`groundhog`] for Groundhog checkpoint lineage and append-only chronicle
-//!   serialization
 //! - [`migration`] for forward-only schema migrations of YAML artifacts
 //! - [`types`] for Orbit domain types, `OrbitError`, IDs, and the v2 schemas
 //! - [`utility`] for generic helpers like filesystem, redaction, logging,
@@ -21,7 +19,6 @@
 //! - [`tracing`] as the shared structured-event facade used by Orbit crates
 
 pub mod friction;
-pub mod groundhog;
 pub mod migration;
 pub mod model_defaults;
 pub mod types;

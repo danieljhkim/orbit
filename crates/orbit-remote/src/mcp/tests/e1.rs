@@ -304,9 +304,9 @@ fn hub_listing_uses_one_canonical_placement_and_capability_predicate() {
         .map(|definition| definition.schema.name.as_str())
         .collect::<BTreeSet<_>>();
     assert!(agent_names.contains("orbit.task.add"));
-    assert!(!agent_names.contains("orbit.host.list"));
+    assert!(!agent_names.contains("orbit.workspace.list"));
     // Crew discovery is admitted for agent (unlike the operator-only registry
-    // discovery tools), proving capability is by placement, not a hierarchy.
+    // discovery tool), proving capability is by placement, not a hierarchy.
     assert!(agent_names.contains("orbit.crew.list"));
     assert!(
         !agent_names
@@ -322,7 +322,7 @@ fn hub_listing_uses_one_canonical_placement_and_capability_predicate() {
         .into_iter()
         .map(|definition| definition.schema.name)
         .collect::<BTreeSet<_>>();
-    assert!(operator_names.contains("orbit.host.list"));
+    assert!(operator_names.contains("orbit.workspace.list"));
     assert!(operator_names.contains("orbit.crew.list"));
     assert!(operator_names.contains("orbit.friction.list"));
     assert!(operator_names.contains("orbit.friction.show"));
@@ -505,7 +505,7 @@ fn unknown_remote_caller_can_only_register_and_retirement_invalidates_open_peer(
 
     let unknown = host
         .call_tool(
-            "orbit.host.list",
+            "orbit.workspace.list",
             json!({}),
             remote_context(McpCapability::Operator, "mcall-before-register"),
         )
@@ -557,7 +557,7 @@ fn unknown_remote_caller_can_only_register_and_retirement_invalidates_open_peer(
         "guessed private name created no registry mutation"
     );
     host.call_tool(
-        "orbit.host.list",
+        "orbit.workspace.list",
         json!({}),
         remote_context(McpCapability::Operator, "mcall-after-register"),
     )
@@ -569,7 +569,7 @@ fn unknown_remote_caller_can_only_register_and_retirement_invalidates_open_peer(
         .expect("retire spoke");
     let retired = host
         .call_tool(
-            "orbit.host.list",
+            "orbit.workspace.list",
             json!({}),
             remote_context(McpCapability::Operator, "mcall-after-retire"),
         )
@@ -671,7 +671,7 @@ fn hub_checkoutless_dispatch_and_denials_each_write_one_trusted_audit() {
 
     let operator_error = host
         .call_tool(
-            "orbit_host_list",
+            "orbit_workspace_list",
             json!({}),
             context(McpCapability::Agent, "mcall-hub-capability-denied"),
         )

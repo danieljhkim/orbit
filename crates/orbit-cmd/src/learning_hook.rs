@@ -73,20 +73,10 @@ pub fn render_reminders(
     format: HookOutputFormat,
     admitted: &[LearningReminder],
 ) -> Result<String, OrbitError> {
-    render_hook_reminders(format, admitted, &[])
-}
-
-pub fn render_hook_reminders(
-    format: HookOutputFormat,
-    admitted: &[LearningReminder],
-    review_threads: &[orbit_core::command::review_thread_hook::ReviewThreadReminder],
-) -> Result<String, OrbitError> {
     match format {
-        HookOutputFormat::Claude | HookOutputFormat::Grok => {
-            Ok(render_text_context(admitted, review_threads))
-        }
-        HookOutputFormat::Codex => render_codex_context(admitted, review_threads),
-        HookOutputFormat::Gemini => render_gemini_context(admitted, review_threads),
+        HookOutputFormat::Claude | HookOutputFormat::Grok => Ok(render_text_context(admitted)),
+        HookOutputFormat::Codex => render_codex_context(admitted),
+        HookOutputFormat::Gemini => render_gemini_context(admitted),
     }
 }
 
@@ -95,28 +85,22 @@ pub fn render_claude(admitted: &[LearningReminder]) -> String {
 }
 
 pub fn render_codex(admitted: &[LearningReminder]) -> Result<String, OrbitError> {
-    render_codex_context(admitted, &[])
+    render_codex_context(admitted)
 }
 
 pub fn render_gemini(admitted: &[LearningReminder]) -> Result<String, OrbitError> {
-    render_gemini_context(admitted, &[])
+    render_gemini_context(admitted)
 }
 
-pub fn render_codex_context(
-    admitted: &[LearningReminder],
-    review_threads: &[orbit_core::command::review_thread_hook::ReviewThreadReminder],
-) -> Result<String, OrbitError> {
-    render_json_context("PreToolUse", admitted, review_threads)
+pub fn render_codex_context(admitted: &[LearningReminder]) -> Result<String, OrbitError> {
+    render_json_context("PreToolUse", admitted)
 }
 
-pub fn render_gemini_context(
-    admitted: &[LearningReminder],
-    review_threads: &[orbit_core::command::review_thread_hook::ReviewThreadReminder],
-) -> Result<String, OrbitError> {
+pub fn render_gemini_context(admitted: &[LearningReminder]) -> Result<String, OrbitError> {
     // Gemini CLI names its documented pre-tool hook event `BeforeTool`; the
     // renderer stays separate so the wiring can change when Gemini's hook
     // context surface settles.
-    render_json_context("BeforeTool", admitted, review_threads)
+    render_json_context("BeforeTool", admitted)
 }
 
 pub fn parse_payload(stdin: &str) -> Option<HookPayload> {
@@ -380,21 +364,7 @@ pub fn run_pretooluse_input(
             Vec::new()
         }
     };
-    let review_thread_admitted = match admitted_review_thread_reminders(
-        runtime,
-        &payload,
-        session_id.as_deref(),
-        &tmpdir,
-        ppid,
-    ) {
-        Ok(admitted) => admitted,
-        Err(error) => {
-            tracing::warn!(error = %redact_sensitive_env_text(&error), "review-thread hook reminder path failed open");
-            Vec::new()
-        }
-    };
-
-    if admitted.is_empty() && review_thread_admitted.is_empty() {
+    if admitted.is_empty() {
         return Ok(None);
     }
 
@@ -412,22 +382,8 @@ pub fn run_pretooluse_input(
     {
         tracing::warn!(error = %redact_sensitive_env_text(&error), "learning hook audit emit failed open");
     }
-    for reminder in &review_thread_admitted {
-        if let Err(error) =
-            orbit_core::command::review_thread_hook::emit_review_thread_surfaced_audit(
-                runtime,
-                &payload.tool_name,
-                &payload.target_path,
-                session_id.as_deref(),
-                reminder,
-                start.elapsed(),
-            )
-        {
-            tracing::warn!(error = %redact_sensitive_env_text(&error), "review-thread hook audit emit failed open");
-        }
-    }
 
-    render_hook_reminders(format, &admitted, &review_thread_admitted)
+    render_reminders(format, &admitted)
         .map(Some)
         .map_err(|error| format!("render reminders: {error}"))
 }
@@ -468,38 +424,6 @@ fn admitted_learning_reminders(
     }
 }
 
-fn admitted_review_thread_reminders(
-    runtime: &OrbitRuntime,
-    payload: &HookPayload,
-    session_id: Option<&str>,
-    tmpdir: &Path,
-    ppid: u32,
-) -> Result<Vec<orbit_core::command::review_thread_hook::ReviewThreadReminder>, String> {
-    let Some(task_id) = orbit_core::command::review_thread_hook::active_task_id_from_env() else {
-        return Ok(Vec::new());
-    };
-    let threads = runtime
-        .list_review_threads(&task_id, None)
-        .map_err(|error| format!("list review threads for hook: {error}"))?;
-    if threads.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let candidates =
-        orbit_core::command::review_thread_hook::reminders_from_threads(&task_id, threads);
-    let state_path = runtime.review_thread_hook_state_file_path(session_id, tmpdir, ppid);
-    let admitted =
-        orbit_core::command::review_thread_hook::update_state_file(&state_path, &candidates)?;
-    tracing::debug!(
-        tool_name = %payload.tool_name,
-        target_path = %payload.target_path,
-        task_id = %task_id,
-        admitted = admitted.len(),
-        "review-thread hook admission completed",
-    );
-    Ok(admitted)
-}
-
 pub(crate) fn accepted_tools(format: HookOutputFormat) -> &'static [&'static str] {
     match format {
         HookOutputFormat::Claude | HookOutputFormat::Grok => CLAUDE_PRETOOLUSE_TOOLS,
@@ -517,27 +441,15 @@ pub(crate) fn learning_hook_tmpdir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
-fn render_text_context(
-    admitted: &[LearningReminder],
-    review_threads: &[orbit_core::command::review_thread_hook::ReviewThreadReminder],
-) -> String {
-    let learning_block = render_claude(admitted);
-    let review_thread_block =
-        orbit_core::command::review_thread_hook::render_review_thread_block(review_threads);
-    match (learning_block.is_empty(), review_thread_block.is_empty()) {
-        (true, true) => String::new(),
-        (false, true) => learning_block,
-        (true, false) => review_thread_block,
-        (false, false) => format!("{learning_block}\n\n{review_thread_block}"),
-    }
+fn render_text_context(admitted: &[LearningReminder]) -> String {
+    render_claude(admitted)
 }
 
 fn render_json_context(
     event_name: &str,
     admitted: &[LearningReminder],
-    review_threads: &[orbit_core::command::review_thread_hook::ReviewThreadReminder],
 ) -> Result<String, OrbitError> {
-    let block = render_text_context(admitted, review_threads);
+    let block = render_text_context(admitted);
     serde_json::to_string(&json!({
         "hookSpecificOutput": {
             "hookEventName": event_name,

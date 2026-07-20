@@ -3,10 +3,8 @@ pub mod auto_task;
 pub mod docs;
 pub mod duel;
 pub mod friction;
-pub mod groundhog;
 pub mod learning;
 pub mod pipeline;
-pub mod review_thread;
 pub mod search;
 pub mod semantic;
 pub mod state;
@@ -16,12 +14,9 @@ use orbit_common::types::{
     McpToolPlacement, McpToolPolicy, OrbitError, ToolParam, normalize_agent_family_for_model,
     normalize_optional_attribution_label,
 };
-use serde::Serialize;
 use serde_json::Value;
 
-use crate::{
-    GroundhogBuiltinAction, OrbitBuiltinAction, OrbitTaskScope, ToolContext, ToolRegistry,
-};
+use crate::{OrbitBuiltinAction, OrbitTaskScope, ToolContext, ToolRegistry};
 
 pub(super) use orbit_common::types::{optional_string_alias, required_string};
 
@@ -77,9 +72,6 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register_inactive(docs::OrbitDocsAddTool);
     registry.register_inactive(docs::OrbitDocsIndexTool);
     registry.register_inactive(docs::OrbitDocsMigrateTool);
-    registry.register(groundhog::checkpoint_success::OrbitGroundhogCheckpointSuccessTool);
-    registry.register(groundhog::checkpoint_failure::OrbitGroundhogCheckpointFailureTool);
-    registry.register(groundhog::side_effect::OrbitGroundhogSideEffectTool);
     registry.register_mcp(
         friction::add::OrbitFrictionAddTool,
         agent_operator(McpToolPlacement::Hub),
@@ -167,22 +159,6 @@ pub fn register(registry: &mut ToolRegistry) {
     );
     registry.register(pipeline::invoke::OrbitPipelineInvokeTool);
     registry.register(pipeline::wait::OrbitPipelineWaitTool);
-    registry.register_mcp(
-        review_thread::add::OrbitReviewThreadAddTool,
-        agent_operator(McpToolPlacement::Hub),
-    );
-    registry.register_mcp(
-        review_thread::list::OrbitReviewThreadListTool,
-        agent_operator(McpToolPlacement::Hub),
-    );
-    registry.register_mcp(
-        review_thread::reply::OrbitReviewThreadReplyTool,
-        agent_operator(McpToolPlacement::Hub),
-    );
-    registry.register_mcp(
-        review_thread::resolve::OrbitReviewThreadResolveTool,
-        agent_operator(McpToolPlacement::Hub),
-    );
     registry.register_mcp(
         search::OrbitSearchTool,
         agent_operator(McpToolPlacement::Composite),
@@ -399,59 +375,6 @@ fn require_orbit_host(ctx: &ToolContext) -> Result<&dyn crate::OrbitToolHost, Or
             "orbit builtin requires an Orbit runtime host in ToolContext".to_string(),
         )
     })
-}
-
-fn require_groundhog_host(ctx: &ToolContext) -> Result<&dyn crate::GroundhogToolHost, OrbitError> {
-    ctx.groundhog_host.as_deref().ok_or_else(|| {
-        OrbitError::Execution(
-            "groundhog verb tools require an active groundhog runner context".to_string(),
-        )
-    })
-}
-
-pub(super) fn execute_groundhog_action<T: Serialize>(
-    ctx: &ToolContext,
-    action: GroundhogBuiltinAction,
-    label: &str,
-    input: &T,
-) -> Result<Value, OrbitError> {
-    let host = require_groundhog_host(ctx)?;
-    let scope = host.scope();
-    if !scope.active_day {
-        return Err(OrbitError::Execution(format!(
-            "groundhog {label} requires an active groundhog day context"
-        )));
-    }
-
-    let input = serde_json::to_value(input)
-        .map_err(|error| OrbitError::Execution(format!("groundhog {label} serialize: {error}")))?;
-    host.execute(action, input)
-}
-
-pub(super) fn require_groundhog_fields(
-    input: &Value,
-    label: &str,
-    fields: &[&str],
-) -> Result<(), OrbitError> {
-    let missing = input
-        .as_object()
-        .map(|obj| {
-            fields
-                .iter()
-                .filter(|field| !obj.contains_key(**field))
-                .copied()
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_else(|| fields.to_vec());
-
-    if missing.is_empty() {
-        return Ok(());
-    }
-
-    Err(OrbitError::InvalidInput(format!(
-        "groundhog {label} input validation failed: missing required fields: {}",
-        missing.join(", ")
-    )))
 }
 
 /// Extract an optional string from the first matching key in `keys`.

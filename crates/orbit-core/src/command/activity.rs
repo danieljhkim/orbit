@@ -29,10 +29,6 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/dispatch_agent.yaml"),
     ),
     (
-        "epic_orchestrator",
-        include_str!("../../assets/activities/epic_orchestrator.yaml"),
-    ),
-    (
         "gate_starvation_fail",
         include_str!("../../assets/activities/gate_starvation_fail.yaml"),
     ),
@@ -59,10 +55,6 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "independent_review_guard",
         include_str!("../../assets/activities/independent_review_guard.yaml"),
-    ),
-    (
-        "pipeline_wait",
-        include_str!("../../assets/activities/pipeline_wait.yaml"),
     ),
     (
         "pipeline_success_guard",
@@ -184,7 +176,6 @@ mod tests {
             ("pr_prepare", "pr_prepare"),
             ("pr_promote", "pr_promote"),
             ("release_locks", "release_locks"),
-            ("pipeline_wait", "pipeline_wait"),
             ("independent_review_guard", "independent_review_guard"),
             ("list_triage_candidates", "list_triage_candidates"),
             ("apply_triage_dispositions", "apply_triage_dispositions"),
@@ -235,7 +226,6 @@ mod tests {
             ("agent_implement", false),
             ("agent_review", true),
             ("triage_failed_runs", true),
-            ("epic_orchestrator", true),
         ] {
             let (_, yaml) = DEFAULT_ACTIVITY_FILES
                 .iter()

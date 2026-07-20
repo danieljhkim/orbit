@@ -366,7 +366,6 @@ impl Commands {
                     TaskSubcommand::Archive(args) => {
                         ("archive", Some("task"), Some(args.id.as_str()))
                     }
-                    TaskSubcommand::ReviewThread(_) => ("review-thread", Some("task"), None),
                     TaskSubcommand::Export(_) => ("export", None, None),
                     TaskSubcommand::Import(args) => (
                         "import",

@@ -58,16 +58,6 @@ pub(super) fn execute(
         OrbitBuiltinAction::PipelineWait => {
             super::pipeline_tools::wait(runtime, input, agent, model)
         }
-        OrbitBuiltinAction::ReviewThreadAdd => {
-            super::review_threads::add(runtime, input, agent, model)
-        }
-        OrbitBuiltinAction::ReviewThreadList => super::review_threads::list(runtime, input),
-        OrbitBuiltinAction::ReviewThreadReply => {
-            super::review_threads::reply(runtime, input, agent, model)
-        }
-        OrbitBuiltinAction::ReviewThreadResolve => {
-            super::review_threads::resolve(runtime, input, agent, model)
-        }
         OrbitBuiltinAction::Search => super::search_tools::search(runtime, input),
         OrbitBuiltinAction::SemanticIndex => super::semantic_tools::index(runtime, input),
         OrbitBuiltinAction::SemanticInstall => super::semantic_tools::install(runtime, input),

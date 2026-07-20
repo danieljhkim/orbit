@@ -475,10 +475,6 @@ const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.task.show",
     "orbit.task.update",
     "orbit.task.list",
-    "orbit.task.review_thread.add",
-    "orbit.task.review_thread.list",
-    "orbit.task.review_thread.reply",
-    "orbit.task.review_thread.resolve",
     "orbit.task.start",
     "orbit.adr.add",
     "orbit.adr.show",
@@ -505,10 +501,7 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
 }
 
 fn is_remote_owned_non_runtime_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "orbit.host.list" | "orbit.workspace.list" | "orbit.crew.list"
-    )
+    matches!(name, "orbit.workspace.list" | "orbit.crew.list")
 }
 
 #[test]
@@ -556,7 +549,7 @@ fn safe_surface_separates_remote_owned_and_runtime_tools() {
         );
     }
 
-    for name in ["orbit.host.list", "orbit.workspace.list", "orbit.crew.list"] {
+    for name in ["orbit.workspace.list", "orbit.crew.list"] {
         assert!(safe_names.contains(name));
         assert!(is_mcp_tool_exposed(name));
         assert!(
@@ -678,7 +671,7 @@ fn runtime_mcp_host_lists_only_core_registry_backed_safe_tools() {
             .filter(|name| name.starts_with("orbit.graph."))
             .collect::<Vec<_>>()
     );
-    for name in ["orbit.host.list", "orbit.workspace.list", "orbit.crew.list"] {
+    for name in ["orbit.workspace.list", "orbit.crew.list"] {
         assert!(
             !listed.contains(name),
             "Core runtime host must not expose Remote discovery: {name}"
@@ -1200,9 +1193,8 @@ mod audited_mcp_call_tests {
                 .expect("global registry discovery succeeds")
         };
 
-        let hosts = call("orbit.host.list", "mcall-host-list");
         let workspaces = call("orbit.workspace.list", "mcall-workspace-list");
-        for value in [&hosts, &workspaces] {
+        for value in [&workspaces] {
             assert_eq!(value["hub_machine_id"], "hm_hub");
             assert_eq!(value["registry_revision"].as_u64(), Some(expected_revision));
             let serialized = serde_json::to_string(value).expect("serialize result");
@@ -1213,28 +1205,13 @@ mod audited_mcp_call_tests {
                 );
             }
         }
-        let host_rows = hosts["hosts"].as_array().expect("host rows");
-        assert_eq!(host_rows.len(), 2);
-        assert!(
-            host_rows
-                .iter()
-                .any(|row| row["machine_id"] == "hm_hub" && row["host_id"] == "hub")
-        );
-        assert!(
-            host_rows
-                .iter()
-                .any(|row| row["machine_id"] == "hm_owner" && row["host_id"] == "owner")
-        );
         let workspace_rows = workspaces["workspaces"].as_array().expect("workspace rows");
         assert_eq!(workspace_rows.len(), 1);
         assert_eq!(workspace_rows[0]["workspace_id"], "ws_checkoutless");
         assert_eq!(workspace_rows[0]["owner_machine_id"], "hm_owner");
         assert_eq!(workspace_rows[0]["owner_host_id"], "owner");
 
-        for (tool_name, call_id) in [
-            ("orbit.host.list", "mcall-host-list"),
-            ("orbit.workspace.list", "mcall-workspace-list"),
-        ] {
+        for (tool_name, call_id) in [("orbit.workspace.list", "mcall-workspace-list")] {
             let events = runtime
                 .list_audit_events(None, Some(tool_name.to_string()), None, None, 16)
                 .expect("list discovery audit events");

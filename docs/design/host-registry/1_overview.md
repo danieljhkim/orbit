@@ -1,7 +1,7 @@
 ---
 title: Host Registry — Overview
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-07-20
 status: Accepted
 feature: host-registry
 doc_role: overview
@@ -10,7 +10,7 @@ summary: First-class, validated machine identity plus a main-host inventory, ena
 tags: [host-registry, multi-host, dispatch, routines]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access]
-related_artifacts: [ORB-00424, ORB-10248, ORB-10249, ORB-10268, ORB-10302, ORB-10319, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10248, ORB-10249, ORB-10268, ORB-10302, ORB-10319, ORB-10332, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Host Registry — Overview
@@ -72,7 +72,8 @@ authority — that direction was already rejected ([ADR-0200], the archived
   the system persists stores `machine_id`. Initialized by `orbit init`.
 - **Host registry** — the inventory of known hosts kept on the main host: name,
   machine id, labels, workspace presence map (workspace → root on that host),
-  last-seen, status. Enumerable via `orbit.host.list`.
+  last-seen, status. Enumerable via the `orbit host list` CLI command; the
+  `orbit.host.list` MCP discovery tool was removed in [ORB-10332].
 - **Main host (hub)** — the machine holding the **coordination plane**: tasks,
   frictions, the run queue, the registry, and all global ID allocation, for every
   workspace regardless of who owns the repo. One place to triage, one MCP target.
@@ -133,5 +134,7 @@ Detailed mechanisms in [2_design.md](./2_design.md); open directions in
   `orbit-remote` feature crate: registry behavior, feature-owned SQLite access,
   profile/cache composition, MCP routing, hub/link, and registration now evolve
   together over neutral Store, MCP, Core, Tools, and Common kernels ([ADR-0240]).
+- [ORB-10332] — removed the `orbit.host.list` MCP discovery tool as unused; the
+  `orbit host list` CLI command remains.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

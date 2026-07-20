@@ -1,8 +1,8 @@
 mod dispatch;
-mod parallel;
+mod support;
 
 pub(super) use dispatch::dispatch_batch;
-pub(super) use parallel::{require_run_id, run_parallel_task_pipeline};
+pub(super) use support::require_run_id;
 
 #[cfg(test)]
 mod tests;

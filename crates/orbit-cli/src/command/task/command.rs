@@ -11,7 +11,6 @@ use super::lifecycle::{TaskArchiveArgs, TaskStartArgs};
 use super::lint::TaskLintArgs;
 use super::list::TaskListArgs;
 use super::reindex::TaskReindexArgs;
-use super::review::ReviewThreadCommand;
 use super::show::TaskShowArgs;
 use super::update::TaskUpdateArgs;
 
@@ -47,9 +46,6 @@ pub enum TaskSubcommand {
     Start(TaskStartArgs),
     /// Archive a task
     Archive(TaskArchiveArgs),
-    /// Manage review threads on a task
-    #[command(name = "review-thread")]
-    ReviewThread(ReviewThreadCommand),
     /// Export task bundles to a portable tar.zst archive
     Export(TaskExportArgs),
     /// Import task bundles from a tar.zst archive
@@ -69,7 +65,6 @@ impl Execute for TaskSubcommand {
             TaskSubcommand::Update(args) => args.execute(runtime),
             TaskSubcommand::Start(args) => args.execute(runtime),
             TaskSubcommand::Archive(args) => args.execute(runtime),
-            TaskSubcommand::ReviewThread(cmd) => cmd.execute(runtime),
             TaskSubcommand::Export(args) => args.execute(runtime),
             TaskSubcommand::Import(args) => args.execute(runtime),
             TaskSubcommand::Reindex(args) => args.execute(runtime),

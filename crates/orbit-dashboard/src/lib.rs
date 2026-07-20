@@ -53,7 +53,6 @@ const DIAGNOSTICS_JS: &str = include_str!("../assets/dashboard/diagnostics.js");
 const ROUTER_JS: &str = include_str!("../assets/dashboard/router.js");
 const RUNS_JS: &str = include_str!("../assets/dashboard/runs.js");
 const RUN_DETAIL_JS: &str = include_str!("../assets/dashboard/run-detail.js");
-const REVIEW_THREADS_JS: &str = include_str!("../assets/dashboard/review-threads.js");
 const DASHBOARD_CSP: &str = concat!(
     "default-src 'self'; ",
     "script-src 'self'; ",
@@ -237,7 +236,6 @@ fn run_server(args: &ServeArgs, state: state::DashboardState) -> Result<(), Orbi
         .route("/static/router.js", get(serve_router_js))
         .route("/static/runs.js", get(serve_runs_js))
         .route("/static/run-detail.js", get(serve_run_detail_js))
-        .route("/static/review-threads.js", get(serve_review_threads_js))
         .route("/healthz", get(health::healthz))
         .nest("/api", api::router())
         .with_state(state);
@@ -358,10 +356,6 @@ async fn serve_runs_js() -> Response {
 
 async fn serve_run_detail_js() -> Response {
     dashboard_response("application/javascript; charset=utf-8", RUN_DETAIL_JS)
-}
-
-async fn serve_review_threads_js() -> Response {
-    dashboard_response("application/javascript; charset=utf-8", REVIEW_THREADS_JS)
 }
 
 fn dashboard_response(content_type: &'static str, body: &'static str) -> Response {

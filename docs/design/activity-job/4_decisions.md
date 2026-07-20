@@ -3,7 +3,7 @@ summary: "Activity / Job — Decisions"
 type: design
 title: "Activity / Job — Decisions"
 owner: codex
-last_updated: 2026-07-18
+last_updated: 2026-07-20
 status: Draft
 feature: activity-job
 doc_role: decisions
@@ -58,7 +58,7 @@ Folded instances:
 
 **Context.** The agent-loop path is where activity/job can most easily leak provider implementation details, mutable sessions, or role configuration across crate boundaries. The split ADRs all defended the same shape: shared types live low, orbit-core hosts primitive services, the engine dispatches concrete activity specs, and provider/backends remain explicit choices.
 
-**Decision.** Keep activity/job types in `orbit-common`, keep orbit-core free of `orbit-agent` transport types, and route `backend: cli` through retained provider runtimes behind a host-resolved executor contract. Scope stateful agent features narrowly: loop `session:` is HTTP-only, Groundhog is its own activity kind, role config from `[agent.<role>]` overrides inline settings field-by-field, task-aware CLI envelopes carry durable run context, and provider static-arg fixups run before sandbox dispatch.
+**Decision.** Keep activity/job types in `orbit-common`, keep orbit-core free of `orbit-agent` transport types, and route `backend: cli` through retained provider runtimes behind a host-resolved executor contract. Scope stateful agent features narrowly: loop `session:` is HTTP-only, the Groundhog activity kind was its own kind rather than an `agent_loop` mode bit (later removed as unused in [ORB-10332]), role config from `[agent.<role>]` overrides inline settings field-by-field, task-aware CLI envelopes carry durable run context, and provider static-arg fixups run before sandbox dispatch.
 
 Folded instances:
 
@@ -168,6 +168,8 @@ Folded into ADR-001's rollup for canonical v2 asset normalization.
 **Status:** Superseded by ADR-002 (folded) · 2026-04 · [T20260420-0510-2]
 
 Folded into ADR-002's rollup for explicit agent dispatch boundaries.
+
+**Superseded by ORB-10332:** the Groundhog activity kind was removed as unused; activity specs are now only `agent_loop` and `deterministic`. Retained for history.
 
 ## ADR-010 — Historical workflow inspection must not depend on live seeded job assets
 
@@ -409,6 +411,8 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 
 **Status:** Accepted · 2026-05 · [T20260427-38]
 
+**Superseded by ORB-10332:** the epic pipeline surface (`task_epic_pipeline` and its `epic_orchestrator` / `pipeline_wait` steps) was removed as unused. Retained for history.
+
 **Context.** `task_epic_pipeline` exits from deterministic `load_epic` snapshots, while normal child shipment workflows stop successful subtasks in `review` for human handoff. Treating `review` as open work made a clean epic cycle redispatch already-shipped subtasks or run until its iteration ceiling.
 
 **Decision.** For epic orchestration only, treat `review` as a shipped stop state: `load_epic` omits review subtasks from the open workset, allows them to satisfy `all_terminal`, and maps their epic summary state to `done` while preserving the raw task status.
@@ -421,6 +425,8 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 ## ADR-044 — Epic orchestrator does not block on child runs
 
 **Status:** Accepted · 2026-05 · [T20260427-40]
+
+**Superseded by ORB-10332:** the `epic_orchestrator` and `pipeline_wait` activities and the `task_epic_pipeline` job were removed as unused. Retained for history.
 
 **Context.** The `epic_orchestrator` activity exists to make one judgment cycle: read the deterministic epic snapshot, choose ready bundles, and dispatch child `task_gate_pipeline` runs. Its previous instruction also made the HTTP agent call `orbit.pipeline.wait`, but a normal gate-and-ship envelope can exceed the orchestrator's wall-clock by hours: gate admission can wait, child dispatch can wait, and implementer activities have their own long timeout.
 
@@ -441,7 +447,7 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 
 **Consequences.**
 - The runtime, not the prompt, controls where relative paths in provider CLIs resolve.
-- Groundhog and CLI dispatch share one workspace resolver, reducing future drift between orchestration and implementation attempts.
+- CLI dispatch uses one runtime-owned workspace resolver across task execution paths, reducing future drift.
 - Cost: stale declared worktrees now fail before spawn instead of silently running from the parent process directory.
 
 ## ADR-046 — Job executor internals split by execution responsibility
@@ -522,6 +528,8 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 ## ADR-051 — Legacy parallel-batch workers use cancellable runs
 
 **Status:** Accepted · 2026-05 · [T20260509-38]
+
+**Superseded by ORB-10332:** the legacy parallel-batch executor (`run_parallel_task_pipeline`) was removed as unused. Retained for history.
 
 **Context.** The retained `run_parallel_task_pipeline` automation path used scoped threads to call `run_job_now_with_input_debug`, then marked active workers failed after a long receive timeout. Rust scoped threads still join before the scope exits, so a never-returning worker could keep the parent dispatcher hung even after timeout failure recording.
 
@@ -664,11 +672,11 @@ Rejected alternatives: reconciling by parent linkage (no parent run id is persis
 - **[T20260419-0104]** — Add `backend: cli` dispatch for v2 `agent_loop`.
 - **[T20260419-0622-3]** — Add `task_gate_pipeline`.
 - **[T20260419-0623]** — Add `task_auto_pipeline`.
-- **[T20260419-0623-2]** — Add `task_epic_pipeline`.
+- **[T20260419-0623-2]** — Add `task_epic_pipeline` (surface later removed in [ORB-10332]).
 - **[T20260419-2014]** — Merge `orbit-types` into `orbit-common`.
 - **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
 - **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
-- **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
+- **[T20260420-0510-2]** — Add the Groundhog v1 activity runner (kind later removed in [ORB-10332]).
 - **[T20260421-0542-2]** — Add structured `list_backlog_tasks` output for context-lock exclusions.
 - **[T20260423-0114]** — Expose the `backend: cli` executor-args gap during a local task ship run.
 - **[T20260423-0445]** — Merge object-valued job defaults over explicit run input and persist synthetic failed job steps for early v2 pipeline failures.
@@ -726,5 +734,6 @@ Rejected alternatives: reconciling by parent linkage (no parent run id is persis
 - **[ORB-10232]** — Model recoverable PR handoff as checkpointed job activities with exact-SHA force-push provenance.
 - **[ORB-10266]** — Materialize independent review as a durable exact-head child Run or fail before implementation.
 - **[ORB-10313]** — Fail delivery before Git mutation when the durable execution outcome is not `Outcome: success`.
+- **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer (`task_epic_pipeline`, `epic_orchestrator`, `pipeline_wait`, legacy parallel-batch executor).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

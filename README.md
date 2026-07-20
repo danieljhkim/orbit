@@ -253,10 +253,6 @@ Agents discover project docs through `orbit.search`; docs, lock, semantic setup/
 | | `orbit.task.reject` | Reject a task |
 | | `orbit.task.artifact.put` | Attach a generated artifact to a task |
 | | `orbit.task.locks` | List files currently locked by active tasks |
-| **review** | `orbit.task.review_thread.add` | Open a review thread on a task |
-| | `orbit.task.review_thread.list` | List review threads on a task |
-| | `orbit.task.review_thread.reply` | Reply to a thread |
-| | `orbit.task.review_thread.resolve` | Close a thread |
 | **search** | `orbit.search` | Unified search across tasks, docs, learnings, and ADRs. `kind` narrows the corpus; `hybrid: true` opts task results into BM25 + cosine ranking; `semantic: "<task-id>"` returns cosine neighbors. Cross-kind filters: `tag` (AND), `all` (kind-aware status widener), `status` (`kind:value` tokens), `path` (selector-mapping for tasks, glob-containment for learnings/ADRs; docs remain content-indexed). |
 | **adr** | `orbit.adr.add` | Author an Architecture Decision Record |
 | | `orbit.adr.update` | Edit an ADR |

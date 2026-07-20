@@ -1,2 +1,0 @@
-- Review-thread YAML metadata parses.
-- Matching Markdown body file exists.

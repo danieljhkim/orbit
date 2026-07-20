@@ -167,35 +167,12 @@ fn filters_and_searches_v2_tasks() {
 }
 
 #[test]
-fn search_tasks_matches_review_threads_and_text_artifacts() {
+fn search_tasks_matches_text_artifacts() {
     let temp = TempDir::new().expect("tempdir");
     let store = store(&temp);
     store
         .create_task(create_params("Searchable", TaskStatus::Backlog))
         .expect("create task");
-    let at = Utc.with_ymd_and_hms(2026, 5, 11, 14, 0, 0).unwrap();
-    store
-        .update_task_reviews(
-            "ORB-00000",
-            &TaskReviewUpdateParams {
-                append_review_threads: vec![ReviewThread {
-                    thread_id: "rt-search".to_string(),
-                    path: Some("src/lib.rs".to_string()),
-                    line: Some(7),
-                    status: ReviewThreadStatus::Open,
-                    messages: vec![ReviewMessage {
-                        message_id: "rm-search".to_string(),
-                        at,
-                        by: "reviewer".to_string(),
-                        body: "needle-review-body".to_string(),
-                        github_comment_id: None,
-                    }],
-                    github_thread_id: None,
-                }],
-                replace_review_threads: None,
-            },
-        )
-        .expect("add review thread");
     store
         .upsert_task_artifacts(
             "ORB-00000",
@@ -209,14 +186,7 @@ fn search_tasks_matches_review_threads_and_text_artifacts() {
         )
         .expect("upsert artifact");
 
-    for query in [
-        "needle-review-body",
-        "needle-artifact-body",
-        "reports/search.md",
-        "src/lib.rs",
-        "reviewer",
-        "linear",
-    ] {
+    for query in ["needle-artifact-body", "reports/search.md"] {
         assert_eq!(
             store
                 .search_tasks(query)

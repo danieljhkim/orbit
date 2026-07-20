@@ -7,8 +7,8 @@ use orbit_common::types::InvocationTrace;
 use orbit_common::types::activity_job::{AgentRole, Backend, Provider};
 use orbit_common::types::{
     Activity, AgentModelPair, ExecutorDef, ExternalRef, Job, JobRun, JobRunState, JobTargetType,
-    KnowledgeRunMetrics, OrbitError, OrbitEvent, PipelineState, ReviewThread, Role, Task,
-    TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus, all_agent_families,
+    KnowledgeRunMetrics, OrbitError, OrbitEvent, PipelineState, Role, Task, TaskArtifact,
+    TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus, all_agent_families,
 };
 use orbit_exec::EnvironmentMode;
 use orbit_store::JobRunStepParams;
@@ -37,7 +37,6 @@ pub struct TaskAutomationUpdate {
     pub append_comments: Vec<TaskComment>,
     pub agent: Option<String>,
     pub model: Option<String>,
-    pub review_threads: Option<Vec<ReviewThread>>,
     pub job_run_id: Option<String>,
 }
 
@@ -110,9 +109,6 @@ pub trait TaskReadHost {
         Ok(Vec::new())
     }
     fn get_task_history(&self, _task_id: &str) -> Result<Vec<TaskHistoryEntry>, OrbitError> {
-        Ok(Vec::new())
-    }
-    fn get_task_review_threads(&self, _task_id: &str) -> Result<Vec<ReviewThread>, OrbitError> {
         Ok(Vec::new())
     }
     fn list_tasks_filtered(

@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use orbit_common::types::{
     Adr, AdrStatus, ArtifactManifestFileV2, ExecutorDef, ExternalRef, Learning, LearningStatus,
-    OrbitError, PolicyDef, ReviewThread, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
-    TaskPriority, TaskStatus,
+    OrbitError, PolicyDef, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority,
+    TaskStatus,
 };
 
 use super::contracts::{
@@ -12,7 +12,7 @@ use super::contracts::{
     LearningSearchParams, LearningSearchResult, LearningStoreBackend, LearningUpdateParams,
     PolicyDefStoreBackend, RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams,
     TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
-    TaskHistoryUpdateParams, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
+    TaskHistoryUpdateParams, TaskStoreBackend,
 };
 use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
@@ -115,20 +115,6 @@ impl TaskHistoryStoreBackend for TaskV2Store {
         params: TaskHistoryUpdateParams,
     ) -> Result<(), OrbitError> {
         self.update_task_history(id, &params)
-    }
-}
-
-impl TaskReviewStoreBackend for TaskV2Store {
-    fn get_task_review_threads(&self, id: &str) -> Result<Option<Vec<ReviewThread>>, OrbitError> {
-        self.get_task_review_threads(id)
-    }
-
-    fn update_task_reviews(
-        &self,
-        id: &str,
-        params: TaskReviewUpdateParams,
-    ) -> Result<(), OrbitError> {
-        self.update_task_reviews(id, &params)
     }
 }
 

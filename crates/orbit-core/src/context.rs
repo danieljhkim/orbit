@@ -9,7 +9,7 @@ use orbit_store::{
     AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend,
     LearningStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
     TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReservationStoreBackend,
-    TaskReviewStoreBackend, TaskStoreBackend, ToolStoreBackend,
+    TaskStoreBackend, ToolStoreBackend,
 };
 use orbit_tools::ToolRegistry;
 
@@ -77,7 +77,6 @@ pub(crate) struct OrbitStores {
     pub(crate) task: Arc<dyn TaskStoreBackend>,
     pub(crate) task_document: Arc<dyn TaskDocumentStoreBackend>,
     pub(crate) task_history: Arc<dyn TaskHistoryStoreBackend>,
-    pub(crate) task_review: Arc<dyn TaskReviewStoreBackend>,
     pub(crate) task_artifact: Arc<dyn TaskArtifactStoreBackend>,
     pub(crate) adr: Arc<dyn AdrStoreBackend>,
     pub(crate) learning: Arc<dyn LearningStoreBackend>,
@@ -97,7 +96,6 @@ impl OrbitStores {
         task: Arc<dyn TaskStoreBackend>,
         task_document: Arc<dyn TaskDocumentStoreBackend>,
         task_history: Arc<dyn TaskHistoryStoreBackend>,
-        task_review: Arc<dyn TaskReviewStoreBackend>,
         task_artifact: Arc<dyn TaskArtifactStoreBackend>,
         adr: Arc<dyn AdrStoreBackend>,
         learning: Arc<dyn LearningStoreBackend>,
@@ -114,7 +112,6 @@ impl OrbitStores {
             task,
             task_document,
             task_history,
-            task_review,
             task_artifact,
             adr,
             learning,

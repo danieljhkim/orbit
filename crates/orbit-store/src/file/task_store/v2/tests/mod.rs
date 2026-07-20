@@ -1,14 +1,12 @@
 use chrono::{TimeZone, Utc};
 use orbit_common::types::{
-    ExternalRef, ReviewMessage, ReviewThread, ReviewThreadStatus, TaskArtifact, TaskComment,
-    TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
+    ExternalRef, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
 };
 use tempfile::TempDir;
 
 use super::*;
 use crate::backend::{
     TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentUpdateParams, TaskHistoryUpdateParams,
-    TaskReviewUpdateParams,
 };
 use crate::sqlite::task_registry::{BindWorkspaceParams, TaskRegistryStore, task_registry_path};
 

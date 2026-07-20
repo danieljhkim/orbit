@@ -13,8 +13,6 @@ Orbit artifact tools persist repo-backed YAML, markdown, and JSON. Their write b
 | `orbit.task.add` | `title`, `description`, `plan`, `acceptance_criteria[]`, `comment` | `context_files[]`, `context`, `external_refs[].url` | workspace, ids, enums, dependency/relation targets, crew, tags |
 | `orbit.task.update` | `title`, `description`, `plan`, `execution_summary`, `acceptance_criteria[]`, `comment` | `context_files[]`, `context` | provenance/status/identity fields, tags, raw artifacts |
 | `orbit.task.reject` | `note`, `comment` | - | `id` |
-| `orbit.task.review_thread.add` | `body` | `path` | `id`, `line`, `model` |
-| `orbit.task.review_thread.reply` | `body` | - | `id`, `thread_id`, `model` |
 | `orbit.friction.add` | `body` | - | `model`, `during_task`, tags |
 | `orbit.friction.update` | `body` | - | `id`, status, tags |
 

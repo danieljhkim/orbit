@@ -86,7 +86,6 @@ fn make_bundle(id: &str, title: &str, relations: Vec<TaskRelation>) -> TaskBundl
             to_status: Some(TaskStatus::Backlog),
         }],
         comments: Vec::new(),
-        review_threads: Vec::new(),
         artifact_manifest: None,
     }
 }

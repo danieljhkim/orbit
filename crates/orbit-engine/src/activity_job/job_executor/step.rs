@@ -157,7 +157,6 @@ pub(super) fn step_activity_name(step: &JobV2Step) -> String {
 pub(super) fn target_activity_label(target: &TargetStep) -> String {
     match &target.spec {
         ActivityV2Spec::AgentLoop(_) => "agent_loop".to_string(),
-        ActivityV2Spec::Groundhog(_) => "groundhog".to_string(),
         ActivityV2Spec::Deterministic(spec) => spec.action.clone(),
     }
 }

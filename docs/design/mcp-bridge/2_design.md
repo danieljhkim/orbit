@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Design
 owner: codex
-last_updated: 2026-07-19
+last_updated: 2026-07-20
 status: Accepted
 feature: mcp-bridge
 doc_role: design
@@ -10,7 +10,7 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Orbit MCP Bridge — Design
@@ -311,7 +311,7 @@ enum ToolScope {
 Both values live beside the canonical schema and safe-surface metadata. Placement is
 not a second connector allowlist and neither property is inferred from a name prefix.
 Existing tools default to `workspace-required`; only registry-wide discovery such as
-`orbit.host.list` and `orbit.workspace.list` is explicitly `global` and may execute
+`orbit.workspace.list` and `orbit.crew.list` is explicitly `global` and may execute
 without selecting or inferring a workspace. A tool without canonical placement/scope
 metadata is not exposed by the multi-host broker.
 
@@ -727,11 +727,12 @@ Bridge's high-level workflow tools move into Orbit:
 | `workflow_run_status` | `orbit.workflow.run.show` |
 | `workflow_run_list` | `orbit.workflow.run.list` |
 
-`orbit.host.list` returns stable machine identity, labels, status, last-seen, and
-workspace presence. `orbit.workspace.list` returns owner and profile freshness
-without exposing spoke absolute paths. Their MCP-only schemas, policies, and
-sanitized snapshot projections live together in `orbit-remote`; dedicated human
-`orbit host list` and `orbit workspace list` commands remain separate CLI surfaces.
+The `orbit.host.list` MCP discovery tool was removed in [ORB-10332]; its data — stable
+machine identity, labels, status, last-seen, and workspace presence — is still available
+through the dedicated human `orbit host list` CLI command. `orbit.workspace.list` returns
+owner and profile freshness without exposing spoke absolute paths. Its MCP-only schema,
+policy, and sanitized snapshot projection live in `orbit-remote`; the human `orbit host list`
+and `orbit workspace list` commands remain separate CLI surfaces.
 
 `orbit.workflow.ship` receives explicit task IDs. It resolves task `host` through
 the hub registry; unset defaults to workspace owner. It records immutable requested/
@@ -966,5 +967,8 @@ Required validation:
   (one hub allocation, one exact-owner finalization, correlated by `mcp_call_id`;
   replica/foreign-spoke rejected before allocation). Public issuance/caller cutover
   remains F3, and standalone creation is unchanged.
+- [ORB-10332] — removed the `orbit.host.list` MCP discovery tool as unused; the
+  `orbit host list` CLI command and the `orbit.workspace.list` / `orbit.crew.list`
+  MCP discovery tools remain.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

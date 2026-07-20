@@ -23,24 +23,9 @@ impl TaskV2Store {
         let Some(comments) = self.get_task_comments(id)? else {
             return Ok(false);
         };
-        if comments
+        Ok(comments
             .iter()
-            .any(|comment| comment.message.to_lowercase().contains(lowered))
-        {
-            return Ok(true);
-        }
-        let Some(review_threads) = self.get_task_review_threads(id)? else {
-            return Ok(false);
-        };
-        Ok(review_threads.iter().any(|thread| {
-            thread.messages.iter().any(|message| {
-                message.body.to_lowercase().contains(lowered)
-                    || message.by.to_lowercase().contains(lowered)
-            }) || thread
-                .path
-                .as_deref()
-                .is_some_and(|path| path.to_lowercase().contains(lowered))
-        }))
+            .any(|comment| comment.message.to_lowercase().contains(lowered)))
     }
 
     fn task_artifacts_match_query(&self, id: &str, lowered: &str) -> Result<bool, OrbitError> {

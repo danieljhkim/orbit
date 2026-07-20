@@ -412,7 +412,6 @@ fn mcp_serve_lists_canonical_agent_surface_outside_any_checkout() {
         .collect::<Vec<_>>();
     assert!(names.contains(&"orbit_task_show"));
     assert!(!names.iter().any(|name| name.starts_with("orbit_graph_")));
-    assert!(!names.contains(&"orbit_host_list"));
 
     let missing = client.call_tool_err("orbit_task_show", json!({ "id": "ORB-00001" }));
     assert!(missing["message"].as_str().is_some_and(|message| {
@@ -476,7 +475,6 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
         "missing task surface: {names:?}"
     );
     assert!(!names.iter().any(|name| name.starts_with("orbit_graph_")));
-    assert!(!names.contains(&"orbit_host_list"));
     assert!(!names.contains(&"orbit_friction_update"));
 
     let created = client.call_tool_with_meta_ok(

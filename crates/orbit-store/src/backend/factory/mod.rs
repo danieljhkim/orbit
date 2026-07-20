@@ -5,8 +5,7 @@ use super::contracts::{
     AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend,
     LearningStoreBackend, PolicyDefStoreBackend, SessionLearningStateStoreBackend,
     TaskArtifactStoreBackend, TaskDocumentStoreBackend, TaskHistoryStoreBackend,
-    TaskReservationStoreBackend, TaskReviewStoreBackend, TaskStoreBackend, ToolStoreBackend,
-    V2AuditEnvelopeStoreBackend,
+    TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend, V2AuditEnvelopeStoreBackend,
 };
 use super::layered_policy_def::LayeredPolicyDefStore;
 use super::sqlite_backends::{
@@ -26,7 +25,6 @@ pub struct WorkspaceTaskBackends {
     pub task: Arc<dyn TaskStoreBackend>,
     pub document: Arc<dyn TaskDocumentStoreBackend>,
     pub history: Arc<dyn TaskHistoryStoreBackend>,
-    pub review: Arc<dyn TaskReviewStoreBackend>,
     pub artifact: Arc<dyn TaskArtifactStoreBackend>,
 }
 
@@ -48,7 +46,6 @@ pub fn workspace_task_backends(
         task: store.clone(),
         document: store.clone(),
         history: store.clone(),
-        review: store.clone(),
         artifact: store,
     }
 }
@@ -65,7 +62,6 @@ pub fn coordination_task_backends(
         task: store.clone(),
         document: store.clone(),
         history: store.clone(),
-        review: store.clone(),
         artifact: store,
     }
 }

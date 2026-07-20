@@ -3,9 +3,8 @@ use orbit_common::types::{
     Adr, AdrStatus, ArtifactManifestFileV2, ArtifactOrigin, AuditEvent, Crew, ExecutorDef,
     ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence,
     LearningInjectionState, LearningScope, LegacyValidation, OrbitError, OrbitId, PipelineState,
-    PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity,
-    TaskHistoryEntry, TaskPriority, TaskRelation, TaskStatus, TaskType, normalize_task_tags,
-    task_matches_tags,
+    PolicyDef, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry,
+    TaskPriority, TaskRelation, TaskStatus, TaskType, normalize_task_tags, task_matches_tags,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -177,15 +176,6 @@ pub struct TaskHistoryUpdateParams {
     pub status_note: Option<String>,
     pub append_history: Vec<TaskHistoryEntry>,
     pub append_comments: Vec<TaskComment>,
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct TaskReviewUpdateParams {
-    /// Review threads to append or merge. Threads whose `thread_id` matches
-    /// an existing thread have their messages appended; new threads are added.
-    pub append_review_threads: Vec<ReviewThread>,
-    /// When set, replaces the entire review_threads collection (used by sync).
-    pub replace_review_threads: Option<Vec<ReviewThread>>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -460,15 +450,6 @@ pub trait TaskHistoryStoreBackend: Send + Sync {
         &self,
         id: &str,
         params: TaskHistoryUpdateParams,
-    ) -> Result<(), OrbitError>;
-}
-
-pub trait TaskReviewStoreBackend: Send + Sync {
-    fn get_task_review_threads(&self, id: &str) -> Result<Option<Vec<ReviewThread>>, OrbitError>;
-    fn update_task_reviews(
-        &self,
-        id: &str,
-        params: TaskReviewUpdateParams,
     ) -> Result<(), OrbitError>;
 }
 

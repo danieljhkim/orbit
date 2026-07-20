@@ -393,43 +393,6 @@ fn record_gate_stale_noop(
         .map_err(|err| action_failed(action, format!("record gate.stale_noop audit: {err}")))
 }
 
-pub(super) fn pipeline_wait(
-    runtime: &OrbitRuntime,
-    action: &str,
-    input: &Value,
-    tool_context: ToolContext,
-) -> Result<Value, DispatchError> {
-    let run_ids =
-        input
-            .get("run_ids")
-            .cloned()
-            .ok_or_else(|| DispatchError::DeterministicActionFailed {
-                action: action.to_string(),
-                message: "missing `run_ids`".to_string(),
-            })?;
-
-    let mut wait_args = serde_json::Map::new();
-    wait_args.insert("run_ids".to_string(), run_ids);
-    if let Some(timeout) = input.get("timeout_seconds").cloned() {
-        wait_args.insert("timeout_seconds".to_string(), timeout);
-    }
-    if let Some(poll) = input.get("poll_interval_seconds").cloned() {
-        wait_args.insert("poll_interval_seconds".to_string(), poll);
-    }
-
-    runtime
-        .run_tool_with_context_and_role(
-            "orbit.pipeline.wait",
-            Value::Object(wait_args),
-            Role::Admin,
-            tool_context,
-        )
-        .map_err(|err| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: format!("pipeline.wait failed: {err}"),
-        })
-}
-
 pub(super) fn pipeline_success_guard(action: &str, input: &Value) -> Result<Value, DispatchError> {
     let context = input
         .get("context")

@@ -339,7 +339,7 @@ async fn managed_empty_capability_set_is_never_upgraded_and_runner_is_non_hierar
 async fn call_tool_wraps_affected_array_results_for_strict_mcp_clients() {
     let affected_tools = [
         "orbit.task.list",
-        "orbit.task.review_thread.list",
+        "orbit.friction.list",
         "orbit.learning.list",
     ];
     let host = Arc::new(EchoArrayHost {

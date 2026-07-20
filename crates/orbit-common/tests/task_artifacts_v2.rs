@@ -5,13 +5,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{
-    ArtifactManifestV2, ReviewThreadMetadataV2, TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2,
-};
+use orbit_common::types::{ArtifactManifestV2, TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2};
 
 #[test]
 fn task_artifact_v2_fixtures_parse_and_validate() {
-    for fixture in ["minimal", "relations", "comments", "review-threads"] {
+    for fixture in ["minimal", "relations", "comments"] {
         validate_fixture(fixture);
     }
 }
@@ -39,24 +37,6 @@ fn validate_fixture(name: &str) {
             root.join(document).is_file(),
             "fixture {name} should include {document}"
         );
-    }
-
-    let review_threads = root.join("review-threads");
-    if review_threads.is_dir() {
-        for entry in fs::read_dir(&review_threads).expect("read review-thread fixtures") {
-            let path = entry.expect("review thread entry").path();
-            if path.extension().and_then(|value| value.to_str()) != Some("yaml") {
-                continue;
-            }
-            let metadata = read_yaml::<ReviewThreadMetadataV2>(&path);
-            metadata.validate().expect("fixture review thread metadata");
-            let markdown_path = path.with_extension("md");
-            assert!(
-                markdown_path.is_file(),
-                "fixture review thread should include {}",
-                markdown_path.display()
-            );
-        }
     }
 
     let artifact_manifest = root.join("artifacts").join("manifest.yaml");

@@ -33,6 +33,5 @@ fn tool_context(agent: &str, model: &str) -> ToolContext {
         fs_audit: None,
         reservation_owner: None,
         orbit_host: None,
-        groundhog_host: None,
     }
 }

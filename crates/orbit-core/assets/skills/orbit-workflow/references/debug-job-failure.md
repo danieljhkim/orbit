@@ -77,7 +77,7 @@ For recurring signatures and known remedies, read [common_failures.md](common_fa
 orbit tool run orbit.task.show --full --input '{"id":"<task_id>","model":"<agent-family>"}'
 ```
 
-Check status/history, plan/execution_summary, comments/review_threads, workspace_path, external_refs/PR metadata, dependencies/resolved_dependencies. If implementation succeeded but a later workflow step failed, the task may already have a useful execution summary — preserve that context.
+Check status/history, plan/execution_summary, comments, workspace_path, external_refs/PR metadata, dependencies/resolved_dependencies. If implementation succeeded but a later workflow step failed, the task may already have a useful execution summary — preserve that context.
 
 ## Check Parent And Child Runs
 

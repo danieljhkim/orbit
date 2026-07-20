@@ -3,7 +3,7 @@ summary: "Policy & Sandboxing — Overview"
 type: design
 title: "Policy & Sandboxing — Overview"
 owner: claude
-last_updated: 2026-05-17
+last_updated: 2026-07-20
 status: Draft
 feature: policy-sandbox
 doc_role: overview
@@ -66,7 +66,7 @@ When the default policy denies workspace `.orbit/**`, the v2 host re-allows only
 | Profile resolution + deny injection | `crates/orbit-common/src/types/policy_def.rs` (`effective_profile`, `check_path`) | [T20260416-0728] |
 | Implicit `unrestricted` materialization | `crates/orbit-core/src/runtime/v2_host/mod.rs` (`tool_context_for_activity`) | [T20260419-0503] |
 | Tool-layer fs enforcement | `crates/orbit-tools/src/builtin/fs/mod.rs` (`enforce_fs_policy`, `emit_fs_event`) | [T20260419-0503] |
-| Activity `fsProfile:` binding | `crates/orbit-engine/src/activity_job/{dispatcher,job_executor,agent_loop_driver,groundhog}.rs` | [T20260419-0503] |
+| Activity `fsProfile:` binding | `crates/orbit-engine/src/activity_job/{dispatcher,job_executor,agent_loop_driver}.rs` | [T20260419-0503] |
 | Exec spawn primitive | `crates/orbit-exec/src/{lib,runner,process,sandbox}.rs` | [T20260417-0550] |
 | Process supervision | `crates/orbit-exec/src/supervision/{wait,cleanup,signal,tee}.rs` | [T20260417-0558-4], [T20260417-0558-5] |
 | Filesystem denial audit channel | `crates/orbit-tools/src/lib.rs` (`FsAuditLogger`) → `docs/design/auditability/2_design.md §3` | [T20260426-0605] |

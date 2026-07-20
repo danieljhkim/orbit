@@ -7,14 +7,13 @@ use orbit_common::types::{
     ArtifactManifestV2, NotFoundKind, OrbitError, TASK_ACCEPTANCE_FILE_NAME,
     TASK_ARTIFACT_FILES_DIR_NAME, TASK_ARTIFACT_MANIFEST_FILE_NAME, TASK_ARTIFACTS_DIR_NAME,
     TASK_COMMENTS_FILE_NAME, TASK_DESCRIPTION_FILE_NAME, TASK_ENVELOPE_FILE_NAME,
-    TASK_EVENTS_FILE_NAME, TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME,
-    TASK_REVIEW_THREADS_DIR_NAME, TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2,
+    TASK_EVENTS_FILE_NAME, TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME, TaskCommentRowV2,
+    TaskEnvelopeV2, TaskEventRowV2,
 };
 use orbit_common::utility::fs::{atomic_write_bytes, atomic_write_text, with_exclusive_file_lock};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
-use super::review_threads::{read_review_threads, write_review_threads};
 use super::task_bundle_types::TaskBundleV2;
 use crate::file::task_store::task_migrations;
 
@@ -54,7 +53,6 @@ pub(crate) fn write_bundle_at(bundle_dir: &Path, bundle: &TaskBundleV2) -> Resul
 
     write_jsonl_file(&bundle_dir.join(TASK_EVENTS_FILE_NAME), &bundle.events)?;
     write_jsonl_file(&bundle_dir.join(TASK_COMMENTS_FILE_NAME), &bundle.comments)?;
-    write_review_threads(bundle_dir, &bundle.review_threads)?;
     if let Some(manifest) = &bundle.artifact_manifest {
         write_yaml_file(
             &bundle_dir
@@ -85,7 +83,6 @@ pub(crate) fn read_bundle_at(bundle_dir: &Path) -> Result<TaskBundleV2, OrbitErr
         execution_summary: read_required_text(&bundle_dir.join(TASK_EXECUTION_SUMMARY_FILE_NAME))?,
         events: read_task_events(&bundle_dir.join(TASK_EVENTS_FILE_NAME))?,
         comments: read_task_comments(&bundle_dir.join(TASK_COMMENTS_FILE_NAME))?,
-        review_threads: read_review_threads(bundle_dir)?,
         artifact_manifest: read_artifact_manifest(bundle_dir)?,
     };
     validate_bundle(&bundle)?;
@@ -99,9 +96,6 @@ fn validate_bundle(bundle: &TaskBundleV2) -> Result<(), OrbitError> {
     }
     for comment in &bundle.comments {
         comment.validate()?;
-    }
-    for thread in &bundle.review_threads {
-        thread.metadata.validate()?;
     }
     if let Some(manifest) = &bundle.artifact_manifest {
         manifest.validate()?;
@@ -124,8 +118,6 @@ fn validate_bundle_consistency(bundle: &TaskBundleV2) -> Result<(), OrbitError> 
 
 fn ensure_bundle_dirs(bundle_dir: &Path) -> Result<(), OrbitError> {
     fs::create_dir_all(bundle_dir).map_err(|err| OrbitError::Io(err.to_string()))?;
-    fs::create_dir_all(bundle_dir.join(TASK_REVIEW_THREADS_DIR_NAME))
-        .map_err(|err| OrbitError::Io(err.to_string()))?;
     fs::create_dir_all(
         bundle_dir
             .join(TASK_ARTIFACTS_DIR_NAME)
@@ -163,15 +155,6 @@ where
 {
     let yaml = serde_yaml::to_string(value).map_err(|err| OrbitError::Store(err.to_string()))?;
     atomic_write_text(path, &yaml).map_err(|err| OrbitError::Io(err.to_string()))
-}
-
-pub(crate) fn read_yaml_file<T>(path: &Path) -> Result<T, OrbitError>
-where
-    T: DeserializeOwned,
-{
-    let raw = read_required_text(path)?;
-    serde_yaml::from_str(&raw)
-        .map_err(|err| OrbitError::Store(format!("invalid YAML at {}: {err}", path.display())))
 }
 
 fn read_migrated_yaml_file<T>(path: &Path, plan: &Plan) -> Result<T, OrbitError>
