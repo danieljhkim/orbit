@@ -7,6 +7,7 @@ use std::path::Path;
 use std::process::Output;
 
 use assert_cmd::cargo::cargo_bin_cmd;
+use orbit_common::test_env::harden_dir;
 use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
 
@@ -51,6 +52,15 @@ fn tool_run_task_update_with_noisy_background_companion_has_clean_stderr() {
     );
 }
 
+/// Foreground search runs the companion with inherited stderr, so a broken
+/// companion's diagnostics reach the operator. Contrast with
+/// [`tool_run_task_update_with_noisy_background_companion_has_clean_stderr`],
+/// where background indexing suppresses companion stderr.
+///
+/// ADR-0244 (ORB-10304) made the task branch degrade to lexical instead of
+/// failing the command when hybrid infrastructure is unavailable, so the
+/// command now exits 0. The degradation must stay *visible*: the companion's
+/// own stderr plus an explicit fallback note (ORB-10350).
 #[test]
 #[cfg(unix)]
 fn direct_search_semantic_command_surfaces_companion_stderr() {
@@ -64,16 +74,15 @@ fn direct_search_semantic_command_surfaces_companion_stderr() {
         Some(&workspace.companion),
     );
 
-    assert!(
-        !output.status.success(),
-        "semantic search unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_success("hybrid search with a failing companion", &output);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("direct semantic failure detail"),
         "direct search command should inherit companion stderr\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("falling back to lexical task search"),
+        "lexical degradation must be reported, not silent\nstderr:\n{stderr}"
     );
 }
 
@@ -88,6 +97,7 @@ struct TestWorkspace {
 impl TestWorkspace {
     fn new() -> Self {
         let temp = tempdir().expect("tempdir");
+        harden_dir(temp.path());
         let home = temp.path().join("home");
         let work = temp.path().join("work");
         let companion = temp.path().join("mock-companion");
