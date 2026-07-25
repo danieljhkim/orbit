@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 
 use orbit_common::types::{OrbitError, TaskType};
 use serde_json::json;
@@ -9,28 +10,23 @@ use super::test_support::*;
 use super::super::super::git::{git_output, git_success};
 
 #[test]
-fn git_commit_uses_scoped_identity_without_mutating_local_human_config() {
-    let cases = [
-        ("claude-opus-4-7", "claude <claude@orbit.local>"),
-        ("gemini-3.1-pro", "gemini <gemini@orbit.local>"),
-        ("gpt-5.5", "codex <codex@orbit.local>"),
-        ("grok-4", "grok <grok@orbit.local>"),
-        ("grok-build", "grok <grok@orbit.local>"),
-        ("mystery-model", "mystery-model <mystery-model@orbit.local>"),
-    ];
+fn git_commit_uses_resolved_model_author_without_mutating_local_human_config() {
+    let cases = [("opus", "claude-opus-5"), ("terra", "gpt-5.6-terra")];
+    let mut author_names = Vec::new();
 
-    for (implemented_by, expected_author) in cases {
+    for (crew_alias, resolved_model) in cases {
         let temp = initialized_git_repo();
         let workspace = temp.path();
         fs::create_dir_all(workspace.join("src")).unwrap();
         fs::write(
             workspace.join("src/task.txt"),
-            format!("implemented by {implemented_by}\n"),
+            format!("implemented by {crew_alias}\n"),
         )
         .unwrap();
 
-        let task = task_with_file("T1", "Implement one task", "src/task.txt", implemented_by);
-        let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+        let task = task_with_file("T1", "Implement one task", "src/task.txt", crew_alias);
+        let host = CommitTestHost::new(vec![task], workspace.to_path_buf())
+            .with_crew_model(resolved_model);
         let input = json!({
             "scope": "per_task",
             "job_run_id": "batch-1",
@@ -57,10 +53,21 @@ fn git_commit_uses_scoped_identity_without_mutating_local_human_config() {
 
         let actual_author =
             git_output(workspace, &["log", "-1", "--format=%an <%ae>"]).expect("read git author");
+        let author_name =
+            git_output(workspace, &["log", "-1", "--format=%an"]).expect("read git author name");
         let actual_committer = git_output(workspace, &["log", "-1", "--format=%cn <%ce>"])
             .expect("read git committer");
-        assert_eq!(actual_author, expected_author);
-        assert_eq!(actual_committer, expected_author);
+        assert_eq!(
+            actual_author,
+            format!("orbit ({resolved_model}) <agent@orbit.invalid>")
+        );
+        assert_eq!(actual_committer, "orbit <orbit@orbit.local>");
+        assert_ne!(
+            actual_author,
+            format!("orbit ({crew_alias}) <agent@orbit.invalid>"),
+            "the author must use the resolved model, not crew alias '{crew_alias}'"
+        );
+        author_names.push(author_name);
         assert_eq!(
             git_output(workspace, &["config", "--get", "user.name"])
                 .expect("read git user.name after"),
@@ -88,10 +95,15 @@ fn git_commit_uses_scoped_identity_without_mutating_local_human_config() {
             local_user_email_before
         );
     }
+    assert_eq!(
+        author_names,
+        ["orbit (claude-opus-5)", "orbit (gpt-5.6-terra)"],
+        "plain git log author names distinguish the two resolved models"
+    );
 }
 
 #[test]
-fn git_commit_succeeds_without_creating_local_user_config() {
+fn git_commit_without_resolved_model_uses_generic_fallback_and_no_local_config() {
     let temp = initialized_git_repo_without_local_user_config();
     let workspace = temp.path();
     fs::create_dir_all(workspace.join("src")).unwrap();
@@ -114,11 +126,73 @@ fn git_commit_succeeds_without_creating_local_user_config() {
         git_output(workspace, &["log", "-1", "--format=%an <%ae>"]).expect("read author");
     let actual_committer =
         git_output(workspace, &["log", "-1", "--format=%cn <%ce>"]).expect("read committer");
-    assert_eq!(actual_author, "codex <codex@orbit.local>");
-    assert_eq!(actual_committer, "codex <codex@orbit.local>");
+    assert_eq!(actual_author, "orbit <orbit@orbit.local>");
+    assert_eq!(actual_committer, "orbit <orbit@orbit.local>");
     assert_eq!(
         local_user_config_snapshot(workspace),
         local_user_config_before
+    );
+}
+
+#[test]
+fn git_commit_treats_bare_configured_model_as_opaque() {
+    let temp = initialized_git_repo();
+    let workspace = temp.path();
+    fs::create_dir_all(workspace.join("src")).unwrap();
+    fs::write(workspace.join("src/task.txt"), "bare model config\n").unwrap();
+
+    let task = task_with_file("T1", "Implement one task", "src/task.txt", "claude");
+    let host = CommitTestHost::new(vec![task], workspace.to_path_buf()).with_crew_model("opus");
+    let input = json!({
+        "scope": "per_task",
+        "job_run_id": "batch-1",
+        "workspace_path": workspace.to_string_lossy().to_string(),
+        "completed_task_ids": ["T1"],
+    });
+
+    git_commit(&host, &input).expect("bare configured model remains accepted");
+
+    assert_eq!(
+        git_output(workspace, &["log", "-1", "--format=%an"]).expect("read model author"),
+        "orbit (opus)"
+    );
+}
+
+#[test]
+fn git_commit_gives_hook_the_same_model_and_preserves_other_trailers() {
+    let temp = initialized_git_repo();
+    let workspace = temp.path();
+    install_telemetry_hook(workspace);
+    fs::create_dir_all(workspace.join("src")).unwrap();
+    fs::write(workspace.join("src/one.txt"), "one\n").unwrap();
+    fs::write(workspace.join("src/two.txt"), "two\n").unwrap();
+
+    let tasks = vec![
+        task_with_file("T1", "Implement one task", "src/one.txt", "claude-opus-5"),
+        task_with_file("T2", "Implement another", "src/two.txt", "gpt-5.6-terra"),
+    ];
+    let host = CommitTestHost::new(tasks, workspace.to_path_buf()).with_crew_model("claude-opus-5");
+    let input = json!({
+        "scope": "per_task_finalize",
+        "job_run_id": "batch-1",
+        "workspace_path": workspace.to_string_lossy().to_string(),
+    });
+
+    git_commit(&host, &input).expect("git_commit succeeds with telemetry hook");
+
+    let author = git_output(workspace, &["log", "-1", "--format=%an"]).expect("read model author");
+    let body = git_output(workspace, &["log", "-1", "--format=%B"]).expect("read commit body");
+    assert_eq!(author, "orbit (claude-opus-5)");
+    assert!(body.contains("Agent-Run: inherited-run"), "{body}");
+    assert!(body.contains("Agent-Model: claude-opus-5"), "{body}");
+    assert!(body.contains("Agent-Task: T1"), "{body}");
+    assert!(
+        body.contains("Co-Authored-By: claude <claude@orbit.local>"),
+        "{body}"
+    );
+    assert!(
+        body.contains("Co-Authored-By: codex <codex@orbit.local>"),
+        "{body}"
     );
 }
 
@@ -138,7 +212,8 @@ fn git_commit_batch_uses_templated_single_task_message() {
     task.execution_summary =
         "Outcome: success\n\n## Summary\n- Fixed deterministic batch commit messages.\n\n## Validation\n- cargo test"
             .to_string();
-    let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+    let host =
+        CommitTestHost::new(vec![task], workspace.to_path_buf()).with_crew_model("claude-opus-5");
     let input = json!({
         "scope": "all",
         "job_run_id": "batch-1",
@@ -159,8 +234,8 @@ fn git_commit_batch_uses_templated_single_task_message() {
         "a".repeat(66),
         title
     );
-    assert_eq!(actual_author, "claude <claude@orbit.local>");
-    assert_eq!(actual_committer, "claude <claude@orbit.local>");
+    assert_eq!(actual_author, "orbit (claude-opus-5) <agent@orbit.invalid>");
+    assert_eq!(actual_committer, "orbit <orbit@orbit.local>");
     assert_eq!(body, expected_body);
     assert_eq!(
         local_user_config_snapshot(workspace),
@@ -313,7 +388,8 @@ fn git_commit_batch_commits_dirty_residue_above_implement_authored_commits() {
     fs::write(workspace.join("residue.txt"), "dirty residue\n").unwrap();
 
     let task = task_with_file("T1", "Mixed history", "residue.txt", "codex");
-    let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+    let host =
+        CommitTestHost::new(vec![task], workspace.to_path_buf()).with_crew_model("gpt-5.6-terra");
     let input = json!({
         "scope": "all",
         "job_run_id": "batch-1",
@@ -342,7 +418,7 @@ fn git_commit_batch_commits_dirty_residue_above_implement_authored_commits() {
     );
     assert_eq!(
         git_output(workspace, &["log", "-1", "--format=%an <%ae>"]).expect("read residue author"),
-        "codex <codex@orbit.local>"
+        "orbit (gpt-5.6-terra) <agent@orbit.invalid>"
     );
 }
 
@@ -516,4 +592,23 @@ fn git_commit_batch_rejects_multiple_tasks() {
             .to_string()
             .contains("commit_batch_changes expected exactly one task")
     );
+}
+
+fn install_telemetry_hook(workspace: &std::path::Path) {
+    let hook = workspace
+        .join(".git")
+        .join("orbit-test-empty-hooks")
+        .join("prepare-commit-msg");
+    fs::write(
+        &hook,
+        "#!/bin/sh\n\
+         printf '\\nAgent-Run: inherited-run\\nAgent-Model: %s\\nAgent-Task: T1\\n' \
+         \"${AGENT_MODEL:-}\" >> \"$1\"\n",
+    )
+    .expect("write prepare-commit-msg fixture");
+    let mut permissions = fs::metadata(&hook)
+        .expect("read hook metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&hook, permissions).expect("make hook executable");
 }

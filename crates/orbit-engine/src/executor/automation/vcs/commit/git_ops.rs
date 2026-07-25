@@ -9,15 +9,20 @@ use super::author::GitAuthor;
 pub(super) fn git_commit_with_identity(
     workspace_path: &Path,
     message: &str,
-    author: Option<&GitAuthor>,
+    resolved_model: Option<&str>,
 ) -> Result<(), OrbitError> {
-    let committer = author.cloned().unwrap_or_else(GitAuthor::orbit);
-    let author = author.cloned().unwrap_or_else(|| committer.clone());
+    // L-0112 / ADR-0249: one persisted value drives both the ambient author
+    // and prepare-commit-msg Agent-Model trailer. The generic fallback remains
+    // commit-capable when a run has no resolved model.
+    let author = resolved_model
+        .map(GitAuthor::resolved_model)
+        .unwrap_or_else(GitAuthor::orbit);
+    let committer = GitAuthor::orbit();
     let mut args = vec!["commit".to_string()];
     args.push("--author".to_string());
     args.push(author.spec());
     args.extend(["-m".to_string(), message.to_string()]);
-    git_success_dynamic_with_identity(workspace_path, &args, &author, &committer)
+    git_success_dynamic_with_identity(workspace_path, &args, &author, &committer, resolved_model)
 }
 
 pub(super) fn stage_paths(workspace_path: &Path, files: &[String]) -> Result<(), OrbitError> {
@@ -47,6 +52,7 @@ fn git_success_dynamic_with_identity(
     args: &[String],
     author: &GitAuthor,
     committer: &GitAuthor,
+    resolved_model: Option<&str>,
 ) -> Result<(), OrbitError> {
     let env_overrides = [
         ("GIT_AUTHOR_NAME", author.name()),
@@ -56,9 +62,10 @@ fn git_success_dynamic_with_identity(
     ];
     let mut environment = std::env::vars()
         .filter(|(key, _)| {
-            !env_overrides
-                .iter()
-                .any(|(override_key, _)| key == override_key)
+            key != "AGENT_MODEL"
+                && !env_overrides
+                    .iter()
+                    .any(|(override_key, _)| key == override_key)
         })
         .collect::<Vec<_>>();
     environment.extend(
@@ -66,6 +73,9 @@ fn git_success_dynamic_with_identity(
             .iter()
             .map(|(key, value)| ((*key).to_string(), (*value).to_string())),
     );
+    if let Some(model) = resolved_model {
+        environment.push(("AGENT_MODEL".to_string(), model.to_string()));
+    }
 
     let result = run_process(
         &ExecRequest {

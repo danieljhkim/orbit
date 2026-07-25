@@ -410,6 +410,10 @@ impl RuntimeHost for AutomationExecutorHost<'_> {
         self.runtime.activity_implementer_identity(input)
     }
 
+    fn resolved_crew_model(&self, run_id: &str) -> Result<Option<String>, OrbitError> {
+        self.runtime.resolved_crew_model(run_id)
+    }
+
     fn run_tool_with_context_and_role(
         &self,
         name: &str,

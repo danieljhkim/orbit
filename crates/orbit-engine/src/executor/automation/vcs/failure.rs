@@ -84,7 +84,8 @@ pub(in crate::executor::automation) fn pr_failure_handoff<
         )));
     }
 
-    let (head_sha, committed_files) = commit_failure_candidate(&workspace_path, &task)?;
+    let (head_sha, committed_files) =
+        commit_failure_candidate(host, run_id, &workspace_path, &task)?;
     let head = git_output(&workspace_path, &["rev-parse", "--abbrev-ref", "HEAD"])?
         .trim()
         .to_string();

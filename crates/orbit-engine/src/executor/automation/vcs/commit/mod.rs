@@ -14,7 +14,7 @@ use crate::context::{RuntimeHost, TaskHost};
 use super::super::input::{canonicalize_existing_dir, input_string_field, required_job_run_id};
 use super::git::{git_command_success, git_output, git_success};
 use super::handoff::reject_failed_delivery;
-use author::{append_co_author_trailers, commit_author_for_tasks, git_author_for_task};
+use author::{append_co_author_trailers, commit_author_for_tasks};
 use git_ops::{
     ensure_named_branch, ensure_no_unmerged_changes, git_commit_with_identity, stage_paths,
     staged_changed_files,
@@ -71,6 +71,7 @@ pub(super) fn commit_task_artifact_changes<H: TaskHost + RuntimeHost + ?Sized>(
     let workspace_path = resolve_workspace_path(host, input, batch_id)?;
     ensure_named_branch(&workspace_path)?;
     ensure_no_unmerged_changes(&workspace_path)?;
+    let resolved_model = host.resolved_crew_model(batch_id)?;
 
     let task_ids = match explicit_completed_task_ids {
         Some(task_ids) => task_ids,
@@ -100,8 +101,7 @@ pub(super) fn commit_task_artifact_changes<H: TaskHost + RuntimeHost + ?Sized>(
         }
 
         let message = task_commit_message(&task);
-        let author = git_author_for_task(&task);
-        git_commit_with_identity(&workspace_path, &message, author.as_ref())?;
+        git_commit_with_identity(&workspace_path, &message, resolved_model.as_deref())?;
         committed_task_ids.push(task.id);
     }
 
@@ -154,9 +154,10 @@ pub(super) fn commit_finalize_artifact_changes<H: TaskHost + RuntimeHost + ?Size
     }
 
     let mut message = finalize_commit_message(&affected_tasks);
-    let (author, coauthors) = commit_author_for_tasks(&affected_tasks);
+    let (_, coauthors) = commit_author_for_tasks(&affected_tasks);
     append_co_author_trailers(&mut message, &coauthors);
-    git_commit_with_identity(&workspace_path, &message, author.as_ref())?;
+    let resolved_model = host.resolved_crew_model(batch_id)?;
+    git_commit_with_identity(&workspace_path, &message, resolved_model.as_deref())?;
 
     Ok(json!({
         "workspace_path": workspace_path.to_string_lossy().to_string(),
@@ -228,9 +229,9 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
     }
 
     let message = batch_commit_message(task);
-    let author = git_author_for_task(task);
+    let resolved_model = host.resolved_crew_model(batch_id)?;
 
-    git_commit_with_identity(&workspace_path, &message, author.as_ref())?;
+    git_commit_with_identity(&workspace_path, &message, resolved_model.as_deref())?;
     let commit_sha = git_output(&workspace_path, &["rev-parse", "HEAD"])?;
     commit_shas.push(commit_sha.trim().to_string());
     let mut result = json!({
@@ -253,7 +254,9 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
 /// Commit a terminally-failed shipment's dirty candidate without consulting
 /// the normal success-summary delivery gate. ADR-0246 confines this bypass to
 /// the failure handoff, which blocks rather than promotes the task.
-pub(super) fn commit_failure_candidate(
+pub(super) fn commit_failure_candidate<H: RuntimeHost + ?Sized>(
+    host: &H,
+    run_id: &str,
     workspace_path: &Path,
     task: &orbit_common::types::Task,
 ) -> Result<(String, Vec<String>), OrbitError> {
@@ -263,8 +266,8 @@ pub(super) fn commit_failure_candidate(
     let changed_files = staged_changed_files(workspace_path)?;
     if !changed_files.is_empty() {
         let message = batch_commit_message(task);
-        let author = git_author_for_task(task);
-        git_commit_with_identity(workspace_path, &message, author.as_ref())?;
+        let resolved_model = host.resolved_crew_model(run_id)?;
+        git_commit_with_identity(workspace_path, &message, resolved_model.as_deref())?;
     }
     let head_sha = git_output(workspace_path, &["rev-parse", "--verify", "HEAD^{commit}"])?;
     Ok((head_sha.trim().to_string(), changed_files))

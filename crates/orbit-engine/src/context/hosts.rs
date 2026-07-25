@@ -308,6 +308,12 @@ pub trait RuntimeHost {
     ) -> Result<(Option<String>, Option<String>), OrbitError> {
         Ok((None, None))
     }
+    /// Return the exact model string persisted when the run's crew was
+    /// resolved. Workflow commit attribution treats this as opaque config
+    /// data and falls back when the run or model is unavailable.
+    fn resolved_crew_model(&self, _run_id: &str) -> Result<Option<String>, OrbitError> {
+        Ok(None)
+    }
     fn run_tool_with_context_and_role(
         &self,
         name: &str,
