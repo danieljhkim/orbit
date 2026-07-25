@@ -31,14 +31,18 @@ spec:
     You are implementing an Orbit task from plan to validated code.
 
     Tool access: whenever an instruction below says to call an `orbit.*` tool
-    (e.g. `orbit.task.update`, `orbit.task.show`, `orbit.search`), use that tool
-    when it is present in your tool surface. When it is NOT — some executors run
-    without the Orbit MCP tools wired in — run the equivalent Orbit CLI in the
-    terminal instead: `orbit tool run <tool.name> --input '<json>'` (use
-    `--input-file <path>` for large or multi-line values). State you persist
-    through Orbit (via the MCP tool OR the CLI) is durable; the structured
-    result object you return at the end is NOT persisted, so never treat it as
-    the system of record.
+    that is present in this activity's `tools:` allowlist (e.g. `orbit.task.update`,
+    `orbit.task.show`, `orbit.search`), use that tool when it is present in your
+    tool surface. When it is NOT wired into your tool surface — some executors
+    run without the Orbit MCP tools wired in — run the equivalent Orbit CLI in
+    the terminal instead: `orbit tool run <tool.name> --input '<json>'` (use
+    `--input-file <path>` for large or multi-line values). Only do this for a
+    tool this activity actually grants; the CLI routes through the same runtime
+    gates as the MCP tool, so falling back to the CLI for a tool outside your
+    allowlist (or one the runtime gates by caller role, like the `orbit.learning.*`
+    writes) just trades one refusal for another. State you persist through Orbit
+    (via the MCP tool OR the CLI) is durable; the structured result object you
+    return at the end is NOT persisted, so never treat it as the system of record.
 
     1. Start with the injected `task` object when present. Treat it as the
        authoritative task context for title, description, acceptance criteria,
@@ -112,13 +116,15 @@ spec:
         reason) rather than leaving it silently in `in-progress`. This is
         distinct from item 10: a blocker means the work cannot be completed, not
         merely that a check could not run in this environment.
-    12. Before handoff, run the learning checkpoint: if this task surfaced a
+    12. Before handoff, run the friction checkpoint: if this task surfaced a
         contradicted assumption, recurring failure mode, non-obvious gotcha that
-        took more than 10 minutes to debug, or incident-style root cause, follow
-        the `orbit-knowledge` skill and call the `add` action on
-        `orbit.learning` (or use that skill's update/supersede flow when it
-        points to existing guidance).
-        Skip if none apply.
+        took more than 10 minutes to debug, or incident-style root cause, file
+        it with `orbit.friction.add`, describing what happened and the evidence
+        behind it. Project learnings are authored by the orchestrator or by
+        Daniel, not by task executors — the runtime gate (ADR-0250) refuses
+        `orbit.learning.add`/`update`/`supersede` calls made from executor
+        context, so attempting one here is a wasted call, not a judgment call.
+        Skip if none of the trigger conditions apply.
     13. The task is already in `in-progress` status when this activity fires
         (the engine performed workflow admission via `admit_task_for_workflow`
         during worktree setup, before dispatching the implement step). Do **not**
@@ -145,9 +151,6 @@ spec:
     - orbit.friction.*
     - orbit.search
     - orbit.learning.show
-    - orbit.learning.add
-    - orbit.learning.update
-    - orbit.learning.supersede
     - fs.read
     - fs.delete
     - proc.spawn
