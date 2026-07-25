@@ -1107,6 +1107,10 @@
           "description": "Task comment to append",
           "type": "string"
         },
+        "complexity": {
+          "description": "Optional task complexity level (low, medium, or hard)",
+          "type": "string"
+        },
         "context": {
           "description": "Legacy alias for `context_files`. Add entries ONLY for existing files, directories, or symbols expected to be modified or deleted by the task. Do not add background-reading entries or files that are only relevant background context. Prefer canonical selectors: `file:path`, `dir:path`, or `symbol:path#name:kind`.",
           "type": "string"

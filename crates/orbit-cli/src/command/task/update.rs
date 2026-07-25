@@ -1,7 +1,7 @@
 use clap::{ArgAction, Args};
 use orbit_common::types::TaskArtifact;
 use orbit_core::command::task::TaskUpdateParams;
-use orbit_core::{OrbitError, OrbitRuntime, TaskStatus, TaskType};
+use orbit_core::{OrbitError, OrbitRuntime, TaskComplexity, TaskStatus, TaskType};
 
 use crate::command::Execute;
 
@@ -41,6 +41,9 @@ pub struct TaskUpdateArgs {
     /// New task type
     #[arg(long = "type", value_enum)]
     pub task_type: Option<TaskType>,
+    /// Task complexity
+    #[arg(long, value_enum)]
+    pub complexity: Option<TaskComplexity>,
     /// Explicit planning attribution label (empty string clears)
     #[arg(long)]
     pub planned_by: Option<String>,
@@ -85,6 +88,7 @@ impl Execute for TaskUpdateArgs {
             comment,
             status,
             task_type,
+            complexity,
             planned_by,
             implemented_by,
             pr_status,
@@ -150,6 +154,7 @@ impl Execute for TaskUpdateArgs {
                 comment,
                 status: status.map(Into::into),
                 task_type,
+                complexity,
                 planned_by,
                 implemented_by,
                 pr_status,

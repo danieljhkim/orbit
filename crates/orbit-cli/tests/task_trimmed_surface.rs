@@ -61,6 +61,18 @@ fn update_status_performs_approve_and_reject_transitions() {
 }
 
 #[test]
+fn task_update_complexity_roundtrips_through_a_real_task_record() {
+    let workspace = TestWorkspace::new();
+    let id = workspace.add_task("Complexity update");
+
+    let updated = workspace.task_json(&["task", "update", &id, "--complexity", "medium", "--json"]);
+    assert_eq!(updated["complexity"], json!("medium"));
+
+    let shown = workspace.task_json(&["task", "show", &id, "--json"]);
+    assert_eq!(shown["complexity"], json!("medium"));
+}
+
+#[test]
 fn locks_list_projects_files_held_by_active_tasks() {
     let workspace = TestWorkspace::new();
     fs::write(workspace.work.join("held.rs"), "// held\n").expect("write held file");

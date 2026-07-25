@@ -759,6 +759,68 @@ async fn patch_api_persists_pr_status_with_status_and_execution_summary() {
     assert_eq!(persisted.status, TaskStatus::Review);
 }
 
+#[tokio::test]
+async fn patch_api_persists_complexity_and_omission_preserves_it() {
+    use axum::http::{Method, Request, header};
+
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let task = seed_backlog_task(&runtime, "Dashboard complexity update");
+    let app = router().with_state(crate::state::DashboardState::single(Arc::new(
+        runtime.clone(),
+    )));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::PATCH)
+                .uri(format!("/tasks/{}", task.id))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::ORIGIN, "http://localhost:7878")
+                .body(Body::from(json!({ "complexity": "medium" }).to_string()))
+                .expect("build complexity patch request"),
+        )
+        .await
+        .expect("complexity patch response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_json(response).await["complexity"], json!("medium"));
+    assert_eq!(
+        runtime
+            .get_task(&task.id)
+            .expect("read updated task")
+            .complexity,
+        Some(TaskComplexity::Medium)
+    );
+
+    let response = router()
+        .with_state(crate::state::DashboardState::single(Arc::new(
+            runtime.clone(),
+        )))
+        .oneshot(
+            Request::builder()
+                .method(Method::PATCH)
+                .uri(format!("/tasks/{}", task.id))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::ORIGIN, "http://localhost:7878")
+                .body(Body::from(
+                    json!({ "title": "Retitled without complexity" }).to_string(),
+                ))
+                .expect("build omitted complexity patch request"),
+        )
+        .await
+        .expect("omitted complexity patch response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_json(response).await["complexity"], json!("medium"));
+    assert_eq!(
+        runtime
+            .get_task(&task.id)
+            .expect("read preserved complexity")
+            .complexity,
+        Some(TaskComplexity::Medium)
+    );
+}
+
 /// Contract test: /tasks projection (and /tasks/:id) must include `complexity` string
 /// when TaskComplexity is set on the task (low/medium/hard). Null complexity omits the key
 /// or yields null (per current projection); this test asserts presence for a hard task.

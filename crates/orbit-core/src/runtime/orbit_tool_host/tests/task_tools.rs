@@ -553,6 +553,79 @@ fn task_add_and_show_tools_roundtrip_crew() {
 }
 
 #[test]
+fn task_update_tool_persists_complexity_without_adding_history() {
+    let (_root, runtime, _repo_root) = test_runtime();
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Complexity update task",
+                "description": "Starts without complexity and receives one on update.",
+                "workspace": ".",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task add tool succeeds");
+    let task_id = added["id"].as_str().expect("task id");
+    assert_eq!(added.get("complexity"), Some(&Value::Null));
+    let history_before = runtime.get_task_history(task_id).expect("initial history");
+
+    runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({ "id": task_id, "crew": "sol" }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("crew update succeeds");
+    let history_after_crew = runtime
+        .get_task_history(task_id)
+        .expect("history after crew update");
+    assert_eq!(
+        history_after_crew, history_before,
+        "crew update adds no history"
+    );
+
+    let updated = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({ "id": task_id, "complexity": "medium" }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("complexity update succeeds");
+    assert_eq!(updated.get("complexity"), Some(&json!("medium")));
+    assert_eq!(
+        runtime
+            .get_task_history(task_id)
+            .expect("history after complexity update"),
+        history_after_crew,
+        "complexity update must match crew's no-history behavior"
+    );
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task_id }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task show succeeds");
+    assert_eq!(shown.get("complexity"), Some(&json!("medium")));
+
+    let omitted = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({ "id": task_id, "title": "Complexity remains set" }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("update omitting complexity succeeds");
+    assert_eq!(omitted.get("complexity"), Some(&json!("medium")));
+}
+
+#[test]
 fn task_add_tool_rejects_unknown_crew() {
     // Un-retiring crew also means it is validated: an unknown crew is now
     // rejected rather than silently ignored.

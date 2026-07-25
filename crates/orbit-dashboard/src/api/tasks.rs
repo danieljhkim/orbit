@@ -115,6 +115,8 @@ pub(super) struct UpdateTaskBody {
     #[serde(default)]
     status: Option<TaskStatus>,
     #[serde(default)]
+    complexity: Option<TaskComplexity>,
+    #[serde(default)]
     task_type: Option<TaskType>,
     #[serde(default, deserialize_with = "deserialize_nullable_string_patch_field")]
     pr_status: Option<Option<String>>,
@@ -351,6 +353,7 @@ pub(super) async fn update_task_action(
         execution_summary: body.execution_summary,
         comment: body.comment,
         status: body.status,
+        complexity: body.complexity,
         task_type: body.task_type,
         source_task_id: None,
         planned_by: None,
