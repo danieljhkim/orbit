@@ -81,5 +81,8 @@ fn error_code(error: &OrbitError) -> &str {
         OrbitError::RemoteArtifactUnavailable { .. } => "remote_artifact_unavailable",
         OrbitError::ArtifactNotLocal { .. } => "artifact_not_local",
         OrbitError::Migration(_) => "migration_failed",
+        // New OrbitError variants must remain JSON-serializable before this
+        // boundary assigns them a dedicated stable code.
+        _ => "internal_error",
     }
 }
