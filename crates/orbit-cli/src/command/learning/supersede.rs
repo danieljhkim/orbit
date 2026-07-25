@@ -20,7 +20,7 @@ pub struct LearningSupersedeArgs {
 
 impl Execute for LearningSupersedeArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        runtime.supersede_learning(&self.id, &self.with)?;
+        runtime.author_learning_supersede(&self.id, &self.with)?;
         let old = runtime.get_learning(&self.id)?;
         let new = runtime.get_learning(&self.with)?;
 

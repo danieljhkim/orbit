@@ -322,6 +322,270 @@ fn guardrail_rejects_flat_learning_root_files() {
     );
 }
 
+// --- ORB-10364: caller-role gate on the learning authoring surfaces --------
+//
+// Policy: task executors file frictions; learnings are authored by the
+// orchestrator or by a human. These tests spawn the CLI with an explicitly
+// declared identity environment, so they exercise the real end-to-end
+// behaviour of both the `orbit learning *` subcommands and their
+// `orbit.learning.*` tool equivalents without mutating this process's env.
+
+/// An agent-context run with no authoring opt-in — i.e. a task executor.
+const EXECUTOR: &[(&str, &str)] = &[("ORBIT_AGENT_MODEL", "claude-opus-5")];
+/// A human at a terminal: no agent-identity pair at all.
+const HUMAN: &[(&str, &str)] = &[];
+/// The orchestrator dispatching curation work as an agent, opted in.
+const ORCHESTRATOR: &[(&str, &str)] = &[
+    ("ORBIT_AGENT_MODEL", "claude-opus-5"),
+    ("ORBIT_LEARNING_AUTHOR", "1"),
+];
+
+#[test]
+fn executor_context_learning_add_is_refused_and_redirected_to_friction_add() {
+    let workspace = TestWorkspace::new();
+
+    let output = workspace.try_run_as(
+        &[
+            "learning",
+            "add",
+            "--summary",
+            "executor observation",
+            "--body",
+            "the body",
+        ],
+        EXECUTOR,
+    );
+
+    assert!(!output.status.success(), "executor add must be refused");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("policy denied"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("orbit friction add"),
+        "names the correct channel: {stderr}"
+    );
+    assert!(
+        stderr.contains("executor observation") && stderr.contains("the body"),
+        "preserves the attempted content: {stderr}"
+    );
+    assert!(
+        stderr.contains("ORBIT_LEARNING_AUTHOR"),
+        "names the orchestrator opt-in: {stderr}"
+    );
+    assert!(
+        workspace.learning_projection("active").is_empty(),
+        "nothing was written"
+    );
+}
+
+#[test]
+fn executor_context_learning_update_and_supersede_are_refused_leaving_records_untouched() {
+    let workspace = TestWorkspace::new();
+    let old = workspace.add_learning("original summary", &[], &[]);
+    let new = workspace.add_learning("replacement summary", &[], &[]);
+    let old_id = old["id"].as_str().expect("old id");
+    let new_id = new["id"].as_str().expect("new id");
+    let before = workspace.learning_projection("active");
+
+    let update = workspace.try_run_as(
+        &["learning", "update", old_id, "--summary", "rewritten"],
+        EXECUTOR,
+    );
+    assert!(!update.status.success(), "executor update must be refused");
+    let update_stderr = String::from_utf8_lossy(&update.stderr);
+    assert!(
+        update_stderr.contains("orbit friction add") && update_stderr.contains("rewritten"),
+        "stderr: {update_stderr}"
+    );
+
+    let supersede = workspace.try_run_as(
+        &["learning", "supersede", old_id, "--with", new_id],
+        EXECUTOR,
+    );
+    assert!(
+        !supersede.status.success(),
+        "executor supersede must be refused"
+    );
+    let supersede_stderr = String::from_utf8_lossy(&supersede.stderr);
+    assert!(
+        supersede_stderr.contains("orbit friction add") && supersede_stderr.contains(old_id),
+        "stderr: {supersede_stderr}"
+    );
+
+    assert_eq!(workspace.learning_projection("active"), before);
+    assert!(workspace.learning_projection("superseded").is_empty());
+}
+
+#[test]
+fn executor_context_learning_tools_are_refused_with_the_same_redirect() {
+    let workspace = TestWorkspace::new();
+    let old = workspace.add_learning("tool original", &[], &[]);
+    let new = workspace.add_learning("tool replacement", &[], &[]);
+    let old_id = old["id"].as_str().expect("old id").to_string();
+    let new_id = new["id"].as_str().expect("new id").to_string();
+    let before = workspace.learning_projection("active");
+
+    let add_input = json!({ "summary": "tool observation", "body": "tool body" }).to_string();
+    let update_input = json!({ "id": old_id, "summary": "tool rewrite" }).to_string();
+    let supersede_input = json!({ "id": old_id, "with": new_id }).to_string();
+    let attempts = [
+        ("orbit.learning.add", &add_input, "tool observation"),
+        ("orbit.learning.update", &update_input, "tool rewrite"),
+        (
+            "orbit.learning.supersede",
+            &supersede_input,
+            old_id.as_str(),
+        ),
+    ];
+
+    for (tool, input, echoed) in attempts {
+        let output = workspace.try_run_as(&["tool", "run", tool, "--input", input], EXECUTOR);
+        assert!(!output.status.success(), "{tool} must be refused");
+        // `tool run` reports failures as a JSON envelope on stdout.
+        let reported: Value = serde_json::from_slice(&output.stdout)
+            .unwrap_or_else(|e| panic!("{tool} produced invalid JSON: {e}"));
+        assert_eq!(reported["code"], "policy_denied", "{tool}");
+        let message = reported["error"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("orbit friction add"),
+            "{tool} names the correct channel: {message}"
+        );
+        assert!(
+            message.contains(echoed),
+            "{tool} preserves the attempted content: {message}"
+        );
+        assert!(
+            message.contains("ORBIT_LEARNING_AUTHOR"),
+            "{tool} names the orchestrator opt-in: {message}"
+        );
+    }
+
+    assert_eq!(workspace.learning_projection("active"), before);
+}
+
+#[test]
+fn human_context_authors_learnings_across_every_write_surface() {
+    let workspace = TestWorkspace::new();
+
+    let added = workspace.run_json(
+        &["learning", "add", "--summary", "human authored", "--json"],
+        "human add",
+    );
+    let id = added["id"].as_str().expect("id").to_string();
+
+    workspace.run_as(
+        &["learning", "update", &id, "--summary", "human rewrote"],
+        HUMAN,
+        "human update",
+    );
+
+    let replacement = workspace.add_learning("human replacement", &[], &[]);
+    let replacement_id = replacement["id"].as_str().expect("id").to_string();
+    workspace.run_as(
+        &["learning", "supersede", &id, "--with", &replacement_id],
+        HUMAN,
+        "human supersede",
+    );
+
+    let shown = workspace.run_json(&["learning", "show", &id, "--json"], "show superseded");
+    assert_eq!(shown["summary"], "human rewrote");
+    assert_eq!(shown["status"], "superseded");
+}
+
+#[test]
+fn the_orchestrator_opt_in_authors_learnings_from_an_agent_context() {
+    let workspace = TestWorkspace::new();
+
+    let added: Value = serde_json::from_slice(
+        &workspace
+            .run_as(
+                &["learning", "add", "--summary", "curated rule", "--json"],
+                ORCHESTRATOR,
+                "opt-in add",
+            )
+            .stdout,
+    )
+    .expect("opt-in add JSON");
+    let id = added["id"].as_str().expect("id").to_string();
+
+    workspace.run_as(
+        &[
+            "learning",
+            "update",
+            &id,
+            "--summary",
+            "curated rule, narrowed",
+        ],
+        ORCHESTRATOR,
+        "opt-in update",
+    );
+
+    // The tool surface honours the same opt-in.
+    let replacement: Value = serde_json::from_slice(
+        &workspace
+            .run_as(
+                &[
+                    "tool",
+                    "run",
+                    "orbit.learning.add",
+                    "--input",
+                    &json!({ "summary": "curated replacement" }).to_string(),
+                ],
+                ORCHESTRATOR,
+                "opt-in tool add",
+            )
+            .stdout,
+    )
+    .expect("opt-in tool add JSON");
+    let replacement_id = replacement["id"].as_str().expect("id").to_string();
+
+    workspace.run_as(
+        &["learning", "supersede", &id, "--with", &replacement_id],
+        ORCHESTRATOR,
+        "opt-in supersede",
+    );
+
+    let shown = workspace.run_json(&["learning", "show", &id, "--json"], "show superseded");
+    assert_eq!(shown["summary"], "curated rule, narrowed");
+    assert_eq!(shown["status"], "superseded");
+    assert_eq!(shown["superseded_by"], replacement_id);
+}
+
+#[test]
+fn learning_reads_are_unaffected_in_every_caller_context() {
+    let workspace = TestWorkspace::new();
+    let added = workspace.add_learning("readable rule", &["foo/**"], &["perf"]);
+    let id = added["id"].as_str().expect("id").to_string();
+
+    let show_input = json!({ "id": id }).to_string();
+    // `orbit.learning.list` is deliberately inactive on the agent tool
+    // surface, so the tool-side read under test is `orbit.learning.show`.
+    let reads: [Vec<&str>; 3] = [
+        vec!["learning", "show", &id, "--json"],
+        vec!["learning", "list", "--json"],
+        vec!["tool", "run", "orbit.learning.show", "--input", &show_input],
+    ];
+
+    for (context_name, context) in [
+        ("human", HUMAN),
+        ("executor", EXECUTOR),
+        ("orchestrator", ORCHESTRATOR),
+    ] {
+        for read in &reads {
+            let output = workspace.run_as(read, context, &format!("{context_name} read {read:?}"));
+            let value: Value = serde_json::from_slice(&output.stdout)
+                .unwrap_or_else(|e| panic!("{context_name} {read:?} invalid JSON: {e}"));
+            let summary = match &value {
+                Value::Array(rows) => rows[0]["summary"].clone(),
+                other => other["summary"].clone(),
+            };
+            assert_eq!(
+                summary, "readable rule",
+                "{context_name} read {read:?} must return the record"
+            );
+        }
+    }
+}
+
 struct TestWorkspace {
     _temp: TempDir,
     home: std::path::PathBuf,
@@ -360,6 +624,23 @@ impl TestWorkspace {
             args.push(*tag);
         }
         self.run_json(&args, "add learning")
+    }
+
+    /// Run with an explicit caller context, returning the raw outcome so a
+    /// test can assert on a refusal as well as on success.
+    fn try_run_as(&self, args: &[&str], context: &[(&str, &str)]) -> Output {
+        run_orbit_with_env(&self.work, &self.home, args, None, context)
+    }
+
+    fn run_as(&self, args: &[&str], context: &[(&str, &str)], label: &str) -> Output {
+        let output = self.try_run_as(args, context);
+        assert!(
+            output.status.success(),
+            "{label} failed\nargs: {args:?}\ncontext: {context:?}\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
     }
 
     fn run(&self, args: &[&str], stdin: Option<&str>, label: &str) -> Output {
@@ -466,13 +747,37 @@ fn snapshot_files(root: &Path) -> Vec<(String, Vec<u8>)> {
 }
 
 fn run_orbit(cwd: &Path, home: &Path, args: &[&str], stdin: Option<&str>) -> Output {
+    run_orbit_with_env(cwd, home, args, stdin, &[])
+}
+
+/// Spawn the CLI with a fully declared identity environment.
+///
+/// The [ORB-10364] caller-role gate and audit-role resolution both read
+/// `ORBIT_AGENT_*` from the process env, and a child inherits whatever the
+/// suite was launched with. Clearing the identity pair and the authoring
+/// opt-in here makes "human context" an explicit property of each test rather
+/// than an accident of how the suite was started (the ORB-10350 hazard);
+/// `extra_env` then declares the context a test actually wants.
+fn run_orbit_with_env(
+    cwd: &Path,
+    home: &Path,
+    args: &[&str],
+    stdin: Option<&str>,
+    extra_env: &[(&str, &str)],
+) -> Output {
     let mut command = cargo_bin_cmd!("orbit");
     command
         .current_dir(cwd)
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env_remove("ORBIT_ROOT")
+        .env_remove("ORBIT_AGENT_NAME")
+        .env_remove("ORBIT_AGENT_MODEL")
+        .env_remove("ORBIT_LEARNING_AUTHOR")
         .args(args);
+    for (name, value) in extra_env {
+        command.env(name, value);
+    }
     if let Some(input) = stdin {
         command.write_stdin(input);
     }

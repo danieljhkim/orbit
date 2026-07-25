@@ -20,6 +20,7 @@ use orbit_store::{
 use serde::Deserialize;
 
 use crate::OrbitRuntime;
+use crate::command::learning_authoring::{LearningWriteAttempt, ensure_learning_write_allowed};
 
 #[derive(Debug, Deserialize)]
 struct LearningConfigFile {
@@ -50,6 +51,49 @@ struct LearningSearchConfigSection {
 }
 
 impl OrbitRuntime {
+    /// [ORB-10364] Role-gated `learning add` authoring surface — the entry
+    /// point for `orbit learning add` and the `orbit.learning.add` tool.
+    ///
+    /// Executor-context callers are refused and redirected to `friction add`;
+    /// see [`crate::command::learning_authoring`] for the policy and the
+    /// orchestrator opt-in. Non-authoring writers (the dashboard's
+    /// request-attributed API, the multi-host owner-finalize path, fixtures)
+    /// keep calling [`Self::create_learning`], which stays ungated.
+    pub fn author_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
+        ensure_learning_write_allowed(LearningWriteAttempt::Add {
+            summary: &params.summary,
+            body: &params.body,
+        })?;
+        self.create_learning(params)
+    }
+
+    /// [ORB-10364] Role-gated `learning update` authoring surface. See
+    /// [`Self::author_learning`].
+    pub fn author_learning_update(
+        &self,
+        id: &str,
+        params: LearningUpdateParams,
+    ) -> Result<Learning, OrbitError> {
+        ensure_learning_write_allowed(LearningWriteAttempt::Update {
+            id,
+            summary: params.summary.as_deref(),
+            body: params.body.as_deref(),
+        })?;
+        self.update_learning(id, params)
+    }
+
+    /// [ORB-10364] Role-gated `learning supersede` authoring surface. See
+    /// [`Self::author_learning`].
+    pub fn author_learning_supersede(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
+        ensure_learning_write_allowed(LearningWriteAttempt::Supersede {
+            id: old_id,
+            with: new_id,
+        })?;
+        self.supersede_learning(old_id, new_id)
+    }
+
+    /// Ungated store-level create. Authoring surfaces must go through
+    /// [`Self::author_learning`] so the [ORB-10364] caller-role gate applies.
     pub fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
         let learning = self.stores().learnings().add(params)?;
         self.record_id_allocation_audit("learning", &learning.id)?;
@@ -65,6 +109,13 @@ impl OrbitRuntime {
     /// here — the hub records the canonical allocation audit transactionally and
     /// the broker writes the correlated owner-finalization audit with trusted
     /// provenance.
+    ///
+    /// [ORB-10364] Deliberately ungated: by the time a caller reaches finalize
+    /// the global id is already consumed and cannot be released, so a refusal
+    /// here would burn an id. When ORB-10274 (F3) routes public
+    /// `orbit.learning.add` through the broker, the caller-role gate belongs in
+    /// the preflight *before* `compose_preallocated_knowledge_add` allocates —
+    /// see [`crate::command::learning_authoring::ensure_learning_write_allowed`].
     pub fn finalize_preallocated_learning(
         &self,
         id: &str,
@@ -205,6 +256,25 @@ impl OrbitRuntime {
         self.stores().audit_events().learning_usage(since.as_ref())
     }
 
+    /// [ORB-10364] Apply an `orbit.learning.update`-shaped payload *without*
+    /// the caller-role gate, returning the same JSON the tool returns.
+    ///
+    /// The dashboard's `PATCH /api/learnings/:id` route uses this instead of
+    /// dispatching `orbit.learning.update`. The gate reads the process
+    /// environment, and a dashboard server can legitimately run inside a
+    /// managed Orbit run with `ORBIT_AGENT_MODEL` set — which is why
+    /// [ORB-10352] moved dashboard write attribution off server env and onto
+    /// the request. Routing the dashboard through the gate would refuse a
+    /// human's edit because of how the server process happened to be launched.
+    pub fn update_learning_from_request(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<serde_json::Value, OrbitError> {
+        crate::runtime::orbit_tool_host::update_learning_without_role_gate(self, input)
+    }
+
+    /// Ungated store-level update. Authoring surfaces must go through
+    /// [`Self::author_learning_update`] so the [ORB-10364] gate applies.
     pub fn update_learning(
         &self,
         id: &str,
@@ -213,6 +283,8 @@ impl OrbitRuntime {
         self.stores().learnings().update(id, params)
     }
 
+    /// Ungated store-level supersede. Authoring surfaces must go through
+    /// [`Self::author_learning_supersede`] so the [ORB-10364] gate applies.
     pub fn supersede_learning(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
         if old_id == new_id {
             return Err(OrbitError::InvalidInput(format!(

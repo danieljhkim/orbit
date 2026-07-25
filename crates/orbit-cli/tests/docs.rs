@@ -1127,6 +1127,13 @@ fn run_orbit_with_companion(
         .env_remove("ORBIT_ROOT")
         .env_remove("ORBIT_SEARCH_COMPANION")
         .env_remove("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE")
+        // These fixtures seed learnings via `orbit learning add`, which the
+        // [ORB-10364] caller-role gate refuses in an agent context. A child
+        // inherits whatever the suite was launched with, so declare the human
+        // context explicitly rather than depending on a bare shell (ORB-10350).
+        .env_remove("ORBIT_AGENT_NAME")
+        .env_remove("ORBIT_AGENT_MODEL")
+        .env_remove("ORBIT_LEARNING_AUTHOR")
         .args(args);
     if let Some(path) = companion {
         cmd.env("ORBIT_SEARCH_COMPANION", path)
