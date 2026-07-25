@@ -1205,6 +1205,18 @@ spec:
             assert_eq!(asset.spec.recovery_activity.as_deref(), None);
             resolve_job_target_refs(&mut asset.spec, &catalog)
                 .unwrap_or_else(|err| panic!("default job {job_name} refs resolve: {err}"));
+            if job_name == "task_pr_pipeline" {
+                assert_eq!(
+                    asset.spec.failure_activity.as_deref(),
+                    Some("pr_failure_handoff")
+                );
+                assert!(
+                    asset.spec.resolved_failure_activity.is_some(),
+                    "task PR terminal failure handoff must resolve from the shipped catalog"
+                );
+            } else {
+                assert_eq!(asset.spec.failure_activity, None);
+            }
             let recovery_steps = step_recovery_activities(&asset.spec);
             assert!(
                 !recovery_steps.is_empty(),

@@ -153,6 +153,48 @@ fn open_or_reuse_pr<H: RuntimeHost + TaskHost + ?Sized>(
     }
 }
 
+/// Create or reuse a PR for an already-pushed recovery branch without the
+/// normal freshness/success gate. The caller owns candidate validation and
+/// must block, never promote, the associated task.
+pub(in crate::executor::automation::vcs) fn open_or_reuse_unchecked<H: RuntimeHost + ?Sized>(
+    host: &H,
+    workspace_path: &std::path::Path,
+    head: &str,
+    base: &str,
+    title: &str,
+    body: &str,
+) -> Result<(String, Option<String>, bool), OrbitError> {
+    let tool_context = ToolContext {
+        cwd: Some(workspace_path.to_string_lossy().to_string()),
+        allowed_tools: vec![],
+        ..Default::default()
+    };
+    if let Some((number, url)) = find_pr_by_head(host, head, tool_context.clone())? {
+        return Ok((number, url, false));
+    }
+    let created = host.run_tool_with_context_and_role(
+        "github.pr.create",
+        json!({
+            "title": title,
+            "body": body,
+            "base": base,
+            "head": head,
+        }),
+        Role::Admin,
+        tool_context.clone(),
+    )?;
+    let url = created
+        .get("url")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            OrbitError::Execution("github.pr.create did not return a PR url".to_string())
+        })?;
+    let (number, viewed_url) = view_pr(host, url, tool_context)?;
+    Ok((number, viewed_url.or_else(|| Some(url.to_string())), true))
+}
+
 fn invalid_prepare(error: OrbitError) -> (FailedHandoffPhase, OrbitError) {
     (FailedHandoffPhase::PrLookup, error)
 }

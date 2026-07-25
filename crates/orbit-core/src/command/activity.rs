@@ -77,6 +77,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/pr_open.yaml"),
     ),
     (
+        "pr_failure_handoff",
+        include_str!("../../assets/activities/pr_failure_handoff.yaml"),
+    ),
+    (
         "pr_prepare",
         include_str!("../../assets/activities/pr_prepare.yaml"),
     ),
@@ -174,6 +178,7 @@ mod tests {
             ("git_commit", "git_commit"),
             ("git_rebase", "git_rebase"),
             ("pr_prepare", "pr_prepare"),
+            ("pr_failure_handoff", "pr_failure_handoff"),
             ("pr_promote", "pr_promote"),
             ("release_locks", "release_locks"),
             ("independent_review_guard", "independent_review_guard"),

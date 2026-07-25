@@ -48,6 +48,7 @@ pub(super) fn run_loop(
             pipeline: ctx.pipeline.clone(),
             sessions: ctx.sessions.clone(),
             recovery_activity: ctx.recovery_activity.clone(),
+            failure_activity: ctx.failure_activity.clone(),
             item: loop_items
                 .as_ref()
                 .and_then(|items| items.get(iteration_index as usize).cloned()),

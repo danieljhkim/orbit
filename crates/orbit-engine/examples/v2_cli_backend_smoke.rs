@@ -545,6 +545,8 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
         default_input: None,
         recovery_activity: None,
         resolved_recovery_activity: None,
+        failure_activity: None,
+        resolved_failure_activity: None,
         max_active_runs: 1,
         kind: JobKind::Workflow,
         steps: vec![loop_step],

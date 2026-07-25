@@ -23,6 +23,7 @@ use super::super::super::agent_role::{apply_resolved_settings, resolve_agent_set
 use super::super::super::audit_writer::V2AuditWriter;
 use super::super::super::dispatcher::DispatchError;
 use super::super::super::sqlite_sink::V2SqliteSink;
+use super::super::super::workspace::{WorktreeBoundaryGuard, validate_declared_worktree_pair};
 use super::super::run_cli_backend;
 use super::test_support::{
     RecordingSink, TestHost, capture_events, test_agent_loop_spec, test_agent_loop_spec_for,
@@ -957,6 +958,121 @@ fn unchanged_pre_dirty_primary_does_not_block_valid_worktree_implementation() {
 }
 
 #[test]
+fn concurrent_primary_fast_forward_does_not_block_disjoint_worktree_changes() {
+    let fixture = linked_worktree_fixture();
+    let script = fixture.root().join("codex");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\nprintf 'assigned\\n' > assigned.txt\nprintf 'concurrent\\n' > '{}/concurrent.txt'\ngit -C '{}' add -- concurrent.txt\ngit -C '{}' commit -m concurrent-base\nprintf '%s\\n' '{{\"schemaVersion\":1,\"status\":\"success\",\"result\":{{}},\"error\":null}}'\n",
+            fixture.primary.display(),
+            fixture.primary.display(),
+            fixture.primary.display(),
+        ),
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+
+    let outcome = run_cli_backend(
+        &host,
+        &test_agent_loop_spec(Duration::from_secs(5)),
+        "run-concurrent-fast-forward",
+        test_audit("run-concurrent-fast-forward", "codex"),
+        &worktree_input(&fixture, "ORB-CONCURRENT-FF"),
+        None,
+    )
+    .expect("a disjoint same-branch primary fast-forward is benign");
+
+    assert!(outcome.success);
+    assert!(fixture.assigned.join("assigned.txt").exists());
+    assert!(fixture.primary.join("concurrent.txt").exists());
+}
+
+#[test]
+fn two_in_flight_worktrees_survive_one_primary_merge_advance() {
+    let fixture = linked_worktree_fixture();
+    let assigned_two = fixture.root().join("assigned-two");
+    git_ok(
+        &fixture.primary,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "orbit-integrity-test-two",
+            assigned_two.to_str().expect("utf8 second worktree"),
+        ],
+    );
+    let assigned_two = assigned_two
+        .canonicalize()
+        .expect("canonical second worktree");
+    let input_one = worktree_input(&fixture, "ORB-CONCURRENT-ONE");
+    let input_two = serde_json::json!({
+        "prompt": "implement",
+        "task_id": "ORB-CONCURRENT-TWO",
+        "workspace_path": assigned_two,
+        "repo_root": assigned_two,
+    });
+    let pair_one = validate_declared_worktree_pair(
+        &input_one,
+        None,
+        "run-concurrent-one",
+        "codex",
+        Some(&fixture.primary),
+    )
+    .expect("validate first pair")
+    .expect("first linked pair");
+    let pair_two = validate_declared_worktree_pair(
+        &input_two,
+        None,
+        "run-concurrent-two",
+        "codex",
+        Some(&fixture.primary),
+    )
+    .expect("validate second pair")
+    .expect("second linked pair");
+    let guard_one = WorktreeBoundaryGuard::capture(
+        &input_one,
+        None,
+        "run-concurrent-one",
+        "codex",
+        Some(&fixture.assigned),
+        Some(&fixture.primary),
+        Some(&pair_one),
+    )
+    .expect("capture first guard")
+    .expect("first guard enabled");
+    let guard_two = WorktreeBoundaryGuard::capture(
+        &input_two,
+        None,
+        "run-concurrent-two",
+        "codex",
+        Some(&assigned_two),
+        Some(&fixture.primary),
+        Some(&pair_two),
+    )
+    .expect("capture second guard")
+    .expect("second guard enabled");
+
+    fs::write(fixture.assigned.join("candidate-one.txt"), "candidate\n")
+        .expect("write first candidate");
+    fs::write(assigned_two.join("candidate-two.txt"), "candidate\n")
+        .expect("write second candidate");
+    fs::write(fixture.primary.join("merged-pr.txt"), "merged\n").expect("write merged PR");
+    git_ok(&fixture.primary, &["add", "merged-pr.txt"]);
+    git_ok(&fixture.primary, &["commit", "-m", "merge concurrent PR"]);
+
+    guard_one
+        .verify()
+        .expect("first in-flight pipeline accepts the shared base advance");
+    guard_two
+        .verify()
+        .expect("second in-flight pipeline accepts the shared base advance");
+
+    assert!(fixture.assigned.join("candidate-one.txt").exists());
+    assert!(assigned_two.join("candidate-two.txt").exists());
+}
+
+#[test]
 fn unchanged_pre_dirty_path_is_excluded_from_escape_diagnostic() {
     let fixture = linked_worktree_fixture();
     fs::write(
@@ -1075,7 +1191,7 @@ fn primary_escape_is_typed_non_retryable_and_preserves_both_checkouts() {
 
     assert_worktree_integrity_error(
         &error,
-        "worktree_escape",
+        "primary_checkout_drift",
         ("ORB-ESCAPE", "run-deliberate-escape", "claude"),
         &fixture,
         "escaped.txt",
@@ -1110,7 +1226,7 @@ fn primary_escape_is_typed_non_retryable_and_preserves_both_checkouts() {
 }
 
 #[test]
-fn changes_in_both_checkouts_report_ambiguous_integrity_violation() {
+fn primary_content_mutation_is_typed_even_when_assigned_content_also_changes() {
     let fixture = linked_worktree_fixture();
     let escaped = fixture.primary.join("ambiguous-primary.txt");
     let script = fixture.root().join("codex");
@@ -1136,13 +1252,94 @@ fn changes_in_both_checkouts_report_ambiguous_integrity_violation() {
 
     assert_worktree_integrity_error(
         &error,
-        "worktree_integrity_ambiguous",
+        "primary_checkout_drift",
         ("ORB-AMBIGUOUS", "run-ambiguous-integrity", "codex"),
         &fixture,
         "ambiguous-primary.txt",
     );
     assert!(fixture.assigned.join("ambiguous-assigned.txt").exists());
     assert!(escaped.exists());
+}
+
+#[test]
+fn assigned_history_divergence_is_a_typed_worktree_content_conflict() {
+    let fixture = linked_worktree_fixture();
+    let script = fixture.root().join("codex");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf 'committed by provider\\n' > assigned-commit.txt\ngit add -- assigned-commit.txt\ngit commit -m assigned-history-change\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+
+    let error = run_cli_backend(
+        &host,
+        &test_agent_loop_spec(Duration::from_secs(5)),
+        "run-assigned-history-change",
+        test_audit("run-assigned-history-change", "codex"),
+        &worktree_input(&fixture, "ORB-ASSIGNED-HISTORY"),
+        None,
+    )
+    .expect_err("provider-created worktree history must fail closed");
+
+    assert_worktree_integrity_error(
+        &error,
+        "worktree_content_conflict",
+        (
+            "ORB-ASSIGNED-HISTORY",
+            "run-assigned-history-change",
+            "codex",
+        ),
+        &fixture,
+        "assigned-commit.txt",
+    );
+    let diagnostic = worktree_integrity_diagnostic(&error);
+    assert_eq!(
+        diagnostic["changed_paths"],
+        serde_json::json!(["assigned-commit.txt"]),
+        "worktree conflicts report the run's paths, not primary checkout paths"
+    );
+}
+
+#[test]
+fn non_fast_forward_primary_move_remains_a_typed_drift_failure() {
+    let fixture = linked_worktree_fixture();
+    fs::write(fixture.primary.join("before-reset.txt"), "before reset\n")
+        .expect("write primary commit");
+    git_ok(&fixture.primary, &["add", "before-reset.txt"]);
+    git_ok(&fixture.primary, &["commit", "-m", "primary before reset"]);
+    let script = fixture.root().join("codex");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\nprintf 'assigned survives\\n' > assigned-survives.txt\ngit -C '{}' reset --hard HEAD^\nprintf '%s\\n' '{{\"schemaVersion\":1,\"status\":\"success\",\"result\":{{}},\"error\":null}}'\n",
+            fixture.primary.display(),
+        ),
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+
+    let error = run_cli_backend(
+        &host,
+        &test_agent_loop_spec(Duration::from_secs(5)),
+        "run-primary-reset",
+        test_audit("run-primary-reset", "codex"),
+        &worktree_input(&fixture, "ORB-PRIMARY-RESET"),
+        None,
+    )
+    .expect_err("a primary reset must remain fail closed");
+
+    assert_worktree_integrity_error(
+        &error,
+        "primary_checkout_drift",
+        ("ORB-PRIMARY-RESET", "run-primary-reset", "codex"),
+        &fixture,
+        "before-reset.txt",
+    );
+    assert!(
+        fixture.assigned.join("assigned-survives.txt").exists(),
+        "the guard diagnoses without discarding the run candidate"
+    );
 }
 
 #[test]
@@ -1179,7 +1376,7 @@ fn primary_escape_is_checked_after_nonzero_exit_and_timeout() {
 
         assert_worktree_integrity_error(
             &error,
-            "worktree_escape",
+            "primary_checkout_drift",
             (&task_id, &run_id, "codex"),
             &fixture,
             &escaped_name,

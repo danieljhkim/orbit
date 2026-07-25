@@ -95,6 +95,72 @@ pub(super) fn attempt_recovery_activity(
     recovery_succeeded
 }
 
+/// Invoke the job's terminal failure hook once, preserving the original step
+/// error regardless of the hook outcome. ADR-0246 keeps this separate from
+/// retry recovery: the hook may publish a recoverable candidate, but it never
+/// claims that the failed step succeeded.
+pub(super) fn attempt_failure_activity(
+    step: &JobV2Step,
+    ctx: &ExecCtx<'_>,
+    original_err: &DispatchError,
+) {
+    let Some(failure) = &ctx.failure_activity else {
+        return;
+    };
+    let pipeline = Value::Object(
+        ctx.pipeline
+            .lock()
+            .expect("pipeline poisoned")
+            .clone()
+            .into_iter()
+            .collect(),
+    );
+    let error_code = match original_err {
+        DispatchError::WorktreeIntegrity { code, .. } => *code,
+        _ => "pipeline_step_failed",
+    };
+    let input = serde_json::json!({
+        "failed_step_id": step.id,
+        "activity_name": step_activity_name(step),
+        "error_code": error_code,
+        "error_message": original_err.to_string(),
+        "job_input": ctx.input,
+        "pipeline": pipeline,
+        "run_id": ctx.run_id,
+    });
+    let dispatch = dispatch_v2_activity_without_run_id_injection(V2DispatchInput {
+        activity_name: &failure.name,
+        spec: &failure.spec,
+        fs_profile: step_fs_profile(step),
+        input: input.clone(),
+        audit: ctx.audit.clone(),
+        run_id: &ctx.run_id,
+        host: Some(ctx.host),
+    });
+    match dispatch {
+        Ok(dispatch) => {
+            persist_dispatch_invocation(ctx, &failure.name, &input, &dispatch);
+            if !dispatch.success {
+                tracing::warn!(
+                    target: "orbit.engine.job_executor",
+                    run_id = %ctx.run_id,
+                    failed_step_id = %step.id,
+                    failure_activity = %failure.name,
+                    "terminal failure activity completed without success"
+                );
+            }
+        }
+        Err(error) => tracing::warn!(
+            target: "orbit.engine.job_executor",
+            run_id = %ctx.run_id,
+            failed_step_id = %step.id,
+            failure_activity = %failure.name,
+            error = %error,
+            "terminal failure activity failed; preserving original step error"
+        ),
+    }
+}
+
 pub(super) fn role_overridden_recovery_spec(
     recovery: &ResolvedRecoveryActivity,
     ctx: &ExecCtx<'_>,

@@ -37,7 +37,7 @@ pub(in crate::executor::automation) fn push_batch_changes<H: RuntimeHost + TaskH
     }
 }
 
-fn push_batch_changes_inner<H: RuntimeHost + ?Sized>(
+pub(super) fn push_batch_changes_inner<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
     workspace_path: &Path,

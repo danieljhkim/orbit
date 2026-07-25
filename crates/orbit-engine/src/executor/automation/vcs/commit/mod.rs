@@ -250,6 +250,26 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
     Ok(result)
 }
 
+/// Commit a terminally-failed shipment's dirty candidate without consulting
+/// the normal success-summary delivery gate. ADR-0246 confines this bypass to
+/// the failure handoff, which blocks rather than promotes the task.
+pub(super) fn commit_failure_candidate(
+    workspace_path: &Path,
+    task: &orbit_common::types::Task,
+) -> Result<(String, Vec<String>), OrbitError> {
+    ensure_named_branch(workspace_path)?;
+    ensure_no_unmerged_changes(workspace_path)?;
+    git_success(workspace_path, &["add", "--all", "--", "."])?;
+    let changed_files = staged_changed_files(workspace_path)?;
+    if !changed_files.is_empty() {
+        let message = batch_commit_message(task);
+        let author = git_author_for_task(task);
+        git_commit_with_identity(workspace_path, &message, author.as_ref())?;
+    }
+    let head_sha = git_output(workspace_path, &["rev-parse", "--verify", "HEAD^{commit}"])?;
+    Ok((head_sha.trim().to_string(), changed_files))
+}
+
 fn existing_batch_commits(
     workspace_path: &Path,
     input: &Value,

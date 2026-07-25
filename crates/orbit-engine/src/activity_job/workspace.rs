@@ -562,25 +562,81 @@ impl WorktreeBoundaryGuard {
     }
 
     /// Compare both monitored checkouts after the provider reaches any
-    /// terminal outcome. A primary delta always fails closed. When the
-    /// assigned checkout changed too, attribution is ambiguous rather than an
-    /// automatic escape/reconciliation claim.
+    /// terminal outcome. An externally advanced primary branch is benign when
+    /// it is a clean fast-forward: linked worktrees keep their own HEAD, and
+    /// the shipment rebase checkpoint owns reconciliation with the new base.
+    /// Primary rewrites/content mutation and history changes in the assigned
+    /// worktree remain typed, fail-closed violations.
     pub(crate) fn verify(self) -> Result<(), DispatchError> {
         let assigned_after = git_fingerprint(&self.assigned_root)?;
         let primary_after = git_fingerprint(&self.primary_root)?;
+        let assigned_history_changed = assigned_after.head != self.assigned_before.head
+            || assigned_after.branch != self.assigned_before.branch;
+        let run_changed_paths =
+            changed_paths(&self.assigned_root, &self.assigned_before, &assigned_after);
+        let primary_changed_paths =
+            changed_paths(&self.primary_root, &self.primary_before, &primary_after);
+        let conflicting_paths = run_changed_paths
+            .iter()
+            .filter(|path| primary_changed_paths.contains(path))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if assigned_history_changed {
+            return Err(self.integrity_error(
+                "worktree_content_conflict",
+                &assigned_after,
+                &primary_after,
+                &run_changed_paths,
+                &primary_changed_paths,
+                &conflicting_paths,
+                "the assigned worktree history or branch changed during implementation",
+            ));
+        }
+
         if primary_after == self.primary_before {
             return Ok(());
         }
 
-        let assigned_changed = assigned_after != self.assigned_before;
-        let code = if assigned_changed {
-            "worktree_integrity_ambiguous"
-        } else {
-            "worktree_escape"
-        };
-        let changed_paths = changed_paths(&self.primary_root, &self.primary_before, &primary_after);
+        if primary_fast_forward_is_benign(&self.primary_root, &self.primary_before, &primary_after)?
+        {
+            tracing::info!(
+                target: "orbit.engine.cli_runner",
+                task_id = %self.task_id,
+                run_id = %self.run_id,
+                primary_before = %self.primary_before.head,
+                primary_after = %primary_after.head,
+                conflicting_paths = ?conflicting_paths,
+                "accepted concurrent primary fast-forward; shipment base synchronization owns reconciliation"
+            );
+            return Ok(());
+        }
+
+        Err(self.integrity_error(
+            "primary_checkout_drift",
+            &assigned_after,
+            &primary_after,
+            &primary_changed_paths,
+            &primary_changed_paths,
+            &conflicting_paths,
+            "the registered primary checkout changed without a clean same-branch fast-forward",
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn integrity_error(
+        &self,
+        code: &'static str,
+        assigned_after: &GitWorktreeFingerprint,
+        primary_after: &GitWorktreeFingerprint,
+        reported_paths: &[String],
+        primary_changed_paths: &[String],
+        conflicting_paths: &[String],
+        reason: &str,
+    ) -> DispatchError {
         let diagnostic = json!({
             "code": code,
+            "reason": reason,
             "task_id": self.task_id,
             "run_id": self.run_id,
             "provider": self.provider,
@@ -588,19 +644,46 @@ impl WorktreeBoundaryGuard {
             "requested_repo_root": self.requested_repo_root,
             "resolved_assigned_root": self.assigned_root,
             "registered_primary_root": self.primary_root,
-            "changed_paths": changed_paths,
-            "assigned_changed": assigned_changed,
+            "changed_paths": reported_paths,
+            "run_changed_paths": changed_paths(&self.assigned_root, &self.assigned_before, assigned_after),
+            "primary_changed_paths": primary_changed_paths,
+            "conflicting_paths": conflicting_paths,
+            "assigned_changed": assigned_after != &self.assigned_before,
             "assigned_before": self.assigned_before,
             "assigned_after": assigned_after,
             "primary_before": self.primary_before,
             "primary_after": primary_after,
             "automatic_reconciliation": false,
         });
-        Err(DispatchError::WorktreeIntegrity {
+        DispatchError::WorktreeIntegrity {
             code,
             diagnostic: diagnostic.to_string(),
-        })
+        }
     }
+}
+
+fn primary_fast_forward_is_benign(
+    root: &Path,
+    before: &GitWorktreeFingerprint,
+    after: &GitWorktreeFingerprint,
+) -> Result<bool, DispatchError> {
+    // L-0110: linked-worktree shipment owns clean base fast-forwards; the
+    // provider boundary still rejects primary content/history drift.
+    if before.head == after.head
+        || before.branch != after.branch
+        || before.dirty_paths != after.dirty_paths
+        || before.path_states != after.path_states
+        || before.tracked_patch_sha256 != after.tracked_patch_sha256
+        || before.untracked_content != after.untracked_content
+    {
+        return Ok(false);
+    }
+    Ok(git_output_raw(
+        root,
+        &["merge-base", "--is-ancestor", &before.head, &after.head],
+    )?
+    .status
+    .success())
 }
 
 fn declared_workspace_path(input: &Value, task_ctx: Option<&Value>) -> Option<String> {

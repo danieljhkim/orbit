@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-07-20
+last_updated: 2026-07-25
 status: Draft
 feature: activity-job
 doc_role: design
@@ -142,6 +142,10 @@ After [ORB-10306], retry classification and recovery eligibility are separate de
 After [ORB-10232], `task_pr_pipeline` exposes the PR handoff as ordered durable checkpoints: `commit` (`git_commit`), `prepare_branch` (`pr_prepare`), `sync_base` (`git_rebase`), `push` (`git_push`), `pr_open`, and `promote_tasks` (`pr_promote`). The no-diff-expected path skips the remote phases and uses its own promotion checkpoint. Each performed activity returns a `phase` and `decision`, so persisted step output distinguishes work performed on the first attempt from a current/skipped phase or a recovered/reused phase; job recovery audit records the recovery decision around the one retried step. `pr_open` no longer commits, rebases, pushes, or mutates task lifecycle state.
 
 `pr_prepare` is the pre-rewrite authority boundary. It records the exact head SHA, base SHA, and observed remote task-branch SHA before `git_rebase` may rewrite history. `git_push` classifies the remote ref as missing, current, fast-forwardable, remote-ahead, or diverged. Missing and fast-forwardable refs use normal push; current refs are reused; remote-ahead refs fail closed. Divergence may use force-with-lease only when the persisted preparation SHA still exactly matches the observed remote SHA and `git_rebase` reports a performed or recovery-reused rewrite. The underlying tool emits a branch-scoped `--force-with-lease=refs/heads/<branch>:<expected-sha>`, so a concurrent remote update rejects the push instead of overwriting it. This is [ADR-0225].
+
+After [ORB-10363], `JobV2.failure_activity` is a terminal, best-effort hook distinct from retry recovery. It receives the merged job input, all completed pipeline checkpoints, the failing step/action, and the structured error; it runs once and never replaces the original failure. `task_pr_pipeline` binds this hook to `pr_failure_handoff` ([ADR-0246]). That deterministic action aborts an active conflicting rebase back to the prepared branch, commits any remaining dirty candidate without passing through the normal success-only promotion gate, performs the existing non-overwriting push classification, and opens or reuses a blocked PR. A conflict PR body names the original and target base SHAs plus the conflicting paths, and the task moves to `blocked` with `pr_conflict_blocked` rather than `review`.
+
+The linked-worktree boundary guard now treats a clean same-branch primary fast-forward as concurrent base movement, not provider escape. The assigned checkout retains its own HEAD, so the later `pr_prepare`/`git_rebase` checkpoints reconcile that movement. Primary resets, force-moves, branch switches, or working-content mutations surface as `primary_checkout_drift`; history or branch movement inside the assigned worktree surfaces as `worktree_content_conflict`. Conflict diagnostics report `run_changed_paths`, `primary_changed_paths`, and their `conflicting_paths` separately instead of presenting the primary's entire moved set as the task's conflict.
 
 PR creation is restartable within its own checkpoint. `pr_open` first looks up the open PR by head branch; only the explicit no-PR result permits `github.pr.create`. If creation succeeds but PR view or local step-output persistence fails, the retry finds that same external PR and returns it as reused. `pr_promote` then idempotently applies the GitHub PR external ref and the per-task implementation attribution before moving tasks to `review`.
 

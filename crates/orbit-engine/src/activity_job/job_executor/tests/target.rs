@@ -145,6 +145,7 @@ fn exec_ctx<'a>(host: &'a dyn V2RuntimeHost) -> super::ExecCtx<'a> {
         pipeline: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         sessions: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         recovery_activity: None,
+        failure_activity: None,
         item: None,
         iteration: None,
     }
