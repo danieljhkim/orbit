@@ -60,7 +60,8 @@ impl KnowledgeMetricsDelta {
                 .usage
                 .input
                 .saturating_add(trace.usage.cache_read)
-                .saturating_add(trace.usage.cache_create),
+                .saturating_add(trace.usage.cache_create)
+                .saturating_add(trace.usage.cache_create_1h),
             ..Self::default()
         };
 

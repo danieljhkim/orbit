@@ -49,11 +49,22 @@ pub struct InvocationRecord {
     pub input_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_create_tokens: u64,
+    /// Premium 1-hour-TTL cache-creation tokens (`TokenUsage::cache_create_1h`).
+    pub cache_create_1h_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
     pub tool_call_count: u64,
     pub task_ids: Vec<String>,
     pub tool_calls: Vec<InvocationToolCallRecord>,
+    /// Provider-reported total cost in USD, persisted verbatim from
+    /// [`InvocationInsertParams::trace`] for monthly manual reconciliation.
+    /// Never overwritten by `derived_cost_usd`.
+    pub provider_cost_usd: Option<f64>,
+    /// Normalized cost in USD derived at query time from `model`, `ts`, and
+    /// the token splits against the versioned price table
+    /// (`orbit_common::types::pricing`). `None` when no price row covers
+    /// this model/date.
+    pub derived_cost_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

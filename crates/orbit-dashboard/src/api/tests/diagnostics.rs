@@ -130,11 +130,14 @@ fn diagnostics_metrics_values_adapt_invocation_records() {
         input_tokens: 100,
         cache_read_tokens: 0,
         cache_create_tokens: 0,
+        cache_create_1h_tokens: 0,
         output_tokens: 23,
         total_tokens: 123,
         tool_call_count: 4,
         task_ids: vec!["T20260505-1".to_string()],
         tool_calls: Vec::new(),
+        provider_cost_usd: None,
+        derived_cost_usd: None,
     }]);
 
     assert_eq!(rows.len(), 1);

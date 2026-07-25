@@ -10,5 +10,6 @@ pub(super) fn extract_invocation_trace(documents: &[Value], duration_ms: u64) ->
         usage,
         tool_calls,
         duration_ms,
+        provider_cost_usd: None,
     }
 }

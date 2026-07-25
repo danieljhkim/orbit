@@ -23,6 +23,7 @@ fn invocation_record(
         input_tokens,
         cache_read_tokens,
         cache_create_tokens,
+        cache_create_1h_tokens: 0,
         output_tokens,
         total_tokens: input_tokens
             .saturating_add(cache_read_tokens)
@@ -31,6 +32,8 @@ fn invocation_record(
         tool_call_count: 0,
         task_ids: vec!["ORB-10339".to_string()],
         tool_calls: Vec::new(),
+        provider_cost_usd: None,
+        derived_cost_usd: None,
     }
 }
 

@@ -38,6 +38,9 @@ pub(super) fn aggregate_token_usage(records: &[InvocationRecord]) -> TokenUsage 
             usage.cache_create = usage
                 .cache_create
                 .saturating_add(record.cache_create_tokens);
+            usage.cache_create_1h = usage
+                .cache_create_1h
+                .saturating_add(record.cache_create_1h_tokens);
             usage.output = usage.output.saturating_add(record.output_tokens);
             usage
         })

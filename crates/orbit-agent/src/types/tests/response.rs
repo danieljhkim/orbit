@@ -229,6 +229,7 @@ mod sum {
                 input: 30,
                 cache_read: 5,
                 cache_create: 0,
+                cache_create_1h: 0,
                 output: 109,
             }
         );
@@ -264,6 +265,7 @@ mod sum {
                 input: 7,
                 cache_read: 1,
                 cache_create: 0,
+                cache_create_1h: 0,
                 output: 3,
             }
         );
@@ -322,6 +324,7 @@ mod sum {
                 input: 40919,
                 cache_read: 40101,
                 cache_create: 0,
+                cache_create_1h: 0,
                 output: 466,
             }
         );
