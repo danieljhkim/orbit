@@ -187,7 +187,10 @@ fn coordination_migrations_create_typed_tables_without_touching_existing_records
         )
         .expect("existing row");
     assert_eq!(preserved, "unchanged");
-    assert_eq!(current_schema_version(&conn).expect("version"), 9);
+    assert_eq!(
+        current_schema_version(&conn).expect("version"),
+        SUPPORTED_SCHEMA_VERSION
+    );
     for table in [
         "workspace_ownership",
         "host_workspace_presence",

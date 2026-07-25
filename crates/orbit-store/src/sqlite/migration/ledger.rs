@@ -78,12 +78,20 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "feature_schema_ledger",
         apply: super::apply_feature_schema_ledger,
     },
+    // ORB-10367: carries the invocation telemetry columns
+    // (`cache_create_1h_tokens`, `provider_cost_usd`) to databases that
+    // recorded the v1 baseline before those columns were added to it.
+    Migration {
+        version: 10,
+        name: "invocation_telemetry_columns",
+        apply: super::apply_invocation_telemetry_columns,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 9;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 10;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

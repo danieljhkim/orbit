@@ -345,3 +345,130 @@ fn role_override_does_not_disable_replay_short_circuit() {
     // Replay short-circuit still triggers — independent of the override.
     assert!(super::replay_active());
 }
+
+// ----- Telemetry persistence is non-fatal (ORB-10367) -----------------
+
+/// Host whose invocation-trace persistence always fails, standing in for the
+/// production failure mode where the store's `invocations` table lacks a
+/// column the insert binds.
+struct FailingTelemetryHost;
+
+impl V2RuntimeHost for FailingTelemetryHost {
+    fn run_deterministic(
+        &self,
+        _action: &str,
+        _config: &Value,
+        _input: &Value,
+        _tool_context: orbit_tools::ToolContext,
+    ) -> Result<Value, DispatchError> {
+        Err(DispatchError::DeterministicActionNotRegistered(
+            "failing telemetry host: not used".into(),
+        ))
+    }
+
+    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
+        Err(DispatchError::AgentLoopFailed(
+            "failing telemetry host: no credentials".into(),
+        ))
+    }
+
+    fn resolve_cli_executor(
+        &self,
+        _provider: &str,
+    ) -> Result<super::super::super::dispatcher::ResolvedCliExecutor, DispatchError> {
+        Err(DispatchError::CliInvocationFailed(
+            "failing telemetry host: no CLI mapping".into(),
+        ))
+    }
+
+    fn tool_context_for_activity(
+        &self,
+        _run_id: Option<&str>,
+        _fs_profile: Option<&str>,
+        _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
+        _proc_allowed_programs: Option<&[String]>,
+    ) -> orbit_tools::ToolContext {
+        orbit_tools::ToolContext::default()
+    }
+
+    fn persist_invocation_trace(
+        &self,
+        _job_run_id: &str,
+        _activity_id: &str,
+        _provider: &str,
+        _model: Option<&str>,
+        _input: &Value,
+        _trace: &orbit_common::types::InvocationTrace,
+    ) -> Result<(), DispatchError> {
+        Err(DispatchError::JobExecution(
+            "persist invocation trace: store error: table invocations has no column named \
+             cache_create_1h_tokens"
+                .to_string(),
+        ))
+    }
+}
+
+fn dispatch_with_invocation() -> super::super::super::dispatcher::DispatchOutcome {
+    super::super::super::dispatcher::DispatchOutcome {
+        success: true,
+        output: json!({ "implemented": true }),
+        message: None,
+        invocation: Some(super::super::super::dispatcher::DispatchInvocationTrace {
+            provider: "claude".to_string(),
+            model: Some(TEST_CLAUDE_MODEL.to_string()),
+            trace: orbit_common::types::InvocationTrace::default(),
+        }),
+    }
+}
+
+/// [ORB-10367] A failed telemetry write must not discard completed agent
+/// work. `persist_dispatch_invocation` returns `()` — there is no error path
+/// left to propagate into the step outcome — and records the failure instead.
+#[test]
+fn failed_invocation_trace_persist_does_not_fail_the_step() {
+    let host = FailingTelemetryHost;
+    let ctx = exec_ctx(&host);
+    let dispatch = dispatch_with_invocation();
+
+    let trace = capture(|| {
+        super::persist_dispatch_invocation(&ctx, "implement_one", &ctx.input, &dispatch);
+    });
+
+    // Logged loudly: an ERROR naming the run, the step, and the store error.
+    let logged = trace
+        .events
+        .iter()
+        .find(|event| event.target == "orbit.engine.telemetry")
+        .expect("telemetry failure logged");
+    assert_eq!(logged.level, Level::ERROR);
+    assert_eq!(logged.field("step_id"), Some("implement_one"));
+    assert!(
+        logged
+            .field("error")
+            .expect("error field")
+            .contains("cache_create_1h_tokens"),
+        "unexpected error field: {:?}",
+        logged.field("error")
+    );
+
+    // ...and surfaced on the run record as a telemetry.persist_failed event.
+    assert_eq!(ctx.audit.telemetry_failure_count(), 1);
+    assert!(ctx.audit.degraded_telemetry());
+    let events = ctx.audit.events_snapshot().expect("events snapshot");
+    let recorded = events
+        .iter()
+        .find(|event| event.envelope.event_type == "telemetry.persist_failed")
+        .expect("telemetry.persist_failed recorded on the run");
+    match &recorded.kind {
+        V2AuditEventKind::TelemetryPersistFailed {
+            component, step_id, ..
+        } => {
+            assert_eq!(component, "invocation_trace");
+            assert_eq!(step_id.as_deref(), Some("implement_one"));
+        }
+        other => panic!("unexpected event kind: {other:?}"),
+    }
+
+    // The audit trail itself is undamaged — this is a telemetry gap only.
+    assert_eq!(ctx.audit.audit_failure_count(), 0);
+}

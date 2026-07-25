@@ -184,6 +184,16 @@ pub enum V2AuditEventKind {
         harness_version: Option<String>,
         timed_out: bool,
     },
+    /// [ORB-10367] A telemetry write failed (e.g. persisting an invocation
+    /// trace). The run continues — telemetry is observability, not
+    /// correctness — but the failure is recorded on the run so the gap in
+    /// the telemetry is visible rather than silent.
+    TelemetryPersistFailed {
+        component: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step_id: Option<String>,
+        error: String,
+    },
 }
 
 impl V2AuditEventKind {
@@ -215,6 +225,7 @@ impl V2AuditEventKind {
             }
             V2AuditEventKind::CliInvocationStarted { .. } => "cli.invocation.started",
             V2AuditEventKind::CliInvocationFinished { .. } => "cli.invocation.finished",
+            V2AuditEventKind::TelemetryPersistFailed { .. } => "telemetry.persist_failed",
         }
     }
 }

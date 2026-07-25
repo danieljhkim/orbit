@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Telemetry no longer discards completed runs**: the `invocations` insert-bound columns (`cache_create_1h_tokens`, `provider_cost_usd`) reach existing databases through a new `invocation_telemetry_columns` migration (schema v10) instead of only the v1 baseline, and a failed invocation-trace write is now logged and recorded as a `telemetry.persist_failed` event on the run rather than failing the job. ([ORB-10367])
 - **PR review status clearing is documented**: `orbit.task.update` now describes its empty-string clear convention, with tool-host coverage for the persisted null result. ([ORB-10229])
 - **Task PR status updates persist in v2 storage**: local tool and dashboard PATCH updates now retain `pr_status` alongside status and execution-summary changes. ([ORB-10223])
 - **Bundled skills are repository-agnostic**: the embedded skill tree drops Orbit-source paths, private Constellation names, workspace-local artifact IDs, and fixed design-doc filenames; a portability regression test and byte-aligned plugin mirrors guard against reintroduction. ([ORB-10208])
