@@ -1,6 +1,6 @@
 //! Shipped-definition tests [ORB-10318]: every git-tracked auto-task
 //! definition under the repo's `.orbit/auto_tasks/` must parse and validate
-//! fail-closed, and the learning-deprecation review definition must stay
+//! fail-closed, and the artifact-deprecation review definition must stay
 //! report-only. This is the "mechanism covered by tests" guard for the
 //! definitions that travel with the repo — a malformed definition would
 //! otherwise only surface at scheduler-fire time.
@@ -48,17 +48,17 @@ fn shipped_definitions_all_parse() {
     );
 }
 
-/// The learning-deprecation review definition ships enabled, on a cron cadence,
+/// The artifact-deprecation review definition ships enabled, on a cron cadence,
 /// and stays report-only: it carries the `no-diff-expected` and
-/// `learning-deprecation` tags and its template never asks to mutate learnings.
+/// `artifact-deprecation` tags and its template never asks to mutate learnings.
 #[test]
-fn learning_deprecation_review_is_report_only() {
-    let path = shipped_auto_tasks_dir().join("learning-deprecation-review.yaml");
+fn artifact_deprecation_review_is_report_only() {
+    let path = shipped_auto_tasks_dir().join("artifact-deprecation-review.yaml");
     let yaml = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-    let definition = parse_auto_task_yaml(&yaml).expect("parse learning-deprecation-review");
+    let definition = parse_auto_task_yaml(&yaml).expect("parse artifact-deprecation-review");
 
-    assert_eq!(definition.name, "learning-deprecation-review");
+    assert_eq!(definition.name, "artifact-deprecation-review");
     assert!(definition.enabled, "definition must ship enabled");
     assert!(
         matches!(definition.schedule, AutoTaskSchedule::Cron { .. }),
@@ -71,8 +71,8 @@ fn learning_deprecation_review_is_report_only() {
         "report-only run must be tagged no-diff-expected"
     );
     assert!(
-        tags.iter().any(|t| t == "learning-deprecation"),
-        "definition must be tagged learning-deprecation"
+        tags.iter().any(|t| t == "artifact-deprecation"),
+        "definition must be tagged artifact-deprecation"
     );
 
     // Report-only: the prompt must not direct the agent to mutate learnings.

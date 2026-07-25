@@ -88,11 +88,12 @@ orbit sweep --json
 ```
 
 The dashboard also exposes `GET /api/routines`. Auto-task definitions such as
-`qa-sweep` and `learning-deprecation-review` are ordinary workspace data under
+`qa-sweep` and `artifact-deprecation-review` are ordinary workspace data under
 `.orbit/auto_tasks/`, processed by the generic auto-task scheduler routine.
-`learning-deprecation-review` is report-only — it mints a task that lists stale
-learning candidates via `execution_summary` and never mutates learnings
-(ORB-10318).
+`artifact-deprecation-review` is report-only — it mints a task that lists stale
+learning candidates and stale artifact-id comment references via
+`execution_summary` and never mutates learnings, ADRs, tasks, friction
+records, or comments (ORB-10318, ORB-10348).
 
 ## Verification and escalation
 
