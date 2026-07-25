@@ -139,7 +139,7 @@ pub(super) fn attempt_failure_activity(
     });
     match dispatch {
         Ok(dispatch) => {
-            let _ = persist_dispatch_invocation(ctx, &failure.name, &input, &dispatch);
+            persist_dispatch_invocation(ctx, &failure.name, &input, &dispatch);
             if !dispatch.success {
                 tracing::warn!(
                     target: "orbit.engine.job_executor",
