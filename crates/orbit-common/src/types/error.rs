@@ -51,6 +51,7 @@ impl std::fmt::Display for NotFoundKind {
 }
 
 #[derive(Debug, Error, Serialize)]
+#[non_exhaustive]
 pub enum OrbitError {
     #[error("policy denied: {0}")]
     PolicyDenied(String),
