@@ -21,14 +21,17 @@ template:
     1. Usage rollups — run `orbit learning stats --json` (falls back to
        `orbit tool run orbit.learning.stats` where the CLI is unavailable).
        Each row carries `injected_count`, `shown_count`, `shown_ratio`,
-       `last_injected_at`, and `last_shown_at`. Combine with each learning's
+       `last_injected_at`, and `last_shown_at`. Injection-side counters are
+       frozen as of 2026-07-20 because automatic delivery ended; zero new
+       injections is expected and is not an error. Combine with each learning's
        age from `orbit learning list --json` (`created_at` / `updated_at`).
-       A learning that is old and has never been injected or shown, or that is
-       injected but never shown (agents ignore it), is a candidate.
+       A learning that is old and has never been shown, or that was injected
+       historically but never shown, is a candidate.
     2. Anchor health — from `orbit learning list --json`, inspect each active
        learning's `scope.paths`. Flag:
-         * empty path scopes (`scope.paths == []`) — the injection hook keys on
-           path globs, so an empty scope can never inject on tool use;
+         * empty path scopes (`scope.paths == []`) — there is no path anchor
+           to inspect, so confirm that a tag scope or reference comment still
+           gives the learning a useful locator;
          * path globs that match nothing in the current tree (the anchored
            file/dir no longer exists, or the glob was written for a different
            repo layout) — these silently never fire.
@@ -37,7 +40,8 @@ template:
     ranked list of the potentially stale learnings. For each, cite the concrete
     evidence (counts, ratios, timestamps, the offending glob) and a one-line
     rationale. Rank by leverage: over-broad or dead globs and never-useful
-    injections first. Note learnings you considered but are keeping, and why.
+    never-shown learnings first. Note learnings you considered but are keeping,
+    and why.
 
     Fail open. If `orbit learning stats` reports no events (empty rollup), or
     the usage/anchor data is otherwise missing or empty, report that nothing
