@@ -26,7 +26,7 @@ The constraints are the point — they're what keep agent-assisted code shippabl
 
 - **Structured audit log.** Every tool call, provider request/response, and task transition becomes a queryable event with agent identity attached — append-only, tamper-evident, exportable. → [docs/design/auditability/](docs/design/auditability/)
 
-- **Code-graph–aware tooling.** Agents query a parsed SQLite code index (symbols, imports, references, implementors) instead of grep. Per-worktree and regenerable on demand; numbers in [`benchmarks/graph/`](benchmarks/graph/). → [docs/design/orbit-graph/](docs/design/orbit-graph/)
+- **Code-graph engine (parked).** A parsed SQLite code index (symbols, imports, references, implementors) exists in-tree, but as of ORB-10357 it has no CLI, MCP, or tool-registry surface — agents use `grep`/`rg` and direct file reads instead. Kept as a single dependent-free crate pending deletion; historical numbers in [`benchmarks/graph/`](benchmarks/graph/). → [docs/design/orbit-graph/](docs/design/orbit-graph/)
 
 - **Conflict-aware parallel execution.** For `orbit run ship`, each agent run lands in its own git worktree per task, and the gate pipeline reserves task `context_files` as locks before fanning out, rejecting overlapping reservations up front instead of producing merge conflicts later (see [merge throughput chart](docs/assets/merge-throughput.png)). → [docs/design/activity-job/](docs/design/activity-job/)
 
@@ -220,7 +220,6 @@ codex plugin add orbit@orbit
 - `orbit-workflow` — use jobs, activities, routines, and `orbit sweep`/`orbit run`; diagnose failed, stuck, or cancelled runs
 - `orbit-search` — search tasks, docs, learnings, and ADRs; dedup and related-task lookups; docs-corpus admin
 - `orbit-knowledge` — author, accept, or supersede learnings and Architecture Decision Records
-Code-graph exploration is available directly through the CLI-only `orbit graph` command (refs, callees, impact, implementors); it is not a separate skill or MCP tool family.
 
 First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are handled by the `orbit` skill itself, via its bundled setup reference.
 
@@ -228,11 +227,11 @@ First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are h
 
 ---
 
-## Orbit MCP and Graph CLI Surfaces
+## Orbit MCP Surface
 
 `orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin. The table below is a registered-tool reference; inactive or CLI/operator-only rows are called out separately from the active agent MCP surface. Run `orbit tool list` for the live registry (it's the source of truth; this table can drift).
 
-The parsed code graph is deliberately CLI-only. Use `orbit graph search|show|overview|refs|callees|impact|trace|implementors|deps|sync` from a shell. Graph commands are not advertised by MCP and are not available through `orbit tool run orbit.graph.*`.
+The parsed code graph has no CLI, MCP, or tool-registry surface as of ORB-10357; it is not reachable by any command.
 
 Not every tool is intended for agent calls. Lifecycle/admin operations (`docs.index`, `docs.migrate`, `semantic.*`, `learning.sync`, `task.locks.*`, and `friction.*` reads/updates) are typically driven by humans via the CLI; the recommended agent permission profile auto-allows discovery/write tools and prompts on the rest. See `.claude/settings.json` (and `.codex/`, `.grok/`, `.gemini/` equivalents) in the seeded workspace for the default agent-facing subset.
 
@@ -289,7 +288,7 @@ Agents discover project docs through `orbit.search`; docs, lock, semantic setup/
 ├── adrs/                        # proposed/, accepted/, superseded/
 ├── learnings/                   # your team's durable knowledge
 ├── frictions/                   # local friction log + tags.yaml
-├── graph/                       # parsed code-graph index (.db, per worktree)
+├── graph/                       # parsed code-graph index (.db, per worktree); vestigial, no command writes it (ORB-10357)
 ├── resources/                   # activities, jobs, executors, policies (customizable)
 └── state/
     ├── audit/                   # reserved; audit events live in ~/.orbit/orbit.db
@@ -320,7 +319,7 @@ Couple things to note:
 
 Orbit is v0.7.x — work in progress.
 
-- Core local execution, graph build/query, workflows, MCP, tasks, reviews, ADRs, frictions, and audit infrastructure are usable today.
+- Core local execution, workflows, MCP, tasks, reviews, ADRs, frictions, and audit infrastructure are usable today. (The code-graph engine is parked, dependent-free, with no CLI/MCP surface as of ORB-10357.)
 
 ---
 

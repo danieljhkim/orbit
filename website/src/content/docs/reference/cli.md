@@ -33,7 +33,6 @@ sidebar:
 
 | Command | Purpose |
 |---------|---------|
-| `orbit graph` | Build and query the knowledge graph. See [Knowledge Graph](../concepts/knowledge-graph). |
 | `orbit audit` | Query the audit event log. |
 | `orbit run history` | Show recent job runs. Filter to one job with `-j <job_id>`. |
 | `orbit run show [run_id]` | Show structured state and step summary for a job run (defaults to latest). |

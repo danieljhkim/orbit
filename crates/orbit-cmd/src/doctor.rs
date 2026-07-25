@@ -229,13 +229,18 @@ fn doctor_check_graph_index(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
         None => check(
             "graph-index",
             WorkspaceDoctorStatus::Skipped,
-            "no graph index built (run `orbit graph sync` to create one)".to_string(),
+            "no graph index built (the code-graph CLI surface was removed in ORB-10357; \
+             this check is a legacy vestige with no build command)"
+                .to_string(),
         ),
         Some(Ok(detail)) => check("graph-index", WorkspaceDoctorStatus::Ok, detail),
         Some(Err(error)) => check(
             "graph-index",
             WorkspaceDoctorStatus::Warning,
-            format!("graph index unreadable ({error}); rebuild with `orbit graph sync`"),
+            format!(
+                "graph index unreadable ({error}); no rebuild command exists \
+                 (the code-graph CLI surface was removed in ORB-10357)"
+            ),
         ),
     }
 }

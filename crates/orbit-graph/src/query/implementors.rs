@@ -7,7 +7,7 @@
 //! `std::fmt::Display`. This mirrors v1's "trailing identifiers match" behavior.
 //! See ORB-00389.
 
-use orbit_graph_extract::Selector;
+use crate::extract::Selector;
 use rusqlite::{Connection, params};
 
 use crate::{Graph, GraphError, Implementor, ImplementorsResult, RefKind};

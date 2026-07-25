@@ -1,6 +1,6 @@
 ---
 title: Knowledge Graph
-description: "The parsed codebase structure Orbit builds and exposes to agents."
+description: "The parsed codebase structure Orbit's graph engine models; parked with no command surface as of ORB-10357."
 sidebar:
   order: 5
 ---
@@ -9,23 +9,13 @@ sidebar:
 
 The knowledge graph is Orbit's parsed, SQLite-backed model of a repository. It contains directories, files, extracted symbols, import edges, trait implementors, call sites, and source references.
 
-Agents query the graph when they need code context. The graph gives structured selectors and scoped query results instead of large grep output.
+**Status:** as of ORB-10357, the graph engine (`orbit-graph`) has no CLI, MCP, or tool-registry surface — it is not reachable by agents or humans through any command. Agents query code context with `grep`/`rg` and direct file reads instead. The engine ships as a single dependent-free crate pending deletion; this page documents its data model for historical reference.
 
 ```mermaid
 graph TD
-    Agent[Agent Loop] -->|Queries for Context| Graph[(Knowledge Graph)]
-    Graph -->|Returns Scoped Results| Agent
+    Agent[Agent Loop] -->|Reads directly| Files[(Worktree Files)]
+    Agent -->|Searches| Grep[grep / rg]
     Agent -->|Executes Action| Worktree[Worktree Isolation]
-```
-
-## Commands
-
-The graph syncs on demand via a file watcher; force a refresh with `orbit graph sync` (add `--full` for a complete re-index). Query it with:
-
-```bash
-orbit graph sync
-orbit graph search task
-orbit graph show file:crates/orbit-cli/src/main.rs
 ```
 
 ## Branch Scope

@@ -122,18 +122,4 @@ orbit workspace init --mcp
 
 `orbit init` seeds `~/.orbit/config.toml` and prompts for per-role agent settings (reviewer, implementer, planner). See [Configuration](../../reference/config/) for file locations, shape, and backend precedence.
 
-## Update the Graph
-
-The code graph syncs on demand — a file watcher keeps it fresh as you work, so reads are normally up to date without a manual step (there is no separate init-time build). To force a refresh:
-
-```bash
-orbit graph sync
-```
-
-For a complete re-index — needed for full `trace` coverage, since incremental sync resolves fewer command handlers:
-
-```bash
-orbit graph sync --full
-```
-
 <!-- ORB-10117 -->

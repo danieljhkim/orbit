@@ -526,31 +526,6 @@ impl Commands {
                     dispatch_learning,
                 )
             }
-            Commands::Graph(command) => {
-                use orbit_graph_cli::Command as GraphSubcommand;
-                let subcommand = match &command.command {
-                    GraphSubcommand::Sync(_) => "sync",
-                    GraphSubcommand::Search(_) => "search",
-                    GraphSubcommand::Show(_) => "show",
-                    GraphSubcommand::Refs(_) => "refs",
-                    GraphSubcommand::Callees(_) => "callees",
-                    GraphSubcommand::Impact(_) => "impact",
-                    GraphSubcommand::Trace(_) => "trace",
-                    GraphSubcommand::Overview(_) => "overview",
-                    GraphSubcommand::Implementors(_) => "implementors",
-                    GraphSubcommand::Deps(_) => "deps",
-                    GraphSubcommand::Version(_) => "version",
-                    GraphSubcommand::DbPath(_) => "db-path",
-                    GraphSubcommand::Clean(_) => "clean",
-                };
-                CommandOperation::new(
-                    RuntimeNeed::Required,
-                    Some(admin_meta("graph", Some(subcommand), Some("graph"), None)),
-                    None,
-                    false,
-                    runtime_dispatch!(Graph),
-                )
-            }
             Commands::Audit(_) => CommandOperation::new(
                 RuntimeNeed::Required,
                 None,

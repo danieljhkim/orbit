@@ -15,7 +15,6 @@ flowchart LR
   CLI --> Core["orbit-core"]
   CLI --> Remote["orbit-remote"]
   CLI --> Dashboard["orbit-dashboard"]
-  CLI --> GraphCli["orbit-graph-cli"]
   Dashboard --> Core
   Dashboard --> Remote
   Dashboard --> Cmd
@@ -40,16 +39,9 @@ flowchart LR
   Remote --> Tools
   Remote --> MCP["orbit-mcp"]
   Remote --> Graph["orbit-graph"]
-  Remote --> GraphExtract["orbit-graph-extract"]
   Remote --> Common
-  Graph --> GraphExtract["orbit-graph-extract"]
   Graph --> Common
-  GraphExtract --> Common
-  GraphCli --> Graph
-  GraphCli --> GraphExtract
   Search --> Common
-  SearchCompanion["orbit-search-companion"] --> Search
-  SearchCompanion --> Common
   MCP --> Common
   Store --> Common
   Exec --> Common
@@ -77,11 +69,8 @@ end while reusing neutral mechanisms.
 | `orbit-policy` | Filesystem-scoping policy and profile resolution. |
 | `orbit-exec` | Process, sandbox, and supervision primitives. |
 | `orbit-store` | Generic YAML/SQLite stores, connection primitives, namespaced feature-migration ledger, and immutable historical bootstrap migrations. |
-| `orbit-graph-extract` | Language extractors and raw graph row contracts. |
-| `orbit-graph` | Worktree-local derived graph index and query API. |
-| `orbit-graph-cli` | Shared clap/JSON command surface for `orbit graph`. |
-| `orbit-search` | Retrieval/ranking feature and workspace-local semantic index. |
-| `orbit-search-companion` | Separately installed embedding companion binary. |
+| `orbit-graph` | Worktree-local derived graph index and query API; folds language extraction and the (dependent-free, no-command-surface) former CLI layer as modules. |
+| `orbit-search` | Retrieval/ranking feature and workspace-local semantic index; also builds `orbit-search-companion`, a separately installed embedding companion binary, as an additional `[[bin]]` target. |
 | `orbit-agent` | HTTP loop transport and retained CLI runtimes. |
 | `orbit-engine` | Activity/job execution, template rendering, retries, CLI subprocess runner. |
 | `orbit-tools` | Generic built-in tool registry and external tool integration. |

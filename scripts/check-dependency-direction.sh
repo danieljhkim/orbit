@@ -18,24 +18,22 @@ allowed_internal_deps() {
       # Remote MCP host and the CLI hook command layer.
       echo "orbit-cmd orbit-common orbit-core orbit-mcp orbit-store orbit-tools"
       ;;
-    orbit-policy | orbit-exec | orbit-store | orbit-search)
+    orbit-policy | orbit-exec | orbit-store)
       echo "orbit-common"
       ;;
-    orbit-search-companion)
-      echo "orbit-common orbit-search"
-      ;;
-    orbit-graph-extract)
-      # ORB-10011 / ADR-0202: canonical Selector parser lives in orbit-common.
+    orbit-search)
+      # ORB-10357 folded the former orbit-search-companion crate in as an
+      # additional [[bin]] target; fastembed is a workspace dependency, not
+      # an internal crate edge.
       echo "orbit-common"
       ;;
     orbit-graph)
       # ORB-10013: orbit-common needed for the GraphError -> OrbitError
       # translator (graph_error_to_orbit), which lives next to the error per
-      # docs/design-patterns/error_translation.md.
-      echo "orbit-common orbit-graph-extract"
-      ;;
-    orbit-graph-cli)
-      echo "orbit-graph orbit-graph-extract"
+      # docs/design-patterns/error_translation.md. ORB-10357 folded the former
+      # orbit-graph-extract and orbit-graph-cli crates in as modules; the
+      # crate now has zero workspace dependents and awaits deletion.
+      echo "orbit-common"
       ;;
     orbit-tools)
       echo "orbit-common orbit-exec orbit-policy"
@@ -61,7 +59,7 @@ allowed_internal_deps() {
       echo "orbit-common orbit-cmd orbit-core orbit-remote"
       ;;
     orbit-cli)
-      echo "orbit-common orbit-cmd orbit-core orbit-graph-cli orbit-remote orbit-dashboard"
+      echo "orbit-common orbit-cmd orbit-core orbit-remote orbit-dashboard"
       ;;
     *)
       return 1

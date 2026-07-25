@@ -3,14 +3,14 @@ summary: "Orbit Graph — Design"
 type: design
 title: "Orbit Graph — Design"
 owner: claude
-last_updated: 2026-07-19
+last_updated: 2026-07-25
 status: Draft
 feature: orbit-graph
 doc_role: design
 tags: ["orbit-graph"]
-paths: ["crates/orbit-graph/**", "crates/orbit-graph-extract/**", "crates/orbit-graph-cli/**"]
+paths: ["crates/orbit-graph/**"]
 related_features: [knowledge-graph]
-related_artifacts: [ORB-00391, ORB-00396, ORB-10011, ORB-10225, ORB-10319, ORB-10325, ADR-0241]
+related_artifacts: [ORB-00391, ORB-00396, ORB-10011, ORB-10225, ORB-10319, ORB-10325, ADR-0241, ORB-10357]
 ---
 
 # Orbit Graph — Design
@@ -19,11 +19,13 @@ This document specifies the design of `orbit-graph` at the architectural level: 
 
 The companion ADR log is in [4_decisions.md](./4_decisions.md); forward-looking work (write surface, embeddings, cross-language refs) lives in [3_vision.md](./3_vision.md).
 
+> **Status (ORB-10357, 2026-07-25):** the three-crate layout and the `orbit graph` CLI surface described below are historical. `orbit-graph-extract` and `orbit-graph-cli` are now modules inside `orbit-graph` (`extract`, `cli`); the `orbit graph` subcommand no longer exists on `orbit-cli`, and `orbit-graph` has zero workspace dependents. See [1_overview.md](./1_overview.md) and the amended ADR-0199 in [4_decisions.md](./4_decisions.md#adr-0199--reintroduce-orbit-graph-as-a-thin-wrapper-over-orbit-graph-cli). The crate-boundary and CLI sections below are kept for historical rationale, not as a description of the current surface.
+
 ---
 
 ## 1. Crate Boundaries
 
-Three graph crates replace `orbit-knowledge`; `orbit-graph-cli` is the sole external graph surface. Layered per [`ARCHITECTURE.md`](../../../ARCHITECTURE.md); no cross-crate edges beyond what's shown.
+Three graph crates replaced `orbit-knowledge`, with `orbit-graph-cli` as the sole external graph surface (historical — see status note above; the three crates are now modules within `orbit-graph` and there is no external graph surface). Layered per [`ARCHITECTURE.md`](../../../ARCHITECTURE.md); no cross-crate edges beyond what's shown.
 
 ```
                  authoritative

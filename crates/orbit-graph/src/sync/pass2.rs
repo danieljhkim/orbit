@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use orbit_graph_extract::RawRef;
+use crate::extract::RawRef;
 use rusqlite::{Connection, Transaction, TransactionBehavior, params};
 
 use super::pass1::ExtractedFileRefs;

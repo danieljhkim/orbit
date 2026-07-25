@@ -2,8 +2,8 @@
 //!
 //! This is the single implementation of the stable selector grammar
 //! (`dir:` / `file:` / `symbol:` / `module:` / `command:`) shared by task
-//! scopes and graph queries. `orbit-graph-extract` re-exports this module for
-//! graph consumers; the grammar reference lives in
+//! scopes and graph queries. `orbit-graph::extract` re-exports this module
+//! for graph consumers; the grammar reference lives in
 //! `docs/design/orbit-graph/specs/GRAPH_SPEC.md`.
 
 use std::fmt::{Display, Formatter};

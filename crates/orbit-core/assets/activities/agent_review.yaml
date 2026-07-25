@@ -64,11 +64,9 @@ spec:
        different head.
     2. For each task id in `input.task_ids`, call `orbit.task.show` to
        recover its description, acceptance criteria, plan, and context
-       files. Use the CLI-only graph surface through `proc.spawn`: read
-       context selectors via `orbit graph show <selector>` (and
-       `orbit graph overview <selector>` for `dir:` scopes), falling back
-       to `fs.read` only when the graph CLI is unavailable or a selector is
-       unresolved. If `orbit.search` is available, optionally call it with
+       files. Resolve context selectors with `fs.read`: read each named file
+       directly, and for `dir:` scopes read the directory listing plus its
+       key files. If `orbit.search` is available, optionally call it with
        `semantic: "<task-id>"` to surface prior similar tasks whose decisions
        may inform this review; skip if the companion binary is not installed.
     3. Diff `input.base_branch...input.candidate_head_sha` and inspect the

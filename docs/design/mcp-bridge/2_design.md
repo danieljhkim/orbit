@@ -69,7 +69,6 @@ orbit-cli / orbit-dashboard
               ├── orbit-tools
               ├── orbit-mcp
               ├── orbit-graph
-              ├── orbit-graph-extract
               └── orbit-common
 ```
 
@@ -777,7 +776,7 @@ Orbit:
 | Capability | Owner after migration |
 |------------|-----------------------|
 | Tasks, frictions, learnings, ADRs, Orbit search | Orbit MCP |
-| Code graph queries | Local `orbit graph` CLI only |
+| Code graph queries | None — the `orbit graph` CLI was removed in ORB-10357; inspect files directly |
 | Host/workspace/crew discovery and workflow submit/observe | Orbit MCP |
 | Sextant search and document retrieval | Bridge/Sextant |
 | Raw one-shot Worker invocation and non-pipeline run control | Bridge/Worker |

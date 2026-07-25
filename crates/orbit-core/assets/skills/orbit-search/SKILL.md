@@ -5,7 +5,7 @@ description: Use when searching tasks, docs, learnings, or ADRs through the unif
 
 # Orbit Search
 
-Use `orbit search` to find project context by topic, literal phrase, or related task ID. The query surface is `orbit search`; the lifecycle surface is `orbit semantic install|uninstall|stats|index`. `orbit graph` remains the tool for code-structure questions (callers, refs, implementors, symbol selectors) — search is corpus retrieval, graph is structural traversal.
+Use `orbit search` to find project context by topic, literal phrase, or related task ID. The query surface is `orbit search`; the lifecycle surface is `orbit semantic install|uninstall|stats|index`. For code-structure questions (callers, refs, implementors, symbol selectors), inspect files directly with `fs.read` or `rg` — search is corpus retrieval, not structural traversal.
 
 ## Query Surface
 
@@ -36,7 +36,7 @@ orbit search similar "<task-id>" --limit 5   # MCP: {"semantic":"<task-id>","lim
 
 **When to use:** (1) pre-create dedup check — `--hybrid --kind task` before adding a task; (2) pre-execute related lookup — `semantic: "<task-id>"` after `orbit.task.show` to surface prior decisions the author may not have linked; (3) ad-hoc — "where did we decide X" starts with `orbit search "X" --kind all`.
 
-**Stop rule:** if one well-formed query returns useful hits, stop and inspect — don't chain rewrites chasing higher scores. Don't use search for "find every symbol matching X" — with shell access, that's `orbit graph search`.
+**Stop rule:** if one well-formed query returns useful hits, stop and inspect — don't chain rewrites chasing higher scores. Don't use search for "find every symbol matching X" — with shell access, that's `rg`.
 
 ## Semantic Companion Lifecycle
 
@@ -91,7 +91,7 @@ Recommended (not enforced) layout: `docs/design/<feature>/`, `docs/design-patter
 |---------|---------------|--------------|
 | Calling lifecycle commands to search | `orbit semantic` manages the companion | Use `orbit search` / `orbit.search` |
 | Aborting when the companion isn't installed | Embeddings are optional infra | Fall back to lexical unless the user opted in |
-| Using semantic search for exact identifiers | Lexical is cheaper/predictable for names, paths, error strings | Plain `orbit search`, or CLI-only `orbit graph search` for code symbols |
+| Using semantic search for exact identifiers | Lexical is cheaper/predictable for names, paths, error strings | Plain `orbit search`, or `rg` for code symbols |
 | `--semantic <id>` on a brand-new task | May not have embeddings yet | `--hybrid --kind task` on title/description |
 
 ## Cross-References

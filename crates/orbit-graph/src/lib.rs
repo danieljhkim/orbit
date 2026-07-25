@@ -16,13 +16,23 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use git2::Repository;
 use orbit_common::types::OrbitError;
-pub use orbit_graph_extract::Selector;
 use rusqlite::{Connection, OpenFlags, params};
 use serde::Serialize;
 
+/// CLI command layer for the Orbit graph, folded from the former
+/// `orbit-graph-cli` crate. No workspace crate wires this up as of ORB-10357;
+/// it is parked here awaiting the eventual deletion of the whole graph island.
+/// `pub` so the command layer stays a live library surface (matching its
+/// original lib+bin design) rather than dead code with no external reachability.
+pub mod cli;
+/// Pure extraction contracts and language-specific extractors, folded from the
+/// former `orbit-graph-extract` crate.
+mod extract;
 mod query;
 mod store;
 mod sync;
+
+pub use extract::Selector;
 
 pub use query::{
     DEFAULT_SEARCH_LIMIT, DEFAULT_SHOW_MAX_BYTES, Match, NodeMetadata, NodeView, SearchKind,

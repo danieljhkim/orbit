@@ -24,7 +24,6 @@ csv = "1"
 orbit-cmd = { path = "../orbit-cmd" }
 orbit-common = { path = "../orbit-common" }
 orbit-core = { path = "../orbit-core", features = ["clap"] }
-orbit-graph-cli = { path = "../orbit-graph-cli" }
 orbit-remote = { path = "../orbit-remote" }
 orbit-dashboard = { path = "../orbit-dashboard" }
 regex.workspace = true

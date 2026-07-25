@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use orbit_graph_extract::RawRef;
+use crate::extract::RawRef;
 use rusqlite::{Connection, params};
 
 use crate::sync::pass1::ExtractedFileRefs;

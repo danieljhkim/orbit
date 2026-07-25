@@ -326,8 +326,7 @@ orbit-cli / orbit-dashboard
               ├── orbit-store  (generic SQLite and feature-migration kernel)
               ├── orbit-tools  (generic builtin tool definitions)
               ├── orbit-mcp    (generic RMCP framing and raw client)
-              ├── orbit-graph  (local-derived graph query engine)
-              ├── orbit-graph-extract (graph selectors and extractors)
+              ├── orbit-graph  (local-derived graph query engine; extraction folded in as a module, ORB-10357)
               └── orbit-common (shared DTOs)
 ```
 

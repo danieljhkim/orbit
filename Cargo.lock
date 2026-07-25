@@ -2203,7 +2203,6 @@ dependencies = [
  "orbit-common",
  "orbit-core",
  "orbit-dashboard",
- "orbit-graph-cli",
  "orbit-remote",
  "predicates",
  "regex",
@@ -2352,47 +2351,21 @@ name = "orbit-graph"
 version = "0.9.2"
 dependencies = [
  "blake3",
+ "clap",
  "fs2",
  "git2",
  "ignore",
  "notify",
  "orbit-common",
- "orbit-graph-extract",
  "rayon",
  "rusqlite",
  "serde",
  "serde_json",
- "tracing",
-]
-
-[[package]]
-name = "orbit-graph-cli"
-version = "0.9.2"
-dependencies = [
- "assert_cmd",
- "clap",
- "git2",
- "orbit-graph",
- "orbit-graph-extract",
- "predicates",
- "serde",
- "serde_json",
+ "serde_yaml",
  "tempfile",
  "thiserror",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "orbit-graph-extract"
-version = "0.9.2"
-dependencies = [
- "orbit-common",
- "serde",
- "serde_json",
- "serde_yaml",
- "thiserror",
  "toml",
+ "tracing",
  "tree-sitter",
  "tree-sitter-c",
  "tree-sitter-c-sharp",
@@ -2461,6 +2434,8 @@ version = "0.9.2"
 dependencies = [
  "blake3",
  "chrono",
+ "clap",
+ "fastembed",
  "libc",
  "orbit-common",
  "reqwest",
@@ -2471,17 +2446,6 @@ dependencies = [
  "sha2",
  "tempfile",
  "tracing",
-]
-
-[[package]]
-name = "orbit-search-companion"
-version = "0.9.2"
-dependencies = [
- "clap",
- "fastembed",
- "orbit-common",
- "orbit-search",
- "serde_json",
 ]
 
 [[package]]

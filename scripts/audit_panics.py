@@ -49,13 +49,10 @@ ALL_CRATES = [
     "orbit-engine",
     "orbit-exec",
     "orbit-graph",
-    "orbit-graph-cli",
-    "orbit-graph-extract",
     "orbit-mcp",
     "orbit-policy",
     "orbit-remote",
     "orbit-search",
-    "orbit-search-companion",
     "orbit-store",
     "orbit-tools",
 ]
