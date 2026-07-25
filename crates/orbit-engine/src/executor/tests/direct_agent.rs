@@ -74,6 +74,31 @@ fn direct_agent_success_ignores_stdout() {
 }
 
 #[test]
+fn direct_agent_success_extracts_claude_model_and_cost_without_exposing_stdout() {
+    let stdout = serde_json::json!({
+        "type": "result",
+        "subtype": "success",
+        "result": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
+        "total_cost_usd": 0.286169,
+        "modelUsage": {
+            "claude-haiku-4-5-20251001": { "costUSD": 0.000598 },
+            "claude-fable-5": { "costUSD": 0.285571 }
+        }
+    })
+    .to_string();
+
+    let outcome = map_exec_result_to_outcome(&execution_result(&stdout, true));
+
+    assert_eq!(outcome.state, JobRunState::Success);
+    assert_eq!(outcome.response_json, None);
+    assert_eq!(
+        outcome.invocation_trace.provider_model.as_deref(),
+        Some("claude-fable-5")
+    );
+    assert_eq!(outcome.invocation_trace.provider_cost_usd, Some(0.286169));
+}
+
+#[test]
 fn direct_agent_failure_ignores_stdout_for_error_message() {
     let outcome = map_exec_result_to_outcome(&execution_result(
         "stdout is audit data, not workflow state",

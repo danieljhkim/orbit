@@ -205,7 +205,13 @@ impl V2RuntimeHost for OrbitRuntime {
         input: &Value,
         trace: &InvocationTrace,
     ) -> Result<(), DispatchError> {
-        let (agent, model) = self.canonical_agent_model_identity(Some(provider), model);
+        let (agent, model) = self.invocation_agent_model_identity(
+            provider,
+            model,
+            trace.provider_model.as_deref(),
+            job_run_id,
+            activity_id,
+        );
         let store = Store::open(&self.context.persistence().audit_db).map_err(|error| {
             DispatchError::JobExecution(format!("open invocation store: {error}"))
         })?;
@@ -349,6 +355,7 @@ mod tests {
         InvocationTrace, JobRunState, TaskPriority, TaskStatus, TaskType, TokenUsage, ToolCallTrace,
     };
     use orbit_engine::{V2AuditWriter, drive_agent_loop, reset_replay_transport};
+    use orbit_store::InvocationQuery;
     use tempfile::NamedTempFile;
 
     use super::test_support::{runtime_with_workspace_layout, seed_list_backlog_task};
@@ -445,8 +452,41 @@ mod tests {
             },
             tool_calls,
             duration_ms: 10,
+            provider_model: None,
             provider_cost_usd: None,
         }
+    }
+
+    #[test]
+    fn persist_invocation_trace_prefers_provider_model_over_requested_alias() {
+        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+        let run_id = seed_running_job_run(&runtime, "provider_model_job");
+        let trace = InvocationTrace {
+            provider_model: Some("claude-fable-5".to_string()),
+            ..InvocationTrace::default()
+        };
+
+        V2RuntimeHost::persist_invocation_trace(
+            &runtime,
+            &run_id,
+            "implement_one",
+            "claude",
+            Some("fable"),
+            &serde_json::json!({ "task_id": "ORB-10370" }),
+            &trace,
+        )
+        .expect("persist provider model");
+
+        let records = runtime
+            .invocation_records(InvocationQuery {
+                job_run_id: Some(run_id),
+                limit: 1,
+                ..InvocationQuery::default()
+            })
+            .expect("query invocation records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].agent, "claude");
+        assert_eq!(records[0].model.as_deref(), Some("claude-fable-5"));
     }
 
     fn persist_test_trace(runtime: &OrbitRuntime, run_id: &str, trace: &InvocationTrace) {

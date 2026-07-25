@@ -19,6 +19,7 @@ fn merge_invocation_trace_records_fs_read_metrics() {
             result_payload: None,
         }],
         duration_ms: 1_234,
+        provider_model: None,
         provider_cost_usd: None,
     };
 
@@ -59,6 +60,7 @@ fn merge_invocation_trace_without_measured_tool_or_existing_returns_none() {
             result_payload: None,
         }],
         duration_ms: 5,
+        provider_model: None,
         provider_cost_usd: None,
     };
 

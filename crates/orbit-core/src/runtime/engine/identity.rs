@@ -32,6 +32,39 @@ impl OrbitRuntime {
             .unwrap_or_else(|_| self.legacy_canonical_agent_model_identity(agent_cli, model))
     }
 
+    pub(crate) fn invocation_agent_model_identity(
+        &self,
+        agent_cli: &str,
+        requested_model: Option<&str>,
+        provider_model: Option<&str>,
+        job_run_id: &str,
+        activity_id: &str,
+    ) -> (Option<String>, Option<String>) {
+        let (agent, requested_model) =
+            self.canonical_agent_model_identity(Some(agent_cli), requested_model);
+        let provider_model = provider_model
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned);
+
+        if let (Some(requested_model), Some(provider_model)) =
+            (requested_model.as_deref(), provider_model.as_deref())
+            && requested_model != provider_model
+        {
+            tracing::warn!(
+                target: "orbit.core.invocation",
+                job_run_id,
+                activity_id,
+                agent_cli,
+                requested_model,
+                provider_model,
+                "provider-reported model differs from requested model",
+            );
+        }
+
+        (agent, provider_model.or(requested_model))
+    }
+
     pub(crate) fn try_canonical_agent_model_identity(
         &self,
         agent_cli: Option<&str>,

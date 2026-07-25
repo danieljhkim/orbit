@@ -53,6 +53,135 @@ mod parse {
     }
 
     #[test]
+    fn claude_cli_selects_the_highest_cost_reported_model_and_cost() {
+        // Captured from Claude Code 2.1.220 with `--model fable`: the CLI
+        // reports both a small internal Haiku invocation and the requested
+        // model. Per-model cost is the only provider-owned discriminator.
+        let stdout = serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "result": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
+            "total_cost_usd": 0.286169,
+            "modelUsage": {
+                "claude-haiku-4-5-20251001": {
+                    "costUSD": 0.000598,
+                    "canonicalModel": "claude-haiku-4-5"
+                },
+                "claude-fable-5": {
+                    "costUSD": 0.285571,
+                    "canonicalModel": "claude-fable-5"
+                }
+            }
+        })
+        .to_string();
+
+        let (_, _, trace) =
+            parse_and_validate_response(&exec(&stdout, "", Some(0), true)).expect("Claude parses");
+        assert_eq!(trace.provider_model.as_deref(), Some("claude-fable-5"));
+        assert_eq!(trace.provider_cost_usd, Some(0.286169));
+    }
+
+    #[test]
+    fn claude_cli_leaves_ambiguous_equal_cost_models_unknown() {
+        let stdout = serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "result": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
+            "modelUsage": {
+                "claude-a": { "costUSD": 1.0 },
+                "claude-b": { "costUSD": 1.0 }
+            }
+        })
+        .to_string();
+
+        let (_, _, trace) =
+            parse_and_validate_response(&exec(&stdout, "", Some(0), true)).expect("Claude parses");
+        assert_eq!(trace.provider_model, None);
+    }
+
+    #[test]
+    fn gemini_cli_reads_the_single_stats_model_key_without_a_cost() {
+        // `stats.models` is the live Gemini CLI shape already used by the
+        // token-ingest regression fixtures. Unlike Claude, it reports no
+        // invocation-total USD cost.
+        let stdout = serde_json::json!({
+            "response": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
+            "stats": {
+                "models": {
+                    "gemini-3.1-pro": {
+                        "tokens": {
+                            "input": 40_919,
+                            "output": 70,
+                            "cached": 40_101,
+                            "thoughts": 396,
+                            "tool": 0,
+                            "total": 41_385
+                        }
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let (_, _, trace) =
+            parse_and_validate_response(&exec(&stdout, "", Some(0), true)).expect("Gemini parses");
+        assert_eq!(trace.provider_model.as_deref(), Some("gemini-3.1-pro"));
+        assert_eq!(trace.provider_cost_usd, None);
+    }
+
+    #[test]
+    fn gemini_cli_leaves_multiple_stats_models_unknown() {
+        let stdout = serde_json::json!({
+            "response": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
+            "stats": {
+                "models": {
+                    "gemini-3.1-pro": { "tokens": { "total": 10 } },
+                    "gemini-2.5-flash": { "tokens": { "total": 5 } }
+                }
+            }
+        })
+        .to_string();
+
+        let (_, _, trace) =
+            parse_and_validate_response(&exec(&stdout, "", Some(0), true)).expect("Gemini parses");
+        assert_eq!(trace.provider_model, None);
+    }
+
+    #[test]
+    fn codex_jsonl_reports_usage_but_no_model_or_cost() {
+        // Captured from codex-cli 0.144.1: successful JSONL contains
+        // thread/turn events and turn.completed usage, but no model identity
+        // or provider cost.
+        let stdout = concat!(
+            "{\"type\":\"thread.started\",\"thread_id\":\"thread-1\"}\n",
+            "{\"type\":\"turn.started\"}\n",
+            "{\"type\":\"item.completed\",\"item\":{\"id\":\"item-0\",\"type\":\"agent_message\",\"text\":\"{\\\"schemaVersion\\\":1,\\\"status\\\":\\\"success\\\",\\\"result\\\":{},\\\"error\\\":null}\"}}\n",
+            "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":17389,\"cached_input_tokens\":0,\"output_tokens\":22,\"reasoning_output_tokens\":0}}\n"
+        );
+
+        let (_, _, trace) =
+            parse_and_validate_response(&exec(stdout, "", Some(0), true)).expect("Codex parses");
+        assert_eq!(trace.provider_model, None);
+        assert_eq!(trace.provider_cost_usd, None);
+    }
+
+    #[test]
+    fn grok_json_wrapper_reports_no_model_or_cost() {
+        // The production Grok fix established this text/stopReason wrapper;
+        // the wrapper carries neither model identity nor a USD total.
+        let stdout = serde_json::json!({
+            "text": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
+            "stopReason": "EndTurn"
+        })
+        .to_string();
+
+        let (_, _, trace) =
+            parse_and_validate_response(&exec(&stdout, "", Some(0), true)).expect("Grok parses");
+        assert_eq!(trace.provider_model, None);
+        assert_eq!(trace.provider_cost_usd, None);
+    }
+
+    #[test]
     fn synthesize_trace_falls_back_to_duration_only_when_stdout_unparseable() {
         // Plain non-JSON stdout: regression check that the previous "duration
         // only, zero usage" behavior is preserved when documents can't be

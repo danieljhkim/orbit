@@ -603,6 +603,7 @@ pub(crate) fn loop_outcome_trace(
         },
         tool_calls,
         duration_ms,
+        provider_model: None,
         provider_cost_usd: None,
     }
 }

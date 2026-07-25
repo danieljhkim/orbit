@@ -49,6 +49,11 @@ pub struct InvocationTrace {
     pub tool_calls: Vec<ToolCallTrace>,
     #[serde(default)]
     pub duration_ms: u64,
+    /// Exact model string reported by the provider CLI, when its result
+    /// protocol identifies one unambiguously. This is deliberately opaque:
+    /// aliases and provider-specific suffixes are preserved verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_model: Option<String>,
     /// Provider-reported total cost in USD for this invocation, when the
     /// caller has it (e.g. Claude CLI `total_cost_usd`). Kept verbatim
     /// alongside the token-derived cost computed from the price table at
