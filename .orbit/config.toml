@@ -31,12 +31,12 @@ default_crew = "opus"
 role = "source"
 
 [crews.opus]
-model = "opus"
+model = "claude-opus-5"
 provider = "claude"
 backend = "cli"
 
 [crews.sonnet]
-model = "sonnet"
+model = "claude-sonnet-5"
 provider = "claude"
 backend = "cli"
 
