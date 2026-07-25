@@ -39,6 +39,10 @@ pub(crate) const DEFAULT_ROUTINE_FILES: &[(&str, &str)] = &[
         "ship_sweep",
         include_str!("../../assets/routines/ship_sweep.yaml"),
     ),
+    (
+        "worktree_gc",
+        include_str!("../../assets/routines/worktree_gc.yaml"),
+    ),
 ];
 
 const HOST_ID_PLACEHOLDER: &str = "__ORBIT_HOST_ID__";
@@ -133,6 +137,7 @@ mod tests {
             ("auto_task_scheduler", "auto_task_scheduler_pipeline"),
             ("task_triage", "task_triage_pipeline"),
             ("ship_sweep", "workspace_ship_pipeline"),
+            ("worktree_gc", "worktree_gc_pipeline"),
         ] {
             let yaml = std::fs::read_to_string(routines_dir.join(format!("{stem}.yaml")))
                 .expect("read seeded routine");
@@ -164,6 +169,13 @@ mod tests {
         );
         assert_eq!(ship.trigger.cron, "*/20 * * * *");
         parse_cron(&ship.trigger.cron).expect("ship cron parses");
+
+        let gc = std::fs::read_to_string(routines_dir.join("worktree_gc.yaml"))
+            .expect("read worktree GC routine");
+        let gc = parse_routine_yaml(&gc).expect("worktree GC routine parses");
+        assert!(!gc.enabled);
+        assert_eq!(gc.policy.overlap, OverlapPolicy::Forbid);
+        assert_eq!(gc.trigger.cron, "35 * * * *");
     }
 
     #[test]
@@ -171,7 +183,7 @@ mod tests {
         let root = tempdir().expect("create tempdir");
         let routines_dir = root.path().join("routines");
         seed_default_routines(&routines_dir, "host-a", None, false).expect("first seed");
-        let path = routines_dir.join("task_triage.yaml");
+        let path = routines_dir.join("worktree_gc.yaml");
         std::fs::write(&path, "user edited").expect("simulate user edit");
 
         let seeded = seed_default_routines(&routines_dir, "host-a", None, false).expect("re-seed");
@@ -186,7 +198,12 @@ mod tests {
         let refreshed = std::fs::read_to_string(&path).expect("read refreshed");
         assert!(refreshed.contains("host-b"));
         let definition = parse_routine_yaml(&refreshed).expect("refreshed routine parses");
-        assert_eq!(definition.name, "task-triage");
+        assert_eq!(definition.name, "worktree-gc");
+        assert_eq!(
+            definition.target,
+            RoutineTarget::Job("worktree_gc_pipeline".to_string())
+        );
+        assert!(!definition.enabled);
     }
 
     #[test]

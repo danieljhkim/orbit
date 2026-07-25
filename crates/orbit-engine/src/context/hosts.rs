@@ -260,6 +260,11 @@ pub trait ExecutorLookupHost {
 pub trait RuntimeHost {
     fn record_event(&self, event: OrbitEvent) -> Result<(), OrbitError>;
     fn repo_root(&self) -> Result<String, OrbitError>;
+    fn list_job_runs_for_gc(&self) -> Result<Vec<JobRun>, OrbitError> {
+        Err(OrbitError::Execution(
+            "worktree GC is not implemented for this runtime host".to_string(),
+        ))
+    }
     fn data_root(&self) -> &Path;
     fn activity_executor_registry(&self) -> &ActivityExecutorRegistry;
     fn run_job_now_with_input_debug(

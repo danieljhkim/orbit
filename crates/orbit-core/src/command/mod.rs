@@ -20,6 +20,7 @@ pub mod audit_event;
 pub mod backend_resolver;
 pub mod docs;
 pub mod executor;
+pub mod gc;
 pub mod init;
 pub mod job;
 pub mod learning;

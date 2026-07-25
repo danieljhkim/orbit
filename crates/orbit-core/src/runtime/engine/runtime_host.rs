@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use orbit_common::types::{
-    Activity, AgentModelPair, InvocationTrace, JobRunState, JobTargetType, OrbitError, OrbitEvent,
-    Role, RoleSlot,
+    Activity, AgentModelPair, InvocationTrace, JobRun, JobRunState, JobTargetType, OrbitError,
+    OrbitEvent, Role, RoleSlot,
 };
 use orbit_engine::{ActivityInvocationResult, ExecutionContext, ExecutorHost, RuntimeHost};
 use orbit_store::{InvocationInsertParams, InvocationQuery, InvocationRecord, token_scoreboard};
@@ -21,6 +21,10 @@ impl RuntimeHost for OrbitRuntime {
 
     fn repo_root(&self) -> Result<String, OrbitError> {
         current_repo_root(self)
+    }
+
+    fn list_job_runs_for_gc(&self) -> Result<Vec<JobRun>, OrbitError> {
+        self.list_job_runs(crate::command::job::JobRunListParams::default())
     }
 
     fn data_root(&self) -> &std::path::Path {

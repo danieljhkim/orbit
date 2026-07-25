@@ -317,6 +317,24 @@ impl Commands {
                     dispatch_run,
                 )
             }
+            Commands::Gc(command) => {
+                use super::gc::GcTarget;
+                let target = match &command.target {
+                    GcTarget::Worktrees(_) => "worktrees",
+                };
+                CommandOperation::new(
+                    RuntimeNeed::Required,
+                    Some(admin_meta(
+                        "gc",
+                        Some(target),
+                        Some("garbage"),
+                        Some(target),
+                    )),
+                    None,
+                    false,
+                    runtime_dispatch!(Gc),
+                )
+            }
             Commands::Sweep(_) => CommandOperation::new(
                 RuntimeNeed::Forbidden,
                 Some(admin_meta("sweep", None, Some("workflow"), Some("sweep"))),

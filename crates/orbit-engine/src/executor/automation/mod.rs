@@ -34,6 +34,7 @@ const GIT_PULL_ACTION: &str = "git_pull";
 const GIT_MERGE_ACTION: &str = "git_merge";
 const WORKTREE_SETUP_ACTION: &str = "worktree_setup";
 const WORKTREE_CLEANUP_ACTION: &str = "worktree_cleanup";
+const WORKTREE_GC_ACTION: &str = "worktree_gc";
 const PR_OPEN_ACTION: &str = "pr_open";
 const PR_PREPARE_ACTION: &str = "pr_prepare";
 const PR_PROMOTE_ACTION: &str = "pr_promote";
@@ -177,6 +178,39 @@ pub fn execute_action<
         GIT_MERGE_ACTION => vcs::git_merge(host, input),
         WORKTREE_SETUP_ACTION => vcs::setup_worktree(host, input),
         WORKTREE_CLEANUP_ACTION => vcs::cleanup_worktree(host, input),
+        WORKTREE_GC_ACTION => {
+            let runs = host.list_job_runs_for_gc()?;
+            let repo_root = host.repo_root()?;
+            let older_than = input
+                .get("older_than_hours")
+                .and_then(Value::as_u64)
+                .map(|hours| {
+                    let hours = i64::try_from(hours).map_err(|_| {
+                        OrbitError::InvalidInput("older_than_hours is too large".to_string())
+                    })?;
+                    chrono::Utc::now()
+                        .checked_sub_signed(chrono::Duration::hours(hours))
+                        .ok_or_else(|| {
+                            OrbitError::InvalidInput("older_than_hours is too large".to_string())
+                        })
+                })
+                .transpose()?;
+            let result = vcs::collect_worktrees(
+                std::path::Path::new(&repo_root),
+                &runs,
+                &vcs::WorktreeGcOptions {
+                    delete: true,
+                    run_id: input
+                        .get("run_id")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned),
+                    older_than,
+                },
+            )?;
+            serde_json::to_value(result).map_err(|error| {
+                OrbitError::Execution(format!("failed to serialize worktree GC result: {error}"))
+            })
+        }
         PR_OPEN_ACTION => vcs::pr_open(host, input),
         PR_PREPARE_ACTION => vcs::prepare_pr_handoff(host, input),
         PR_PROMOTE_ACTION => vcs::pr_promote(host, input),

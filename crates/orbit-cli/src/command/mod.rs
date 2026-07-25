@@ -7,6 +7,7 @@ pub mod docs;
 pub mod doctor;
 pub mod executor;
 pub mod friction;
+pub mod gc;
 pub mod graph;
 pub mod hook;
 pub mod host;
@@ -65,6 +66,7 @@ Environment:
 
 Operate:
   run         Run a workflow (ship, duel-plan, job)
+  gc          Inspect and explicitly reap Orbit-managed garbage
   sweep       Fire due routines on this host (the scheduler pass)
   routine     Inspect and control scheduled routines on this host
   task        Create, update, and manage tasks
@@ -118,6 +120,7 @@ pub enum Commands {
 
     // ── Operate ──
     Run(run::RunCommand),
+    Gc(gc::GcCommand),
     Sweep(sweep::SweepCommand),
     Routine(routine::RoutineCommand),
     Task(Box<task::TaskCommand>),

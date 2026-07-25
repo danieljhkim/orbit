@@ -22,16 +22,7 @@ pub(in crate::executor::automation) fn cleanup_worktree<H: RuntimeHost + ?Sized>
     let workspace_path_str = workspace_path.to_string_lossy().to_string();
     let branch_name = detect_branch_name(repo_root, &workspace_path);
 
-    if workspace_path.exists() {
-        git_success(
-            repo_root,
-            &["worktree", "remove", "--force", workspace_path_str.as_str()],
-        )?;
-    }
-    git_success(repo_root, &["worktree", "prune"])?;
-    if let Some(branch_name) = branch_name.as_deref() {
-        git_success(repo_root, &["branch", "-D", branch_name])?;
-    }
+    remove_worktree(repo_root, &workspace_path, branch_name.as_deref(), true)?;
 
     let mut output = Map::new();
     output.insert("cleaned_up".to_string(), json!(true));
@@ -40,6 +31,33 @@ pub(in crate::executor::automation) fn cleanup_worktree<H: RuntimeHost + ?Sized>
         output.insert("branch".to_string(), json!(branch_name));
     }
     Ok(Value::Object(output))
+}
+
+/// Shared sanctioned worktree removal sequence. Pipeline cleanup may force
+/// removal because it owns the just-created checkout; out-of-band GC must
+/// always pass `force = false`.
+pub(super) fn remove_worktree(
+    repo_root: &Path,
+    workspace_path: &Path,
+    branch_name: Option<&str>,
+    force: bool,
+) -> Result<(), OrbitError> {
+    if workspace_path.exists() {
+        let workspace_path = workspace_path.to_string_lossy();
+        if force {
+            git_success(
+                repo_root,
+                &["worktree", "remove", "--force", workspace_path.as_ref()],
+            )?;
+        } else {
+            git_success(repo_root, &["worktree", "remove", workspace_path.as_ref()])?;
+        }
+    }
+    git_success(repo_root, &["worktree", "prune"])?;
+    if let Some(branch_name) = branch_name {
+        git_success(repo_root, &["branch", "-D", branch_name])?;
+    }
+    Ok(())
 }
 
 fn resolve_workspace_path(

@@ -663,6 +663,80 @@ mod tests {
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
+    fn fresh_workspace_init_seeds_disabled_worktree_gc_routine() {
+        let temp = tempdir().expect("tempdir");
+        let global_root = temp.path().join("global");
+        let orbit_root = temp.path().join("repo/.orbit");
+        let result = init_workspace_at_root(
+            &orbit_root,
+            InitOptions {
+                global_root_override: Some(global_root.clone()),
+                refresh_defaults: true,
+                routine_host_id: Some("host-a".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("initialize fresh workspace");
+
+        assert_eq!(
+            result.refreshed_default_routines,
+            super::super::routine::DEFAULT_ROUTINE_FILES.len()
+        );
+        let yaml = fs::read_to_string(orbit_root.join("routines/worktree_gc.yaml"))
+            .expect("read seeded worktree GC routine");
+        assert!(!yaml.contains("__ORBIT_"));
+        let routine = orbit_common::types::parse_routine_yaml(&yaml)
+            .expect("seeded worktree GC routine parses");
+        assert!(!routine.enabled);
+        assert_eq!(routine.hosts, vec!["host-a".to_string()]);
+        assert_eq!(
+            routine.target,
+            orbit_common::types::RoutineTarget::Job("worktree_gc_pipeline".to_string())
+        );
+        assert_eq!(
+            routine.policy.overlap,
+            orbit_common::types::OverlapPolicy::Forbid
+        );
+
+        let routine_path = orbit_root.join("routines/worktree_gc.yaml");
+        fs::write(&routine_path, "operator edited").expect("hand edit routine");
+        init_workspace_at_root(
+            &orbit_root,
+            InitOptions {
+                global_root_override: Some(global_root.clone()),
+                refresh_defaults: true,
+                routine_host_id: Some("host-a".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("plain re-init");
+        assert_eq!(
+            fs::read_to_string(&routine_path).expect("read preserved routine"),
+            "operator edited",
+            "plain re-init preserves a hand-edited routine"
+        );
+
+        init_workspace_at_root(
+            &orbit_root,
+            InitOptions {
+                global_root_override: Some(global_root),
+                force: true,
+                refresh_defaults: true,
+                routine_host_id: Some("host-b".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("forced re-init");
+        let forced =
+            fs::read_to_string(&routine_path).expect("read force-overwritten worktree GC routine");
+        assert!(!forced.contains("operator edited"));
+        let forced = orbit_common::types::parse_routine_yaml(&forced)
+            .expect("force-overwritten routine parses");
+        assert_eq!(forced.hosts, vec!["host-b".to_string()]);
+        assert!(!forced.enabled);
+    }
+
+    #[test]
     fn global_init_seeds_skills_and_home_level_links() {
         let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
