@@ -6,7 +6,7 @@
 //! v2 graph models module/use edges, not the Cargo dependency graph. See
 //! ORB-00389 and GRAPH_SPEC §6.2 (`imports`).
 
-use orbit_graph_extract::Selector;
+use crate::extract::Selector;
 use rusqlite::{Connection, params};
 
 use crate::{DepEdge, DepsResult, Graph, GraphError};

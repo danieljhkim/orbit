@@ -9,7 +9,6 @@ mod sweep;
 use clap::{Parser, error::ErrorKind};
 
 use orbit_common::types::McpCapability;
-use orbit_graph_cli::Command as GraphSubcommand;
 
 use super::{
     Cli, Commands,
@@ -90,37 +89,6 @@ fn cli_rejects_mcp_capability_without_hub_and_unknown_values() {
         ErrorKind::ValueValidation,
         "admin",
     );
-}
-
-#[test]
-fn cli_parses_graph_search() {
-    let cli = Cli::parse_from([
-        "orbit",
-        "graph",
-        "search",
-        "GraphCommand",
-        "--kind",
-        "symbol",
-    ]);
-    match cli.command {
-        Commands::Graph(command) => match command.command {
-            GraphSubcommand::Search(_) => {}
-            _ => panic!("expected graph search"),
-        },
-        _ => panic!("expected top-level graph command"),
-    }
-}
-
-#[test]
-fn cli_parses_graph_impact() {
-    let cli = Cli::parse_from(["orbit", "graph", "impact", "symbol:src/lib.rs#run:function"]);
-    match cli.command {
-        Commands::Graph(command) => match command.command {
-            GraphSubcommand::Impact(_) => {}
-            _ => panic!("expected graph impact"),
-        },
-        _ => panic!("expected top-level graph command"),
-    }
 }
 
 #[test]

@@ -1,7 +1,7 @@
 # Scope: extract docs + search into a plugin-style feature crate
 
 Status: draft (uncommitted) — scoping for the docs+search pluginization pilot.
-Pattern precedent: orbit-graph / orbit-graph-cli (ADR-0199). Extraction precedent: ORB-10016 (ADR-0203).
+Pattern precedent: orbit-graph / orbit-graph-cli (ADR-0199) — historical; ORB-10357 superseded ADR-0199 and folded orbit-graph-cli back into orbit-graph as a dependent-free module, so this lib+cli split is no longer a live example of the pattern. Extraction precedent: ORB-10016 (ADR-0203).
 
 ## Goal
 
@@ -76,7 +76,9 @@ API-surface churn. 4 PRs.
    corpus — "docs" undersells it slightly.)
 2. Do the `orbit semantic` verbs move under the plugin CLI or stay core-side? (Install/uninstall
    are companion lifecycle — arguably orbit-search's CLI, not docs'.)
-3. Standalone binary like `orbit-graph-cli` has, or embed-only? Standalone requires config
+3. Standalone binary like `orbit-graph-cli` used to have, or embed-only? ORB-10357 removed that
+   standalone binary (it had no real consumer) and folded the command layer back into
+   `orbit-graph` — a caution against the standalone option. Standalone also requires config
    resolution without OrbitRuntime — suggest embed-only for the pilot.
 4. Does `LearningEmbeddingSource` projection (built inline in semantic.rs from
    `runtime.list_learnings()`) stay core-side? Suggest yes — learnings are runtime domain.

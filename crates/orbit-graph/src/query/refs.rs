@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_graph_extract::Selector;
+use crate::extract::Selector;
 use rusqlite::{Connection, Row, params};
 
 use crate::{

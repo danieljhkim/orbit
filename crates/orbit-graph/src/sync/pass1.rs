@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use orbit_graph_extract::{
+use crate::extract::{
     ExtractedFile, RawCommand, RawConfig, RawImport, RawRef, RawRelation, RawString, RawSymbol,
     languages,
 };

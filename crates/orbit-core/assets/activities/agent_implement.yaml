@@ -50,14 +50,12 @@ spec:
     2. If the injected task context is missing or malformed, recover it with
        `orbit.task.show`.
     3. Read the task description, acceptance criteria, and plan first. Treat
-       `context_files` as Orbit graph selectors and use the CLI-only graph
-       surface through `proc.spawn`: prefer `orbit graph show <selector>`
-       (and `orbit graph overview <selector>` for `dir:` scopes) to gather
-       context, and fall back to `fs.read` only for selectors that stay
-       unresolved or when the graph CLI is unavailable. If `orbit.search`
-       is available, call it with `semantic: "<task-id>"` to surface prior tasks
-       not linked via `context_files` (past decisions, related review threads);
-       skip if the companion binary is not installed.
+       `context_files` as Orbit graph selectors (`file:`, `dir:`, etc.) and
+       resolve them with `fs.read`: read each named file directly, and for
+       `dir:` scopes read the directory listing plus its key files. If
+       `orbit.search` is available, call it with `semantic: "<task-id>"` to
+       surface prior tasks not linked via `context_files` (past decisions,
+       related review threads); skip if the companion binary is not installed.
     4. Use `input.workspace_path` and `input.repo_root` when provided; they
        override the task snapshot's paths. Before the first write, resolve the
        effective process directory and Git top-level (`pwd -P` and

@@ -1,7 +1,7 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
-**Last updated:** 2026-07-19 (ORB-10325 removed graph from MCP and retained the `orbit graph` CLI surface only)
+**Last updated:** 2026-07-25 (ORB-10357 removed the `orbit graph` CLI surface entirely and consolidated `orbit-graph-extract`/`orbit-graph-cli` into `orbit-graph` as modules; the crate now has zero workspace dependents and is parked awaiting deletion — see [`../1_overview.md`](../1_overview.md). References to the `orbit graph` CLI and the three-crate layout below are historical.)
 **Relation to `orbit-knowledge`:** Decommissioned. `orbit-knowledge` (v1) was removed in ORB-00391; orbit-graph is the sole graph backend. The two no longer coexist. See §16 for the migration outcome.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../_archive/knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.

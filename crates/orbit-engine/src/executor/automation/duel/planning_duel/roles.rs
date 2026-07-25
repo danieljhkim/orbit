@@ -45,8 +45,8 @@ Steps:
    - Read the full body of every symbol you intend to change.
    - Map an unfamiliar area before you draft against it.
    - Mark transitive blast-radius claims that need implementation/review
-     verification as risks, with exact `orbit graph` or `rg` commands that will
-     verify them later.
+     verification as risks, with exact `rg` commands that will verify them
+     later.
    - If you discover pub(crate) imports, helper coupling, call sites, or
      dependency edges not reflected in the task description, treat them as
      hidden coupling — they belong in step 1 of your plan body.
@@ -66,7 +66,7 @@ Steps:
        implementation/review risk rather than inventing exhaustive coverage.
      - Specify exact verification commands the implementer should run — e.g.
        `cargo build -p <crate>`, `cargo test -p <crate> <test_name>`,
-       `make ci-fast`, `orbit graph refs <selector>`, `rg '<symbol>' <path>`, or
+       `make ci-fast`, `rg '<symbol>' <path>`, or
        `curl -s http://localhost:<port>/<route>` — that prove the change works.
      - If hidden coupling exists (imports, helpers, call sites the task
        description did not name), open the plan with step 1 enumerating it.
@@ -117,7 +117,7 @@ Steps:
      tasks or indexed decisions can resolve ambiguity.
    - Treat exhaustive caller and blast-radius verification as an
      implementation/review gate. Require the proposal to name exact
-     `orbit graph` or `rg` commands for that later verification instead of
+     `rg` commands for that later verification instead of
      rejecting a plan because the shell-less arbiter cannot prove it now.
 
 5. Decide the winner:

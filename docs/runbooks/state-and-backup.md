@@ -30,7 +30,7 @@ precedence). Path layout is defined in
 | `adrs/`, `learnings/`, `knowledge/` | canonical ADR / learning / knowledge bundles (files) | **authoritative** |
 | `frictions/` | friction records + `tags.yaml` taxonomy | **authoritative** |
 | `resources/` | workspace overrides for activities/jobs/executors/policies | authoritative |
-| `graph/<branch>.<ver>.db` | code-graph SQLite index, per branch/worktree | regenerable (`orbit graph sync`) |
+| `graph/<branch>.<ver>.db` | code-graph SQLite index, per branch/worktree | regenerable, but no command rebuilds it — the `orbit graph` CLI was removed in ORB-10357 |
 | `state/layout.version` | plain-text workspace layout version marker | regenerable marker (see [upgrades](./upgrades.md)) |
 | `state/layout.lock` | advisory lock taken during layout upgrades | transient |
 | `state/semantic.db` | semantic/vector index (docs, learnings, tasks) | regenerable (`orbit semantic index`) |
@@ -137,7 +137,8 @@ rm -f ~/.orbit/orbit.db-wal ~/.orbit/orbit.db-shm
 # Rebuild derived indexes as needed.
 orbit task reindex
 orbit semantic index      # if semantic search is installed
-orbit graph sync          # per workspace, on demand
+# graph/*.db is not rebuildable from a command — the `orbit graph` CLI was
+# removed in ORB-10357; delete stale files under .orbit/graph/ if present.
 
 orbit doctor              # verify; see health-checks.md
 ```

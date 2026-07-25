@@ -3,7 +3,7 @@ summary: "Orbit Graph — Vision"
 type: design
 title: "Orbit Graph — Vision"
 owner: claude
-last_updated: 2026-07-19
+last_updated: 2026-07-25
 status: Draft
 feature: orbit-graph
 doc_role: vision
@@ -16,6 +16,8 @@ related_features: [knowledge-graph]
 Forward-looking design space for `orbit-graph`. Everything below is hypothesis, not commitment. Items here do not carry task IDs because they are not yet scheduled; if an item lands, the task reference appears in [2_design.md](./2_design.md) when that doc is updated.
 
 Current contracts and the V1 plan live in [2_design.md](./2_design.md) and [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md).
+
+> **Status (ORB-10357, 2026-07-25):** `orbit-graph` was consolidated to a single dependent-free crate awaiting deletion (see [1_overview.md](./1_overview.md)). The write-surface and CLI-boundary items below assume the pre-ORB-10357 crate layout and `orbit graph` CLI surface, neither of which exist anymore — treat this section as historical hypothesis, not a live design space.
 
 ---
 

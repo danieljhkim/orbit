@@ -117,10 +117,6 @@ impl WorkspaceInitArgs {
             }
         }
 
-        // The code graph is served by orbit-graph (v2), which indexes lazily on
-        // first query — no build step at init time (ORB-00391).
-        println!("  graph:     indexed on demand by orbit-graph");
-
         Ok(())
     }
 

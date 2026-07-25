@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use orbit_graph_extract::Selector;
+use crate::extract::Selector;
 use rusqlite::{Connection, Row, params};
 
 use crate::{Graph, GraphError, OverviewFile, OverviewFormat, OverviewResult, OverviewSymbol};

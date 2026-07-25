@@ -7,7 +7,7 @@ description: Entry point for Orbit. Once a workspace is initialized (`.orbit/` p
 
 ## Purpose
 
-This skill orients agents working with Orbit. Durable operations should go through the registered Orbit tool surface — not direct lifecycle subcommands or rebuilds from source. Code-graph queries are the exception: they use the dedicated `orbit graph` CLI surface.
+This skill orients agents working with Orbit. Durable operations should go through the registered Orbit tool surface — not direct lifecycle subcommands or rebuilds from source.
 
 Lifecycle and authoring details live in the per-topic skills below; this skill stays brief on purpose.
 
@@ -26,13 +26,13 @@ Registered Orbit tools are reachable via two surfaces. Both accept identical JSO
 
 **Mapping rule**: `orbit.<group>.<action>` ↔ `orbit_<group>_<action>` (dots become underscores; JSON args identical). For multi-segment names like `orbit.task.artifact.put`, every dot becomes an underscore: `orbit_task_artifact_put`.
 
-**Environment parity**: the registered `orbit.*` tool surface is identical across MCP and `orbit tool run`. Some deployments front the orbit MCP behind a gateway that mirrors the surface exactly and may add an optional `workspace` routing param on tools that lack one. The code graph is deliberately outside this parity contract: it is available only through `orbit graph` in a shell. Any non-standard tools a gateway adds beyond the Orbit surface are documented by that gateway, not here — consult its own reference before relying on them.
+**Environment parity**: the registered `orbit.*` tool surface is identical across MCP and `orbit tool run`. Some deployments front the orbit MCP behind a gateway that mirrors the surface exactly and may add an optional `workspace` routing param on tools that lack one. Any non-standard tools a gateway adds beyond the Orbit surface are documented by that gateway, not here — consult its own reference before relying on them.
 
 **Surface coverage:**
 
 - Task lifecycle (`orbit.task.*`), ADR artifacts (`orbit.adr.*`), learnings (`orbit.learning.*`), unified search (`orbit.search`): both surfaces.
-- Graph queries (`sync`, `search`, `show`, `refs`, `callees`, `impact`, `trace`, `overview`, `implementors`, `deps`): **CLI only** via `orbit graph <subcommand>`; they are neither MCP tools nor `orbit tool run orbit.graph.*` tools. Task-to-commit lookup is not a graph query; use `git log --grep '[T<task-id>]'`.
 - Semantic lifecycle (`orbit semantic install|stats|index|uninstall`) and state handoff (`orbit.state.*`), routine/sweep/job commands: **CLI only** — used inside activity steps or from a shell where the agent has direct process access.
+- Code-structure questions (callers, refs, symbols, implementors): no dedicated query surface. Use `fs.read` to inspect files directly, or `rg`/`grep` with shell access. Task-to-commit lookup is not a graph query; use `git log --grep '[T<task-id>]'`.
 
 **Always include `model` in the JSON** so Orbit can attribute the call to the right agent family: `codex`, `claude`, `gemini`, or `grok`. Full model strings are accepted and auto-normalized, but the family is the persisted identity.
 
@@ -52,7 +52,6 @@ orbit tool run orbit.task.list --input '{"status": "backlog", "model": "<agent-f
 orbit tool run orbit.task.list --input '{"path": "src/auth/login.rs", "model": "<agent-family>"}'             # Tasks whose context_files apply to this path
 orbit tool run orbit.search --input '{"query": "topic phrase", "kind": "task", "limit": 5, "model": "<agent-family>"}'
 orbit tool run orbit.search --input '{"query": "topic phrase", "hybrid": true, "kind": "task", "limit": 5, "model": "<agent-family>"}'
-orbit graph search "<symbol-or-string>" --kind symbol                                                        # CLI-only code graph
 orbit tool run orbit.task.add --input '{"title": "...", "description": "...", "acceptance_criteria": ["..."], "workspace": ".", "model": "<agent-family>"}'
 orbit tool run orbit.task.update --input '{"id": "<id>", "plan": "...", "model": "<agent-family>"}'
 orbit tool run orbit.task.start --input '{"id": "<id>", "note": "...", "model": "<agent-family>"}'            # backlog -> in-progress
@@ -65,7 +64,6 @@ orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "...", "model"
 |---------|-------------|--------------|
 | `cargo run -- tool run ...` | Agents must use the installed `orbit` binary, not rebuild from source | `orbit tool run ...` |
 | `orbit task show <id>` | Direct CLI subcommands skip agent provenance tracking | `orbit tool run orbit.task.show --full --input '{"id":"<id>"}'` |
-| `orbit tool run orbit.graph.search ...` | The graph is not part of the registered tool or MCP surface | `orbit graph search "<term>"` |
 
 ## Lifecycle
 

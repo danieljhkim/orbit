@@ -36,7 +36,8 @@ $ orbit doctor
 │ database         ok        quick_check ok; schema version 1 matches this binary             │
 │ disk-space       ok        11.2 GiB free of 65.6 GiB (17.1%) on the volume holding …/.orbit │
 │ semantic-index   skipped   no semantic embeddings indexed yet                               │
-│ graph-index      skipped   no graph index built (run `orbit graph sync` to create one)      │
+│ graph-index      skipped   no graph index built (the code-graph CLI surface was removed in  │
+│                            ORB-10357; this check is a legacy vestige with no build command)  │
 │ stale-locks      warning   1 lock file(s) left by dead holders (the OS already released     │
 │                            the flock; safe to delete): …/state/layout.lock                  │
 │                            (dead pid 154488, op: layout upgrade, since 2026-07-04T09:25…)   │

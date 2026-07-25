@@ -8,7 +8,6 @@ pub mod doctor;
 pub mod executor;
 pub mod friction;
 pub mod gc;
-pub mod graph;
 pub mod hook;
 pub mod host;
 pub mod init;
@@ -78,7 +77,6 @@ Operate:
 
 Observe:
   search      Search tasks, docs, learnings, and ADRs
-  graph       Query and sync the code graph (symbols, refs, impact)
   audit       Query the audit event log
   log         Tail the unified Orbit log feed
   doctor      Diagnose workspace health (config, database, disk, indexes)
@@ -132,7 +130,6 @@ pub enum Commands {
     Learning(learning::LearningCommand),
 
     // ── Observe ──
-    Graph(graph::GraphCommand),
     Audit(audit::AuditCommand),
     Log(log::LogCommand),
     Doctor(doctor::DoctorCommand),

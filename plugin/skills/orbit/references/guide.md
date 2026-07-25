@@ -108,8 +108,7 @@ Orbit advertises the canonical MCP surface independently of Cowork's launch cwd 
 server rejects launch-root routing. Calls resolve a registered workspace from MCP
 initialize/session context or an explicit `workspace` input. If a call reports that
 workspace selection is missing, provide that selector rather than changing the MCP
-launch command. Graph queries are never advertised by MCP; use `orbit graph` from a
-shell when code-graph access is needed.
+launch command.
 
 ## Anti-patterns (DO NOT)
 

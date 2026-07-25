@@ -60,7 +60,7 @@ Do not install the recovered database unless `PRAGMA integrity_check` returns `o
 
 | DB | Derivable? | Rebuild |
 |---|---|---|
-| `<ws>/.orbit/graph/*.db` | yes | `orbit graph clean`, then `orbit graph sync` |
+| `<ws>/.orbit/graph/*.db` | yes | delete the file(s) — the `orbit graph` CLI was removed in ORB-10357, so nothing rebuilds this index; the graph subsystem is a dependent-free vestige awaiting deletion |
 | `<ws>/.orbit/state/semantic.db` | yes | delete the file, then `orbit semantic index` |
 | `~/.orbit/tasks/index.sqlite` | yes, from task bundles | `orbit task reindex` |
 | `~/.orbit/orbit.db` | **no**—audit + run history | restore or salvage; deleting it is a last resort that loses history, although task/ADR/learning content survives in file bundles |

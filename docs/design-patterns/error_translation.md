@@ -78,7 +78,7 @@ Used at every cross-crate edge — e.g. `crates/orbit-remote/src/mcp/graph.rs`:
 to_json(graph.search(&query).map_err(graph_error_to_orbit)?)
 ```
 
-Other live translators in the same shape: `selector_error_to_orbit` (`orbit-common::utility::selector`, re-exported through `orbit-graph-extract` for graph consumers), `rpc_error_to_orbit` (`orbit-search::rpc`), and `dispatch_error_to_orbit` (`orbit-engine`, dispatcher module).
+Other live translators in the same shape: `selector_error_to_orbit` (`orbit-common::utility::selector`, re-exported through `orbit-graph::extract` for graph consumers), `rpc_error_to_orbit` (`orbit-search::rpc`), and `dispatch_error_to_orbit` (`orbit-engine`, dispatcher module).
 
 Patterns to copy:
 
