@@ -122,6 +122,36 @@ fn dashboard_task_actions_route_to_selected_workspace() {
 }
 
 #[test]
+fn dashboard_run_resume_matches_runtime_guard_and_surfaces_lineage_and_errors() {
+    let runs = include_str!("../../assets/dashboard/runs.js");
+
+    assert!(
+        runs.contains(
+            r#"const RESUMABLE_RUN_STATES = new Set(["failed", "interrupted", "timeout"])"#
+        ),
+        "Resume must only be offered for states accepted by resume_job_run"
+    );
+    assert!(
+        runs.contains("/api/job-runs/${encodeURIComponent(runId)}/resume"),
+        "Resume must POST to the job-run action route"
+    );
+    assert!(
+        runs.contains("re-runs the failed step and all subsequent steps")
+            && runs.contains("underlying cause is resolved"),
+        "the confirmation must explain checkpoint resume semantics honestly"
+    );
+    assert!(
+        runs.contains("text: `resumed as ${resumedAsId}`")
+            && runs.contains("text: `from ${sourceId}`"),
+        "the runs table must expose both directions of resumed-run lineage"
+    );
+    assert!(
+        runs.contains(r#"class: "action-error", text: e.message || "resume failed""#),
+        "Resume failures must display the server-provided error text"
+    );
+}
+
+#[test]
 fn dashboard_guards_per_workspace_panels_in_aggregate_view() {
     // ORB-00039: in the aggregate "All workspaces" view there is no concrete
     // workspace, so the per-workspace endpoints (/api/crews, /api/tasks/locks,
