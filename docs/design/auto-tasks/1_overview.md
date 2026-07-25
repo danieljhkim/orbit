@@ -1,7 +1,7 @@
 ---
 title: Auto-tasks — Overview
 owner: claude
-last_updated: 2026-07-19
+last_updated: 2026-07-25
 status: Accepted
 feature: auto-tasks
 doc_role: overview
@@ -10,7 +10,7 @@ summary: Dynamically-defined recurring task templates minted by one generic sche
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10318, ADR-0218, ADR-0217]
+related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ADR-0218, ADR-0217]
 ---
 
 # Auto-tasks — Overview
@@ -67,14 +67,18 @@ becomes just the first definition.
 ## Definitions shipped in this repo
 
 - `qa-sweep` — hands-on validation of recent changes (ORB-10148).
-- `learning-deprecation-review` — report-only weekly review that lists stale
-  learning candidates (usage rollups + anchor health) via `execution_summary`;
-  never mutates learnings (ORB-10318, [project-learnings §7.6](../project-learnings/2_design.md#76-recurring-deprecation-review-auto-task)).
+- `artifact-deprecation-review` — report-only weekly review that lists stale
+  learning candidates (usage rollups + anchor health) and stale artifact-id
+  comment references (`L-`/`ADR-`/`ORB-`/`F` ids swept from source comments
+  and resolved against their registries) via `execution_summary`; never
+  mutates learnings, ADRs, tasks, friction records, or comments (ORB-10318,
+  ORB-10348, [project-learnings §7.6](../project-learnings/2_design.md#76-recurring-deprecation-review-auto-task)).
 
 ## Task References
 
 - ORB-10149 — Auto-task primitive.
 - ORB-10148 — qa-sweep V1 (first definition; depends on this).
-- ORB-10318 — learning-deprecation-review definition (report-only stale-learning review).
+- ORB-10318 — learning-deprecation-review definition (report-only stale-learning review; superseded by ORB-10348).
+- ORB-10348 — Generalized the definition into artifact-deprecation-review, adding the comment-reference sweep.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
