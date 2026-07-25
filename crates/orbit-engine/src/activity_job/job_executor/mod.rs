@@ -93,6 +93,12 @@ pub struct JobOutcome {
     /// [ORB-00414] True when any audit write failed — retry/recovery/debugging
     /// consumers should treat the trail as incomplete.
     pub degraded_audit: bool,
+    /// [ORB-10367] Number of telemetry-persistence failures (invocation
+    /// traces) observed during the run. Never affects `success`.
+    pub telemetry_failures: u64,
+    /// [ORB-10367] True when any telemetry write failed — the run's
+    /// invocation/token accounting is incomplete, but its work is not.
+    pub degraded_telemetry: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -209,6 +215,8 @@ pub fn execute_job_with_resume(
         message: (!overall_ok).then_some(overall_message).flatten(),
         audit_failures: audit.audit_failure_count(),
         degraded_audit: audit.degraded_audit(),
+        telemetry_failures: audit.telemetry_failure_count(),
+        degraded_telemetry: audit.degraded_telemetry(),
     })
 }
 

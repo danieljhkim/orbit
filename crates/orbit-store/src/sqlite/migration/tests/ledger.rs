@@ -58,6 +58,9 @@ fn fresh_db_applies_baseline_and_records_ledger() {
     assert_eq!(applied[8].version, 9);
     assert_eq!(applied[8].name, "feature_schema_ledger");
     assert!(!applied[8].applied_at.is_empty());
+    assert_eq!(applied[9].version, 10);
+    assert_eq!(applied[9].name, "invocation_telemetry_columns");
+    assert!(!applied[9].applied_at.is_empty());
 }
 
 #[test]
@@ -194,6 +197,10 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0009".to_string(),
                 "feature_schema_ledger".to_string()
             ),
+            (
+                "migration.v0010".to_string(),
+                "invocation_telemetry_columns".to_string()
+            ),
         ]
     );
 }
@@ -205,7 +212,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0010', 'from-the-future', '2099-01-01T00:00:00Z')",
+         VALUES ('migration.v0011', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -274,12 +281,18 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_through_latest() {
     drop(conn);
 
     let store = crate::Store::open(&path).expect("reopen shipped v4 store");
-    assert_eq!(store.schema_version().expect("schema version"), 9);
+    assert_eq!(
+        store.schema_version().expect("schema version"),
+        SUPPORTED_SCHEMA_VERSION
+    );
     let applied = store.applied_migrations().expect("applied migrations");
-    assert_eq!(applied.last().map(|migration| migration.version), Some(9));
+    assert_eq!(
+        applied.last().map(|migration| migration.version),
+        Some(SUPPORTED_SCHEMA_VERSION)
+    );
     assert_eq!(
         applied.last().map(|migration| migration.name.as_str()),
-        Some("feature_schema_ledger")
+        Some("invocation_telemetry_columns")
     );
     let connection = store.connection();
     let conn = connection.lock().expect("connection");
@@ -356,7 +369,10 @@ fn store_reopens_shipped_v6_audit_rows_and_applies_v7_additively() {
     drop(conn);
 
     let store = crate::Store::open(&path).expect("open and migrate v6 store");
-    assert_eq!(store.schema_version().expect("schema version"), 9);
+    assert_eq!(
+        store.schema_version().expect("schema version"),
+        SUPPORTED_SCHEMA_VERSION
+    );
     let rows = store
         .list_audit_events(&crate::AuditEventFilter::default())
         .expect("read migrated audit rows");
@@ -370,7 +386,10 @@ fn store_reopens_shipped_v6_audit_rows_and_applies_v7_additively() {
     drop(store);
 
     let reopened = crate::Store::open(&path).expect("reopen migrated store");
-    assert_eq!(reopened.schema_version().expect("schema version"), 9);
+    assert_eq!(
+        reopened.schema_version().expect("schema version"),
+        SUPPORTED_SCHEMA_VERSION
+    );
     assert_eq!(
         reopened
             .list_audit_events(&crate::AuditEventFilter::default())
@@ -488,4 +507,116 @@ fn rejects_non_increasing_registry() {
 
     let err = ledger::run_migrations(&conn, &registry).expect_err("must reject registry");
     assert!(matches!(err, OrbitError::Migration(_)), "got {err:?}");
+}
+
+/// [ORB-10367] Schema/insert skew regression: a database that recorded the v1
+/// baseline *before* a column was added to it never re-runs baseline, so any
+/// column added there alone silently never reaches it. This models the
+/// dk-server-1 store — pre-telemetry `invocations` table, ledger stamped
+/// through the newest pre-fix version — and asserts that after migration
+/// every column the insert binds exists and a real insert lands.
+///
+/// Against the broken state (no v10 registry entry) the store opens at v9 and
+/// the insert fails with `table invocations has no column named
+/// cache_create_1h_tokens` — the exact production failure.
+#[test]
+fn migrated_legacy_db_carries_every_invocation_insert_column() {
+    use orbit_common::types::{InvocationTrace, TokenUsage};
+
+    use crate::sqlite::invocation_store::{INVOCATION_INSERT_COLUMNS, InvocationInsertParams};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("orbit.db");
+    let conn = Connection::open(&path).expect("open raw store connection");
+    conn.execute_batch(
+        r#"
+            CREATE TABLE schema_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO schema_meta VALUES
+                ('migration.v0001', 'baseline', '2026-07-01T00:00:00Z'),
+                ('migration.v0002', 'learnings_index_workspace_scope', '2026-07-02T00:00:00Z'),
+                ('migration.v0003', 'flat_crew_model', '2026-07-03T00:00:00Z'),
+                ('migration.v0004', 'job_run_archive_stage', '2026-07-04T00:00:00Z'),
+                ('migration.v0005', 'host_registry_core', '2026-07-05T00:00:00Z'),
+                ('migration.v0006', 'workspace_coordination_projections', '2026-07-06T00:00:00Z'),
+                ('migration.v0007', 'trusted_mcp_audit_provenance', '2026-07-07T00:00:00Z'),
+                ('migration.v0008', 'hub_registry_metadata', '2026-07-08T00:00:00Z'),
+                ('migration.v0009', 'feature_schema_ledger', '2026-07-09T00:00:00Z');
+
+            -- `invocations` as the baseline created it before the 5m/1h cache
+            -- split and the token-derived cost column were added.
+            CREATE TABLE invocations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                job_run_id TEXT NOT NULL,
+                activity_id TEXT NOT NULL,
+                agent TEXT NOT NULL,
+                model TEXT,
+                slot TEXT,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_create_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                tool_call_count INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE invocation_tasks (
+                invocation_id INTEGER NOT NULL,
+                task_id TEXT NOT NULL,
+                PRIMARY KEY(invocation_id, task_id),
+                FOREIGN KEY(invocation_id) REFERENCES invocations(id) ON DELETE CASCADE
+            );
+            CREATE TABLE tool_calls (
+                invocation_id INTEGER NOT NULL,
+                seq INTEGER NOT NULL,
+                tool_name TEXT NOT NULL,
+                result_bytes INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(invocation_id, seq),
+                FOREIGN KEY(invocation_id) REFERENCES invocations(id) ON DELETE CASCADE
+            );
+        "#,
+    )
+    .expect("seed pre-telemetry database");
+    drop(conn);
+
+    let store = crate::Store::open(&path).expect("open and migrate legacy store");
+    assert_eq!(
+        store.schema_version().expect("schema version"),
+        SUPPORTED_SCHEMA_VERSION
+    );
+
+    {
+        let connection = store.connection();
+        let conn = connection.lock().expect("connection");
+        for column in INVOCATION_INSERT_COLUMNS {
+            assert!(
+                table_has_column(&conn, "invocations", column).expect("read invocations columns"),
+                "migrated database is missing insert-bound column `{column}`",
+            );
+        }
+    }
+
+    // The structural assertion above is what catches skew early; this proves
+    // the production write path itself works against a migrated database.
+    store
+        .insert_invocation_trace_record(&InvocationInsertParams {
+            job_run_id: "jrun-legacy".to_string(),
+            activity_id: "implement_one".to_string(),
+            agent: "claude".to_string(),
+            model: Some("claude-opus-4-7".to_string()),
+            slot: None,
+            task_ids: vec!["ORB-10367".to_string()],
+            trace: InvocationTrace {
+                usage: TokenUsage {
+                    cache_create_1h: 37_795,
+                    ..TokenUsage::default()
+                },
+                provider_cost_usd: Some(1.25),
+                ..InvocationTrace::default()
+            },
+        })
+        .expect("insert invocation trace into migrated legacy database");
 }

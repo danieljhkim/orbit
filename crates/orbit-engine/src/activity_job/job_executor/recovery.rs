@@ -71,12 +71,12 @@ pub(super) fn attempt_recovery_activity(
             // record, not an audit-envelope write); a failure here is
             // intentionally non-fatal and does not affect recovery outcome. The
             // audit trail of the recovery attempt is emitted separately below.
-            let _ = persist_dispatch_invocation(ctx, &recovery.name, &input, &dispatch);
+            persist_dispatch_invocation(ctx, &recovery.name, &input, &dispatch);
             true
         }
         Ok(dispatch) => {
             // [ORB-00414] See above: non-audit DB persistence, non-fatal.
-            let _ = persist_dispatch_invocation(ctx, &recovery.name, &input, &dispatch);
+            persist_dispatch_invocation(ctx, &recovery.name, &input, &dispatch);
             false
         }
         Err(_) => false,

@@ -51,6 +51,10 @@ pub struct V2AuditWriter {
     /// [ORB-00414] Count of audit-write failures observed this run. Non-fatal
     /// to the run, but recorded so consumers know the trail is incomplete.
     audit_failures: AtomicU64,
+    /// [ORB-10367] Count of telemetry-persistence failures observed this run
+    /// (invocation traces). Non-fatal to the run — its success is decided by
+    /// its work — but recorded so the telemetry gap is visible.
+    telemetry_failures: AtomicU64,
 }
 
 /// Restores the calling thread's previous parent stack on drop.
@@ -82,6 +86,7 @@ impl V2AuditWriter {
             event_counter: Mutex::new(0),
             parent_stacks: Mutex::new(HashMap::new()),
             audit_failures: AtomicU64::new(0),
+            telemetry_failures: AtomicU64::new(0),
         }
     }
 
@@ -203,6 +208,46 @@ impl V2AuditWriter {
     /// True when at least one audit write failed — the trail is incomplete.
     pub fn degraded_audit(&self) -> bool {
         self.audit_failure_count() > 0
+    }
+
+    /// [ORB-10367] Record a non-fatal telemetry-persistence failure: bump the
+    /// per-run counter, emit a `tracing::error!`, and put a
+    /// `telemetry.persist_failed` event on the run record so the gap is
+    /// visible to run-history consumers. The run's own success is never
+    /// decided by this — completed agent work must not be discarded because a
+    /// telemetry row could not be written.
+    pub fn note_telemetry_failure(
+        &self,
+        component: &str,
+        step_id: Option<&str>,
+        error: &dyn std::fmt::Display,
+    ) {
+        self.telemetry_failures.fetch_add(1, Ordering::Relaxed);
+        let error = error.to_string();
+        tracing::error!(
+            target: "orbit.engine.telemetry",
+            run_id = %self.run_id,
+            component,
+            step_id = step_id.unwrap_or_default(),
+            error = %error,
+            "telemetry persist failed; run continuing with degraded telemetry",
+        );
+        self.emit_lossy(V2AuditEventKind::TelemetryPersistFailed {
+            component: component.to_string(),
+            step_id: step_id.map(ToOwned::to_owned),
+            error,
+        });
+    }
+
+    /// Number of telemetry-persistence failures observed this run.
+    pub fn telemetry_failure_count(&self) -> u64 {
+        self.telemetry_failures.load(Ordering::Relaxed)
+    }
+
+    /// True when at least one telemetry write failed — invocation traces for
+    /// this run are incomplete.
+    pub fn degraded_telemetry(&self) -> bool {
+        self.telemetry_failure_count() > 0
     }
 
     /// [ORB-00414] Emit an envelope event, recording (not discarding) a write

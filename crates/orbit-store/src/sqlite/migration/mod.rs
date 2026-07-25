@@ -585,6 +585,32 @@ fn ensure_audit_events_schema(conn: &Connection) -> Result<(), OrbitError> {
     Ok(())
 }
 
+/// v10 `invocation_telemetry_columns` migration (ORB-10367): re-run the
+/// idempotent invocation-schema step against databases that already recorded
+/// the v1 baseline.
+///
+/// The 5m/1h cache split (`cache_create_1h_tokens`) and the token-derived
+/// cost column (`provider_cost_usd`) were added to
+/// [`ensure_invocation_schema`], which only ever runs as part of the v1
+/// `baseline` migration. Every database created before those columns landed
+/// is already at v1 or newer, so `run_migrations` skips baseline and the
+/// `ALTER`s never reach it — the insert then binds columns the table lacks
+/// and every agent-dispatching run dies at the telemetry write. Registering
+/// the same idempotent step under its own version is what carries it to
+/// existing databases.
+fn apply_invocation_telemetry_columns(conn: &Connection) -> Result<(), OrbitError> {
+    // The `ALTER`s below address tables the v1 baseline creates. A database
+    // without them has nothing to repair (and `ALTER TABLE` on a missing
+    // table is an error, not a no-op), so skip rather than fail the open.
+    if !table_exists(conn, "invocations")?
+        || !table_exists(conn, "invocation_tasks")?
+        || !table_exists(conn, "tool_calls")?
+    {
+        return Ok(());
+    }
+    ensure_invocation_schema(conn)
+}
+
 fn ensure_invocation_schema(conn: &Connection) -> Result<(), OrbitError> {
     add_column_if_missing(conn, "ALTER TABLE invocations ADD COLUMN slot TEXT")?;
     add_column_if_missing(

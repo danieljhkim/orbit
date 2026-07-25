@@ -77,7 +77,7 @@ pub(super) fn run_target(
                 run_id: &ctx.run_id,
                 host: Some(ctx.host),
             })?;
-            persist_dispatch_invocation(ctx, &step.id, &rendered_input, &dispatch)?;
+            persist_dispatch_invocation(ctx, &step.id, &rendered_input, &dispatch);
             let out = dispatch.output.clone();
             record_pipeline(ctx, &step.id, out.clone());
             Ok(StepOutcome {
@@ -98,7 +98,7 @@ pub(super) fn run_target(
                 run_id: &ctx.run_id,
                 host: Some(ctx.host),
             })?;
-            persist_dispatch_invocation(ctx, &step.id, &rendered_input, &dispatch)?;
+            persist_dispatch_invocation(ctx, &step.id, &rendered_input, &dispatch);
             let out = dispatch.output.clone();
             record_pipeline(ctx, &step.id, out.clone());
             Ok(StepOutcome {
@@ -111,24 +111,34 @@ pub(super) fn run_target(
     }
 }
 
+/// Persist the invocation trace for a dispatched step.
+///
+/// [ORB-10367] **Non-fatal by contract.** This is telemetry: a failed write
+/// (schema drift, a locked or unwritable database, a full disk) must never
+/// discard agent work that already completed. The failure is logged loudly
+/// and surfaced on the run record as `telemetry.persist_failed`; the step's
+/// success stays decided solely by its own work.
 pub(super) fn persist_dispatch_invocation(
     ctx: &ExecCtx<'_>,
     step_id: &str,
     input: &Value,
     dispatch: &super::super::dispatcher::DispatchOutcome,
-) -> Result<(), DispatchError> {
+) {
     let Some(invocation) = dispatch.invocation.as_ref() else {
-        return Ok(());
+        return;
     };
 
-    ctx.host.persist_invocation_trace(
+    if let Err(error) = ctx.host.persist_invocation_trace(
         &ctx.run_id,
         step_id,
         &invocation.provider,
         invocation.model.as_deref(),
         input,
         &invocation.trace,
-    )
+    ) {
+        ctx.audit
+            .note_telemetry_failure("invocation_trace", Some(step_id), &error);
+    }
 }
 
 pub(super) fn run_agent_loop_outcome(
@@ -155,14 +165,19 @@ pub(super) fn run_agent_loop_outcome(
         &outcome,
         started.elapsed().as_millis() as u64,
     );
-    ctx.host.persist_invocation_trace(
+    // [ORB-10367] Telemetry, not correctness: the agent loop already ran to
+    // completion, so a failed trace write is recorded, never propagated.
+    if let Err(error) = ctx.host.persist_invocation_trace(
         &ctx.run_id,
         &step.id,
         spec.provider.as_str(),
         spec.model.as_deref(),
         input,
         &trace,
-    )?;
+    ) {
+        ctx.audit
+            .note_telemetry_failure("invocation_trace", Some(&step.id), &error);
+    }
     let mut metadata = serde_json::Map::new();
     metadata.insert(
         "final_message".to_string(),
