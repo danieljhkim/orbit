@@ -40,7 +40,6 @@ fn workspace_reinit_merges_explicit_registration_updates_without_resetting_autho
         owner: None,
         task_id_start: None,
         mcp: false,
-        hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
     };
@@ -163,7 +162,6 @@ fn multi_host_workspace_init_persists_an_explicit_local_owner() {
             owner: None,
             task_id_start: None,
             mcp: false,
-            hooks: false,
             inject_agent_rules: false,
             refresh_defaults: false,
         }
@@ -204,7 +202,6 @@ fn spoke_workspace_init_can_atomically_declare_a_remote_owner_replica() {
         owner: Some("hm_owner".to_string()),
         task_id_start: None,
         mcp: false,
-        hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
     }
@@ -255,7 +252,6 @@ fn invalid_replica_init_fails_before_workspace_artifacts_or_registry_mutation() 
             owner: Some(rejected_owner.to_string()),
             task_id_start: None,
             mcp: false,
-            hooks: false,
             inject_agent_rules: false,
             refresh_defaults: false,
         }
@@ -330,7 +326,6 @@ fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() 
         owner: None,
         task_id_start: None,
         mcp: false,
-        hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
     };
@@ -426,7 +421,6 @@ fn workspace_init_seeds_auto_detected_mcp_configs() {
         owner: None,
         task_id_start: None,
         mcp: true,
-        hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
     }
@@ -476,7 +470,6 @@ fn workspace_init_skips_mcp_by_default() {
         owner: None,
         task_id_start: None,
         mcp: false,
-        hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
     }
@@ -518,7 +511,6 @@ fn workspace_init_under_home_with_global_orbit_creates_repo_orbit() {
         owner: None,
         task_id_start: None,
         mcp: false,
-        hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
     }
@@ -553,7 +545,6 @@ fn workspace_init_appends_orbit_to_existing_gitignore() {
         owner: None,
         task_id_start: None,
         mcp: false,
-        hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
     }
@@ -587,7 +578,6 @@ fn workspace_init_replaces_legacy_bare_orbit_gitignore_line_with_managed_block()
         owner: None,
         task_id_start: None,
         mcp: false,
-        hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
     };
@@ -631,7 +621,6 @@ fn workspace_init_from_git_subdir_gitignores_repo_orbit_dir() {
         owner: None,
         task_id_start: None,
         mcp: false,
-        hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
     }
@@ -662,7 +651,6 @@ fn workspace_init_with_root_override_uses_custom_registry() {
         owner: None,
         task_id_start: None,
         mcp: false,
-        hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
     }
@@ -718,7 +706,6 @@ fn workspace_init_seeds_default_orbitignore_when_missing() {
         owner: None,
         task_id_start: None,
         mcp: false,
-        hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
     }
@@ -751,7 +738,6 @@ fn workspace_init_preserves_existing_orbitignore() {
         owner: None,
         task_id_start: None,
         mcp: false,
-        hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
     }
@@ -785,7 +771,6 @@ fn workspace_init_with_root_override_does_not_modify_repo_gitignore() {
         owner: None,
         task_id_start: None,
         mcp: false,
-        hooks: false,
         inject_agent_rules: false,
         refresh_defaults: false,
     }
@@ -843,7 +828,6 @@ fn nameless_tmp_workspace_registers_only_in_isolated_registry() {
             owner: None,
             task_id_start: None,
             mcp: false,
-            hooks: false,
             inject_agent_rules: false,
             refresh_defaults: false,
         }

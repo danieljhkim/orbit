@@ -48,9 +48,6 @@ pub struct WorkspaceInitArgs {
     /// Set up MCP client integrations for auto-detected providers.
     #[arg(long)]
     pub mcp: bool,
-    /// Set up PreToolUse learning hooks for auto-detected agent providers.
-    #[arg(long)]
-    pub hooks: bool,
     /// Inject (or refresh) an Orbit workflow-rules block in CLAUDE.md and AGENTS.md at the workspace root.
     #[arg(long)]
     pub inject_agent_rules: bool,
@@ -67,7 +64,6 @@ impl WorkspaceInitArgs {
         let global_root = roots.global_root;
         let registry_path = workspace_registry::registry_path_for(&global_root);
         let mcp = self.mcp;
-        let hooks = self.hooks;
         let inject_rules = self.inject_agent_rules;
         let task_id_start = self.task_id_start;
         let init_result = self.execute_at_path(&cwd, &orbit_dir, &global_root, &registry_path)?;
@@ -102,17 +98,6 @@ impl WorkspaceInitArgs {
             }
         } else {
             println!("  mcp:       skipped (pass --mcp to set up integrations)");
-        }
-
-        if hooks {
-            let providers = orbit_cmd::hook_install::install_for_workspace(&init_result.root)?;
-            if providers.is_empty() {
-                println!("  hooks:     no providers auto-detected");
-            } else {
-                println!("  hooks:     {}", providers.join(", "));
-            }
-        } else {
-            println!("  hooks:     skipped (pass --hooks to set up integrations)");
         }
 
         if inject_rules {
