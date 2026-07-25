@@ -22,8 +22,10 @@ pub(super) async fn search(Ws(runtime): Ws, RawQuery(raw): RawQuery) -> Response
 }
 
 fn parse_search_query(raw: Option<&str>) -> Result<GlobalSearchParams, String> {
-    let mut params = GlobalSearchParams::default();
-    params.limit = 10;
+    let mut params = GlobalSearchParams {
+        limit: 10,
+        ..GlobalSearchParams::default()
+    };
 
     for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
         match key.as_ref() {
