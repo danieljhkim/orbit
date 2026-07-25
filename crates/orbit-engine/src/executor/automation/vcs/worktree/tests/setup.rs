@@ -113,10 +113,30 @@ fn worktree_setup_output_includes_legacy_batch_id_alias() {
         "/tmp/orbit-worktree".to_string(),
         "orbit/ORB-00010".to_string(),
         "main".to_string(),
+        "1111111111111111111111111111111111111111".to_string(),
     );
 
     assert_eq!(output["job_run_id"], json!("jrun-test"));
     assert_eq!(output["batch_id"], output["job_run_id"]);
+}
+
+#[test]
+fn worktree_setup_publishes_the_resolved_base_commit_alongside_the_moving_ref() {
+    // ORB-10380: downstream steps must be able to pin the base this worktree was
+    // created at, because `origin/<base>` moves while the run is in flight.
+    let output = worktree_setup_output(
+        "jrun-test",
+        "/tmp/orbit-worktree".to_string(),
+        "orbit/ORB-10380".to_string(),
+        "origin/agent-main".to_string(),
+        "2222222222222222222222222222222222222222".to_string(),
+    );
+
+    assert_eq!(output["base_ref"], json!("origin/agent-main"));
+    assert_eq!(
+        output["base_sha"],
+        json!("2222222222222222222222222222222222222222")
+    );
 }
 
 fn init_repo(path: &Path, branch: &str) {
