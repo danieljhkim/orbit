@@ -10,6 +10,7 @@ mod friction;
 mod host;
 mod job;
 mod learning;
+mod model_identity;
 mod pricing;
 mod resource;
 mod routine;

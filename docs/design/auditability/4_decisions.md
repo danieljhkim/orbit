@@ -3,7 +3,7 @@ summary: "Auditability — Decisions"
 type: design
 title: "Auditability — Decisions"
 owner: codex
-last_updated: 2026-07-20
+last_updated: 2026-07-25
 status: Draft
 feature: auditability
 doc_role: decisions
@@ -357,7 +357,26 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - `provider_cost_usd` never changes once written, so it stays the ground truth Daniel reconciles against monthly even if `derived_cost_usd` for the same row changes later.
 - Cost: because derived cost is recomputed on every read instead of frozen at ingest, editing a price row after the fact silently changes the reported cost of every past invocation under that model/date range — there is no record of what a row's derived cost "used to be", unlike the immutable `provider_cost_usd`.
 - Cache-write TTL split: `TokenUsage`/`PriceRow` distinguish 5-minute-TTL cache-creation tokens (`cache_create`, 1.25x input) from 1-hour-TTL (`cache_create_1h`, 2x input), since Anthropic prices them differently; the store persists both. Validated against real worker run 91d7ef01 (`claude-opus-4-8[1m]` → $1.014018 exactly). The ingest path does not yet parse the provider's `ephemeral_1h`/`ephemeral_5m` split, so persisted 1h counts are currently zero (all cache-creation prices at the 5m rate) until that wiring lands — a documented follow-up, matching the pattern by which `provider_cost_usd` was added ahead of its ingest wiring.
-- Model-string keying: rows are keyed by the exact string that lands in `InvocationRecord.model`. A context-window suffix (`claude-opus-4-8[1m]`) is stripped to fall back to the base row rather than duplicating rows, since it bills at base rates; a distinct `model[1m]` row would win by exact match if a long-context premium ever applied. Unversioned crew aliases (`opus`/`sonnet`/`fable`) are deliberately not priced — the store currently records those aliases alongside resolved version strings, an upstream data-quality issue for a follow-up.
+- Model-string keying: rows are keyed by the exact string that lands in `InvocationRecord.model`. A context-window suffix (`claude-opus-4-8[1m]`) is stripped to fall back to the base row rather than duplicating rows, since it bills at base rates; a distinct `model[1m]` row would win by exact match if a long-context premium ever applied. Unversioned crew aliases (`opus`/`sonnet`/`fable`) are deliberately not priced — [ADR-0247] fixed the upstream data-quality issue this bullet originally flagged, so aliases no longer reach `InvocationRecord.model` at all.
+
+---
+
+## ADR-0247 — Resolve crew aliases to exact model strings at invocation ingest
+
+**Status:** Accepted · 2026-07 · [ORB-10354]
+
+**Context.** [ADR-0245] keys the price table by exact model string, but Orbit's crew config deliberately dispatches Claude through unversioned CLI aliases (`opus`, `sonnet`, `fable`) so CLI defaults never drift, and gemini through `pro`. Those alias strings flowed straight into `invocations.model`, where no price row could ever match them: alias rows derived no cost and sat in per-model aggregates as if each alias were its own model. Three real alternatives existed: (a) price the aliases in `model_prices.yaml`; (b) resolve alias to exact string at read time behind an explicit marker; (c) resolve at ingest and keep the alias as separate provenance metadata.
+
+**Decision.** Resolve at ingest, in the store. `orbit_common::types::model_identity` owns one alias table mapping `(agent family, alias)` to the exact string the alias currently resolves to, and classifies any model string as `Exact`, `ResolvedAlias`, or `UnresolvedAlias`. `Store::insert_invocation_trace_record` splits the caller's model string across two columns: `model` always carries an exact provider string (or NULL), `model_alias` carries the alias the invocation was dispatched through. An alias Orbit cannot resolve locally — currently gemini `pro`, because Orbit pins two conflicting exact gemini pro strings — records `model = NULL` with the alias in `model_alias` rather than a guess. Normalization lives in the store, not at the call sites, because `insert_invocation_trace_record` is the one funnel every ingest path shares, including the worker bridge's `POST /api/metrics/invocations`, which deserializes `InvocationInsertParams` straight from JSON and never passes through the runtime's identity normalization. Migration v11 lifts historical alias values out of `model` into `model_alias` without resolving them.
+
+**Consequences.**
+- Alias-dispatched runs now derive a cost, and per-model aggregates stop splitting between an alias and the exact string for the same model.
+- Rejected (a): pricing the aliases would have papered over the real defect — an alias in `model` is unattributable regardless of cost, and a priced alias row would make any future alias leak invisible.
+- Rejected (b): a read-time marker leaves the bad value in the column, so every future consumer (exports, scoreboards, the coverage scan) has to re-implement the same exclusion. Ingest-time is the single point where the invariant can hold.
+- Historical alias rows are migrated, not resolved: `opus` in a June row may have pointed at a different flagship than `opus` does today, so rewriting it to today's string would fabricate provenance. Those rows keep deriving no cost (they never did) but stop polluting per-model aggregates and stay auditable through `model_alias`.
+- Staleness is the accepted cost. The alias table names today's flagship, so when a provider promotes a new model behind an existing alias, rows record a wrong-but-plausible exact string until the table is bumped — worse than a NULL in that nothing flags it. The authoritative fix is to read the model the provider reports in its result JSON, deferred to [ORB-10370]; the table doc and the `model_prices.yaml` header both state the bump-in-lockstep rule.
+- The price-coverage guard could be upgraded from a curated fleet list to a live scan (`Store::list_unpriced_invocation_models`) only because aliases left the `model` column; aliases are deliberately unpriced, so before this change every scan would have reported them as permanent false positives. The curated unit-level list stays as the CI-runnable form, since CI has no invocation ledger to scan.
+- Token-attribution side effect: the scoreboard's activities/agents sections already omit invocations with no resolved model, so rows for an unresolvable alias (today only gemini `pro`) drop out of those two sections instead of appearing under the alias. Their tokens remain in the per-task and tool sections and in `orbit run` record listings, and [ORB-10370] restores full attribution. Labeling them by alias in the token aggregate was rejected: it would re-introduce the alias-shaped grouping this ADR removes.
 
 ---
 
@@ -401,5 +420,6 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
 - **[ORB-10202]** — Remove the retired friction task status and consolidate task mutation attribution and record-parameter construction.
 - **[ORB-10338]** — Add the versioned model price table and query-time `derived_cost_usd`, plus a persisted `provider_cost_usd` column for reconciliation.
+- **[ORB-10354]** — Resolve crew aliases to exact model strings at invocation ingest, split the alias into `model_alias`, and add the live unpriced-model scan.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -24,6 +24,12 @@
 # Keyed by exact model string (the value that ends up in
 # `InvocationRecord.model` — never a crew name or unversioned CLI alias like
 # `opus`/`sonnet`/`fable`) plus an effective date range.
+#
+# ORB-10354: aliases never reach `InvocationRecord.model` any more — the store
+# resolves them at ingest via `types::model_identity`, which keeps the alias in
+# `model_alias`. When a provider promotes a new flagship behind an alias, bump
+# the alias target in that module in the same change as the row below, or the
+# resolved string stops matching what the CLI actually ran.
 # `orbit_common::types::pricing` looks up the row whose range covers an
 # invocation's timestamp and derives USD cost from the token splits at query
 # time; nothing here is baked into Rust.

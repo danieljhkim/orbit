@@ -168,7 +168,11 @@ fn apply_baseline_schema(conn: &Connection) -> Result<(), OrbitError> {
                 job_run_id TEXT NOT NULL,
                 activity_id TEXT NOT NULL,
                 agent TEXT NOT NULL,
+                -- Exact provider model string only, never a crew alias
+                -- (ORB-10354); the alias the invocation was dispatched
+                -- through lands in `model_alias`.
                 model TEXT,
+                model_alias TEXT,
                 slot TEXT,
                 duration_ms INTEGER NOT NULL DEFAULT 0,
                 input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -609,6 +613,42 @@ fn apply_invocation_telemetry_columns(conn: &Connection) -> Result<(), OrbitErro
         return Ok(());
     }
     ensure_invocation_schema(conn)
+}
+
+/// v11 `invocation_model_alias` migration (ORB-10354): add the `model_alias`
+/// column and lift historical crew aliases out of the `model` column.
+///
+/// `invocations.model` is keyed against the exact-model price table
+/// (ADR-0245), so the unversioned crew aliases the ingest path used to record
+/// (`opus`, `sonnet`, `fable`, `pro`) never derived a cost and sat in per-model
+/// aggregates as if each were its own model. Existing alias rows are migrated,
+/// not resolved: `opus` in a row from June may have been a different flagship
+/// than `opus` today, so rewriting it to today's exact string would fabricate
+/// provenance. The alias moves to `model_alias` and `model` becomes NULL —
+/// those rows still derive no cost (they never did), but they stop polluting
+/// per-model aggregates and stay auditable through the alias.
+///
+/// Deliberately its own migration rather than an addition to
+/// [`ensure_invocation_schema`]: that step only runs under the v1 baseline and
+/// v10, so a column added there never reaches a database already stamped at
+/// v10 (the ORB-10367 failure mode).
+fn apply_invocation_model_alias(conn: &Connection) -> Result<(), OrbitError> {
+    // `ALTER TABLE` on a missing table is an error, not a no-op, and a
+    // database without `invocations` has nothing to repair.
+    if !table_exists(conn, "invocations")? {
+        return Ok(());
+    }
+    add_column_if_missing(conn, "ALTER TABLE invocations ADD COLUMN model_alias TEXT")?;
+
+    for alias in orbit_common::types::model_alias_names() {
+        conn.execute(
+            "UPDATE invocations SET model_alias = model, model = NULL \
+             WHERE model = ?1 AND model_alias IS NULL",
+            [alias],
+        )
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    }
+    Ok(())
 }
 
 fn ensure_invocation_schema(conn: &Connection) -> Result<(), OrbitError> {

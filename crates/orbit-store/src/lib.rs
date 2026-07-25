@@ -151,6 +151,7 @@ pub use sqlite::id_allocator::{
 pub use sqlite::invocation_store::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,
     InvocationRecord, InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
+    UnpricedModelRow,
 };
 pub use sqlite::routine_store::{
     RoutineCursor, RoutineFireIntentParams, RoutineFireRecord, RoutineFireState,

@@ -43,6 +43,7 @@ pub mod job;
 pub mod knowledge_allocation;
 pub mod learning;
 pub mod metrics;
+pub mod model_identity;
 pub mod policy_decision;
 pub mod policy_def;
 pub mod pricing;
@@ -133,6 +134,10 @@ pub use learning::{
     prepend_reminder_block, render_reminder_block,
 };
 pub use metrics::MetricsEntry;
+pub use model_identity::{
+    CLAUDE_FABLE_ALIAS_TARGET, CLAUDE_OPUS_ALIAS_TARGET, CLAUDE_SONNET_ALIAS_TARGET, ModelIdentity,
+    classify_model_string, model_alias_names,
+};
 pub use policy_decision::PolicyDecision;
 pub use policy_def::{
     DEFAULT_POLICY_NAME, FsCheckResult, FsOperation, FsProfile, PolicyDef, ResolvedFsProfile,

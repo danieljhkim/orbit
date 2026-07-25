@@ -254,3 +254,105 @@ fn invocation_records_leave_derived_cost_none_for_an_unpriced_model() {
     assert_eq!(records[0].provider_cost_usd, None);
     assert_eq!(records[0].derived_cost_usd, None);
 }
+
+// ─── Crew-alias resolution at ingest (ORB-10354) ─────────────────────────────
+
+fn insert_with_model(store: &Store, job_run_id: &str, agent: &str, model: &str) {
+    store
+        .insert_invocation_trace_record(&InvocationInsertParams {
+            job_run_id: job_run_id.to_string(),
+            activity_id: "implement_one".to_string(),
+            agent: agent.to_string(),
+            model: Some(model.to_string()),
+            slot: None,
+            task_ids: vec!["ORB-10354".to_string()],
+            trace: InvocationTrace {
+                usage: TokenUsage {
+                    input: 1_000,
+                    output: 1_000,
+                    ..TokenUsage::default()
+                },
+                ..InvocationTrace::default()
+            },
+        })
+        .expect("insert invocation");
+}
+
+fn only_record(store: &Store, job_run_id: &str) -> crate::InvocationRecord {
+    let mut records = store
+        .list_invocation_records(&InvocationQuery {
+            job_run_id: Some(job_run_id.to_string()),
+            limit: 10,
+            ..Default::default()
+        })
+        .expect("list records");
+    assert_eq!(
+        records.len(),
+        1,
+        "expected exactly one row for {job_run_id}"
+    );
+    records.remove(0)
+}
+
+/// The point of the fix: a crew dispatched through the `opus` alias lands in
+/// the store as an exact, priceable model string, with the alias kept as
+/// provenance.
+#[test]
+fn a_dispatched_crew_alias_is_resolved_before_insert() {
+    let store = Store::open_in_memory().expect("open store");
+    insert_with_model(&store, "jrun-alias", "claude", "opus");
+
+    let record = only_record(&store, "jrun-alias");
+    assert_eq!(
+        record.model.as_deref(),
+        Some(orbit_common::types::CLAUDE_OPUS_ALIAS_TARGET),
+        "the model column must carry the resolved version string"
+    );
+    assert_eq!(record.model_alias.as_deref(), Some("opus"));
+    assert!(
+        record.derived_cost_usd.is_some(),
+        "a resolved alias row must derive a cost; alias rows never did"
+    );
+}
+
+/// An alias Orbit cannot resolve is recorded as metadata only — a NULL model
+/// beats either a guessed version string or an alias in the model column.
+#[test]
+fn an_unresolvable_alias_is_recorded_as_metadata_with_a_null_model() {
+    let store = Store::open_in_memory().expect("open store");
+    insert_with_model(&store, "jrun-unresolved", "gemini", "pro");
+
+    let record = only_record(&store, "jrun-unresolved");
+    assert_eq!(record.model, None);
+    assert_eq!(record.model_alias.as_deref(), Some("pro"));
+    assert_eq!(record.derived_cost_usd, None);
+}
+
+#[test]
+fn an_exact_model_string_is_persisted_without_an_alias() {
+    let store = Store::open_in_memory().expect("open store");
+    insert_with_model(&store, "jrun-exact", "claude", PRICED_MODEL);
+
+    let record = only_record(&store, "jrun-exact");
+    assert_eq!(record.model.as_deref(), Some(PRICED_MODEL));
+    assert_eq!(record.model_alias, None);
+}
+
+/// Callers think in the alias they dispatched with, so the model filter matches
+/// either side of the split.
+#[test]
+fn the_model_filter_matches_the_alias_or_the_resolved_string() {
+    let store = Store::open_in_memory().expect("open store");
+    insert_with_model(&store, "jrun-filter-alias", "claude", "opus");
+
+    for needle in ["opus", orbit_common::types::CLAUDE_OPUS_ALIAS_TARGET] {
+        let records = store
+            .list_invocation_records(&InvocationQuery {
+                model: Some(needle.to_string()),
+                limit: 10,
+                ..Default::default()
+            })
+            .expect("list records");
+        assert_eq!(records.len(), 1, "filtering by {needle} must find the row");
+    }
+}

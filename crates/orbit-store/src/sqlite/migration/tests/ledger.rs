@@ -61,6 +61,9 @@ fn fresh_db_applies_baseline_and_records_ledger() {
     assert_eq!(applied[9].version, 10);
     assert_eq!(applied[9].name, "invocation_telemetry_columns");
     assert!(!applied[9].applied_at.is_empty());
+    assert_eq!(applied[10].version, 11);
+    assert_eq!(applied[10].name, "invocation_model_alias");
+    assert!(!applied[10].applied_at.is_empty());
 }
 
 #[test]
@@ -201,6 +204,10 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0010".to_string(),
                 "invocation_telemetry_columns".to_string()
             ),
+            (
+                "migration.v0011".to_string(),
+                "invocation_model_alias".to_string()
+            ),
         ]
     );
 }
@@ -212,7 +219,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0011', 'from-the-future', '2099-01-01T00:00:00Z')",
+         VALUES ('migration.v0012', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -292,7 +299,7 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_through_latest() {
     );
     assert_eq!(
         applied.last().map(|migration| migration.name.as_str()),
-        Some("invocation_telemetry_columns")
+        Some("invocation_model_alias")
     );
     let connection = store.connection();
     let conn = connection.lock().expect("connection");
@@ -619,4 +626,64 @@ fn migrated_legacy_db_carries_every_invocation_insert_column() {
             },
         })
         .expect("insert invocation trace into migrated legacy database");
+}
+
+/// [ORB-10354] The v11 migration lifts historical crew aliases out of the
+/// exact-model `model` column without inventing a resolution for them: `opus`
+/// in an old row may have pointed at a different flagship than `opus` does now,
+/// so the alias moves to `model_alias` and `model` becomes NULL.
+#[test]
+fn migration_moves_historical_crew_aliases_into_model_alias() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("orbit.db");
+    let conn = Connection::open(&path).expect("open raw store connection");
+    apply_schema(&conn).expect("apply current schema");
+    // Simulate rows written before the ingest path resolved aliases, and roll
+    // the ledger back so v11 runs against them.
+    conn.execute_batch(
+        r#"
+            UPDATE invocations SET model_alias = NULL;
+            INSERT INTO invocations(ts, job_run_id, activity_id, agent, model)
+            VALUES
+                ('2026-07-01T00:00:00Z', 'jrun-a', 'implement_one', 'claude', 'opus'),
+                ('2026-07-02T00:00:00Z', 'jrun-b', 'implement_one', 'claude', 'sonnet'),
+                ('2026-07-03T00:00:00Z', 'jrun-c', 'implement_one', 'gemini', 'pro'),
+                ('2026-07-04T00:00:00Z', 'jrun-d', 'implement_one', 'claude', 'claude-opus-4-7');
+            DELETE FROM schema_meta WHERE key = 'migration.v0011';
+        "#,
+    )
+    .expect("seed unresolved alias rows");
+    drop(conn);
+
+    let store = crate::Store::open(&path).expect("reopen and migrate");
+    assert_eq!(
+        store.schema_version().expect("schema version"),
+        SUPPORTED_SCHEMA_VERSION
+    );
+
+    let connection = store.connection();
+    let conn = connection.lock().expect("connection");
+    let mut stmt = conn
+        .prepare("SELECT job_run_id, model, model_alias FROM invocations ORDER BY job_run_id ASC")
+        .expect("prepare");
+    let rows: Vec<(String, Option<String>, Option<String>)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .expect("query")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect rows");
+
+    assert_eq!(
+        rows,
+        vec![
+            ("jrun-a".to_string(), None, Some("opus".to_string())),
+            ("jrun-b".to_string(), None, Some("sonnet".to_string())),
+            ("jrun-c".to_string(), None, Some("pro".to_string())),
+            (
+                "jrun-d".to_string(),
+                Some("claude-opus-4-7".to_string()),
+                None
+            ),
+        ],
+        "aliases move to model_alias; exact model strings are left alone",
+    );
 }

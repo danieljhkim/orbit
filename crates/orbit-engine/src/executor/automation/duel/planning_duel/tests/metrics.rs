@@ -18,6 +18,7 @@ fn invocation_record(
         activity_id: "propose_duel_plan".to_string(),
         agent: "codex".to_string(),
         model: Some("gpt-5.6".to_string()),
+        model_alias: None,
         slot: Some(RoleSlot::PlannerA),
         duration_ms: 10,
         input_tokens,

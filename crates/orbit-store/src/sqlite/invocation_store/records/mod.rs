@@ -5,7 +5,9 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, types::ToSql};
 
-use orbit_common::types::{OrbitError, RoleSlot, TokenUsage, derive_cost_usd};
+use orbit_common::types::{
+    ModelIdentity, OrbitError, RoleSlot, TokenUsage, classify_model_string, derive_cost_usd,
+};
 
 use crate::{Store, now_string};
 
@@ -26,6 +28,7 @@ pub(crate) const INVOCATION_INSERT_COLUMNS: &[&str] = &[
     "activity_id",
     "agent",
     "model",
+    "model_alias",
     "slot",
     "duration_ms",
     "input_tokens",
@@ -54,6 +57,7 @@ impl Store {
         &self,
         params: &InvocationInsertParams,
     ) -> Result<(), OrbitError> {
+        let (model, model_alias) = resolved_model_columns(&params.agent, params.model.as_deref());
         let mut conn = self
             .conn
             .lock()
@@ -69,7 +73,8 @@ impl Store {
                 params.job_run_id,
                 params.activity_id,
                 params.agent,
-                params.model,
+                model,
+                model_alias,
                 params.slot.map(|slot| slot.as_str().to_string()),
                 params.trace.duration_ms as i64,
                 params.trace.usage.input as i64,
@@ -173,6 +178,30 @@ impl Store {
     }
 }
 
+/// Split the caller-supplied model string into the `(model, model_alias)`
+/// column pair (ORB-10354).
+///
+/// This runs inside the store, not at the call sites, because
+/// `insert_invocation_trace_record` is the one funnel every ingest path shares
+/// — the engine hosts, the worker bridge's `POST /api/metrics/invocations`
+/// (which deserializes [`InvocationInsertParams`] straight from JSON and never
+/// passes through the runtime's identity normalization), and tests. Normalizing
+/// here is what makes "the `model` column never holds an alias" an invariant of
+/// the store rather than a convention each caller has to remember.
+fn resolved_model_columns(agent: &str, model: Option<&str>) -> (Option<String>, Option<String>) {
+    let Some(identity) = model.and_then(|model| classify_model_string(Some(agent), model)) else {
+        return (None, None);
+    };
+    match identity {
+        ModelIdentity::Exact(model) => (Some(model), None),
+        ModelIdentity::ResolvedAlias { model, alias } => (Some(model), Some(alias)),
+        // No exact string to record: keeping the alias out of `model` is the
+        // whole point, and a NULL model derives no cost (which an alias never
+        // did either) instead of splitting per-model aggregates.
+        ModelIdentity::UnresolvedAlias { alias } => (None, Some(alias)),
+    }
+}
+
 fn insert_invocation_task_ids(
     tx: &rusqlite::Transaction<'_>,
     invocation_id: i64,
@@ -234,7 +263,10 @@ fn build_invocation_list_query(filter: &InvocationQuery) -> (String, Vec<Box<dyn
         query.push_filter("i.agent = ?", agent.clone());
     }
     if let Some(model) = &filter.model {
-        query.push_filter("i.model = ?", model.clone());
+        // ORB-10354: alias rows now carry the resolved string in `model`, so a
+        // caller filtering by the alias they dispatched with (`opus`) still
+        // finds them through `model_alias`.
+        query.push_repeating_filter("(i.model = ? OR i.model_alias = ?)", model.clone());
     }
     if let Some(slot) = filter.slot {
         query.push_filter("i.slot = ?", slot.as_str().to_string());
@@ -252,7 +284,7 @@ fn build_invocation_list_query(filter: &InvocationQuery) -> (String, Vec<Box<dyn
     let sql = format!(
         "SELECT i.id, i.ts, i.job_run_id, i.activity_id, i.agent, i.model, i.slot, i.duration_ms, \
          i.input_tokens, i.cache_read_tokens, i.cache_create_tokens, i.cache_create_1h_tokens, \
-         i.output_tokens, i.tool_call_count, i.provider_cost_usd \
+         i.output_tokens, i.tool_call_count, i.provider_cost_usd, i.model_alias \
          FROM invocations i {} ORDER BY i.ts DESC, i.id DESC LIMIT ?{}",
         query.where_clause(),
         query.len()
@@ -272,6 +304,7 @@ fn map_invocation_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<Invocation
     let cache_create_1h_tokens = row.get::<_, i64>(11)? as u64;
     let output_tokens = row.get::<_, i64>(12)? as u64;
     let provider_cost_usd: Option<f64> = row.get(14)?;
+    let model_alias: Option<String> = row.get(15)?;
 
     let derived_cost_usd = model.as_deref().and_then(|model| {
         derive_cost_usd(
@@ -294,6 +327,7 @@ fn map_invocation_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<Invocation
         activity_id: row.get(3)?,
         agent: row.get(4)?,
         model,
+        model_alias,
         slot: slot_raw
             .as_deref()
             .map(RoleSlot::from_str)
@@ -415,6 +449,17 @@ impl InvocationListQuery {
         // L-0024: nested EXISTS filters need the bind index inserted at the placeholder.
         let placeholder = format!("?{}", self.len());
         self.conditions.push(sql.replacen('?', &placeholder, 1));
+    }
+
+    /// Like [`Self::push_filter`], but for a condition that references the
+    /// bound value more than once (every `?` becomes the same placeholder).
+    fn push_repeating_filter<T>(&mut self, sql: &str, value: T)
+    where
+        T: ToSql + 'static,
+    {
+        self.push_value(value);
+        let placeholder = format!("?{}", self.len());
+        self.conditions.push(sql.replace('?', &placeholder));
     }
 
     fn push_value<T>(&mut self, value: T)

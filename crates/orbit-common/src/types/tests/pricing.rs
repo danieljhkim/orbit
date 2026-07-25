@@ -138,12 +138,16 @@ fn context_window_suffix_falls_back_to_the_base_row() {
 /// (`modelUsage` keys) and the crew config. When the fleet adds a model, add it
 /// here and to `assets/model_prices.yaml` in the same change.
 ///
-/// This is the cheap, curated form. The fuller guard — a check that scans the
-/// live invocation store/ledger for any `model` with no covering row — is a
-/// follow-up (it also has to contend with the upstream data-quality issue that
-/// the store currently records unversioned crew aliases like `opus`/`sonnet`
-/// alongside resolved version strings; those aliases are deliberately NOT
-/// priced here).
+/// This stays the cheap, curated form on purpose: it runs in CI, which has no
+/// invocation ledger to scan, and it catches a missing row before the model is
+/// ever fielded. The authoritative coverage signal is now the live-store scan
+/// added by [ORB-10354] — `Store::list_unpriced_invocation_models`, which
+/// groups the `model` strings actually observed and reports the ones no row
+/// covers. That scan became usable once the store stopped recording unversioned
+/// crew aliases (`opus`/`sonnet`/`fable`/`pro`) in the `model` column; aliases
+/// are deliberately still NOT priced here, they resolve to an exact string at
+/// ingest and are asserted against this table by
+/// `types::tests::model_identity::every_alias_target_is_priced`.
 #[test]
 fn every_fleet_model_string_is_priced() {
     const FLEET_MODELS: &[&str] = &[

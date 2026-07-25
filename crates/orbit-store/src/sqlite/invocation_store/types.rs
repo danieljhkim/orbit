@@ -22,6 +22,11 @@ pub struct InvocationInsertParams {
     pub job_run_id: String,
     pub activity_id: String,
     pub agent: String,
+    /// The model string the invocation was dispatched with — an exact provider
+    /// model string, or the unversioned crew alias it was dispatched through.
+    /// [ORB-10354] The store resolves an alias before insert, so the persisted
+    /// `model` column always carries an exact string (or NULL) and the alias
+    /// lands in `model_alias`. Callers do not pre-resolve.
     pub model: Option<String>,
     pub slot: Option<RoleSlot>,
     pub task_ids: Vec<String>,
@@ -43,7 +48,16 @@ pub struct InvocationRecord {
     pub job_run_id: String,
     pub activity_id: String,
     pub agent: String,
+    /// Exact provider model string, or `None` when the invocation was
+    /// dispatched through an alias Orbit could not resolve. [ORB-10354] Never a
+    /// crew alias — the price table is keyed by exact strings only, so an alias
+    /// here would derive no cost and split per-model aggregates.
     pub model: Option<String>,
+    /// The unversioned crew alias the invocation was dispatched through
+    /// (`opus`, `sonnet`, `fable`, `pro`), when it was dispatched through one.
+    /// Provenance metadata: `None` whenever the caller supplied an exact model
+    /// string.
+    pub model_alias: Option<String>,
     pub slot: Option<RoleSlot>,
     pub duration_ms: u64,
     pub input_tokens: u64,
@@ -65,6 +79,18 @@ pub struct InvocationRecord {
     /// (`orbit_common::types::pricing`). `None` when no price row covers
     /// this model/date.
     pub derived_cost_usd: Option<f64>,
+}
+
+/// One observed `invocations.model` string that no price row covers
+/// ([ORB-10354]). Produced by [`crate::Store::list_unpriced_invocation_models`]
+/// — the live-store form of the curated fleet-coverage guard.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UnpricedModelRow {
+    pub model: String,
+    pub invocation_count: u64,
+    /// RFC3339 timestamps, verbatim from the store.
+    pub first_seen: String,
+    pub last_seen: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

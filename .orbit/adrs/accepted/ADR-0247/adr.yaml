@@ -1,0 +1,23 @@
+schema_version: 2
+id: ADR-0247
+title: Resolve crew aliases to exact model strings at invocation ingest
+status: accepted
+owner: claude
+created_at: 2026-07-25T05:10:26.183537304Z
+accepted_at: 2026-07-25T05:10:31.513739925Z
+last_updated: 2026-07-25T05:16:13.305481736Z
+related_features:
+- auditability
+related_tasks:
+- ORB-10354
+tags:
+- telemetry
+- pricing
+paths:
+- crates/orbit-common/src/types/model_identity.rs
+- crates/orbit-store/src/sqlite/invocation_store/**
+- crates/orbit-store/src/sqlite/migration/**
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none
