@@ -223,10 +223,12 @@ fn synthetic_error_message(exec_result: &orbit_common::types::ExecutionResult) -
 }
 
 fn base_outcome(exec_result: &orbit_common::types::ExecutionResult) -> AttemptOutcome {
-    let trace = InvocationTrace {
-        duration_ms: exec_result.duration_ms,
-        ..InvocationTrace::default()
-    };
+    let trace = orbit_agent::parse_and_validate_response(exec_result)
+        .map(|(_, _, trace)| trace)
+        .unwrap_or_else(|_| InvocationTrace {
+            duration_ms: exec_result.duration_ms,
+            ..InvocationTrace::default()
+        });
     AttemptOutcome {
         state: JobRunState::Failed,
         exit_code: exec_result.exit_code,

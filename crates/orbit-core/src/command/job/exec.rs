@@ -701,7 +701,7 @@ spec:
         std::fs::write(path, yaml).expect("write job yaml");
     }
 
-    fn write_cli_metrics_job(path: &Path, name: &str) {
+    fn write_cli_metrics_job(path: &Path, name: &str, step_id: &str, provider: &str, model: &str) {
         let yaml = format!(
             r#"schemaVersion: 2
 kind: Job
@@ -711,16 +711,16 @@ spec:
   state: enabled
   kind: workflow
   steps:
-    - id: codex_metrics
+    - id: {step_id}
       spec:
         type: agent_loop
         instruction: "emit a successful Orbit envelope"
         tools: [fs.read]
         on_denial: terminate
         max_iterations: 1
-        model: gpt-test
+        model: {model}
         backend: cli
-        provider: codex
+        provider: {provider}
         wall_clock_timeout_seconds: 30
 "#
         );
@@ -1117,7 +1117,13 @@ spec:
             .expect("seed fake codex executor");
 
         let yaml_path = repo_root.join("qa_cli_metrics.yaml");
-        write_cli_metrics_job(&yaml_path, "qa_cli_metrics");
+        write_cli_metrics_job(
+            &yaml_path,
+            "qa_cli_metrics",
+            "codex_metrics",
+            "codex",
+            "gpt-test",
+        );
         let task = runtime
             .add_task(TaskAddParams {
                 title: "Metrics fixture".to_string(),
@@ -1171,6 +1177,61 @@ spec:
                 && row.tool_name == "command_execution"
                 && row.call_count == 1
         }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn v2_claude_fable_alias_persists_provider_reported_model_and_cost() {
+        let (_root, runtime, repo_root, _global_root) = test_runtime();
+        let fake_bin = repo_root.join("claude");
+        write_fake_cli_response(
+            &fake_bin,
+            r#"{"type":"result","subtype":"success","result":"{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}","total_cost_usd":0.286169,"modelUsage":{"claude-haiku-4-5-20251001":{"costUSD":0.000598,"canonicalModel":"claude-haiku-4-5"},"claude-fable-5":{"costUSD":0.285571,"canonicalModel":"claude-fable-5"}},"usage":{"input_tokens":2,"output_tokens":102}}"#,
+        );
+
+        let now = Utc::now();
+        runtime
+            .upsert_executor_def(&ExecutorDef {
+                name: "claude".to_string(),
+                executor_type: ExecutorType::DirectAgent,
+                command: Some(fake_bin.display().to_string()),
+                args: Vec::new(),
+                stdout_format: None,
+                model_pair_override: None,
+                model_flag: None,
+                timeout_seconds: None,
+                env: HashMap::new(),
+                sandbox: None,
+                allow_fallback: false,
+                created_at: now,
+                updated_at: now,
+            })
+            .expect("seed fake Claude executor");
+
+        let yaml_path = repo_root.join("qa_fable_metrics.yaml");
+        write_cli_metrics_job(
+            &yaml_path,
+            "qa_fable_metrics",
+            "fable_metrics",
+            "claude",
+            "fable",
+        );
+        let result = runtime
+            .run_job_v2_from_yaml(&yaml_path, json!({"prompt": "collect metrics"}), None)
+            .expect("Claude fable metrics job succeeds");
+
+        let records = runtime
+            .invocation_records(InvocationQuery {
+                job_run_id: Some(result.run_id),
+                limit: 1,
+                ..InvocationQuery::default()
+            })
+            .expect("query invocation records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].activity_id, "fable_metrics");
+        assert_eq!(records[0].agent, "claude");
+        assert_eq!(records[0].model.as_deref(), Some("claude-fable-5"));
+        assert_eq!(records[0].provider_cost_usd, Some(0.286169));
     }
 
     #[cfg(unix)]

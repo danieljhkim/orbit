@@ -93,6 +93,7 @@ fn invocation_records_filter_by_nested_task_and_tool() {
                     result_payload: None,
                 }],
                 duration_ms: 100,
+                provider_model: None,
                 provider_cost_usd: Some(0.5),
             },
         })

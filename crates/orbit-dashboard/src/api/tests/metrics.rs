@@ -177,6 +177,7 @@ fn seed_invocation(runtime: &OrbitRuntime, seed: SeedInvocation<'_>) {
                     })
                     .collect(),
                 duration_ms: seed.duration_ms,
+                provider_model: None,
                 provider_cost_usd: None,
             },
         })
@@ -337,6 +338,7 @@ async fn metrics_invocation_ingestion_preserves_worker_runs_and_aggregates() {
                 },
                 tool_calls: Vec::new(),
                 duration_ms: 1_500,
+                provider_model: None,
                 provider_cost_usd: Some(0.42),
             },
         },
@@ -357,6 +359,7 @@ async fn metrics_invocation_ingestion_preserves_worker_runs_and_aggregates() {
                 },
                 tool_calls: Vec::new(),
                 duration_ms: 900,
+                provider_model: None,
                 provider_cost_usd: None,
             },
         },

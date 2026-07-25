@@ -154,6 +154,13 @@ fn claude_cache_creation_ttl_split_ingests_at_the_one_hour_rate() {
         "type": "result",
         "subtype": "success",
         "result": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{}}",
+        "total_cost_usd": 1.014_018,
+        "modelUsage": {
+            "claude-opus-4-8[1m]": {
+                "costUSD": 1.014_018,
+                "canonicalModel": "claude-opus-4-8"
+            }
+        },
         "usage": {
             "input_tokens": 36,
             "output_tokens": 8_265,
@@ -168,6 +175,8 @@ fn claude_cache_creation_ttl_split_ingests_at_the_one_hour_rate() {
     .to_string();
     let trace = parse_cli_invocation_trace(stdout.as_bytes(), b"", Some(0), 99, true)
         .expect("Claude CLI envelope parses");
+    assert_eq!(trace.provider_model.as_deref(), Some("claude-opus-4-8[1m]"));
+    assert_eq!(trace.provider_cost_usd, Some(1.014_018));
     let store = Store::open_in_memory().expect("open store");
 
     store
@@ -193,6 +202,7 @@ fn claude_cache_creation_ttl_split_ingests_at_the_one_hour_rate() {
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].cache_create_tokens, 0);
     assert_eq!(records[0].cache_create_1h_tokens, 37_795);
+    assert_eq!(records[0].provider_cost_usd, Some(1.014_018));
     let derived = records[0].derived_cost_usd.expect("priced Claude model");
     assert!(
         (derived - 1.014_018).abs() < 1e-6,
