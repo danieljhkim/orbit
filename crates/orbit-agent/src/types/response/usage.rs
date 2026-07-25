@@ -147,17 +147,35 @@ fn usage_from_map(map: &JsonMap, key_mode: UsageKeyMode) -> Option<TokenUsage> {
         }
     };
 
-    input.or(cache_read).or(cache_create).or(output)?;
+    let cache_creation_split = match key_mode {
+        UsageKeyMode::Standard => cache_creation_split(map),
+        UsageKeyMode::TokenBlock => None,
+    };
+
+    if input.is_none()
+        && cache_read.is_none()
+        && cache_create.is_none()
+        && cache_creation_split.is_none()
+        && output.is_none()
+    {
+        return None;
+    }
+
+    let (cache_create, cache_create_1h) = match cache_creation_split {
+        // Claude CLI reports the aggregate cache-creation count as well as a
+        // TTL split. Prefer the split whenever it is present so 1h writes can
+        // be priced at their premium rate rather than being folded into 5m.
+        Some((five_minutes, one_hour)) => (five_minutes, one_hour),
+        // Older Claude CLI output and providers without a TTL split retain the
+        // historical aggregate-as-5m interpretation.
+        None => (cache_create.unwrap_or(0), 0),
+    };
 
     Some(TokenUsage {
         input: input.unwrap_or(0),
         cache_read: cache_read.unwrap_or(0),
-        cache_create: cache_create.unwrap_or(0),
-        // The generic usage flattener reads a single cache-creation counter; the
-        // Anthropic ephemeral_1h/ephemeral_5m split isn't parsed here yet, so
-        // cache_create_1h stays zero and all cache-creation tokens price at the
-        // standard (5m) rate downstream (ORB-10338 follow-up).
-        cache_create_1h: 0,
+        cache_create,
+        cache_create_1h,
         output: output.unwrap_or(0),
     })
 }
@@ -212,6 +230,10 @@ const STANDARD_CACHE_CREATE_KEYS: &[&str] = &[
     "cacheCreateTokens",
 ];
 
+const CACHE_CREATION_KEY: &str = "cache_creation";
+const EPHEMERAL_5M_INPUT_TOKENS_KEY: &str = "ephemeral_5m_input_tokens";
+const EPHEMERAL_1H_INPUT_TOKENS_KEY: &str = "ephemeral_1h_input_tokens";
+
 const STANDARD_OUTPUT_KEYS: &[&str] = &[
     "output_tokens",
     "outputTokens",
@@ -236,6 +258,23 @@ const TOKEN_BLOCK_THOUGHT_KEYS: &[&str] =
     &["thoughts", "thoughtsTokenCount", "thoughts_token_count"];
 
 const TOKEN_BLOCK_TOOL_KEYS: &[&str] = &["tool", "toolTokenCount", "tool_token_count"];
+
+/// Returns Claude CLI's cache-creation TTL split when either split field is
+/// present. A missing counterpart is zero: the provider has explicitly chosen
+/// the split format, so the aggregate is not a reliable 5m-only fallback.
+fn cache_creation_split(map: &JsonMap) -> Option<(u64, u64)> {
+    let cache_creation = map.get(CACHE_CREATION_KEY)?.as_object()?;
+    let five_minutes = cache_creation
+        .get(EPHEMERAL_5M_INPUT_TOKENS_KEY)
+        .and_then(value_as_u64);
+    let one_hour = cache_creation
+        .get(EPHEMERAL_1H_INPUT_TOKENS_KEY)
+        .and_then(value_as_u64);
+
+    five_minutes
+        .or(one_hour)
+        .map(|_| (five_minutes.unwrap_or(0), one_hour.unwrap_or(0)))
+}
 
 fn first_u64(map: &JsonMap, keys: &[&str]) -> Option<u64> {
     keys.iter().find_map(|key| value_as_u64(map.get(*key)?))
