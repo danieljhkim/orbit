@@ -4,14 +4,27 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{JobRun, JobRunState, OrbitError};
+use orbit_common::types::{JobRun, JobRunState, OrbitError, TaskStatus};
 use serde::Serialize;
 use serde_json::Value;
+
+use crate::context::TaskReadHost;
 
 use super::cleanup::remove_worktree;
 use super::{resolve_shared_worktree_path, resolve_worktree_path_from_prefix};
 
 const DEFAULT_BRANCH_PREFIX: &str = "orbit";
+
+/// Task statuses that settle the work as done — the only statuses that
+/// license discarding a run's worktree and branch. Every other status
+/// (including `blocked` and `review`) retains it, and an unresolvable or
+/// missing task_id retains it as well: the collector fails closed.
+fn task_status_permits_deletion(status: TaskStatus) -> bool {
+    matches!(
+        status,
+        TaskStatus::Rejected | TaskStatus::Archived | TaskStatus::Done
+    )
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct WorktreeGcOptions {
@@ -25,6 +38,9 @@ pub struct WorktreeGcReport {
     pub path: PathBuf,
     pub run_id: Option<String>,
     pub run_state: Option<JobRunState>,
+    pub task_id: Option<String>,
+    pub task_status: Option<TaskStatus>,
+    pub pr_status: Option<String>,
     pub action: String,
     pub bytes_reclaimed: u64,
 }
@@ -36,9 +52,10 @@ pub struct WorktreeGcResult {
     pub reports: Vec<WorktreeGcReport>,
 }
 
-pub fn collect_worktrees(
+pub fn collect_worktrees<H: TaskReadHost + ?Sized>(
     repo_root: &Path,
     runs: &[JobRun],
+    task_host: &H,
     options: &WorktreeGcOptions,
 ) -> Result<WorktreeGcResult, OrbitError> {
     let mut known_paths = BTreeMap::<PathBuf, Vec<&JobRun>>::new();
@@ -70,12 +87,21 @@ pub fn collect_worktrees(
                 path: path.clone(),
                 run_id: Some(run.run_id.clone()),
                 run_state: Some(run.state),
+                task_id: None,
+                task_status: None,
+                pr_status: None,
                 action: "skipped:ambiguous_run_path".to_string(),
                 bytes_reclaimed: 0,
             }));
             continue;
         }
-        reports.push(classify_known(repo_root, path, selected_runs[0], options)?);
+        reports.push(classify_known(
+            repo_root,
+            path,
+            selected_runs[0],
+            task_host,
+            options,
+        )?);
     }
 
     if options.run_id.is_none() {
@@ -86,6 +112,9 @@ pub fn collect_worktrees(
                     path: entry,
                     run_id: None,
                     run_state: None,
+                    task_id: None,
+                    task_status: None,
+                    pr_status: None,
                     action: "skipped:unrecognized".to_string(),
                     bytes_reclaimed: 0,
                 });
@@ -106,19 +135,32 @@ pub fn collect_worktrees(
     })
 }
 
-fn classify_known(
+fn classify_known<H: TaskReadHost + ?Sized>(
     repo_root: &Path,
     path: &Path,
     run: &JobRun,
+    task_host: &H,
     options: &WorktreeGcOptions,
 ) -> Result<WorktreeGcReport, OrbitError> {
+    let task_id =
+        string_field(run.input.as_ref().unwrap_or(&Value::Null), "task_id").map(ToOwned::to_owned);
+    let task = task_id
+        .as_deref()
+        .and_then(|task_id| task_host.get_task(task_id).ok());
+
     let mut report = WorktreeGcReport {
         path: path.to_path_buf(),
         run_id: Some(run.run_id.clone()),
         run_state: Some(run.state),
+        task_id: task_id.clone(),
+        task_status: task.as_ref().map(|task| task.status),
+        pr_status: task.as_ref().and_then(|task| task.pr_status.clone()),
         action: String::new(),
         bytes_reclaimed: 0,
     };
+
+    // Secondary gate: never disturb a worktree that may still back a live
+    // process, regardless of what the associated task's status says.
     if !run.state.is_terminal() {
         report.action = "skipped:run_not_terminal".to_string();
         return Ok(report);
@@ -144,6 +186,27 @@ fn classify_known(
         report.action = "skipped:not_registered_worktree".to_string();
         return Ok(report);
     }
+
+    // Primary gate: only a task settled to rejected, archived, or done
+    // licenses deletion. A run's process finishing says nothing about
+    // whether the work it produced is settled — a run with no associated
+    // task, or one whose task can't be resolved, is retained rather than
+    // treated as eligible.
+    if task_id.is_none() {
+        report.action = "skipped:unattributed".to_string();
+        return Ok(report);
+    }
+    let Some(status) = report.task_status else {
+        report.action = "skipped:task_unresolved".to_string();
+        return Ok(report);
+    };
+    if !task_status_permits_deletion(status) {
+        report.action = "skipped:task_status_ineligible".to_string();
+        return Ok(report);
+    }
+
+    // Reported safety net, not a deletion gate: a task can be settled with
+    // uncommitted content still sitting in the worktree.
     if !git_output(path, &["status", "--porcelain", "--untracked-files=all"])?
         .trim()
         .is_empty()
@@ -159,10 +222,6 @@ fn classify_known(
             return Ok(report);
         }
     };
-    if !branch_is_merged(repo_root, &branch) && !branch_pr_is_closed(repo_root, &branch) {
-        report.action = "skipped:branch_not_merged_or_pr_closed".to_string();
-        return Ok(report);
-    }
 
     let estimated_bytes = directory_bytes(path)?;
     if !options.delete {
@@ -254,28 +313,6 @@ fn is_registered_worktree(repo_root: &Path, path: &Path) -> Result<bool, OrbitEr
         .lines()
         .filter_map(|line| line.strip_prefix("worktree "))
         .any(|registered| registered == expected))
-}
-
-fn branch_is_merged(repo_root: &Path, branch: &str) -> bool {
-    Command::new("git")
-        .current_dir(repo_root)
-        .args(["merge-base", "--is-ancestor", branch, "HEAD"])
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
-fn branch_pr_is_closed(repo_root: &Path, branch: &str) -> bool {
-    let output = Command::new("gh")
-        .current_dir(repo_root)
-        .args([
-            "pr", "list", "--head", branch, "--state", "closed", "--limit", "1", "--json", "number",
-        ])
-        .output();
-    output
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| serde_json::from_slice::<Vec<Value>>(&output.stdout).ok())
-        .is_some_and(|items| !items.is_empty())
 }
 
 fn branch_exists(repo_root: &Path, branch: &str) -> bool {

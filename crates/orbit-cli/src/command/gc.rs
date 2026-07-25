@@ -22,7 +22,7 @@ impl Execute for GcCommand {
 /// or execution contract.
 #[derive(Subcommand)]
 pub enum GcTarget {
-    /// Reap clean, finished, merged-or-closed job-run worktrees
+    /// Reap job-run worktrees whose associated task has settled to rejected, archived, or done
     Worktrees(WorktreeGcArgs),
 }
 
@@ -76,7 +76,7 @@ impl Execute for WorktreeGcArgs {
         }
         for report in &result.reports {
             println!(
-                "path={} run_id={} run_state={} action={} bytes_reclaimed={}",
+                "path={} run_id={} run_state={} task_id={} task_status={} pr_status={} action={} bytes_reclaimed={}",
                 report.path.display(),
                 report.run_id.as_deref().unwrap_or("-"),
                 report
@@ -84,6 +84,13 @@ impl Execute for WorktreeGcArgs {
                     .map(|state| state.to_string())
                     .as_deref()
                     .unwrap_or("-"),
+                report.task_id.as_deref().unwrap_or("-"),
+                report
+                    .task_status
+                    .map(|status| status.to_string())
+                    .as_deref()
+                    .unwrap_or("-"),
+                report.pr_status.as_deref().unwrap_or("-"),
                 report.action,
                 report.bytes_reclaimed
             );

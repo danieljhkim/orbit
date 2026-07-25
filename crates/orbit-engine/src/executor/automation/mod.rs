@@ -198,6 +198,7 @@ pub fn execute_action<
             let result = vcs::collect_worktrees(
                 std::path::Path::new(&repo_root),
                 &runs,
+                host,
                 &vcs::WorktreeGcOptions {
                     delete: true,
                     run_id: input
