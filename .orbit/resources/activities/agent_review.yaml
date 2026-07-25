@@ -103,6 +103,5 @@ spec:
     - orbit
     - rg
   on_denial: terminate
-  max_iterations: 20
   require_response_envelope: true
   wall_clock_timeout_seconds: 3600

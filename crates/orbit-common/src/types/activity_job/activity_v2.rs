@@ -55,7 +55,17 @@ pub struct AgentLoopSpec {
     /// Optional model override (provider-specific name).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Upper bound on loop iterations.
+    /// Upper bound on loop iterations. **HTTP path only.**
+    ///
+    /// This binds solely where the engine drives the loop itself — the
+    /// `drive_agent_loop*` entry points, reached from `Backend::Http` dispatch,
+    /// `session:`-bound steps (which the loader restricts to `backend: http`),
+    /// and the reference smoke examples that call the driver directly. The CLI
+    /// runner never reads it: under `backend: cli` the provider owns its own
+    /// turn budget and only `wall_clock_timeout_seconds` bounds the invocation.
+    ///
+    /// So do not declare it on an activity that runs under `backend: cli` —
+    /// there it is inert config that reads as a live safety bound. [ORB-10382]
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u32,
     /// Execution backend (§3.1). Missing values default to the v1 `Cli`

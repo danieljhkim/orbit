@@ -89,6 +89,5 @@ spec:
     - orbit.friction.*
     - orbit.search
   on_denial: terminate
-  max_iterations: 8
   role: planner
   wall_clock_timeout_seconds: 300
