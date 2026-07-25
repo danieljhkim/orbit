@@ -9,7 +9,7 @@ spec:
     current diff plus the reviewer's accumulated Session history and emits a
     structured verdict. Designed to sit inside a `loop:` body with a named
     `session: reviewer` binding so conversation state persists across
-    iterations — a precondition for T20260418-0421 Option B adversarial
+    iterations — a precondition for Option B adversarial
     independence. Phase 4 preserves that guarantee by pinning `backend: http`
     explicitly (§3.2 item 1: cross-iteration `session:` binding is HTTP-only).
 

@@ -192,10 +192,11 @@ mod tests {
     //! router skill's enumeration. The next agent who adds a skill folder
     //! must update all four; these tests fail loudly if any catalog lags.
     //!
-    //! Plus a portability regression (`embedded_skills_are_repository_agnostic`)
-    //! guarding the shipped skill tree against leaking Orbit-source paths,
-    //! private Constellation names, workspace-local artifact IDs, and fixed
-    //! consumer design-doc filenames into public consumer workspaces.
+    //! Plus a portability regression (`embedded_assets_are_repository_agnostic`)
+    //! guarding the shipped skill *and* activity trees against leaking
+    //! Orbit-source paths, private Constellation names, maintainers' personal
+    //! names, workspace-local artifact IDs (task/friction/learning/ADR), and
+    //! fixed consumer design-doc filenames into public consumer workspaces.
 
     use super::*;
     use std::collections::BTreeSet;
@@ -203,6 +204,10 @@ mod tests {
 
     fn assets_skills_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/skills")
+    }
+
+    fn assets_activities_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/activities")
     }
 
     fn repo_root() -> PathBuf {
@@ -567,10 +572,10 @@ mod tests {
     // paths (`.orbit/...`, `~/.orbit/...`) and placeholder IDs (`ORB-NNNN`,
     // `L-NNNN`, `<task-id>`).
 
-    /// Concrete workspace-local artifact IDs (task/friction/learning) that would
-    /// become dangling references in a consumer workspace. Placeholder forms
-    /// (`ORB-NNNN`, `L-NNNN`, `<task-id>`) use non-digit stand-ins and are
-    /// intentionally *not* matched.
+    /// Concrete workspace-local artifact IDs (task/friction/learning/decision)
+    /// that would become dangling references in a consumer workspace. Placeholder
+    /// forms (`ORB-NNNN`, `L-NNNN`, `ADR-NNNN`, `<task-id>`) use non-digit
+    /// stand-ins and are intentionally *not* matched.
     fn find_artifact_ids(content: &str) -> Vec<String> {
         let b = content.as_bytes();
         let n = b.len();
@@ -592,6 +597,15 @@ mod tests {
                 // ORB-<digit...> (task ids). ORB-NNNN / ORB-NNNNN placeholders
                 // have a non-digit after the dash and are skipped.
                 if starts(i, b"ORB-") && is_digit(i + 4) {
+                    let d = digit_run(i + 4);
+                    out.push(String::from_utf8_lossy(&b[i..i + 4 + d]).into_owned());
+                }
+                // ADR-<digit...> (decision-record ids). ADR ids are allocated
+                // per workspace, so a concrete one resolves to a different
+                // decision — or to nothing — in a consumer's `.orbit/adrs/`.
+                // The ADR-NNNN placeholder has a non-digit after the dash and
+                // is skipped.
+                if starts(i, b"ADR-") && is_digit(i + 4) {
                     let d = digit_run(i + 4);
                     out.push(String::from_utf8_lossy(&b[i..i + 4 + d]).into_owned());
                 }
@@ -650,6 +664,11 @@ mod tests {
         None
     }
 
+    /// Given names of this repository's maintainers. Shipped assets address an
+    /// arbitrary consumer's agent, so naming a maintainer turns an enforceable
+    /// policy into a referral to someone the reader cannot reach.
+    const PRIVATE_PERSONAL_NAMES: &[&str] = &["Daniel"];
+
     /// Every reason `content` is not repository-agnostic. Empty == portable.
     fn portability_violations(content: &str) -> Vec<String> {
         let mut hits = Vec::new();
@@ -663,6 +682,18 @@ mod tests {
         for needle in ["almanac", "dk-mac", "dk-server", "Constellation"] {
             if content.contains(needle) {
                 hits.push(format!("private name `{needle}`"));
+            }
+        }
+
+        // Personal names. A shipped asset is read by an agent in someone else's
+        // workspace, where a maintainer's given name is an unreachable stranger
+        // rather than an authority — so policy must be stated by the *role* that
+        // holds it ("the workspace's orchestrator or owner"), never by person.
+        for needle in PRIVATE_PERSONAL_NAMES {
+            if content.contains(needle) {
+                hits.push(format!(
+                    "personal name `{needle}` (state the role, not the person)"
+                ));
             }
         }
 
@@ -700,6 +731,8 @@ mod tests {
             r#"{"model": "codex"}"#,
             "migrated by ORB-00200",
             "see learning L-0065",
+            "the runtime gate (ADR-0250) refuses the call",
+            "learnings are authored by the orchestrator or by Daniel",
             "silently drops it (F2026-05-024)",
             "--evidence task:T20260514-3",
             "docs/design/<feature>/4_decisions.md",
@@ -718,6 +751,8 @@ mod tests {
             "evidence under `.orbit/state/job-runs/`",
             "dependencies: [\"ORB-NNNN\", ...] require ORB-NNNNN targets",
             "drop a `// L-NNNN: <rationale>` citation",
+            "record the choice as ADR-NNNN once `orbit.adr.add` allocates it",
+            "learnings are curated by the workspace's orchestrator or owner",
             "recommended layout: `docs/design/<feature>/`",
             "resolve `context_files` selectors, then `fs.read` a `<task-id>`",
             "run `orbit search --kind adr`",
@@ -730,27 +765,46 @@ mod tests {
         }
     }
 
-    #[test]
-    fn embedded_skills_are_repository_agnostic() {
-        let root = assets_skills_dir();
-        let files = collect_relative_files(&root)
+    /// Every portability violation in `root`, each prefixed with its path
+    /// relative to `crates/orbit-core/assets/` for a readable failure report.
+    fn portability_failures_under(label: &str, root: &Path) -> Vec<String> {
+        let files = collect_relative_files(root)
             .unwrap_or_else(|e| panic!("collect_relative_files({}): {e}", root.display()));
 
-        let mut failures: Vec<String> = Vec::new();
+        let mut failures = Vec::new();
         for relative in files {
             let path = root.join(&relative);
             let content = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
             for violation in portability_violations(&content) {
-                failures.push(format!("  {}: {violation}", relative.display()));
+                failures.push(format!("  {label}/{}: {violation}", relative.display()));
             }
         }
+        failures
+    }
+
+    #[test]
+    fn embedded_assets_are_repository_agnostic() {
+        // Both trees ship: skills are embedded and mirrored into the public
+        // plugin package, and activities are `include_str!`'d by
+        // `command::activity` and seeded into every workspace on `orbit init`
+        // (with a byte-identical copy under `.orbit/resources/activities/`).
+        // Activities were outside this check until a task description's own
+        // wording — a maintainer's name plus a concrete ADR id — was copied
+        // verbatim into `agent_implement.yaml` (PR #702).
+        let mut failures = portability_failures_under("skills", &assets_skills_dir());
+        failures.extend(portability_failures_under(
+            "activities",
+            &assets_activities_dir(),
+        ));
 
         assert!(
             failures.is_empty(),
-            "embedded skill assets under crates/orbit-core/assets/skills/ are not repository-agnostic \
-             ({} leak(s)) — generalize, remove, or guard as explicitly source-only/client-specific \
-             guidance (ORB-10208):\n{}",
+            "embedded assets under crates/orbit-core/assets/{{skills,activities}}/ are not \
+             repository-agnostic ({} leak(s)) — generalize, remove, or guard as explicitly \
+             source-only/client-specific guidance. State a policy by the role that holds it and \
+             the mechanism that enforces it, never by a person's name or a workspace-local \
+             artifact id (ORB-10208):\n{}",
             failures.len(),
             failures.join("\n"),
         );
