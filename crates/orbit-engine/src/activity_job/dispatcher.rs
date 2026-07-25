@@ -64,6 +64,24 @@ pub trait V2RuntimeHost: Send + Sync {
         tool_context: ToolContext,
     ) -> Result<Value, DispatchError>;
 
+    /// Report whether `action` names a deterministic action this host's
+    /// registry can actually dispatch.
+    ///
+    /// [ORB-10385] Catalog assets and the installed binary are separate
+    /// artifacts: a workspace can load an activity whose `action:` the running
+    /// runtime does not implement. Job validation consults this before the
+    /// first step runs, so that skew fails admission instead of being
+    /// discovered by a terminal failure hook after a task was admitted and
+    /// implemented. The default is `true`: hosts that cannot enumerate their
+    /// registry (tests, smoke examples) keep the pre-ORB-10385 behavior of
+    /// surfacing the miss at dispatch as
+    /// [`DispatchError::DeterministicActionNotRegistered`]. Reporting `true`
+    /// for an unknown action is therefore safe; reporting `false` for a
+    /// dispatchable one would reject a healthy job.
+    fn has_deterministic_action(&self, _action: &str) -> bool {
+        true
+    }
+
     /// Source the API key for a given provider (e.g. `"anthropic"`). Returns
     /// the raw key as a `String` so nothing orbit-agent-shaped bleeds across
     /// the boundary. Implementors typically read from env or config.
@@ -257,6 +275,16 @@ pub enum DispatchError {
     #[error("deterministic action not registered: {0}")]
     DeterministicActionNotRegistered(String),
 
+    /// [ORB-10385] A resolved catalog activity names a deterministic action
+    /// the executing runtime does not implement — the job/activity assets and
+    /// the installed binary are out of sync. Raised by
+    /// [`crate::validate_job_deterministic_actions`] before any step runs, so
+    /// the run never admits a task or creates a worktree it cannot finish.
+    #[error(
+        "activity `{activity}` references deterministic action `{action}`, which is not registered in the executing runtime — the loaded catalog asset and the installed orbit binary are out of sync; reinstall or rebuild orbit, or remove the activity from the job"
+    )]
+    DeterministicActionUnavailable { activity: String, action: String },
+
     #[error("deterministic action `{action}` failed: {message}")]
     DeterministicActionFailed { action: String, message: String },
 
@@ -340,6 +368,7 @@ impl DispatchError {
             self,
             DispatchError::ToolDenied { .. }
                 | DispatchError::DeterministicActionNotRegistered(_)
+                | DispatchError::DeterministicActionUnavailable { .. }
                 | DispatchError::JobValidation(_)
                 | DispatchError::RetryConfigInvalid { .. }
                 | DispatchError::HostRequired(_)
@@ -365,13 +394,18 @@ impl DispatchError {
 /// surface at crate boundaries.
 ///
 /// Validation failures keep their dedicated [`OrbitError::JobValidation`]
-/// variant; everything else collapses into [`OrbitError::InvalidInput`] with
-/// the dispatch error's rendered message. Callers translate with
+/// variant — including [`DispatchError::DeterministicActionUnavailable`],
+/// which is raised by the same pre-execution validation pass [ORB-10385].
+/// Everything else collapses into [`OrbitError::InvalidInput`] with the
+/// dispatch error's rendered message. Callers translate with
 /// `.map_err(dispatch_error_to_orbit)?` per
 /// `docs/design-patterns/error_translation.md` [ORB-10013].
 pub fn dispatch_error_to_orbit(error: DispatchError) -> OrbitError {
     match error {
         DispatchError::JobValidation(message) => OrbitError::JobValidation(message),
+        unavailable @ DispatchError::DeterministicActionUnavailable { .. } => {
+            OrbitError::JobValidation(unavailable.to_string())
+        }
         other => OrbitError::InvalidInput(format!("{other}")),
     }
 }

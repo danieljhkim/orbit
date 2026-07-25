@@ -15,6 +15,60 @@ use crate::runtime::orbit_tool_host::{
 
 use super::{backlog_exclusion, pipeline_actions, triage};
 
+/// Every deterministic action name this dispatch table can execute.
+///
+/// [ORB-10385] This is the runtime's advertised capability list. It backs
+/// [`is_deterministic_action_registered`], which job validation consults
+/// before a run's first step so a catalog asset naming an action this binary
+/// does not implement fails admission instead of a terminal hook. Retired
+/// stubs (`promote_agent_main`, `revert_on_red`) stay listed on purpose: they
+/// *are* dispatchable and answer with an actionable retirement message.
+///
+/// Adding an arm below without adding its name here makes validation reject a
+/// job the runtime could actually run; adding a name here without an arm
+/// reintroduces exactly the skew this list exists to prevent. The seeded-asset
+/// coverage test in `mod.rs` pins the direction that broke in production —
+/// every shipped deterministic activity's action must be registered here.
+pub(super) const REGISTERED_DETERMINISTIC_ACTIONS: &[&str] = &[
+    "apply_triage_dispositions",
+    "context_conflict_check",
+    "gate_starvation_fail",
+    "git_commit",
+    "git_merge",
+    "git_push",
+    "git_rebase",
+    "independent_review_guard",
+    "invoke_and_wait",
+    "list_backlog_tasks",
+    "list_triage_candidates",
+    "load_epic",
+    "orbit_tool_call",
+    "pipeline_success_guard",
+    "pr_failure_handoff",
+    "pr_open",
+    "pr_prepare",
+    "pr_promote",
+    "promote_agent_main",
+    "release_locks",
+    "reserve_locks",
+    "resolve_workspace_ship_input",
+    "revert_on_red",
+    "run_auto_task_scheduler",
+    "run_planning_duel",
+    "sleep",
+    "summarize_epic",
+    "update_task",
+    "validate_bundles",
+    "worktree_gc",
+    "worktree_setup",
+];
+
+/// Whether `action` is dispatchable by this runtime — the capability probe
+/// behind `V2RuntimeHost::has_deterministic_action` [ORB-10385].
+pub(super) fn is_deterministic_action_registered(action: &str) -> bool {
+    REGISTERED_DETERMINISTIC_ACTIONS.contains(&action)
+}
+
 pub(super) fn run_deterministic(
     runtime: &OrbitRuntime,
     action: &str,
@@ -22,6 +76,14 @@ pub(super) fn run_deterministic(
     input: &Value,
     tool_context: ToolContext,
 ) -> Result<Value, DispatchError> {
+    // Reject anything the advertised capability list does not claim, so
+    // `has_deterministic_action` can never report an action this function then
+    // refuses [ORB-10385].
+    if !is_deterministic_action_registered(action) {
+        return Err(DispatchError::DeterministicActionNotRegistered(
+            action.to_string(),
+        ));
+    }
     match action {
         "orbit_tool_call" => {
             // The `config` block shape (see deterministic_reference.yaml):
@@ -48,8 +110,15 @@ pub(super) fn run_deterministic(
                     message: format!("{err}"),
                 })
         }
-        "git_commit" | "git_merge" | "git_push" | "git_rebase" | "pr_open" | "pr_prepare"
-        | "pr_promote" | "run_planning_duel" | "update_task" | "worktree_setup" => {
+        // Forwarded to orbit-engine's automation registry. `pr_failure_handoff`
+        // and `worktree_gc` were shipped as activity assets and referenced by
+        // `task_pr_pipeline` / `worktree_gc_pipeline` while this arm still
+        // omitted them, so both dispatched as "not registered" — the skew
+        // ORB-10385 fixes. Keep this list in sync with
+        // `REGISTERED_DETERMINISTIC_ACTIONS`.
+        "git_commit" | "git_merge" | "git_push" | "git_rebase" | "pr_failure_handoff"
+        | "pr_open" | "pr_prepare" | "pr_promote" | "run_planning_duel" | "update_task"
+        | "worktree_gc" | "worktree_setup" => {
             let state_context = StateExecutionContext {
                 run_id: input
                     .get("run_id")
@@ -297,9 +366,19 @@ pub(super) fn run_deterministic(
         // conflicting_files so an epic-orchestrator parent can decide
         // to replan, then fails the Run with a structured error.
         "gate_starvation_fail" => pipeline_actions::gate_starvation_fail(runtime, action, input),
-        other => Err(DispatchError::DeterministicActionNotRegistered(
-            other.to_string(),
-        )),
+        other => {
+            // Unreachable for a well-formed table: the guard above already
+            // rejected every unlisted name. Reaching here means a name was
+            // added to `REGISTERED_DETERMINISTIC_ACTIONS` without an arm —
+            // the capability list over-promising [ORB-10385].
+            debug_assert!(
+                !is_deterministic_action_registered(other),
+                "`{other}` is in REGISTERED_DETERMINISTIC_ACTIONS but has no dispatch arm"
+            );
+            Err(DispatchError::DeterministicActionNotRegistered(
+                other.to_string(),
+            ))
+        }
     }
 }
 

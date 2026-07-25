@@ -1607,6 +1607,11 @@ spec:
         );
     }
 
+    /// [ORB-10385] An unregistered action is now caught by validation before
+    /// the first step dispatches rather than by the dispatcher, so the
+    /// diagnostic names the activity and the runtime skew. The durable
+    /// bookkeeping this test guards — `Failed` run state, a persisted step
+    /// error, and an `error` run.finished audit event — is unchanged.
     #[test]
     fn failing_direct_run_records_failure_state() {
         let (_root, runtime, repo_root, _global_root) = test_runtime();
@@ -1617,8 +1622,8 @@ spec:
             .run_job_v2_from_yaml(&yaml_path, json!({}), None)
             .expect_err("direct job run should fail");
         assert!(
-            err.to_string()
-                .contains("deterministic action not registered"),
+            err.to_string().contains("missing_action")
+                && err.to_string().contains("not registered"),
             "{err}"
         );
 
@@ -1628,7 +1633,7 @@ spec:
         assert!(run.steps.iter().any(|step| {
             step.error_message
                 .as_deref()
-                .is_some_and(|message| message.contains("deterministic action not registered"))
+                .is_some_and(|message| message.contains("not registered"))
         }));
         let event: serde_json::Value = serde_json::from_str(
             &v2_events(&runtime, &run.run_id, "run.finished")
@@ -1645,7 +1650,7 @@ spec:
             event
                 .get("error_message")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|message| message.contains("deterministic action not registered"))
+                .is_some_and(|message| message.contains("not registered"))
         );
         assert!(
             runtime
