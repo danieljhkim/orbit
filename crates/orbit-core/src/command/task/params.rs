@@ -68,6 +68,7 @@ pub struct TaskUpdateParams {
     pub execution_summary: Option<String>,
     pub comment: Option<String>,
     pub status: Option<TaskStatus>,
+    pub complexity: Option<TaskComplexity>,
     pub task_type: Option<TaskType>,
     pub source_task_id: Option<Option<String>>,
     pub planned_by: Option<Option<String>>,
@@ -94,6 +95,7 @@ impl TaskUpdateParams {
             || self.plan.is_some()
             || self.execution_summary.is_some()
             || self.status.is_some()
+            || self.complexity.is_some()
             || self.task_type.is_some()
             || self.source_task_id.is_some()
             || self.planned_by.is_some()
@@ -122,6 +124,7 @@ impl From<TaskUpdateParams> for TaskRecordUpdateParams {
             plan: p.plan,
             execution_summary: p.execution_summary,
             status: p.status,
+            complexity: p.complexity,
             task_type: p.task_type,
             source_task_id: p.source_task_id,
             planned_by: p.planned_by,

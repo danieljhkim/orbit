@@ -294,6 +294,9 @@ pub(super) fn update(
             status: optional_string(&input, "status")?
                 .map(|value| parse_task_status("status", &value))
                 .transpose()?,
+            complexity: optional_string(&input, "complexity")?
+                .map(|value| parse_task_complexity("complexity", &value))
+                .transpose()?,
             task_type: optional_string_alias(&input, &["type", "task_type", "taskType"])?
                 .map(|value| parse_task_type("type", &value))
                 .transpose()?,
