@@ -21,7 +21,10 @@ spec:
         type: string
       base_ref:
         type: string
-        description: Worktree setup start-point ref used to identify commits authored during implementation.
+        description: Worktree setup start-point ref name. Diagnostic context only; this step never resolves it.
+      base_sha:
+        type: string
+        description: Full commit id pinned by worktree_setup, used to identify commits authored during implementation.
   output_schema_json:
     type: object
     properties:

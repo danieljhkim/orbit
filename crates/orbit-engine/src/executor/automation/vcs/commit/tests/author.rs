@@ -262,27 +262,32 @@ fn git_commit_batch_errors_on_empty_stage() {
         "scope": "all",
         "job_run_id": "batch-1",
         "workspace_path": workspace.to_string_lossy().to_string(),
-        "base_ref": base_sha,
+        "base_sha": base_sha,
     });
 
     let error = git_commit(&host, &input).expect_err("empty stage must error");
     let OrbitError::Execution(message) = error else {
         panic!("expected execution error, got: {error}");
     };
+    // ORB-10380 reconciliation: the assertion still pins the *exact* message,
+    // but the message changed on purpose. The old text was shared verbatim with
+    // the ancestry gate and guessed at causes ("may have been written outside
+    // the assigned worktree, or attribution may be unknown") that this branch
+    // never observed. The empty-stage diagnostic now reports only measured
+    // state; the intent this test protects — a clean worktree errors, never
+    // silently succeeds — is unchanged.
     assert_eq!(
         message,
         format!(
-            "commit_batch_changes: no staged changes to commit for task 'T1' in worktree '{}'; \
-             the implement step produced an empty diff. Changes may have been written outside \
-             the assigned worktree, or attribution may be unknown; Orbit did not inspect, stage, \
-             reset, or reconcile any other checkout",
+            "commit_batch_changes: nothing to commit for task 'T1' in worktree '{}'. \
+             Observed after `git add --all`: 0 staged, 0 unstaged, 0 untracked file(s); \
+             HEAD {base_sha}; pinned base {base_sha}; 0 commit(s) above it. Orbit did not \
+             inspect, stage, reset, or reconcile any other checkout",
             workspace.display()
-        ),
-        "the existing empty-diff diagnostic must remain unchanged"
+        )
     );
 
-    // The index is left clean (the staging reset ran before erroring), so no
-    // commit was created beyond the repo's initial commit.
+    // No commit was created beyond the repo's initial commit.
     let log = git_output(workspace, &["rev-list", "--count", "HEAD"]).expect("count commits");
     assert_eq!(log.trim(), "1", "no commit should have been created");
 }
@@ -339,7 +344,7 @@ fn git_commit_batch_adopts_implement_authored_commits_without_rewriting_them() {
         "scope": "all",
         "job_run_id": "batch-1",
         "workspace_path": workspace.to_string_lossy().to_string(),
-        "base_ref": base_sha,
+        "base_sha": base_sha,
     });
 
     let result = git_commit(&host, &input).expect("commit-only batch succeeds");
@@ -394,7 +399,7 @@ fn git_commit_batch_commits_dirty_residue_above_implement_authored_commits() {
         "scope": "all",
         "job_run_id": "batch-1",
         "workspace_path": workspace.to_string_lossy().to_string(),
-        "base_ref": base_sha,
+        "base_sha": base_sha,
     });
 
     let result = git_commit(&host, &input).expect("mixed batch succeeds");
@@ -446,14 +451,18 @@ fn git_commit_batch_does_not_adopt_commits_reachable_only_from_another_branch() 
         "scope": "all",
         "job_run_id": "batch-1",
         "workspace_path": workspace.to_string_lossy().to_string(),
-        "base_ref": base_sha,
+        "base_sha": base_sha,
     });
 
     let error = git_commit(&host, &input).expect_err("other branch commit is not adopted");
     let message = error.to_string();
-    assert!(message.contains("no staged changes to commit"), "{message}");
+    assert!(message.contains("nothing to commit"), "{message}");
     assert!(
-        message.contains("outside the assigned worktree"),
+        message.contains("0 commit(s) above it"),
+        "the diagnostic reports the observed count, not a guess: {message}"
+    );
+    assert!(
+        message.contains("Orbit did not inspect, stage, reset, or reconcile any other checkout"),
         "{message}"
     );
     assert_eq!(
@@ -463,7 +472,14 @@ fn git_commit_batch_does_not_adopt_commits_reachable_only_from_another_branch() 
 }
 
 #[test]
-fn git_commit_batch_rejects_head_that_is_not_a_descendant_of_the_base_checkpoint() {
+fn git_commit_batch_counts_from_the_merge_base_when_head_left_the_pinned_base() {
+    // ORB-10380 reconciliation: this case used to be a hard failure. With the
+    // base pinned at setup a non-descendant HEAD no longer implies a moved base
+    // — it means the branch was rewritten below the checkpoint — and discarding
+    // real work over it is the wrong trade. The commit range now falls back to
+    // `merge-base(base_sha, HEAD)`; only genuinely unrelated histories fail (see
+    // base_checkpoint.rs). The invariant this test still protects is that Orbit
+    // neither rewrites nor drops the commits it finds.
     let temp = initialized_git_repo();
     let workspace = temp.path();
     let root_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read root");
@@ -487,22 +503,19 @@ fn git_commit_batch_rejects_head_that_is_not_a_descendant_of_the_base_checkpoint
         "scope": "all",
         "job_run_id": "batch-1",
         "workspace_path": workspace.to_string_lossy().to_string(),
-        "base_ref": base_sha,
+        "base_sha": base_sha,
     });
 
-    let error = git_commit(&host, &input).expect_err("non-descendant history is rejected");
-    let message = error.to_string();
-    assert!(
-        message.contains("outside the assigned worktree"),
-        "{message}"
-    );
-    assert!(
-        message.contains("Orbit did not inspect, stage, reset, or reconcile any other checkout"),
-        "{message}"
-    );
+    let result = git_commit(&host, &input).expect("divergent history is counted, not rejected");
+
+    assert_eq!(result["decision"], "adopted_existing_commits");
+    assert_eq!(result["committed"], false);
+    assert_eq!(result["base_sha"], base_sha);
+    assert_eq!(result["commit_shas"], json!([divergent_head]));
     assert_eq!(
         git_output(workspace, &["rev-parse", "HEAD"]).expect("read final divergent head"),
-        divergent_head
+        divergent_head,
+        "the fallback must not rewrite the task branch"
     );
 }
 
@@ -533,10 +546,17 @@ fn git_commit_empty_diff_never_stages_or_resets_registered_primary_checkout() {
     let error = git_commit(&host, &input).expect_err("empty assigned worktree must error");
     let message = error.to_string();
     assert!(
-        message.contains("outside the assigned worktree"),
+        message.contains("nothing to commit for task 'T1'"),
         "{message}"
     );
-    assert!(message.contains("attribution may be unknown"), "{message}");
+    assert!(
+        !message.contains(&primary.path().display().to_string()),
+        "the diagnostic reports the assigned worktree, never the primary checkout: {message}"
+    );
+    assert!(
+        message.contains("Orbit did not inspect, stage, reset, or reconcile any other checkout"),
+        "{message}"
+    );
     assert_eq!(
         git_stdout_bytes(
             primary.path(),

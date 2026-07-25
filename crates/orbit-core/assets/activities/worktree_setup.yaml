@@ -42,5 +42,9 @@ spec:
         type: string
       base_ref:
         type: string
+        description: Moving start-point ref name, for steps that reconcile against the live base.
+      base_sha:
+        type: string
+        description: Commit the worktree was created at, resolved once here so later steps never re-resolve the moving ref.
   action: worktree_setup
   config: {}

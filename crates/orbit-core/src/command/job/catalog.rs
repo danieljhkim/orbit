@@ -702,6 +702,12 @@ spec:
                 input["base_ref"], "{{ steps.worktree.output.base_ref }}",
                 "{job_name} must pass the exact worktree start-point ref"
             );
+            // ORB-10380: the commit step reconciles history against the commit
+            // pinned at setup, never the moving ref name.
+            assert_eq!(
+                input["base_sha"], "{{ steps.worktree.output.base_sha }}",
+                "{job_name} must pin the commit step to the setup-time base commit"
+            );
         }
     }
 

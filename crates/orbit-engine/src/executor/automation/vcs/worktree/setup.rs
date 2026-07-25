@@ -45,12 +45,24 @@ pub(in crate::executor::automation) fn setup_worktree<H: RuntimeHost + TaskHost 
     }
 
     let start_point = resolve_worktree_start_point(repo_root, &base, base_sync_mode)?;
+    // ORB-10380: `start_point` is a moving name (`origin/<base>`) shared by every
+    // worktree off this `.git`; a sibling run's fetch or a merge can move it
+    // mid-run. Resolve it exactly once here and hand the resulting commit id to
+    // both the worktree creation and every downstream step that needs the base.
+    let base_sha = git_output(
+        repo_root,
+        &[
+            "rev-parse",
+            "--verify",
+            &format!("{start_point}^{{commit}}"),
+        ],
+    )?;
 
     let branch_name = branch_name_for_tasks(&branch_prefix, &task_ids);
 
     let worktree_path = resolve_worktree_path_from_prefix(repo_root, &branch_prefix, &run_id)?;
 
-    ensure_worktree(repo_root, &worktree_path, &start_point, &branch_name)?;
+    ensure_worktree(repo_root, &worktree_path, &base_sha, &branch_name)?;
 
     let workspace_path_str = worktree_path.to_string_lossy().to_string();
 
@@ -70,6 +82,7 @@ pub(in crate::executor::automation) fn setup_worktree<H: RuntimeHost + TaskHost 
         workspace_path_str,
         branch_name,
         start_point,
+        base_sha,
     ))
 }
 
@@ -82,13 +95,19 @@ pub(crate) fn worktree_setup_output(
     workspace_path: String,
     head_ref: String,
     base_ref: String,
+    base_sha: String,
 ) -> Value {
     json!({
         "job_run_id": run_id,
         "batch_id": run_id,
         "workspace_path": workspace_path,
         "head_ref": head_ref,
+        // The moving name, for steps that legitimately reconcile against the
+        // live base (`sync_base`, `pr_open`).
         "base_ref": base_ref,
+        // ORB-10380: the immutable commit this worktree was created at. Steps
+        // that must reason about the history this run authored consume this.
+        "base_sha": base_sha,
     })
 }
 
