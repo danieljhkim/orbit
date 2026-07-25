@@ -304,7 +304,7 @@ The bar for authoring: the knowledge must be **non-obvious** (otherwise it lives
 When a learning is replaced by a clearer or more current entry:
 
 ```
-orbit learning supersede L-0001 --with L-0042
+orbit learning supersede L-0001 --with L-0002
 ```
 
 Both records update atomically. The old record's `status` flips to `superseded` and gains a `superseded_by` field; the new record's `supersedes` field points back. Superseded records are excluded from default discovery but retained on disk for history.
@@ -318,6 +318,19 @@ A learning is **stale** if any of these are true:
 - All `evidence` task IDs are deleted.
 
 `orbit learning prune --stale-only` reports staleness; with `--delete` it archives the record. Staleness detection is opportunistic, not automatic; nothing fires it on every commit. Phase 2 may wire it into the knowledge graph rebuild path.
+
+### 7.3.1 Approved physical retirement
+
+Physical retirement is distinct from staleness pruning. Use it only for a specifically approved learning ID or for records whose persisted lifecycle status is `superseded`; never infer retirement from age, path drift, or zero usage. In the current schema the only retired status is `superseded` (there is no `deprecated` variant); legacy data, if introduced, must be enumerated explicitly before any deletion.
+
+The sanctioned sequence is:
+
+1. Enumerate the approved IDs and lifecycle-status candidates, then grep the workspace for each ID. Rewrite every surviving reference comment so the code states the rationale without pointing to the retiring learning.
+2. Remove the complete `.orbit/learnings/<id>/` artifact directory. Do not edit `learning.yaml` in place.
+3. Run `orbit learning sync --json` to rebuild the workspace's `learnings_index` projection from the remaining artifacts. This removes the deleted record's index row; no checked-in manifest points to learning artifacts. The global allocator keeps its reservation so a deleted ID is never reused.
+4. Re-run the ID grep and confirm the directory and index-backed listing no longer surface the record.
+
+This is intentionally not an `orbit learning archive` command: archival retains a superseded artifact, while approved retirement removes the artifact after its references have been made self-contained.
 
 ### 7.4 Conflict resolution
 

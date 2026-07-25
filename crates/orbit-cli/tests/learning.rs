@@ -160,6 +160,37 @@ fn cli_update_then_show_reflects_changes() {
 }
 
 #[test]
+fn cli_update_scope_fields_preserve_omitted_fields_and_empty_tag_clears() {
+    let workspace = TestWorkspace::new();
+    let added = workspace.add_learning("original", &["old/**"], &["alpha", "beta"]);
+    let id = added["id"].as_str().unwrap();
+
+    workspace.run(
+        &["learning", "update", id, "--path", "new/**", "--json"],
+        None,
+        "update paths while preserving tags",
+    );
+    let after_path_update = workspace.run_json(
+        &["learning", "show", id, "--json"],
+        "show paths-only update",
+    );
+    assert_eq!(after_path_update["scope"]["paths"], json!(["new/**"]));
+    assert_eq!(after_path_update["scope"]["tags"], json!(["alpha", "beta"]));
+
+    workspace.run(
+        &["learning", "update", id, "--tag", "", "--json"],
+        None,
+        "clear tags explicitly",
+    );
+    let after_tag_clear = workspace.run_json(
+        &["learning", "show", id, "--json"],
+        "show explicit tag clear",
+    );
+    assert_eq!(after_tag_clear["scope"]["paths"], json!(["new/**"]));
+    assert_eq!(after_tag_clear["scope"]["tags"], json!([]));
+}
+
+#[test]
 fn cli_sync_returns_rebuilt_count() {
     let workspace = TestWorkspace::new();
     workspace.add_learning("a", &[], &[]);

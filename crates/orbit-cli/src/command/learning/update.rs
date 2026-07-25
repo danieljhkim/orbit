@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use clap::{ArgAction, Args};
-use orbit_core::{LearningScope, LearningUpdateParams, OrbitError, OrbitRuntime};
+use orbit_core::{LearningUpdateParams, OrbitError, OrbitRuntime};
 
 use crate::command::Execute;
 
@@ -15,10 +15,10 @@ pub struct LearningUpdateArgs {
     /// Replace `summary` (≤ 280 chars)
     #[arg(long)]
     pub summary: Option<String>,
-    /// Replace `scope.paths`. Pass `--path` once per entry.
+    /// Replace `scope.paths`. Pass `--path` once per entry; pass `--path ""` to clear. Omit to preserve.
     #[arg(long = "path", action = ArgAction::Append)]
     pub paths: Vec<String>,
-    /// Replace `scope.tags`. Pass `--tag` once per entry.
+    /// Replace `scope.tags`. Pass `--tag` once per entry; pass `--tag ""` to clear. Omit to preserve.
     #[arg(long = "tag", action = ArgAction::Append)]
     pub tags: Vec<String>,
     /// Replace `body`
@@ -33,9 +33,6 @@ pub struct LearningUpdateArgs {
     /// Clear `priority`
     #[arg(long, conflicts_with = "priority")]
     pub clear_priority: bool,
-    /// Replace `scope`. When neither `--path` nor `--tag` is provided, scope is left unchanged.
-    #[arg(long, hide = true, default_value_t = false)]
-    pub replace_scope: bool,
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
@@ -58,11 +55,14 @@ impl Execute for LearningUpdateArgs {
             };
 
         let scope = if !self.paths.is_empty() || !self.tags.is_empty() {
-            Some(LearningScope {
-                paths: self.paths,
-                tags: self.tags,
-                ..Default::default()
-            })
+            let mut scope = runtime.get_learning(&self.id)?.scope;
+            if !self.paths.is_empty() {
+                scope.paths = self.paths;
+            }
+            if !self.tags.is_empty() {
+                scope.tags = self.tags;
+            }
+            Some(scope)
         } else {
             None
         };

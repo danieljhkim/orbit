@@ -777,13 +777,13 @@ fn finalize_preallocated_learning_writes_supplied_id_without_allocating() {
     let (dir, store) = store_with_index();
     // A non-sequential id: a local allocation would have produced L-0001.
     let learning = store
-        .finalize_preallocated_learning("L-0042", create_params("hub-preallocated", vec![], vec![]))
+        .finalize_preallocated_learning("L-0043", create_params("hub-preallocated", vec![], vec![]))
         .expect("finalize preallocated learning");
-    assert_eq!(learning.id, "L-0042");
+    assert_eq!(learning.id, "L-0043");
     assert_eq!(learning.status, LearningStatus::Active);
 
     // Body landed under the requested owner root.
-    assert!(dir.path().join("L-0042/learning.yaml").is_file());
+    assert!(dir.path().join("L-0043/learning.yaml").is_file());
 
     // Exactly the supplied id is projected — no stray L-0001 from a hidden
     // allocation.
@@ -792,10 +792,10 @@ fn finalize_preallocated_learning_writes_supplied_id_without_allocating() {
         .learning_allocations()
         .expect("allocations");
     assert_eq!(allocations.len(), 1, "no extra allocation was selected");
-    assert_eq!(allocations[0].id, "L-0042");
+    assert_eq!(allocations[0].id, "L-0043");
     assert_eq!(
         allocations[0].body_path.as_deref(),
-        Some(std::path::Path::new("L-0042/learning.yaml"))
+        Some(std::path::Path::new("L-0043/learning.yaml"))
     );
 
     // Lifecycle read works through the projection.
@@ -804,7 +804,7 @@ fn finalize_preallocated_learning_writes_supplied_id_without_allocating() {
         .expect("list");
     assert_eq!(
         listed.iter().map(|l| l.id.clone()).collect::<Vec<_>>(),
-        vec!["L-0042".to_string()]
+        vec!["L-0043".to_string()]
     );
 }
 
