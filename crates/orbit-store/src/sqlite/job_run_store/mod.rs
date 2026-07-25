@@ -448,6 +448,11 @@ impl Store {
             conditions.push(format!("state = ?{}", params.len() + 1));
             params.push(Box::new(state.to_string()));
         }
+        if query.terminal_only {
+            conditions.push(
+                "state IN ('success', 'failed', 'timeout', 'cancelled', 'interrupted')".to_string(),
+            );
+        }
         if let Some(created_since) = query.created_since {
             conditions.push(format!("created_at >= ?{}", params.len() + 1));
             params.push(Box::new(created_since.to_rfc3339()));

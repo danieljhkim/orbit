@@ -117,6 +117,7 @@ impl OrbitRuntime {
                 .list_runs_filtered(&JobRunQuery {
                     job_id: Some(job_id.to_string()),
                     state: None,
+                    terminal_only: false,
                     created_since: None,
                     limit: Some(1),
                 })

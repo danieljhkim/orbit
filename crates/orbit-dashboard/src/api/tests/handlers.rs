@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use chrono::{Duration, Utc};
 use orbit_core::command::task::TaskAddParams;
 use orbit_core::{JobRunState, OrbitRuntime, TaskStatus};
 use serde_json::json;
 use tower::ServiceExt;
 
 use super::super::*;
-use super::test_support::{body_json, seed_run};
+use super::test_support::{body_json, seed_run, write_seeded_run};
 
 async fn request_cancel(runtime: OrbitRuntime, run_id: &str, origin: Option<&str>) -> Response {
     let mut builder = Request::builder()
@@ -31,6 +32,20 @@ async fn request_tasks(runtime: OrbitRuntime) -> Response {
             Request::builder()
                 .method(Method::GET)
                 .uri("/tasks")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response")
+}
+
+async fn request_job_runs(runtime: OrbitRuntime, query: &str) -> Response {
+    router()
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/job-runs?{query}"))
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -174,6 +189,92 @@ fn seed_task(
             ..Default::default()
         })
         .expect("create task")
+}
+
+#[tokio::test]
+async fn job_run_filters_apply_before_limit_and_validate_state() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let since = Utc::now();
+    let mut running = seed_run(
+        &runtime,
+        "jrun-job-runs-running",
+        "job_runs_filter",
+        JobRunState::Running,
+    );
+    running.pid = Some(std::process::id());
+    write_seeded_run(&runtime, &running);
+    for state in [
+        JobRunState::Success,
+        JobRunState::Failed,
+        JobRunState::Cancelled,
+        JobRunState::Interrupted,
+        JobRunState::Timeout,
+    ] {
+        seed_run(
+            &runtime,
+            &format!("jrun-job-runs-terminal-{state}"),
+            "job_runs_filter",
+            state,
+        );
+    }
+    let mut old_terminal = seed_run(
+        &runtime,
+        "jrun-job-runs-terminal-old",
+        "job_runs_filter",
+        JobRunState::Success,
+    );
+    old_terminal.created_at = since - Duration::days(1);
+    write_seeded_run(&runtime, &old_terminal);
+    seed_run(
+        &runtime,
+        "jrun-job-runs-terminal-other-job",
+        "other_job",
+        JobRunState::Success,
+    );
+
+    let response = request_job_runs(runtime.clone(), "state=running&limit=1").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let rows = body_json(response).await;
+    assert_eq!(rows.as_array().expect("runs array").len(), 1);
+    assert_eq!(rows[0]["run_id"], json!(running.run_id));
+
+    let response = request_job_runs(runtime.clone(), "state=terminal&limit=10").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let rows = body_json(response).await;
+    let states = rows
+        .as_array()
+        .expect("runs array")
+        .iter()
+        .map(|run| run["state"].as_str().expect("state"))
+        .collect::<Vec<_>>();
+    for state in ["success", "failed", "cancelled", "interrupted", "timeout"] {
+        assert!(states.contains(&state), "missing terminal state {state}");
+    }
+
+    let since = since.to_rfc3339().replace('+', "%2B");
+    let response = request_job_runs(
+        runtime.clone(),
+        &format!("job_id=job_runs_filter&state=terminal&since={since}&limit=10"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let rows = body_json(response).await;
+    let run_ids = rows
+        .as_array()
+        .expect("runs array")
+        .iter()
+        .map(|run| run["run_id"].as_str().expect("run id"))
+        .collect::<Vec<_>>();
+    assert!(!run_ids.contains(&old_terminal.run_id.as_str()));
+    assert!(!run_ids.contains(&"jrun-job-runs-terminal-other-job"));
+
+    let response = request_job_runs(runtime, "state=unknown").await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error = body_json(response).await;
+    assert_eq!(
+        error["error"],
+        json!("invalid state; expected one of: pending, running, terminal")
+    );
 }
 
 #[tokio::test]

@@ -37,6 +37,7 @@ impl OrbitRuntime {
         let query = JobRunQuery {
             job_id: params.job_id,
             state: params.state,
+            terminal_only: params.terminal_only,
             created_since: params.since,
             limit: params.limit,
         };

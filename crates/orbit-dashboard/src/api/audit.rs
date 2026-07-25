@@ -436,6 +436,7 @@ fn count_failed_runs(
         let runs = runtime.list_job_runs(JobRunListParams {
             job_id: None,
             state: Some(state),
+            terminal_only: false,
             since: Some(since),
             limit: Some(HISTORY_MAX_LIMIT),
         })?;
@@ -464,6 +465,7 @@ fn count_active_long_runs(
         let runs = runtime.list_job_runs(JobRunListParams {
             job_id: None,
             state: Some(state),
+            terminal_only: false,
             since: Some(since),
             limit: Some(HISTORY_MAX_LIMIT),
         })?;
@@ -485,6 +487,7 @@ fn count_active_long_runs(
     let running = runtime.list_job_runs(JobRunListParams {
         job_id: None,
         state: Some(JobRunState::Running),
+        terminal_only: false,
         since: None,
         limit: Some(HISTORY_MAX_LIMIT),
     })?;

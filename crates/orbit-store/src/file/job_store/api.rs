@@ -42,6 +42,9 @@ impl JobFileStore {
         if let Some(state) = query.state {
             runs.retain(|run| run.state == state);
         }
+        if query.terminal_only {
+            runs.retain(|run| run.state.is_terminal());
+        }
         if let Some(created_since) = query.created_since {
             runs.retain(|run| run.created_at >= created_since);
         }
