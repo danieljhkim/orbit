@@ -26,6 +26,7 @@ impl OrbitRuntime {
         collect_worktrees(
             &self.paths().repo_root,
             &runs,
+            self,
             &WorktreeGcOptions {
                 delete,
                 run_id,

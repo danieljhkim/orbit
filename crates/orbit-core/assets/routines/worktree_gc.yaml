@@ -3,8 +3,8 @@
 schemaVersion: 1
 name: __ORBIT_ROUTINE_NAME__
 description: >
-  Hourly reclamation of clean worktrees from terminal job runs whose branch is
-  merged or whose pull request is closed.
+  Hourly reclamation of worktrees whose associated task has settled to
+  rejected, archived, or done.
 enabled: false
 hosts:
   - __ORBIT_HOST_ID__

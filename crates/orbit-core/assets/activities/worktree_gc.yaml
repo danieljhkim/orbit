@@ -5,9 +5,9 @@ metadata:
 spec:
   type: deterministic
   description: >
-    Reap clean worktrees belonging to terminal job runs after confirming that
-    their branches are merged or their pull requests are closed. Unknown and
-    dirty worktrees are always retained and reported.
+    Reap worktrees whose associated task has settled to rejected, archived,
+    or done. A run that is not yet terminal, has no resolvable associated
+    task, or still has a dirty tree is always retained and reported.
   input_schema_json:
     type: object
     properties:
@@ -28,6 +28,7 @@ spec:
         type: array
         items:
           type: object
-          required: [path, run_id, run_state, action, bytes_reclaimed]
+          required:
+            [path, run_id, run_state, task_id, task_status, action, bytes_reclaimed]
   action: worktree_gc
   config: {}
