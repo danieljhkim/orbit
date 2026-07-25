@@ -3,7 +3,7 @@ summary: "Auditability — Decisions"
 type: design
 title: "Auditability — Decisions"
 owner: codex
-last_updated: 2026-07-20
+last_updated: 2026-07-25
 status: Draft
 feature: auditability
 doc_role: decisions
@@ -285,7 +285,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-022 — Automated git commits carry implementer authorship
 
-**Status:** Accepted · 2026-05 · [T20260508-22]
+**Status:** Superseded by [ADR-0249] · 2026-07 · [ORB-10369]
 
 **Context.** Task records already store `implemented_by`, but automated `git_commit` actions previously delegated commit authorship to local git config, hiding the agent that actually produced the change.
 
@@ -300,7 +300,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-023 — Workflow git commit identity is process-scoped
 
-**Status:** Accepted · 2026-05 · [T20260509-12]
+**Status:** Superseded by [ADR-0249] · 2026-07 · [ORB-10369]
 
 **Context.** Reusing local Git config for workflow committers made agent identities sticky in developer repositories. If `user.name` or `user.email` was set to an agent identity in repo-local config, later human commits inherited that attribution.
 
@@ -361,6 +361,22 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ---
 
+## ADR-0249 — Workflow commit authors use the persisted crew model
+
+**Status:** Accepted · 2026-07 · [ORB-10369]
+
+**Context.** Pipeline-created commits exposed only a generic or family author even though the job run already persisted the exact resolved crew model used as `AGENT_MODEL` for provider subprocess commit trailers. Deriving attribution again from `task.implemented_by` or crew aliases, or letting the author and trailer read different process state, would permit the ambient author to disagree with durable model telemetry.
+
+**Decision.** Read the persisted job-run `crew_model` once and use that same opaque string both to construct the author name `orbit (<model>)` and to set the spawned Git process's `AGENT_MODEL` for `prepare-commit-msg`. Use `agent@orbit.invalid`; do not resolve aliases, validate model strings, or add a model registry. A missing model uses the generic `orbit <orbit@orbit.local>` author. Keep the committer as the process-scoped generic Orbit identity, and adopt existing commits without amendment.
+
+**Consequences.**
+- `git log --format=%an` distinguishes pipeline commits produced by different resolved models, while the model-bearing author and `Agent-Model` trailer cannot diverge.
+- Existing `Agent-Run`, `Agent-Task`, and `Co-Authored-By` trailers remain additive and unchanged.
+- ORB-10365 retains a host committer because its already-created commit was adopted forward-only, while ORB-10348 was created by pipeline automation with a scoped Orbit committer.
+- Cost: a bare `[crews.*].model` value remains bare in the author because configured model strings stay opaque and Orbit ships no release-coupled alias table.
+
+---
+
 ## Task References
 
 - **[T20260419-0002]** — Add workspace provenance and v2 audit envelope events for activity/job execution.
@@ -401,5 +417,6 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
 - **[ORB-10202]** — Remove the retired friction task status and consolidate task mutation attribution and record-parameter construction.
 - **[ORB-10338]** — Add the versioned model price table and query-time `derived_cost_usd`, plus a persisted `provider_cost_usd` column for reconciliation.
+- **[ORB-10369]** — Set pipeline-created commit authors from the persisted resolved crew model without changing aliases or rewriting existing commits.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

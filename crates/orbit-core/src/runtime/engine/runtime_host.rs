@@ -99,6 +99,16 @@ impl RuntimeHost for OrbitRuntime {
         self.implementer_identity_for_activity_input(input)
     }
 
+    fn resolved_crew_model(&self, run_id: &str) -> Result<Option<String>, OrbitError> {
+        Ok(self
+            .get_job_run_backend(run_id)?
+            .and_then(|run| run.crew_model)
+            .and_then(|model| {
+                let model = model.trim();
+                (!model.is_empty()).then(|| model.to_string())
+            }))
+    }
+
     fn run_tool_with_context_and_role(
         &self,
         name: &str,

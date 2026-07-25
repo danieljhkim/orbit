@@ -3,7 +3,7 @@ summary: "Auditability — Design"
 type: design
 title: "Auditability — Design"
 owner: codex
-last_updated: 2026-07-20
+last_updated: 2026-07-25
 status: Draft
 feature: auditability
 doc_role: design
@@ -106,7 +106,7 @@ Task attribution remains automatic by default: non-empty plan writes stamp `plan
 
 For `orbit run ship`, the PR-open handoff preserves implementation provenance when tasks move from In Progress to Review, and the PR-merge handoff preserves it again when tasks move from Review to Done. The Review handoff resolves attribution from existing `task.implemented_by`, then the pipeline's resolved implementer identity, then task-authored fallback fields (`planned_by`, `created_by`) before leaving genuinely actor-less automation as `system`. The Done handoff preserves existing `implemented_by` and otherwise falls back to `created_by` before `system`. This keeps mixed-family batches from collapsing to one ship actor while retaining the legitimate system fallback. [ORB-00106]
 
-After [T20260508-22] and [T20260509-12], `git_commit` automation carries that task attribution into git metadata. Per-task commits use process-scoped author and committer identity derived from `task.implemented_by` (`claude`, `gemini`, or `codex` family identities), leaving repository `git config user.name` and `user.email` untouched. Multi-implementer batch commits use `orbit <orbit@orbit.local>` as the aggregate author and committer and add `Co-Authored-By` trailers for each distinct implementer identity.
+After [ORB-10369] / [ADR-0249], pipeline-created `git_commit` automation reads the persisted job-run `crew_model` once and uses that opaque value for both the visible author name (`orbit (<model>)`) and the spawned Git process's `AGENT_MODEL`, which the shared `prepare-commit-msg` hook records as `Agent-Model`. The author uses the non-routable `agent@orbit.invalid` address. A missing model falls back to `orbit <orbit@orbit.local>` without aborting the commit. The committer remains the process-scoped generic Orbit identity; repository `git config user.name` and `user.email` are neither required nor changed. Existing `Agent-Run`, `Agent-Task`, and `Co-Authored-By` trailers remain unchanged, and already-created commits are adopted without rewriting.
 
 The requirement is not to collapse every field into one value. It is that a reviewer can follow task state, command rows, run envelopes, provider/tool traces, and metrics back to a concrete human or agent family. A unified identity glossary and query join story remain open.
 
@@ -179,6 +179,7 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[T20260508-14]** — Surface bounded per-step agent log previews and derived diagnostics error rows in the dashboard.
 - **[T20260508-22]** — Use `task.implemented_by` to set git commit authors for automated task commits.
 - **[T20260509-12]** — Scope workflow git author and committer identity to the spawned commit process without writing repo-local Git config.
+- **[ORB-10369]** — Use the persisted resolved crew model for the pipeline commit author and `Agent-Model` hook input, with generic fallback and no alias resolver.
 - **[T20260510-13]** — Move friction reports from task lifecycle state to append-only `.orbit/frictions/` records.
 - **[ORB-00062]** — Surface first-class friction artifacts in the dashboard Knowledge tab and add triage endpoints.
 - **[ORB-00090]** — Aligned agent-facing provenance wording with the family-as-identity convention.

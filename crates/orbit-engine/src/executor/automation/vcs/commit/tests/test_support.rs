@@ -21,6 +21,7 @@ use super::super::super::git::git_success;
 
 pub struct CommitTestHost {
     tasks: Vec<Task>,
+    crew_model: Option<String>,
     repo_root: PathBuf,
     data_root: PathBuf,
     scoreboard_dir: PathBuf,
@@ -33,11 +34,17 @@ impl CommitTestHost {
         let scoreboard_dir = data_root.join("scoreboard");
         Self {
             tasks,
+            crew_model: None,
             repo_root,
             data_root,
             scoreboard_dir,
             registry: ActivityExecutorRegistry::default(),
         }
+    }
+
+    pub fn with_crew_model(mut self, model: impl Into<String>) -> Self {
+        self.crew_model = Some(model.into());
+        self
     }
 }
 
@@ -137,6 +144,10 @@ impl RuntimeHost for CommitTestHost {
 
     fn repo_root(&self) -> Result<String, OrbitError> {
         Ok(self.repo_root.to_string_lossy().to_string())
+    }
+
+    fn resolved_crew_model(&self, _run_id: &str) -> Result<Option<String>, OrbitError> {
+        Ok(self.crew_model.clone())
     }
 
     fn data_root(&self) -> &Path {

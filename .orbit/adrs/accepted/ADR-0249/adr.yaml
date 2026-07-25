@@ -1,0 +1,26 @@
+schema_version: 2
+id: ADR-0249
+title: Workflow commit authors use the persisted crew model
+status: accepted
+owner: codex
+created_at: 2026-07-25T16:25:26.564976883Z
+accepted_at: 2026-07-25T16:25:31.820350056Z
+last_updated: 2026-07-25T16:29:06.501128587Z
+related_features:
+- auditability
+related_tasks:
+- ORB-10369
+tags:
+- attribution
+- vcs
+- provenance
+paths:
+- crates/orbit-engine/src/executor/automation/vcs/commit/**/*.rs
+- crates/orbit-core/src/runtime/engine/runtime_host.rs
+- docs/design/auditability/*.md
+supersedes:
+- ADR-0048
+- ADR-0047
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none
