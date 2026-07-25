@@ -3,6 +3,8 @@ use orbit_core::{OrbitError, OrbitRuntime};
 
 use crate::command::Execute;
 
+// ADR-0248: kept as a deliberate, human-invoked opt-in — `workspace init`
+// no longer wires this up automatically.
 #[derive(Args)]
 pub struct HookInstallArgs;
 

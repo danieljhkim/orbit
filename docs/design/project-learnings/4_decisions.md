@@ -259,11 +259,29 @@ Alternatives considered:
 
 ---
 
+## ADR-0248 — Keep `orbit hook install` opt-in; remove `--hooks` from `workspace init`
+
+**Status:** Accepted · 2026-07 · [ORB-10366]
+
+**Context.** [ORB-10346] removed the learning-reminder registrations this repo's own `.claude/settings.json` and `.codex/config.toml` carried, but deliberately left the writer mechanism untouched: `orbit workspace init --hooks` and `orbit hook install` both still silently wrote those registrations back for any repo that invoked them, and the tree still carried two now-inert tracked shim files left over from before the retirement.
+
+**Decision.** Remove the `--hooks` flag from `orbit workspace init` entirely — clap now rejects it as an unknown argument instead of silently ignoring it — and delete the tracked inert shim files. Keep `orbit hook install` / `orbit hook uninstall` as an explicit, opt-in, human-invoked escape hatch. The distinction is *automatic* vs. *deliberate*: ADR-0108/ADR-0112's failure mode was learnings pushed into context without anyone choosing that. A `--hooks` flag riding along on `workspace init` (run for unrelated reasons — bootstrapping a checkout) reproduces exactly that. `orbit hook install` has no such ambiguity — it is the only thing the command does, so running it is itself the deliberate opt-in choice.
+
+**Consequences.**
+- No code path reachable from `orbit init` or `orbit workspace init` writes a learning-reminder registration; a fresh `workspace init` against a temp workspace root leaves `.claude/settings.json` / `.codex/config.toml` untouched (`crates/orbit-cli/tests/hook_install.rs`).
+- `orbit workspace init --hooks` now fails loudly (clap "unexpected argument") instead of silently succeeding.
+- `orbit hook install` / `orbit hook uninstall`, the underlying `orbit_cmd::hook_install` module, the `orbit hook pretooluse` runtime path, and the independent `scripts/orbit-file-lock` PreToolUse guard are all unchanged.
+- Cost: `orbit hook install` remains capable of re-registering the retired delivery mechanism if a human runs it deliberately — accepted as the intended behavior of an opt-in escape hatch, not a gap.
+- Cost: the two tracked inert shim files this repo carried are deleted; `orbit hook install` regenerates them byte-identically if ever re-run, so nothing is lost.
+
+---
+
 ## Task References
 
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
 - [ORB-10046] — Remove the vote and comment surfaces from the learning subsystem (ADR-0210 supersedes ADR-0157).
 - [ORB-10316] — Teaser injection + `learning_shown` usage signal + `orbit learning stats` rollup + payload-derived session dedup (ADR-0242).
 - [ORB-10346] — Retired automatic learning delivery while retaining pull discovery, `learning_shown`, and historical usage stats.
+- [ORB-10366] — Removed the `--hooks` flag from `orbit workspace init` and the tracked inert shims; kept `orbit hook install` as an opt-in escape hatch (ADR-0248).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
