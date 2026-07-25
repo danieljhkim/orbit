@@ -48,6 +48,13 @@ impl V2RuntimeHost for OrbitRuntime {
         dispatch::run_deterministic(self, action, config, input, tool_context)
     }
 
+    /// [ORB-10385] Report this binary's deterministic-action registry so job
+    /// validation can reject a catalog asset naming an action we cannot
+    /// dispatch, before the run admits a task or builds a worktree.
+    fn has_deterministic_action(&self, action: &str) -> bool {
+        dispatch::is_deterministic_action_registered(action)
+    }
+
     fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
         cli_executor::resolve_cli_executor(self, provider)
     }

@@ -190,6 +190,9 @@ pub(super) struct ScriptedHost {
     call_log: StdMutex<Vec<String>>,
     in_flight: AtomicUsize,
     peak_in_flight: AtomicUsize,
+    /// [ORB-10385] Action names this host reports as absent from its registry,
+    /// modelling a runtime older than the loaded catalog asset.
+    unregistered: Vec<String>,
 }
 
 impl ScriptedHost {
@@ -204,7 +207,19 @@ impl ScriptedHost {
             call_log: StdMutex::new(Vec::new()),
             in_flight: AtomicUsize::new(0),
             peak_in_flight: AtomicUsize::new(0),
+            unregistered: Vec::new(),
         }
+    }
+
+    /// [ORB-10385] Make this host report `actions` as unregistered, the way an
+    /// installed binary reports an action its source tree never gained.
+    pub(super) fn without_registered_actions(mut self, actions: &[&str]) -> Self {
+        self.unregistered = actions.iter().map(|name| (*name).to_string()).collect();
+        self
+    }
+
+    pub(super) fn total_calls(&self) -> usize {
+        self.call_log.lock().expect("call log").len()
     }
 
     pub(super) fn call_count(&self, action: &str) -> usize {
@@ -274,6 +289,10 @@ impl V2RuntimeHost for ScriptedHost {
         };
         self.in_flight.fetch_sub(1, Ordering::SeqCst);
         result
+    }
+
+    fn has_deterministic_action(&self, action: &str) -> bool {
+        !self.unregistered.iter().any(|name| name == action)
     }
 
     fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {

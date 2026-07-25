@@ -45,6 +45,7 @@ pub use activity_job::{
     drive_agent_loop_with_session, drive_agent_loop_with_tool_context, execute_job,
     execute_job_with_resume, reset_replay_transport, resolve_agent_settings,
     resolve_job_catalog_refs_for_execution, resolve_subprocess_cwd, run_cli_backend, validate_job,
+    validate_job_deterministic_actions,
 };
 pub use context::{
     ACTIVITY_EXECUTION_FAILED, AGENT_COMMIT_FAILED, AGENT_INVOCATION_FAILED,

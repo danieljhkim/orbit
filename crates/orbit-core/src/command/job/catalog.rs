@@ -419,6 +419,50 @@ spec:
         }
     }
 
+    /// [ORB-10385] Every deterministic action reachable from a shipped job —
+    /// including terminal `failure_activity` hooks — must be registered in
+    /// this binary's v2 dispatch table. `pr_failure_handoff` shipped as a
+    /// catalog asset bound to `task_pr_pipeline` while orbit-core's dispatch
+    /// arm still omitted it, so the hook fired as "deterministic action not
+    /// registered" on three runs, each after a task had been admitted,
+    /// implemented, and validated. `worktree_gc` had the same gap.
+    #[test]
+    fn default_jobs_only_reference_registered_deterministic_actions() {
+        let (_root, runtime, _global_root, _workspace_root) = test_runtime();
+        let catalog = default_activity_catalog();
+
+        for (job_name, yaml) in DEFAULT_JOB_FILES {
+            let mut asset = load_job_asset(yaml)
+                .unwrap_or_else(|err| panic!("default job {job_name} should parse: {err}"));
+            resolve_job_target_refs(&mut asset.spec, &catalog)
+                .unwrap_or_else(|err| panic!("default job {job_name} refs resolve: {err}"));
+            orbit_engine::validate_job_deterministic_actions(&asset.spec, &runtime).unwrap_or_else(
+                |err| panic!("default job {job_name} references an unregistered action: {err}"),
+            );
+        }
+    }
+
+    /// Companion to the job sweep above: a seeded deterministic activity that
+    /// no shipped job targets yet must still be dispatchable, or the first job
+    /// to bind it inherits the same skew.
+    #[test]
+    fn default_deterministic_activities_are_registered_in_the_runtime() {
+        let (_root, runtime, _global_root, _workspace_root) = test_runtime();
+
+        for (name, yaml) in DEFAULT_ACTIVITY_FILES {
+            let asset = load_activity_asset(yaml)
+                .unwrap_or_else(|err| panic!("default activity {name} should parse: {err}"));
+            let ActivityV2Spec::Deterministic(spec) = &asset.spec.spec else {
+                continue;
+            };
+            assert!(
+                orbit_engine::V2RuntimeHost::has_deterministic_action(&runtime, &spec.action),
+                "seeded activity `{name}` names deterministic action `{}`, which this runtime cannot dispatch",
+                spec.action
+            );
+        }
+    }
+
     #[test]
     fn local_task_pipeline_commits_before_merge() {
         let yaml = DEFAULT_JOB_FILES

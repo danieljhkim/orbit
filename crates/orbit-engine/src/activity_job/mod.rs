@@ -31,7 +31,7 @@ pub use dispatcher::{
 };
 pub use job_executor::{
     JobOutcome, execute_job, execute_job_with_resume, resolve_job_catalog_refs_for_execution,
-    validate_job,
+    validate_job, validate_job_deterministic_actions,
 };
 pub use orbit_tool_executor::OrbitToolCallExecutor;
 pub use sqlite_sink::V2SqliteSink;

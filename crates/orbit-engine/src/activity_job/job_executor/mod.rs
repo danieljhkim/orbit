@@ -80,7 +80,7 @@ use self::step::*;
 use self::target::*;
 use self::templating::*;
 
-pub use self::validate::validate_job;
+pub use self::validate::{validate_job, validate_job_deterministic_actions};
 
 #[derive(Debug, Clone)]
 pub struct JobOutcome {
@@ -148,6 +148,10 @@ pub fn execute_job_with_resume(
     resume: Option<&PipelineState>,
 ) -> Result<JobOutcome, DispatchError> {
     validate_job(job)?;
+    // [ORB-10385] Catalog/runtime skew is caught here, before the first step
+    // runs — so a job whose (possibly terminal) activity names an action this
+    // binary cannot dispatch never reaches `worktree_setup`'s task admission.
+    validate_job_deterministic_actions(job, host)?;
 
     let base_input = merge_job_input(job.default_input.as_ref(), &input);
     let recovery_activity = match (&job.recovery_activity, &job.resolved_recovery_activity) {
