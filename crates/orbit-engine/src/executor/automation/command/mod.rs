@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use tempfile::tempdir;
 
 use super::StateExecutionContext;
-use crate::context::{EnvironmentHost, RuntimeHost, TaskHost};
+use crate::context::{EnvironmentHost, ProvenanceEnv, RuntimeHost, TaskHost, provenance_env};
 use crate::template::{TemplateContext, render, render_shell_command};
 
 #[derive(Debug, Deserialize)]
@@ -88,8 +88,11 @@ pub(super) fn run_command<H: RuntimeHost + TaskHost + EnvironmentHost + ?Sized>(
             state_context.state_dir.as_ref(),
         )
     {
-        proc_env.insert("ORBIT_RUN_ID".to_string(), run_id.clone());
-        proc_env.insert("ORBIT_MANAGED_RUN_CONTEXT".to_string(), "1".to_string());
+        proc_env.extend(provenance_env(ProvenanceEnv {
+            orbit_run_id: Some(run_id),
+            orbit_managed_run_context: true,
+            ..ProvenanceEnv::default()
+        }));
         proc_env.insert("ORBIT_STEP_INDEX".to_string(), step_index.to_string());
         proc_env.insert(
             "ORBIT_STATE_DIR".to_string(),

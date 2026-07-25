@@ -15,6 +15,7 @@ use crate::context::{
     EnvironmentHost, JobRunResult, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate,
     TaskReadHost, TaskWriteHost,
 };
+use crate::executor::automation::StateExecutionContext;
 use crate::executor::registry::ActivityExecutorRegistry;
 
 struct CommandTestHost {
@@ -251,6 +252,32 @@ fn single_quoted_template_value_still_substitutes() {
 
     let result =
         super::run_command(&host, &input, &HashMap::new(), None).expect("run_command succeeds");
+
+    assert_eq!(result, json!({ "exit_code": 0 }));
+}
+
+#[test]
+fn managed_command_preserves_site_specific_provenance_env() {
+    let host = CommandTestHost::new();
+    let state_dir = tempfile::tempdir().expect("create state dir");
+    let state_context = StateExecutionContext {
+        run_id: Some("jrun-command".to_string()),
+        step_index: Some(4),
+        state_dir: Some(state_dir.path().to_path_buf()),
+        agent: None,
+        model: None,
+    };
+    let input = json!({
+        "command": concat!(
+            "test \"$ORBIT_RUN_ID\" = jrun-command",
+            " && test \"$ORBIT_MANAGED_RUN_CONTEXT\" = 1",
+            " && test \"$ORBIT_STEP_INDEX\" = 4",
+            " && test -z \"${AGENT_RUN_ID+x}\"",
+        ),
+    });
+
+    let result = super::run_command(&host, &input, &HashMap::new(), Some(&state_context))
+        .expect("managed run_command succeeds");
 
     assert_eq!(result, json!({ "exit_code": 0 }));
 }

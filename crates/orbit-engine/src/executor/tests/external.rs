@@ -12,6 +12,7 @@ use chrono::Utc;
 use orbit_common::types::{
     Activity, ExecutorDef, ExecutorSandboxKind, ExecutorType, JobRunState, OrbitError,
 };
+use orbit_exec::EnvironmentMode;
 use serde_json::json;
 
 use super::super::direct_agent::{build_subprocess_exec_request, run_subprocess_executor};
@@ -224,4 +225,48 @@ fn external_and_direct_agent_build_identical_exec_request() {
     assert_eq!(req_external.stdin_mode, req_direct.stdin_mode);
     assert_eq!(req_external.environment_mode, req_direct.environment_mode);
     assert_eq!(req_external.debug, req_direct.debug);
+}
+
+#[test]
+fn direct_agent_request_preserves_site_specific_provenance_env() {
+    let host = stub_host();
+    let mut def = external_def("acme-harness", &["run"]);
+    def.executor_type = ExecutorType::DirectAgent;
+    let mut execution = execution();
+    execution.model = Some("vendor/model-exact".to_string());
+    execution.run_id = Some("jrun-direct".to_string());
+    execution.step_index = Some(3);
+    execution.state_dir = Some("/tmp/orbit-state".into());
+    execution.input = json!({ "task_id": "ORB-direct" });
+
+    let request =
+        build_subprocess_exec_request(&def, &host, &execution).expect("direct agent request");
+    let EnvironmentMode::ClearAndSet(pairs) = request.environment_mode else {
+        panic!("direct agent request must carry an explicit environment");
+    };
+    let env: HashMap<String, String> = pairs.into_iter().collect();
+
+    assert_eq!(
+        env.get("ORBIT_AGENT_NAME").map(String::as_str),
+        Some("acme-harness")
+    );
+    assert_eq!(
+        env.get("ORBIT_AGENT_MODEL").map(String::as_str),
+        Some("vendor/model-exact")
+    );
+    assert_eq!(
+        env.get("ORBIT_RUN_ID").map(String::as_str),
+        Some("jrun-direct")
+    );
+    assert_eq!(
+        env.get("ORBIT_TASK_ID").map(String::as_str),
+        Some("ORB-direct")
+    );
+    assert_eq!(
+        env.get("ORBIT_ACTIVE_TASK_ID").map(String::as_str),
+        Some("ORB-direct")
+    );
+    assert!(!env.contains_key("AGENT_RUN_ID"));
+    assert!(!env.contains_key("AGENT_MODEL"));
+    assert!(!env.contains_key("AGENT_TASK"));
 }

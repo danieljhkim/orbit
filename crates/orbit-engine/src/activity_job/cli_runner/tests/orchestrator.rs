@@ -16,6 +16,7 @@ use orbit_common::types::activity_job::{
 use orbit_store::Store;
 use tempfile::{TempDir, tempdir};
 
+use crate::context::{ProvenanceEnv, provenance_env};
 use crate::template::{self, TemplateContext};
 
 use super::super::super::agent_role::{apply_resolved_settings, resolve_agent_settings};
@@ -1705,52 +1706,26 @@ fi
 /// AGENT_MODEL/AGENT_TASK must be omitted (unset), not set to an empty
 /// string, when the model or task id is unknown — mirrors ORB-10340's
 /// worker-side semantics. AGENT_RUN_ID is always known for a dispatched run.
+// Asserted at the builder boundary, not through a spawned child: provider spawns seed the
+// cleared environment with `non_sensitive_env_vars()`, so an Orbit-dispatched test run's own
+// AGENT_* telemetry can leak into the child and mask a correct omission. The positive
+// propagation case above still covers the wiring end-to-end.
 #[test]
 fn run_cli_backend_omits_agent_model_and_task_env_vars_when_unknown() {
-    let temp = tempdir().expect("tempdir");
-    let script = temp.path().join("grok");
-    write_executable(
-        &script,
-        r#"#!/bin/sh
-cat > /dev/null
-if [ "$AGENT_RUN_ID" = "job-grok-telemetry-unknown" ] && [ -z "${AGENT_MODEL+x}" ] && [ -z "${AGENT_TASK+x}" ]; then
-  printf '%s\n' '{"schemaVersion":1,"status":"success","result":{"identity":"ok"},"error":null}'
-else
-  printf '%s\n' '{"schemaVersion":1,"status":"failed","error":{"code":"telemetry_env_unexpected","message":"agent telemetry env should be unset when unknown","details":null}}'
-  exit 1
-fi
-"#,
-    );
+    let vars = provenance_env(ProvenanceEnv {
+        orbit_run_id: Some("job-grok-telemetry-unknown"),
+        orbit_managed_run_context: true,
+        orbit_agent_name: Some("grok"),
+        agent_run_id: Some("job-grok-telemetry-unknown"),
+        ..ProvenanceEnv::default()
+    });
 
-    let sink = Arc::new(RecordingSink::default());
-    let sink_for_writer: Arc<dyn AuditSink> = sink;
-    let audit = Arc::new(V2AuditWriter::new(
-        "job-grok-telemetry-unknown",
-        "grok",
-        sink_for_writer,
-    ));
-    let host = TestHost {
-        command: script.display().to_string(),
-        executor_args: Vec::new(),
-        provider_config: HashMap::new(),
-        sandbox: None,
-        task_context: None,
-        workspace_root: None,
-    };
-    let spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
-
-    let outcome = run_cli_backend(
-        &host,
-        &spec,
-        "job-grok-telemetry-unknown",
-        audit,
-        &serde_json::json!({"prompt": "hi"}),
-        None,
-    )
-    .expect("run succeeds");
-
-    assert!(outcome.success);
-    assert_eq!(outcome.output["provider"], "grok");
+    assert!(vars.contains(&(
+        "AGENT_RUN_ID".to_string(),
+        "job-grok-telemetry-unknown".to_string()
+    )));
+    assert!(!vars.iter().any(|(key, _)| key == "AGENT_MODEL"));
+    assert!(!vars.iter().any(|(key, _)| key == "AGENT_TASK"));
 }
 
 struct EnvVarGuard {

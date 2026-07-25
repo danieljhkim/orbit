@@ -22,6 +22,7 @@ mod outcome;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use env::{ProvenanceEnv, provenance_env};
 pub use env::{apply_env_set, inject_state_env, state_env_vars};
 pub use execution::{
     ExecutionContext, execution_working_directory, execution_working_directory_with_task,
