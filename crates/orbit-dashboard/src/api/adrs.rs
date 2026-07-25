@@ -11,6 +11,7 @@ use serde_json::{Map, Value, json};
 use super::{bad_request, bounded_limit, map_runtime_error, non_empty_string};
 
 const ADRS_DEFAULT_LIMIT: usize = 100;
+const HUMAN_ACTOR_LABEL: &str = "human";
 
 #[derive(Deserialize, Default)]
 pub(super) struct AdrsQuery {
@@ -32,8 +33,8 @@ pub(super) struct AdrsQuery {
 /// empty. Status is not a field — the tool always creates a Proposed ADR.
 /// `model` carries caller-supplied attribution (the canonical agent family,
 /// e.g. `codex`/`claude`, or `human`) and is forwarded to the tool host
-/// unchanged; when absent, the tool host attributes the write to the human
-/// actor label rather than defaulting to a model constant. `orbit.adr.add`
+/// unchanged; when absent, the HTTP route supplies the human actor label so
+/// the server process's ambient identity cannot become the actor. `orbit.adr.add`
 /// rejects a separate `agent` field (attribution was consolidated to
 /// `model`-only), so this body does not accept one.
 #[derive(Deserialize, Default)]
@@ -185,6 +186,7 @@ pub(super) async fn create_adr_action(
     let mut input = json!({
         "title": title,
         "body": adr_body,
+        "model": model_attribution(body.model.as_deref()),
         "related_features": body.related_features,
         "related_tasks": body.related_tasks,
         "tags": body.tags,
@@ -195,12 +197,6 @@ pub(super) async fn create_adr_action(
     {
         object.insert("owner".to_string(), Value::String(owner));
     }
-    if let Some(model) = body.model.as_deref().and_then(non_empty_string)
-        && let Some(object) = input.as_object_mut()
-    {
-        object.insert("model".to_string(), Value::String(model));
-    }
-
     match runtime.run_tool("orbit.adr.add", input) {
         Ok(adr) => match adr.get("id").and_then(Value::as_str) {
             Some(id) => match adr_show(&runtime, id) {
@@ -221,6 +217,7 @@ pub(super) async fn accept_adr_action(Ws(runtime): Ws, Path(id): Path<String>) -
         json!({
             "id": id.clone(),
             "status": "accepted",
+            "model": HUMAN_ACTOR_LABEL,
         }),
     );
     match result {
@@ -253,6 +250,7 @@ pub(super) async fn update_adr_action(
         legacy_ids,
         model,
     } = body;
+    let model = model.as_deref().and_then(non_empty_string);
 
     let mut input = Map::new();
     insert_optional_string(&mut input, "title", title);
@@ -265,11 +263,14 @@ pub(super) async fn update_adr_action(
     insert_optional_list(&mut input, "paths", paths);
     insert_optional_list(&mut input, "supersedes", supersedes);
     insert_optional_list(&mut input, "legacy_ids", legacy_ids);
-    insert_optional_string(&mut input, "model", model);
-    if input.is_empty() {
+    if input.is_empty() && model.is_none() {
         return bad_request("request body must include at least one updatable field".to_string());
     }
     input.insert("id".to_string(), Value::String(id.clone()));
+    input.insert(
+        "model".to_string(),
+        Value::String(model_attribution(model.as_deref())),
+    );
 
     match runtime.run_tool("orbit.adr.update", Value::Object(input)) {
         Ok(_) => match adr_show(&runtime, &id) {
@@ -293,15 +294,11 @@ pub(super) async fn supersede_adr_action(
     };
     let _reason = body.reason.as_deref().and_then(non_empty_string);
 
-    let mut input = json!({
+    let input = json!({
         "old_id": id.clone(),
         "new_id": by.clone(),
+        "model": model_attribution(body.model.as_deref()),
     });
-    if let Some(object) = input.as_object_mut()
-        && let Some(model) = body.model.as_deref().and_then(non_empty_string)
-    {
-        object.insert("model".to_string(), Value::String(model));
-    }
 
     let result = runtime.run_tool("orbit.adr.supersede", input);
 
@@ -339,6 +336,12 @@ fn insert_optional_list(input: &mut Map<String, Value>, key: &str, value: Option
     if let Some(value) = value {
         input.insert(key.to_string(), json!(value));
     }
+}
+
+fn model_attribution(model: Option<&str>) -> String {
+    model
+        .and_then(non_empty_string)
+        .unwrap_or_else(|| HUMAN_ACTOR_LABEL.to_string())
 }
 
 fn adr_list(runtime: &OrbitRuntime, input: Map<String, Value>) -> Result<Vec<Value>, OrbitError> {

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
-use orbit_core::OrbitRuntime;
+use orbit_core::{ActorIdentity, OrbitRuntime};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -28,6 +28,19 @@ fn runtime_without_agent_identity() -> OrbitRuntime {
     let _env =
         orbit_common::test_env::unset(orbit_common::test_env::AGENT_IDENTITY_ENV.iter().copied());
     OrbitRuntime::in_memory().expect("build runtime")
+}
+
+/// A runtime carrying an explicit ambient *agent* actor — what a dashboard
+/// server process looks like when it runs inside a managed Orbit run.
+///
+/// Built on [`runtime_without_agent_identity`] so the injected actor is the
+/// only agent identity in play however the suite was launched (ORB-10350),
+/// then given one deterministically (ORB-10352). The no-attribution
+/// assertions below are strongest against this runtime: the ADR HTTP routes
+/// now derive attribution from the request, so an identity-less write must
+/// still record the human actor even though the runtime itself is an agent.
+fn runtime_with_ambient_agent_identity() -> OrbitRuntime {
+    runtime_without_agent_identity().with_actor(ActorIdentity::agent("ambient-server-model"))
 }
 
 fn seed_adr(runtime: &OrbitRuntime, title: &str, related_tasks: Vec<&str>) -> Value {
@@ -201,7 +214,7 @@ async fn create_persists_proposed_adr_and_reads_back() {
 
 #[tokio::test]
 async fn create_without_attribution_defaults_owner_to_human() {
-    let runtime = runtime_without_agent_identity();
+    let runtime = runtime_with_ambient_agent_identity();
 
     let response = request_create(
         runtime,
@@ -662,7 +675,7 @@ fn transition_audit_actor(runtime: &OrbitRuntime, adr_id: &str) -> String {
 
 #[tokio::test]
 async fn update_without_attribution_records_human_actor_in_audit() {
-    let runtime = runtime_without_agent_identity();
+    let runtime = runtime_with_ambient_agent_identity();
     let adr = seed_adr(&runtime, "No attribution transition", vec!["ORB-00063"]);
 
     let response = request_update(
