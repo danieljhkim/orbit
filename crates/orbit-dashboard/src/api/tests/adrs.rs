@@ -15,6 +15,21 @@ use super::test_support::body_json;
 
 const ADR_BODY: &str = "## Context\nFixture context.\n\n## Decision\nFixture decision.\n\n## Consequences\n- Dashboard behavior is observable.\n- Cost: Test fixtures carry enough ADR shape to pass validation.\n";
 
+/// A runtime built with the agent-identity env cleared, so its actor resolves
+/// to the human default.
+///
+/// The runtime captures `ActorIdentity` from the process env at construction
+/// time, which makes "identity-less write" assertions depend on how the suite
+/// was launched — an agent running it inside a managed Orbit run exports
+/// `ORBIT_AGENT_MODEL` and the actor comes back as that model (ORB-10350).
+/// The guard is confined to this synchronous call so it never spans an
+/// `.await` (`clippy::await_holding_lock`).
+fn runtime_without_agent_identity() -> OrbitRuntime {
+    let _env =
+        orbit_common::test_env::unset(orbit_common::test_env::AGENT_IDENTITY_ENV.iter().copied());
+    OrbitRuntime::in_memory().expect("build runtime")
+}
+
 fn seed_adr(runtime: &OrbitRuntime, title: &str, related_tasks: Vec<&str>) -> Value {
     runtime
         .execute_tool_command(
@@ -186,7 +201,7 @@ async fn create_persists_proposed_adr_and_reads_back() {
 
 #[tokio::test]
 async fn create_without_attribution_defaults_owner_to_human() {
-    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let runtime = runtime_without_agent_identity();
 
     let response = request_create(
         runtime,
@@ -647,7 +662,7 @@ fn transition_audit_actor(runtime: &OrbitRuntime, adr_id: &str) -> String {
 
 #[tokio::test]
 async fn update_without_attribution_records_human_actor_in_audit() {
-    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let runtime = runtime_without_agent_identity();
     let adr = seed_adr(&runtime, "No attribution transition", vec!["ORB-00063"]);
 
     let response = request_update(

@@ -24,6 +24,11 @@ pub mod model_defaults;
 pub mod types;
 pub mod utility;
 
+/// Scoped process-environment guards for tests that assert on the absence of
+/// Orbit run/identity context. Behind the `test-util` feature.
+#[cfg(any(test, feature = "test-util"))]
+pub mod test_env;
+
 /// Frozen model-name constants shared by tests across the workspace. Behind the
 /// `test-util` feature so integration tests in sibling crates can reach it.
 #[cfg(any(test, feature = "test-util"))]

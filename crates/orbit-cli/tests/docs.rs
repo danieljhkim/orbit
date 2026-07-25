@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::process::Output;
 
 use assert_cmd::cargo::cargo_bin_cmd;
+use orbit_common::test_env::harden_dir;
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
@@ -872,6 +873,7 @@ struct TestWorkspace {
 impl TestWorkspace {
     fn new() -> Self {
         let temp = tempdir().expect("tempdir");
+        harden_dir(temp.path());
         let home = temp.path().join("home");
         let work = temp.path().join("work");
         let companion = temp.path().join("mock-companion");

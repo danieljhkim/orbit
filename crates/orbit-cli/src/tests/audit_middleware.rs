@@ -1,11 +1,11 @@
 use clap::Parser;
 use orbit_common::types::AuditEvent;
 use serde_json::{Value, json};
-use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use crate::command::Cli;
 
 use super::super::audit_middleware::*;
+use orbit_common::test_env::{self, AGENT_IDENTITY_ENV};
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::AuditEventStatus;
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -15,39 +15,8 @@ fn meta_for(args: &[&str]) -> CommandMeta {
     extract_command_meta(&cli.command)
 }
 
-struct OrbitRunEnvGuard {
-    _lock: MutexGuard<'static, ()>,
-    saved: Option<String>,
-}
-
-fn unset_orbit_run_id() -> OrbitRunEnvGuard {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    let lock = LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let saved = std::env::var("ORBIT_RUN_ID").ok();
-    // SAFETY: the guard serializes this test env mutation and restores the value on drop.
-    unsafe {
-        std::env::remove_var("ORBIT_RUN_ID");
-    }
-    OrbitRunEnvGuard { _lock: lock, saved }
-}
-
-impl Drop for OrbitRunEnvGuard {
-    fn drop(&mut self) {
-        // SAFETY: the guard holds the serialization lock for the full mutation window.
-        unsafe {
-            match &self.saved {
-                Some(value) => std::env::set_var("ORBIT_RUN_ID", value),
-                None => std::env::remove_var("ORBIT_RUN_ID"),
-            }
-        }
-    }
-}
-
 fn audit_event_for_meta_without_orbit_run_id(meta: CommandMeta) -> AuditEvent {
-    let _env = unset_orbit_run_id();
+    let _env = test_env::unset(["ORBIT_RUN_ID"]);
     let runtime = OrbitRuntime::in_memory().expect("build in-memory runtime");
     {
         let mut guard = AuditGuard::new(&runtime, meta);
@@ -160,6 +129,9 @@ fn tool_run_audit_meta_prefers_input_identity_over_flags() {
 
 #[test]
 fn tool_run_audit_meta_uses_agent_role_without_identity() {
+    // Without flag/input identity the role falls back to the process env, so
+    // the assertion is only meaningful with that env cleared (ORB-10350).
+    let _env = test_env::unset(AGENT_IDENTITY_ENV.iter().copied());
     let meta = meta_for(&["orbit", "tool", "run", "orbit.search"]);
 
     assert_eq!(meta.role, "agent");
