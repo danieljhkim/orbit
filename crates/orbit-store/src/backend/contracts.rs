@@ -346,6 +346,9 @@ pub struct TaskReservationOwnedConflictsResult {
 pub struct JobRunQuery {
     pub job_id: Option<String>,
     pub state: Option<JobRunState>,
+    /// Whether to include only states for which `JobRunState::is_terminal()`
+    /// returns true. Applied before ordering and limiting.
+    pub terminal_only: bool,
     pub created_since: Option<DateTime<Utc>>,
     pub limit: Option<usize>,
 }
