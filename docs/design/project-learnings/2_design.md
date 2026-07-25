@@ -3,7 +3,7 @@ summary: "Project Learnings — Design"
 type: design
 title: "Project Learnings — Design"
 owner: claude
-last_updated: 2026-07-19
+last_updated: 2026-07-25
 status: Draft
 feature: project-learnings
 doc_role: design
@@ -12,7 +12,7 @@ tags: ["project-learnings"]
 
 # Project Learnings — Design
 
-This document specifies phase-1 project-learnings: the placement of learning storage in `orbit-store`, the schema of a learning record plus sidecars, the phase-1 scope-matching algorithm (path globs + tags), the three-layer push-injection pipeline (engine pre-prompt + MCP sidecar + optional Claude Code hook), the pull surface (skill + tools), the curation lifecycle, and the concerns the design deliberately leaves to follow-ups.
+This document specifies phase-1 project-learnings: the placement of learning storage in `orbit-store`, the schema of a learning record plus sidecars, the phase-1 scope-matching algorithm (path globs + tags), pull-based discovery through search and show, the reference-comment convention, the curation lifecycle, and the concerns the design deliberately leaves to follow-ups.
 
 Phase 2 (semantic ranking, symbol-aware scope) is out of scope for this document and is captured in [3_vision.md §1.2](./3_vision.md). The schema in [§2](#2-learning-record-schema) is forward-compatible with phase 2.
 
@@ -33,13 +33,9 @@ orbit-store/
 
 `orbit-tools` gains a `learning::` submodule that exposes `orbit.learning.add | list | search | show | update | supersede | upvote` as MCP tools. `orbit-cli` exposes the corresponding `orbit learning <subcommand>` shell surface.
 
-`orbit-engine` gains the **pre-prompt injection** logic: before invoking an agent runtime for a task, it queries the learning store for entries whose `scope` matches the task's `context_files` and prepends formatted summaries to the agent prompt. This is the layer that makes push-based discovery cross-agent, because injection happens above the agent boundary ([§4](#4-push-injection-pipeline), [4_decisions.md ADR-005](./4_decisions.md)).
+`orbit.search` and `orbit.learning.show` are the delivery surface. Search returns candidate records without expanding their bodies; `show` returns the authoritative body and records a passive `learning_shown` usage event. Code and workflow boundaries can point to a relevant record with a concise reference comment, keeping the rationale close to use without copying durable content into the source.
 
-`orbit-remote` gains a thin MCP result decorator that, for tool responses referencing file paths, attaches a `learnings` sidecar field with up to N matching entries. This is the second push layer; it works for any agent that calls Orbit's MCP tools.
-
-The third push layer — a Claude Code `PreToolUse` hook on `Edit | Write | Read` — is not part of any Orbit crate; it ships as a hook configuration in [.claude/settings.json](../../../.claude/settings.json) (or whichever scope is appropriate; see [§4.3](#43-layer-3-claude-code-pretooluse-hook-optional)).
-
-No cross-crate dependencies that violate the architecture diagram in [CLAUDE.md](../../../CLAUDE.md) are introduced. The dependency edges added are `orbit-store` (extended internally), `orbit-tools → orbit-store` (already present), and `orbit-engine → orbit-store` (already present). `orbit-mcp` remains a generic transport kernel that depends only on `orbit-common`; `orbit-remote` owns Layer 2 composition and asks the injected host to query learning candidates instead of coupling the result decorator to learning persistence.
+No cross-crate dependencies that violate the architecture diagram in [CLAUDE.md](../../../CLAUDE.md) are introduced. The dependency edges remain `orbit-store` (extended internally) and the existing consumers of the learning tools; delivery does not add an agent-runtime or hook-path dependency.
 
 ---
 
@@ -137,26 +133,19 @@ Phase 1 supports two scope axes, evaluated as a logical OR:
 
 ### 3.1 Path globs
 
-Glob patterns over repo-relative paths. Matched against any file path that:
-
-- Appears in a task's `context_files` (engine pre-prompt path).
-- Is referenced in an MCP tool argument or response (MCP-sidecar path).
-- Is the target of `Edit | Write | Read` (Claude Code hook path).
+Glob patterns over repo-relative paths. They narrow explicit `orbit search path <path> --kind learning` and `orbit learning list --path <path>` queries.
 
 Glob syntax: standard `**`/`*`/`?` semantics (the same matcher `orbit-policy` uses for `read`/`modify` rules — reused, not reimplemented). A learning matches if **any** of its `scope.paths` matches the candidate path.
 
 ### 3.2 Tags
 
-Free-form string labels. Matched against:
-
-- Tags on the task itself (when in the engine pre-prompt path).
-- Tags supplied by the caller in an explicit `orbit learning list --tag` query (structural filter; post-[ORB-00202]).
+Free-form string labels. They narrow explicit `orbit search --kind learning --tag <tag>` and `orbit learning list --tag <tag>` queries.
 
 Tags are not auto-derived from anything in phase 1. They exist for the cases where path-based scoping doesn't fit ("when running any benchmark", "when authoring docs").
 
 ### 3.3 Combination
 
-A learning matches a candidate if **(path glob matches) OR (any tag matches)**. The OR is deliberate: the two axes capture different shapes of relevance and shouldn't gate each other.
+A learning matches an explicit query if **(path glob matches) OR (any tag matches)**. The OR is deliberate: the two axes capture different shapes of relevance and shouldn't gate each other.
 
 ### 3.4 Why not symbol-aware in phase 1
 
@@ -164,87 +153,21 @@ Symbol-aware scoping (e.g. "this learning applies whenever the agent touches the
 
 ---
 
-## 4. Push-Injection Pipeline
+## 4. Pull Delivery and Reference Comments
 
-Three layers, from coarsest to finest. Each layer adds precision on top of the layers below; all three may be active simultaneously, with deduplication described in [§4.4](#44-deduplication-and-budget).
+### 4.1 Discover and retrieve
 
-### 4.1 Layer 1 — Engine pre-prompt injection (universal)
+Agents start with `orbit search --kind learning <query>` or a path/tag-constrained query to discover candidate records. They retrieve a full record only with `orbit learning show <id>` or `orbit.learning.show`. This keeps a search result concise while preserving a single authoritative body for the durable guidance.
 
-`orbit-engine` is the layer that spawns agents for tasks. Before the agent runtime starts, the engine:
+### 4.2 Point-of-use references
 
-1. Reads the task's `context_files`.
-2. Reads the task's `tags` (if any).
-3. Queries the runtime-side `search_learnings` helper (equivalent to `orbit.search` with `kind: "learning"`) with the union of (paths from `context_files`) and (tags from the task).
-4. Takes the top-K (default 5) results.
-5. Prepends a `<system-reminder>` block to the agent prompt:
+When a learning, ADR, task, or friction report constrains a specific code or workflow boundary, the surrounding source may carry a one-line reference comment: `// L-0041: hook subcommands keep parsing and state in core.` Reference comments must include the artifact ID and a short claim about why it applies. They are intentionally small pointers, not duplicated policy text.
 
-   ```
-   <system-reminder>
-   Project learnings relevant to this task:
+Do not place workspace-local artifact IDs in shipped skills, prompt templates, or other consumer-facing instruction surfaces: those IDs are not portable outside this workspace. The artifact registry and the reference comment together are the delivery mechanism.
 
-   - [L-0001] Never declare a perf win on latency alone — verify
-     output equivalence before freezing a result.
-   - [L-0014] When editing tree-sitter extractors, the …
+### 4.3 Historical injection data
 
-   Read full body via `orbit.learning.show <id>` if needed.
-   </system-reminder>
-   ```
-
-**Prerequisite.** The tag-matching half of step 3 depends on the `Task` schema carrying a `tags: Vec<String>` field, which does not exist today. That schema change is tracked separately as [T20260510-12] and is a hard prerequisite for this layer's tag axis. Path-glob matching against `context_files` works regardless and is what Layer 1 falls back to until [T20260510-12] lands.
-
-This is the universal layer because every supported agent runtime (Claude, Codex, Gemini, Anthropic API, OpenAI-compat, Ollama, mock) consumes a prompt. The injection is invisible to the runtime.
-
-**Limitation.** This layer fires once per task, before the agent has read its way into the relevant files. Learnings whose scope is narrower than the task's overall scope may not surface here; that's what layers 2 and 3 are for.
-
-### 4.2 Layer 2 — MCP tool-call injection (cross-agent, fine-grained)
-
-For MCP tools whose arguments or responses reference file paths — `orbit_task_show` (which surfaces `context_files`), `orbit_task_artifact_put`, and similar registered tools — the `orbit-remote` MCP composition attaches a `learnings` sidecar to the tool response. The CLI-only graph surface does not pass through this mechanism:
-
-```jsonc
-{
-  "result": { ... },
-  "learnings": [
-    {
-      "id": "L-0001",
-      "summary": "Never declare a perf win on latency alone — ..."
-    }
-  ]
-}
-```
-
-The agent's MCP client surfaces the sidecar however it normally surfaces tool output. Modern agents read structured tool responses; the sidecar is part of that response, so it lands in agent context naturally.
-
-This layer covers any agent that talks to Orbit's Remote-composed MCP server. It does not cover agent-vendor-specific tools (e.g. Claude Code's built-in `Edit`/`Write`/`Read`), which the MCP server doesn't see. Layer 3 fills that gap for Claude Code specifically.
-
-### 4.3 Layer 3 — Claude Code `PreToolUse` hook (optional)
-
-A `PreToolUse` hook in [.claude/settings.json](../../../.claude/settings.json) intercepts `Edit | Write | Read`, extracts the target path from the tool input, calls `orbit learning list --path <path>` (post-[ORB-00202] glob-containment semantics), and emits a `<system-reminder>` with the matching learnings before the tool runs.
-
-This is the only layer that surfaces learnings on Claude Code's built-in editor tools, which agents use far more than they call MCP file tools. It's the most precise layer (per-edit, per-target) but the least universal (Claude Code only).
-
-The hook is shipped as part of the design, but it is **layered on top of** layers 1 and 2, not a replacement. Other agent vendors that gain analogous hook capabilities can plug in equivalent layers without touching the Orbit-side store.
-
-Every hook fire that admits at least one learning records a `learning_injected` audit event in the host-global `~/.orbit/orbit.db` (`arguments_json.learning_ids`, target path, session id). The instrumentation **fails open**: an unavailable audit backend logs a warning and the reminder still renders — injection never depends on the observability write ([ORB-10316]). The per-learning rollup over these events is described in [§5.5](#55-usage-instrumentation-and-feedback).
-
-The hook resolves its session identity in priority order: `ORBIT_SESSION_ID` from the environment (engine-managed runs export it, pre-seeded with layer-1 injections) → the `session_id` field carried by the hook payload itself (Claude Code sends it on every hook event) → a tmpdir file keyed by parent pid as the last resort. The payload fallback matters: interactive sessions never export `ORBIT_SESSION_ID`, and each hook fire runs under a fresh shell, so the ppid fallback re-keys per invocation and cannot dedup (the 2026-07-18 relevancy audit observed one learning injected 10× in a single session; F2026-07-092).
-
-### 4.4 Deduplication and budget
-
-A naive implementation injects the same learning multiple times across layers (e.g. once at layer 1, once at layer 2 for a tool call referencing the same file, once at layer 3 for the eventual edit). To prevent this:
-
-- The agent process tracks injected learning IDs in a per-session set.
-- Each layer consults the set before emitting a `<system-reminder>`; already-injected IDs are skipped.
-- Per-call cap of **5** learnings (configurable via `ORBIT_LEARNING_PER_CALL_CAP`). Hard cap of **20** per session (configurable via `ORBIT_LEARNING_SESSION_CAP`) to bound total context cost.
-
-Implementation note: the per-session set lives in the agent's working memory. The Orbit-side store does not need to track session state; it just provides idempotent search. Layers consult the set; the store is stateless.
-
-Cross-process deduplication is best-effort and keyed on a session id: `ORBIT_SESSION_ID` when exported, else (for Layer 3) the `session_id` field the hook payload carries ([ORB-10316]). With a session id, dedup state lives in the `session_learning_state` table of the host-global `orbit.db`; without one, Layer 3 falls back to a tmpdir state file keyed by parent pid, which cannot dedup across fires from an interactive agent (each fire gets a fresh parent shell). In-process Layer 1 + Layer 2 dedup is exact; an `orbit-mcp` server started outside an engine-spawned session still falls back to per-process state and may double-emit. The dedup layer is belt-and-braces; the agent's own context window remains the practical backstop.
-
-### 4.5 What gets injected
-
-The injected teaser carries only the learning **id**, one-line **summary**, and scope **tags** (`- [L-0001] summary [tags: a, b]`). `body` is **not** injected — bodies are loaded on demand via `orbit learning show` / `orbit.learning.show`. This keeps per-injection token cost small (a few dozen tokens per learning, not a few hundred), which is what makes the 5-per-call cap workable.
-
-If an agent decides a teaser is relevant, it pulls the body explicitly — and that `show` is the passive usage signal the deprecation rollup reads (see [§5.5](#55-usage-instrumentation-and-feedback)). This separates "alerting the agent that a learning exists" from "spending context on the full content." Most learnings will be teaser-only in any given session.
+Automatic learning injection is no longer registered in the repository settings. `learning_injected` audit events and their counters remain readable as historical data, frozen as of 2026-07-20. No new injected events are expected; a zero-new-injections future is valid. `learning_shown` continues to be emitted when an agent explicitly opens a learning and is the active usage signal.
 
 ---
 
@@ -268,7 +191,7 @@ orbit search <text> --kind learning [--tag T] [--all] [--status learning:active]
 orbit search path <path> --kind learning [--tag T] [--all] [--status learning:active]
 ```
 
-`add`, `update`, and `supersede` write the YAML and update the index atomically. `upvote` appends to the learning's `votes.jsonl` sidecar and is idempotent for `(learning_id, voter_model, task_id)`. `orbit learning list --path/--tag` and `orbit search --kind learning` are the fast read paths used by the injection layers (the runtime-side `search_learnings` helper is the in-process equivalent).
+`add`, `update`, and `supersede` write the YAML and update the index atomically. `upvote` appends to the learning's `votes.jsonl` sidecar and is idempotent for `(learning_id, voter_model, task_id)`. `orbit learning list --path/--tag` and `orbit search --kind learning` are the indexed read paths used for pull discovery.
 
 ### 5.2 MCP tools
 
@@ -282,7 +205,7 @@ orbit search path <path> --kind learning [--tag T] [--all] [--status learning:ac
 | `orbit.learning.supersede` | `id`, `with` | both records updated |
 | `orbit.learning.upvote` | `id`, `model`, `task?` | vote summary |
 
-`orbit.learning.list` and the runtime-side `search_learnings` helper drive the injection-layer hot path; both must stay sub-10ms at expected scale. The standalone per-domain learning-search MCP tool (phase-1 surface) was retired by [ORB-00202] in favor of `orbit.search` with `kind: "learning"`.
+`orbit.learning.list` and `orbit.search` are the primary discovery paths; both must stay sub-10ms at expected scale. The standalone per-domain learning-search MCP tool (phase-1 surface) was retired by [ORB-00202] in favor of `orbit.search` with `kind: "learning"`.
 
 ### 5.3 Result shape
 
@@ -330,14 +253,14 @@ Search ranking remains scope-filtered first. Within the matched set, rows sort b
 
 ### 5.5 Usage instrumentation and feedback
 
-Two audit event kinds in the host-global `~/.orbit/orbit.db` carry the usage signal ([ORB-10316], [ADR-0242]; the scoped reintroduction of a feedback primitive anticipated by [ADR-0210]):
+Two audit event kinds in the host-global `~/.orbit/orbit.db` describe historical delivery and current explicit use:
 
-- **`learning_injected`** — one event per hook fire that admitted learnings; `arguments_json.learning_ids` lists the injected IDs, `target_id` is the tool-target path, `session_id` the resolved session.
-- **`learning_shown`** — recorded when an agent opens a learning's full body via `orbit learning show` (CLI) or the `orbit.learning.show` MCP tool: `target_id` is the learning ID, keyed by session. This is the **passive, ungameable usage signal** — an agent that expands a teaser found it worth reading. There is deliberately **no ack surface** (no `orbit learning ack`, no `orbit.learning.ack`): an earlier ack-based design ([ADR-0242] rejected alternatives) added a gameable, agent-remembered step and a new MCP tool; `show` needs neither.
+- **`learning_injected`** — historical automatic-delivery evidence. Its final values are frozen as of 2026-07-20; the system must tolerate no new events.
+- **`learning_shown`** — recorded when an agent opens a learning's full body via `orbit learning show` (CLI) or the `orbit.learning.show` MCP tool. This is the active, passive usage signal for explicit retrieval.
 
-Both emissions **fail open**: an unavailable audit backend logs a warning and the injection/show still completes. The signal is best-effort observability and must never break the read or injection path.
+`learning_shown` emission **fails open**: an unavailable audit backend logs a warning and the `show` read still completes. The signal is best-effort observability and must never break retrieval.
 
-`orbit learning stats [--since ..] [--json]` folds both event kinds into a per-learning rollup: injected count, shown count, shown ratio (`shown / injected`), and last-injected/last-shown timestamps (CLI + the `learning_usage_stats` runtime API). A low shown ratio — injected often, never read — is the deprecation-candidate signal. This rollup is the designed input for downstream deprecation policy (ORB-10318); decay/TTL is deliberately follow-up work, not implemented at this layer.
+`orbit learning stats [--since ..] [--json]` retains its per-learning rollup: historical injected count, shown count, shown ratio (`shown / injected`), and last-injected/last-shown timestamps (CLI + the `learning_usage_stats` runtime API). It handles a zero-new-injections future without error. The deprecation review treats the frozen injection figures as calibration data and relies on current shown data and anchor health for ongoing assessment ([ORB-10318]).
 
 ---
 
@@ -347,7 +270,7 @@ Both emissions **fail open**: an unavailable audit backend logs a warning and th
 
 A skill at `.claude/skills/orbit-learnings/` (and the equivalent location for other agent vendors) exists for the active-query path. Trigger phrases include "what should I know about", "are there learnings for", "is there context I'm missing on". The skill body documents how to call `orbit.search` (with `kind: "learning"`) and how to interpret results.
 
-The skill is the pull complement to push. Push handles the "agent doesn't know it should look" failure mode; the skill handles the "agent has time to ask" case (e.g., at task start, when reviewing an unfamiliar area).
+The skill is the primary delivery path for agents that need guidance at task start or while reviewing an unfamiliar area. A nearby reference comment supplies the same pointer at a specific code or workflow boundary.
 
 ### 6.2 Direct tool use
 
@@ -361,7 +284,7 @@ The local dashboard exposes learnings under Knowledge > Learnings. The HTTP surf
 - `GET /api/learnings/:id` returns the full record.
 - `POST /api/learnings/:id/supersede` accepts `{ "by": "<replacement-learning-id>" }` and runs the same atomic supersession path described in §7.2.
 
-The dashboard is a pull and curation surface, not an injection layer. It lets operators scan stale or duplicate records before review without changing the phase-1 push semantics.
+The dashboard is a pull and curation surface. It lets operators scan stale or duplicate records before review without changing the delivery model.
 
 ---
 
@@ -384,7 +307,7 @@ When a learning is replaced by a clearer or more current entry:
 orbit learning supersede L-0001 --with L-0042
 ```
 
-Both records update atomically. The old record's `status` flips to `superseded` and gains a `superseded_by` field; the new record's `supersedes` field points back. Superseded records are excluded from injection but retained on disk for history.
+Both records update atomically. The old record's `status` flips to `superseded` and gains a `superseded_by` field; the new record's `supersedes` field points back. Superseded records are excluded from default discovery but retained on disk for history.
 
 ### 7.3 Staleness detection
 
@@ -398,7 +321,7 @@ A learning is **stale** if any of these are true:
 
 ### 7.4 Conflict resolution
 
-Two agents (or two humans) may author overlapping learnings concurrently. Phase 1 does not auto-merge; the curation answer is "humans review and supersede one with the other when the duplication surfaces." `orbit learning list --tag <tag>` is the manual surface for spotting duplicates. Phase 2's semantic-similarity ranking will naturally surface near-duplicates at injection time, which is the better forcing function.
+Two agents (or two humans) may author overlapping learnings concurrently. Phase 1 does not auto-merge; the curation answer is "humans review and supersede one with the other when the duplication surfaces." `orbit learning list --tag <tag>` is the manual surface for spotting duplicates. Phase 2's semantic-similarity ranking can surface near-duplicates during search.
 
 ### 7.5 Re-validation without re-authoring
 
@@ -406,17 +329,17 @@ When a duplicate concern is already covered by an active learning, the agent sho
 
 ### 7.6 Recurring deprecation review (auto-task)
 
-`orbit learning prune` ([§7.3](#73-staleness-detection)) is mechanical and anchor-only: it flags a learning stale purely on dead paths / evidence, and it is opportunistic — nothing schedules it. The teaser-injection instrumentation ([ORB-10316], [§5.5](#55-usage-instrumentation-and-feedback)) adds a second, softer signal — *whether a learning is ever injected or shown* — that `prune` does not consider. A learning can be perfectly anchored (its globs still resolve) yet be dead weight: never injected, injected-but-never-opened, or scoped so broadly it only ever matches tangentially.
+`orbit learning prune` ([§7.3](#73-staleness-detection)) is mechanical and anchor-only: it flags a learning stale purely on dead paths / evidence, and it is opportunistic — nothing schedules it. The historical injection counts and current `learning_shown` signal ([§5.5](#55-usage-instrumentation-and-feedback)) add contextual evidence that `prune` does not consider. A learning can be perfectly anchored yet be dead weight: never shown, or associated with a reference comment that no longer explains a live boundary.
 
 To surface that class continuously without hard-coding thresholds, orbit ships a **report-only recurring review** as an auto-task ([docs/design/auto-tasks/](../auto-tasks/), [ORB-10318]) — `.orbit/auto_tasks/learning-deprecation-review.yaml`. On its cadence the generic scheduler mints a normal task whose prompt directs the assigned agent to:
 
 1. Read the usage rollups (`orbit learning stats --json`: `injected_count`, `shown_count`, `shown_ratio`, `last_injected_at`, `last_shown_at`) and each learning's age (`orbit learning list --json`).
-2. Inspect **anchor health** from `scope.paths`: empty path scopes (can never inject) and globs that match nothing in the current tree.
+2. Inspect **anchor health** from `scope.paths`: empty path scopes and globs that match nothing in the current tree.
 3. Write a ranked list of the potentially stale learnings, each with evidence, into the task's `execution_summary` — that is the entire deliverable.
 
 The run **never** deprecates, deletes, supersedes, archives, or adds a learning state; curation stays human/orchestrator-owned and is applied afterwards through the existing `orbit learning update` / archival surface. It **fails open**: an empty or missing rollup (a fresh workspace with no audit history) reports "nothing stale" rather than erroring. Agent judgment replaces the fixed thresholds a bespoke staleness-scoring engine would have hard-coded — the deliberate choice ([ORB-10318]) not to build one, given the small corpus and the audit's finding that no learning is a proven chronic offender.
 
-The definition is ordinary workspace data (`no-diff-expected` + `learning-deprecation` tags, `skip_if_open` dedupe); its cadence lives in the definition's `schedule` field, not in the identity `config.yaml` ([L-0014] keeps runtime config out of `config.yaml`). First-cycle calibration reproduces the 2026-07-18 hook-relevancy audit's candidate set (L-0074, L-0077, L-0068, L-0041, and the six empty-path learnings) or documents why any now differs.
+The definition is ordinary workspace data (`no-diff-expected` + `learning-deprecation` tags, `skip_if_open` dedupe); its cadence lives in the definition's `schedule` field, not in the identity `config.yaml` ([L-0014] keeps runtime config out of `config.yaml`). The 2026-07-18 hook-relevancy audit's injection figures are frozen historical calibration as of 2026-07-20; the review documents why any candidate differs from that baseline.
 
 ---
 
@@ -424,7 +347,7 @@ The definition is ordinary workspace data (`no-diff-expected` + `learning-deprec
 
 ### 8.1 Authoring discipline is the bottleneck
 
-The system can be perfect at *delivering* learnings and still fail if no one *writes* them. The `orbit-learnings` skill and the agent-self-authoring flow are the primary remediations, but neither is automatic. If authoring lags, the store stays sparse and the push layer surfaces nothing — same end state as today, just with more code in the way.
+The system can be perfect at storing learnings and still fail if no one writes or discovers them. The `orbit-learnings` skill, reference comments, and the agent-self-authoring flow are the primary remediations, but none is automatic. If authoring lags, the store stays sparse.
 
 This is acknowledged, not fixed. Phase 2's auto-extraction from review threads or postmortems may help; phase 1 ships with manual authoring and accepts the discipline cost.
 
@@ -440,19 +363,15 @@ Phase 1 ranks matched learnings by decayed upvotes before falling back to manual
 
 Phase 2's semantic-similarity ranking from orbit-search may complement or replace parts of this formula; vote score is a load-bearing signal, not the whole relevance model.
 
-### 8.4 Layer 3 hook is Claude-Code-only
+### 8.4 Pull delivery requires a useful locator
 
-The `PreToolUse` hook covers Claude Code's built-in `Edit | Write | Read`, which are the most frequent agent actions. Other agents that gain comparable hooks can layer in equivalent integrations, but as of phase 1, agents without hook support get only layers 1 and 2 — coarser-grained injection. This is uneven coverage by agent vendor; the design accepts the unevenness because layer 1 is universal and gives a baseline that's strictly better than today.
+Search depends on a meaningful query, and a reference comment can drift after a refactor. Keep comments concise, cite the artifact ID, and use the recurring review to surface stale anchors. This cost is accepted in exchange for avoiding automatic context delivery on unrelated tool calls.
 
-### 8.5 Per-session deduplication depends on a resolvable session id
-
-Cross-process dedup state is session-keyed in `orbit-store` (`session_learning_state`), but it only engages when a session id resolves — from `ORBIT_SESSION_ID` or, for Layer 3, the hook payload ([ORB-10316]). Agents whose hook payloads carry no session id and that run outside engine management still fall back to the per-invocation ppid state file and may re-inject. Separately, the agent's own in-context dedup set resets on context compression or crash-restart; the store-side state is the backstop for exactly the sessions that can be keyed.
-
-### 8.6 No write-time validation that learnings are non-obvious
+### 8.5 No write-time validation that learnings are non-obvious
 
 Authoring policy ([§7.1](#71-authoring)) is enforced by reviewer judgment, not by the tool. Nothing prevents an agent from writing a "learning" that just restates what `Cargo.toml` says. Quality control is a curation problem, not a schema problem; phase 1 ships without programmatic guardrails and relies on the same review pressure that keeps `MEMORY.md` and ADR logs honest.
 
-### 8.7 Privacy posture
+### 8.6 Privacy posture
 
 Learnings are workspace-scoped and checked into the repo. They travel exactly where the repo travels. There is no telemetry surface in the loop and no remote API. The authoritative content (the YAML) stays local by construction, like task content. The only shared artifact is the rebuildable SQLite envelope index in the host-global `orbit.db`, and it is partitioned by `workspace_id` so one workspace never reads another's rows (ADR-0212).
 
@@ -461,10 +380,11 @@ Learnings are workspace-scoped and checked into the repo. They travel exactly wh
 ## Task References
 
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
-- [T20260510-12] — Add `tags` field to `Task` schema. Hard prerequisite for Layer 1's tag-axis matching ([§4.1](#41-layer-1--engine-pre-prompt-injection-universal)).
+- [T20260510-12] — Add `tags` field to `Task` schema.
 - [ORB-00061] — Add Knowledge tab and Learnings subtab to dashboard.
 - [ORB-00090] — Aligned learning identity examples with the agent-family convention.
-- [ORB-10316] — Teaser injection (id + summary + tags), `learning_shown` usage signal on `orbit learning show`, `learning_injected`/`learning_shown` rollup via `orbit learning stats`, payload-derived session dedup ([§4.3](#43-layer-3--claude-code-pretooluse-hook-optional), [§4.5](#45-what-gets-injected), [§5.5](#55-usage-instrumentation-and-feedback); [ADR-0242]).
+- [ORB-10316] — Added `learning_shown` and the `learning_injected`/`learning_shown` stats rollup retained as historical data ([§5.5](#55-usage-instrumentation-and-feedback)).
 - [ORB-10318] — Report-only recurring learning-deprecation review as an auto-task; surfaces stale candidates via `execution_summary` from usage rollups + anchor health, no bespoke sweep engine ([§7.6](#76-recurring-deprecation-review-auto-task)).
+- [ORB-10346] — Removed automatic learning delivery and adopted pull delivery with reference comments.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

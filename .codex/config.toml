@@ -1,12 +1,4 @@
 [[hooks.PreToolUse]]
-matcher = '^(Bash|apply_patch|mcp__.*|mcp\..*)$'
-
-[[hooks.PreToolUse.hooks]]
-command = '"$(git rev-parse --show-toplevel)/.codex/hooks/orbit-learning-reminder"'
-statusMessage = "Loading Orbit learnings"
-type = "command"
-
-[[hooks.PreToolUse]]
 matcher = '^(Edit|Write|apply_patch)$'
 
 [[hooks.PreToolUse.hooks]]

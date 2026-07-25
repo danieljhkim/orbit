@@ -4,15 +4,6 @@
       {
         "hooks": [
           {
-            "command": ".claude/hooks/orbit-learning-reminder",
-            "type": "command"
-          }
-        ],
-        "matcher": "Edit|Write|Read"
-      },
-      {
-        "hooks": [
-          {
             "command": "scripts/orbit-file-lock",
             "type": "command"
           }

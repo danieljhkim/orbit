@@ -3,7 +3,7 @@ summary: "Project Learnings — Overview"
 type: design
 title: "Project Learnings — Overview"
 owner: claude
-last_updated: 2026-07-19
+last_updated: 2026-07-25
 status: Draft
 feature: project-learnings
 doc_role: overview
@@ -12,11 +12,11 @@ tags: ["project-learnings"]
 
 # Project Learnings — Overview
 
-Project learnings is a system for preserving and surfacing non-obvious project knowledge — gotchas, root causes from incidents, validated approaches, hard-won workflow insights — at the moment of action so agents stop repeating the same mistakes. The system is **push-first**: relevant learnings inject into agent context automatically when an agent is about to touch code, files, or workflows the learning applies to. A pull surface exists for active exploration, but pull is the secondary mode.
+Project learnings is a system for preserving and surfacing non-obvious project knowledge — gotchas, root causes from incidents, validated approaches, hard-won workflow insights — so agents can retrieve and apply them when they are relevant. Delivery is **pull-based**: agents discover learnings with `orbit search` and open the full record with `orbit learning show`. Point-of-use reference comments make the relevant artifact discoverable in the code without injecting it into every tool call.
 
-Phase 1 ships the native primitive (`learning` resource type alongside `task`), the push-injection mechanism, and the pull skill. Phase 2, deferred until [docs/design/orbit-search/](../orbit-search/) reaches Accepted, layers semantic-similarity ranking on top of the path-glob scoping that phase 1 uses.
+Phase 1 ships the native primitive (`learning` resource type alongside `task`), the pull surface, and the reference-comment convention. Phase 2, deferred until [docs/design/orbit-search/](../orbit-search/) reaches Accepted, layers semantic-similarity ranking on top of the path-glob scoping that phase 1 uses.
 
-This document is the entry point. [2_design.md](./2_design.md) specifies the storage schema, injection pipeline, lifecycle, and surface; [3_vision.md](./3_vision.md) names open questions and prior art; [4_decisions.md](./4_decisions.md) is the ADR log.
+This document is the entry point. [2_design.md](./2_design.md) specifies the storage schema, pull-delivery mechanism, lifecycle, and surface; [3_vision.md](./3_vision.md) names open questions and prior art; [4_decisions.md](./4_decisions.md) is the ADR log.
 
 ---
 
@@ -28,9 +28,9 @@ Three concrete failure modes exist today, none of which the existing knowledge s
 2. **Postmortem decay.** Root causes from incidents land as commit messages and review-thread replies, then become unsearchable under their original framing. A future agent investigating the same area has no way to encounter the prior incident's lesson except by chance.
 3. **Cross-cutting knowledge is homeless.** ADRs scope to a feature folder. CLAUDE.md is loaded on every session and gets noisy fast. Workspace-private MEMORY.md is per-agent and per-machine. None of these handle "when editing anything that touches both `orbit-store` and the activity-job runner, remember Y."
 
-Pull-only systems (flat markdown directories, search tools, the `/learn` skill) require an agent to remember to look. **That is exactly the failure mode the system is built to prevent**: if discovery depends on agent discipline, the agent that needed the learning most — the one that forgot it existed — won't find it. Push-first delivery resolves this by surfacing the learning at the moment of action without requiring the agent to query for it.
+Unstructured pull-only systems (flat markdown directories and generic wikis) make a relevant record hard to find. Orbit instead makes the durable artifact searchable and puts a short reference comment at the affected code or workflow boundary. The comment names the artifact ID and why it applies; the agent can then retrieve the authoritative record rather than receive a broad, automatic reminder.
 
-The hard constraint that shapes the design: **the system must be discoverable across agents, not just Claude Code.** Orbit runs Codex, Gemini, Claude, and others through the activity/job runner. A solution that hooks only into Claude Code's `PreToolUse` would re-fragment knowledge along agent-vendor lines, which defeats the point.
+The hard constraint that shapes the design: **the system must be discoverable across agents, not just one agent vendor.** Orbit runs Codex, Gemini, Claude, and others through the activity/job runner. Search, show, and repository-local reference comments are vendor-neutral.
 
 ---
 
@@ -42,7 +42,7 @@ A first-class Orbit resource, parallel to `task`. Each record carries:
 
 - `id` — `L-NNNN`, allocated like task IDs.
 - `scope` — what triggers the learning. Phase 1: path globs + tags. Phase 2 will layer semantic similarity on top ([4_decisions.md ADR-004](./4_decisions.md)).
-- `summary` — one-line rule of thumb (the part that fits in a `<system-reminder>`).
+- `summary` — one-line rule of thumb displayed in a concise search result.
 - `body` — multi-line markdown: the rule, the reason, how to apply it.
 - `evidence` — commit SHAs, task IDs, or external refs that produced the learning.
 - `status` — `active` or `superseded`.
@@ -52,30 +52,22 @@ A first-class Orbit resource, parallel to `task`. Each record carries:
 
 Records persist as YAML on disk under `.orbit/learnings/<id>/learning.yaml`, with sidecars such as `votes.jsonl` living beside the YAML. Workspace-scoped per the Scoping Rules table in [CLAUDE.md](../../../CLAUDE.md), and checked into git so learnings travel with the repo ([4_decisions.md ADR-003](./4_decisions.md)).
 
-### 2.2 Push-based discovery
+### 2.2 Pull-based discovery and reference comments
 
-Learnings reach agents through three injection points, layered from coarsest to finest:
+Agents discover a learning through `orbit search --kind learning` (or a topic/path-specific query) and read its authoritative body with `orbit learning show <id>`. `show` records the passive `learning_shown` usage signal.
 
-1. **Engine pre-prompt injection.** When `orbit-engine` spawns an agent for a task, it queries learnings whose scope matches the task's `context_files` and prepends matching summaries to the agent prompt. Universal across agents because it happens above the agent boundary ([2_design.md §4](./2_design.md)).
-2. **MCP tool-call injection.** When an agent calls an Orbit MCP tool that references file paths (`orbit_task_show`, `orbit_task_artifact_put`, etc.), the tool response carries a sidecar `learnings` field listing relevant entries. Works for any agent that speaks MCP.
-3. **Claude Code `PreToolUse` hook.** Finer-grained per-edit injection on `Edit | Write | Read`. Covers Claude Code's built-in editor tools, which the MCP layer doesn't see. Optional: a layer of precision on top of (1) and (2), not a replacement.
+When a learning or decision applies at a particular code or workflow boundary, add a concise nearby comment such as `// L-0041: hook subcommands keep parsing and state in core.` The comment is a locator, not a copy of the learning: it carries the artifact ID and a short rationale, while the full record remains in the Orbit registry. Do not place workspace-local artifact IDs in shipped prompts or other consumer-facing instruction assets.
 
-Cap injection at 3–5 learnings per call and dedupe per session to keep context bounded ([4_decisions.md ADR-005](./4_decisions.md)).
-
-### 2.3 Pull surface
-
-For active exploration ("what should I know about this crate before I start?"), an `orbit-learnings` skill wraps `orbit.search` (with `kind: learning`) with a natural-language interface. Agents can also call the tool directly. Pull is a complement to push, not the primary path; the push layer exists precisely because pull alone has been observed to fail.
-
-### 2.4 Curation lifecycle
+### 2.3 Curation lifecycle
 
 Active learnings can be superseded (replaced by a newer entry) or marked stale (the code they reference no longer exists). The knowledge graph is the natural staleness signal: when a symbol or file referenced in a learning's `evidence` disappears in a graph rebuild, the learning is flagged for review. Pruning is human-or-agent-driven; the system does not auto-delete.
 
-### 2.5 Phase boundary
+### 2.4 Phase boundary
 
 | Phase | Scope axis | Ranking | Discovery |
 |-------|-----------|---------|-----------|
-| **Phase 1** | path globs + tags | decay-weighted upvotes + manual priority + recency | engine pre-prompt + MCP injection + (optional) Claude Code hook |
-| **Phase 2** | + symbol-aware (knowledge graph) | + semantic similarity (orbit-search) | + relevance-ranked, not just match-based |
+| **Phase 1** | path globs + tags | manual priority + recency | `orbit search` / `orbit learning show` + reference comments |
+| **Phase 2** | + symbol-aware (knowledge graph) | + semantic similarity (orbit-search) | improved pull ranking |
 
 Phase 2 is gated on [docs/design/orbit-search/](../orbit-search/) reaching Accepted because the relevance-ranking layer wants real semantic similarity, and the symbol-aware scope wants the same graph integration orbit-search phase 2 will require.
 
@@ -89,11 +81,10 @@ Phase 2 is gated on [docs/design/orbit-search/](../orbit-search/) reaching Accep
 | Architectural placement (storage in `orbit-store`, tools in `orbit-tools`) | [2_design.md §1](./2_design.md) | [T20260510-11] |
 | Learning record schema | [2_design.md §2](./2_design.md) | [T20260510-11] |
 | Scope axis (path globs + tags, phase 1) | [2_design.md §3](./2_design.md), [4_decisions.md ADR-004](./4_decisions.md) | [T20260510-11] |
-| Push-injection pipeline | [2_design.md §4](./2_design.md), [4_decisions.md ADR-001](./4_decisions.md), [4_decisions.md ADR-005](./4_decisions.md) | [T20260510-11] |
-| Prerequisite: `Task.tags` field | [2_design.md §4.1](./2_design.md) | [T20260510-12] |
+| Pull delivery and reference comments | [2_design.md §4](./2_design.md) | [ORB-10346] |
 | MCP / CLI surface (`orbit.learning.*`) | [2_design.md §5](./2_design.md) | [T20260510-11] |
 | Re-validation votes and ranking | [2_design.md §5.4](./2_design.md), [4_decisions.md ADR-006](./4_decisions.md) | [ORB-00095] |
-| Pull skill (`orbit-learnings`) | [2_design.md §6](./2_design.md) | [T20260510-11] |
+| Pull surface (`orbit search` / `orbit learning show`) | [2_design.md §6](./2_design.md) | [T20260510-11] |
 | Curation lifecycle, supersession, staleness | [2_design.md §7](./2_design.md) | [T20260510-11] |
 | Native primitive vs flat markdown | [4_decisions.md ADR-002](./4_decisions.md) | [T20260510-11] |
 | Checked-in vs workspace-only state | [4_decisions.md ADR-003](./4_decisions.md) | [T20260510-11] |
@@ -109,5 +100,6 @@ Phase 2 is gated on [docs/design/orbit-search/](../orbit-search/) reaching Accep
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
 - [T20260510-12] — Add `tags` field to `Task` schema. Hard prerequisite for Layer 1's tag-axis matching.
 - [ORB-00095] — Add task-anchored learning upvotes and decay-weighted search ranking.
+- [ORB-10346] — Remove automatic learning delivery; retain pull discovery, `learning_shown`, and historical usage stats.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -3,7 +3,7 @@ summary: "Project Learnings — Decisions"
 type: design
 title: "Project Learnings — Decisions"
 owner: claude
-last_updated: 2026-07-19
+last_updated: 2026-07-25
 status: Draft
 feature: project-learnings
 doc_role: decisions
@@ -20,9 +20,11 @@ Historical note: entries below were originally numbered ADR-001 through ADR-006 
 
 ---
 
-## ADR-0108 — Push-based discovery via context injection, not pull-only via search
+## ADR-0108 — Push-based discovery via context injection, not pull-only via search (superseded)
 
-**Status:** Accepted · 2026-05 · [T20260510-11] · [ORB-00009] · legacy_id: `project-learnings/ADR-001`
+**Status:** Superseded · 2026-07 · [ORB-10346] · legacy_id: `project-learnings/ADR-001`
+
+**Supersession note.** Automatic delivery was retired after the 2026-07-18 relevancy audit. The current model is pull discovery through search/show plus concise reference comments; this entry remains as the historical decision it replaced.
 
 **Context.** Three classes of discovery were on the table:
 
@@ -127,9 +129,11 @@ Phase 2 ([3_vision.md §1.1](./3_vision.md), [§1.2](./3_vision.md)) layers symb
 
 ---
 
-## ADR-0112 — Three-layer push pipeline (engine pre-prompt + MCP sidecar + Claude Code hook), not single-layer
+## ADR-0112 — Three-layer push pipeline (engine pre-prompt + MCP sidecar + Claude Code hook), not single-layer (superseded)
 
-**Status:** Accepted · 2026-05 · [T20260510-11] · [ORB-00009] · legacy_id: `project-learnings/ADR-005`
+**Status:** Superseded · 2026-07 · [ORB-10346] · legacy_id: `project-learnings/ADR-005`
+
+**Supersession note.** The three automatic-delivery layers are no longer active. [ORB-10346] removes the repository hook registrations and retains explicit search/show retrieval with point-of-use reference comments.
 
 **Context.** The push-injection layer ([2_design.md §4](./2_design.md)) has multiple natural placements, each with different coverage:
 
@@ -245,6 +249,8 @@ Alternatives considered:
 
 **Decision.** Injection projects only the learning id, one-line summary, and scope tags; the full body is retrieved via `orbit learning show <id>`, which records a `learning_shown` audit event (keyed by learning id + session) in the host-global `~/.orbit/orbit.db` — the passive usage signal. `orbit learning stats` folds `learning_injected` + `learning_shown` into a per-learning rollup (injected, shown, shown ratio, last-injected/last-shown). Both emissions **fail open**: an unavailable audit backend logs a warning and the injection/show still completes. Session dedup keys on the first resolvable anchor: `ORBIT_SESSION_ID` env → the `session_id` field the hook payload carries → ppid-tmpfile last resort. **No ack surface** — no `orbit learning ack`, no `orbit.learning.ack`, no ack instruction in the injected block.
 
+**Amendment — ORB-10346.** The injection half of this decision is retired: automatic delivery stopped on 2026-07-20 and its counters are frozen historical calibration. `orbit learning show`, its `learning_shown` audit event, and the `orbit learning stats` rollup remain active; a zero-new-injections future is valid.
+
 **Consequences.**
 - The rollup is the designed input for downstream deprecation policy (ORB-10318); decay/TTL is deliberately follow-up work, not implemented at this layer.
 - The `learning_injected`/`learning_shown` contract lives in audit-event conventions (`target_type` + `arguments_json`), enforced by store-level fold tests, not a schema migration.
@@ -258,5 +264,6 @@ Alternatives considered:
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
 - [ORB-10046] — Remove the vote and comment surfaces from the learning subsystem (ADR-0210 supersedes ADR-0157).
 - [ORB-10316] — Teaser injection + `learning_shown` usage signal + `orbit learning stats` rollup + payload-derived session dedup (ADR-0242).
+- [ORB-10346] — Retired automatic learning delivery while retaining pull discovery, `learning_shown`, and historical usage stats.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
