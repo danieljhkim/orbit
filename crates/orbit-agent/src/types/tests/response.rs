@@ -172,6 +172,50 @@ mod sum {
     use super::super::super::response::usage::*;
 
     #[test]
+    fn claude_cli_cache_creation_ttl_split_maps_each_ttl() {
+        let documents = vec![json!({
+            "usage": {
+                "input_tokens": 36,
+                "output_tokens": 8_265,
+                "cache_read_input_tokens": 858_526,
+                "cache_creation_input_tokens": 37_846,
+                "cache_creation": {
+                    "ephemeral_5m_input_tokens": 51,
+                    "ephemeral_1h_input_tokens": 37_795,
+                }
+            }
+        })];
+
+        assert_eq!(
+            sum_usage(&documents),
+            TokenUsage {
+                input: 36,
+                cache_read: 858_526,
+                cache_create: 51,
+                cache_create_1h: 37_795,
+                output: 8_265,
+            }
+        );
+    }
+
+    #[test]
+    fn cache_creation_without_a_ttl_split_remains_five_minute_usage() {
+        let documents = vec![json!({
+            "usage": {
+                "cache_creation_input_tokens": 100,
+            }
+        })];
+
+        assert_eq!(
+            sum_usage(&documents),
+            TokenUsage {
+                cache_create: 100,
+                ..TokenUsage::default()
+            }
+        );
+    }
+
+    #[test]
     fn gemini_cli_model_token_blocks_are_summed_once_per_model() {
         let documents = vec![json!({
             "stats": {

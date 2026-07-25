@@ -16,8 +16,7 @@ pub struct TokenUsage {
     /// (Anthropic `ephemeral_1h_input_tokens`). Kept separate from
     /// [`Self::cache_create`] so the price table can charge the 1h rate (2x
     /// input) distinctly from the 5m rate (1.25x input). Zero when the provider
-    /// doesn't split TTLs, or until the ingest path learns to populate it
-    /// (ORB-10338 follow-up).
+    /// doesn't split TTLs.
     #[serde(default)]
     pub cache_create_1h: u64,
     #[serde(default)]
