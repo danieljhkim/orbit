@@ -6,9 +6,9 @@
 use crate::executor::registry::ActivityExecutorRegistry;
 use orbit_common::types::activity_job::AgentRole;
 use orbit_common::types::{
-    Activity, AgentModelPair, ExecutorDef, ExternalRef, InvocationTrace, Job, JobTargetType,
-    OrbitError, OrbitEvent, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority,
-    TaskStatus,
+    Activity, AgentModelPair, ExecutorDef, ExternalRef, InvocationTrace, Job, JobRun,
+    JobTargetType, OrbitError, OrbitEvent, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
+    TaskPriority, TaskStatus,
 };
 use orbit_store::{InvocationQuery, InvocationRecord};
 use orbit_tools::ToolContext;
@@ -355,6 +355,10 @@ impl RuntimeHost for AutomationExecutorHost<'_> {
 
     fn repo_root(&self) -> Result<String, OrbitError> {
         self.runtime.repo_root()
+    }
+
+    fn list_job_runs_for_gc(&self) -> Result<Vec<JobRun>, OrbitError> {
+        self.runtime.list_job_runs_for_gc()
     }
 
     fn data_root(&self) -> &Path {

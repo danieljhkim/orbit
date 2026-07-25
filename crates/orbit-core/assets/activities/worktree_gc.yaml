@@ -1,0 +1,33 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: worktree_gc
+spec:
+  type: deterministic
+  description: >
+    Reap clean worktrees belonging to terminal job runs after confirming that
+    their branches are merged or their pull requests are closed. Unknown and
+    dirty worktrees are always retained and reported.
+  input_schema_json:
+    type: object
+    properties:
+      older_than_hours:
+        type: integer
+        minimum: 0
+      run_id:
+        type: string
+  output_schema_json:
+    type: object
+    required: [dry_run, bytes_reclaimed, reports]
+    properties:
+      dry_run:
+        type: boolean
+      bytes_reclaimed:
+        type: integer
+      reports:
+        type: array
+        items:
+          type: object
+          required: [path, run_id, run_state, action, bytes_reclaimed]
+  action: worktree_gc
+  config: {}

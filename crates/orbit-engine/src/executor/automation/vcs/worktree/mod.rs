@@ -1,4 +1,5 @@
 mod cleanup;
+mod gc;
 mod merge;
 mod setup;
 
@@ -7,6 +8,7 @@ use std::path::{Path, PathBuf};
 use orbit_common::types::OrbitError;
 
 pub(in crate::executor::automation) use cleanup::cleanup_worktree;
+pub use gc::{WorktreeGcOptions, WorktreeGcReport, WorktreeGcResult, collect_worktrees};
 pub(in crate::executor::automation) use merge::merge_batch_worktree_into_base;
 pub(in crate::executor::automation) use setup::setup_worktree;
 
@@ -37,7 +39,7 @@ pub(in crate::executor::automation) fn sanitize_worktree_token(
     Ok(trimmed)
 }
 
-pub(in crate::executor::automation) fn resolve_worktree_path_from_prefix(
+pub fn resolve_worktree_path_from_prefix(
     repo_root: &Path,
     prefix: &str,
     run_id: &str,
@@ -54,10 +56,7 @@ pub(in crate::executor::automation) fn resolve_worktree_path_from_prefix(
     }
 }
 
-pub(in crate::executor::automation) fn resolve_shared_worktree_path(
-    repo_root: &Path,
-    run_id: &str,
-) -> Result<PathBuf, OrbitError> {
+pub fn resolve_shared_worktree_path(repo_root: &Path, run_id: &str) -> Result<PathBuf, OrbitError> {
     let dir_name = shared_worktree_dir_name(run_id)?;
     match worktree_root() {
         Some(root) => Ok(root.join(repo_name(repo_root)?).join(dir_name)),

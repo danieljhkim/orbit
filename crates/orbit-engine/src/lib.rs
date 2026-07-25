@@ -57,6 +57,10 @@ pub use context::{
     execution_working_directory_with_task, input_workspace_path, redact_attempt_outcome,
     workflow_failure_note,
 };
+pub use executor::automation::vcs::{
+    WorktreeGcOptions, WorktreeGcReport, WorktreeGcResult, collect_worktrees,
+    resolve_shared_worktree_path, resolve_worktree_path_from_prefix,
+};
 pub use executor::automation::{
     StateExecutionContext, execute_action as execute_deterministic_action,
 };

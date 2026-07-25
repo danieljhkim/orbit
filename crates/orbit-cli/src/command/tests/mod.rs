@@ -1,6 +1,7 @@
 // Content moved from inline #[cfg(test)] mod tests in command/mod.rs per ORB-00221.
 // tests/mod.rs can directly contain tests for the declaring parent module (exempt from orphan rules).
 
+mod gc;
 mod init;
 mod operation;
 mod sweep;

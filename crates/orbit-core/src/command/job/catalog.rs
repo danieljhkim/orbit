@@ -55,6 +55,10 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         "workspace_ship_pipeline",
         include_str!("../../../assets/jobs/workspace_ship_pipeline.yaml"),
     ),
+    (
+        "worktree_gc_pipeline",
+        include_str!("../../../assets/jobs/worktree_gc_pipeline.yaml"),
+    ),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

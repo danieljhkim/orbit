@@ -133,6 +133,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         "worktree_setup",
         include_str!("../../assets/activities/worktree_setup.yaml"),
     ),
+    (
+        "worktree_gc",
+        include_str!("../../assets/activities/worktree_gc.yaml"),
+    ),
 ];
 
 /// Seed every entry in [`DEFAULT_ACTIVITY_FILES`] as a YAML file under
@@ -184,6 +188,7 @@ mod tests {
             ("independent_review_guard", "independent_review_guard"),
             ("list_triage_candidates", "list_triage_candidates"),
             ("apply_triage_dispositions", "apply_triage_dispositions"),
+            ("worktree_gc", "worktree_gc"),
         ] {
             let yaml = std::fs::read_to_string(activities_dir.join(format!("{name}.yaml")))
                 .unwrap_or_else(|error| panic!("read {name} activity: {error}"));
