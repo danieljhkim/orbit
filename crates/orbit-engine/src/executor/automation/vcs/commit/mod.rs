@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use crate::context::{RuntimeHost, TaskHost};
 
 use super::super::input::{canonicalize_existing_dir, input_string_field, required_job_run_id};
-use super::git::{git_output, git_success};
+use super::git::{git_command_success, git_output, git_success};
 use super::handoff::reject_failed_delivery;
 use author::{append_co_author_trailers, commit_author_for_tasks, git_author_for_task};
 use git_ops::{
@@ -186,10 +186,30 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
     ensure_named_branch(&workspace_path)?;
 
     ensure_no_unmerged_changes(&workspace_path)?;
+    let (base_sha, mut commit_shas) = existing_batch_commits(&workspace_path, input, &task.id)?;
     git_success(&workspace_path, &["add", "--all", "--", "."])?;
 
     let changed_files = staged_changed_files(&workspace_path)?;
     if changed_files.is_empty() {
+        if !commit_shas.is_empty() {
+            let commit_sha = git_output(&workspace_path, &["rev-parse", "HEAD"])?;
+            let mut result = json!({
+                "phase": "commit",
+                "decision": "adopted_existing_commits",
+                "committed": false,
+                "adopted_commits": true,
+                "commit_sha": commit_sha.trim(),
+                "commit_shas": commit_shas,
+                "job_run_id": batch_id,
+                "skipped_no_diff_expected": false,
+                "task_id": task.id,
+            });
+            if let Some(base_sha) = base_sha {
+                result["base_sha"] = json!(base_sha);
+            }
+            return Ok(result);
+        }
+
         git_success(&workspace_path, &["reset", "HEAD"])?;
         // ADR-0219: explicit side-effect-only tasks bypass the empty-diff gate.
         if task.tags.iter().any(|tag| tag == NO_DIFF_EXPECTED_TAG) {
@@ -201,14 +221,10 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
                 "task_id": task.id,
             }));
         }
-        return Err(OrbitError::Execution(format!(
-            "commit_batch_changes: no staged changes to commit for task '{}' in worktree '{}'; \
-             the implement step produced an empty diff. Changes may have been written outside \
-             the assigned worktree, or attribution may be unknown; Orbit did not inspect, stage, \
-             reset, or reconcile any other checkout",
-            task.id,
-            workspace_path.display()
-        )));
+        return Err(outside_worktree_or_empty_diff_error(
+            &task.id,
+            &workspace_path,
+        ));
     }
 
     let message = batch_commit_message(task);
@@ -216,14 +232,63 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
 
     git_commit_with_identity(&workspace_path, &message, author.as_ref())?;
     let commit_sha = git_output(&workspace_path, &["rev-parse", "HEAD"])?;
-    Ok(json!({
+    commit_shas.push(commit_sha.trim().to_string());
+    let mut result = json!({
         "phase": "commit",
         "decision": "performed",
         "committed": true,
+        "adopted_commits": commit_shas.len() > 1,
         "commit_sha": commit_sha.trim(),
+        "commit_shas": commit_shas,
+        "job_run_id": batch_id,
         "skipped_no_diff_expected": false,
         "task_id": task.id,
-    }))
+    });
+    if let Some(base_sha) = base_sha {
+        result["base_sha"] = json!(base_sha);
+    }
+    Ok(result)
+}
+
+fn existing_batch_commits(
+    workspace_path: &Path,
+    input: &Value,
+    task_id: &str,
+) -> Result<(Option<String>, Vec<String>), OrbitError> {
+    let Some(base_ref) = input_string_field(input, "base_ref") else {
+        return Ok((None, Vec::new()));
+    };
+
+    let base_commit = format!("{base_ref}^{{commit}}");
+    let base_sha = git_output(workspace_path, &["rev-parse", "--verify", &base_commit])?;
+    if !git_command_success(
+        workspace_path,
+        &["merge-base", "--is-ancestor", &base_sha, "HEAD"],
+    )? {
+        return Err(outside_worktree_or_empty_diff_error(
+            task_id,
+            workspace_path,
+        ));
+    }
+
+    let range = format!("{base_sha}..HEAD");
+    let commit_shas = git_output(workspace_path, &["rev-list", "--reverse", &range])?
+        .lines()
+        .map(str::trim)
+        .filter(|sha| !sha.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+    Ok((Some(base_sha), commit_shas))
+}
+
+fn outside_worktree_or_empty_diff_error(task_id: &str, workspace_path: &Path) -> OrbitError {
+    OrbitError::Execution(format!(
+        "commit_batch_changes: no staged changes to commit for task '{task_id}' in worktree '{}'; \
+         the implement step produced an empty diff. Changes may have been written outside \
+         the assigned worktree, or attribution may be unknown; Orbit did not inspect, stage, \
+         reset, or reconcile any other checkout",
+        workspace_path.display()
+    ))
 }
 
 fn resolve_workspace_path<H: RuntimeHost + ?Sized>(

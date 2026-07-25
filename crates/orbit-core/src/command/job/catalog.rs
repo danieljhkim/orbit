@@ -675,6 +675,32 @@ spec:
     }
 
     #[test]
+    fn task_shipment_commit_steps_use_the_worktree_base_checkpoint() {
+        for job_name in ["task_local_pipeline", "task_pr_pipeline"] {
+            let yaml = DEFAULT_JOB_FILES
+                .iter()
+                .find_map(|(name, yaml)| (*name == job_name).then_some(*yaml))
+                .unwrap_or_else(|| panic!("default job {job_name} exists"));
+            let asset =
+                load_job_asset(yaml).unwrap_or_else(|error| panic!("parse {job_name}: {error}"));
+            let commit = asset
+                .spec
+                .steps
+                .iter()
+                .find(|step| step.id == "commit")
+                .expect("commit step");
+            let JobV2StepBody::TargetRef(commit) = &commit.body else {
+                panic!("{job_name} commit step must reference git_commit");
+            };
+            let input = commit.default_input.as_ref().expect("commit input");
+            assert_eq!(
+                input["base_ref"], "{{ steps.worktree.output.base_ref }}",
+                "{job_name} must pass the exact worktree start-point ref"
+            );
+        }
+    }
+
+    #[test]
     fn independent_review_job_requires_structured_exact_head_verdict() {
         let yaml = DEFAULT_JOB_FILES
             .iter()

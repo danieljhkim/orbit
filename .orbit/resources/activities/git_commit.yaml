@@ -19,6 +19,9 @@ spec:
         enum: [all, per_task, per_task_finalize]
       workspace_path:
         type: string
+      base_ref:
+        type: string
+        description: Worktree setup start-point ref used to identify commits authored during implementation.
   output_schema_json:
     type: object
     properties:
@@ -28,7 +31,17 @@ spec:
         type: string
       committed:
         type: boolean
+      adopted_commits:
+        type: boolean
+      base_sha:
+        type: string
       commit_sha:
+        type: string
+      commit_shas:
+        type: array
+        items:
+          type: string
+      job_run_id:
         type: string
       skipped_no_diff_expected:
         type: boolean
