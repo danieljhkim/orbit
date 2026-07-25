@@ -4,7 +4,7 @@
 // Extracted from app.js (ORB-00180). Owns the runSort state, all friction-row
 // classification helpers (coerce*, first*, frictionRow*, empty*, add*), merge*,
 // sort*, header/cell renderers, and the table renderer.
-// Also owns the action button builders and cancel/replay fns (used by both the
+// Also owns the action button builders and cancel/replay/resume fns (used by both the
 // runs table and the run-detail meta in app.js).
 //
 // Receives one-time context via initRuns(runsContext()) containing the
@@ -16,6 +16,7 @@ import { el, stateCell, syncNodes, postJson } from './common.js';
 const $ = (id) => document.getElementById(id);
 
 const CANCELLABLE_RUN_STATES = new Set(["pending", "running"]);
+const RESUMABLE_RUN_STATES = new Set(["failed", "interrupted", "timeout"]);
 
 const RUN_SORT_DEFAULT_DIR = {
   when: "desc",
@@ -28,6 +29,7 @@ const RUN_SORT_DEFAULT_DIR = {
 };
 
 let runSort = { key: "when", dir: "desc" };
+const resumedRunIdsBySource = new Map();
 
 let _runsCtx = null;
 
@@ -83,6 +85,10 @@ function runIsCancellable(run) {
   return CANCELLABLE_RUN_STATES.has(run && run.state);
 }
 
+function runIsResumable(run) {
+  return RESUMABLE_RUN_STATES.has(run && run.state);
+}
+
 function buildCancelRunButton(run, host) {
   const btn = el("button", {
     class: "action reject run-cancel",
@@ -106,6 +112,19 @@ function buildReplayRunButton(run, host) {
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     replayRun(run, btn, host);
+  });
+  return btn;
+}
+
+function buildResumeRunButton(run, host) {
+  const btn = el("button", {
+    class: "action approve run-resume",
+    text: "Resume",
+    title: `Resume ${run.run_id} from its first non-successful step`,
+  });
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    resumeRun(run, btn, host);
   });
   return btn;
 }
@@ -154,6 +173,33 @@ async function replayRun(run, btn, host) {
   } catch (e) {
     if (host) {
       host.appendChild(el("div", { class: "action-error", text: e.message || "replay failed" }));
+    }
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+async function resumeRun(run, btn, host) {
+  const runId = run && run.run_id;
+  if (!runId) return;
+  const message = `Resume ${runId}? This creates a new run that re-runs the failed step and all subsequent steps. It succeeds only if the underlying cause is resolved.`;
+  if (!window.confirm(message)) return;
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>Resume`;
+  if (host) {
+    for (const node of host.querySelectorAll(".action-error")) node.remove();
+  }
+  try {
+    const payload = await postJson(`/api/job-runs/${encodeURIComponent(runId)}/resume`);
+    if (!payload.run_id) throw new Error("resume response did not include run_id");
+    resumedRunIdsBySource.set(runId, payload.run_id);
+    await doFetchAndRenderRuns();
+  } catch (e) {
+    if (host) {
+      host.appendChild(el("div", { class: "action-error", text: e.message || "resume failed" }));
     }
     console.error(e);
   } finally {
@@ -438,18 +484,48 @@ export function renderRuns(runs) {
         runIdSpan.style.color = "";
       }, 1000);
     });
+    const runIdCell = el("span", { class: "run-id-cell" }, [runIdSpan]);
+    if (r.retry_source_run_id) {
+      const sourceId = r.retry_source_run_id;
+      const lineage = el("button", {
+        class: "run-lineage",
+        text: `from ${sourceId}`,
+        title: `Open source run ${sourceId}`,
+      });
+      lineage.addEventListener("click", (e) => {
+        e.stopPropagation();
+        doNavigateToRun(sourceId);
+      });
+      runIdCell.appendChild(lineage);
+    }
+    const resumedAsId = resumedRunIdsBySource.get(r.run_id);
+    if (resumedAsId) {
+      const lineage = el("button", {
+        class: "run-lineage resumed-as",
+        text: `resumed as ${resumedAsId}`,
+        title: `Open resumed run ${resumedAsId}`,
+      });
+      lineage.addEventListener("click", (e) => {
+        e.stopPropagation();
+        doNavigateToRun(resumedAsId);
+      });
+      runIdCell.appendChild(lineage);
+    }
     const row = el("div", { class: "runs-row", title: `${r.run_id} (click to inspect)` }, [
       el("span", { class: "when", text: fmtTimestampValue(ts) }),
       el("span", { class: "id", text: r.job_id }),
-      runIdSpan,
+      runIdCell,
       runCountCell(friction.denials),
       runCountCell(friction.toolFails),
       runDurationCell(r),
       el("span", { class: "state" }, [stateCell(r.state)]),
-      el("span", { class: "run-actions" }, runIsCancellable(r) ? [buildCancelRunButton(r, body)] : []),
+      el("span", { class: "run-actions" }, [
+        runIsCancellable(r) ? buildCancelRunButton(r, body) : null,
+        runIsResumable(r) ? buildResumeRunButton(r, body) : null,
+      ]),
     ]);
     row.dataset.key = `run-${r.run_id}`;
-    row.dataset.hash = `${r.run_id}-${ts}-${r.duration_ms}-${r.state}-${friction.denials}-${friction.toolFails}-${friction.durationMs}-${friction.longRun}`;
+    row.dataset.hash = `${r.run_id}-${ts}-${r.duration_ms}-${r.state}-${r.retry_source_run_id || ""}-${resumedAsId || ""}-${friction.denials}-${friction.toolFails}-${friction.durationMs}-${friction.longRun}`;
     row.style.cursor = "pointer";
     row.addEventListener("click", () => doNavigateToRun(r.run_id));
     frag.appendChild(row);
@@ -459,6 +535,8 @@ export function renderRuns(runs) {
 
 export {
   runIsCancellable,
+  runIsResumable,
   buildCancelRunButton,
   buildReplayRunButton,
+  buildResumeRunButton,
 };

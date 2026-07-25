@@ -1022,6 +1022,31 @@
         transition: color 0.15s ease;
       }
       .runs-row .run-id:hover { color: var(--accent); }
+      .runs-row .run-id-cell {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        gap: 2px;
+      }
+      .runs-row .run-lineage {
+        width: fit-content;
+        max-width: 100%;
+        overflow: hidden;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--fg-dim);
+        font: inherit;
+        font-size: 9px;
+        text-align: left;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .runs-row .run-lineage:hover,
+      .runs-row .run-lineage.resumed-as {
+        color: var(--accent-hover);
+      }
       .runs-row .duration { color: var(--fg-dim); text-align: right; }
       .runs-row .num { text-align: right; color: var(--fg-dim); }
       .runs-row .num.hot { color: var(--state-failed); }
@@ -1036,6 +1061,7 @@
       }
       .runs-row .run-actions {
         display: flex;
+        gap: 4px;
         justify-content: flex-end;
         min-height: 26px;
       }
@@ -3543,5 +3569,4 @@
           max-height: none;
         }
       }
-
 

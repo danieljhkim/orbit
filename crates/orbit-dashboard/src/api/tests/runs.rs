@@ -18,7 +18,9 @@ use tower::ServiceExt;
 
 use super::super::router;
 use super::super::runs::*;
-use super::test_support::{body_json, seed_run, write_replay_job, write_replay_job_under};
+use super::test_support::{
+    body_json, seed_run, write_replay_job, write_replay_job_under, write_seeded_run,
+};
 
 async fn request_cancel(runtime: OrbitRuntime, run_id: &str, origin: Option<&str>) -> Response {
     let mut builder = Request::builder()
@@ -38,6 +40,20 @@ async fn request_replay(runtime: OrbitRuntime, run_id: &str, origin: Option<&str
     let mut builder = Request::builder()
         .method(Method::POST)
         .uri(format!("/runs/{run_id}/replay"));
+    if let Some(origin) = origin {
+        builder = builder.header(header::ORIGIN, origin);
+    }
+    router()
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(builder.body(Body::empty()).expect("request"))
+        .await
+        .expect("response")
+}
+
+async fn request_resume(runtime: OrbitRuntime, run_id: &str, origin: Option<&str>) -> Response {
+    let mut builder = Request::builder()
+        .method(Method::POST)
+        .uri(format!("/job-runs/{run_id}/resume"));
     if let Some(origin) = origin {
         builder = builder.header(header::ORIGIN, origin);
     }
@@ -531,6 +547,85 @@ async fn replay_run_endpoint_returns_4xx_when_current_job_is_deleted() {
             .as_str()
             .is_some_and(|message| message.contains("job not found"))
     );
+}
+
+#[tokio::test]
+async fn resume_job_run_endpoint_returns_new_run_summary_and_lineage() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    write_replay_job(&runtime, "web_resume_success");
+    let mut source = seed_run(
+        &runtime,
+        "jrun-web-resume-failed",
+        "web_resume_success",
+        JobRunState::Failed,
+    );
+    source.input = Some(json!({ "seconds": 0 }));
+    write_seeded_run(&runtime, &source);
+
+    let response = request_resume(
+        runtime.clone(),
+        &source.run_id,
+        Some("http://localhost:3000"),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_json(response).await;
+    let new_run_id = payload["run_id"].as_str().expect("new run id");
+    assert_ne!(new_run_id, source.run_id);
+    assert_eq!(payload["state"], "success");
+    assert_eq!(
+        payload["retry_source_run_id"].as_str(),
+        Some(source.run_id.as_str())
+    );
+    let stored = runtime.show_job_run(new_run_id).expect("show resumed run");
+    assert_eq!(stored.state, JobRunState::Success);
+    assert_eq!(
+        stored.retry_source_run_id.as_deref(),
+        Some(source.run_id.as_str())
+    );
+}
+
+#[tokio::test]
+async fn resume_job_run_endpoint_rejects_non_terminal_run_with_guard_reason() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let source = seed_run(
+        &runtime,
+        "jrun-web-resume-pending",
+        "web_resume_pending",
+        JobRunState::Pending,
+    );
+
+    let response = request_resume(runtime, &source.run_id, Some("http://localhost:3000")).await;
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let payload = body_json(response).await;
+    assert!(
+        payload["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("is pending"))
+    );
+    assert!(
+        payload["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("interrupted, failed, or timed-out"))
+    );
+}
+
+#[tokio::test]
+async fn resume_job_run_endpoint_returns_not_found_for_unknown_run() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+    let response = request_resume(
+        runtime,
+        "jrun-web-resume-missing",
+        Some("http://localhost:3000"),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let payload = body_json(response).await;
+    assert_eq!(payload["error"], "run not found: jrun-web-resume-missing");
 }
 
 #[test]
