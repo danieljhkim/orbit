@@ -120,8 +120,8 @@ spec:
         contradicted assumption, recurring failure mode, non-obvious gotcha that
         took more than 10 minutes to debug, or incident-style root cause, file
         it with `orbit.friction.add`, describing what happened and the evidence
-        behind it. Project learnings are authored by the orchestrator or by
-        Daniel, not by task executors — the runtime gate (ADR-0250) refuses
+        behind it. Project learnings are curated by the workspace's orchestrator
+        or owner, not by task executors — the learning authoring gate refuses
         `orbit.learning.add`/`update`/`supersede` calls made from executor
         context, so attempting one here is a wasted call, not a judgment call.
         Skip if none of the trigger conditions apply.
