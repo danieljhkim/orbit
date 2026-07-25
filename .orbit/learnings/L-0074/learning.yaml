@@ -4,7 +4,8 @@ status: active
 scope:
   paths:
   - crates/orbit-core/assets/activities/**
-  - crates/orbit-tools/src/builtin/**
+  - crates/orbit-tools/src/builtin/mod.rs
+  - crates/orbit-tools/src/builtin/*/mod.rs
   tags:
   - activity-job
   - default-assets
@@ -14,5 +15,5 @@ evidence:
 - kind: task
   reference: ORB-10129
 created_at: 2026-07-11T21:55:18.164559864Z
-updated_at: 2026-07-11T21:55:18.164559864Z
+updated_at: 2026-07-25T02:09:43.770668661Z
 created_by: claude

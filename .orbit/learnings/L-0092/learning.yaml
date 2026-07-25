@@ -3,7 +3,6 @@ id: L-0092
 status: active
 scope:
   paths:
-  - crates/orbit-core/src/routines/host.rs
   - crates/orbit-core/src/routines/**
   - crates/orbit-core/src/command/init.rs
   tags:
@@ -23,5 +22,5 @@ evidence:
 - kind: task
   reference: ORB-10247
 created_at: 2026-07-18T01:16:26.461640115Z
-updated_at: 2026-07-18T01:16:26.461640115Z
+updated_at: 2026-07-25T02:09:43.509280123Z
 created_by: claude

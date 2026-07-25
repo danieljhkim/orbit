@@ -1,12 +1,10 @@
 schema_version: 1
 id: L-0009
-legacy_ids:
-- L20260517-9
 status: active
 scope:
   paths:
   - .orbit/orbit.db
-  - crates/orbit-store/src/sqlite/audit_event_store.rs
+  - crates/orbit-store/src/sqlite/audit_event_store/**
   - crates/orbit-core/src/config/persistence.rs
   tags:
   - audit
@@ -76,5 +74,7 @@ evidence:
   reference: conversation 2026-05-17 — agent queried .orbit/orbit.db directly (364 rows ending 2026-05-10) and missed all run-mcp entries; switching to `orbit audit list --json` returned 6068 rows including 1749 MCP tool calls.
 - kind: external
   reference: 'conversation 2026-05-17 follow-up — verified workspace .orbit/orbit.db is not a mirror but an abandoned file: persistence.rs:59 binds audit_db to paths.global_dir.join(''orbit.db'') = ~/.orbit/orbit.db (6428 rows, current) vs workspace DB (364 rows, stuck at 2026-05-10).'
+legacy_ids:
+- L20260517-9
 created_at: 2026-05-17T21:23:46.695896Z
-updated_at: 2026-05-17T23:08:46.917509Z
+updated_at: 2026-07-25T02:09:43.637918597Z
