@@ -76,13 +76,15 @@ spec:
        acceptance-criteria miss, obvious regression — note the most relevant
        task, file, and line in your verdict response. Cite `path:line` when the
        issue is file-specific. Skip stylistic nits.
-    4. Before stopping, run the learning checkpoint: if this review surfaced a
+    4. Before stopping, run the friction checkpoint: if this review surfaced a
        contradicted assumption, recurring failure mode, non-obvious gotcha that
-       took more than 10 minutes to debug, or incident-style root cause, follow
-       the `orbit-knowledge` skill and call the `add` action on
-       `orbit.learning` (or use that skill's update/supersede flow when it
-       points to existing guidance).
-       Skip if none apply.
+       took more than 10 minutes to debug, or incident-style root cause, file
+       it with `orbit.friction.add`, describing what happened and the evidence
+       behind it. Project learnings are authored by the orchestrator or by
+       Daniel, not by task executors — the runtime gate (ADR-0250) refuses
+       `orbit.learning.add`/`update`/`supersede` calls made from executor
+       context, so attempting one here is a wasted call, not a judgment call.
+       Skip if none of the trigger conditions apply.
     5. Return exactly one Orbit response envelope. Use status `success`, set
        `result.verdict` to `approve` only when no blocking issue remains, or
        `request_changes` when at least one blocking issue remains, and set
@@ -91,11 +93,9 @@ spec:
        {"schemaVersion":1,"status":"success","result":{"verdict":"approve|request_changes","reviewed_head_sha":"<sha>"},"error":null}
   tools:
     - orbit.task.show
+    - orbit.friction.add
     - orbit.search
     - orbit.learning.show
-    - orbit.learning.add
-    - orbit.learning.update
-    - orbit.learning.supersede
     - fs.read
     - proc.spawn
   proc_allowed_programs:
