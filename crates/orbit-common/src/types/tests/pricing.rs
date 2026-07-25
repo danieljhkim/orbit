@@ -147,6 +147,7 @@ fn context_window_suffix_falls_back_to_the_base_row() {
 #[test]
 fn every_fleet_model_string_is_priced() {
     const FLEET_MODELS: &[&str] = &[
+        "claude-opus-5",
         "claude-opus-4-8",
         "claude-opus-4-8[1m]",
         "claude-opus-4-7",
@@ -166,7 +167,9 @@ fn every_fleet_model_string_is_priced() {
         output: 1_000,
         ..TokenUsage::default()
     };
-    let at = dt("2026-07-19T00:00:00Z");
+    // 2026-07-24 (not 07-19): must be on/after claude-opus-5's effective_from
+    // so its row is in range too, while still covering every other row below.
+    let at = dt("2026-07-24T00:00:00Z");
     for model in FLEET_MODELS {
         assert!(
             derive_cost_usd(model, at, &usage).is_some(),
