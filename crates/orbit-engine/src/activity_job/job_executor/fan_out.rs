@@ -97,6 +97,7 @@ pub(super) fn run_fan_out(
                     pipeline: Arc::new(Mutex::new(pipeline_snapshot)),
                     sessions: Arc::new(Mutex::new(HashMap::new())),
                     recovery_activity: ctx.recovery_activity.clone(),
+                    failure_activity: ctx.failure_activity.clone(),
                     item: Some(item),
                     iteration: Some(idx),
                 };

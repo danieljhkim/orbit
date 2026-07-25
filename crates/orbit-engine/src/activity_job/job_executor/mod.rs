@@ -157,6 +157,13 @@ pub fn execute_job_with_resume(
         }),
         _ => None,
     };
+    let failure_activity = match (&job.failure_activity, &job.resolved_failure_activity) {
+        (Some(name), Some(activity)) => Some(ResolvedRecoveryActivity {
+            name: name.clone(),
+            spec: activity.spec.clone(),
+        }),
+        _ => None,
+    };
 
     let ctx = ExecCtx {
         run_id: run_id.to_string(),
@@ -166,6 +173,7 @@ pub fn execute_job_with_resume(
         pipeline: Arc::new(Mutex::new(seed_pipeline_from_resume(job, resume))),
         sessions: Arc::new(Mutex::new(HashMap::new())),
         recovery_activity,
+        failure_activity,
         item: None,
         iteration: None,
     };
@@ -187,7 +195,13 @@ pub fn execute_job_with_resume(
             );
             continue;
         }
-        let outcome = run_step(step, &ctx)?;
+        let outcome = match run_step(step, &ctx) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                attempt_failure_activity(step, &ctx, &error);
+                return Err(error);
+            }
+        };
         if !outcome.success {
             overall_ok = false;
             overall_message = Some(
@@ -195,6 +209,12 @@ pub fn execute_job_with_resume(
                     .message
                     .unwrap_or_else(|| format!("step `{}` completed with success=false", step.id)),
             );
+            let error = DispatchError::JobExecution(
+                overall_message
+                    .clone()
+                    .unwrap_or_else(|| format!("step `{}` failed", step.id)),
+            );
+            attempt_failure_activity(step, &ctx, &error);
             break;
         }
         checkpoint_completed_step(&ctx, step_index, &step.id, &outcome.output);

@@ -36,6 +36,12 @@ pub struct JobV2 {
     pub recovery_activity: Option<String>,
     #[serde(skip)]
     pub resolved_recovery_activity: Option<ActivityV2>,
+    /// Best-effort terminal hook invoked once after a step failure. Unlike
+    /// `recovery_activity`, it does not retry or replace the failed step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_activity: Option<String>,
+    #[serde(skip)]
+    pub resolved_failure_activity: Option<ActivityV2>,
     #[serde(default = "default_max_active_runs")]
     pub max_active_runs: u32,
     #[serde(default)]

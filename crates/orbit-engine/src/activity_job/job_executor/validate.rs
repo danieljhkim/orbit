@@ -9,6 +9,14 @@ pub fn validate_job(job: &JobV2) -> Result<(), DispatchError> {
              `resolve_job_catalog_refs_for_execution` at load time before dispatch"
         )));
     }
+    if let Some(name) = &job.failure_activity
+        && job.resolved_failure_activity.is_none()
+    {
+        return Err(DispatchError::JobValidation(format!(
+            "job failure_activity `{name}` was not resolved — caller must run \
+             `resolve_job_catalog_refs_for_execution` at load time before dispatch"
+        )));
+    }
     for step in &job.steps {
         validate_step(step)?;
     }

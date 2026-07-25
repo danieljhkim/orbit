@@ -3,7 +3,7 @@ summary: "Activity / Job — Decisions"
 type: design
 title: "Activity / Job — Decisions"
 owner: codex
-last_updated: 2026-07-20
+last_updated: 2026-07-25
 status: Draft
 feature: activity-job
 doc_role: decisions
@@ -662,6 +662,22 @@ Rejected alternatives: reconciling by parent linkage (no parent run id is persis
 
 ---
 
+## ADR-0246 — Terminal PR shipment uses a job-level failure handoff
+
+**Status:** Accepted · 2026-07 · [ORB-10363]
+
+**Context.** A task shipment can fail after an agent has produced coherent work but before the normal commit, rebase, push, and PR checkpoints finish. The real alternatives are to overload per-step recovery so it replays or impersonates later checkpoints, or give the workflow one explicit terminal failure hook that preserves the original failure while publishing any recoverable candidate.
+
+**Decision.** Add an optional job-level failure activity that runs once after a terminal step failure with the job input, completed pipeline checkpoints, failing step, and structured error. `task_pr_pipeline` binds it to a deterministic PR failure handoff which restores the pre-rebase candidate, commits dirty work, pushes without rewriting unknown remote history, opens or reuses a blocked/manual-resolution PR, and blocks the task while the original run still terminalizes as failed.
+
+**Consequences.**
+- Normal success and retry checkpoints remain unchanged; the failure handoff is an explicit, auditable last-chance side effect.
+- A conflict-blocked run is distinguishable through its task status event, PR body, and failure-activity audit even though the original step failure remains authoritative.
+- Cost: JobV2 gains another lifecycle hook and task shipment maintains a dedicated deterministic recovery action with conservative Git/remote rules.
+- Cost: External push or PR service outages can still prevent publication, but dirty work is committed locally before those fallible operations so terminal runs do not strand uncommitted changes.
+
+---
+
 ## Task References
 
 - **[T20260418-2018]** — Add `JobV2` DAG constructs (`parallel`, `fan_out`, `loop`, `retry`, `when`).
@@ -734,6 +750,7 @@ Rejected alternatives: reconciling by parent linkage (no parent run id is persis
 - **[ORB-10232]** — Model recoverable PR handoff as checkpointed job activities with exact-SHA force-push provenance.
 - **[ORB-10266]** — Materialize independent review as a durable exact-head child Run or fail before implementation.
 - **[ORB-10313]** — Fail delivery before Git mutation when the durable execution outcome is not `Outcome: success`.
+- **[ORB-10363]** — Rebase task candidates after concurrent base advances and publish blocked PRs instead of stranding failed work.
 - **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer (`task_epic_pipeline`, `epic_orchestrator`, `pipeline_wait`, legacy parallel-batch executor).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

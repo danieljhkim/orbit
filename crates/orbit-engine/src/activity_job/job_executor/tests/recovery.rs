@@ -528,6 +528,39 @@ fn no_recovery_activity_preserves_success_and_failure_paths() {
 }
 
 #[test]
+fn terminal_failure_activity_runs_once_and_preserves_original_error() {
+    let host = ScriptedHost::new([
+        (
+            "build",
+            vec![Action::Err(retryable_error("build", "compile failed"))],
+        ),
+        (
+            "publish_failure",
+            vec![Action::Ok(json!({"published": true}))],
+        ),
+    ]);
+    let mut job = recovery_job(None, None, "build", None, 1);
+    job.failure_activity = Some("publish_failure".to_string());
+    job.resolved_failure_activity = Some(deterministic_activity("publish_failure", None));
+
+    let error = execute_job(
+        &job,
+        json!({"task_id": "ORB-FAILURE-HOOK"}),
+        "run-failure-hook",
+        Arc::new(test_writer("run-failure-hook")),
+        &host,
+    )
+    .expect_err("the failure hook must not replace the original step failure");
+
+    assert!(
+        error.to_string().contains("compile failed"),
+        "original error remains authoritative: {error}"
+    );
+    assert_eq!(host.call_count("build"), 1);
+    assert_eq!(host.call_count("publish_failure"), 1);
+}
+
+#[test]
 fn unknown_recovery_activity_name_is_job_validation_during_catalog_resolution() {
     let yaml = r#"
 schemaVersion: 2
@@ -569,6 +602,8 @@ fn recovery_job(
         recovery_activity: recovery_name.map(str::to_string),
         resolved_recovery_activity: recovery_name
             .map(|name| deterministic_activity(name, recovery_fs_profile)),
+        failure_activity: None,
+        resolved_failure_activity: None,
         max_active_runs: 1,
         kind: JobKind::Workflow,
         steps: vec![JobV2Step {
@@ -645,6 +680,7 @@ fn recovery_exec_ctx<'a>(host: &'a dyn V2RuntimeHost) -> ExecCtx<'a> {
         pipeline: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         sessions: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         recovery_activity: None,
+        failure_activity: None,
         item: None,
         iteration: None,
     }

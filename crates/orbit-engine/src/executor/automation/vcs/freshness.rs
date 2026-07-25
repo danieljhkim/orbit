@@ -140,10 +140,10 @@ fn rebase_pr_branch_inner(input: &Value, context: &HandoffContext) -> Result<Val
         &context.workspace_path,
         &["diff", "--quiet", "--diff-filter=U"],
     )? {
-        return Err(OrbitError::Execution(
-            "git_rebase: unresolved merge conflicts remain; recovery must resolve and continue the recorded rebase"
-                .to_string(),
-        ));
+        return Err(rebase_conflict_error(
+            &context.workspace_path,
+            "unresolved merge conflicts remain",
+        )?);
     }
 
     let current_sha = commit_sha(&context.workspace_path, head)?;
@@ -172,9 +172,10 @@ fn rebase_pr_branch_inner(input: &Value, context: &HandoffContext) -> Result<Val
             ));
         }
         if !git_command_success(&context.workspace_path, &["rebase", base_sha])? {
-            return Err(OrbitError::Execution(format!(
-                "git_rebase: rebase of '{head}' onto checkpoint '{base_sha}' stopped with conflicts; resolve them and continue the rebase before recovery retries this step"
-            )));
+            return Err(rebase_conflict_error(
+                &context.workspace_path,
+                &format!("rebase of '{head}' onto checkpoint '{base_sha}' stopped with conflicts"),
+            )?);
         }
         let after =
             branch_freshness_against_ref(&context.workspace_path, head, base_ref, base_sha)?;
@@ -202,6 +203,18 @@ fn rebase_pr_branch_inner(input: &Value, context: &HandoffContext) -> Result<Val
         "remote_sha_before": input_string_field(input, "remote_sha"),
         "rewritten": rewritten,
     }))
+}
+
+fn rebase_conflict_error(repo_root: &Path, context: &str) -> Result<OrbitError, OrbitError> {
+    let paths = git_output(repo_root, &["diff", "--name-only", "--diff-filter=U"])?
+        .lines()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(OrbitError::Execution(format!(
+        "git_rebase: {context}; conflicting paths: {paths}"
+    )))
 }
 
 pub(super) fn ensure_branch_fresh_against_base(

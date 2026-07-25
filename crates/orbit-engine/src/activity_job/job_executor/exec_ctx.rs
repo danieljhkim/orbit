@@ -14,6 +14,7 @@ pub(super) struct ExecCtx<'a> {
     pub(super) pipeline: Arc<Mutex<HashMap<String, Value>>>,
     pub(super) sessions: Arc<Mutex<HashMap<String, Session>>>,
     pub(super) recovery_activity: Option<ResolvedRecoveryActivity>,
+    pub(super) failure_activity: Option<ResolvedRecoveryActivity>,
     /// `Some(value)` inside a fan-out worker. Rendered into template context
     /// as `{{ item }}`.
     pub(super) item: Option<Value>,

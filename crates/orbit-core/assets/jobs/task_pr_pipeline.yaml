@@ -30,6 +30,9 @@ spec:
   state: enabled
   kind: workflow
   max_active_runs: 10
+  # ADR-0246: preserve and publish recoverable work after any terminal step
+  # failure while keeping the original failure authoritative.
+  failure_activity: pr_failure_handoff
   default_input:
     task_ids: []
     base_branch: main

@@ -7,6 +7,7 @@ use super::super::open::pr_open;
 use super::super::promote::pr_promote;
 use super::test_support::*;
 use crate::context::TaskReadHost;
+use crate::executor::automation::vcs::failure::pr_failure_handoff;
 use crate::executor::automation::vcs::freshness::{prepare_pr_handoff, rebase_pr_branch};
 use crate::executor::automation::vcs::push::push_batch_changes;
 use orbit_common::types::TaskStatus;
@@ -197,6 +198,205 @@ fn recovered_rebase_continues_remaining_handoff_phases_without_replay() {
     let task = host.get_task(task_id).expect("task");
     assert_eq!(task.status, TaskStatus::Review);
     assert_eq!(task.github_pr_number(), Some("42"));
+}
+
+#[test]
+fn base_advance_with_mergeable_changes_rebases_cleanly_and_continues() {
+    let workspace = pr_workspace();
+    git(&workspace.repo, &["checkout", "agent-main"]);
+    fs::write(workspace.repo.join("BASE_ADVANCE.md"), "new base\n").expect("write base advance");
+    git(&workspace.repo, &["add", "BASE_ADVANCE.md"]);
+    git(&workspace.repo, &["commit", "-m", "advance base"]);
+    git(&workspace.repo, &["checkout", "orbit/test-batch"]);
+    let task_id = "ORB-CLEAN-REBASE";
+    let host = PrOpenTestHost::new(
+        vec![batch_task(
+            task_id,
+            "Clean base synchronization",
+            "Outcome: success\nChanges:\n- Candidate remains mergeable.",
+        )],
+        workspace.repo.clone(),
+    );
+    let input = json!({
+        "workspace_path": workspace.repo,
+        "job_run_id": "batch-1",
+        "completed_task_ids": [task_id],
+        "base": "agent-main",
+        "base_sync": "local",
+    });
+
+    let prepared = prepare_pr_handoff(&host, &input).expect("detect advanced base");
+    assert_eq!(prepared["decision"], json!("rebase_required"));
+    let synced =
+        rebase_pr_branch(&host, &rebase_input(&input, &prepared)).expect("clean rebase succeeds");
+
+    assert_eq!(synced["decision"], json!("performed"));
+    assert_eq!(synced["rewritten"], json!(true));
+    assert!(
+        workspace.repo.join("BASE_ADVANCE.md").exists(),
+        "rebased candidate contains the new base commit"
+    );
+}
+
+#[test]
+fn conflicting_rebase_publishes_clean_pre_rebase_branch_and_blocks_task() {
+    let workspace = rebase_conflict_pr_workspace();
+    let task_id = "ORB-CONFLICT-HANDOFF";
+    let host = PrOpenTestHost::new(
+        vec![batch_task(
+            task_id,
+            "Preserve conflicting candidate",
+            "Outcome: success\nChanges:\n- Candidate is complete.",
+        )],
+        workspace.repo.clone(),
+    );
+    let common = json!({
+        "workspace_path": workspace.repo,
+        "job_run_id": "batch-1",
+        "completed_task_ids": [task_id],
+        "base": "agent-main",
+        "base_sync": "local",
+    });
+    let prepared = prepare_pr_handoff(&host, &common).expect("prepare conflict checkpoint");
+    let pre_rebase_sha = git(&workspace.repo, &["rev-parse", "HEAD"]);
+    let error = rebase_pr_branch(&host, &rebase_input(&common, &prepared))
+        .expect_err("rebase must stop on the fixture conflict");
+
+    let recovered = pr_failure_handoff(
+        &host,
+        &json!({
+            "failed_step_id": "sync_base",
+            "activity_name": "git_rebase",
+            "error_code": "pipeline_step_failed",
+            "error_message": error.to_string(),
+            "run_id": "batch-1",
+            "job_input": {
+                "task_ids": [task_id],
+                "base_branch": "agent-main",
+                "base_sync": "local",
+            },
+            "pipeline": {
+                "worktree": {
+                    "workspace_path": workspace.repo,
+                    "job_run_id": "batch-1",
+                    "base_ref": "agent-main",
+                },
+                "prepare_branch": prepared,
+            },
+        }),
+    )
+    .expect("terminal handoff publishes the pre-rebase candidate");
+
+    assert_eq!(recovered["decision"], json!("blocked_conflict_pr"));
+    assert_eq!(
+        recovered["conflicting_paths"],
+        json!(["src/lib.rs"]),
+        "diagnostics name only the run's true conflict"
+    );
+    assert_eq!(
+        recovered["target_base_sha"], prepared["base_sha"],
+        "the blocked handoff names the exact prepared base that rejected the rebase"
+    );
+    assert_eq!(git(&workspace.repo, &["rev-parse", "HEAD"]), pre_rebase_sha);
+    assert!(
+        git(&workspace.repo, &["status", "--porcelain"]).is_empty(),
+        "terminal handoff must not leave uncommitted or conflict-marked work"
+    );
+    let body = host.pr_create_body();
+    for expected in [
+        "Manual resolution required",
+        "Original base:",
+        "Target base:",
+        "`src/lib.rs`",
+    ] {
+        assert!(
+            body.contains(expected),
+            "blocked PR body missing {expected:?}: {body}"
+        );
+    }
+    let task = host.get_task(task_id).expect("blocked task");
+    assert_eq!(task.status, TaskStatus::Blocked);
+    assert_eq!(task.github_pr_number(), Some("42"));
+    let update = host
+        .automation_updates()
+        .into_iter()
+        .find(|(_, update)| update.status == Some(TaskStatus::Blocked))
+        .expect("blocked failure-handoff update");
+    assert_eq!(
+        update.1.status_event.as_deref(),
+        Some("pr_conflict_blocked")
+    );
+}
+
+#[test]
+fn non_fast_forward_drift_handoff_commits_dirty_work_and_raises_pr() {
+    let workspace = no_diff_pr_workspace();
+    fs::create_dir_all(workspace.repo.join("src")).expect("create source dir");
+    fs::write(
+        workspace.repo.join("src/recovered.rs"),
+        "pub fn recovered() {}\n",
+    )
+    .expect("write uncommitted candidate");
+    let task_id = "ORB-DIRTY-HANDOFF";
+    let host = PrOpenTestHost::new(
+        vec![batch_task(
+            task_id,
+            "Preserve dirty candidate",
+            "Outcome: failed\nChanges:\n- Agent stopped after writing code.",
+        )],
+        workspace.repo.clone(),
+    );
+
+    let recovered = pr_failure_handoff(
+        &host,
+        &json!({
+            "failed_step_id": "implement_bundle",
+            "activity_name": "agent_implement",
+            "error_code": "primary_checkout_drift",
+            "error_message": "registered primary moved non-fast-forward after work was persisted",
+            "run_id": "batch-1",
+            "job_input": {
+                "task_ids": [task_id],
+                "base_branch": "agent-main",
+                "base_sync": "local",
+            },
+            "pipeline": {
+                "worktree": {
+                    "workspace_path": workspace.repo,
+                    "job_run_id": "batch-1",
+                    "base_ref": "agent-main",
+                },
+            },
+        }),
+    )
+    .expect("dirty work is committed and published");
+
+    assert_eq!(recovered["decision"], json!("blocked_failure_pr"));
+    assert_eq!(recovered["committed_files"], json!(["src/recovered.rs"]));
+    assert!(
+        git(&workspace.repo, &["status", "--porcelain"]).is_empty(),
+        "failure handoff must leave a clean worktree"
+    );
+    assert_eq!(
+        git(&workspace.repo, &["log", "-1", "--format=%s"]),
+        "chore: Preserve dirty candidate [ORB-DIRTY-HANDOFF]"
+    );
+    assert!(
+        host.tool_calls().iter().any(|call| call.name == "git.push"),
+        "the recovery branch is pushed before PR creation"
+    );
+    assert!(
+        host.pr_create_body().contains("primary_checkout_drift"),
+        "the blocked PR preserves the typed primary-drift classification"
+    );
+    let calls = host.tool_calls();
+    assert!(
+        calls.iter().position(|call| call.name == "git.push")
+            < calls
+                .iter()
+                .position(|call| call.name == "github.pr.create"),
+        "push precedes PR creation"
+    );
 }
 
 /// ORB-10313: every resumable PR checkpoint reloads durable state through
