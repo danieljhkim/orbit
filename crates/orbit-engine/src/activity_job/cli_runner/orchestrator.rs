@@ -10,6 +10,8 @@ use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, prepend
 use orbit_common::utility::redaction::{PatternRedactor, redact_sensitive_env_text};
 use serde_json::Value;
 
+use crate::context::{ProvenanceEnv, provenance_env};
+
 use super::super::audit_writer::V2AuditWriter;
 use super::super::dispatcher::{
     DispatchError, DispatchInvocationTrace, DispatchOutcome, V2RuntimeHost,
@@ -184,36 +186,22 @@ pub fn run_cli_backend(
         wall_clock_timeout_ms: wall_clock_timeout.as_millis() as u64,
     });
 
-    let mut child_env = vec![
-        ("ORBIT_RUN_ID".to_string(), run_id.to_string()),
-        ("ORBIT_MANAGED_RUN_CONTEXT".to_string(), "1".to_string()),
-    ];
-    if let Some(agent_name) = tool_ctx.agent_name.as_deref() {
-        child_env.push(("ORBIT_AGENT_NAME".to_string(), agent_name.to_string()));
-    }
-    if let Some(model_name) = tool_ctx.model_name.as_deref() {
-        child_env.push(("ORBIT_AGENT_MODEL".to_string(), model_name.to_string()));
-    }
-    if let Some(session_id) = learning_context.session_id {
-        child_env.push(("ORBIT_SESSION_ID".to_string(), session_id));
-    }
-    if let Some(task_id) = task_id_from_input(input) {
-        // ADR-0182: external CLI agents get the same active-task hook binding
-        // as direct-agent executions.
-        child_env.push(("ORBIT_TASK_ID".to_string(), task_id.to_string()));
-        child_env.push(("ORBIT_ACTIVE_TASK_ID".to_string(), task_id.to_string()));
-    }
-    // Telemetry trailers (ORB-10342, mirrors ORB-10340's worker-side spawn):
-    // the shared prepare-commit-msg injector reads these to stamp
-    // Agent-Run/Agent-Model/Agent-Task on every commit a pipeline-gate
-    // provider CLI makes. Omitted (not empty) when unknown.
-    child_env.push(("AGENT_RUN_ID".to_string(), run_id.to_string()));
-    if let Some(model_name) = model.as_deref() {
-        child_env.push(("AGENT_MODEL".to_string(), model_name.to_string()));
-    }
-    if let Some(task_id) = task_id_from_input(input) {
-        child_env.push(("AGENT_TASK".to_string(), task_id.to_string()));
-    }
+    let task_id = task_id_from_input(input);
+    // ADR-0182: external CLI agents get the same active-task hook binding as
+    // direct-agent executions. The AGENT_* fields preserve ORB-10342's
+    // commit-telemetry contract and omit unknown model/task values.
+    let child_env = provenance_env(ProvenanceEnv {
+        orbit_run_id: Some(run_id),
+        orbit_managed_run_context: true,
+        orbit_agent_name: tool_ctx.agent_name.as_deref(),
+        orbit_agent_model: tool_ctx.model_name.as_deref(),
+        orbit_session_id: learning_context.session_id.as_deref(),
+        orbit_task_id: task_id,
+        orbit_active_task: true,
+        agent_run_id: Some(run_id),
+        agent_model: model.as_deref(),
+        agent_task_id: task_id,
+    });
     let spawn_result = spawn_with_timeout(SpawnWithTimeoutRequest {
         program: &invocation.program,
         args: &subprocess_args,

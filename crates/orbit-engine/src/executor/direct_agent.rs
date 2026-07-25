@@ -6,7 +6,8 @@ use orbit_exec::EnvironmentMode;
 use super::ActivityExecutor;
 use crate::context::{
     AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, AgentProtocolHost, AttemptOutcome, EnvironmentHost,
-    ExecutionContext, ExecutorHost, apply_env_set, execution_working_directory, inject_state_env,
+    ExecutionContext, ExecutorHost, ProvenanceEnv, apply_env_set, execution_working_directory,
+    inject_state_env, provenance_env,
 };
 
 fn inject_activity_tools(mode: EnvironmentMode, tools: &[String]) -> EnvironmentMode {
@@ -28,15 +29,16 @@ fn inject_agent_identity(
     }
 
     inject_environment(mode, |pairs| {
-        pairs.push(("ORBIT_AGENT_NAME".to_string(), agent.clone()));
-        if let Some(model) = execution
+        let model = execution
             .model
             .as_deref()
             .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            pairs.push(("ORBIT_AGENT_MODEL".to_string(), model.to_string()));
-        }
+            .filter(|value| !value.is_empty());
+        pairs.extend(provenance_env(ProvenanceEnv {
+            orbit_agent_name: Some(&agent),
+            orbit_agent_model: model,
+            ..ProvenanceEnv::default()
+        }));
     })
 }
 
