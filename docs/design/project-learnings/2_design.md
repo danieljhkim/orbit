@@ -193,6 +193,8 @@ orbit search path <path> --kind learning [--tag T] [--all] [--status learning:ac
 
 `add`, `update`, and `supersede` write the YAML and update the index atomically. `upvote` appends to the learning's `votes.jsonl` sidecar and is idempotent for `(learning_id, voter_model, task_id)`. `orbit learning list --path/--tag` and `orbit search --kind learning` are the indexed read paths used for pull discovery.
 
+**Authoring is role-gated ([ADR-0250], [ORB-10364]).** `add`, `update`, and `supersede` — and only those three — refuse callers running in an agent-executor context, returning a `policy denied` error that names `orbit friction add` as the correct channel and echoes the attempted content so the observation is not lost. The role comes from the `ORBIT_AGENT_NAME` / `ORBIT_AGENT_MODEL` identity pair the audit middleware already reads: present ⇒ agent, absent ⇒ human. An orchestrator that dispatches curation work *as* an agent opts in deliberately with `ORBIT_LEARNING_AUTHOR=1`. Every read surface, plus `sync`, `prune`, and `stats`, is unaffected in every context.
+
 ### 5.2 MCP tools
 
 | Tool | Inputs | Outputs |
@@ -206,6 +208,8 @@ orbit search path <path> --kind learning [--tag T] [--all] [--status learning:ac
 | `orbit.learning.upvote` | `id`, `model`, `task?` | vote summary |
 
 `orbit.learning.list` and `orbit.search` are the primary discovery paths; both must stay sub-10ms at expected scale. The standalone per-domain learning-search MCP tool (phase-1 surface) was retired by [ORB-00202] in favor of `orbit.search` with `kind: "learning"`.
+
+`orbit.learning.add`, `orbit.learning.update`, and `orbit.learning.supersede` carry the same [ADR-0250] caller-role gate as their CLI counterparts — the check lives on the shared `OrbitRuntime::author_learning*` surface, so the two entry points cannot drift. A refused tool call returns `{"code": "policy_denied", "error": ...}` and writes nothing.
 
 ### 5.3 Result shape
 
@@ -406,5 +410,6 @@ Learnings are workspace-scoped and checked into the repo. They travel exactly wh
 - [ORB-10318] — Report-only recurring learning-deprecation review as an auto-task; surfaces stale candidates via `execution_summary` from usage rollups + anchor health, no bespoke sweep engine ([§7.6](#76-recurring-deprecation-review-auto-task)).
 - [ORB-10346] — Removed automatic learning delivery and adopted pull delivery with reference comments.
 - [ORB-10348] — Generalized the review into `artifact-deprecation-review`: added the comment-reference sweep (Stream B) alongside the original learning-corpus-health stream ([§7.6](#76-recurring-deprecation-review-auto-task)).
+- [ORB-10364] — Gated the `add`/`update`/`supersede` authoring surfaces on caller role and redirected executors to `friction add` ([§5.1](#51-cli), [§5.2](#52-mcp-tools), ADR-0250).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

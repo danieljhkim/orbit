@@ -73,7 +73,7 @@ impl Execute for LearningUpdateArgs {
             self.priority.map(Some)
         };
 
-        let learning = runtime.update_learning(
+        let learning = runtime.author_learning_update(
             &self.id,
             LearningUpdateParams {
                 summary: self.summary,

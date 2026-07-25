@@ -57,7 +57,7 @@ impl Execute for LearningAddArgs {
             .map(parse_evidence_spec)
             .collect::<Result<Vec<_>, _>>()?;
 
-        let learning = runtime.create_learning(LearningCreateParams {
+        let learning = runtime.author_learning(LearningCreateParams {
             summary: self.summary,
             scope: LearningScope {
                 paths: self.paths,

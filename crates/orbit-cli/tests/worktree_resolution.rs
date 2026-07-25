@@ -330,6 +330,7 @@ fn run_orbit_json(cwd: &Path, home: &Path, args: &[&str], orbit_root: Option<&Pa
         .env("HOME", home)
         .env("USERPROFILE", home)
         .args(args);
+    clear_agent_identity_env(&mut command);
     set_orbit_root_env(&mut command, orbit_root);
     let assert = command.assert().success();
     serde_json::from_slice(&assert.get_output().stdout).expect("orbit json output")
@@ -347,8 +348,23 @@ fn run_orbit_output(
         .env("HOME", home)
         .env("USERPROFILE", home)
         .args(args);
+    clear_agent_identity_env(&mut command);
     set_orbit_root_env(&mut command, orbit_root);
     command.output().expect("run orbit")
+}
+
+/// Declare a human caller context for the spawned `orbit` child.
+///
+/// [ORB-10364] gates `learning add`/`update`/`supersede` on the `ORBIT_AGENT_*`
+/// pair, and a child inherits whatever the suite was launched with — an agent
+/// running this suite inside a managed Orbit run would otherwise be refused
+/// (the ORB-10350 hazard). These tests cover worktree artifact routing, not the
+/// role gate, so they state the context they need rather than inheriting it.
+fn clear_agent_identity_env(command: &mut AssertCommand) {
+    command
+        .env_remove("ORBIT_AGENT_NAME")
+        .env_remove("ORBIT_AGENT_MODEL")
+        .env_remove("ORBIT_LEARNING_AUTHOR");
 }
 
 fn set_orbit_root_env(command: &mut AssertCommand, orbit_root: Option<&Path>) {

@@ -33,6 +33,22 @@ fn registry_with_builtins() -> ToolRegistry {
     registry
 }
 
+/// Declare a human caller context for a test that reaches a learning *write*
+/// tool.
+///
+/// [ORB-10364] gates `add`/`update`/`supersede` on the `ORBIT_AGENT_*` pair,
+/// which a child of a managed Orbit run inherits (the ORB-10350 hazard). The
+/// returned guard also holds the process-wide env lock, so it serializes these
+/// tests against the executor-context ones below.
+fn human_context_env() -> orbit_common::test_env::ScopedEnv {
+    orbit_common::test_env::unset(
+        orbit_common::test_env::AGENT_IDENTITY_ENV
+            .iter()
+            .copied()
+            .chain(std::iter::once("ORBIT_LEARNING_AUTHOR")),
+    )
+}
+
 fn create_minimal(
     runtime: &OrbitRuntime,
     summary: &str,
@@ -182,6 +198,7 @@ fn list_tag_filter_uses_case_insensitive_equality() {
 #[test]
 fn supersede_excludes_from_default_list_but_surfaces_under_status_superseded() {
     let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
     let old = create_minimal(&runtime, "old", &["foo/**"], &[]);
     let new = create_minimal(&runtime, "new", &["foo/**"], &[]);
 
@@ -227,6 +244,7 @@ fn sync_rebuilds_index_after_truncation() {
 #[test]
 fn add_rejects_summary_longer_than_280_chars() {
     let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
     let long = "a".repeat(281);
     let err = super::super::learning_tools::add(
         &runtime,
@@ -247,6 +265,7 @@ fn add_rejects_summary_longer_than_280_chars() {
 #[test]
 fn supersede_rejects_id_equal_to_with() {
     let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
     let learning = create_minimal(&runtime, "x", &[], &[]);
     let err = super::super::learning_tools::supersede(
         &runtime,
@@ -261,6 +280,7 @@ fn supersede_rejects_id_equal_to_with() {
 #[test]
 fn update_rejects_on_superseded_record() {
     let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
     let old = create_minimal(&runtime, "old", &[], &[]);
     let new = create_minimal(&runtime, "new", &[], &[]);
     runtime
@@ -490,4 +510,116 @@ fn finalize_preallocated_adr_lands_supplied_id() {
         .expect("finalize preallocated ADR");
     assert_eq!(adr.id, "ADR-0055");
     assert_eq!(adr.status, orbit_common::types::AdrStatus::Proposed);
+}
+
+// --- ORB-10364: caller-role gate on the tool write surfaces ---------------
+
+/// Clear the identity pair and the authoring opt-in, then declare an executor
+/// context. The returned guard holds the process-wide env lock and restores
+/// everything on drop; every caller below is synchronous.
+fn executor_context_env() -> orbit_common::test_env::ScopedEnv {
+    let guard = human_context_env();
+    // SAFETY: the guard holds the process-wide env lock for its lifetime and
+    // restores `ORBIT_AGENT_MODEL` (as unset) when it drops.
+    unsafe {
+        std::env::set_var("ORBIT_AGENT_MODEL", "claude-opus-5");
+    }
+    guard
+}
+
+fn policy_denied_message<T>(result: Result<T, OrbitError>) -> String {
+    match result {
+        Err(OrbitError::PolicyDenied(message)) => message,
+        Err(error) => panic!("expected a policy denial, got {error:?}"),
+        Ok(_) => panic!("expected a policy denial, got success"),
+    }
+}
+
+#[test]
+fn learning_write_tools_refuse_executor_context_and_redirect_to_friction_add() {
+    let (_temp, runtime, _repo_root) = test_runtime();
+    let old = create_minimal(&runtime, "old", &[], &[]);
+    let new = create_minimal(&runtime, "new", &[], &[]);
+    let _env = executor_context_env();
+
+    for (label, result) in [
+        (
+            "add",
+            super::super::learning_tools::add(
+                &runtime,
+                json!({ "summary": "executor rule", "body": "executor body" }),
+                None,
+                None,
+            ),
+        ),
+        (
+            "update",
+            super::super::learning_tools::update(
+                &runtime,
+                json!({ "id": old.id, "summary": "rewrite" }),
+                None,
+                None,
+            ),
+        ),
+        (
+            "supersede",
+            super::super::learning_tools::supersede(
+                &runtime,
+                json!({ "id": old.id, "with": new.id }),
+                None,
+                None,
+            ),
+        ),
+    ] {
+        let message = policy_denied_message(result);
+        assert!(
+            message.contains("orbit friction add"),
+            "{label} redirects to friction: {message}"
+        );
+        assert!(
+            message.contains("ORBIT_LEARNING_AUTHOR"),
+            "{label} names the opt-in: {message}"
+        );
+    }
+
+    // Nothing was written: both fixtures are still active and unmodified.
+    let active = runtime
+        .list_learnings(Some(LearningStatus::Active))
+        .expect("list active");
+    assert_eq!(active.len(), 2);
+    assert!(active.iter().any(|l| l.id == old.id && l.summary == "old"));
+}
+
+/// Reads stay open in an executor context — the gate is on authoring only.
+#[test]
+fn learning_read_tools_are_unaffected_in_an_executor_context() {
+    let (_temp, runtime, _repo_root) = test_runtime();
+    let learning = create_minimal(&runtime, "readable", &["foo/**"], &["perf"]);
+    let _env = executor_context_env();
+
+    let shown = super::super::learning_tools::show(&runtime, json!({ "id": learning.id }))
+        .expect("show is not gated");
+    assert_eq!(shown["summary"], "readable");
+
+    let listed =
+        super::super::learning_tools::list(&runtime, json!({})).expect("list is not gated");
+    assert_eq!(ids_from_array(&listed), vec![learning.id]);
+}
+
+/// The dashboard's `PATCH /api/learnings/:id` entry point deliberately skips
+/// the gate: a dashboard server can run inside a managed Orbit run with
+/// `ORBIT_AGENT_MODEL` set, and its writes carry request-derived attribution
+/// (ORB-10352). Gating it would refuse a human's edit over how the *server*
+/// was launched.
+#[test]
+fn the_dashboard_update_entry_point_is_not_gated_by_the_server_process_env() {
+    let (_temp, runtime, _repo_root) = test_runtime();
+    let learning = create_minimal(&runtime, "dashboard original", &[], &[]);
+    let _env = executor_context_env();
+
+    let updated = runtime
+        .update_learning_from_request(json!({ "id": learning.id, "summary": "dashboard revised" }))
+        .expect("dashboard update is not gated");
+
+    assert_eq!(updated["summary"], "dashboard revised");
 }

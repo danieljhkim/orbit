@@ -24,6 +24,7 @@ pub mod gc;
 pub mod init;
 pub mod job;
 pub mod learning;
+pub mod learning_authoring;
 pub mod pipeline_run;
 pub mod policy;
 pub mod routine;

@@ -39,7 +39,7 @@ pub(super) fn add(
     let priority = parse_optional_priority(&input)?;
     let created_by = optional_string_alias(&input, &["created_by", "createdBy"])?.or(model);
 
-    let learning = runtime.create_learning(LearningCreateParams {
+    let learning = runtime.author_learning(LearningCreateParams {
         summary,
         scope,
         body,
@@ -135,21 +135,42 @@ pub(super) fn update(
     _agent: Option<String>,
     _model: Option<String>,
 ) -> Result<Value, OrbitError> {
-    let id = required_string(&input, &["id"], "id")?;
-    let summary = optional_string(&input, "summary")?;
+    let (id, params) = parse_update_input(&input)?;
+    let updated = runtime.author_learning_update(&id, params)?;
+    Ok(learning_to_json(&updated))
+}
+
+/// The same update, without the [ORB-10364] caller-role gate.
+///
+/// Backs [`OrbitRuntime::update_learning_from_request`], which the dashboard's
+/// `PATCH /api/learnings/:id` route calls instead of dispatching the tool.
+/// Sharing `parse_update_input` keeps the two paths byte-identical apart from
+/// the gate.
+pub(crate) fn update_without_role_gate(
+    runtime: &OrbitRuntime,
+    input: Value,
+) -> Result<Value, OrbitError> {
+    let (id, params) = parse_update_input(&input)?;
+    let updated = runtime.update_learning(&id, params)?;
+    Ok(learning_to_json(&updated))
+}
+
+fn parse_update_input(input: &Value) -> Result<(String, LearningUpdateParams), OrbitError> {
+    let id = required_string(input, &["id"], "id")?;
+    let summary = optional_string(input, "summary")?;
     let scope = match input.get("scope") {
         Some(Value::Null) | None => None,
         Some(value) => Some(parse_scope_value(value.clone())?),
     };
-    let body = optional_string(&input, "body")?;
+    let body = optional_string(input, "body")?;
     let evidence = match input.get("evidence") {
         Some(Value::Null) | None => None,
         Some(value) => Some(parse_evidence_value(Some(value))?),
     };
-    let priority = parse_optional_priority_field(&input)?;
+    let priority = parse_optional_priority_field(input)?;
 
-    let updated = runtime.stores().learnings().update(
-        &id,
+    Ok((
+        id,
         LearningUpdateParams {
             summary,
             scope,
@@ -157,8 +178,7 @@ pub(super) fn update(
             evidence,
             priority,
         },
-    )?;
-    Ok(learning_to_json(&updated))
+    ))
 }
 
 pub(super) fn supersede(
@@ -169,12 +189,10 @@ pub(super) fn supersede(
 ) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id", "old_id", "oldId"], "id")?;
     let with = required_string(&input, &["with", "new_id", "newId"], "with")?;
-    if id == with {
-        return Err(OrbitError::InvalidInput(format!(
-            "learning '{id}' cannot supersede itself"
-        )));
-    }
-    runtime.stores().learnings().supersede(&id, &with)?;
+    // Self-supersede validation lives on `author_learning_supersede`'s
+    // delegate, so the [ORB-10364] caller-role gate is evaluated first and an
+    // executor never learns which inputs would have been valid.
+    runtime.author_learning_supersede(&id, &with)?;
     let old = runtime
         .stores()
         .learnings()

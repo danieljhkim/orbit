@@ -158,10 +158,13 @@ pub(super) async fn update_learning_action(
     }
     input.insert("id".to_string(), Value::String(id));
 
-    // Delegate to the `orbit.learning.update` tool so the HTTP route inherits
-    // the CLI lifecycle rules verbatim — notably the rejection of updates on a
-    // superseded record (supersede, don't mutate/delete).
-    match runtime.run_tool("orbit.learning.update", Value::Object(input)) {
+    // Share the `orbit.learning.update` payload parsing so the HTTP route
+    // inherits the CLI lifecycle rules verbatim — notably the rejection of
+    // updates on a superseded record (supersede, don't mutate/delete) — but
+    // skip the [ORB-10364] caller-role gate. That gate reads the *process*
+    // environment, and this server can legitimately run inside a managed Orbit
+    // run; dashboard writes carry request-derived attribution ([ORB-10352]).
+    match runtime.update_learning_from_request(Value::Object(input)) {
         Ok(learning) => Json(learning).into_response(),
         Err(e) => map_runtime_error(e),
     }

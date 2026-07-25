@@ -560,6 +560,23 @@ mod tests {
 
     use crate::runtime::orbit_tool_host::test_support::test_runtime;
 
+    /// Declare a human caller context for a test that dispatches a learning
+    /// *write* tool.
+    ///
+    /// [ORB-10364] gates `orbit.learning.add`/`update`/`supersede` on the
+    /// `ORBIT_AGENT_*` pair, which a child of a managed Orbit run inherits (the
+    /// ORB-10350 hazard). These tests assert redaction behaviour, not the role
+    /// gate, so they state the context they need instead of inheriting whatever
+    /// the suite was launched with.
+    fn human_context_env() -> orbit_common::test_env::ScopedEnv {
+        orbit_common::test_env::unset(
+            orbit_common::test_env::AGENT_IDENTITY_ENV
+                .iter()
+                .copied()
+                .chain(std::iter::once("ORBIT_LEARNING_AUTHOR")),
+        )
+    }
+
     struct EnvVarGuard {
         _lock: MutexGuard<'static, ()>,
         name: &'static str,
@@ -767,6 +784,9 @@ mod tests {
     #[test]
     fn adr_and_learning_dispatch_redact_live_github_token_in_persisted_fields() {
         let token = "orbit-adr-learning-secret-value";
+        // Acquired before `EnvVarGuard` so the two locks are always taken in
+        // the same order.
+        let _identity = human_context_env();
         let _env = EnvVarGuard::set("GITHUB_TOKEN", token);
         let (_root, runtime, _repo_root) = test_runtime();
 
@@ -847,6 +867,7 @@ mod tests {
 
     #[test]
     fn dispatch_adds_false_response_flags_for_each_covered_family() {
+        let _identity = human_context_env();
         let (_root, runtime, _repo_root) = test_runtime();
 
         let task = runtime
