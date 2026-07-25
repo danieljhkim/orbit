@@ -1,6 +1,6 @@
 use std::fs;
 
-use orbit_common::types::TaskType;
+use orbit_common::types::{OrbitError, TaskType};
 use serde_json::json;
 
 use super::super::git_commit;
@@ -182,22 +182,252 @@ fn git_commit_batch_errors_on_empty_stage() {
         "claude-opus-4-7",
     )];
     let host = CommitTestHost::new(tasks, workspace.to_path_buf());
+    let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read base checkpoint");
     let input = json!({
         "scope": "all",
         "job_run_id": "batch-1",
         "workspace_path": workspace.to_string_lossy().to_string(),
+        "base_ref": base_sha,
     });
 
     let error = git_commit(&host, &input).expect_err("empty stage must error");
-    assert!(
-        error.to_string().contains("no staged changes to commit"),
-        "expected empty-diff error, got: {error}"
+    let OrbitError::Execution(message) = error else {
+        panic!("expected execution error, got: {error}");
+    };
+    assert_eq!(
+        message,
+        format!(
+            "commit_batch_changes: no staged changes to commit for task 'T1' in worktree '{}'; \
+             the implement step produced an empty diff. Changes may have been written outside \
+             the assigned worktree, or attribution may be unknown; Orbit did not inspect, stage, \
+             reset, or reconcile any other checkout",
+            workspace.display()
+        ),
+        "the existing empty-diff diagnostic must remain unchanged"
     );
 
     // The index is left clean (the staging reset ran before erroring), so no
     // commit was created beyond the repo's initial commit.
     let log = git_output(workspace, &["rev-list", "--count", "HEAD"]).expect("count commits");
     assert_eq!(log.trim(), "1", "no commit should have been created");
+}
+
+#[test]
+fn git_commit_batch_adopts_implement_authored_commits_without_rewriting_them() {
+    let temp = initialized_git_repo();
+    let workspace = temp.path();
+    let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read base checkpoint");
+
+    fs::write(workspace.join("README.md"), "reverted\n").unwrap();
+    git_success(workspace, &["add", "README.md"]).expect("stage revert");
+    git_success(
+        workspace,
+        &[
+            "-c",
+            "user.name=Implement Agent",
+            "-c",
+            "user.email=implement@example.test",
+            "commit",
+            "-m",
+            "revert prior change",
+        ],
+    )
+    .expect("author revert commit");
+    fs::write(workspace.join("README.md"), "replacement\n").unwrap();
+    git_success(workspace, &["add", "README.md"]).expect("stage replacement");
+    git_success(
+        workspace,
+        &[
+            "-c",
+            "user.name=Implement Agent",
+            "-c",
+            "user.email=implement@example.test",
+            "commit",
+            "-m",
+            "cherry-pick replacement",
+        ],
+    )
+    .expect("author replacement commit");
+
+    let head_before = git_output(workspace, &["rev-parse", "HEAD"]).expect("read authored head");
+    let authored_shas = git_output(
+        workspace,
+        &["rev-list", "--reverse", &format!("{base_sha}..HEAD")],
+    )
+    .expect("read authored commits")
+    .lines()
+    .map(ToOwned::to_owned)
+    .collect::<Vec<_>>();
+    let task = task_with_file("T1", "History surgery", "README.md", "codex");
+    let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+    let input = json!({
+        "scope": "all",
+        "job_run_id": "batch-1",
+        "workspace_path": workspace.to_string_lossy().to_string(),
+        "base_ref": base_sha,
+    });
+
+    let result = git_commit(&host, &input).expect("commit-only batch succeeds");
+
+    assert_eq!(result["decision"], "adopted_existing_commits");
+    assert_eq!(result["committed"], false);
+    assert_eq!(result["adopted_commits"], true);
+    assert_eq!(result["task_id"], "T1");
+    assert_eq!(result["job_run_id"], "batch-1");
+    assert_eq!(result["commit_shas"], json!(authored_shas));
+    assert_eq!(result["commit_sha"], head_before);
+    assert_eq!(
+        git_output(workspace, &["rev-parse", "HEAD"]).expect("read final head"),
+        head_before,
+        "the pipeline must not create or amend a commit"
+    );
+    assert_eq!(
+        git_output(workspace, &["log", "-2", "--format=%an <%ae>"]).expect("read retained authors"),
+        "Implement Agent <implement@example.test>\nImplement Agent <implement@example.test>"
+    );
+}
+
+#[test]
+fn git_commit_batch_commits_dirty_residue_above_implement_authored_commits() {
+    let temp = initialized_git_repo();
+    let workspace = temp.path();
+    let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read base checkpoint");
+
+    fs::write(workspace.join("README.md"), "implement commit\n").unwrap();
+    git_success(workspace, &["add", "README.md"]).expect("stage implement commit");
+    git_success(
+        workspace,
+        &[
+            "-c",
+            "user.name=Implement Agent",
+            "-c",
+            "user.email=implement@example.test",
+            "commit",
+            "-m",
+            "implement authored",
+        ],
+    )
+    .expect("author implement commit");
+    let authored_sha =
+        git_output(workspace, &["rev-parse", "HEAD"]).expect("read implement commit");
+    fs::write(workspace.join("residue.txt"), "dirty residue\n").unwrap();
+
+    let task = task_with_file("T1", "Mixed history", "residue.txt", "codex");
+    let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+    let input = json!({
+        "scope": "all",
+        "job_run_id": "batch-1",
+        "workspace_path": workspace.to_string_lossy().to_string(),
+        "base_ref": base_sha,
+    });
+
+    let result = git_commit(&host, &input).expect("mixed batch succeeds");
+
+    assert_eq!(result["decision"], "performed");
+    assert_eq!(result["committed"], true);
+    assert_eq!(result["adopted_commits"], true);
+    assert_eq!(result["commit_shas"][0], authored_sha);
+    assert_eq!(result["commit_shas"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        git_output(workspace, &["log", "-1", "--format=%P"]).expect("read residue parent"),
+        authored_sha
+    );
+    assert_eq!(
+        git_output(
+            workspace,
+            &["show", "-s", "--format=%an <%ae>", &authored_sha]
+        )
+        .expect("read retained implement author"),
+        "Implement Agent <implement@example.test>"
+    );
+    assert_eq!(
+        git_output(workspace, &["log", "-1", "--format=%an <%ae>"]).expect("read residue author"),
+        "codex <codex@orbit.local>"
+    );
+}
+
+#[test]
+fn git_commit_batch_does_not_adopt_commits_reachable_only_from_another_branch() {
+    let temp = initialized_git_repo();
+    let workspace = temp.path();
+    let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read base checkpoint");
+
+    git_success(workspace, &["checkout", "-b", "other-worktree-branch"])
+        .expect("create other branch");
+    fs::write(workspace.join("other.txt"), "other branch work\n").unwrap();
+    git_success(workspace, &["add", "other.txt"]).expect("stage other branch work");
+    git_success(workspace, &["commit", "-m", "other branch commit"])
+        .expect("commit other branch work");
+    git_success(
+        workspace,
+        &["checkout", "-b", "assigned-task-branch", &base_sha],
+    )
+    .expect("restore assigned branch at checkpoint");
+
+    let task = task_with_file("T1", "Assigned task", "src/missing.txt", "codex");
+    let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+    let input = json!({
+        "scope": "all",
+        "job_run_id": "batch-1",
+        "workspace_path": workspace.to_string_lossy().to_string(),
+        "base_ref": base_sha,
+    });
+
+    let error = git_commit(&host, &input).expect_err("other branch commit is not adopted");
+    let message = error.to_string();
+    assert!(message.contains("no staged changes to commit"), "{message}");
+    assert!(
+        message.contains("outside the assigned worktree"),
+        "{message}"
+    );
+    assert_eq!(
+        git_output(workspace, &["rev-list", "--count", "HEAD"]).expect("count assigned commits"),
+        "1"
+    );
+}
+
+#[test]
+fn git_commit_batch_rejects_head_that_is_not_a_descendant_of_the_base_checkpoint() {
+    let temp = initialized_git_repo();
+    let workspace = temp.path();
+    let root_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read root");
+
+    fs::write(workspace.join("base.txt"), "recorded base\n").unwrap();
+    git_success(workspace, &["add", "base.txt"]).expect("stage base");
+    git_success(workspace, &["commit", "-m", "recorded base checkpoint"])
+        .expect("commit recorded base");
+    let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read base checkpoint");
+    git_success(workspace, &["reset", "--hard", &root_sha]).expect("rewind task branch");
+    fs::write(workspace.join("divergent.txt"), "divergent task history\n").unwrap();
+    git_success(workspace, &["add", "divergent.txt"]).expect("stage divergent work");
+    git_success(workspace, &["commit", "-m", "divergent task commit"])
+        .expect("commit divergent history");
+    let divergent_head =
+        git_output(workspace, &["rev-parse", "HEAD"]).expect("read divergent head");
+
+    let task = task_with_file("T1", "Divergent task", "divergent.txt", "codex");
+    let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+    let input = json!({
+        "scope": "all",
+        "job_run_id": "batch-1",
+        "workspace_path": workspace.to_string_lossy().to_string(),
+        "base_ref": base_sha,
+    });
+
+    let error = git_commit(&host, &input).expect_err("non-descendant history is rejected");
+    let message = error.to_string();
+    assert!(
+        message.contains("outside the assigned worktree"),
+        "{message}"
+    );
+    assert!(
+        message.contains("Orbit did not inspect, stage, reset, or reconcile any other checkout"),
+        "{message}"
+    );
+    assert_eq!(
+        git_output(workspace, &["rev-parse", "HEAD"]).expect("read final divergent head"),
+        divergent_head
+    );
 }
 
 #[test]
