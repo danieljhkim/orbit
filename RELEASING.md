@@ -42,6 +42,19 @@ Layout migrations must be **idempotent or staged (write-new-then-swap)**: they a
 
 Such a change is still **breaking** for versioning purposes (bump minor) and must be listed under Breaking Changes; the registry entry is what makes it *survivable*, not what makes it non-breaking.
 
+### CHANGELOG archiving
+
+On a **major** release, the CHANGELOG history released before that version is archived under `docs/changelogs/` and `CHANGELOG.md` starts fresh (the new version's section, plus a blank `## Unreleased`). Between major releases, `CHANGELOG.md` accumulates every released section and is never split.
+
+Under the versioning policy above, the current 0.x line has no major bump — every release, including breaking ones, is a `0.<minor>.<patch>` bump. So the archive trigger **does not exist yet**: a breaking `0.9.2 → 0.10.0` (or any other `0.x → 0.(x+1).0`) release does not archive, no matter how large `CHANGELOG.md` has grown. The convention first applies at `1.0.0`, and at each major release after that. Until then, `CHANGELOG.md` accumulates unconditionally.
+
+ORB-10429 executed this archive ahead of `0.10.0` and produced a validated, working diff shape before its PR was rejected — on timing (there was no major-release trigger), not on the mechanism itself. Reuse that shape rather than re-deriving it, once a real major release triggers this:
+
+- `CHANGELOG.md` keeps its exact name and repo-root location; the archive gets the new name and location, never the live file. Four things bind to `CHANGELOG.md`'s current path and must keep resolving: `scripts/check-changelog-style.sh` (hardcodes `$repo_root/CHANGELOG.md`), the convention-file allowlist in `crates/orbit-core/src/command/task/paths.rs`, the never-modify list in `.orbit/auto_tasks/doc-duties.yaml`, and the references to it from this file, `CONTRIBUTING.md`, `CLAUDE.md`, ADR-0176, and ADR-0210.
+- Relocation of released sections into `docs/changelogs/` is byte-for-byte — stale task-id citations and inconsistent old bullet shapes are provenance, not defects, and must survive the move unedited.
+- The live `## Unreleased` section never moves; only already-released `## <X.Y.Z>` sections are archived.
+- Cross-link the two locations so neither reads as a dead end: the archive file links back to `CHANGELOG.md`, and `CHANGELOG.md` links forward to `docs/changelogs/` once that directory exists.
+
 ## Release checklist
 
 ### 1. Survey commits since last tag
