@@ -17,9 +17,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 # The replay smokes require an explicit feature, so the default workspace
 # clippy pass skips them. Keep that opt-in path compiled and linted too.
 cargo clippy -p orbit-engine --all-targets --features replay -- -D warnings
-# Keep examples covered by the clippy passes, but avoid re-running their empty
-# test harnesses in the test phase. Exercise orbit-engine's replay-dependent
-# tests separately so both default and opt-in configurations stay covered.
+# The converted v2 integration tests are included in the default test surface;
+# exercise the replay-gated cases separately so both configurations run.
 if cargo nextest --version >/dev/null 2>&1; then
   cargo nextest run --workspace --lib --bins --tests
   cargo nextest run -p orbit-engine --features replay --lib --bins --tests

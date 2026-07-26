@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
-// ORB-00013: Examples are user-facing smoke binaries that print progress and unwrap setup invariants.
+#![cfg(feature = "replay")]
+// ORB-00013: Integration fixtures exercise public behavior and unwrap setup invariants.
 #![allow(
     clippy::expect_used,
     clippy::print_stderr,
@@ -7,7 +8,7 @@
     clippy::unwrap_used
 )]
 
-//! Phase 3 end-to-end smoke for the v2 job DAG executor.
+//! Phase 3 end-to-end integration coverage for the v2 job DAG executor.
 //!
 //! Runs each sample under `crates/orbit-core/assets/jobs/` through
 //! `orbit_engine::execute_job` and asserts the expected §7 envelope
@@ -16,12 +17,10 @@
 //! No credentials needed: the loop + denial samples use the replay path
 //! (`ORBIT_V2_REPLAY{,_FIXTURE}`).
 //!
-//! Usage:
-//!     cargo run -p orbit-engine --features replay --example v2_job_runtime_smoke
+//! Runs under `cargo nextest run -p orbit-engine --features replay --test v2_job_runtime`.
 
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 use std::sync::Arc;
 
 use orbit_agent::loop_engine::{InMemorySink, LoopAuditEvent};
@@ -32,43 +31,13 @@ use orbit_engine::{
 };
 use serde_json::Value;
 
-fn main() -> ExitCode {
+#[test]
+fn job_runtime_regressions() -> Result<(), String> {
     let samples_dir = workspace_root().join("crates/orbit-core/assets/jobs/examples");
     let fixtures_dir = samples_dir.join("fixtures");
-    let tmp_audit_root = std::env::temp_dir().join("orbit-v2-job-smoke");
-    let _ = std::fs::create_dir_all(&tmp_audit_root);
-
-    let results: Vec<(String, Result<(), String>)> = vec![
-        (
-            "loop_review_fix".into(),
-            smoke_loop_converge(&samples_dir, &fixtures_dir, &tmp_audit_root),
-        ),
-        (
-            "tool_denial_no_retry".into(),
-            smoke_denial_no_retry(&samples_dir, &tmp_audit_root),
-        ),
-    ];
-
-    let mut ok = 0;
-    let mut fail = 0;
-    for (name, res) in &results {
-        match res {
-            Ok(()) => {
-                println!("[PASS] {name}");
-                ok += 1;
-            }
-            Err(err) => {
-                println!("[FAIL] {name}: {err}");
-                fail += 1;
-            }
-        }
-    }
-    println!("\n{ok} passed, {fail} failed");
-    if fail == 0 {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::FAILURE
-    }
+    let tmp_audit = tempfile::tempdir().map_err(|err| err.to_string())?;
+    smoke_loop_converge(&samples_dir, &fixtures_dir, tmp_audit.path())?;
+    smoke_denial_no_retry(&samples_dir, tmp_audit.path())
 }
 
 // ---------------------------------------------------------------------------

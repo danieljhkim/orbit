@@ -12,14 +12,6 @@ stability = "internal"
 default = []
 replay = []
 
-[[example]]
-name = "v2_runtime_smoke"
-required-features = ["replay"]
-
-[[example]]
-name = "v2_job_runtime_smoke"
-required-features = ["replay"]
-
 [lints]
 workspace = true
 

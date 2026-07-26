@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-// ORB-00013: Examples are user-facing smoke binaries that print progress and unwrap setup invariants.
+// ORB-00013: Integration fixtures exercise public behavior and unwrap setup invariants.
 #![allow(
     clippy::expect_used,
     clippy::print_stderr,
@@ -7,7 +7,7 @@
     clippy::unwrap_used
 )]
 
-//! Phase 4 prerequisite smoke — T20260418-2019.
+//! Name-resolution integration coverage — T20260418-2019.
 //!
 //! Exercises:
 //!   A) `V2ActivityCatalog::load_dir` picks up the four new v2 activities
@@ -24,7 +24,7 @@
 //!      Phase 4). Only the resolvable refs rewrite; unresolved ones are
 //!      reported by the resolver.
 //!
-//! Run: `cargo run -p orbit-engine --example v2_name_resolution_smoke`
+//! Runs under `cargo nextest run -p orbit-engine --test v2_name_resolution`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -41,9 +41,8 @@ use orbit_engine::{
 };
 use serde_json::Value;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("v2 name-resolution smoke — T20260418-2019 Phase 4 prereq");
-
+#[test]
+fn name_resolution_regressions() -> Result<(), Box<dyn std::error::Error>> {
     scenario_a_catalog_loads_new_activities()?;
     scenario_b_target_ref_resolves()?;
     scenario_c_unknown_ref_is_structural_error()?;
@@ -51,23 +50,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     scenario_e_backend_rejection_runs_after_resolution()?;
     scenario_f_deterministic_activities_dispatch()?;
 
-    println!("OK — all scenarios passed");
     Ok(())
 }
 
 fn scenario_a_catalog_loads_new_activities() -> Result<(), Box<dyn std::error::Error>> {
-    println!("  A) catalog loads 4 new v2 activities from v2_reference/");
+    println!("  A) catalog retains supported examples and excludes retired promotion");
     let mut catalog = V2ActivityCatalog::new();
     let dir = repo_root().join("crates/orbit-core/assets/activities");
     catalog.load_dir(&dir)?;
 
-    // Must contain the 4 new Phase 4 activities.
-    for name in [
-        "agent_review_diff",
-        "agent_apply_fixes",
-        "promote_agent_main",
-        "revert_on_red",
-    ] {
+    for name in ["agent_review_diff", "agent_apply_fixes", "revert_on_red"] {
         assert!(
             catalog.get(name).is_some(),
             "catalog missing new activity `{}` (present: {:?})",
@@ -90,15 +82,15 @@ fn scenario_a_catalog_loads_new_activities() -> Result<(), Box<dyn std::error::E
     };
     assert_eq!(fixer_spec.backend, Backend::Auto);
 
-    // Deterministic activities — no backend field.
-    let promote = catalog.get("promote_agent_main").expect("present");
-    assert!(matches!(&promote.spec, ActivityV2Spec::Deterministic(_)));
-
     let revert = catalog.get("revert_on_red").expect("present");
     assert!(matches!(&revert.spec, ActivityV2Spec::Deterministic(_)));
+    assert!(
+        catalog.get("promote_agent_main").is_none(),
+        "retired promotion must not remain in the activity catalog"
+    );
 
     println!(
-        "    loaded {} activities total (filter selects 4 new)",
+        "    loaded {} activities total (filter selects retained surface)",
         catalog.len()
     );
     Ok(())
@@ -144,50 +136,40 @@ fn scenario_c_unknown_ref_is_structural_error() -> Result<(), Box<dyn std::error
 }
 
 fn scenario_d_pipeline_yaml_partial_resolution() -> Result<(), Box<dyn std::error::Error>> {
-    println!("  D) task_pipeline.yaml partial-resolves (4 new refs)");
-    let yaml_path = repo_root().join("crates/orbit-core/assets/jobs/task_pipeline.yaml");
+    println!("  D) task_pipeline.yaml exposes retired promotion structurally");
+    let yaml_path = repo_root().join("crates/orbit-core/assets/jobs/examples/task_pipeline.yaml");
     let yaml = std::fs::read_to_string(&yaml_path)?;
     let asset = load_job_asset(&yaml)?;
 
     // Confirm the parse produced TargetRefs (not inline specs) throughout.
     let ref_count = count_target_refs(&asset.spec);
     assert!(
-        ref_count >= 7,
-        "expected at least 7 TargetRefs in pipeline, got {}",
+        ref_count >= 8,
+        "expected at least 8 TargetRefs in pipeline, got {}",
         ref_count
     );
 
-    // A catalog containing only the 4 new activities can't resolve the whole
-    // pipeline — the deferred v1-port refs (worktree_setup, agent_implement,
-    // dispatch_batch, git_push, pr_open, pr_merge) fail to resolve. That's
-    // the expected partial-state in Phase 4 prereqs.
+    // The post-sweep catalog resolves the live pipeline surface but leaves
+    // retired promotion unresolved rather than silently treating it as live.
     let catalog = load_reference_catalog()?;
     let mut partial = asset.spec.clone();
     let err = resolve_job_target_refs(&mut partial, &catalog);
     match err {
         Err(ResolveError::ActivityNotInCatalog { name, .. }) => {
-            println!(
-                "    pipeline parse OK; resolution needs deferred ports (first missing: `{}`)",
-                name
-            );
+            assert_eq!(name, "promote_agent_main");
+            println!("    retired promotion remains a structural resolution error");
         }
-        Ok(_) => panic!("expected partial resolution failure pending v1 ports"),
+        Ok(_) => panic!("expected retired promotion to remain unresolved"),
         Err(other) => panic!("wrong error: {other:?}"),
     }
 
-    // With the new 4 + stub entries for the missing activities, full
-    // resolution succeeds.
+    // A synthetic promotion entry proves all remaining targets resolve; it
+    // must never be shipped as a real activity until the action exists.
     let mut catalog_with_stubs = catalog;
-    for name in [
-        "dispatch_batch",
-        "worktree_setup",
-        "agent_implement",
-        "git_push",
-        "pr_open",
-        "pr_merge",
-    ] {
-        catalog_with_stubs.insert(name, stub_deterministic_activity(name));
-    }
+    catalog_with_stubs.insert(
+        "promote_agent_main",
+        stub_deterministic_activity("promote_agent_main"),
+    );
     let mut full = asset.spec.clone();
     resolve_job_target_refs(&mut full, &catalog_with_stubs)?;
     assert_eq!(
@@ -230,67 +212,34 @@ fn scenario_e_backend_rejection_runs_after_resolution() -> Result<(), Box<dyn st
     Ok(())
 }
 
-/// F: the two new deterministic activities (`promote_agent_main`,
-/// `revert_on_red`) dispatch end-to-end and emit §7 envelope events. The
-/// host registers the same stub logic that `orbit-core::runtime::v2_host`
-/// ships — real git/API implementations are a follow-up.
+/// F: the retired `revert_on_red` example still parses, but its deleted action
+/// must fail loudly rather than becoming a skipped-success path.
 fn scenario_f_deterministic_activities_dispatch() -> Result<(), Box<dyn std::error::Error>> {
-    println!("  F) promote_agent_main + revert_on_red dispatch + emit §7 events");
+    println!("  F) retired revert_on_red action is rejected structurally");
     let catalog = load_reference_catalog()?;
     let host = PipelineHost;
 
-    for name in ["promote_agent_main", "revert_on_red"] {
-        let activity = catalog
-            .get(name)
-            .unwrap_or_else(|| panic!("catalog missing `{}`", name))
-            .clone();
-        let tmp = tempfile::tempdir()?;
-        let writer = build_writer(tmp.path(), &format!("smoke-f-{name}"))?;
-
-        let input = match name {
-            "promote_agent_main" => serde_json::json!({
-                "target_branch": "main",
-                "source_branch": "agent-main",
-            }),
-            "revert_on_red" => serde_json::json!({
-                "commit_sha": "deadbeef",
-                "branch": "agent-main",
-                "reason": "smoke",
-            }),
-            _ => unreachable!(),
-        };
-
-        let outcome = dispatch_v2_activity(V2DispatchInput {
-            activity_name: name,
-            spec: &activity.spec,
-            fs_profile: activity.fs_profile.as_deref(),
-            input,
-            audit: writer.clone(),
-            run_id: &format!("smoke-f-{name}"),
-            agent_override: None,
-            host: Some(&host),
-        })?;
-        assert!(outcome.success, "`{}` dispatch should succeed", name);
-
-        let events = writer.events_snapshot()?;
-        let types: Vec<&str> = events
-            .iter()
-            .map(|e| e.envelope.event_type.as_str())
-            .collect();
-        assert!(
-            types.contains(&"activity.started"),
-            "`{}` missing activity.started (got {:?})",
-            name,
-            types
-        );
-        assert!(
-            types.contains(&"activity.finished"),
-            "`{}` missing activity.finished (got {:?})",
-            name,
-            types
-        );
-        println!("    `{}` emitted: {:?}", name, types);
-    }
+    let activity = catalog.get("revert_on_red").expect("present");
+    let tmp = tempfile::tempdir()?;
+    let writer = build_writer(tmp.path(), "name-resolution-revert")?;
+    let err = dispatch_v2_activity(V2DispatchInput {
+        activity_name: "revert_on_red",
+        spec: &activity.spec,
+        fs_profile: activity.fs_profile.as_deref(),
+        input: serde_json::json!({
+            "commit_sha": "deadbeef",
+            "branch": "agent-main",
+            "reason": "coverage",
+        }),
+        audit: writer,
+        run_id: "name-resolution-revert",
+        agent_override: None,
+        host: Some(&host),
+    })
+    .expect_err("retired action must be rejected");
+    assert!(
+        matches!(err, DispatchError::DeterministicActionNotRegistered(action) if action == "revert_on_red")
+    );
 
     Ok(())
 }
@@ -316,10 +265,7 @@ fn build_writer(
     Ok(writer)
 }
 
-/// Host that registers the same stub logic as `orbit-core::runtime::v2_host`
-/// for `promote_agent_main` + `revert_on_red`. This is a smoke-only copy —
-/// when Phase 4 ports the real git/API handlers, both paths converge on
-/// the orbit-core impl and this can drop.
+/// Host that models the post-sweep deterministic action surface.
 struct PipelineHost;
 
 impl V2RuntimeHost for PipelineHost {
@@ -327,39 +273,12 @@ impl V2RuntimeHost for PipelineHost {
         &self,
         action: &str,
         _config: &Value,
-        input: &Value,
+        _input: &Value,
         _tool_context: orbit_tools::ToolContext,
     ) -> Result<Value, DispatchError> {
-        match action {
-            "promote_agent_main" => {
-                let target = input
-                    .get("target_branch")
-                    .and_then(Value::as_str)
-                    .unwrap_or("main");
-                let source = input
-                    .get("source_branch")
-                    .and_then(Value::as_str)
-                    .unwrap_or("agent-main");
-                Ok(serde_json::json!({
-                    "promoted": false,
-                    "skipped_reason":
-                        format!("stub: promotion `{source}` → `{target}` pending follow-up"),
-                }))
-            }
-            "revert_on_red" => {
-                let sha = input
-                    .get("commit_sha")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                Ok(serde_json::json!({
-                    "reverted": false,
-                    "skipped_reason": format!("stub: revert of `{sha}` pending follow-up"),
-                }))
-            }
-            other => Err(DispatchError::DeterministicActionNotRegistered(
-                other.to_string(),
-            )),
-        }
+        Err(DispatchError::DeterministicActionNotRegistered(
+            action.to_string(),
+        ))
     }
 
     fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {

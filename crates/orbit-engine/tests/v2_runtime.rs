@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
-// ORB-00013: Examples are user-facing smoke binaries that print progress and unwrap setup invariants.
+#![cfg(feature = "replay")]
+// ORB-00013: Integration fixtures exercise public behavior and unwrap setup invariants.
 #![allow(
     clippy::expect_used,
     clippy::print_stderr,
@@ -7,7 +8,7 @@
     clippy::unwrap_used
 )]
 
-//! Phase 2b v2 runtime smoke, updated for Phase 2d + Phase 3:
+//! Phase 2b v2 runtime integration coverage, updated for Phase 2d + Phase 3:
 //!
 //! 1. Deterministic reference — a stub `V2RuntimeHost` echoes the action.
 //! 2. Agent_loop reference — exercised via `drive_agent_loop` under
@@ -15,11 +16,9 @@
 //!    structurally, so the expected result is `Err(ToolDenied)` and the §7
 //!    `tool.denied` envelope event is present.
 //!
-//! Usage:
-//!     cargo run -p orbit-engine --features replay --example v2_runtime_smoke
+//! Runs under `cargo nextest run -p orbit-engine --features replay --test v2_runtime`.
 
 use std::path::PathBuf;
-use std::process::ExitCode;
 use std::sync::Arc;
 
 use orbit_agent::loop_engine::{InMemorySink, LoopAuditEvent};
@@ -33,39 +32,24 @@ use orbit_engine::{
 use serde_json::Value;
 use std::env;
 
-fn main() -> ExitCode {
-    let mut failures: Vec<String> = Vec::new();
-
+#[test]
+fn deterministic_reference_dispatches_and_persists_audit_events() -> Result<(), String> {
     let references_dir = workspace_root().join("crates/orbit-core/assets/activities/examples");
-    let tmp_audit_root = std::env::temp_dir().join("orbit-v2-smoke");
-    let _ = std::fs::create_dir_all(&tmp_audit_root);
+    let tmp_audit = tempfile::tempdir().map_err(|err| err.to_string())?;
+    smoke_dispatch_deterministic(
+        &references_dir.join("deterministic_reference.yaml"),
+        tmp_audit.path(),
+    )
+}
 
-    {
-        let path = references_dir.join("deterministic_reference.yaml");
-        match smoke_dispatch_deterministic(&path, &tmp_audit_root) {
-            Ok(()) => println!("deterministic reference: OK"),
-            Err(err) => failures.push(format!("deterministic reference: {err}")),
-        }
-    }
-
-    {
-        let path = references_dir.join("agent_loop_reference.yaml");
-        match smoke_dispatch_agent_loop(&path, &tmp_audit_root) {
-            Ok(()) => println!("agent_loop reference (tool-denial): OK"),
-            Err(err) => failures.push(format!("agent_loop reference: {err}")),
-        }
-    }
-
-    if failures.is_empty() {
-        println!("\nall v2 runtime smokes passed");
-        ExitCode::SUCCESS
-    } else {
-        eprintln!("\n{} failure(s):", failures.len());
-        for f in &failures {
-            eprintln!("  - {f}");
-        }
-        ExitCode::FAILURE
-    }
+#[test]
+fn agent_loop_reference_denial_is_structural_and_audited() -> Result<(), String> {
+    let references_dir = workspace_root().join("crates/orbit-core/assets/activities/examples");
+    let tmp_audit = tempfile::tempdir().map_err(|err| err.to_string())?;
+    smoke_dispatch_agent_loop(
+        &references_dir.join("agent_loop_reference.yaml"),
+        tmp_audit.path(),
+    )
 }
 
 fn smoke_dispatch_deterministic(
