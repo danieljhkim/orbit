@@ -22,10 +22,10 @@ Activity / Job is Orbit's execution substrate. Activities describe runnable unit
 
 Orbit needs a runtime layer that humans can inspect and code can execute. Activity / Job solves four practical problems:
 
-1. **Typed execution.** Agent loops and deterministic actions share one schema family after [T20260418-2010].
-2. **Durable local control flow.** Retry, parallelism, fan-out, and loops survive outside one model turn via `JobV2` DAG constructs from [T20260418-2018].
-3. **Clean runtime boundaries.** orbit-core coordinates runs without naming `orbit-agent` internals through the `V2RuntimeHost` work in [T20260418-2143] and [T20260418-2210].
-4. **One canonical schema.** `schemaVersion: 1` assets fail load-time parsing after [T20260419-2156].
+1. **Typed execution.** Agent loops and deterministic actions share one schema family.
+2. **Durable local control flow.** Retry, parallelism, fan-out, and loops survive outside one model turn via `JobV2` DAG constructs.
+3. **Clean runtime boundaries.** orbit-core coordinates runs without naming `orbit-agent` internals through the `V2RuntimeHost` work.
+4. **One canonical schema.** `schemaVersion: 1` assets fail load-time parsing.
 
 ---
 
@@ -38,7 +38,7 @@ An `ActivityV2` carries shared metadata plus one runtime spec:
 - `agent_loop`
 - `deterministic`
 
-The shared shape shipped in [T20260418-2010]. The `shell` type was removed as a fail-closed security fix in [ORB-00374]; see [ADR-0194](./4_decisions.md). The `groundhog` activity kind was later removed as unused in [ORB-10332].
+The shared shape shipped. The `shell` type was removed as a fail-closed security fix in [ORB-00374]; see [ADR-0194](./4_decisions.md). The `groundhog` activity kind was later removed as unused in [ORB-10332].
 
 ### 2.2 Jobs are the orchestration grammar
 
@@ -52,7 +52,7 @@ A `JobV2` is a step tree with:
 - `fan_out` / `fan_in`
 - `loop`
 
-That grammar landed in [T20260418-2018], with `workflow` / `subroutine` job kinds added in [T20260419-0339].
+That grammar landed first, followed by the `workflow` / `subroutine` job kinds.
 
 ### 2.3 Load-time normalization is part of the contract
 
@@ -63,7 +63,7 @@ orbit-core normalizes assets before a run starts:
 - rewrites `backend: auto` to a concrete backend once per run
 - rejects loop/session/backend combinations that cannot execute safely
 
-Name resolution arrived in [T20260418-2019]. Backend resolution and `run-v2` entrypoints came in [T20260418-2143]; CLI backend support followed in [T20260419-0104].
+Name resolution arrived first. Backend resolution and `run-v2` entrypoints came next; CLI backend support followed.
 
 ### 2.4 Backends and providers are separate choices
 
@@ -72,7 +72,7 @@ For `agent_loop`, Orbit distinguishes:
 - **backend**: `http`, `cli`, or `auto`
 - **provider**: `claude`, `codex`, `gemini`, `ollama`, or `openai_compat`
 
-`backend: auto` resolves once at load time. `backend: http` against an unwired provider fails structurally instead of falling back. `backend: cli` intentionally retains the older CLI-provider runtimes per [T20260419-0104] and [T20260418-2210].
+`backend: auto` resolves once at load time. `backend: http` against an unwired provider fails structurally instead of falling back. `backend: cli` intentionally retains the older CLI-provider runtimes.
 
 ### 2.5 Audit, policy, and seeded assets make the runtime inspectable
 
@@ -82,7 +82,7 @@ This layer also owns:
 - the v2 audit envelope with `workspace_path` provenance
 - seeded reference assets and pipeline jobs used by `orbit init`
 
-`workspace_path` entered the envelope in [T20260419-0002], runtime/CLI `fsProfile` enforcement landed in [T20260419-0503], and init seeding landed in [T20260419-2347].
+The envelope gained `workspace_path`; runtime/CLI `fsProfile` enforcement and init seeding followed.
 
 ---
 
@@ -90,35 +90,35 @@ This layer also owns:
 
 | Concern | Where it lives | Primary task ID |
 |---------|----------------|-----------------|
-| v2 activity type system | `crates/orbit-common/src/types/activity_job/activity_v2.rs` | [T20260418-2010] |
-| v2 job step grammar | `crates/orbit-common/src/types/activity_job/job_v2.rs` | [T20260418-2018] |
-| Job kinds (`workflow`, `subroutine`) | `crates/orbit-common/src/types/activity_job/job_v2.rs` | [T20260419-0339] |
-| Target-ref resolution | `crates/orbit-common/src/types/activity_job/catalog.rs` | [T20260418-2019] |
-| `run-v2` core entrypoints and host boundary | `crates/orbit-cmd/src/activity_v2.rs`, `crates/orbit-core/src/command/job/exec.rs` | [T20260418-2143], [T20260418-2210] |
-| Backend resolution and loop/session constraints | `crates/orbit-core/src/command/backend_resolver.rs`, `crates/orbit-common/src/types/activity_job/backend.rs` | [T20260419-0104] |
-| v2 DAG executor | `crates/orbit-engine/src/activity_job/job_executor/` | [T20260418-2018], [T20260509-2] |
-| V2 audit envelope and disk sink | `crates/orbit-common/src/types/activity_job/audit_envelope.rs`, `crates/orbit-engine/src/activity_job/audit_writer.rs` | [T20260419-0002] |
-| `backend: cli` runtime path | `crates/orbit-engine/src/activity_job/cli_runner/mod.rs` | [T20260419-0104] |
-| `fsProfile` enforcement | `crates/orbit-policy`, `tool_context_for_activity`, CLI describe/get surfaces | [T20260419-0503] |
-| Seeded reference activities and pipeline jobs | `crates/orbit-core/assets/activities/`, `crates/orbit-core/assets/jobs/` | [T20260419-2347], [T20260419-0622-3], [T20260419-0623] |
+| v2 activity type system | `crates/orbit-common/src/types/activity_job/activity_v2.rs` |  |
+| v2 job step grammar | `crates/orbit-common/src/types/activity_job/job_v2.rs` |  |
+| Job kinds (`workflow`, `subroutine`) | `crates/orbit-common/src/types/activity_job/job_v2.rs` |  |
+| Target-ref resolution | `crates/orbit-common/src/types/activity_job/catalog.rs` |  |
+| `run-v2` core entrypoints and host boundary | `crates/orbit-cmd/src/activity_v2.rs`, `crates/orbit-core/src/command/job/exec.rs` | |
+| Backend resolution and loop/session constraints | `crates/orbit-core/src/command/backend_resolver.rs`, `crates/orbit-common/src/types/activity_job/backend.rs` |  |
+| v2 DAG executor | `crates/orbit-engine/src/activity_job/job_executor/` | [T20260509-2] |
+| V2 audit envelope and disk sink | `crates/orbit-common/src/types/activity_job/audit_envelope.rs`, `crates/orbit-engine/src/activity_job/audit_writer.rs` |  |
+| `backend: cli` runtime path | `crates/orbit-engine/src/activity_job/cli_runner/mod.rs` |  |
+| `fsProfile` enforcement | `crates/orbit-policy`, `tool_context_for_activity`, CLI describe/get surfaces |  |
+| Seeded reference activities and pipeline jobs | `crates/orbit-core/assets/activities/`, `crates/orbit-core/assets/jobs/` | |
 
 ---
 
 ## Task References
 
-- **[T20260418-2010]** — Add the first v2 activity runtime scaffolding.
-- **[T20260418-2018]** — Add `JobV2` DAG constructs (`parallel`, `fan_out`, `loop`, `retry`, `when`).
-- **[T20260418-2019]** — Add v2 activity name resolution and pipeline skeleton assets.
-- **[T20260418-2143]** — Wire `V2RuntimeHost` in orbit-core and add `orbit activity run-v2`.
-- **[T20260418-2210]** — Reshape `V2RuntimeHost` to keep `orbit-agent` types out of orbit-core.
-- **[T20260419-0002]** — Add `workspace_path` provenance to the v2 audit envelope.
-- **[T20260419-0104]** — Add `backend: cli` dispatch for v2 `agent_loop`.
-- **[T20260419-0339]** — Add v2 job kinds to the job catalog.
-- **[T20260419-0503]** — Enforce `fsProfile` rules across runtime and CLI surfaces.
-- **[T20260419-0622-3]** — Add `task_gate_pipeline`.
-- **[T20260419-0623]** — Add `task_auto_pipeline`.
-- **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
-- **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
+- Add the first v2 activity runtime scaffolding.
+- Add `JobV2` DAG constructs (`parallel`, `fan_out`, `loop`, `retry`, `when`).
+- Add v2 activity name resolution and pipeline skeleton assets.
+- Wire `V2RuntimeHost` in orbit-core and add `orbit activity run-v2`.
+- Reshape `V2RuntimeHost` to keep `orbit-agent` types out of orbit-core.
+- Add `workspace_path` provenance to the v2 audit envelope.
+- Add `backend: cli` dispatch for v2 `agent_loop`.
+- Add v2 job kinds to the job catalog.
+- Enforce `fsProfile` rules across runtime and CLI surfaces.
+- Add `task_gate_pipeline`.
+- Add `task_auto_pipeline`.
+- Retire v1 assets and drop the transitional v2 naming.
+- Seed activities and workflows on `orbit init`.
 - **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer.
 - **[T20260430-19]** — Shorten the Activity / Job design docs while preserving required structure.
 - **[T20260509-2]** — Split the v2 job executor into responsibility-focused modules without changing runtime behavior.

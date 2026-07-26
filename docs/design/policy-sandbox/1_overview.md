@@ -60,27 +60,27 @@ When the default policy denies workspace `.orbit/**`, the v2 host re-allows only
 
 | Concern | Where it lives | Primary task ID |
 |---------|----------------|-----------------|
-| Policy schema and validation | `crates/orbit-common/src/types/policy_def.rs`, `crates/orbit-common/src/types/resource.rs` | [T20260416-0728] |
-| Allow/deny enum | `crates/orbit-common/src/types/policy_decision.rs` | [T20260426-0622] |
-| Policy facade | `crates/orbit-policy/src/{lib,engine,evaluator,decision}.rs` | [T20260416-0728] |
-| Profile resolution + deny injection | `crates/orbit-common/src/types/policy_def.rs` (`effective_profile`, `check_path`) | [T20260416-0728] |
-| Implicit `unrestricted` materialization | `crates/orbit-core/src/runtime/v2_host/mod.rs` (`tool_context_for_activity`) | [T20260419-0503] |
-| Tool-layer fs enforcement | `crates/orbit-tools/src/builtin/fs/mod.rs` (`enforce_fs_policy`, `emit_fs_event`) | [T20260419-0503] |
-| Activity `fsProfile:` binding | `crates/orbit-engine/src/activity_job/{dispatcher,job_executor,agent_loop_driver}.rs` | [T20260419-0503] |
-| Exec spawn primitive | `crates/orbit-exec/src/{lib,runner,process,sandbox}.rs` | [T20260417-0550] |
-| Process supervision | `crates/orbit-exec/src/supervision/{wait,cleanup,signal,tee}.rs` | [T20260417-0558-4], [T20260417-0558-5] |
-| Filesystem denial audit channel | `crates/orbit-tools/src/lib.rs` (`FsAuditLogger`) → `docs/design/auditability/2_design.md §3` | [T20260426-0605] |
+| Policy schema and validation | `crates/orbit-common/src/types/policy_def.rs`, `crates/orbit-common/src/types/resource.rs` |  |
+| Allow/deny enum | `crates/orbit-common/src/types/policy_decision.rs` |  |
+| Policy facade | `crates/orbit-policy/src/{lib,engine,evaluator,decision}.rs` |  |
+| Profile resolution + deny injection | `crates/orbit-common/src/types/policy_def.rs` (`effective_profile`, `check_path`) |  |
+| Implicit `unrestricted` materialization | `crates/orbit-core/src/runtime/v2_host/mod.rs` (`tool_context_for_activity`) |  |
+| Tool-layer fs enforcement | `crates/orbit-tools/src/builtin/fs/mod.rs` (`enforce_fs_policy`, `emit_fs_event`) |  |
+| Activity `fsProfile:` binding | `crates/orbit-engine/src/activity_job/{dispatcher,job_executor,agent_loop_driver}.rs` |  |
+| Exec spawn primitive | `crates/orbit-exec/src/{lib,runner,process,sandbox}.rs` |  |
+| Process supervision | `crates/orbit-exec/src/supervision/{wait,cleanup,signal,tee}.rs` | |
+| Filesystem denial audit channel | `crates/orbit-tools/src/lib.rs` (`FsAuditLogger`) → `docs/design/auditability/2_design.md §3` |  |
 
 ---
 
 ## Task References
 
-- **[T20260416-0728]** — Align policy contract with runtime enforcement (v2 schema, effective profile resolution).
-- **[T20260417-0550]** — Decompose `orbit-exec` supervision modules.
-- **[T20260417-0558-4]** / **[T20260417-0558-5]** — Harden `orbit-exec` supervision (signal pipe, process-group reaping).
-- **[T20260419-0503]** — Enforce `fsProfiles` across runtime and CLI.
-- **[T20260426-0605]** — Add the auditability design folder cross-linked from §3.
-- **[T20260426-0622]** — Add this policy & sandboxing design folder under claude ownership.
+- Align policy contract with runtime enforcement (v2 schema, effective profile resolution).
+- Decompose `orbit-exec` supervision modules.
+- Harden `orbit-exec` supervision (signal pipe, process-group reaping).
+- Enforce `fsProfiles` across runtime and CLI.
+- Add the auditability design folder cross-linked from §3.
+- Add this policy & sandboxing design folder under claude ownership.
 - **[T20260430-23]** — Shorten the policy sandbox design docs while preserving the shipped contract and ADR history.
 - **[ORB-00129]** — Keep child Orbit runtime write roots narrow under the macOS sandbox while supporting activity-exposed learning, friction, and job-run state tools.
 

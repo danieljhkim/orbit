@@ -7,7 +7,7 @@
     clippy::unwrap_used
 )]
 
-//! Phase 4 prerequisite smoke — T20260418-2019.
+//! Phase 4 prerequisite smoke.
 //!
 //! Exercises:
 //!   A) `V2ActivityCatalog::load_dir` picks up the four new v2 activities
@@ -42,7 +42,7 @@ use orbit_engine::{
 use serde_json::Value;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("v2 name-resolution smoke — T20260418-2019 Phase 4 prereq");
+    println!("v2 name-resolution smoke — Phase 4 prereq");
 
     scenario_a_catalog_loads_new_activities()?;
     scenario_b_target_ref_resolves()?;

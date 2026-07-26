@@ -26,7 +26,7 @@ Auditability is split across five channels:
 4. **Global tracing events.** Redacted JSONL under `~/.orbit/state/logs/orbit.jsonl`.
 5. **Invocation metrics.** SQLite records keyed by job run, activity, task, agent, model, usage, and tool-call summaries.
 
-The split is deliberate: command rows stay compact and queryable; envelopes preserve workflow structure; loop audit preserves provider/tool detail; tracing gives operators a live feed before workspace context exists; metrics answer cost and scoreboard questions without scraping transcripts. [T20260426-0519] moved file-backed run traces under `.orbit/state/audit/` while command audit rows remained in SQLite.
+The split is deliberate: command rows stay compact and queryable; envelopes preserve workflow structure; loop audit preserves provider/tool detail; tracing gives operators a live feed before workspace context exists; metrics answer cost and scoreboard questions without scraping transcripts. File-backed run traces live under `.orbit/state/audit/` while command audit rows remain in SQLite.
 
 ---
 
@@ -61,7 +61,7 @@ Some runtime paths write targeted command-audit rows directly:
 
 These producers share the SQLite schema and must preserve the same status, target, actor, and redaction expectations as CLI rows. Prescriptive coverage expectations live in [specs/coverage-matrix.md](./specs/coverage-matrix.md).
 
-After [T20260427-0023], selected canonical stores also project live tracing events: filesystem policy denials still write FS audit events, proc-spawn allowlist denials still return `OrbitError::PolicyDenied`, and each path also emits a redacted `orbit.policy.deny` event. Friction reports are records under `.orbit/frictions/` via [T20260510-13], not task lifecycle events or precomputed scoreboard updates; [ORB-00062] adds explicit record triage metadata (`open`, `triaged`, `resolved`) and dashboard/API mutation surfaces for status and tags.
+Selected canonical stores also project live tracing events: filesystem policy denials still write FS audit events, proc-spawn allowlist denials still return `OrbitError::PolicyDenied`, and each path also emits a redacted `orbit.policy.deny` event. Friction reports are records under `.orbit/frictions/`, not task lifecycle events or precomputed scoreboard updates; [ORB-00062] adds explicit record triage metadata (`open`, `triaged`, `resolved`) and dashboard/API mutation surfaces for status and tags.
 
 ---
 
@@ -71,7 +71,7 @@ After [T20260427-0023], selected canonical stores also project live tracing even
 
 `V2AuditWriter` in `crates/orbit-engine/src/activity_job/audit_writer.rs` assigns event ids, maintains per-thread parent stacks, emits through `V2JsonlSink`, keeps a smoke-verification snapshot, and exposes the inner loop sink for provider/tool events. CLI-launched v2 runs stamp envelope `agent_identity` as `system`; concrete agent identity lives in activity configuration, CLI invocation events, and invocation metrics.
 
-`crates/orbit-engine/src/activity_job/jsonl_sink.rs` appends one JSON object per line under `v2_loop/` and flushes per write. `crates/orbit-core/src/runtime/run_audit.rs` is the read-side accessor after [T20260426-0709], deriving activity DAG `step.id` values from `parent_event_id` ancestry and resolving CLI stdout/stderr blob references for `orbit run logs`. After [T20260508-14], the same accessor tolerates malformed read-side JSONL lines and missing blobs for dashboard inspection, returning partial per-step CLI invocation records with run id, event id, timestamp, step index, exit status, timeout, duration, provider, blob refs, and bounded stdout/stderr material.
+`crates/orbit-engine/src/activity_job/jsonl_sink.rs` appends one JSON object per line under `v2_loop/` and flushes per write. `crates/orbit-core/src/runtime/run_audit.rs` is the read-side accessor, deriving activity DAG `step.id` values from `parent_event_id` ancestry and resolving CLI stdout/stderr blob references for `orbit run logs`. After [T20260508-14], the same accessor tolerates malformed read-side JSONL lines and missing blobs for dashboard inspection, returning partial per-step CLI invocation records with run id, event id, timestamp, step index, exit status, timeout, duration, provider, blob refs, and bounded stdout/stderr material.
 
 ---
 
@@ -136,9 +136,9 @@ After [T20260510-13] and [ORB-00062], friction reporting is outside the task lif
 
 ## 9. Global Process Tracing JSONL
 
-`crates/orbit-common/src/utility/logging.rs` installs a default subscriber with one `EnvFilter`, stderr formatting, and an optional non-blocking JSONL file layer at `~/.orbit/state/logs/orbit.jsonl` after [T20260426-2343]. The retained `WorkerGuard` lets routine event emission avoid synchronous disk writes.
+`crates/orbit-common/src/utility/logging.rs` installs a default subscriber with one `EnvFilter`, stderr formatting, and an optional non-blocking JSONL file layer at `~/.orbit/state/logs/orbit.jsonl`. The retained `WorkerGuard` lets routine event emission avoid synchronous disk writes.
 
-Each record contains timestamp, level, target, and structured fields. After [T20260426-2349], both stderr and JSONL use `RedactingFields`, which scrubs string values, `Debug`-formatted values, and unstructured messages while preserving numeric and boolean JSON types. This global feed is the live landing zone for subprocess output [T20260426-2313], policy-denial and friction projections [T20260427-0023], and other `tracing` events emitted before workspace runtime context exists. After [T20260508-8], CLI subprocess line events include `cwd` when Activity/Job resolved one, matching the audit-started event while omitting the field when the child inherits the parent cwd. It is operational telemetry, not the canonical workflow envelope.
+Each record contains timestamp, level, target, and structured fields. Both stderr and JSONL use `RedactingFields`, which scrubs string values, `Debug`-formatted values, and unstructured messages while preserving numeric and boolean JSON types. This global feed is the live landing zone for subprocess output, policy-denial and friction projections, and other `tracing` events emitted before workspace runtime context exists. After [T20260508-8], CLI subprocess line events include `cwd` when Activity/Job resolved one, matching the audit-started event while omitting the field when the child inherits the parent cwd. It is operational telemetry, not the canonical workflow envelope.
 
 ---
 
@@ -157,17 +157,17 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 
 ## Task References
 
-- **[T20260419-0002]** — Add workspace provenance and v2 audit envelope events for activity/job execution.
-- **[T20260426-0519]** — Move file-backed activity/job audit traces under workspace state.
-- **[T20260426-0526]** — Persist v2 invocation traces for metrics beside audit.
-- **[T20260426-0605]** — Add this auditability design folder and document the current audit architecture.
-- **[T20260426-0705]** — Expose v2 run audit events through `orbit run events` and `orbit run trace`.
-- **[T20260426-0709]** — Align run step selectors on activity `step.id` and move CLI invocation log reading behind orbit-core runtime accessors.
-- **[T20260426-0742]** — Remove duplicate job-level run inspection aliases and keep run inspection under `orbit run`.
-- **[T20260426-2313]** — Stream CLI subprocess stdout/stderr through structured tracing events while retaining the existing audit/blob path.
-- **[T20260426-2343]** — Add the global process tracing JSONL feed at `~/.orbit/state/logs/orbit.jsonl`.
-- **[T20260426-2349]** — Apply tracing-layer redaction before stderr and global JSONL output.
-- **[T20260427-0023]** — Project policy denials and friction task submissions into the global tracing feed.
+- Add workspace provenance and v2 audit envelope events for activity/job execution.
+- Move file-backed activity/job audit traces under workspace state.
+- Persist v2 invocation traces for metrics beside audit.
+- Add this auditability design folder and document the current audit architecture.
+- Expose v2 run audit events through `orbit run events` and `orbit run trace`.
+- Align run step selectors on activity `step.id` and move CLI invocation log reading behind orbit-core runtime accessors.
+- Remove duplicate job-level run inspection aliases and keep run inspection under `orbit run`.
+- Stream CLI subprocess stdout/stderr through structured tracing events while retaining the existing audit/blob path.
+- Add the global process tracing JSONL feed at `~/.orbit/state/logs/orbit.jsonl`.
+- Apply tracing-layer redaction before stderr and global JSONL output.
+- Project policy denials and friction task submissions into the global tracing feed.
 - **[T20260427-43]** — Superseded friction lifecycle scoring with `status: friction` and history-derived counters.
 - **[T20260427-47]** — Allow explicit task attribution correction for `planned_by` and `implemented_by` through task update paths.
 - **[T20260428-4]** — Move tool-invocation audit ownership into the runtime, add the `ToolEntryPoint` discriminator, bracket MCP preflight + dispatch, and deduplicate CLI guard rows.

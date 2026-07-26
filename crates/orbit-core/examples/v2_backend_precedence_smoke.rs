@@ -9,7 +9,7 @@
 
 //! Four precedence smokes for `Backend::Auto` resolution per §3.1.
 //!
-//! AC #2 of T20260419-0104: verify each tier of the flag → env → config →
+//! AC #2: verify each tier of the flag → env → config →
 //! default chain with a separate scenario. Uses the pure
 //! `resolve_backend_precedence` function so no OrbitRuntime / workspace
 //! scaffolding is required.
@@ -18,7 +18,7 @@ use orbit_common::types::activity_job::Backend;
 use orbit_core::command::backend_resolver::{BackendSource, resolve_backend_precedence};
 
 fn main() {
-    println!("v2 backend precedence smoke — T20260419-0104 AC #2");
+    println!("v2 backend precedence smoke — AC #2");
 
     // Flag wins over all lower tiers.
     let r = resolve_backend_precedence(Some(Backend::Cli), Some("http"), Some("http"));

@@ -1193,7 +1193,7 @@ async fn ship_endpoint_rejects_duplicate_task_ids() {
 
     let response = request_ship(
         runtime,
-        Some(json!({ "task_ids": ["T12345678-123456", "T12345678-123456"] })),
+        Some(json!({ "task_ids": ["ORB-00001", "ORB-00001"] })),
     )
     .await;
 

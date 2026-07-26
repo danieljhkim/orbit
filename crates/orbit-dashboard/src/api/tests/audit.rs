@@ -32,7 +32,7 @@ fn seed_audit_event(
             subcommand: Some("update".to_string()),
             tool_name: Some(tool_name.to_string()),
             target_type: Some("task".to_string()),
-            target_id: Some("T00000000-000000".to_string()),
+            target_id: Some("example-task-id".to_string()),
             role: role.to_string(),
             status,
             exit_code: match status {

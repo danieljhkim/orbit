@@ -237,7 +237,7 @@ with `k = 60` (the published-paper default that has held up across many evaluati
 Three queries that motivate the choice:
 
 - **"slow embed inference"** — semantic wins; lexical misses tasks titled "BGE latency degraded after Nomic swap."
-- **"T20260421-0528"** — lexical wins; semantic returns near-random because the literal token has no semantic neighborhood.
+- **"literal task-id token"** — lexical wins; semantic returns near-random because the literal token has no semantic neighborhood.
 - **"file: orbit-store/src/file/task_store/layout.rs"** — lexical wins; literal path tokens dominate.
 
 Either retriever alone has a failure mode the other doesn't. RRF resolves both at the cost of one extra SQL query per search ([4_decisions.md ADR-004](./4_decisions.md)).
@@ -282,7 +282,7 @@ If the companion is not installed, task-hybrid search, `orbit search similar <ta
   "results": [
     {
       "source_kind": "task",
-      "source_id": "T20260421-0528",
+      "source_id": "literal-task-id",
       "best_field": "plan",
       "snippet": "...",
       "score": 0.87,

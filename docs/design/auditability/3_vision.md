@@ -23,7 +23,7 @@ This document captures the questions that remain before Orbit's auditability sto
 3. **Auditing audit reads.** Should `orbit audit` reads, exports, and prunes remain outside the guard to avoid recursion, or be recorded through a separate path?
 4. **Stable identity across channels.** MCP now records trusted caller/process machine identity separately from managed agent identity; what joins those fields to human CLI usage, task attribution, v2 envelopes, metrics, commits, and PR metadata?
 5. **Stdout/stderr retention.** The command schema has truncated stdout/stderr fields, but most paths leave them empty. What retention policy should exist before broad capture?
-6. **JSONL migration.** [T20260426-0519] moved run traces to `.orbit/state/audit/`; should old `.orbit/audit/` files be migrated, ignored, or read through a legacy fallback?
+6. **JSONL migration.** Run traces now live under `.orbit/state/audit/`; should old `.orbit/audit/` files be migrated, ignored, or read through a legacy fallback?
 7. **Replay payload depth.** When are redacted verbatim prompts/responses required, and when are summaries enough?
 8. **Uniform denials.** Can filesystem denials, tool allowlist denials, task-lock conflicts, and gate starvation share one audit shape?
 9. **Coverage enforcement.** What lint or tests should fail review when a new mutation path lacks audit coverage?
@@ -91,10 +91,10 @@ External reference categories:
 
 ## Task References
 
-- **[T20260419-0002]** — Add workspace provenance and v2 audit envelope events for activity/job execution.
-- **[T20260426-0519]** — Move file-backed activity/job audit traces under workspace state.
-- **[T20260426-0526]** — Persist v2 invocation traces for metrics beside audit.
-- **[T20260426-0605]** — Add this auditability design folder and name future auditability questions.
+- Add workspace provenance and v2 audit envelope events for activity/job execution.
+- Move file-backed activity/job audit traces under workspace state.
+- Persist v2 invocation traces for metrics beside audit.
+- Add this auditability design folder and name future auditability questions.
 - **[T20260430-20]** — Shorten the auditability docs while preserving required guarantees.
 - **[ORB-00090]** — Aligned auditability identity wording with the family-as-identity convention.
 - **[ORB-10228]** — Established trusted MCP caller/process provenance and anti-spoofing.

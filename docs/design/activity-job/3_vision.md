@@ -12,7 +12,7 @@ tags: ["activity-job"]
 
 # Activity / Job — Vision
 
-This document pressure-tests where the Activity / Job substrate may go next. It starts from the v2 runtime shipped across [T20260418-2010], [T20260418-2018], [T20260418-2143], [T20260418-2210], [T20260419-0104], and [T20260419-2156]. [2_design.md](./2_design.md) is the current contract; this file asks what should harden, collapse, or disappear.
+This document pressure-tests where the Activity / Job substrate may go next. It starts from the shipped v2 runtime. [2_design.md](./2_design.md) is the current contract; this file asks what should harden, collapse, or disappear.
 
 ---
 
@@ -24,7 +24,7 @@ README frames tasks, jobs, and activities as substrate. Should Orbit keep this l
 
 ### 1.2 Should `target:` grow beyond `activity:<name>`?
 
-`TargetRef` is namespace-prefixed, but only `activity:<name>` exists after [T20260418-2019]. Do nested job refs, subroutine refs, or cross-workspace refs help, or would they turn this layer into a generic workflow engine?
+`TargetRef` is namespace-prefixed, but only `activity:<name>` exists. Do nested job refs, subroutine refs, or cross-workspace refs help, or would they turn this layer into a generic workflow engine?
 
 ### 1.3 Is the provider model too closed-set?
 
@@ -32,7 +32,7 @@ The schema names multiple providers, but the HTTP transport path is still effect
 
 ### 1.4 Should Orbit enforce tool allowlists on the CLI backend?
 
-The gap from [T20260419-0104] is significant: HTTP enforces, CLI advises. Does `backend: cli` need a wrapper so `tools:` means the same thing everywhere?
+The gap is significant: HTTP enforces, CLI advises. Does `backend: cli` need a wrapper so `tools:` means the same thing everywhere?
 
 ### 1.5 Which limits should stay structural literals?
 
@@ -40,15 +40,15 @@ The gap from [T20260419-0104] is significant: HTTP enforces, CLI advises. Does `
 
 ### 1.6 What is the right audit landing zone?
 
-The v2 envelope from [T20260419-0002] makes runs traversable, but the full HTTP transcript still lives in the sibling loop sink. Should review converge on one query surface even if files remain separate?
+The v2 envelope makes runs traversable, but the full HTTP transcript still lives in the sibling loop sink. Should review converge on one query surface even if files remain separate?
 
 ### 1.7 How much more special-casing belongs in ActivityV2?
 
-Groundhog once had a dedicated kind ([T20260420-0510-2]) but was removed as unused in [ORB-10332], leaving only `agent_loop` and `deterministic`. If more modes arrive, do we add variants again, or is churn like that a sign the abstraction should stay minimal?
+Groundhog once had a dedicated kind but was removed as unused in [ORB-10332], leaving only `agent_loop` and `deterministic`. If more modes arrive, do we add variants again, or is churn like that a sign the abstraction should stay minimal?
 
 ### 1.8 What should become the canonical reference corpus?
 
-Seeded assets added in [T20260419-2347] and extended in [T20260419-0622-3] and [T20260419-0623] already act as executable docs. Should they become the main reference set, or do we need smaller spec-only exemplars?
+Seeded assets already act as executable docs. Should they become the main reference set, or do we need smaller spec-only exemplars?
 
 ---
 
@@ -82,7 +82,7 @@ Orbit's `fsProfile` attachment and the HTTP/CLI enforcement split make this conc
 
 - Mature workflow systems almost always ship example pipelines, starter templates, or scaffolded defaults.
 
-Orbit's seeded activities and jobs from [T20260419-2347] are already more than examples; they are the closest thing to an executable spec corpus.
+Orbit's seeded activities and jobs are already more than examples; they are the closest thing to an executable spec corpus.
 
 ---
 
@@ -92,8 +92,8 @@ Soft claims only:
 
 - **Load-time normalization as a public contract.** Target-ref resolution, backend concretization, and loop/session rejection are part of what a job *is*, not just hidden parser details.
 - **Backend choice separated from provider choice.** Orbit treats `backend: http|cli|auto` and `provider: ...` as orthogonal schema fields, then makes mismatches explicit instead of silently recovering.
-- **A two-layer audit tree tied to repo provenance.** The v2 envelope from [T20260419-0002] gives runs, steps, activities, and workspace origin a stable skeleton while still preserving the underlying loop transcript and blobs.
-- **Seeded workflows as load-bearing contracts.** The shipped jobs from [T20260419-0622-3] and [T20260419-0623] are not toy examples; they are how the control-flow substrate proves itself against real Orbit work.
+- **A two-layer audit tree tied to repo provenance.** The v2 envelope gives runs, steps, activities, and workspace origin a stable skeleton while still preserving the underlying loop transcript and blobs.
+- **Seeded workflows as load-bearing contracts.** The shipped jobs are not toy examples; they are how the control-flow substrate proves itself against real Orbit work.
 
 None of these are research contributions. Activity / Job earns its keep only if it stays understandable, local, and inspectable while the product evolves.
 
@@ -121,17 +121,17 @@ None of these are research contributions. Activity / Job earns its keep only if 
 
 ## Task References
 
-- **[T20260418-2010]** — Add the first v2 activity runtime scaffolding.
-- **[T20260418-2018]** — Add `JobV2` DAG constructs (`parallel`, `fan_out`, `loop`, `retry`, `when`).
-- **[T20260418-2019]** — Add v2 activity name resolution and pipeline skeleton assets.
-- **[T20260418-2143]** — Wire `V2RuntimeHost` in orbit-core and add `orbit activity run-v2`.
-- **[T20260418-2210]** — Reshape `V2RuntimeHost` to keep `orbit-agent` types out of orbit-core.
-- **[T20260419-0002]** — Add `workspace_path` provenance to the v2 audit envelope.
-- **[T20260419-0104]** — Add `backend: cli` dispatch for v2 `agent_loop`.
-- **[T20260419-0622-3]** — Add `task_gate_pipeline`.
-- **[T20260419-0623]** — Add `task_auto_pipeline`.
-- **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
-- **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
+- Add the first v2 activity runtime scaffolding.
+- Add `JobV2` DAG constructs (`parallel`, `fan_out`, `loop`, `retry`, `when`).
+- Add v2 activity name resolution and pipeline skeleton assets.
+- Wire `V2RuntimeHost` in orbit-core and add `orbit activity run-v2`.
+- Reshape `V2RuntimeHost` to keep `orbit-agent` types out of orbit-core.
+- Add `workspace_path` provenance to the v2 audit envelope.
+- Add `backend: cli` dispatch for v2 `agent_loop`.
+- Add `task_gate_pipeline`.
+- Add `task_auto_pipeline`.
+- Retire v1 assets and drop the transitional v2 naming.
+- Seed activities and workflows on `orbit init`.
 - **[T20260430-19]** — Shorten the Activity / Job design docs while preserving required structure.
 - **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer.
 

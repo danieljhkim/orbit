@@ -436,7 +436,7 @@ mod subscriber {
                 provider = "codex",
                 stream = "stderr",
                 job_run_id = "jrun-123",
-                task_id = "T20260426-2343",
+                task_id = "ORB-00001",
                 line = "hello"
             );
         })
@@ -448,7 +448,7 @@ mod subscriber {
         assert_eq!(fields["provider"], "codex");
         assert_eq!(fields["stream"], "stderr");
         assert_eq!(fields["job_run_id"], "jrun-123");
-        assert_eq!(fields["task_id"], "T20260426-2343");
+        assert_eq!(fields["task_id"], "ORB-00001");
         assert_eq!(fields["line"], "hello");
     }
 

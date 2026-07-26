@@ -61,4 +61,4 @@ Process supervision is full of subtle deadlocks (full pipe buffers, orphan grand
 
 ## Agent Signature
 
-Last revised by claude / claude-opus-4-7 for [T20260426-0622].
+Last revised by claude / claude-opus-4-7.

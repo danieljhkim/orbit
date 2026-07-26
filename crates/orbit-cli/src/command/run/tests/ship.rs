@@ -55,7 +55,7 @@ fn ship_auto_mode_preserves_local_mode_and_base_override() {
 #[test]
 fn explicit_ship_uses_unified_gated_workflow_with_pr_mode() {
     let plan = build_plan(
-        &ship_args(&["T20260425-2010", "T20260425-2011"], ShipMode::Pr, None),
+        &ship_args(&["ORB-00001", "ORB-00002"], ShipMode::Pr, None),
         "agent-main",
     )
     .expect("build plan");
@@ -66,7 +66,7 @@ fn explicit_ship_uses_unified_gated_workflow_with_pr_mode() {
         json!({
             "mode": "pr",
             "base_branch": "agent-main",
-            "task_ids": ["T20260425-2010", "T20260425-2011"],
+            "task_ids": ["ORB-00001", "ORB-00002"],
         })
     );
 }
@@ -74,7 +74,7 @@ fn explicit_ship_uses_unified_gated_workflow_with_pr_mode() {
 #[test]
 fn explicit_ship_preserves_local_mode_and_base_override() {
     let plan = build_plan(
-        &ship_args(&["T20260425-2010"], ShipMode::Local, Some("main")),
+        &ship_args(&["ORB-00001"], ShipMode::Local, Some("main")),
         "agent-main",
     )
     .expect("build plan");
@@ -85,14 +85,14 @@ fn explicit_ship_preserves_local_mode_and_base_override() {
         json!({
             "mode": "local",
             "base_branch": "main",
-            "task_ids": ["T20260425-2010"],
+            "task_ids": ["ORB-00001"],
         })
     );
 }
 
 #[test]
 fn ship_threads_explicit_review_controls() {
-    let mut args = ship_args(&["T20260425-2010"], ShipMode::Pr, None);
+    let mut args = ship_args(&["ORB-00001"], ShipMode::Pr, None);
     args.review = true;
     args.review_crew = Some("opus-review".to_string());
 
@@ -104,7 +104,7 @@ fn ship_threads_explicit_review_controls() {
 
 #[test]
 fn ship_rejects_enabled_review_without_explicit_crew() {
-    let mut args = ship_args(&["T20260425-2010"], ShipMode::Pr, None);
+    let mut args = ship_args(&["ORB-00001"], ShipMode::Pr, None);
     args.review = true;
 
     let error = build_plan(&args, "agent-main").expect_err("review crew is required");
@@ -118,7 +118,7 @@ fn ship_rejects_enabled_review_without_explicit_crew() {
 fn ship_local_deprecation_returns_legacy_error() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let err = LegacyShipLocalCommand {
-        task_ids: vec!["T20260425-2010".to_string()],
+        task_ids: vec!["ORB-00001".to_string()],
         base: None,
         json: false,
     }
@@ -170,7 +170,7 @@ fn ship_rejects_removed_auto_positional_form() {
 #[test]
 fn ship_rejects_duplicate_task_ids() {
     let err = build_plan(
-        &ship_args(&["T20260425-2010", "T20260425-2010"], ShipMode::Pr, None),
+        &ship_args(&["ORB-00001", "ORB-00001"], ShipMode::Pr, None),
         "agent-main",
     )
     .expect_err("duplicate task IDs should fail");

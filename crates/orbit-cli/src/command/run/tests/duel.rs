@@ -8,7 +8,7 @@ use super::super::support::dispatch_workflow;
 
 fn duel_plan_args(base: Option<&str>, wait: bool) -> DuelPlanCommand {
     DuelPlanCommand {
-        task_id: "T20260425-2010".to_string(),
+        task_id: "ORB-00001".to_string(),
         base: base.map(str::to_string),
         wait,
         json: false,
@@ -36,8 +36,8 @@ fn duel_plan_uses_explicit_base_when_flag_set() {
     assert_eq!(
         plan.input,
         json!({
-            "task_id": "T20260425-2010",
-            "task_ids": ["T20260425-2010"],
+            "task_id": "ORB-00001",
+            "task_ids": ["ORB-00001"],
             "base_branch": "main",
         })
     );
@@ -60,8 +60,8 @@ fn duel_plan_falls_back_to_config_base_when_flag_absent() {
     assert_eq!(
         plan.input,
         json!({
-            "task_id": "T20260425-2010",
-            "task_ids": ["T20260425-2010"],
+            "task_id": "ORB-00001",
+            "task_ids": ["ORB-00001"],
             "base_branch": "agent-main",
         })
     );

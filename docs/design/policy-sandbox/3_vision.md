@@ -91,11 +91,11 @@ External reference categories:
 
 ## Task References
 
-- **[T20260416-0728]** — Established the v2 policy contract that this document extends.
-- **[T20260419-0503]** — Made `fsProfiles` enforcement runtime-wide.
-- **[T20260417-0558-4]** / **[T20260417-0558-5]** — Hardened the supervision contract that §1.11 wants to evolve.
-- **[T20260426-0605]** — Auditability folder linked from §1.10.
-- **[T20260426-0622]** — Add this folder and name the open questions.
+- Established the v2 policy contract that this document extends.
+- Made `fsProfiles` enforcement runtime-wide.
+- Hardened the supervision contract that §1.11 wants to evolve.
+- Auditability folder linked from §1.10.
+- Add this folder and name the open questions.
 - **[T20260430-23]** — Shorten the policy sandbox design docs while preserving the shipped contract and ADR history.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

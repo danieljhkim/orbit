@@ -7,7 +7,7 @@
     clippy::unwrap_used
 )]
 
-//! Round-trip smoke for v2 reference YAMLs (closes T20260418-2010 AC1).
+//! Round-trip smoke for v2 reference YAMLs (AC1).
 //!
 //! For each v2 reference under `crates/orbit-core/assets/activities/`:
 //!   1. Load the YAML through `load_activity_asset` → `ActivityV2`.

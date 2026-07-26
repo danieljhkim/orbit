@@ -7,7 +7,7 @@
     clippy::unwrap_used
 )]
 
-//! v2 `backend: cli` smoke suite — T20260419-0104.
+//! v2 `backend: cli` smoke suite.
 //!
 //! Exercises the new §3.1 dispatch path, the §7.6 envelope events, the §6
 //! harness-delegated allowlist advisory, the §3.2 loader rejection, argv
@@ -43,7 +43,7 @@ use serde_json::Value;
 use tempfile::TempDir;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("v2 cli-backend smoke — T20260419-0104");
+    println!("v2 cli-backend smoke");
 
     scenario_a_cli_dispatch_emits_envelope_events()?;
     scenario_b_argv_redaction()?;

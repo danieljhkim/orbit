@@ -2,7 +2,7 @@
 //!
 //! Feeds a scripted sequence of `TurnResponse`s back in order, so the
 //! `AgentLoop` can drive a full turn cycle without an outbound HTTP call or
-//! credentials. Used by Phase 2b's tool-denial smoke (T20260418-2052 AC4):
+//! credentials. Used by Phase 2b's tool-denial smoke to verify AC4:
 //! the replay emits a `tool_use` for a disallowed tool on the first turn,
 //! allowing `EnforcedAuditSink` to observe the dispatch and record the
 //! `tool.denied` event.

@@ -18,7 +18,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-001 — Dedicated auditability design ownership
 
-**Status:** Accepted · 2026-04 · [T20260426-0605]
+**Status:** Accepted · 2026-04
 
 **Context.** Auditability is a primary Orbit feature, but its implementation and rationale were spread across README prose, Activity / Job docs, SQLite audit code, loop audit code, and redaction utilities.
 
@@ -30,7 +30,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-002 — Command audit rows stay compact and queryable
 
-**Status:** Accepted · 2026-04 · [T20260426-0605]
+**Status:** Accepted · 2026-04
 
 **Context.** CLI commands need durable, filterable history across processes, but full provider payloads would make routine queries noisy and expensive.
 
@@ -42,7 +42,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-003 — V2 run structure and loop transcript detail are separate audit layers
 
-**Status:** Accepted · 2026-04 · [T20260419-0002]
+**Status:** Accepted · 2026-04
 
 **Context.** Activity/job execution needs run, step, retry, fan-out, loop, and activity structure. Provider loops need HTTP, tool-call, payload, and session detail.
 
@@ -54,7 +54,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-004 — File-backed run traces are workspace-local state
 
-**Status:** Accepted · 2026-04 · [T20260426-0519]
+**Status:** Accepted · 2026-04
 
 **Context.** V2 JSONL and blob traces are runtime artifacts, but their old first-level `.orbit/audit/` path blurred command audit, workspace state, and authored docs.
 
@@ -66,7 +66,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-005 — Redaction is a write-side durability boundary
 
-**Status:** Accepted · 2026-04 · [T20260426-0605]
+**Status:** Accepted · 2026-04
 
 **Context.** Audit needs useful payloads for reproducibility, but raw provider keys or sensitive environment-derived values would make the trail unsafe by default.
 
@@ -78,7 +78,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-006 — Invocation metrics are audit-adjacent primary records
 
-**Status:** Accepted · 2026-04 · [T20260426-0526]
+**Status:** Accepted · 2026-04
 
 **Context.** V2 job execution emits audit JSONL, but metrics and scoreboards read the invocation store. Scraping audit logs would couple reporting to transcript format and retention.
 
@@ -104,7 +104,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-007 — Run trace inspection stays separate from command audit
 
-**Status:** Accepted · 2026-04 · [T20260426-0705], [T20260426-0709]
+**Status:** Accepted · 2026-04
 
 **Context.** Operators need first-class commands for activity/job envelope JSONL, but `orbit audit` is the compact SQLite command-audit surface.
 
@@ -116,9 +116,9 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-008 — Process tracing feed is global JSONL
 
-**Status:** Accepted · 2026-04 · [T20260426-2343]
+**Status:** Accepted · 2026-04
 
-**Context.** CLI subprocess output emits structured tracing events after [T20260426-2313], but subscriber initialization happens before Orbit resolves a workspace root.
+**Context.** CLI subprocess output emits structured tracing events, but subscriber initialization happens before Orbit resolves a workspace root.
 
 **Decision.** Append process-level tracing events to `~/.orbit/state/logs/orbit.jsonl` through the default subscriber using the same `EnvFilter` as stderr and a retained non-blocking writer.
 
@@ -128,7 +128,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-009 — Tracing redaction is enforced by field formatting
 
-**Status:** Accepted · 2026-04 · [T20260426-2349]
+**Status:** Accepted · 2026-04
 
 **Context.** A durable JSONL feed made tracing output persistent, but call-site helpers only protected emitters that remembered to use them.
 
@@ -140,7 +140,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-010 — Canonical audit stores project high-signal events to tracing
 
-**Status:** Accepted · 2026-04 · [T20260427-0023]
+**Status:** Accepted · 2026-04
 
 **Context.** Policy denials and friction submissions reached canonical stores or return paths, but operators tailing the live feed could miss them.
 
@@ -380,17 +380,17 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## Task References
 
-- **[T20260419-0002]** — Add workspace provenance and v2 audit envelope events for activity/job execution.
-- **[T20260426-0519]** — Move file-backed activity/job audit traces under workspace state.
-- **[T20260426-0526]** — Persist v2 invocation traces for metrics beside audit.
+- Add workspace provenance and v2 audit envelope events for activity/job execution.
+- Move file-backed activity/job audit traces under workspace state.
+- Persist v2 invocation traces for metrics beside audit.
 - **[ORB-00190]** — Retire the metrics CLI and make dashboard endpoints canonical for invocation metrics.
-- **[T20260426-0605]** — Add this auditability design folder and record initial ADRs.
-- **[T20260426-0705]** — Expose v2 run audit events through `orbit run events` and `orbit run trace`.
-- **[T20260426-0709]** — Align run step selectors on activity `step.id` and move CLI invocation log reading behind orbit-core runtime accessors.
-- **[T20260426-2313]** — Stream CLI subprocess stdout/stderr through structured tracing events.
-- **[T20260426-2343]** — Add the global process tracing JSONL feed at `~/.orbit/state/logs/orbit.jsonl`.
-- **[T20260426-2349]** — Apply tracing-layer redaction before stderr and global JSONL output.
-- **[T20260427-0023]** — Project policy denials and friction task submissions into the global tracing feed.
+- Add this auditability design folder and record initial ADRs.
+- Expose v2 run audit events through `orbit run events` and `orbit run trace`.
+- Align run step selectors on activity `step.id` and move CLI invocation log reading behind orbit-core runtime accessors.
+- Stream CLI subprocess stdout/stderr through structured tracing events.
+- Add the global process tracing JSONL feed at `~/.orbit/state/logs/orbit.jsonl`.
+- Apply tracing-layer redaction before stderr and global JSONL output.
+- Project policy denials and friction task submissions into the global tracing feed.
 - **[T20260427-27]** — Close out the unified-log story: job lifecycle dual-write, library print migration with workspace lint gate, and `orbit log tail` reader CLI.
 - **[T20260427-43]** — Add `status: friction`, creation-time friction routing, migration, and history-derived friction bounty refresh.
 - **[T20260427-44]** — Add shared log formatter extraction and dashboard backend `/api/log` snapshot/SSE endpoints.

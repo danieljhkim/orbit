@@ -220,14 +220,14 @@ non-empty on Linux CI.
 
 ## Task References
 
-- **[T20260416-0728]** — Align policy contract with runtime enforcement; established v2 schema and effective-profile resolution.
-- **[T20260417-0550]** — Decompose `orbit-exec` supervision modules.
-- **[T20260417-0557]** — Harden Orbit path boundaries and dependency advisories.
-- **[T20260417-0558-4]** / **[T20260417-0558-5]** — Harden `orbit-exec` supervision (signal-pipe handler and process-group reaping).
-- **[T20260419-0503]** — Enforce `fsProfiles` across runtime and CLI; introduced the `tool_context_for_activity` materialization.
-- **[T20260328-221810]** — Agent subprocess termination on Ctrl+C / job-run cancel; predecessor of the current signal-pipe design.
-- **[T20260426-0605]** — Auditability design folder cross-linked from §5.
-- **[T20260426-0622]** — Add this policy & sandboxing design folder and document the current contract.
+- Align policy contract with runtime enforcement; established v2 schema and effective-profile resolution.
+- Decompose `orbit-exec` supervision modules.
+- Harden Orbit path boundaries and dependency advisories.
+- Harden `orbit-exec` supervision (signal-pipe handler and process-group reaping).
+- Enforce `fsProfiles` across runtime and CLI; introduced the `tool_context_for_activity` materialization.
+- Agent subprocess termination on Ctrl+C / job-run cancel; predecessor of the current signal-pipe design.
+- Auditability design folder cross-linked from §5.
+- Add this policy & sandboxing design folder and document the current contract.
 - **[T20260427-51]** — Wrap cli-backend agent invocations in `sandbox-exec` on macOS.
 - **[T20260428-10]** — Allow Codex CLI state writes under the macOS sandbox.
 - **[T20260428-14]** — Extend the macOS sandbox state-dir allowance to Claude (`~/.claude` / `$CLAUDE_CONFIG_DIR`) and Gemini (`~/.gemini`), and document why side-write roots remain Codex-only.

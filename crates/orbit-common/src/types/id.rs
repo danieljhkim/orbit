@@ -1,4 +1,4 @@
-/// A human-readable, deterministic identifier string (e.g. `"T20260321-192339"`).
+/// A human-readable, deterministic identifier string (e.g. `"example-id"`).
 ///
 /// This is a type alias rather than a newtype so it serializes and deserializes
 /// as a plain string without needing custom serde impls. All IDs are generated

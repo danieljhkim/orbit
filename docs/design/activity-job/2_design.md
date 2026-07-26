@@ -24,7 +24,7 @@ Activity / Job assets are `schemaVersion: 2` YAML envelopes with:
 - `metadata.name`
 - typed `spec`
 
-The loader in `crates/orbit-common/src/types/activity_job/asset_loader.rs` reads the schema header first, then parses the full envelope into `ActivityV2` or `JobV2`; that shape arrived in [T20260418-2010]. `schemaVersion: 1` is retired after [T20260419-2156], and `kind` mismatches are structural errors, so an activity cannot dispatch as a job or vice versa.
+The loader in `crates/orbit-common/src/types/activity_job/asset_loader.rs` reads the schema header first, then parses the full envelope into `ActivityV2` or `JobV2`; that shape is now the contract. `schemaVersion: 1` is retired, and `kind` mismatches are structural errors, so an activity cannot dispatch as a job or vice versa.
 
 ---
 
@@ -55,7 +55,7 @@ The common `agent_loop` fields are:
 - `require_response_envelope` (default `false`; opt in only when downstream
   templates consume structured response fields)
 
-A former `Groundhog(GroundhogSpec)` variant (a sibling activity kind from [T20260420-0510-2]) was removed as unused in [ORB-10332]; activity specs are now only `agent_loop` and `deterministic`.
+A former `Groundhog(GroundhogSpec)` variant was removed as unused in [ORB-10332]; activity specs are now only `agent_loop` and `deterministic`.
 
 `DeterministicSpec` is just `{ action, config }`. A fourth variant, `Shell(ShellSpec)`, was removed in [ORB-00374] as a fail-closed security fix (see [ADR-0194](./4_decisions.md)); `type: shell` now fails to deserialize at load rather than spawning an unsandboxed subprocess.
 
@@ -71,7 +71,7 @@ A former `Groundhog(GroundhogSpec)` variant (a sibling activity kind from [T2026
 - `kind`
 - `steps`
 
-`JobKind` is currently `workflow` or `subroutine`, added in [T20260419-0339]. The more interesting surface is the step grammar from [T20260418-2018]:
+`JobKind` is currently `workflow` or `subroutine`. The more interesting surface is the step grammar:
 
 - every step has `id`
 - every step may add `when`
@@ -88,13 +88,13 @@ The body is one of:
 
 `TargetStep` is the executor-facing form. It inlines an `ActivityV2Spec` plus optional `fsProfile`, `default_input`, `timeout_seconds`, and optional `session`. `TargetRef` is the authoring-facing form: `target: activity:<name>`. It is resolved away before execution.
 
-Step-local input layering landed earlier, but the shipped job-level `default_input` behavior changed in [T20260423-0445]:
+Step-local input layering landed earlier, but the shipped job-level `default_input` behavior changed:
 
 - if the caller passes `null`, the run input becomes `job.default_input`
 - if both the caller input and `job.default_input` are JSON objects, Orbit performs a shallow merge and caller-supplied keys win on conflict
 - if the caller input is any non-object JSON value, it replaces `job.default_input` entirely
 
-Step-level `default_input` is still recursively template-rendered before dispatch. Support landed in [T20260413-0141], entered the v2 DAG path in [T20260418-2018], and was corrected for job-level merges in [T20260423-0445].
+Step-level `default_input` is still recursively template-rendered before dispatch. The behavior now applies consistently across the v2 DAG path and job-level merges.
 
 ---
 
@@ -102,7 +102,7 @@ Step-level `default_input` is still recursively template-rendered before dispatc
 
 orbit-core normalizes raw YAML before dispatch.
 
-Job catalog listing uses `MergeByKey` precedence after [T20260425-0204]: `ORBIT_JOB_DIR` / `ORBIT_V2_JOB_DIR` entries first, then workspace jobs, then global seeded jobs. The first valid `metadata.name` wins, so listing can show a workspace `task_auto_pipeline` in place of the global default without making the catalog ambiguous. Duplicate names inside one directory tree remain invalid because that single layer would otherwise be ambiguous.
+Job catalog listing uses `MergeByKey` precedence: `ORBIT_JOB_DIR` / `ORBIT_V2_JOB_DIR` entries first, then workspace jobs, then global seeded jobs. The first valid `metadata.name` wins, so listing can show a workspace `task_auto_pipeline` in place of the global default without making the catalog ambiguous. Duplicate names inside one directory tree remain invalid because that single layer would otherwise be ambiguous.
 
 Job execution deliberately has a different order: explicit `ORBIT_JOB_DIR` / `ORBIT_V2_JOB_DIR` entries, then global seeded jobs, then workspace jobs only for names that are not shipped defaults. Thus an explicit environment catalog can opt in to a replacement for testing or smoke runs, but a workspace-local file cannot shadow a shipped job when Orbit resolves that job by name for execution.
 
@@ -129,9 +129,9 @@ Job runs:
 7. Build audit sinks and run id with `system` as the v2 envelope `agent_identity`.
 8. Execute the normalized `JobV2`.
 
-The target-ref pass was added in [T20260418-2019], backend resolution and `run-v2` entrypoints in [T20260418-2143], and CLI backend plus HTTP-only loop/session rejection in [T20260419-0104].
+The target-ref pass, backend resolution, `run-v2` entrypoints, and CLI backend plus HTTP-only loop/session rejection are all part of the normalized dispatch path.
 
-The public CLI now executes activity assets through jobs rather than exposing a standalone `orbit activity run` subcommand. `orbit activity` is an inspection/catalog surface; `orbit job run` and workflow aliases under `orbit run` are the public execution surfaces after [T20260426-0047].
+The public CLI now executes activity assets through jobs rather than exposing a standalone `orbit activity run` subcommand. `orbit activity` is an inspection/catalog surface; `orbit job run` and workflow aliases under `orbit run` are the public execution surfaces.
 
 Some module comments still describe older phase ordering; the authoritative behavior is the orbit-core call path in `crates/orbit-core/src/command/job/exec.rs`.
 
@@ -157,7 +157,7 @@ PR creation is restartable within its own checkpoint. `pr_open` first looks up t
 
 After [ORB-10266], explicit-task PR shipment with independent review enabled preflights the selected review crew and the deployed auto/gate/PR/review assets before inserting the implementation run. `task_pr_pipeline` materializes exactly one `task_review_pipeline` child only after push, PR publication, and task promotion, snapshotting the parent run, tasks, workspace, explicit crew, candidate branch, pushed SHA, and PR identity. Parent retry/resume reuses the child whose persisted `parent_run_id` matches; multiple matches fail closed, and the dispatch step has no recovery retry that could create a second reviewer. The read-only reviewer returns a structured verdict and reviewed SHA; a deterministic guard requires that SHA to equal the published candidate before either the child or waiting parent can succeed. Review-disabled shipment is unchanged, while review-enabled local, auto-discovery, missing-crew, same-assignment, unknown-crew, and unmaterializable configurations fail before implementation. This is [ADR-0233].
 
-The seeded `list_backlog_tasks` deterministic activity starts `task_auto_pipeline`. Automatic mode admits tasks by `status: backlog`. It emits `task_count`, `task_ids`, `tasks`, singleton `bundles`, and an `excluded` array for admitted backlog tasks filtered because their context files overlap `in-progress` or `review` locks. `excluded` covers only lock overlap; status-based admission and `max_tasks` truncation stay silent, and explicit `task_ids` mode omits it. This attribution contract was added in [T20260421-0542-2].
+The seeded `list_backlog_tasks` deterministic activity starts `task_auto_pipeline`. Automatic mode admits tasks by `status: backlog`. It emits `task_count`, `task_ids`, `tasks`, singleton `bundles`, and an `excluded` array for admitted backlog tasks filtered because their context files overlap `in-progress` or `review` locks. `excluded` covers only lock overlap; status-based admission and `max_tasks` truncation stay silent, and explicit `task_ids` mode omits it. This is the attribution contract.
 
 `task_gate_pipeline` reserves a bundle's context files before it dispatches `task_pr_pipeline` or `task_local_pipeline` through `invoke_and_wait`. The reservation owner is the gate run that executed `reserve_locks`, not the child shipment run. Seeded defaults keep `ttl_seconds` aligned with `dispatch_timeout_seconds` at 7200 seconds, so the admission reservation covers the full child wait budget; workspace overrides must preserve `ttl_seconds >= dispatch_timeout_seconds` [T20260427-36]. Owned reservations are engine-cleaned when that owner run reaches a terminal state (`success`, `failed`, `cancelled`, or `timeout`), so correctness does not depend on every workspace override preserving a YAML release step. The seeded deterministic `release_locks` activity still calls `orbit.task.locks.release` after a terminal child wait as an early-release optimization; idempotent terminal cleanup then finds nothing left to release. After [T20260427-34], `invoke_and_wait` remains a raw child-status join primitive, and seeded shipment parents use `pipeline_success_guard` to fail after required cleanup whenever a child run reports anything other than `succeeded`. `task_gate_pipeline` guards the direct child after release; `task_auto_pipeline` guards collected gate results after fan-in and skips that guard for an empty backlog. Unowned/manual reservations remain explicit-release-or-TTL only. TTL is the fallback for abandoned/manual reservations or cases where no terminal cleanup or reserve-pressure reconciliation trigger runs. This lifecycle was tightened in [T20260430-26] and made engine-owned in [T20260505-10].
 
@@ -176,7 +176,7 @@ Reserve conflict checking also performs bounded, opportunistic stale-owned-reser
 3. `[runtime] backend = "<value>"` in config
 4. hard-coded fallback `http`
 
-If any intermediate tier says `auto`, the resolver folds it to the hard-coded fallback so dispatch only sees `http` or `cli`. That rule arrived with `run-v2` in [T20260418-2143] and was hardened for CLI in [T20260419-0104].
+If any intermediate tier says `auto`, the resolver folds it to the hard-coded fallback so dispatch only sees `http` or `cli`. The rule is shared by `run-v2` and the CLI path.
 
 The second rule is the HTTP-only feature constraint. Today that means loop-body cross-iteration `session:` binding: `validate_job_loop_session_backends(...)` rejects a `loop:` step with `session:` when it resolves to `backend: cli`.
 
@@ -198,7 +198,7 @@ Activity / Job is where orbit-core hands work to orbit-engine without depending 
 - build `ToolContext` for an activity, including policy, filesystem audit hooks, and trusted reservation-owner context from the active run id
 - persist invocation traces for completed agent-loop work
 
-That host wiring arrived in [T20260418-2143]. The cleanup in [T20260418-2210] kept the boundary primitive: strings, `Value`, and `ToolContext`, not `orbit-agent` transport objects.
+The host wiring keeps the boundary primitive to strings, `Value`, and `ToolContext`, not `orbit-agent` transport objects.
 
 `dispatch_v2_activity(...)` is the central per-activity entry. It emits `ActivityStarted` / `ActivityFinished` envelope events, then delegates by spec kind:
 
@@ -224,11 +224,11 @@ This path is narrower than the schema: `Provider::has_http_transport()` currentl
 
 The allowlist is enforced in the loop engine on this path. A denied tool becomes a structural `DispatchError::ToolDenied` so the job retry wrapper can classify it as non-retryable.
 
-After [T20260426-0526], completed HTTP loop outcomes become `InvocationTrace` records under the job run ID and step ID, including loop-body `session:` steps.
+Completed HTTP loop outcomes become `InvocationTrace` records under the job run ID and step ID, including loop-body `session:` steps.
 
 ### 7.2 CLI path
 
-The CLI path is driven by `cli_runner.rs`, added in [T20260419-0104]. The flow is:
+The CLI path is driven by `cli_runner.rs`. The flow is:
 
 1. Ask the host for the concrete CLI executor: command plus static executor args.
 2. Build an `Agent` from `orbit-agent`.
@@ -240,9 +240,9 @@ The CLI path is driven by `cli_runner.rs`, added in [T20260419-0104]. The flow i
 8. Emit `CliInvocationFinished` with stdout/stderr blob refs and timeout state.
 9. Parse the captured provider output with the existing Orbit response parser and persist its `InvocationTrace` through the host. After [ORB-10231] / [ADR-0224], envelope parsing is best-effort by default: provider exit status and timeout determine transport success while durable task/review/git artifacts remain authoritative. A valid envelope still projects its result fields, and an invalid or absent envelope is retained as bounded/redacted diagnostic metadata. Activities whose downstream templates require response fields set `require_response_envelope: true`, preserving fail-closed validation for that explicit contract.
 
-After [T20260426-2313], stdout/stderr readers emit line-level `tracing::info!` events while the child runs, carrying `provider`, `stream`, `job_run_id`, `task_id`, and `line`. After [T20260508-8], those events also carry `cwd` when the CLI subprocess has a resolved cwd. After [T20260426-2349], the default tracing subscriber redacts formatted output. The readers still retain original bytes for the existing audit/blob path, so run logs follow blob refs rather than the live feed.
+Stdout/stderr readers emit line-level `tracing::info!` events while the child runs, carrying `provider`, `stream`, `job_run_id`, `task_id`, and `line`. After [T20260508-8], those events also carry `cwd` when the CLI subprocess has a resolved cwd. The default tracing subscriber redacts formatted output. The readers still retain original bytes for the existing audit/blob path, so run logs follow blob refs rather than the live feed.
 
-Executor args are prepended before provider runtime args. For seeded Codex, the subprocess starts as `codex exec --json ...`, not the interactive TUI. [T20260423-0114] exposed the earlier command-only boundary.
+Executor args are prepended before provider runtime args. For seeded Codex, the subprocess starts as `codex exec --json ...`, not the interactive TUI. The executor-args boundary remains explicit.
 
 After [T20260427-48], provider runtime args receive provider config through `V2RuntimeHost`. Static executor definitions keep command-shape flags (`exec --json`); dynamic Codex settings such as sandbox mode, side-write roots, and approval policy stay in the retained provider runtime. Codex approval policy is an exec-compatible config override, not the interactive-only `--ask-for-approval` flag.
 
@@ -320,9 +320,9 @@ The body runs before `break_when`, so steps can populate fields the break expres
 
 ### 8.6 Persisted state for v2 job runs
 
-Persisted pipeline runs (`orbit run ship`, `duel-plan`, `orbit.pipeline.invoke` + `orbit.pipeline.wait`) go through `pipeline_run.rs`. Direct v2 runs (`orbit job run <job-id-or-yaml>`) also create durable `JobRun` bundles after [T20260423-2004-4] under `state/job-runs/<job_id>/<run_id>/`, so `orbit run history -j <job_id>` and `orbit run show <run_id>` can inspect the returned ID. Workflow-specific `orbit run <workflow> list/show` aliases were removed in [T20260425-2010], and duplicate job-level aliases in [T20260426-0742].
+Persisted pipeline runs (`orbit run ship`, `duel-plan`, `orbit.pipeline.invoke` + `orbit.pipeline.wait`) go through `pipeline_run.rs`. Direct v2 runs (`orbit job run <job-id-or-yaml>`) also create durable `JobRun` bundles under `state/job-runs/<job_id>/<run_id>`, so `orbit run history -j <job_id>` and `orbit run show <run_id>` can inspect the returned ID. Workflow-specific `orbit run <workflow> list/show` aliases and duplicate job-level aliases were removed.
 
-Before [T20260423-0445], early v2 failures could leave `steps: []` and no surfaced `error_message`. The current contract is:
+Before the current contract, early v2 failures could leave `steps: []` and no surfaced `error_message`. The current contract is:
 
 - if a persisted v2 pipeline fails and no recorded step already carries error detail, the pipeline worker writes a synthetic failed `JobRunStep`
 - if a direct v2 run succeeds, the direct-run wrapper writes a synthetic successful `JobRunStep` containing the final pipeline snapshot
@@ -347,7 +347,7 @@ The loop shares one pipeline map and session map across iterations, which makes 
 
 The dashboard metrics endpoints read knowledge usage from job-run state (`/api/metrics/knowledge`) and agent, tool, task, and invocation usage from the SQLite invocation store (`/api/metrics/activity`, `/api/metrics/tools`, `/api/metrics/task/:id`, `/api/metrics/invocations`). They do not scrape `.orbit/state/audit/v2_loop/` or diagnostics JSONL.
 
-V2 jobs persist invocation traces explicitly after [T20260426-0526]. `DispatchOutcome` carries optional trace data; the executor attaches run and step IDs; orbit-core stores canonical agent/model names plus task IDs from rendered input and refreshes the token scoreboard.
+V2 jobs persist invocation traces explicitly. `DispatchOutcome` carries optional trace data; the executor attaches run and step IDs; orbit-core stores canonical agent/model names plus task IDs from rendered input and refreshes the token scoreboard.
 
 For `backend: cli`, the trace comes from the provider's structured stdout using the same parser that validates Orbit response envelopes. For the HTTP loop path, the trace is derived from `LoopOutcome` usage and tool-call names.
 
@@ -355,9 +355,9 @@ For `backend: cli`, the trace comes from the provider's structured stdout using 
 
 `orbit run show`, `logs`, `events`, and `trace` inspect already-scheduled runs and resolve an omitted run ID to the most recent run.
 
-After [T20260426-0709], `orbit run show <run> -s <id>` treats the v2 envelope's activity DAG `step.id` as primary. This matters because durable v2 runs may store a synthetic job-level `JobRunStep`, while the envelope records actual YAML step IDs. `JobRunStep.target_id` and numeric `step_index` remain fallbacks.
+`orbit run show <run> -s <id>` treats the v2 envelope's activity DAG `step.id` as primary. This matters because durable v2 runs may store a synthetic job-level `JobRunStep`, while the envelope records actual YAML step IDs. `JobRunStep.target_id` and numeric `step_index` remain fallbacks.
 
-After [T20260426-0705], `orbit run events <run>` reads the v2 envelope chronologically and filters by step ID or event type. `orbit run trace <run>` renders the parent/child tree from `event_id` and `parent_event_id`. JSON mode is deterministic.
+`orbit run events <run>` reads the v2 envelope chronologically and filters by step ID or event type. `orbit run trace <run>` renders the parent/child tree from `event_id` and `parent_event_id`. JSON mode is deterministic.
 
 The CLI does not own envelope storage. `orbit-core` exposes accessors for v2 audit events and CLI invocation records, including derived step IDs and blob-backed stdout/stderr, keeping storage knowledge with the runtime layer.
 
@@ -428,7 +428,7 @@ analogous invariants — see [ADR-0011].
 
 Both `ActivityV2` and `TargetStep` can attach an `fsProfile`. orbit-core uses `tool_context_for_activity(...)` to build the policy-aware `ToolContext`, and `V2AuditWriter` can attach filesystem audit logging so read/write denials appear in the envelope.
 
-Runtime/CLI enforcement landed in [T20260419-0503]. `fsProfile` is therefore part of the activity/job contract, not a CLI presentation detail.
+Runtime/CLI enforcement landed. `fsProfile` is therefore part of the activity/job contract, not a CLI presentation detail.
 
 One subtlety: profile attachment happens at two layers.
 
@@ -447,13 +447,13 @@ This feature spans a migration, so the retained surfaces are explicit.
 
 | Surface | Current status | Rationale |
 |---------|----------------|-----------|
-| `schemaVersion: 1` activity/job assets | Retired | Load-time hard error after [T20260419-2156]. |
-| v2 `agent_loop` HTTP path | Kept | Canonical typed runtime path from [T20260418-2010]. |
-| v2 `agent_loop` CLI path | Kept | Implemented by the retained `AgentRuntime` trait and `providers/*_cli.rs` after [T20260419-0104]. |
-| `TargetRef` authoring form | Kept at authoring/load time only | Human-friendly YAML surface; resolved away before execution since [T20260418-2019]. |
+| `schemaVersion: 1` activity/job assets | Retired | Load-time hard error. |
+| v2 `agent_loop` HTTP path | Kept | Canonical typed runtime path. |
+| v2 `agent_loop` CLI path | Kept | Implemented by the retained `AgentRuntime` trait and `providers/*_cli.rs`. |
+| `TargetRef` authoring form | Kept at authoring/load time only | Human-friendly YAML surface; resolved away before execution. |
 | v1 `crate::job_runner` | Kept, condition grammar only | The older sequential/DAG runtime was removed in [ORB-10390]; the module now holds only `condition::evaluate_bool_expr`, consumed by the v2 executor's `when` and `break_when` evaluation (`job_executor/step.rs`, `job_executor/loop_block.rs`). |
 | Legacy `run_parallel_task_pipeline` | Removed | The legacy parallel-batch executor was removed as unused in [ORB-10332]; the live pipelines still dispatch and join children through `orbit.pipeline.invoke` / `orbit.pipeline.wait`. |
-| Seeded reference activities and jobs | Kept | They act as runnable contracts and examples, and were moved into init seeding in [T20260419-2347]. |
+| Seeded reference activities and jobs | Kept | They act as runnable contracts and examples, and were moved into init seeding. |
 
 ### 10.2 Seeded Assets in Practice
 
@@ -463,7 +463,7 @@ Seeded assets are part of the design. Today they include:
 - control-plane jobs such as `task_gate_pipeline`
 - higher-level dispatch workflows such as `task_auto_pipeline` and `job_duel_plan_pipeline`
 
-The gate/auto assets from [T20260419-0622-3] and [T20260419-0623] exercise real v2 constructs:
+The gate/auto assets exercise real v2 constructs:
 
 - `loop + break_when`
 - `fan_out + fan_in`
@@ -494,7 +494,7 @@ Some bad shapes fail at load time, some at job preflight, and some during dispat
 
 ### 11.5 The audit story is powerful but split
 
-The v2 envelope tree lives in `.orbit/state/audit/v2_loop/`, HTTP loop details materialize lazily in `.orbit/state/audit/loop/`, and payload blobs live in `.orbit/state/audit/blobs/`. Reviewers still need to know the split layout. [T20260426-0519] moved these traces under `.orbit/state/` so top-level `.orbit/` stays for config, resources, tasks, graph artifacts, and the SQLite command-audit database; [T20260506-2] stopped creating empty loop JSONL files for runs with no loop-level events.
+The v2 envelope tree lives in `.orbit/state/audit/v2_loop/`, HTTP loop details materialize lazily in `.orbit/state/audit/loop/`, and payload blobs live in `.orbit/state/audit/blobs/`. Reviewers still need to know the split layout. These traces live under `.orbit/state/`, keeping top-level `.orbit/` for config, resources, tasks, graph artifacts, and the SQLite command-audit database; [T20260506-2] stopped creating empty loop JSONL files for runs with no loop-level events.
 
 ### 11.6 The substrate still leaks into the public product story
 
@@ -506,41 +506,41 @@ Some module prose still reflects earlier phase names or pass ordering. orbit-cor
 
 ### 11.8 Historical run inspection belongs to the run surface
 
-Read-only history does not need the same dependencies as live execution. [T20260423-0447] kept retired workflow runs observable without live assets, [T20260425-2010] removed workflow-specific history browsers, and [T20260426-0742] removed duplicate job-level inspection aliases. Current inspection belongs to `orbit run history -j <job_id>` and `orbit run show <run_id>`; `orbit job` is for catalog browsing and direct execution.
+Read-only history does not need the same dependencies as live execution. Retired workflow runs remain observable without live assets, while workflow-specific history browsers and duplicate job-level inspection aliases are gone. Current inspection belongs to `orbit run history -j <job_id>` and `orbit run show <run_id>`; `orbit job` is for catalog browsing and direct execution.
 
 ---
 
 ## Task References
 
-- **[T20260413-0141]** — Support step default inputs in jobs.
-- **[T20260418-2010]** — Add the first v2 activity runtime scaffolding.
-- **[T20260418-2018]** — Add `JobV2` DAG constructs (`parallel`, `fan_out`, `loop`, `retry`, `when`).
-- **[T20260418-2019]** — Add v2 activity name resolution and pipeline skeleton assets.
-- **[T20260418-2143]** — Wire `V2RuntimeHost` in orbit-core and add `orbit activity run-v2`.
-- **[T20260418-2210]** — Reshape `V2RuntimeHost` to keep `orbit-agent` types out of orbit-core.
-- **[T20260419-0002]** — Add `workspace_path` provenance to the v2 audit envelope.
-- **[T20260419-0104]** — Add `backend: cli` dispatch for v2 `agent_loop`.
-- **[T20260419-0339]** — Add v2 job kinds to the job catalog.
-- **[T20260419-0503]** — Enforce `fsProfile` rules across runtime and CLI surfaces.
-- **[T20260419-0622-3]** — Add `task_gate_pipeline`.
-- **[T20260419-0623]** — Add `task_auto_pipeline`.
-- **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
-- **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
-- **[T20260421-0542-2]** — Add pre-gate lock-overlap exclusion attribution to `list_backlog_tasks`.
-- **[T20260423-0114]** — Expose the `backend: cli` executor-args gap during a local task ship run.
-- **[T20260423-0445]** — Merge object-valued job defaults over explicit run input and persist synthetic failed job steps for early v2 pipeline failures.
-- **[T20260423-0447]** — Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.
-- **[T20260423-2004-4]** — Persist direct v2 `orbit job run` executions into durable job-run records and state.
-- **[T20260425-0204]** — Make v2 job catalog discovery honor workspace-over-global `MergeByKey` precedence.
-- **[T20260425-2010]** — Refactor `orbit run` task workflow commands and remove workflow-specific history browsers.
-- **[T20260426-0047]** — Make v2 activity catalog discovery honor workspace-over-global `MergeByKey` precedence and remove the public `orbit activity run` command.
-- **[T20260426-0526]** — Restore v2 job invocation trace persistence so dashboard metrics surfaces can report agent and tool usage.
-- **[T20260426-0519]** — Move file-backed activity/job audit traces under `.orbit/state/audit`.
-- **[T20260426-0705]** — Expose v2 run audit events through `orbit run events` and `orbit run trace`.
-- **[T20260426-0709]** — Align run step selectors on activity `step.id` and move CLI invocation log reading behind orbit-core runtime accessors.
-- **[T20260426-0742]** — Remove duplicate job-level run inspection aliases and keep run inspection under `orbit run`.
-- **[T20260426-2313]** — Stream CLI subprocess stdout/stderr through structured tracing events while retaining the existing audit/blob path.
-- **[T20260426-2349]** — Move CLI tracing output redaction from `cli_runner` call sites into the default tracing formatter layer.
+- Support step default inputs in jobs.
+- Add the first v2 activity runtime scaffolding.
+- Add `JobV2` DAG constructs (`parallel`, `fan_out`, `loop`, `retry`, `when`).
+- Add v2 activity name resolution and pipeline skeleton assets.
+- Wire `V2RuntimeHost` in orbit-core and add `orbit activity run-v2`.
+- Reshape `V2RuntimeHost` to keep `orbit-agent` types out of orbit-core.
+- Add `workspace_path` provenance to the v2 audit envelope.
+- Add `backend: cli` dispatch for v2 `agent_loop`.
+- Add v2 job kinds to the job catalog.
+- Enforce `fsProfile` rules across runtime and CLI surfaces.
+- Add `task_gate_pipeline`.
+- Add `task_auto_pipeline`.
+- Retire v1 assets and drop the transitional v2 naming.
+- Seed activities and workflows on `orbit init`.
+- Add pre-gate lock-overlap exclusion attribution to `list_backlog_tasks`.
+- Expose the `backend: cli` executor-args gap during a local task ship run.
+- Merge object-valued job defaults over explicit run input and persist synthetic failed job steps for early v2 pipeline failures.
+- Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.
+- Persist direct v2 `orbit job run` executions into durable job-run records and state.
+- Make v2 job catalog discovery honor workspace-over-global `MergeByKey` precedence.
+- Refactor `orbit run` task workflow commands and remove workflow-specific history browsers.
+- Make v2 activity catalog discovery honor workspace-over-global `MergeByKey` precedence and remove the public `orbit activity run` command.
+- Restore v2 job invocation trace persistence so dashboard metrics surfaces can report agent and tool usage.
+- Move file-backed activity/job audit traces under `.orbit/state/audit`.
+- Expose v2 run audit events through `orbit run events` and `orbit run trace`.
+- Align run step selectors on activity `step.id` and move CLI invocation log reading behind orbit-core runtime accessors.
+- Remove duplicate job-level run inspection aliases and keep run inspection under `orbit run`.
+- Stream CLI subprocess stdout/stderr through structured tracing events while retaining the existing audit/blob path.
+- Move CLI tracing output redaction from `cli_runner` call sites into the default tracing formatter layer.
 - **[T20260427-34]** — Add seeded pipeline success guards so non-succeeded child runs fail parent shipment workflows.
 - **[T20260427-36]** — Align task-gate reservation TTL with the child dispatch wait budget.
 - **[T20260427-45]** — Use freshly fetched remote base refs for default task-shipping worktrees.

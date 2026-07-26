@@ -18,7 +18,7 @@ This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by 
 
 ## ADR-001 — Dedicated policy & sandboxing design ownership
 
-**Status:** Accepted · 2026-04 · [T20260426-0622]
+**Status:** Accepted · 2026-04
 
 **Context.** Policy and sandboxing semantics were spread across `orbit-policy`, `orbit-exec`, the `PolicyDef` schema in `orbit-common`, the activity dispatcher, and the v2 host. There was no canonical place to record invariants, the `unrestricted` fallback, or the supervision contract.
 
@@ -30,7 +30,7 @@ This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by 
 
 ## ADR-002 — Policy schema is v2-only with named profiles plus global denies
 
-**Status:** Accepted · 2026-04 · [T20260416-0728]
+**Status:** Accepted · 2026-04
 
 **Context.** An earlier policy schema (v1) used a different shape for allow/deny rules. Supporting both shapes in the runtime caused interpretation drift between the loader, the merger, and the evaluator.
 
@@ -42,7 +42,7 @@ This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by 
 
 ## ADR-003 — Implicit `unrestricted` profile materializes when an activity omits `fsProfile:`
 
-**Status:** Accepted · 2026-04 · [T20260419-0503]
+**Status:** Accepted · 2026-04
 
 **Context.** Activities can omit `fsProfile:`. A naive design would either reject the activity at load or run it without policy enforcement. Both are wrong: rejection breaks the common case, and unguarded execution means audit blindness.
 
@@ -54,7 +54,7 @@ This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by 
 
 ## ADR-004 — Deny rules inject as negated profile rules with last-match-wins evaluation
 
-**Status:** Accepted · 2026-04 · [T20260416-0728]
+**Status:** Accepted · 2026-04
 
 **Context.** A separate "deny pass" before profile evaluation is the obvious shape, but it makes precedence ambiguous when a profile rule and a deny rule both match. Multiple Orbit features (workspace overrides, profile narrowing, denyModify-also-implies-denyRead-for-modify validation) need a single evaluation order.
 
@@ -66,7 +66,7 @@ This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by 
 
 ## ADR-005 — Modify rules must be covered by a read rule in the same profile
 
-**Status:** Accepted · 2026-04 · [T20260416-0728]
+**Status:** Accepted · 2026-04
 
 **Context.** A profile that grants `modify: ["./build/**"]` without granting `read: ["./build/**"]` is technically valid but produces a confusing operational story: a tool may be allowed to write a file it cannot read, breaking the standard read-modify-write pattern.
 
@@ -78,7 +78,7 @@ This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by 
 
 ## ADR-006 — Tool layer is the policy enforcement point for HTTP-backed activities
 
-**Status:** Accepted · 2026-04 · [T20260419-0503]
+**Status:** Accepted · 2026-04
 
 **Context.** Policy enforcement could plausibly live at the syscall layer, the fs trait layer, the tool layer, or the activity layer. Each placement has different trust and coverage tradeoffs.
 
@@ -90,7 +90,7 @@ This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by 
 
 ## ADR-007 — Children spawn as process-group leaders so orphan subprocesses are reapable
 
-**Status:** Accepted · 2026-04 · [T20260417-0558-4], [T20260328-221810]
+**Status:** Accepted · 2026-04
 
 **Context.** Naive subprocess code on Unix leaves orphan grandchildren holding open pipe write ends, which causes the parent's `wait_with_output` to hang when the orphan never exits. Earlier versions of orbit-exec hit this exact failure when an agent's tool spawned long-lived helpers.
 
@@ -102,7 +102,7 @@ This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by 
 
 ## ADR-008 — SIGTERM with 5-second grace, then SIGKILL for the whole group
 
-**Status:** Accepted · 2026-04 · [T20260417-0558-4]
+**Status:** Accepted · 2026-04
 
 **Context.** A timed-out or interrupted child needs a chance to flush state before being killed, but the supervisor cannot wait indefinitely. The escalation policy needs a single, predictable shape.
 
@@ -114,7 +114,7 @@ This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by 
 
 ## ADR-009 — Signal handler installation is process-global and serialized
 
-**Status:** Accepted · 2026-04 · [T20260417-0558-5]
+**Status:** Accepted · 2026-04
 
 **Context.** Installing parent-side SIGINT/SIGTERM handlers is a process-global operation. Two concurrent `run_process` calls cannot install independent handlers without races, and a panicking call must restore the prior handler so the orbit process itself remains interruptible.
 
@@ -126,7 +126,7 @@ This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by 
 
 ## ADR-010 — `NoSandbox` is the default `Sandbox` impl; real isolation is deferred
 
-**Status:** Accepted · 2026-04 · [T20260417-0550]
+**Status:** Accepted · 2026-04
 
 **Context.** The `Sandbox` trait is the seam where kernel-level or container-level isolation would attach to `orbit-exec`. The trait shipped with the supervision rework, but no real impl is registered.
 
@@ -214,12 +214,12 @@ Use `literal` for the canonical and lock files (predictable names) and `regex` f
 
 ## Task References
 
-- **[T20260328-221810]** — Subprocess termination on Ctrl+C / job cancel; predecessor of the current process-group design.
-- **[T20260416-0728]** — Aligned the policy contract with runtime enforcement; v2 schema and effective-profile resolution land here.
-- **[T20260417-0550]** — Decomposed `orbit-exec` supervision modules.
-- **[T20260417-0558-4]** / **[T20260417-0558-5]** — Hardened `orbit-exec` supervision (process-group reaping, signal-pipe handler).
-- **[T20260419-0503]** — Enforced `fsProfiles` across runtime and CLI; introduced `tool_context_for_activity`.
-- **[T20260426-0622]** — Add this design folder and record the initial ADR set.
+- Subprocess termination on Ctrl+C / job cancel; predecessor of the current process-group design.
+- Aligned the policy contract with runtime enforcement; v2 schema and effective-profile resolution land here.
+- Decomposed `orbit-exec` supervision modules.
+- Hardened `orbit-exec` supervision (process-group reaping, signal-pipe handler).
+- Enforced `fsProfiles` across runtime and CLI; introduced `tool_context_for_activity`.
+- Add this design folder and record the initial ADR set.
 - **[T20260427-51]** — Wrap cli-backend agent invocations in `sandbox-exec` on macOS with inner-flag neutralization for codex/gemini.
 - **[T20260428-10]** — Allow Codex CLI state writes under the macOS sandbox.
 - **[T20260428-14]** — Extend the macOS sandbox state-dir allowance to Claude and Gemini, and document why side-write roots remain Codex-only.

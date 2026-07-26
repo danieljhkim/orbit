@@ -15,7 +15,7 @@ const DUEL_PLAN_WORKFLOW: &str = "duel-plan";
 #[command(
     about = "Run a planning duel for one task",
     override_usage = "orbit run duel-plan <TASK_ID> [OPTIONS]",
-    after_help = "Examples:\n  orbit run duel-plan T20260409-0310\n  orbit run duel-plan T20260409-0310 --base main --json\n  orbit run duel-plan T20260409-0310 --wait\n\nBy default this submits the planning-duel pipeline and returns a run ID immediately. Use `orbit run show <RUN_ID>` to inspect it, or pass `--wait` to block until it finishes."
+    after_help = "Examples:\n  orbit run duel-plan <TASK_ID>\n  orbit run duel-plan <TASK_ID> --base main --json\n  orbit run duel-plan <TASK_ID> --wait\n\nBy default this submits the planning-duel pipeline and returns a run ID immediately. Use `orbit run show <RUN_ID>` to inspect it, or pass `--wait` to block until it finishes."
 )]
 pub struct DuelPlanCommand {
     /// Task ID for the planning duel.

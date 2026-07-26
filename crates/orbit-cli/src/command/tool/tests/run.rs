@@ -8,7 +8,7 @@ fn list_output_uses_minimal_task_projection() {
         "orbit.task.list",
         &json!({ "status": "backlog" }),
         json!([{
-            "id": "T20260422-0001",
+            "id": "ORB-00001",
             "title": "Backlog task",
             "status": "backlog",
             "priority": "medium",
@@ -27,7 +27,7 @@ fn list_output_uses_minimal_task_projection() {
     assert_eq!(
         shaped,
         json!([{
-            "id": "T20260422-0001",
+            "id": "ORB-00001",
             "title": "Backlog task",
             "status": "backlog",
             "priority": "medium",
