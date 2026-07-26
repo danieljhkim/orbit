@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::CONFIG_SCHEMA_VERSION;
 use super::types::WorkspaceConfig;
-use super::workspace_id::{sanitize_slug, validate_workspace_id, workspace_id_candidate};
+use super::workspace_id::validate_workspace_id;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -18,13 +18,6 @@ struct WorkspaceConfigDoc {
 
 pub fn task_registry_path(global_root: &Path) -> PathBuf {
     global_root.join("tasks").join("index.sqlite")
-}
-
-pub fn home_task_workspace_dir(global_root: &Path, workspace_id: &str) -> PathBuf {
-    global_root
-        .join("tasks")
-        .join("workspaces")
-        .join(workspace_id)
 }
 
 pub fn workspace_config_path(orbit_dir: &Path) -> PathBuf {
@@ -87,10 +80,6 @@ pub fn write_workspace_config(
     let content = serde_yaml::to_string(&doc).map_err(|e| OrbitError::Store(e.to_string()))?;
     atomic_write_text(&workspace_config_path(orbit_dir), &content)
         .map_err(|e| OrbitError::Io(e.to_string()))
-}
-
-pub fn assign_workspace_id(slug_source: &str, path: &Path) -> String {
-    workspace_id_candidate(&sanitize_slug(slug_source), path, 0)
 }
 
 fn validate_workspace_config_doc(doc: WorkspaceConfigDoc) -> Result<WorkspaceConfig, OrbitError> {

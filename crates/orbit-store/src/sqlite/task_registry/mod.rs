@@ -30,9 +30,8 @@ pub use types::{
     WorkspaceCheckoutBinding, WorkspaceConfig,
 };
 pub use workspace_config::{
-    assign_workspace_id, home_task_workspace_dir, read_workspace_config,
-    read_workspace_config_optional, task_registry_path, workspace_config_path,
-    workspace_id_for_orbit_dir, write_workspace_config,
+    read_workspace_config, read_workspace_config_optional, task_registry_path,
+    workspace_config_path, workspace_id_for_orbit_dir, write_workspace_config,
 };
 
 #[cfg(test)]

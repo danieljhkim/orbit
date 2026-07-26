@@ -76,13 +76,6 @@ pub fn read_pipeline(state_dir: &Path) -> Result<Value, OrbitError> {
     Ok(read_state_file(state_dir)?.pipeline)
 }
 
-pub fn read_step_output(state_dir: &Path, step_index: u32) -> Result<Option<Value>, OrbitError> {
-    Ok(read_state_file(state_dir)?
-        .step_outputs
-        .get(&step_index)
-        .cloned())
-}
-
 pub fn write_step_output(
     state_dir: &Path,
     step_index: u32,

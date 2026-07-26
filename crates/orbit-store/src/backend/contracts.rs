@@ -2,9 +2,9 @@ use chrono::{DateTime, Utc};
 use orbit_common::types::{
     Adr, AdrStatus, ArtifactManifestFileV2, ArtifactOrigin, AuditEvent, Crew, ExecutorDef,
     ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence,
-    LearningInjectionState, LearningScope, LegacyValidation, OrbitError, OrbitId, PipelineState,
-    PolicyDef, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry,
-    TaskPriority, TaskRelation, TaskStatus, TaskType, normalize_task_tags, task_matches_tags,
+    LearningScope, LegacyValidation, OrbitError, OrbitId, PipelineState, PolicyDef, StoredTool,
+    Task, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskRelation,
+    TaskStatus, TaskType, normalize_task_tags, task_matches_tags,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -15,9 +15,6 @@ use crate::sqlite::audit_event_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
     AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
     LearningUsageStat,
-};
-use crate::sqlite::v2_audit_store::{
-    V2AuditEventFilter, V2AuditEventInsertParams, V2AuditEventRow,
 };
 
 #[derive(Debug, Clone)]
@@ -655,35 +652,6 @@ pub trait AuditEventStoreBackend: Send + Sync {
         since: Option<&DateTime<Utc>>,
     ) -> Result<Vec<LearningUsageStat>, OrbitError>;
     fn prune_audit_events(&self, older_than: &DateTime<Utc>) -> Result<usize, OrbitError>;
-}
-
-pub trait V2AuditEnvelopeStoreBackend: Send + Sync {
-    fn insert_v2_audit_event(&self, params: &V2AuditEventInsertParams) -> Result<(), OrbitError>;
-    fn list_v2_audit_events(
-        &self,
-        filter: &V2AuditEventFilter,
-    ) -> Result<Vec<V2AuditEventRow>, OrbitError>;
-    fn count_v2_audit_events(&self, filter: &V2AuditEventFilter) -> Result<i64, OrbitError>;
-    fn prune_v2_audit_events_older_than(
-        &self,
-        workspace_id: &str,
-        ts: &DateTime<Utc>,
-    ) -> Result<usize, OrbitError>;
-}
-
-pub trait SessionLearningStateStoreBackend: Send + Sync {
-    fn upsert_session_learning_state(
-        &self,
-        workspace_id: &str,
-        session_id: &str,
-        state: &LearningInjectionState,
-    ) -> Result<(), OrbitError>;
-
-    fn get_session_learning_state(
-        &self,
-        workspace_id: &str,
-        session_id: &str,
-    ) -> Result<Option<LearningInjectionState>, OrbitError>;
 }
 
 pub trait ExecutorDefStoreBackend: Send + Sync {

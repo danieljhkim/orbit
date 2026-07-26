@@ -62,7 +62,7 @@ pub mod friction_store {
 
 pub mod pr_scoreboard {
     pub use crate::file::scoreboard::pr_scoreboard::{
-        record_pr_count_with_revision, record_pr_count_without_revision, record_pr_review_comment,
+        record_pr_count_with_revision, record_pr_count_without_revision,
     };
 }
 
@@ -90,18 +90,6 @@ pub mod planning_duel_scoreboard {
     };
 }
 
-pub mod friction_log {
-    pub use crate::file::diagnostics::friction_log::{
-        append_friction_entry, read_friction_entries_for_month,
-    };
-}
-
-pub mod metrics_log {
-    pub use crate::file::diagnostics::metrics_log::{
-        append_metrics_entry, read_metrics_entries_for_month,
-    };
-}
-
 pub mod token_scoreboard {
     pub use crate::file::scoreboard::token_scoreboard::write_token_scoreboard;
 }
@@ -120,21 +108,19 @@ pub use backend::{
     ExecutorDefStoreBackend, ExpiredTaskReservation, JobRunQuery, JobRunStepParams,
     JobRunStoreBackend, LearningCreateParams, LearningListEntry, LearningSearchParams,
     LearningSearchResult, LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend,
-    ReleasedTaskReservation, RemoteArtifactStub, SessionLearningStateStoreBackend,
-    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
-    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict,
-    TaskLockHolder, TaskReservationCheckParams, TaskReservationCheckResult,
-    TaskReservationListResult, TaskReservationOwnedConflictsParams,
-    TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
-    TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
-    TaskReservationReleaseReason, TaskReservationReleaseResult, TaskReservationReserveParams,
-    TaskReservationReserveResult, TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend,
-    V2AuditEnvelopeStoreBackend, WorkspaceTaskBackends, audit_event_store_sqlite,
+    ReleasedTaskReservation, RemoteArtifactStub, TaskArtifactStoreBackend,
+    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
+    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder,
+    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
+    TaskReservationOwnedConflictsParams, TaskReservationOwnedConflictsResult,
+    TaskReservationReleaseByOwnerParams, TaskReservationReleaseByOwnerResult,
+    TaskReservationReleaseParams, TaskReservationReleaseReason, TaskReservationReleaseResult,
+    TaskReservationReserveParams, TaskReservationReserveResult, TaskReservationStoreBackend,
+    TaskStoreBackend, ToolStoreBackend, WorkspaceTaskBackends, audit_event_store_sqlite,
     coordination_task_backends, global_executor_def_store, global_policy_def_store,
-    layered_policy_def_store, session_learning_state_store_sqlite, task_reservation_store_sqlite,
-    tool_store_sqlite, v2_audit_event_store_sqlite, workspace_adr_backends,
-    workspace_job_run_store, workspace_learning_backend, workspace_policy_def_store,
-    workspace_task_backends,
+    layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
+    workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
+    workspace_policy_def_store, workspace_task_backends,
 };
 pub use file_lock::{LockHolderInfo, read_lock_holder};
 pub use json_schema::{validate_instance_against_schema, validate_schema_document};

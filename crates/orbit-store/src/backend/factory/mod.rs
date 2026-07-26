@@ -3,14 +3,13 @@ use std::sync::Arc;
 
 use super::contracts::{
     AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend,
-    LearningStoreBackend, PolicyDefStoreBackend, SessionLearningStateStoreBackend,
-    TaskArtifactStoreBackend, TaskDocumentStoreBackend, TaskHistoryStoreBackend,
-    TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend, V2AuditEnvelopeStoreBackend,
+    LearningStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
+    TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReservationStoreBackend,
+    TaskStoreBackend, ToolStoreBackend,
 };
 use super::layered_policy_def::LayeredPolicyDefStore;
 use super::sqlite_backends::{
-    SqliteAuditEventStoreBackend, SqliteSessionLearningStateStoreBackend,
-    SqliteTaskReservationStoreBackend, SqliteToolStoreBackend, SqliteV2AuditEnvelopeStoreBackend,
+    SqliteAuditEventStoreBackend, SqliteTaskReservationStoreBackend, SqliteToolStoreBackend,
 };
 use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
@@ -118,16 +117,6 @@ pub fn tool_store_sqlite(store: Store) -> Arc<dyn ToolStoreBackend> {
 
 pub fn audit_event_store_sqlite(store: Store) -> Arc<dyn AuditEventStoreBackend> {
     Arc::new(SqliteAuditEventStoreBackend { store })
-}
-
-pub fn v2_audit_event_store_sqlite(store: Store) -> Arc<dyn V2AuditEnvelopeStoreBackend> {
-    Arc::new(SqliteV2AuditEnvelopeStoreBackend { store })
-}
-
-pub fn session_learning_state_store_sqlite(
-    store: Store,
-) -> Arc<dyn SessionLearningStateStoreBackend> {
-    Arc::new(SqliteSessionLearningStateStoreBackend { store })
 }
 
 pub fn task_reservation_store_sqlite(store: Store) -> Arc<dyn TaskReservationStoreBackend> {

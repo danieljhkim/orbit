@@ -7,10 +7,6 @@
 //! from corrupting state.
 
 pub(crate) mod adr_store;
-pub(crate) mod diagnostics {
-    pub(crate) mod friction_log;
-    pub(crate) mod metrics_log;
-}
 pub(crate) mod executor_def_store;
 pub(crate) mod friction_store;
 pub(crate) mod layout;
