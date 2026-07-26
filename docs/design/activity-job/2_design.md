@@ -222,6 +222,8 @@ The HTTP path is driven by `agent_loop_driver.rs`. It:
 
 This path is narrower than the schema: `Provider::has_http_transport()` currently returns true only for `claude`, so non-replay uses `AnthropicMessagesTransport`. Default builds ignore `ORBIT_V2_REPLAY` and `ORBIT_V2_REPLAY_FIXTURE`; scripted replay is enabled for explicit smoke and fixture use only when orbit-engine's `replay` cargo feature is selected ([ORB-10414]).
 
+Because the feature is default-off, **any crate with a replay-fixture-backed test must opt in itself** — a test that merely sets `ORBIT_V2_REPLAY_FIXTURE` silently falls through to the live Anthropic transport and fails on a credential-free runner. orbit-core does this via its own `replay` feature, which forwards to `orbit-engine/replay` and gates `runtime/v2_host/tests/v2_host_replay.rs`. `scripts/ci-guardrails.sh` lints and runs the opt-in configuration for orbit-engine and orbit-core in one extra pass (`--features orbit-core/replay`), so both the default and replay configurations stay covered ([ORB-10434]).
+
 The allowlist is enforced in the loop engine on this path. A denied tool becomes a structural `DispatchError::ToolDenied` so the job retry wrapper can classify it as non-retryable.
 
 After [T20260426-0526], completed HTTP loop outcomes become `InvocationTrace` records under the job run ID and step ID, including loop-body `session:` steps.
@@ -575,5 +577,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[ORB-10232]** — Model recoverable PR handoff as checkpointed job activities with exact-SHA force-push provenance.
 - **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer (`task_epic_pipeline`, `epic_orchestrator`, `pipeline_wait`, legacy parallel-batch executor).
 - **[ORB-10414]** — Make HTTP replay an explicit default-off cargo feature and keep replay environment variables inert in default builds.
+- **[ORB-10434]** — Extend the replay opt-in to orbit-core (`orbit-core/replay`) so its fixture-backed v2_host test keeps running hermetically instead of demanding a live credential.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
