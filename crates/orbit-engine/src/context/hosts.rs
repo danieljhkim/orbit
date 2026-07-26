@@ -6,8 +6,8 @@ use orbit_agent::AgentConfig;
 use orbit_common::types::InvocationTrace;
 use orbit_common::types::activity_job::{AgentRole, Backend, Provider};
 use orbit_common::types::{
-    ActivityV2, AgentModelPair, ExecutorDef, ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics,
-    OrbitError, OrbitEvent, PipelineState, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
+    ActivityV2, AgentModelPair, ExecutorDef, ExternalRef, JobRun, JobRunState, OrbitError,
+    OrbitEvent, PipelineState, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
     TaskPriority, TaskStatus, all_agent_families,
 };
 use orbit_exec::EnvironmentMode;
@@ -52,8 +52,6 @@ pub struct TaskActivityUpdate {
 }
 
 pub trait JobRunHost {
-    fn list_all_pending_or_running_runs(&self) -> Result<Vec<JobRun>, OrbitError>;
-    fn list_pending_or_running_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError>;
     fn insert_job_run(
         &self,
         job_id: &str,
@@ -68,28 +66,10 @@ pub trait JobRunHost {
         started_at: chrono::DateTime<chrono::Utc>,
         pid: u32,
     ) -> Result<bool, OrbitError>;
-    fn take_over_running_job_run(
-        &self,
-        run_id: &str,
-        expected_pid: Option<u32>,
-        expected_pid_start_time: Option<String>,
-        started_at: chrono::DateTime<chrono::Utc>,
-        pid: u32,
-    ) -> Result<bool, OrbitError>;
-    fn abandon_job_run(
-        &self,
-        run_id: &str,
-        finished_at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<bool, OrbitError>;
     fn complete_job_run_step(
         &self,
         run_id: &str,
         params: &JobRunStepParams,
-    ) -> Result<bool, OrbitError>;
-    fn record_job_run_knowledge_metrics(
-        &self,
-        run_id: &str,
-        metrics: KnowledgeRunMetrics,
     ) -> Result<bool, OrbitError>;
     fn finalize_job_run(
         &self,
@@ -278,18 +258,6 @@ pub trait RuntimeHost {
         _query: InvocationQuery,
     ) -> Result<Vec<InvocationRecord>, OrbitError> {
         Ok(Vec::new())
-    }
-    fn invocation_records_for_job_run_and_activity(
-        &self,
-        job_run_id: &str,
-        activity_id: &str,
-    ) -> Result<Vec<InvocationRecord>, OrbitError> {
-        self.invocation_records(InvocationQuery {
-            job_run_id: Some(job_run_id.to_string()),
-            activity_id: Some(activity_id.to_string()),
-            limit: 1_000_000,
-            ..InvocationQuery::default()
-        })
     }
     fn activity_implementer_identity(
         &self,
