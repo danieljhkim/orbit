@@ -42,8 +42,8 @@ The three-task sequence split this apart:
 | Concern | File | Task |
 |---------|------|------|
 | Root split | `crates/orbit-core/src/runtime/resolve.rs` | [ORB-00199] |
-| Allocator and body metadata | `crates/orbit-store/src/sqlite/id_allocator.rs` | [ORB-00200], [ORB-00201] |
-| ADR body storage and federation | `crates/orbit-store/src/file/adr_store/api.rs` | [ORB-00201] |
+| Allocator and body metadata | `crates/orbit-store/src/sqlite/id_allocator/` | [ORB-00200], [ORB-00201] |
+| ADR body storage and federation | `crates/orbit-store/src/file/adr_store/api/` | [ORB-00201] |
 | Learning body storage and federation | `crates/orbit-store/src/file/learning_store/api/crud.rs` | [ORB-00201] |
 | CLI/tool remote listing | `crates/orbit-core/src/runtime/orbit_tool_host/` and `crates/orbit-cli/src/command/learning/` | [ORB-00201] |
 | Decision log | `docs/design/worktree-artifacts/4_decisions.md` | [ADR-0177] |

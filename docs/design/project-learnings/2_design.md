@@ -220,7 +220,7 @@ orbit search path <path> --kind learning [--tag T] [--all] [--status learning:ac
       "id": "L-0001",
       "summary": "Never declare a perf win on latency alone — ...",
       "tags": ["performance", "benchmarking"],
-      "matched_by": ["path:crates/orbit-knowledge/src/graph_bench.rs", "tag:performance"],
+      "matched_by": ["tag:performance"],
       "updated_at": "2026-05-09T18:00:00Z"
     }
   ]
@@ -376,7 +376,7 @@ This is acknowledged, not fixed. Phase 2's auto-extraction from review threads o
 
 ### 8.2 Path globs are brittle to large refactors
 
-A learning scoped to `crates/orbit-knowledge/src/graph_bench.rs` becomes invisible the day someone moves the file. Tags partly compensate (tag-based scoping survives renames) but require the author to anticipate the rename, which is rare.
+A learning scoped to a benchmark source file becomes invisible the day someone moves the file. Tags partly compensate (tag-based scoping survives renames) but require the author to anticipate the rename, which is rare.
 
 Phase 2's symbol-aware scope handles renames cleanly because the knowledge graph tracks symbol identity across moves. Phase 1's mitigation is operational: when a refactor moves files, run `orbit learning prune --stale-only` and update or supersede affected records as part of the refactor task.
 

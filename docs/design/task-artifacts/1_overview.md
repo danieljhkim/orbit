@@ -110,8 +110,8 @@ The canonical bundle lives in the local task store under `~/.orbit/tasks/workspa
 | V2 envelope, relations, JSONL rows, and manifest types | [crates/orbit-common/src/types/task_artifacts.rs](../../../crates/orbit-common/src/types/task_artifacts.rs) | — |
 | Public `Task` DTO (still flat during Phase 6 consumer wiring) | [crates/orbit-common/src/types/task.rs](../../../crates/orbit-common/src/types/task.rs) | — |
 | V2 bundle primitives (file layout, atomic writes, JSONL append) | [crates/orbit-store/src/file/task_store/v2_bundle.rs](../../../crates/orbit-store/src/file/task_store/v2_bundle.rs) | — |
-| V2 task backend adapter (create/get/list/search/mutations) | [crates/orbit-store/src/file/task_store/v2_store.rs](../../../crates/orbit-store/src/file/task_store/v2_store.rs) | — |
-| Home registry: allocator, workspace bindings, generated indexes | [crates/orbit-store/src/sqlite/task_registry.rs](../../../crates/orbit-store/src/sqlite/task_registry.rs) | — |
+| V2 task backend adapter (create/get/list/search/mutations) | [crates/orbit-store/src/file/task_store/v2/](../../../crates/orbit-store/src/file/task_store/v2/) | — |
+| Home registry: allocator, workspace bindings, generated indexes | [crates/orbit-store/src/sqlite/task_registry/](../../../crates/orbit-store/src/sqlite/task_registry/) | — |
 | V2 runtime wiring (`build_v2_task_backends`) | [crates/orbit-core/src/runtime/builder.rs](../../../crates/orbit-core/src/runtime/builder.rs) | — |
 | Local task store and symlink projection | [2_design.md §6](./2_design.md#6-local-task-store-and-symlink-projection) | — |
 | Task sync design over `ORB-*` IDs (archived) | [docs/design/_archive/task-sync/2_design.md](../_archive/task-sync/2_design.md) | [T20260505-12] |

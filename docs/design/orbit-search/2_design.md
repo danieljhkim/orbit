@@ -351,7 +351,7 @@ The audience this corpus serves is the **task-creating / task-executing agent**.
 
 ### 9.1 Corpus: knowledge-graph leaves
 
-The corpus is **`LeafKind`-filtered leaves of the knowledge graph**. The graph already represents code symbols *and* markdown sections as `LeafKind` variants in [graph/nodes.rs:12](../../../crates/orbit-knowledge/src/graph/nodes.rs), so one indexer covers both code and design docs uniformly.
+The corpus is **filtered leaves of the knowledge graph**. The graph is intended to represent code symbols *and* markdown sections as typed leaves, so one indexer can cover both code and design docs uniformly.
 
 Allowlist for the first cut:
 
@@ -381,9 +381,9 @@ Per-leaf field tuning beyond this sketch is left for the implementing task; the 
 
 ### 9.4 Indexer placement: `orbit-embed::graph_indexer`
 
-A new module under `orbit-embed`, consistent with [ADR-007](./4_decisions.md#adr-007--orbit-search-ownership-relocated-to-orbit-embed)'s "semantic ownership lives in `orbit-embed`" rule. The indexer consumes a leaf-diff stream emitted by [`orbit-knowledge::pipeline::ensure_fresh`](../../../crates/orbit-knowledge/src/pipeline/mod.rs) after each *clean* rebuild, batches `EmbedJob`s through the same channel pattern the task path uses ([§7.1](#71-on-mutation-indexing)), and writes to the existing `VectorStore`.
+A new module under `orbit-embed`, consistent with [ADR-007](./4_decisions.md#adr-007--orbit-search-ownership-relocated-to-orbit-embed)'s "semantic ownership lives in `orbit-embed`" rule. The indexer consumes a leaf-diff stream from graph synchronization after each *clean* rebuild, batches `EmbedJob`s through the same channel pattern the task path uses ([§7.1](#71-on-mutation-indexing)), and writes to the existing `VectorStore`.
 
-Async by design: graph rebuild commits first, embedding lags behind in a background worker. `orbit-knowledge` does not gain a dependency on `orbit-embed` — the indexer pulls the diff via a public API on the pipeline. The exact diff-stream contract (push channel vs. pull-after-rebuild, `LeafDiff` shape) is deferred to the implementing task; both shapes are viable.
+Async by design: graph rebuild commits first, embedding lags behind in a background worker. The graph implementation does not gain a dependency on `orbit-embed` — the indexer pulls the diff via a graph synchronization API. The exact diff-stream contract (push channel vs. pull-after-rebuild, `LeafDiff` shape) is deferred to the implementing task; both shapes are viable.
 
 ### 9.5 Freshness and stale-row removal
 

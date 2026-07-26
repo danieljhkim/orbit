@@ -76,16 +76,16 @@ Phase 1 indexes each review-thread message as a separate row. The alternative �
 
 Phase 2 extends the embeddings table to graph leaves — code symbols and design-doc sections, with ADRs joining once a fresh ADR-vector indexing design exists. The phase-2 design is sketched in [2_design.md §9](./2_design.md#9-phase-2-graph-corpus-designed-deferred). Highlights:
 
-- **Corpus** is `LeafKind`-filtered leaves from the knowledge graph (allowlist: `Function`, `Method`, `Module`, `Struct`, `Enum`, `Trait`, `Section`). One indexer covers code and markdown uniformly because both already exist as `LeafKind` variants in [graph/nodes.rs](../../../crates/orbit-knowledge/src/graph/nodes.rs).
+- **Corpus** is filtered leaves from the knowledge graph (allowlist: `Function`, `Method`, `Module`, `Struct`, `Enum`, `Trait`, `Section`). One indexer is intended to cover code and markdown uniformly because both can be represented as typed graph leaves.
 - **Stable IDs** from `BaseNodeFields.identity_key`; **content hashing** reuses `LeafNode.source_hash`; **no schema migration** — the phase-1 `source_kind` discriminator carries the extension.
-- **Indexer** is `orbit-embed::graph_indexer`, consuming a diff stream from `orbit-knowledge::pipeline` after clean rebuilds. Async, mirrors the task indexer.
+- **Indexer** is `orbit-embed::graph_indexer`, consuming a diff stream from graph synchronization after clean rebuilds. Async, mirrors the task indexer.
 - **Three freshness loops** handle stale-row removal: per-rebuild diff, mark-and-sweep anti-join, explicit `--kind=symbol` reindex. Dirty rebuilds are skipped.
 - **Sequencing**: gated on a separate ADR-vector indexing design so the doc-section indexer can cleanly exclude `4_decisions.md` and ADRs flow in as `source_kind = "adr"` through the same machinery.
 
 Open questions kept for the implementing phase:
 
 - **Code-aware vs general embedding model.** CodeBERT / voyage-code outperform general-text models on code retrieval but are larger and weaker on English. Three options: metadata only + general model, metadata only + code model, code bodies + code model. v1 of the corpus ships with the BGE-small default and revisits with eval evidence if recall underperforms.
-- **Diff-stream contract.** Push channel vs. pull-after-rebuild between `orbit-knowledge::pipeline` and `orbit-embed::graph_indexer`. Both shapes are viable; the design doesn't change either way.
+- **Diff-stream contract.** Push channel vs. pull-after-rebuild between graph synchronization and `orbit-embed::graph_indexer`. Both shapes are viable; the design doesn't change either way.
 - **`LeafKind` encoding in the `field` column** vs. a join against the graph's identity-key→kind map at filter time. No schema implications; chosen at implementation.
 
 ### 1.8 Privacy of telemetry

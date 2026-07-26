@@ -102,7 +102,6 @@ network edge per spoke: spoke → hub.
 | Local broker, trusted hub config/server/link pool, graph and learning composition, safe surface, and audit boundary | [crates/orbit-remote/src/mcp/](../../../crates/orbit-remote/src/mcp/) | [ORB-10262], [ORB-10268], [ORB-10269] |
 | Generic builtin schema + placement metadata | [crates/orbit-tools/src/builtin/orbit/mod.rs](../../../crates/orbit-tools/src/builtin/orbit/mod.rs) | [ORB-00424] |
 | Canonical host/workspace discovery schema, placement, and projection | [crates/orbit-remote/src/mcp/discovery.rs](../../../crates/orbit-remote/src/mcp/discovery.rs) | [ORB-10267] |
-| Canonical graph schema + placement metadata | [crates/orbit-remote/src/mcp/graph.rs](../../../crates/orbit-remote/src/mcp/graph.rs) | [ORB-00424] |
 | Local owner/builtin execution + transport-independent hub coordination executor | [crates/orbit-core/src/](../../../crates/orbit-core/src/) | [ORB-00424], [ORB-10319] |
 | Registry SQL and remote audit/snapshot persistence over shared `orbit.db` | [crates/orbit-remote/src/persistence/](../../../crates/orbit-remote/src/persistence/) | [ORB-10319] |
 | Hub, ownership, replica role, and run placement | [host-registry/2_design.md](../host-registry/2_design.md) | [ORB-00424] |
