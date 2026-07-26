@@ -6,18 +6,21 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use orbit_common::types::{
     ExternalRef, JobRun, JobRunState, NotFoundKind, OrbitError, Task, TaskArtifact, TaskPriority,
     TaskStatus, TaskType,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use tempfile::tempdir;
 
 use crate::context::TaskReadHost;
 
+use super::super::cleanup::remove_worktree;
 use super::super::gc::{WorktreeGcOptions, collect_worktrees};
-use super::super::{resolve_shared_worktree_path, resolve_worktree_path_from_prefix};
+use super::super::{
+    WorktreeIdentity, resolve_shared_worktree_path, resolve_worktree_path_from_prefix,
+};
 
 static WORKTREE_ROOT_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -127,7 +130,7 @@ fn terminal_dirty_worktree_is_a_rescue_candidate() {
     let temp = tempdir().unwrap();
     let repo = temp.path().join("repo");
     init_repo(&repo);
-    let run = run("jrun-dirty", JobRunState::Failed, Some("ORB-DIRTY"));
+    let run = pipeline_run("jrun-dirty", JobRunState::Failed, &["ORB-DIRTY"]);
     let worktree = resolved_task_worktree(&repo, &run);
     add_worktree(&repo, &worktree, "orbit/dirty");
     fs::write(worktree.join("uncommitted.txt"), "valuable").unwrap();
@@ -155,7 +158,7 @@ fn dry_run_and_yes_share_eligibility_but_only_yes_removes() {
     let temp = tempdir().unwrap();
     let repo = temp.path().join("repo");
     init_repo(&repo);
-    let run = run("jrun-clean", JobRunState::Success, Some("ORB-CLEAN"));
+    let run = pipeline_run("jrun-clean", JobRunState::Success, &["ORB-CLEAN"]);
     let worktree = resolved_task_worktree(&repo, &run);
     add_worktree(&repo, &worktree, "orbit/clean");
     fs::write(worktree.join("bytes.bin"), [1_u8; 32]).unwrap();
@@ -194,16 +197,8 @@ fn colliding_sanitized_run_ids_are_ambiguous_and_never_removed() {
     let temp = tempdir().unwrap();
     let repo = temp.path().join("repo");
     init_repo(&repo);
-    let first = run(
-        "jrun:collision",
-        JobRunState::Success,
-        Some("ORB-COLLISION"),
-    );
-    let second = run(
-        "jrun-collision",
-        JobRunState::Success,
-        Some("ORB-COLLISION"),
-    );
+    let first = pipeline_run("jrun:collision", JobRunState::Success, &["ORB-COLLISION"]);
+    let second = pipeline_run("jrun-collision", JobRunState::Success, &["ORB-COLLISION"]);
     let worktree = resolved_task_worktree(&repo, &first);
     assert_eq!(worktree, resolved_task_worktree(&repo, &second));
     add_worktree(&repo, &worktree, "orbit/collision");
@@ -235,7 +230,7 @@ fn terminal_run_with_blocked_task_is_retained() {
     let temp = tempdir().unwrap();
     let repo = temp.path().join("repo");
     init_repo(&repo);
-    let run = run("jrun-blocked", JobRunState::Success, Some("ORB-BLOCKED"));
+    let run = pipeline_run("jrun-blocked", JobRunState::Success, &["ORB-BLOCKED"]);
     let worktree = resolved_task_worktree(&repo, &run);
     add_worktree(&repo, &worktree, "orbit/blocked");
     let host = FakeTaskHost::new(vec![task_fixture("ORB-BLOCKED", TaskStatus::Blocked)]);
@@ -262,7 +257,7 @@ fn terminal_run_with_review_task_is_retained() {
     let temp = tempdir().unwrap();
     let repo = temp.path().join("repo");
     init_repo(&repo);
-    let run = run("jrun-review", JobRunState::Success, Some("ORB-REVIEW"));
+    let run = pipeline_run("jrun-review", JobRunState::Success, &["ORB-REVIEW"]);
     let worktree = resolved_task_worktree(&repo, &run);
     add_worktree(&repo, &worktree, "orbit/review");
     let host = FakeTaskHost::new(vec![task_fixture("ORB-REVIEW", TaskStatus::Review)]);
@@ -288,7 +283,7 @@ fn unattributed_run_is_retained_and_reported() {
     let temp = tempdir().unwrap();
     let repo = temp.path().join("repo");
     init_repo(&repo);
-    let run = run("jrun-unattributed", JobRunState::Success, None);
+    let run = unattributed_run("jrun-unattributed", JobRunState::Success);
     let worktree = resolve_shared_worktree_path(&repo, &run.run_id).unwrap();
     add_worktree(&repo, &worktree, "orbit/unattributed");
     let host = FakeTaskHost::new(Vec::new());
@@ -339,7 +334,430 @@ fn resolver_uses_external_root_and_repository_name_when_configured() {
     restore_worktree_root(old);
 }
 
-fn run(id: &str, state: JobRunState, task_id: Option<&str>) -> JobRun {
+/// ORB-10427: the collector reclaimed nothing in production because it probed
+/// a singular `task_id` that `task_pr_pipeline` never writes, derived a
+/// `parallel-batch-*` path no worktree occupied, and reported every real
+/// worktree `skipped:unrecognized`. Nothing about this worktree is
+/// unrecognizable: the run record is complete and terminal and its task is
+/// settled.
+#[test]
+fn pipeline_shaped_run_is_recognized_and_reported_in_full() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = pipeline_run("jrun-20260726-0305-2", JobRunState::Success, &["ORB-10419"]);
+    let worktree = resolved_task_worktree(&repo, &run);
+    add_worktree(&repo, &worktree, "orbit/ORB-10419-6a657983");
+    let host = FakeTaskHost::new(vec![task_fixture("ORB-10419", TaskStatus::Done)]);
+
+    let result = collect_worktrees(
+        &repo,
+        std::slice::from_ref(&run),
+        &host,
+        &WorktreeGcOptions::default(),
+    )
+    .unwrap();
+
+    let report = result
+        .reports
+        .iter()
+        .find(|report| report.path == worktree)
+        .expect("the worktree the pipeline created must appear in the report");
+    assert!(
+        !report.action.starts_with("skipped:"),
+        "an attributable worktree must not be skipped, got {}",
+        report.action
+    );
+    assert_eq!(report.action, "would_remove");
+    assert_eq!(report.run_id.as_deref(), Some("jrun-20260726-0305-2"));
+    assert_eq!(report.run_state, Some(JobRunState::Success));
+    assert_eq!(report.task_id.as_deref(), Some("ORB-10419"));
+    assert_eq!(report.task_status, Some(TaskStatus::Done));
+    assert!(
+        report.bytes_reclaimed > 0,
+        "a dry run still estimates what --yes would reclaim"
+    );
+    assert!(result.dry_run);
+    assert!(worktree.exists(), "a dry run never removes anything");
+}
+
+/// The bug was a silent divergence between two independent spellings of one
+/// rule: `setup_worktree` created `orbit-<run_id>` and gc looked for
+/// `parallel-batch-<run_id>`. Both now derive through [`WorktreeIdentity`].
+#[test]
+fn setup_and_gc_derive_the_same_worktree_path() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let run = pipeline_run("jrun-derivation", JobRunState::Success, &["ORB-DERIVE"]);
+    let input = run.input.clone().unwrap();
+
+    let identity = WorktreeIdentity::from_input(&input, Some(&run.run_id)).unwrap();
+
+    assert_eq!(identity.task_ids, vec!["ORB-DERIVE".to_string()]);
+    assert_eq!(identity.branch_prefix, "orbit");
+    assert_eq!(identity.run_id, "jrun-derivation");
+    assert_eq!(
+        identity.path(&repo).unwrap(),
+        resolved_task_worktree(&repo, &run)
+    );
+}
+
+/// Stored runs from before `task_ids` existed still carry the singular key.
+#[test]
+fn legacy_singular_task_id_run_is_still_recognized() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = legacy_task_id_run("jrun-legacy", JobRunState::Success, "ORB-LEGACY");
+    let worktree = resolved_task_worktree(&repo, &run);
+    add_worktree(&repo, &worktree, "orbit/legacy");
+    let host = FakeTaskHost::new(vec![task_fixture("ORB-LEGACY", TaskStatus::Done)]);
+
+    let result = collect_worktrees(&repo, &[run], &host, &WorktreeGcOptions::default()).unwrap();
+
+    assert_eq!(result.reports[0].action, "would_remove");
+    assert_eq!(result.reports[0].task_id.as_deref(), Some("ORB-LEGACY"));
+}
+
+/// The second divergence of the same shape: `setup_worktree` falls back to a
+/// task-derived token when no `run_id` reaches it, while gc only ever knew the
+/// run record's id. gc now considers both candidates.
+#[test]
+fn worktree_created_under_the_task_derived_fallback_is_recognized() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = pipeline_run("jrun-fallback", JobRunState::Success, &["ORB-FALLBACK"]);
+    let fallback = resolve_worktree_path_from_prefix(&repo, "orbit", "task-ORB-FALLBACK").unwrap();
+    assert_ne!(fallback, resolved_task_worktree(&repo, &run));
+    add_worktree(&repo, &fallback, "orbit/fallback");
+    let host = FakeTaskHost::new(vec![task_fixture("ORB-FALLBACK", TaskStatus::Blocked)]);
+
+    let result = collect_worktrees(
+        &repo,
+        &[run],
+        &host,
+        &WorktreeGcOptions {
+            delete: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let report = result
+        .reports
+        .iter()
+        .find(|report| report.path == fallback)
+        .expect("the fallback-named worktree must be attributed to its run");
+    assert_eq!(report.action, "skipped:task_status_ineligible");
+    assert_eq!(report.run_id.as_deref(), Some("jrun-fallback"));
+    assert!(fallback.exists());
+}
+
+/// Bundle rule: a worktree serving several tasks is only eligible when every
+/// task it serves is settled, and the report names the member that blocked it.
+/// A bundle is never easier to discard than its least-settled member.
+#[test]
+fn bundle_worktree_is_retained_until_every_member_settles() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = pipeline_run(
+        "jrun-bundle",
+        JobRunState::Success,
+        &["ORB-BUNDLE-A", "ORB-BUNDLE-B"],
+    );
+    let worktree = resolved_task_worktree(&repo, &run);
+    add_worktree(&repo, &worktree, "orbit/bundle-0badc0de");
+    let host = FakeTaskHost::new(vec![
+        task_fixture("ORB-BUNDLE-A", TaskStatus::Done),
+        task_fixture("ORB-BUNDLE-B", TaskStatus::Review),
+    ]);
+
+    let result = collect_worktrees(
+        &repo,
+        &[run],
+        &host,
+        &WorktreeGcOptions {
+            delete: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(worktree.exists());
+    assert_eq!(result.reports[0].action, "skipped:task_status_ineligible");
+    assert_eq!(
+        result.reports[0].task_id.as_deref(),
+        Some("ORB-BUNDLE-B"),
+        "the report names the member that blocked the bundle"
+    );
+    assert_eq!(result.reports[0].task_status, Some(TaskStatus::Review));
+}
+
+#[test]
+fn bundle_worktree_with_every_member_settled_is_eligible() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = pipeline_run(
+        "jrun-bundle-settled",
+        JobRunState::Success,
+        &["ORB-BUNDLE-A", "ORB-BUNDLE-B"],
+    );
+    let worktree = resolved_task_worktree(&repo, &run);
+    add_worktree(&repo, &worktree, "orbit/bundle-5ettled");
+    let host = FakeTaskHost::new(vec![
+        task_fixture("ORB-BUNDLE-A", TaskStatus::Done),
+        task_fixture("ORB-BUNDLE-B", TaskStatus::Archived),
+    ]);
+
+    let result = collect_worktrees(&repo, &[run], &host, &WorktreeGcOptions::default()).unwrap();
+
+    assert_eq!(result.reports[0].action, "would_remove");
+    assert_eq!(
+        result.reports[0].task_id.as_deref(),
+        Some("ORB-BUNDLE-A,ORB-BUNDLE-B"),
+        "an eligible bundle names every task it serves"
+    );
+}
+
+/// Safety gate: a worktree may still back a live process.
+#[test]
+fn non_terminal_run_is_retained() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = pipeline_run("jrun-running", JobRunState::Running, &["ORB-RUNNING"]);
+    let worktree = resolved_task_worktree(&repo, &run);
+    add_worktree(&repo, &worktree, "orbit/running");
+    let host = FakeTaskHost::new(vec![task_fixture("ORB-RUNNING", TaskStatus::Done)]);
+
+    let result = collect_worktrees(
+        &repo,
+        &[run],
+        &host,
+        &WorktreeGcOptions {
+            delete: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(worktree.exists());
+    assert_eq!(result.reports[0].action, "skipped:run_not_terminal");
+}
+
+/// Safety gate: `--older-than-hours` holds back recently finished runs.
+#[test]
+fn run_finished_after_the_cutoff_is_retained() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = pipeline_run("jrun-recent", JobRunState::Success, &["ORB-RECENT"]);
+    let worktree = resolved_task_worktree(&repo, &run);
+    add_worktree(&repo, &worktree, "orbit/recent");
+    let host = FakeTaskHost::new(vec![task_fixture("ORB-RECENT", TaskStatus::Done)]);
+
+    let result = collect_worktrees(
+        &repo,
+        &[run],
+        &host,
+        &WorktreeGcOptions {
+            delete: true,
+            older_than: Some(Utc::now() - Duration::hours(1)),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(worktree.exists());
+    assert_eq!(result.reports[0].action, "skipped:too_recent");
+}
+
+/// Safety gate: the collector never follows a symlink standing where a
+/// worktree should be.
+#[cfg(unix)]
+#[test]
+fn symlink_at_a_known_worktree_path_is_never_followed() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = pipeline_run("jrun-symlink", JobRunState::Success, &["ORB-SYMLINK"]);
+    let worktree = resolved_task_worktree(&repo, &run);
+    let elsewhere = temp.path().join("elsewhere");
+    fs::create_dir_all(&elsewhere).unwrap();
+    fs::write(elsewhere.join("precious.txt"), "keep me").unwrap();
+    fs::create_dir_all(worktree.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, &worktree).unwrap();
+    let host = FakeTaskHost::new(vec![task_fixture("ORB-SYMLINK", TaskStatus::Done)]);
+
+    let result = collect_worktrees(
+        &repo,
+        &[run],
+        &host,
+        &WorktreeGcOptions {
+            delete: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(elsewhere.join("precious.txt").exists());
+    assert_eq!(result.reports[0].action, "skipped:not_a_real_directory");
+}
+
+/// Safety gate: a directory Git does not know as a worktree is left alone,
+/// even at a path a run record claims.
+#[test]
+fn unregistered_directory_at_a_known_path_is_retained() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = pipeline_run("jrun-unregistered", JobRunState::Success, &["ORB-UNREG"]);
+    let worktree = resolved_task_worktree(&repo, &run);
+    fs::create_dir_all(&worktree).unwrap();
+    fs::write(worktree.join("rescue.txt"), "keep me").unwrap();
+    let host = FakeTaskHost::new(vec![task_fixture("ORB-UNREG", TaskStatus::Done)]);
+
+    let result = collect_worktrees(
+        &repo,
+        &[run],
+        &host,
+        &WorktreeGcOptions {
+            delete: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(worktree.join("rescue.txt").exists());
+    assert_eq!(result.reports[0].action, "skipped:not_registered_worktree");
+}
+
+/// Safety gate: a task the store cannot resolve says nothing about whether
+/// the work settled, so the worktree is retained.
+#[test]
+fn run_whose_task_cannot_be_resolved_is_retained() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = pipeline_run("jrun-missing", JobRunState::Success, &["ORB-MISSING"]);
+    let worktree = resolved_task_worktree(&repo, &run);
+    add_worktree(&repo, &worktree, "orbit/missing");
+    let host = FakeTaskHost::new(Vec::new());
+
+    let result = collect_worktrees(
+        &repo,
+        &[run],
+        &host,
+        &WorktreeGcOptions {
+            delete: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(worktree.exists());
+    assert_eq!(result.reports[0].action, "skipped:task_unresolved");
+    assert_eq!(result.reports[0].task_id.as_deref(), Some("ORB-MISSING"));
+    assert_eq!(result.reports[0].task_status, None);
+}
+
+/// Safety gate: a detached worktree has no branch to reason about, so it is
+/// never collected.
+#[test]
+fn detached_worktree_with_no_branch_is_retained() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = pipeline_run("jrun-detached", JobRunState::Success, &["ORB-DETACHED"]);
+    let worktree = resolved_task_worktree(&repo, &run);
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            worktree.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
+    let host = FakeTaskHost::new(vec![task_fixture("ORB-DETACHED", TaskStatus::Done)]);
+
+    let result = collect_worktrees(
+        &repo,
+        &[run],
+        &host,
+        &WorktreeGcOptions {
+            delete: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(worktree.exists());
+    assert_eq!(result.reports[0].action, "skipped:branch_unknown");
+}
+
+/// The removal itself is the last gate: gc calls `remove_worktree` without
+/// `--force`, so a worktree dirtied after the status check makes Git refuse.
+/// Never replace this with a recursive delete.
+#[test]
+fn removal_without_force_fails_closed_on_a_dirty_worktree() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let worktree = repo.join(".orbit/state/worktrees/orbit-jrun-noforce");
+    add_worktree(&repo, &worktree, "orbit/noforce");
+    fs::write(worktree.join("uncommitted.txt"), "valuable").unwrap();
+
+    let error = remove_worktree(&repo, &worktree, Some("orbit/noforce"), false)
+        .expect_err("git must refuse to remove a dirty worktree without --force");
+
+    assert!(worktree.join("uncommitted.txt").exists());
+    assert!(
+        format!("{error}").contains("worktree remove"),
+        "unexpected error: {error}"
+    );
+}
+
+/// A run record shaped exactly like a real `task_pr_pipeline` run: `task_ids`
+/// as an array, no `branch_prefix`, and no singular `task_id`. Also no
+/// `run_id` — the engine injects that into the activity input at dispatch, so
+/// the stored `initial_input` never carries it.
+///
+/// Copied from run `jrun-20260726-0305-2` on dk-server-1 (ORB-10427). GC
+/// probed the singular `task_id` against this shape, missed, derived a
+/// `parallel-batch-*` path that no worktree ever occupied, and so classified
+/// every real worktree `skipped:unrecognized`.
+fn pipeline_run(id: &str, state: JobRunState, task_ids: &[&str]) -> JobRun {
+    job_run(
+        id,
+        state,
+        json!({
+            "auto_push": true,
+            "base_branch": "agent-main",
+            "base_sync": "remote",
+            "review": false,
+            "review_crew": null,
+            "task_ids": task_ids,
+        }),
+    )
+}
+
+/// A pre-`task_ids` run record. Stored runs from older pipelines still carry
+/// the singular key, and gc must keep recognizing them.
+fn legacy_task_id_run(id: &str, state: JobRunState, task_id: &str) -> JobRun {
+    job_run(id, state, json!({ "task_id": task_id }))
+}
+
+/// A run that names no task at all — it never went through `setup_worktree`.
+fn unattributed_run(id: &str, state: JobRunState) -> JobRun {
+    job_run(id, state, json!({}))
+}
+
+fn job_run(id: &str, state: JobRunState, input: Value) -> JobRun {
     let now = Utc::now();
     JobRun {
         run_id: id.to_string(),
@@ -353,10 +771,7 @@ fn run(id: &str, state: JobRunState, task_id: Option<&str>) -> JobRun {
         created_at: now,
         pid: None,
         pid_start_time: None,
-        input: Some(match task_id {
-            Some(task_id) => json!({"task_id": task_id}),
-            None => json!({}),
-        }),
+        input: Some(input),
         retry_source_run_id: None,
         knowledge_metrics: None,
         resolved_crew: None,
@@ -365,6 +780,10 @@ fn run(id: &str, state: JobRunState, task_id: Option<&str>) -> JobRun {
     }
 }
 
+/// The directory `setup_worktree` creates for a run with no `branch_prefix`
+/// override, spelled out independently of the production derivation so these
+/// tests pin the on-disk outcome rather than restating the code under test.
+/// [`setup_and_gc_derive_the_same_worktree_path`] ties the two together.
 fn resolved_task_worktree(repo: &Path, run: &JobRun) -> PathBuf {
     resolve_worktree_path_from_prefix(repo, "orbit", &run.run_id).unwrap()
 }
