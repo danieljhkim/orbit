@@ -53,8 +53,10 @@ fn read_bundle_rejects_missing_body_md() {
     let dir = tempdir.path().join("ADR-0001");
     fs::create_dir_all(&dir).expect("create adr dir");
     let bundle = sample_bundle("ADR-0001");
-    write_yaml_atomic_with(&adr_doc_path(&dir), &bundle.doc, serialize_adr_doc_yaml)
-        .expect("write doc only");
+    write_yaml_atomic_with(&adr_doc_path(&dir), &bundle.doc, |error| {
+        OrbitError::Store(error.to_string())
+    })
+    .expect("write doc only");
 
     let error = read_bundle_at(&dir).expect_err("missing body must fail");
 

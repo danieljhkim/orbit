@@ -6,9 +6,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use orbit_common::types::{Learning, LearningStatus, NotFoundKind, OrbitError};
 
 use super::constants::LEARNING_SCHEMA_VERSION;
-use super::doc::{LearningFileDocument, serialize_learning_doc_yaml};
+use super::doc::LearningFileDocument;
 use super::layout::validate_learning_id;
-use crate::file::yaml_doc::{read_yaml_with, write_yaml_atomic_with};
+use crate::file::yaml_doc::{read_yaml_with, serialize_yaml_with, write_yaml_atomic_with};
 
 static LEARNING_CREATE_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -55,7 +55,7 @@ pub(super) fn write_learning_file(
         schema_version: LEARNING_SCHEMA_VERSION,
         learning: learning.clone(),
     };
-    write_yaml_atomic_with(path, &doc, serialize_learning_doc_yaml)
+    write_yaml_atomic_with(path, &doc, |error| OrbitError::Store(error.to_string()))
 }
 
 /// Create a learning record at `path` without clobbering an existing body.
@@ -87,7 +87,7 @@ pub(super) fn create_learning_file_exclusive(
         schema_version: LEARNING_SCHEMA_VERSION,
         learning: learning.clone(),
     };
-    let yaml = serialize_learning_doc_yaml(&doc)?;
+    let yaml = serialize_yaml_with(&doc, |error| OrbitError::Store(error.to_string()))?;
     let temp_path = exclusive_temp_path(path);
     let mut file = OpenOptions::new()
         .create_new(true)

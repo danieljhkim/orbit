@@ -6,7 +6,7 @@ use orbit_common::types::{
     ResourceKind, ResourceMetadata, parse_policy_resource, validate_resource_name,
 };
 
-use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
+use crate::file::yaml_doc::write_yaml_atomic_with;
 
 pub(crate) struct PolicyDefFileStore {
     root: PathBuf,
@@ -69,23 +69,23 @@ impl PolicyDefFileStore {
         def.validate()?;
         let path = self.policy_path(&def.name)?;
         self.ensure_layout()?;
-        let content = serde_yaml::to_string(&PolicyResource {
-            schema_version: POLICY_RESOURCE_SCHEMA_VERSION,
-            kind: ResourceKind::Policy,
-            metadata: ResourceMetadata::named(def.name.clone()),
-            spec: PolicyResourceSpec {
-                description: def.description.clone(),
-                deny_read: def.deny_read.clone(),
-                deny_modify: def.deny_modify.clone(),
-                fs_profiles: def.fs_profiles.clone(),
-                created_at: def.created_at,
-                updated_at: def.updated_at,
+        write_yaml_atomic_with(
+            &path,
+            &PolicyResource {
+                schema_version: POLICY_RESOURCE_SCHEMA_VERSION,
+                kind: ResourceKind::Policy,
+                metadata: ResourceMetadata::named(def.name.clone()),
+                spec: PolicyResourceSpec {
+                    description: def.description.clone(),
+                    deny_read: def.deny_read.clone(),
+                    deny_modify: def.deny_modify.clone(),
+                    fs_profiles: def.fs_profiles.clone(),
+                    created_at: def.created_at,
+                    updated_at: def.updated_at,
+                },
             },
-        })
-        .map_err(|e| {
-            OrbitError::InvalidInput(format!("failed to serialize policy {}: {e}", def.name))
-        })?;
-        write_atomic(&path, &content).map_err(Into::into)
+            |e| OrbitError::InvalidInput(format!("failed to serialize policy {}: {e}", def.name)),
+        )
     }
 }
 

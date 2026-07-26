@@ -13,6 +13,7 @@ use orbit_common::types::{
 };
 use orbit_common::utility::fs::{atomic_write_text, sync_parent_dir, with_exclusive_file_lock};
 
+use crate::file::yaml_doc::write_yaml_atomic_with;
 use crate::sqlite::task_registry::{ProjectionRebuildResult, TaskRegistryStore};
 
 pub(crate) mod bundle_io;
@@ -21,7 +22,7 @@ pub(crate) mod task_bundle_types;
 
 pub(crate) use bundle_io::{
     append_jsonl_row, cleanup_partial_bundle_best_effort, copy_artifact_blobs, read_bundle_at,
-    write_bundle_at, write_yaml_file,
+    write_bundle_at,
 };
 pub(crate) use lock::{
     ensure_projection_entry_removable, remove_projection_entry, remove_task_bundle_lock_sentinel,
@@ -233,9 +234,10 @@ impl TaskBundleStoreV2 {
             )));
         }
         envelope.validate()?;
-        write_yaml_file(
+        write_yaml_atomic_with(
             &self.bundle_path(task_id)?.join(TASK_ENVELOPE_FILE_NAME),
             envelope,
+            |err| OrbitError::Store(err.to_string()),
         )
     }
 
@@ -245,12 +247,13 @@ impl TaskBundleStoreV2 {
         manifest: &ArtifactManifestV2,
     ) -> Result<(), OrbitError> {
         manifest.validate()?;
-        write_yaml_file(
+        write_yaml_atomic_with(
             &self
                 .bundle_path(task_id)?
                 .join(TASK_ARTIFACTS_DIR_NAME)
                 .join(TASK_ARTIFACT_MANIFEST_FILE_NAME),
             manifest,
+            |err| OrbitError::Store(err.to_string()),
         )
     }
 

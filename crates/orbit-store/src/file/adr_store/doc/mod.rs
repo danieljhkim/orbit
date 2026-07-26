@@ -1,4 +1,4 @@
-use orbit_common::types::{Adr, OrbitError};
+use orbit_common::types::Adr;
 use serde::{Deserialize, Serialize};
 
 /// On-disk shape of an ADR record (the contents of `adr.yaml`).
@@ -11,10 +11,6 @@ pub(super) struct AdrFileDocument {
     pub(super) schema_version: u8,
     #[serde(flatten)]
     pub(super) adr: Adr,
-}
-
-pub(super) fn serialize_adr_doc_yaml(doc: &AdrFileDocument) -> Result<String, OrbitError> {
-    serde_yaml::to_string(doc).map_err(|e| OrbitError::Store(e.to_string()))
 }
 
 #[cfg(test)]

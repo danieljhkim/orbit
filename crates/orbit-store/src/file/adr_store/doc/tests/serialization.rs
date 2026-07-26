@@ -1,9 +1,10 @@
 use chrono::TimeZone;
 use chrono::Utc;
-use orbit_common::types::{AdrStatus, LegacyValidation};
+use orbit_common::types::{AdrStatus, LegacyValidation, OrbitError};
 
 use super::super::super::constants::ADR_SCHEMA_VERSION;
 use super::super::*;
+use crate::file::yaml_doc::serialize_yaml_with;
 
 fn sample_doc() -> AdrFileDocument {
     let ts = Utc.with_ymd_and_hms(2026, 5, 11, 0, 0, 0).unwrap();
@@ -35,7 +36,8 @@ fn round_trip_through_yaml_preserves_schema_version() {
     let mut doc = sample_doc();
     doc.adr.tags = vec!["adr-schema".to_string(), "cross-cutting".to_string()];
     doc.adr.paths = vec!["crates/orbit-store/**".to_string()];
-    let yaml = serialize_adr_doc_yaml(&doc).expect("serialize");
+    let yaml =
+        serialize_yaml_with(&doc, |error| OrbitError::Store(error.to_string())).expect("serialize");
     assert!(
         yaml.contains("schema_version: 2"),
         "yaml should contain schema_version: 2; got:\n{yaml}"

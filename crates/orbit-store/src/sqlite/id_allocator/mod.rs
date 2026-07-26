@@ -11,6 +11,8 @@ use rusqlite::{Connection, Transaction, TransactionBehavior, params, types::Type
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
+use crate::file::yaml_doc::{parse_yaml_with, serialize_yaml_with};
+
 const KIND_ADR: &str = "adr";
 const KIND_LEARNING: &str = "learning";
 const STATUS_ABANDONED: &str = "abandoned";
@@ -435,8 +437,8 @@ impl IdAllocator {
 
             let mut value = read_yaml_value(yaml_path)?;
             rewrite_learning_yaml(&mut value, old_id, &rename.new_id, &rename_map)?;
-            let rendered = serde_yaml::to_string(&value)
-                .map_err(|error| OrbitError::Migration(error.to_string()))?;
+            let rendered =
+                serialize_yaml_with(&value, |error| OrbitError::Migration(error.to_string()))?;
             atomic_write_text(yaml_path, &rendered).map_err(|error| {
                 OrbitError::Io(format!("write {}: {error}", yaml_path.display()))
             })?;
@@ -875,8 +877,9 @@ fn yaml_epoch(path: &Path) -> Result<i64, OrbitError> {
 fn read_yaml_value(path: &Path) -> Result<Value, OrbitError> {
     let raw = fs::read_to_string(path)
         .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
-    serde_yaml::from_str(&raw)
-        .map_err(|error| OrbitError::Migration(format!("parse {}: {error}", path.display())))
+    parse_yaml_with(&raw, path, |_, error| {
+        OrbitError::Migration(format!("parse {}: {error}", path.display()))
+    })
 }
 
 fn rewrite_learning_yaml(

@@ -4,7 +4,7 @@ use std::path::Path;
 use orbit_common::types::{Adr, NotFoundKind, OrbitError};
 use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
 
-use super::doc::{AdrFileDocument, serialize_adr_doc_yaml};
+use super::doc::AdrFileDocument;
 use super::layout::{adr_doc_path, body_path, validate_adr_id};
 use crate::file::yaml_doc::{read_yaml_with, write_yaml_atomic_with};
 
@@ -18,7 +18,9 @@ pub(super) fn write_bundle_at(adr_dir: &Path, bundle: &AdrBundle) -> Result<(), 
     validate_bundle(bundle)?;
     fs::create_dir_all(adr_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
 
-    write_yaml_atomic_with(&adr_doc_path(adr_dir), &bundle.doc, serialize_adr_doc_yaml)?;
+    write_yaml_atomic_with(&adr_doc_path(adr_dir), &bundle.doc, |error| {
+        OrbitError::Store(error.to_string())
+    })?;
     write_atomic(&body_path(adr_dir), &bundle.body).map_err(|e| OrbitError::Io(e.to_string()))?;
     Ok(())
 }

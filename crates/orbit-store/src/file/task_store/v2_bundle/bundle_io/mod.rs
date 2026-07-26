@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 
 use super::task_bundle_types::TaskBundleV2;
 use crate::file::task_store::task_migrations;
+use crate::file::yaml_doc::{parse_yaml_with, write_yaml_atomic_with};
 
 /// Write a new v2 bundle at `bundle_dir`.
 ///
@@ -32,7 +33,11 @@ pub(crate) fn write_bundle_at(bundle_dir: &Path, bundle: &TaskBundleV2) -> Resul
     validate_bundle(bundle)?;
     ensure_bundle_dirs(bundle_dir)?;
 
-    write_yaml_file(&bundle_dir.join(TASK_ENVELOPE_FILE_NAME), &bundle.envelope)?;
+    write_yaml_atomic_with(
+        &bundle_dir.join(TASK_ENVELOPE_FILE_NAME),
+        &bundle.envelope,
+        |err| OrbitError::Store(err.to_string()),
+    )?;
     atomic_write_text(
         &bundle_dir.join(TASK_DESCRIPTION_FILE_NAME),
         &bundle.description,
@@ -54,11 +59,12 @@ pub(crate) fn write_bundle_at(bundle_dir: &Path, bundle: &TaskBundleV2) -> Resul
     write_jsonl_file(&bundle_dir.join(TASK_EVENTS_FILE_NAME), &bundle.events)?;
     write_jsonl_file(&bundle_dir.join(TASK_COMMENTS_FILE_NAME), &bundle.comments)?;
     if let Some(manifest) = &bundle.artifact_manifest {
-        write_yaml_file(
+        write_yaml_atomic_with(
             &bundle_dir
                 .join(TASK_ARTIFACTS_DIR_NAME)
                 .join(TASK_ARTIFACT_MANIFEST_FILE_NAME),
             manifest,
+            |err| OrbitError::Store(err.to_string()),
         )?;
     }
 
@@ -149,21 +155,14 @@ fn task_id_from_bundle_dir(bundle_dir: &Path) -> Result<String, OrbitError> {
         })
 }
 
-pub(crate) fn write_yaml_file<T>(path: &Path, value: &T) -> Result<(), OrbitError>
-where
-    T: serde::Serialize,
-{
-    let yaml = serde_yaml::to_string(value).map_err(|err| OrbitError::Store(err.to_string()))?;
-    atomic_write_text(path, &yaml).map_err(|err| OrbitError::Io(err.to_string()))
-}
-
 fn read_migrated_yaml_file<T>(path: &Path, plan: &Plan) -> Result<T, OrbitError>
 where
     T: DeserializeOwned,
 {
     let raw = read_required_text(path)?;
-    let value: serde_yaml::Value = serde_yaml::from_str(&raw)
-        .map_err(|err| OrbitError::Store(format!("invalid YAML at {}: {err}", path.display())))?;
+    let value: serde_yaml::Value = parse_yaml_with(&raw, path, |_, err| {
+        OrbitError::Store(format!("invalid YAML at {}: {err}", path.display()))
+    })?;
     let migrated = plan.migrate(value).map_err(|err| match err {
         OrbitError::Migration(msg) => {
             OrbitError::Migration(format!("{} ({})", msg, path.display()))
@@ -336,7 +335,7 @@ fn read_artifact_manifest(bundle_dir: &Path) -> Result<Option<ArtifactManifestV2
     let manifest_path = artifact_dir.join(TASK_ARTIFACT_MANIFEST_FILE_NAME);
     match fs::read_to_string(&manifest_path) {
         Ok(raw) => {
-            let manifest: ArtifactManifestV2 = serde_yaml::from_str(&raw).map_err(|err| {
+            let manifest: ArtifactManifestV2 = parse_yaml_with(&raw, &manifest_path, |_, err| {
                 OrbitError::Store(format!(
                     "invalid artifact manifest {}: {err}",
                     manifest_path.display()
