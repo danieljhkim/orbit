@@ -135,28 +135,6 @@ impl OrbitRuntime {
         }
     }
 
-    /// Initialize a runtime against an already-initialized workspace, returning
-    /// `Ok(None)` when no initialized workspace is discovered from cwd.
-    ///
-    /// Unlike [`Self::initialize_with_root_override`], this does not bootstrap
-    /// a new `.orbit/` directory. Intended for long-running services like
-    /// `orbit mcp serve` that may be invoked from arbitrary directories and
-    /// must not silently materialize workspace state.
-    pub fn try_initialize_existing(
-        root_override: Option<&Path>,
-    ) -> Result<Option<Self>, OrbitError> {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let Some(resolved) = try_resolve_initialized_roots(&cwd, root_override)? else {
-            return Ok(None);
-        };
-        let global_root = resolve_global_root()?;
-        Ok(Some(Self::from_resolved_roots(
-            &global_root,
-            &resolved.shared_root,
-            &resolved.local_root,
-        )?))
-    }
-
     pub fn resolve_roots_for_cwd(
         cwd: &Path,
         root_override: Option<&Path>,
@@ -213,10 +191,6 @@ impl OrbitRuntime {
             resolve_global_root()?
         };
         Ok(OrbitRuntimeRoots::new(global_root, resolved))
-    }
-
-    pub fn from_data_root(data_root: &Path) -> Result<Self, OrbitError> {
-        Self::from_resolved_roots(data_root, data_root, data_root)
     }
 
     pub fn from_roots(global_root: &Path, workspace_root: &Path) -> Result<Self, OrbitError> {
@@ -306,11 +280,6 @@ impl OrbitRuntime {
         &self.layout_report
     }
 
-    pub fn with_policy(mut self, policy: orbit_policy::PolicyEngine) -> Self {
-        self.context.set_policy(policy);
-        self
-    }
-
     pub fn with_actor(mut self, actor: ActorIdentity) -> Self {
         self.context.set_actor(actor);
         self
@@ -335,23 +304,6 @@ impl OrbitRuntime {
         Err(OrbitError::Execution(format!(
             "v1 job lookup is retired; refusing to resolve job '{job_id}' through OrbitRuntime::get_job. Use schemaVersion: 2 job assets with `orbit job run` or `orbit run` instead."
         )))
-    }
-
-    pub fn execution_env_config(&self) -> (bool, Vec<String>) {
-        (
-            self.context.execution_env_policy().inherit(),
-            self.context.execution_env_policy().pass().to_vec(),
-        )
-    }
-
-    pub fn codex_execution_config(&self) -> (String, Option<String>) {
-        (
-            self.context.codex_execution_policy().sandbox().to_string(),
-            self.context
-                .codex_execution_policy()
-                .approval_policy()
-                .map(ToString::to_string),
-        )
     }
 
     pub fn shared_root(&self) -> PathBuf {

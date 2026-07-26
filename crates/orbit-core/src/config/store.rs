@@ -123,10 +123,6 @@ impl ConfigStore {
         &self.path
     }
 
-    pub fn exists_on_disk(&self) -> bool {
-        self.path.exists()
-    }
-
     /// The fully resolved (defaulted) view of this document, as if it were
     /// loaded as the effective `config.toml`. Used by both `orbit config
     /// show` and `orbit config get` so they report identical values for the

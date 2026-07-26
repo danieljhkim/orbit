@@ -67,10 +67,6 @@ pub use orbit_tools::prepare_remote_task_artifact_put;
 // Command-layer types the CLI names in its clap surfaces.
 pub use command::docs::{DocType, TaskRelatedDoc};
 pub use command::learning::migrate_learning_layout_at;
-pub use command::learning_authoring::{
-    LEARNING_AUTHOR_OPT_IN_ENV, LearningAuthorRole, LearningWriteAttempt,
-    ensure_learning_write_allowed, learning_author_role,
-};
 pub use command::search::{
     GlobalSearchHit, GlobalSearchKind, GlobalSearchParams, task_selectors_contain_path,
 };
@@ -88,8 +84,8 @@ pub use orbit_common::types::{
     JobRunState, JobRunStep, JobTargetType, Learning, LearningEvidence, LearningScope,
     LearningStatus, ProjectionFreshness, SanitizedExecutionProfile, SanitizedWorkspacePresence,
     StoredExecutionProfile, Task, TaskComplexity, TaskCreateStatus, TaskPriority, TaskStatus,
-    TaskType, WorkspaceOwnership, WorkspacePresenceDeclaration, build_task_status_index,
-    resolve_task_dependencies, task_dependencies_ready,
+    TaskType, WorkspaceOwnership, WorkspacePresenceDeclaration, resolve_task_dependencies,
+    task_dependencies_ready,
 };
 pub use orbit_common::types::{MissedRunPolicy, NotFoundKind, OrbitError, OverlapPolicy};
 pub use orbit_common::utility::redaction::redact_sensitive_env_text;

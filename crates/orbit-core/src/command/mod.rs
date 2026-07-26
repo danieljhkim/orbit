@@ -15,26 +15,26 @@
 /// [ORB-10016] and stamps the same identity.
 pub const SYSTEM_AUDIT_IDENTITY: &str = "system";
 
-pub mod activity;
+pub(crate) mod activity;
 pub mod audit_event;
 pub mod backend_resolver;
-pub mod docs;
-pub mod executor;
+pub(crate) mod docs;
+pub(crate) mod executor;
 pub mod gc;
 pub mod init;
 pub mod job;
 pub mod learning;
-pub mod learning_authoring;
-pub mod pipeline_run;
-pub mod policy;
-pub mod routine;
-pub mod search;
+pub(crate) mod learning_authoring;
+pub(crate) mod pipeline_run;
+pub(crate) mod policy;
+pub(crate) mod routine;
+pub(crate) mod search;
 pub mod semantic;
 pub mod skill;
 pub mod task;
 pub mod task_migration;
 pub mod tool;
-pub mod workflow;
+pub(crate) mod workflow;
 
 #[cfg(test)]
 mod tests;
