@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
 use crate::command::SYSTEM_AUDIT_IDENTITY;
+use crate::command::job::resume::ResumePlan;
 
 #[derive(Debug, Clone)]
 pub struct V2JobRunResult {
@@ -52,6 +53,10 @@ impl OrbitRuntime {
 
     /// Re-run a completed or historical job run from step 0 using the current
     /// catalog definition and the source run's persisted input.
+    ///
+    /// Explicitly discards checkpoints — replay is the "run everything again"
+    /// surface, including agent steps. Use `resume_job_run` / `submit_resume_run`
+    /// to continue from the failed step instead.
     pub fn replay_job_run(&self, source_run_id: &str) -> Result<V2JobRunResult, OrbitError> {
         let source = self.show_job_run(source_run_id)?;
         let input = source.input.clone().unwrap_or_else(|| json!({}));
@@ -75,34 +80,25 @@ impl OrbitRuntime {
     /// their outputs are fed back into the pipeline so later steps see them.
     /// If the source run has no successful checkpoints this degrades to a
     /// full replay.
+    ///
+    /// [ORB-10470] Before the first step runs, the resume reconciles the tasks
+    /// its own retry lineage owns: a task blocked by the source failure is
+    /// re-admitted, and its `job_run_id` is realigned to the batch id the
+    /// reused checkpoints carry. Tasks owned by an unrelated run are untouched.
+    ///
+    /// This surface runs the job **in-process** and returns only at a terminal
+    /// state — it is the foreground CLI path (`orbit job resume`). Non-blocking
+    /// callers (the HTTP API, bridge) use
+    /// [`OrbitRuntime::submit_resume_run`](crate::OrbitRuntime::submit_resume_run).
     pub fn resume_job_run(&self, source_run_id: &str) -> Result<V2JobRunResult, OrbitError> {
-        // `show_job_run` reconciles a stale Running owner first, so a run
-        // orphaned by SIGKILL flips to Interrupted before the state guard.
-        let source = self.show_job_run(source_run_id)?;
-        if !matches!(
-            source.state,
-            JobRunState::Interrupted | JobRunState::Failed | JobRunState::Timeout
-        ) {
-            return Err(OrbitError::JobValidation(format!(
-                "job run '{}' is {} — resume requires an interrupted, failed, or timed-out run",
-                source_run_id, source.state
-            )));
-        }
-        let input = source.input.clone().unwrap_or_else(|| json!({}));
-        let resume_state = self.read_run_state(source_run_id)?.filter(|state| {
-            state
-                .step_states
-                .values()
-                .any(|step_state| *step_state == JobRunState::Success)
-        });
-        let (job_path, _) = self.load_v2_job_asset_by_name(&source.job_id)?;
+        let plan = self.plan_job_run_resume(source_run_id)?;
         self.run_job_v2_from_yaml_with_retry_source(
-            &job_path,
-            input,
+            &plan.job_path,
+            plan.input.clone(),
             None,
-            Some(source.run_id.clone()),
-            source.attempt.saturating_add(1),
-            resume_state,
+            Some(plan.source.run_id.clone()),
+            plan.attempt,
+            Some(&plan),
         )
     }
 
@@ -113,7 +109,7 @@ impl OrbitRuntime {
         backend_flag: Option<Backend>,
         retry_source_run_id: Option<String>,
         attempt: u32,
-        resume: Option<PipelineState>,
+        resume: Option<&ResumePlan>,
     ) -> Result<V2JobRunResult, OrbitError> {
         let job_name = load_job_name(yaml_path)?;
         let scheduled_at = chrono::Utc::now();
@@ -126,19 +122,19 @@ impl OrbitRuntime {
         )?;
         // [ORB-10002] A resumed run starts from the source run's checkpoint
         // state (re-keyed to the new run) instead of a blank pipeline.
-        let initial_state = match &resume {
-            Some(source_state) => {
-                let mut seeded = source_state.clone();
-                seeded.run_id = run.run_id.clone();
-                seeded.job_id = run.job_id.clone();
-                seeded.updated_at = chrono::Utc::now();
-                seeded
-            }
+        let initial_state = match resume.and_then(|plan| plan.resume_state.as_ref()) {
+            Some(source_state) => seeded_resume_state(source_state, &run),
             None => PipelineState::new(run.run_id.clone(), run.job_id.clone(), input.clone()),
         };
         self.stores()
             .jobs()
             .write_run_state(&run.run_id, &initial_state)?;
+        // [ORB-10470] Re-admit and re-claim this lineage's tasks before the
+        // first step runs, so a resume of a failed run is not gated by the
+        // block that same failure applied.
+        if let Some(plan) = resume {
+            self.reconcile_resume_task_ownership(plan, &run.run_id)?;
+        }
 
         let started_at = chrono::Utc::now();
         let changed = self.stores().jobs().mark_job_run_running(
@@ -162,7 +158,7 @@ impl OrbitRuntime {
             backend_flag,
             Some(run.run_id.clone()),
             retry_source_run_id,
-            resume.as_ref(),
+            resume.and_then(|plan| plan.resume_state.as_ref()),
         );
         let finished_at = chrono::Utc::now();
         let duration_ms = Some(
@@ -240,6 +236,31 @@ impl OrbitRuntime {
             run_id_override,
             None,
             None,
+        )
+    }
+
+    /// [ORB-10470] Execute a persisted run against its own checkpoints.
+    ///
+    /// The pipeline worker uses this so a run whose `PipelineState` already
+    /// records successful top-level steps — a resumed run seeded at submission,
+    /// or a run whose earlier worker died after checkpointing — continues from
+    /// the first non-successful step instead of replaying completed work.
+    pub(crate) fn run_job_v2_from_yaml_with_run_id_and_resume(
+        &self,
+        yaml_path: &Path,
+        input: Value,
+        backend_flag: Option<Backend>,
+        run_id_override: Option<String>,
+        retry_source_run_id: Option<String>,
+        resume: Option<&PipelineState>,
+    ) -> Result<V2JobRunResult, OrbitError> {
+        self.run_job_v2_from_yaml_with_run_context(
+            yaml_path,
+            input,
+            backend_flag,
+            run_id_override,
+            retry_source_run_id,
+            resume,
         )
     }
 
@@ -392,6 +413,17 @@ impl OrbitRuntime {
         )?;
         Ok(())
     }
+}
+
+/// [ORB-10002] Re-key a source run's checkpoint state onto the resumed run.
+/// The step records are the source's; only the identity and timestamp change,
+/// so the resumed run owns its own durable state from its first write.
+pub(super) fn seeded_resume_state(source_state: &PipelineState, run: &JobRun) -> PipelineState {
+    let mut seeded = source_state.clone();
+    seeded.run_id = run.run_id.clone();
+    seeded.job_id = run.job_id.clone();
+    seeded.updated_at = chrono::Utc::now();
+    seeded
 }
 
 fn load_job_name(yaml_path: &Path) -> Result<String, OrbitError> {

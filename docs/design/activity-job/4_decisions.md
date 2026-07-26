@@ -778,8 +778,17 @@ Recognition is the entire change: no safety gate moved. Non-terminal run, `--old
 
 ---
 
+## ADR-0289 — Resume is a durable submission scoped by explicit retry lineage
+
+**Status:** Proposed · 2026-07 · [ORB-10470]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0289"}'`.
+
+---
+
 ## Task References
 
+- **[ORB-10470]** — Make resume submit a detached run that starts at the failed checkpoint, and reconcile blocked/re-stamped tasks against the run's retry lineage ([ADR-0289]).
 - **[ORB-10456]** — Resolve provider launchers at the shared CLI spawn boundary and add provider-aware missing-launcher diagnostics ([ADR-0259]).
 - **[ORB-10454]** — Allocate [ADR-0258] for the step-completion / response-content split and retire the IOU in ADR-0224's amendment block.
 - **[ORB-10427]** — Share one worktree-path derivation between `setup_worktree` and gc; collect bundles only when every member has settled.

@@ -23,7 +23,7 @@ use crate::command::activity::seed_default_activities;
 use crate::command::job::seed_default_jobs;
 use crate::command::task::{TaskAddParams, TaskUpdateParams};
 
-fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathBuf) {
+pub(super) fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathBuf) {
     let root = tempdir().expect("create tempdir");
     let global_root = root.path().join("global");
     let repo_root = root.path().join("repo");
@@ -488,7 +488,7 @@ spec:
     std::fs::write(path, yaml).expect("write cli metrics job yaml");
 }
 
-fn v2_events(
+pub(super) fn v2_events(
     runtime: &OrbitRuntime,
     run_id: &str,
     event_type: &str,
