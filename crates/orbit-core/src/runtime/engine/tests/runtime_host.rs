@@ -168,6 +168,6 @@ fn planning_duel_v2_dispatch_preserves_slot_model_and_task_attribution() {
         assert_eq!(row.agent, agent);
         assert_eq!(row.model.as_deref(), Some(model));
         assert_eq!(row.activity_id, activity_id);
-        assert_eq!(row.task_ids, [task.id.clone()]);
+        assert_eq!(row.task_ids, std::slice::from_ref(&task.id));
     }
 }

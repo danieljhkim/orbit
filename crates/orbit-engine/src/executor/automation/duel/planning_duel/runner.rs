@@ -26,16 +26,29 @@ fn join_activity_result(
     }
 }
 
+struct DuelAgentDispatch<'a> {
+    activity_name: &'a str,
+    activity: &'a ActivityV2,
+    provider: &'a str,
+    model: &'a str,
+    input: Value,
+    run_id: &'a str,
+    audit: Arc<V2AuditWriter>,
+}
+
 fn dispatch_duel_agent_activity<H: RuntimeHost + ?Sized>(
     host: &H,
-    activity_name: &str,
-    activity: &ActivityV2,
-    provider: &str,
-    model: &str,
-    input: Value,
-    run_id: &str,
-    audit: Arc<V2AuditWriter>,
+    dispatch: DuelAgentDispatch<'_>,
 ) -> Result<ActivityInvocationResult, OrbitError> {
+    let DuelAgentDispatch {
+        activity_name,
+        activity,
+        provider,
+        model,
+        input,
+        run_id,
+        audit,
+    } = dispatch;
     let v2_host = host.v2_runtime_host()?;
     let outcome = dispatch_v2_activity(V2DispatchInput {
         activity_name,
@@ -229,25 +242,29 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
         let handle_a = scope.spawn(move || {
             dispatch_duel_agent_activity(
                 host,
-                roles::PLANNER_ACTIVITY_ID,
-                &planner_activity_a,
-                planner_a.family.as_str(),
-                planner_a_model.as_str(),
-                planner_a_input,
-                run_id,
-                audit_a,
+                DuelAgentDispatch {
+                    activity_name: roles::PLANNER_ACTIVITY_ID,
+                    activity: &planner_activity_a,
+                    provider: planner_a.family.as_str(),
+                    model: planner_a_model.as_str(),
+                    input: planner_a_input,
+                    run_id,
+                    audit: audit_a,
+                },
             )
         });
         let handle_b = scope.spawn(move || {
             dispatch_duel_agent_activity(
                 host,
-                roles::PLANNER_ACTIVITY_ID,
-                &planner_activity_b,
-                planner_b.family.as_str(),
-                planner_b_model.as_str(),
-                planner_b_input,
-                run_id,
-                audit_b,
+                DuelAgentDispatch {
+                    activity_name: roles::PLANNER_ACTIVITY_ID,
+                    activity: &planner_activity_b,
+                    provider: planner_b.family.as_str(),
+                    model: planner_b_model.as_str(),
+                    input: planner_b_input,
+                    run_id,
+                    audit: audit_b,
+                },
             )
         });
         (
@@ -280,13 +297,15 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
     let arbiter_activity = host.v2_activity(roles::ARBITER_ACTIVITY_ID)?;
     let arbiter_result = dispatch_duel_agent_activity(
         host,
-        roles::ARBITER_ACTIVITY_ID,
-        &arbiter_activity,
-        planning_roles.arbiter.family.as_str(),
-        arbiter_model.as_str(),
-        roles::arbiter_input(task_id),
-        run_id,
-        audit,
+        DuelAgentDispatch {
+            activity_name: roles::ARBITER_ACTIVITY_ID,
+            activity: &arbiter_activity,
+            provider: planning_roles.arbiter.family.as_str(),
+            model: arbiter_model.as_str(),
+            input: roles::arbiter_input(task_id),
+            run_id,
+            audit,
+        },
     )?;
 
     let artifacts_after_arbiter = host.get_task_artifacts(task_id)?;

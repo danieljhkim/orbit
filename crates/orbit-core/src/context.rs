@@ -361,10 +361,6 @@ impl OrbitContext {
         &self.policy.policy
     }
 
-    pub(crate) fn set_policy(&mut self, policy: PolicyEngine) {
-        self.policy.policy = policy;
-    }
-
     pub(crate) fn registry(&self) -> &ToolRegistry {
         self.execution.registry.as_ref()
     }
