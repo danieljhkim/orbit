@@ -8,7 +8,7 @@ use orbit_tools::ToolContext;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
-use crate::runtime::orbit_tool_host::{
+use crate::runtime::task_locks::{
     emit_expired_reservation_events, merge_task_lock_conflicts, parse_task_ids,
     requested_task_files, task_lock_conflicts, workspace_orbit_dir, workspace_task_reservation_id,
 };

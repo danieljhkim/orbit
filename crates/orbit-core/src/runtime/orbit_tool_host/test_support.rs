@@ -62,7 +62,7 @@ pub(super) fn create_task(
         .expect("create task")
 }
 
-pub(super) fn create_context_task(
+pub(crate) fn create_context_task(
     runtime: &OrbitRuntime,
     workspace_path: &Path,
     status: TaskStatus,
@@ -78,7 +78,7 @@ pub(super) fn create_context_task(
     )
 }
 
-pub(super) fn invalid_input_message<T>(result: Result<T, OrbitError>) -> String {
+pub(crate) fn invalid_input_message<T>(result: Result<T, OrbitError>) -> String {
     match result {
         Err(OrbitError::InvalidInput(message)) => message,
         Err(error) => panic!("expected invalid input, got {error:?}"),
@@ -86,12 +86,12 @@ pub(super) fn invalid_input_message<T>(result: Result<T, OrbitError>) -> String 
     }
 }
 
-pub(super) struct UnmanagedToolEnvGuard {
+pub(crate) struct UnmanagedToolEnvGuard {
     _lock: MutexGuard<'static, ()>,
     vars: Vec<(&'static str, Option<String>)>,
 }
 
-pub(super) fn unmanaged_tool_env_guard() -> UnmanagedToolEnvGuard {
+pub(crate) fn unmanaged_tool_env_guard() -> UnmanagedToolEnvGuard {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     let lock = LOCK
         .get_or_init(|| Mutex::new(()))

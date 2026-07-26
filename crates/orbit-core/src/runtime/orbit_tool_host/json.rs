@@ -92,17 +92,6 @@ pub(super) fn serialize_task(runtime: &OrbitRuntime, task: &Task) -> Result<Valu
     Ok(value)
 }
 
-pub(super) fn task_lock_to_json(task: &Task) -> Value {
-    json!({
-        "id": task.id,
-        "title": task.title,
-        "status": task.status.to_string(),
-        "job_run_id": task.job_run_id,
-        "crew": task.crew,
-        "context_files": task.context_files,
-    })
-}
-
 fn insert_resolved_crew(
     runtime: &OrbitRuntime,
     task: &Task,
@@ -220,14 +209,6 @@ fn serialize_comments(comments: &[TaskComment]) -> Result<Value, OrbitError> {
 
 fn serialize_history(history: &[TaskHistoryEntry]) -> Result<Value, OrbitError> {
     serde_json::to_value(history).map_err(serialize_error("serialize history"))
-}
-
-pub(super) fn task_lock_status_rank(status: TaskStatus) -> u8 {
-    match status {
-        TaskStatus::InProgress => 0,
-        TaskStatus::Review => 1,
-        _ => 2,
-    }
 }
 
 pub(super) fn serialize_error(label: &'static str) -> impl FnOnce(serde_json::Error) -> OrbitError {

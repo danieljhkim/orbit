@@ -10,7 +10,7 @@ use serde_json::json;
 
 use crate::OrbitRuntime;
 
-use super::orbit_tool_host::{
+use super::task_locks::{
     emit_expired_reservation_events, emit_task_lock_release_event, workspace_orbit_dir,
     workspace_task_reservation_id,
 };

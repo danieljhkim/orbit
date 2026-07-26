@@ -12,7 +12,6 @@ mod pipeline_tools;
 mod search_tools;
 mod semantic_tools;
 mod state_tools;
-mod task_locks;
 mod task_tools;
 
 #[cfg(test)]
@@ -24,8 +23,3 @@ pub(crate) mod test_support;
 pub use host::HubCoordinationExecutor;
 pub(crate) use host::build_orbit_tool_host;
 pub(crate) use learning_tools::update_without_role_gate as update_learning_without_role_gate;
-pub(crate) use task_locks::{
-    emit_expired_reservation_events, emit_task_lock_release_event, merge_task_lock_conflicts,
-    requested_task_files, task_lock_conflicts, workspace_orbit_dir, workspace_task_reservation_id,
-};
-pub(crate) use task_tools::parse_task_ids;
