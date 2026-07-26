@@ -324,6 +324,16 @@ After [T20260427-51], macOS CLI invocations declaring `sandbox: macos-sandbox-ex
 
 After [T20260509-40], bare Unix CLI subprocesses enter their own process group, matching the macOS sandbox wrapper's kill boundary. The supervisor kills that process group on timeout, also kills any remaining group members after the main child exits before joining output readers, and bounds timeout-path reader joins so a leaked pipe writer cannot hang the activity supervisor. Non-Unix platforms keep the immediate-child kill fallback until Orbit has an equivalent process-tree primitive there.
 
+After [ORB-10456], every bare provider launcher is resolved before audit and
+spawn at the shared `orbit-engine` CLI boundary ([ADR-0259]). Lookup preserves
+configured paths verbatim; bare names search the process `PATH` first, then
+portable user-local directories derived from `HOME` (`.local/bin`,
+`.orbit/bin`, `.cargo/bin`, and `bin`). Dashboard Ship, routine sweep,
+`orbit run ship`, and direct job execution all converge on this boundary, so
+none depends solely on the environment inherited by its entry process. A
+missing launcher remains a permanent failure, but the diagnostic names the
+provider and every path Orbit searched.
+
 After [T20260430-15], the CLI stdin envelope carries rendered activity input and durable `run_id` beside instruction, prompt, tools, and model. When input identifies one task, orbit-core embeds a canonical task snapshot with `input.workspace_path` / `input.repo_root` taking precedence over stored paths. After [T20260508-8], `backend: cli` also uses a shared workspace resolver for subprocess cwd: `input.workspace_path`, then `task.workspace_path`, then best-effort `ToolContext.workspace_root`. Declared input/task paths must already be directories; stale worktrees fail as `CliInvocationFailed` before `CliInvocationStarted` is emitted. After [T20260505-10], Orbit-managed CLI subprocesses receive `ORBIT_RUN_ID` plus an Orbit-managed run-context marker; `orbit tool run` requires both before it populates `ToolContext` reservation ownership. Direct manual CLI tool calls, including calls with only `ORBIT_RUN_ID`, remain unowned.
 
 The older `AgentRuntime` trait and `providers/*_cli.rs` files are not deprecated leftovers; they are the shipped `backend: cli` implementation.
@@ -651,5 +661,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer (`task_epic_pipeline`, `epic_orchestrator`, `pipeline_wait`, legacy parallel-batch executor).
 - **[ORB-10414]** — Make HTTP replay an explicit default-off cargo feature and keep replay environment variables inert in default builds.
 - **[ORB-10434]** — Extend the replay opt-in to orbit-core (`orbit-core/replay`) so its fixture-backed v2_host test keeps running hermetically instead of demanding a live credential.
+- **[ORB-10456]** — Resolve provider launchers at the shared CLI spawn boundary and report provider-aware searched-location diagnostics.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
