@@ -1,7 +1,9 @@
+use std::borrow::Cow;
 use std::path::Path;
 
 use orbit_common::types::OrbitError;
-use orbit_common::utility::fs::write_text_with_parent;
+
+use super::seed_embedded_assets;
 
 /// Shippable default activity assets, seeded under
 /// `<orbit_root>/resources/activities/<name>.yaml` on `orbit init`. Keep this
@@ -151,16 +153,12 @@ pub(crate) fn seed_default_activities(
     activities_dir: &Path,
     overwrite: bool,
 ) -> Result<usize, OrbitError> {
-    let mut count = 0usize;
-    for (name, content) in DEFAULT_ACTIVITY_FILES {
-        let path = activities_dir.join(format!("{name}.yaml"));
-        if !overwrite && path.exists() {
-            continue;
-        }
-        write_text_with_parent(&path, content)?;
-        count += 1;
-    }
-    Ok(count)
+    seed_embedded_assets(
+        activities_dir,
+        DEFAULT_ACTIVITY_FILES,
+        overwrite,
+        |_, content| Ok(Cow::Borrowed(content)),
+    )
 }
 
 #[cfg(test)]

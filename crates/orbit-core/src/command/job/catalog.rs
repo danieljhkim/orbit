@@ -1,13 +1,14 @@
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::activity_job::{
     CatalogDirectory, CatalogDirectoryList, V2JobCatalog, catalog_error_to_orbit,
 };
 use orbit_common::types::{JobKind, JobRun, JobScheduleState, JobV2, NotFoundKind, OrbitError};
-use orbit_common::utility::fs::write_text_with_parent;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
+use crate::command::seed_embedded_assets;
 
 /// Shippable default workflow assets, seeded under
 /// `<orbit_root>/resources/jobs/<name>.yaml` on `orbit init`. The entries
@@ -279,14 +280,7 @@ fn matches_job_filter(kind: JobKind, filter: JobCatalogFilter) -> bool {
 /// When `overwrite` is false, existing files are preserved — users who've
 /// edited a previously-seeded workflow won't lose their changes on re-init.
 pub(crate) fn seed_default_jobs(jobs_dir: &Path, overwrite: bool) -> Result<usize, OrbitError> {
-    let mut count = 0usize;
-    for (name, content) in DEFAULT_JOB_FILES {
-        let path = jobs_dir.join(format!("{name}.yaml"));
-        if !overwrite && path.exists() {
-            continue;
-        }
-        write_text_with_parent(&path, content)?;
-        count += 1;
-    }
-    Ok(count)
+    seed_embedded_assets(jobs_dir, DEFAULT_JOB_FILES, overwrite, |_, content| {
+        Ok(Cow::Borrowed(content))
+    })
 }

@@ -16,10 +16,12 @@
 //! `[routines] role = "source"`; they exist so a fresh workspace gets
 //! reviewable, opt-in schedules without silently enabling unattended work.
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use orbit_common::types::{OrbitError, parse_routine_yaml};
-use orbit_common::utility::fs::write_text_with_parent;
+
+use super::seed_embedded_assets;
 
 /// Shippable default routine assets, seeded under
 /// `<workspace>/.orbit/routines/<file>.yaml` on `orbit init`. Every entry
@@ -68,27 +70,25 @@ pub(crate) fn seed_default_routines(
             "cannot seed default routines without a host id".to_string(),
         ));
     }
-    let mut count = 0usize;
-    for (file_stem, template) in DEFAULT_ROUTINE_FILES {
-        let path = routines_dir.join(format!("{file_stem}.yaml"));
-        if !overwrite && path.exists() {
-            continue;
-        }
-        let routine_name = routine_name_for(file_stem, workspace_slug);
-        let rendered = template
-            .replace(ROUTINE_NAME_PLACEHOLDER, &routine_name)
-            .replace(HOST_ID_PLACEHOLDER, host_id);
-        // Fail-closed: never seed a file the routine loader would reject.
-        parse_routine_yaml(&rendered).map_err(|error| {
-            OrbitError::InvalidInput(format!(
-                "default routine `{file_stem}` failed validation after placeholder \
-                 substitution (host `{host_id}`, name `{routine_name}`): {error}"
-            ))
-        })?;
-        write_text_with_parent(&path, &rendered)?;
-        count += 1;
-    }
-    Ok(count)
+    seed_embedded_assets(
+        routines_dir,
+        DEFAULT_ROUTINE_FILES,
+        overwrite,
+        |file_stem, template| {
+            let routine_name = routine_name_for(file_stem, workspace_slug);
+            let rendered = template
+                .replace(ROUTINE_NAME_PLACEHOLDER, &routine_name)
+                .replace(HOST_ID_PLACEHOLDER, host_id);
+            // Fail-closed: never seed a file the routine loader would reject.
+            parse_routine_yaml(&rendered).map_err(|error| {
+                OrbitError::InvalidInput(format!(
+                    "default routine `{file_stem}` failed validation after placeholder \
+                     substitution (host `{host_id}`, name `{routine_name}`): {error}"
+                ))
+            })?;
+            Ok(Cow::Owned(rendered))
+        },
+    )
 }
 
 /// Compose a per-workspace routine name: `<stem>-<workspace-slug>`, using
