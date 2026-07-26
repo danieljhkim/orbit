@@ -171,14 +171,14 @@ The dropdown label `default: codex` in the dashboard means *the task has no `cre
 
 ## `[duel]` — bake-off candidates for `duel-plan`
 
-`orbit duel-plan` runs the planning step across multiple agent families in parallel and scores the results. `[duel]` controls which families participate.
+`orbit run duel-plan` runs the planning step across multiple agent families in parallel and scores the results. `[duel]` controls which families participate.
 
 ```toml
 [duel]
 candidates = ["codex", "claude", "gemini", "grok"]
 
 [duel.models]
-codex  = "gpt-5.5"
+codex  = "gpt-5.6-terra"
 claude = "opus"
 gemini = "pro"
 grok   = "grok-build"

@@ -283,7 +283,10 @@ Agents discover project docs through `orbit.search`; docs, lock, semantic setup/
 
 ```
 .orbit/                          # workspace-local (safe to delete → clean slate)
-├── config.yaml                  # workspace_id + config
+├── config.toml                  # workspace-local runtime overrides
+├── config.yaml                  # workspace_id only
+├── auto_tasks/                  # recurring task definitions
+├── routines/                    # routine definitions
 ├── tasks/                       # symlinks → ~/.orbit/tasks/workspaces/<id>/
 ├── adrs/                        # proposed/, accepted/, superseded/
 ├── learnings/                   # your team's durable knowledge
@@ -317,7 +320,7 @@ Couple things to note:
 
 ## Current Status
 
-Orbit is v0.7.x — work in progress.
+Orbit is v0.9.x — work in progress.
 
 - Core local execution, workflows, MCP, tasks, reviews, ADRs, frictions, and audit infrastructure are usable today. (The code-graph engine is parked, dependent-free, with no CLI/MCP surface as of ORB-10357.)
 

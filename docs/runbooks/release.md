@@ -172,7 +172,7 @@ skills are discovered, and calls the read-only `orbit.task.list` MCP tool
 through the installed Codex MCP transport. The pass criterion is that the
 response advertises Orbit MCP tools and the read-only call succeeds. (Tool
 names are emitted with underscores on the wire — see
-`crates/orbit-mcp/src/adapter.rs::sanitize_tool_name` — even though the
+`crates/orbit-mcp/src/adapter/name_map.rs::sanitize_tool_name` — even though the
 canonical selectors used in skills and CLI args are dot-form.)
 
 The smoke runs against published artifacts, not the local working tree, so
