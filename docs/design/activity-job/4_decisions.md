@@ -4,6 +4,7 @@ type: design
 title: "Activity / Job — Decisions"
 owner: codex
 last_updated: 2026-07-26
+last_validated: 2026-07-26
 status: Draft
 feature: activity-job
 doc_role: decisions
@@ -475,6 +476,19 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 - The split preserves the existing engine/core and CLI-runner boundaries; no new crate edge or provider type crosses the activity/job layer.
 - Cost: private helper movement now requires maintaining intra-module visibility and imports across several files instead of one lexical scope.
 
+## ADR-047 — Each new executor block ships with a sibling test module
+
+**Status:** Accepted · 2026-05 · [T20260509-7]
+
+**Context.** The v2 job executor sub-modules (`step.rs`, `parallel.rs`, `fan_out.rs`, `loop_block.rs`, `target.rs`, `recovery.rs`) own non-trivial concurrency, ordering, and audit invariants. Without test coverage co-located with each block, regressions to those invariants surface only as production failures or as audit-trace anomalies that are hard to reproduce.
+
+**Decision.** Every executor-block module under `crates/orbit-engine/src/activity_job/job_executor/` gets a matching test module under `tests/` whose test function names name the specific invariant or failure mode each test guards. The block-specific layout includes `step.rs`, `parallel.rs`, `fanout.rs`, `loop.rs`, and `pipeline_durability.rs`, alongside focused modules for `audit.rs`, `recovery.rs`, `resume.rs`, `target.rs`, `templating.rs`, and `validate.rs`. Shared scaffolding (`ScriptedHost`, `Action`, job/step builders) lives in `tests/mod.rs` so block modules stay focused on their own invariants and don't fork the host shape. Sandbox and policy boundary coverage lives next to the implementations they guard: `crates/orbit-exec/src/macos_sandbox/` (read-deny enforcement and a realistic agent_loop profile boundary) and `crates/orbit-policy/src/engine.rs#tests` (global denyRead/denyModify last-match-wins, unknown-profile error, matched_rule observability).
+
+**Consequences.**
+- Future refactors of an executor block must keep the matching invariant test alive in its corresponding test module or update it to reflect the new contract.
+- New blocks (e.g. a future `dag` or `gate` construct) must land with a matching test module covering at least the invariants enumerated in the seed surface.
+- Shared scaffolding in `tests/mod.rs` is the consolidation seam — broaden it (agent_loop or shell hosts, additional builders) there rather than re-deriving in each block module.
+
 ## ADR-048 — Auto-populate `task.context_files` from the winning duel plan
 
 **Status:** Accepted · 2026-05 · [T20260509-9]
@@ -497,19 +511,6 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 - Section-recognition heuristics drift between writers is bounded by the strict rule above; future planner agents that emit non-conforming shapes simply fall back to the preserve-existing branch instead of triggering best-effort guesses.
 - A new `TaskAutomationUpdate.context_files` field touches every existing automation call site, but the `..Default::default()` pattern keeps each site at the "leave untouched" default. A regression test in `task_host` guards that contract.
 - Operators get a `PlanningDuelContextFileSkipped` event channel for debugging stale or malformed plan markdown, instead of silently-dropped entries.
-
-## ADR-047 — Each new executor block ships with a sibling test module
-
-**Status:** Accepted · 2026-05 · [T20260509-7]
-
-**Context.** The v2 job executor sub-modules (`step.rs`, `parallel.rs`, `fan_out.rs`, `loop_block.rs`, `target.rs`, `recovery.rs`) own non-trivial concurrency, ordering, and audit invariants. Without test coverage co-located with each block, regressions to those invariants surface only as production failures or as audit-trace anomalies that are hard to reproduce.
-
-**Decision.** Every executor-block module under `crates/orbit-engine/src/activity_job/job_executor/` gets a sibling `*_tests.rs` in `tests/` whose test function names name the specific invariant or failure mode each test guards. The current layout is `step_tests.rs`, `parallel_tests.rs`, `fanout_tests.rs`, `loop_tests.rs`, and `pipeline_durability_tests.rs`, alongside the pre-existing `audit_tests.rs`, `recovery_tests.rs`, and `target_tests.rs`. Shared scaffolding (`ScriptedHost`, `Action`, job/step builders) lives in `tests/mod.rs` so block modules stay focused on their own invariants and don't fork the host shape. Sandbox and policy boundary coverage lives next to the implementations they guard: `crates/orbit-exec/src/macos_sandbox/` (read-deny enforcement and a realistic agent_loop profile boundary) and `crates/orbit-policy/src/engine.rs#tests` (global denyRead/denyModify last-match-wins, unknown-profile error, matched_rule observability).
-
-**Consequences.**
-- Future refactors of an executor block must keep the matching invariant test alive in the same-named test file or update it to reflect the new contract.
-- New blocks (e.g. a future `dag` or `gate` construct) must land with a sibling test module covering at least the invariants enumerated in the seed surface.
-- Shared scaffolding in `tests/mod.rs` is the consolidation seam — broaden it (agent_loop or shell hosts, additional builders) there rather than re-deriving in each block module.
 
 ## ADR-049 — Condition guards stay equality-only
 
@@ -665,11 +666,11 @@ Rejected alternatives: reconciling by parent linkage (no parent run id is persis
 
 **Context.** During ORB-10262, `task_pr_pipeline` advanced a task to review and published a PR even though the durable execution summary began `Outcome: failed`. `commit_batch_changes` mutated Git without checking the durable outcome, and `load_handoff_context` treated every nonempty, non-placeholder summary as promotable, so a nonempty summary reporting failure still delivered (friction F2026-07-091). The alternatives were to make the advisory agent response envelope authoritative or to teach `pipeline_success_guard` to parse task prose; both move the source of truth away from the durable task record.
 
-**Decision.** Add one shared durable predicate (`require_delivery_success`) in the VCS handoff seam that reads the persisted task execution summary and requires its first nonblank line to be exactly `Outcome: success`. A `failed`, missing, malformed, or unknown outcome fails closed with a typed error naming the task and rejected value; empty and placeholder summaries keep their existing rejection. Enforce it in `commit_batch_changes` before the checkout is resolved, files staged, the index changed, or a commit created, and again in `load_handoff_context` so every fresh or resumed `pr_prepare`, rebase, push, `pr_open`, `pr_promote`, and no-diff promotion revalidates durable state. The durable task record stays the delivery authority; the response envelope is not made authoritative and `pipeline_success_guard` is unchanged.
+**Decision.** Keep one shared durable predicate (`reject_failed_delivery`) in the VCS handoff seam that reads the persisted task execution summary and blocks delivery when its first nonblank line is exactly `Outcome: failed`. Empty and placeholder summaries remain rejected by the existing meaningful-summary guard; other meaningful summary shapes remain deliverable. Enforce the predicate in `commit_batch_changes` before the checkout is resolved, files staged, the index changed, or a commit created, and again in `load_handoff_context` so every fresh or resumed `pr_prepare`, rebase, push, `pr_open`, `pr_promote`, and no-diff promotion revalidates durable state. The durable task record stays the delivery authority; the response envelope is not made authoritative and `pipeline_success_guard` is unchanged.
 
 **Consequences.**
-- Delivery fails closed against the durable record: a failed, unchecked, or malformed outcome cannot commit, push, open a PR, or promote a task, on both fresh and replayed pipelines.
-- Agents must write `Outcome: success` as the first nonblank execution-summary line for delivery to proceed; nonempty prose alone is no longer sufficient.
+- Delivery fails closed against the durable record: an empty or placeholder summary, or an explicit `Outcome: failed` line, cannot commit, push, open a PR, or promote a task, on both fresh and replayed pipelines.
+- Agents should write `Outcome: success` as the first nonblank execution-summary line to make the durable outcome explicit; other meaningful non-empty prose remains deliverable.
 - Cost: the delivery contract now depends on a summary-line convention; a genuinely successful task whose summary omits or misformats the outcome line is blocked until the durable summary is corrected.
 
 ---
