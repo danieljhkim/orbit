@@ -61,6 +61,9 @@ fn fresh_db_applies_baseline_and_records_ledger() {
     assert_eq!(applied[9].version, 10);
     assert_eq!(applied[9].name, "invocation_telemetry_columns");
     assert!(!applied[9].applied_at.is_empty());
+    assert_eq!(applied[10].version, 11);
+    assert_eq!(applied[10].name, "routine_scheduler_schema");
+    assert!(!applied[10].applied_at.is_empty());
 }
 
 #[test]
@@ -201,6 +204,10 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0010".to_string(),
                 "invocation_telemetry_columns".to_string()
             ),
+            (
+                "migration.v0011".to_string(),
+                "routine_scheduler_schema".to_string()
+            ),
         ]
     );
 }
@@ -212,7 +219,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0011', 'from-the-future', '2099-01-01T00:00:00Z')",
+         VALUES ('migration.v0012', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -292,7 +299,7 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_through_latest() {
     );
     assert_eq!(
         applied.last().map(|migration| migration.name.as_str()),
-        Some("invocation_telemetry_columns")
+        Some("routine_scheduler_schema")
     );
     let connection = store.connection();
     let conn = connection.lock().expect("connection");
@@ -619,4 +626,87 @@ fn migrated_legacy_db_carries_every_invocation_insert_column() {
             },
         })
         .expect("insert invocation trace into migrated legacy database");
+}
+
+fn schema_column_fingerprint(conn: &Connection) -> String {
+    let mut table_statement = conn
+        .prepare(
+            "SELECT name FROM sqlite_master
+             WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+             ORDER BY name",
+        )
+        .expect("prepare table list");
+    let tables = table_statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("query table list")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect table list");
+
+    tables
+        .into_iter()
+        .map(|table| {
+            let mut column_statement = conn
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .expect("prepare column list");
+            let columns = column_statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .expect("query column list")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("collect column list");
+            format!("{table}:{}\n", columns.join(","))
+        })
+        .collect()
+}
+
+/// ADR-0287: v1 is a shipped historical artifact. This fingerprint is
+/// deliberately strict: adding a fresh-only table or column to the baseline
+/// fails here and requires an append-only migration instead.
+#[test]
+fn shipped_v1_baseline_structure_is_frozen() {
+    let conn = Connection::open_in_memory().expect("open v1 database");
+    ledger::run_migrations(&conn, &ledger::MIGRATIONS[..1]).expect("apply v1 only");
+
+    assert_eq!(
+        schema_column_fingerprint(&conn),
+        concat!(
+            "adrs:id,status,title,owner,related_features,related_tasks,tags,paths,legacy_ids,supersedes,superseded_by,validation_warnings,legacy_validation,created_at,accepted_at,last_updated\n",
+            "agent_sessions:session_id,task_id,identity_id,identity_name,identity_role,identity_block,skill_names,composed_context_hash,effective_allowed_tools,tool_calls,outcome,status,created_at,updated_at\n",
+            "audit_events:id,execution_id,timestamp,command,subcommand,tool_name,target_type,target_id,role,status,exit_code,duration_ms,working_directory,arguments_json,stdout_truncated,stderr_truncated,error_message,host,pid,session_id,task_id,job_run_id,activity_id,step_index\n",
+            "invocation_tasks:invocation_id,task_id\n",
+            "invocations:id,ts,job_run_id,activity_id,agent,model,slot,duration_ms,input_tokens,cache_read_tokens,cache_create_tokens,output_tokens,tool_call_count\n",
+            "job_run_steps:workspace_id,run_id,step_index,target_type,target_id,state,started_at,finished_at,duration_ms,exit_code,error_code,error_message,agent_response_json\n",
+            "job_runs:run_id,workspace_id,job_id,attempt,state,scheduled_at,started_at,finished_at,duration_ms,created_at,pid,pid_start_time,input_json,retry_source_run_id,knowledge_metrics_json,resolved_crew,planner_model,implementer_model,reviewer_model,pipeline_state_json\n",
+            "learnings_index:id,status,paths,tags,summary,updated_at,priority\n",
+            "schema_meta:key,value,updated_at\n",
+            "session_learning_state:workspace_id,session_id,learning_injection_state_json,updated_at\n",
+            "task_reservations:reservation_id,workspace_orbit_dir,workspace_id,task_ids_json,files_json,actor,created_at,expires_at,released_at,owner_run_id,owner_metadata_json,release_reason,release_metadata_json\n",
+            "tool_calls:invocation_id,seq,tool_name,result_bytes\n",
+            "tools:name,path,description,parameters_json,enabled,builtin,created_at,updated_at\n",
+            "v2_audit_events:id,workspace_id,event_id,source,schema_version,event_type,ts,run_id,agent_identity,parent_event_id,workspace_path,payload_json\n",
+        )
+    );
+}
+
+/// A database that recorded shipped v1 and then advances through every
+/// registered migration must expose the same table/column structure as a
+/// database created fresh by the current binary.
+#[test]
+fn v1_upgrade_and_fresh_database_have_identical_columns() {
+    let fresh = Connection::open_in_memory().expect("open fresh database");
+    apply_schema(&fresh).expect("migrate fresh database");
+
+    let legacy = Connection::open_in_memory().expect("open legacy database");
+    ledger::run_migrations(&legacy, &ledger::MIGRATIONS[..1]).expect("record shipped v1");
+    ledger::run_migrations(&legacy, ledger::MIGRATIONS).expect("upgrade through registry");
+
+    assert_eq!(
+        applied_migrations(&legacy)
+            .expect("legacy migration ledger")
+            .len(),
+        ledger::MIGRATIONS.len()
+    );
+    assert_eq!(
+        schema_column_fingerprint(&legacy),
+        schema_column_fingerprint(&fresh)
+    );
 }

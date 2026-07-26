@@ -4,7 +4,7 @@ status: active
 scope:
   paths:
   - crates/orbit-core/assets/clock/*.service
-  - crates/orbit-core/src/command/pipeline_run.rs
+  - crates/orbit-core/src/command/job/pipeline.rs
   tags:
   - systemd
   - workers
@@ -14,5 +14,5 @@ evidence:
 - kind: task
   reference: ORB-10153
 created_at: 2026-07-12T21:22:25.948439524Z
-updated_at: 2026-07-12T21:22:25.948439524Z
+updated_at: 2026-07-26T22:24:28.846316166Z
 created_by: codex

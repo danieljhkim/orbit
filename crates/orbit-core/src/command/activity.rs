@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_implement_grants_concrete_adr_allocation() {
+    fn agent_implement_grants_allocate_then_update_adr() {
         let (_, yaml) = DEFAULT_ACTIVITY_FILES
             .iter()
             .find(|(name, _)| *name == "agent_implement")
@@ -277,13 +277,15 @@ mod tests {
         let asset = load_activity_asset(yaml).expect("parse agent implement activity");
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
-                assert!(
-                    spec.tools.iter().any(|tool| tool == "orbit.adr.add"),
-                    "implementers must be able to allocate global ADR IDs"
-                );
+                for tool in ["orbit.adr.add", "orbit.adr.update"] {
+                    assert!(
+                        spec.tools.iter().any(|granted| granted == tool),
+                        "implementers must be able to {tool} ADR artifacts"
+                    );
+                    assert!(tool_allowed(tool, &spec.tools));
+                }
                 validate_tool_allowlist(&spec.tools)
                     .expect("agent implement allowlist must remain valid");
-                assert!(tool_allowed("orbit.adr.add", &spec.tools));
             }
             other => panic!("expected agent_loop activity, got {other:?}"),
         }

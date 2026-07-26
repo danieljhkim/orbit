@@ -50,6 +50,23 @@ impl std::fmt::Display for NotFoundKind {
     }
 }
 
+/// Evidence behind [`OrbitError::DependencyNotDelivered`]: which task was
+/// refused, which of its done dependencies is missing from the base, the base
+/// itself, and `detail` — the delivery commits found elsewhere in the
+/// repository plus the remedy.
+///
+/// Boxed into the error enum: five inline strings would widen every
+/// `Result<_, OrbitError>` in the workspace past the large-error threshold for
+/// one rare refusal.
+#[derive(Debug, Serialize)]
+pub struct DependencyNotDelivered {
+    pub task_id: String,
+    pub dependency_id: String,
+    pub base_ref: String,
+    pub base_sha: String,
+    pub detail: String,
+}
+
 #[derive(Debug, Error, Serialize)]
 #[non_exhaustive]
 pub enum OrbitError {
@@ -114,10 +131,36 @@ pub enum OrbitError {
     },
     #[error("execution failed: {0}")]
     Execution(String),
+    #[error(
+        "run cancellation incomplete: pid={pid}, pgid={pgid:?}, term_sent={term_sent}, kill_sent={kill_sent}, leader_alive={leader_alive}, group_alive={group_alive}"
+    )]
+    RunCancellationIncomplete {
+        pid: u32,
+        pgid: Option<i32>,
+        term_sent: bool,
+        kill_sent: bool,
+        leader_alive: bool,
+        group_alive: bool,
+    },
+    #[error("task bundle corrupt for {task_id} at {path}: {reason}")]
+    TaskBundleCorrupt {
+        task_id: String,
+        path: String,
+        reason: String,
+    },
     #[error("store error: {0}")]
     Store(String),
     #[error("invalid task status transition: {0}")]
     TaskStatusTransition(String),
+    /// A workflow run was refused because a dependency that reached `done` has
+    /// not been delivered into the base the run would be cut from
+    /// [ORB-10464]. Distinct from [`Self::TaskStatusTransition`]: the
+    /// lifecycle transition is legal, the *baseline* is wrong.
+    #[error(
+        "task '{}' depends on '{}', which is done but not delivered into base '{}' ({}): {}",
+        .0.task_id, .0.dependency_id, .0.base_ref, .0.base_sha, .0.detail
+    )]
+    DependencyNotDelivered(Box<DependencyNotDelivered>),
     #[error("invalid job run state transition: {0}")]
     JobRunStateTransition(String),
     #[error("workspace error: {0}")]
@@ -191,6 +234,17 @@ impl OrbitError {
             Self::InvalidInputDiagnostic { did_you_mean, .. } if !did_you_mean.is_empty() => {
                 Some(did_you_mean)
             }
+            _ => None,
+        }
+    }
+
+    pub fn task_bundle_corruption(&self) -> Option<(&str, &str, &str)> {
+        match self {
+            Self::TaskBundleCorrupt {
+                task_id,
+                path,
+                reason,
+            } => Some((task_id, path, reason)),
             _ => None,
         }
     }

@@ -27,8 +27,8 @@
 //! under `artifacts/files/**`. Export tars the entire canonical bundle tree, so
 //! blobs are always present in the archive. Import validates each blob against
 //! the manifest during staging ([`read_bundle_at`] hashes every file), then
-//! writes the manifest with [`write_bundle_at`] and copies the blob tree with
-//! [`copy_artifact_blobs`] under the same rollback guard as the manifest.
+//! publishes the bundle and blob tree together with
+//! [`write_bundle_with_artifacts_at`] under the same rollback guard.
 //!
 //! ## Backfilling stranded bundles
 //! Before ORB-10042, `write_bundle_at` wrote only the manifest, so any
@@ -63,7 +63,7 @@ use orbit_common::types::{OrbitError, TASK_ARTIFACT_SCHEMA_VERSION, validate_orb
 use serde::{Deserialize, Serialize};
 
 use crate::file::task_store::v2_bundle::{
-    TaskBundleV2, copy_artifact_blobs, read_bundle_at, write_bundle_at,
+    TaskBundleV2, read_bundle_at, write_bundle_at, write_bundle_with_artifacts_at,
 };
 use crate::sqlite::task_registry::{
     ProjectionRebuildResult, RegisterWorkspaceParams, TaskRegistryStore, parse_orb_task_number,
@@ -402,17 +402,16 @@ pub fn import_tasks(
             };
             let bundle = remap_bundle(&staged.bundle, &final_id, &id_remap);
             let dir = registry.canonical_task_bundle_path(&target.workspace_id, &final_id)?;
-            write_bundle_at(&dir, &bundle)?;
-            guard.written_dirs.push(dir.clone());
-            // Copy `artifacts/files/**` blobs from the staged archive tree
-            // *after* the manifest lands; the guard already tracks `dir`, so a
-            // failure here rolls back the whole bundle. `write_bundle_at`
-            // writes the manifest only, so without this step the canonical
-            // bundle would fail `read_bundle_at` on the next reindex pass
-            // (ORB-10042).
-            if let Some(manifest) = bundle.artifact_manifest.as_ref() {
-                copy_artifact_blobs(&staged.staging_dir, &dir, manifest)?;
+            if bundle
+                .artifact_manifest
+                .as_ref()
+                .is_some_and(|manifest| !manifest.files.is_empty())
+            {
+                write_bundle_with_artifacts_at(&dir, &bundle, &staged.staging_dir)?;
+            } else {
+                write_bundle_at(&dir, &bundle)?;
             }
+            guard.written_dirs.push(dir.clone());
             registry.register_task_bundle(&final_id, &target.workspace_id, &dir)?;
             guard.registered_ids.push(final_id.clone());
             if let Some(number) = parse_orb_task_number(&final_id) {

@@ -1,5 +1,5 @@
 use crate::command::task::{TaskAddParams, compute_task_add_warnings};
-use orbit_common::types::{TaskStatus, TaskType};
+use orbit_common::types::{OrbitError, TaskStatus, TaskType};
 
 use super::test_runtime;
 
@@ -28,6 +28,62 @@ fn task_add_enters_proposed_and_requires_approval_before_backlog() {
         .start_task(&task.id, Some("start approved task".to_string()), None)
         .expect("backlog task starts directly");
     assert_eq!(started.status, TaskStatus::InProgress);
+}
+
+#[test]
+fn task_add_does_not_scan_unrelated_corrupt_bundles() {
+    let (root, runtime) = test_runtime();
+    let task_a = runtime
+        .add_task(TaskAddParams {
+            title: "Readable A".to_string(),
+            description: "A remains readable.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("create task A");
+    let task_c = runtime
+        .add_task(TaskAddParams {
+            title: "Corrupt C".to_string(),
+            description: "C will be malformed.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("create task C");
+
+    let workspace_bundles = root.path().join("global/tasks/workspaces");
+    let workspace_dir = std::fs::read_dir(&workspace_bundles)
+        .expect("read workspace bundle roots")
+        .next()
+        .expect("one workspace bundle root")
+        .expect("workspace bundle entry")
+        .path();
+    let corrupt_dir = workspace_dir.join(&task_c.id);
+    std::fs::remove_file(corrupt_dir.join("description.md")).expect("malform task C");
+
+    assert_eq!(
+        runtime
+            .get_task(&task_a.id)
+            .expect("show unrelated task A")
+            .id,
+        task_a.id
+    );
+    let task_b = runtime
+        .add_task(TaskAddParams {
+            title: "New B".to_string(),
+            description: "B must not scan C.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("add task B despite corrupt task C");
+    assert_ne!(task_b.id, task_c.id);
+    assert!(matches!(
+        runtime.list_tasks(),
+        Err(OrbitError::TaskBundleCorrupt { task_id, .. }) if task_id == task_c.id
+    ));
+    assert!(
+        corrupt_dir.is_dir(),
+        "diagnosis must not quarantine or delete C"
+    );
 }
 
 // --- ORB-00251: context_files omission / over-inclusion warning helper tests ---

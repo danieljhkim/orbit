@@ -1,6 +1,6 @@
 use orbit_common::types::{
     OrbitError, OrbitEvent, Task, TaskStatus, TaskType, normalize_task_dependencies,
-    normalize_task_tags, prune_missing_context_files, validate_task_dependencies,
+    normalize_task_tags, prune_missing_context_files,
 };
 use orbit_common::utility::redaction::redact_all;
 use orbit_store::TaskCreateParams as StoreTaskCreateParams;
@@ -63,7 +63,6 @@ impl OrbitRuntime {
         let workspace_path =
             normalize_workspace_path(&self.paths().repo_root, params.workspace_path.as_deref())?;
         let dependencies = normalize_task_dependencies(params.dependencies.clone())?;
-        validate_task_dependencies(&self.list_tasks()?, None, &dependencies)?;
         self.validate_crew_name(params.crew.as_deref())?;
 
         let prune_root = context_workspace_root(&self.paths().repo_root, workspace_path.as_deref());

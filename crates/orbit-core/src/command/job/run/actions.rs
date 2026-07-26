@@ -23,6 +23,21 @@ impl OrbitRuntime {
         actor: &str,
         source: &str,
     ) -> Result<JobRunCancelResult, OrbitError> {
+        self.cancel_job_run_with_signaller(run_id, actor, source, signal_run_owner_process)
+    }
+
+    /// Internal cancellation seam so tests can model a failed post-signal
+    /// liveness check without signalling a process they do not own.
+    pub(super) fn cancel_job_run_with_signaller<F>(
+        &self,
+        run_id: &str,
+        actor: &str,
+        source: &str,
+        signal: F,
+    ) -> Result<JobRunCancelResult, OrbitError>
+    where
+        F: FnOnce(&JobRun) -> Result<String, OrbitError>,
+    {
         let run = self
             .get_job_run_backend(run_id)?
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::JobRun, run_id.to_string()))?;
@@ -33,7 +48,7 @@ impl OrbitRuntime {
             })?;
         let signal_attempted = run.state == JobRunState::Running && run.pid.is_some();
         let signal_outcome = if signal_attempted {
-            Some(signal_run_owner_process(&run)?)
+            Some(signal(&run)?)
         } else {
             None
         };

@@ -419,11 +419,40 @@ fn add_call_missing_workspace_without_session_context_returns_clear_error() {
         OrbitError::InvalidInput(message) => {
             assert!(message.contains("missing `workspace`"), "{message}");
             assert!(message.contains("MCP session"), "{message}");
+            assert!(
+                message.contains("filesystem path"),
+                "error must state the accepted form is a filesystem path: {message}"
+            );
+            assert!(
+                message.contains("logical workspace id"),
+                "error must call out that a logical/bridge id is not accepted: {message}"
+            );
         }
         other => panic!("unexpected error for missing workspace: {other}"),
     }
     assert!(
         host.call.lock().expect("lock").is_none(),
         "host must not be called when workspace cannot be resolved"
+    );
+}
+
+#[test]
+fn schema_workspace_param_documents_a_filesystem_path_not_a_logical_id() {
+    let schema = OrbitTaskAddTool.schema();
+    let workspace = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "workspace")
+        .expect("workspace param");
+
+    assert!(
+        workspace.description.contains("Filesystem path"),
+        "workspace param must document the accepted path form: {}",
+        workspace.description
+    );
+    assert!(
+        workspace.description.contains("never a logical/bridge"),
+        "workspace param must rule out logical/bridge ids: {}",
+        workspace.description
     );
 }

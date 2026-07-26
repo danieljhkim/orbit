@@ -4,7 +4,8 @@
 # Its persisted input is the lineage projection: parent run, task bundle,
 # workspace/worktree, PR, candidate branch, exact pushed SHA, and explicit
 # review crew. The agent response is followed by a deterministic guard so a
-# successful Run always contains a structured verdict bound to that SHA.
+# successful Run always contains a structured verdict bound to that SHA, backed
+# by per-criterion review records the reviewer persisted on the tasks.
 
 schemaVersion: 2
 kind: Job
@@ -45,3 +46,7 @@ spec:
         verdict: "{{ steps.independent_review.output.verdict }}"
         reviewed_head_sha: "{{ steps.independent_review.output.reviewed_head_sha }}"
         candidate_head_sha: "{{ input.candidate_head_sha }}"
+        # From the run's own input, not the reviewer's response: the guard reads
+        # each task's acceptance criteria and comments from durable state and
+        # refuses an approval that skipped a criterion or a later correction.
+        task_ids: "{{ input.task_ids }}"

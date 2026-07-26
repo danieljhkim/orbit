@@ -3,7 +3,7 @@ id: L-0094
 status: active
 scope:
   paths:
-  - crates/orbit-core/src/command/pipeline_run.rs
+  - crates/orbit-core/src/command/job/pipeline.rs
   - crates/orbit-core/src/runtime/v2_host/pipeline_actions.rs
   - crates/orbit-core/assets/jobs/task_*_pipeline.yaml
   - .orbit/resources/jobs/task_*_pipeline.yaml
@@ -24,6 +24,6 @@ evidence:
 - kind: external
   reference: jrun-20260718-0641
 created_at: 2026-07-18T07:46:38.090533713Z
-updated_at: 2026-07-18T08:02:57.280651310Z
+updated_at: 2026-07-26T22:24:34.494873808Z
 created_by: codex
 priority: 210

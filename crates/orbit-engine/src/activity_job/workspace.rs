@@ -767,14 +767,23 @@ fn git_fingerprint(root: &Path) -> Result<GitWorktreeFingerprint, DispatchError>
             "--",
         ],
     )?;
-    let untracked_paths = nul_paths(&git_stdout_bytes(
+    let discovered_untracked_paths = nul_paths(&git_stdout_bytes(
         root,
         &["ls-files", "--others", "--exclude-standard", "-z", "--"],
     )?);
+    let mut untracked_paths = Vec::with_capacity(discovered_untracked_paths.len());
     let mut untracked_content = BTreeMap::new();
-    for path in &untracked_paths {
-        let identity = git_stdout(root, &["hash-object", "--no-filters", "--", path])?;
-        untracked_content.insert(path.clone(), format!("git-blob:{identity}"));
+    for path in discovered_untracked_paths {
+        let Some(identity) = untracked_file_identity(root, &path)? else {
+            // ADR-0286: an atomic tracked-file replacement briefly exposes an
+            // untracked sibling temp file. It may disappear between
+            // `ls-files` and `hash-object`; that file was never part of a
+            // stable checkout state, so omit it instead of turning an
+            // unrelated boundary snapshot into a permanent failure.
+            continue;
+        };
+        untracked_content.insert(path.clone(), identity);
+        untracked_paths.push(path);
     }
 
     let mut dirty_paths = nul_paths(&git_stdout_bytes(
@@ -843,6 +852,23 @@ fn git_fingerprint(root: &Path) -> Result<GitWorktreeFingerprint, DispatchError>
         dirty_paths,
         path_states,
     })
+}
+
+pub(crate) fn untracked_file_identity(
+    root: &Path,
+    path: &str,
+) -> Result<Option<String>, DispatchError> {
+    let args = ["hash-object", "--no-filters", "--", path];
+    let output = git_output_raw(root, &args)?;
+    if output.status.success() {
+        let identity = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok(Some(format!("git-blob:{identity}")));
+    }
+
+    match fs::symlink_metadata(root.join(path)) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        _ => Err(git_command_error(root, &args, &output)),
+    }
 }
 
 fn changed_paths(

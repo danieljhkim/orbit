@@ -896,7 +896,7 @@
           "type": "string"
         },
         "workspace": {
-          "description": "Workspace path for the task",
+          "description": "Filesystem path to an existing directory inside the target repository (e.g. the repository root). This is a repository path, never a logical/bridge workspace id (such as a `ws_*` id). Falls back to the MCP session's `_meta.orbit.workspace` when omitted.",
           "type": "string"
         }
       },

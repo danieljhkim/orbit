@@ -14,6 +14,10 @@ use super::super::git::{
     resolve_worktree_start_point,
 };
 use super::WorktreeIdentity;
+use super::dependency_delivery::{
+    DependencyDeliveryMode, dependency_delivery_mode_from_input,
+    ensure_dependencies_delivered_into_base,
+};
 
 const DEFAULT_BASE: &str = "main";
 
@@ -38,6 +42,7 @@ pub(in crate::executor::automation) fn setup_worktree<
         .or_else(|| input_string_field(input, "base_branch"))
         .unwrap_or_else(|| DEFAULT_BASE.to_string());
     let base_sync_mode = base_sync_mode_from_input(input)?;
+    let dependency_delivery_mode = dependency_delivery_mode_from_input(input)?;
 
     let repo_root_str = host.repo_root()?;
     let repo_root = Path::new(&repo_root_str);
@@ -59,6 +64,20 @@ pub(in crate::executor::automation) fn setup_worktree<
             &format!("{start_point}^{{commit}}"),
         ],
     )?;
+
+    // ORB-10464 (F2026-07-038): a dependency being `done` says nothing about
+    // whether its commits reached this base. Verify that before anything
+    // exists on disk, so a refusal leaves no worktree, no branch, and every
+    // task still in its pre-run status.
+    if dependency_delivery_mode == DependencyDeliveryMode::Enforce {
+        ensure_dependencies_delivered_into_base(
+            host,
+            repo_root,
+            task_ids,
+            &start_point,
+            &base_sha,
+        )?;
+    }
 
     let branch_name = branch_name_for_tasks(&identity.branch_prefix, task_ids);
 

@@ -1,5 +1,8 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    AuditEventStatus, Role, TaskStatus, audit_execution_id, optional_string_list_alias,
+    AuditEventStatus, Role, TaskComment, TaskStatus, audit_execution_id, optional_string_list_alias,
 };
 use orbit_engine::{DispatchError, ensure_task_can_enter_workflow};
 use orbit_store::AuditEventInsertParams;
@@ -451,41 +454,54 @@ pub(super) fn pipeline_success_guard(action: &str, input: &Value) -> Result<Valu
     }))
 }
 
+/// Prefix of the durable review record an independent reviewer appends to each
+/// participating task as a comment.
+///
+/// The reviewer's structured response is advisory, so the per-criterion verdict
+/// it claims cannot be the thing this guard checks. The record below is durable
+/// task state: it survives the run, is readable by anyone later, and is what the
+/// guard reads. The marker also partitions comments — a comment carrying it is a
+/// review record, and every other comment is task authority the reviewer must
+/// have reconciled before approving.
+pub(super) const REVIEW_RECORD_MARKER: &str = "[independent-review]";
+
+/// One reviewer-persisted per-criterion record, recovered from durable task
+/// comments rather than from the agent's response.
+struct ReviewRecord {
+    task_id: String,
+    verdict: String,
+    reconciled_through: DateTime<Utc>,
+    /// 1-based acceptance-criterion index → the reviewer's verdict for it.
+    criteria: BTreeMap<u64, String>,
+    late_corrections: usize,
+}
+
 pub(super) fn independent_review_guard(
+    runtime: &OrbitRuntime,
     action: &str,
     input: &Value,
 ) -> Result<Value, DispatchError> {
-    let verdict = input
-        .get("verdict")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| action_failed(action, "missing non-blank `verdict`".to_string()))?;
-    if !matches!(verdict, "approve" | "request_changes") {
-        return Err(action_failed(
-            action,
-            format!(
-                "unknown independent review verdict '{verdict}' (expected 'approve' or 'request_changes')"
-            ),
-        ));
-    }
+    let reported_verdict = match non_blank_str(input, "verdict") {
+        Some(verdict) => {
+            if !matches!(verdict, "approve" | "request_changes") {
+                return Err(action_failed(
+                    action,
+                    format!(
+                        "unknown independent review verdict '{verdict}' (expected 'approve' or 'request_changes')"
+                    ),
+                ));
+            }
+            Some(verdict.to_string())
+        }
+        None => None,
+    };
 
-    let reviewed_head_sha = input
-        .get("reviewed_head_sha")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            action_failed(action, "missing non-blank `reviewed_head_sha`".to_string())
-        })?;
-    let candidate_head_sha = input
-        .get("candidate_head_sha")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            action_failed(action, "missing non-blank `candidate_head_sha`".to_string())
-        })?;
+    let reviewed_head_sha = non_blank_str(input, "reviewed_head_sha").ok_or_else(|| {
+        action_failed(action, "missing non-blank `reviewed_head_sha`".to_string())
+    })?;
+    let candidate_head_sha = non_blank_str(input, "candidate_head_sha").ok_or_else(|| {
+        action_failed(action, "missing non-blank `candidate_head_sha`".to_string())
+    })?;
     if reviewed_head_sha != candidate_head_sha {
         return Err(action_failed(
             action,
@@ -495,11 +511,285 @@ pub(super) fn independent_review_guard(
         ));
     }
 
+    // The bundle comes from the parent pipeline's own input, never from the
+    // reviewer, so the set of criteria that must be covered cannot be narrowed
+    // by the thing being checked.
+    let task_ids = parse_task_ids(input).map_err(|error| {
+        action_failed(
+            action,
+            format!("independent review guard cannot resolve its task bundle: {error}"),
+        )
+    })?;
+
+    let mut records = Vec::with_capacity(task_ids.len());
+    for task_id in &task_ids {
+        let comments = runtime.get_task_comments(task_id).map_err(|error| {
+            action_failed(action, format!("read comments for task {task_id}: {error}"))
+        })?;
+        records.push((
+            latest_review_record(action, task_id, candidate_head_sha, &comments)?,
+            latest_task_authority(&comments),
+        ));
+    }
+
+    // Any task whose durable record withholds approval decides the bundle.
+    let durable_verdict = if records
+        .iter()
+        .any(|(record, _)| record.verdict == "request_changes")
+    {
+        "request_changes"
+    } else {
+        "approve"
+    };
+    if let Some(reported) = reported_verdict.as_deref()
+        && reported != durable_verdict
+    {
+        return Err(action_failed(
+            action,
+            format!(
+                "independent review verdict mismatch: response reported '{reported}', persisted review records say '{durable_verdict}'"
+            ),
+        ));
+    }
+
+    if durable_verdict == "approve" {
+        let mut violations = Vec::new();
+        for (record, latest_authority) in &records {
+            let task = runtime.get_task(&record.task_id).map_err(|error| {
+                action_failed(action, format!("read task {}: {error}", record.task_id))
+            })?;
+            violations.extend(approval_violations(
+                record,
+                task.acceptance_criteria.len(),
+                *latest_authority,
+            ));
+        }
+        if !violations.is_empty() {
+            return Err(action_failed(
+                action,
+                format!(
+                    "independent review approval is not admissible: {}",
+                    violations.join("; ")
+                ),
+            ));
+        }
+    }
+
+    let criteria_covered: usize = records
+        .iter()
+        .map(|(record, _)| record.criteria.len())
+        .sum();
+    let tasks_reviewed = records
+        .iter()
+        .map(|(record, _)| {
+            serde_json::json!({
+                "task_id": record.task_id,
+                "verdict": record.verdict,
+                "criteria_covered": record.criteria.len(),
+                "reconciled_through": record.reconciled_through.to_rfc3339(),
+                "late_corrections": record.late_corrections,
+            })
+        })
+        .collect::<Vec<_>>();
+
     Ok(serde_json::json!({
-        "verdict": verdict,
+        "verdict": durable_verdict,
         "reviewed_head_sha": reviewed_head_sha,
         "exact_head": true,
+        "criteria_covered": criteria_covered,
+        "tasks_reviewed": tasks_reviewed,
     }))
+}
+
+/// Newest durable review record for `candidate_head_sha`.
+///
+/// Structurally invalid records are skipped rather than fatal: a reviewer that
+/// re-runs after a rejected record must be able to supersede it, and a record
+/// that named an older candidate belongs to an older review.
+fn latest_review_record(
+    action: &str,
+    task_id: &str,
+    candidate_head_sha: &str,
+    comments: &[TaskComment],
+) -> Result<ReviewRecord, DispatchError> {
+    let mut rejected: Vec<String> = Vec::new();
+    let mut latest: Option<(DateTime<Utc>, ReviewRecord)> = None;
+
+    for comment in comments {
+        let Some(payload) = review_record_payload(&comment.message) else {
+            continue;
+        };
+        let payload = match payload {
+            Ok(payload) => payload,
+            Err(error) => {
+                rejected.push(format!("unparsable record at {}: {error}", comment.at));
+                continue;
+            }
+        };
+        if payload
+            .get("candidate_head_sha")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            != Some(candidate_head_sha)
+        {
+            continue;
+        }
+        match review_record_from_payload(task_id, &payload) {
+            Ok(record) => {
+                let supersedes = latest
+                    .as_ref()
+                    .map(|(at, _)| comment.at >= *at)
+                    .unwrap_or(true);
+                if supersedes {
+                    latest = Some((comment.at, record));
+                }
+            }
+            Err(error) => rejected.push(format!("invalid record at {}: {error}", comment.at)),
+        }
+    }
+
+    match latest {
+        Some((_, record)) => Ok(record),
+        None => Err(action_failed(
+            action,
+            format!(
+                "independent review persisted no `{REVIEW_RECORD_MARKER}` per-criterion record on task {task_id} for candidate {candidate_head_sha}{}",
+                if rejected.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (rejected: {})", rejected.join(", "))
+                }
+            ),
+        )),
+    }
+}
+
+/// The JSON body of a review-record comment, or `None` when the comment is
+/// ordinary task authority rather than a review record.
+fn review_record_payload(message: &str) -> Option<Result<Value, String>> {
+    let body = message.trim_start().strip_prefix(REVIEW_RECORD_MARKER)?;
+    Some(serde_json::from_str::<Value>(body.trim()).map_err(|error| error.to_string()))
+}
+
+fn review_record_from_payload(task_id: &str, payload: &Value) -> Result<ReviewRecord, String> {
+    let verdict = payload
+        .get("verdict")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| matches!(*value, "approve" | "request_changes"))
+        .ok_or_else(|| "`verdict` must be 'approve' or 'request_changes'".to_string())?;
+    let reconciled_through = payload
+        .get("reconciled_through")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .ok_or_else(|| "`reconciled_through` is missing".to_string())?;
+    let reconciled_through = DateTime::parse_from_rfc3339(reconciled_through)
+        .map_err(|error| format!("`reconciled_through` is not an RFC 3339 timestamp: {error}"))?
+        .with_timezone(&Utc);
+    let late_corrections = payload
+        .get("late_corrections")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            "`late_corrections` must be an array (empty when the task carries none)".to_string()
+        })?
+        .len();
+
+    let entries = payload
+        .get("criteria")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "`criteria` must be an array".to_string())?;
+    let mut criteria = BTreeMap::new();
+    for entry in entries {
+        let index = entry
+            .get("index")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "every `criteria` entry needs a 1-based integer `index`".to_string())?;
+        let criterion_verdict = entry
+            .get("verdict")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| matches!(*value, "met" | "not_met"))
+            .ok_or_else(|| format!("criterion {index} verdict must be 'met' or 'not_met'"))?;
+        if criteria
+            .insert(index, criterion_verdict.to_string())
+            .is_some()
+        {
+            return Err(format!("criterion {index} is reported more than once"));
+        }
+    }
+
+    Ok(ReviewRecord {
+        task_id: task_id.to_string(),
+        verdict: verdict.to_string(),
+        reconciled_through,
+        criteria,
+        late_corrections,
+    })
+}
+
+/// Timestamp of the newest comment that is task authority rather than a review
+/// record — the correction an approval must not have been written before.
+fn latest_task_authority(comments: &[TaskComment]) -> Option<DateTime<Utc>> {
+    comments
+        .iter()
+        .filter(|comment| review_record_payload(&comment.message).is_none())
+        .map(|comment| comment.at)
+        .max()
+}
+
+/// Why this record may not carry an approval. Empty means it may.
+fn approval_violations(
+    record: &ReviewRecord,
+    criteria_count: usize,
+    latest_authority: Option<DateTime<Utc>>,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    let task_id = &record.task_id;
+
+    let expected: BTreeSet<u64> = (1..=criteria_count as u64).collect();
+    let reported: BTreeSet<u64> = record.criteria.keys().copied().collect();
+    let missing = expected.difference(&reported).copied().collect::<Vec<_>>();
+    if !missing.is_empty() {
+        violations.push(format!(
+            "task {task_id} has no verdict for acceptance criteria {missing:?} (of {criteria_count})"
+        ));
+    }
+    let unknown = reported.difference(&expected).copied().collect::<Vec<_>>();
+    if !unknown.is_empty() {
+        violations.push(format!(
+            "task {task_id} reports verdicts for criteria {unknown:?} that do not exist (it has {criteria_count})"
+        ));
+    }
+    let unmet = record
+        .criteria
+        .iter()
+        .filter(|(_, verdict)| verdict.as_str() != "met")
+        .map(|(index, _)| *index)
+        .collect::<Vec<_>>();
+    if !unmet.is_empty() {
+        violations.push(format!(
+            "task {task_id} approves while reporting criteria {unmet:?} as not met"
+        ));
+    }
+
+    if let Some(latest_authority) = latest_authority
+        && record.reconciled_through < latest_authority
+    {
+        violations.push(format!(
+            "task {task_id} was approved against authority reconciled through {}, but a later task comment landed at {latest_authority}",
+            record.reconciled_through
+        ));
+    }
+
+    violations
+}
+
+fn non_blank_str<'a>(input: &'a Value, field: &str) -> Option<&'a str> {
+    input
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn pipeline_wait_entry_failure(label: &str, entry: &Value) -> Option<String> {

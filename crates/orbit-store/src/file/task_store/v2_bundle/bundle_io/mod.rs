@@ -1,6 +1,7 @@
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use orbit_common::migration::Plan;
 use orbit_common::types::{
@@ -10,7 +11,9 @@ use orbit_common::types::{
     TASK_EVENTS_FILE_NAME, TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME, TaskCommentRowV2,
     TaskEnvelopeV2, TaskEventRowV2,
 };
-use orbit_common::utility::fs::{atomic_write_bytes, atomic_write_text, with_exclusive_file_lock};
+use orbit_common::utility::fs::{
+    atomic_write_bytes, atomic_write_text, sync_parent_dir, with_exclusive_file_lock,
+};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
@@ -18,11 +21,42 @@ use super::task_bundle_types::TaskBundleV2;
 use crate::file::task_store::task_migrations;
 use crate::file::yaml_doc::{parse_yaml_with, write_yaml_atomic_with};
 
+static STAGING_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 /// Write a new v2 bundle at `bundle_dir`.
 ///
-/// This is a creation-only primitive and refuses to write into an existing
-/// bundle directory. Use narrower update helpers for later mutations.
+/// The complete bundle is assembled in a unique sibling directory and renamed
+/// into place only after every required file and directory is durable. This is
+/// a creation-only primitive and refuses to write into an existing bundle
+/// directory. Use narrower update helpers for later mutations.
 pub(crate) fn write_bundle_at(bundle_dir: &Path, bundle: &TaskBundleV2) -> Result<(), OrbitError> {
+    write_bundle_atomically(bundle_dir, bundle, None, publish_staged_bundle)
+}
+
+/// Write a complete imported bundle, including every blob in its artifact
+/// manifest, before publishing the destination directory.
+pub(crate) fn write_bundle_with_artifacts_at(
+    bundle_dir: &Path,
+    bundle: &TaskBundleV2,
+    source_bundle_dir: &Path,
+) -> Result<(), OrbitError> {
+    write_bundle_atomically(
+        bundle_dir,
+        bundle,
+        Some(source_bundle_dir),
+        publish_staged_bundle,
+    )
+}
+
+fn write_bundle_atomically<F>(
+    bundle_dir: &Path,
+    bundle: &TaskBundleV2,
+    artifact_source: Option<&Path>,
+    publish: F,
+) -> Result<(), OrbitError>
+where
+    F: FnOnce(&Path, &Path) -> std::io::Result<()>,
+{
     if bundle_dir.exists() {
         return Err(OrbitError::Store(format!(
             "task bundle already exists at {}",
@@ -31,8 +65,33 @@ pub(crate) fn write_bundle_at(bundle_dir: &Path, bundle: &TaskBundleV2) -> Resul
     }
     validate_bundle_dir_matches_task_id(bundle_dir, &bundle.envelope.id)?;
     validate_bundle(bundle)?;
-    ensure_bundle_dirs(bundle_dir)?;
+    let staging_dir = create_staging_dir(bundle_dir)?;
+    let result = (|| {
+        write_bundle_contents(&staging_dir, bundle)?;
+        if let Some(manifest) = &bundle.artifact_manifest
+            && !manifest.files.is_empty()
+        {
+            let source = artifact_source.ok_or_else(|| {
+                OrbitError::Store(format!(
+                    "task bundle {} has artifact files but no artifact source was supplied",
+                    bundle.envelope.id
+                ))
+            })?;
+            copy_artifact_blobs(source, &staging_dir, manifest)?;
+        }
+        read_bundle_for_id(&staging_dir, &bundle.envelope.id)?;
+        sync_staged_bundle_dirs(&staging_dir)?;
+        publish(&staging_dir, bundle_dir).map_err(OrbitError::from)
+    })();
 
+    if let Err(error) = &result {
+        cleanup_partial_bundle_best_effort(&staging_dir, "atomic bundle staging", error);
+    }
+    result
+}
+
+fn write_bundle_contents(bundle_dir: &Path, bundle: &TaskBundleV2) -> Result<(), OrbitError> {
+    ensure_bundle_dirs(bundle_dir)?;
     write_yaml_atomic_with(
         &bundle_dir.join(TASK_ENVELOPE_FILE_NAME),
         &bundle.envelope,
@@ -71,15 +130,91 @@ pub(crate) fn write_bundle_at(bundle_dir: &Path, bundle: &TaskBundleV2) -> Resul
     Ok(())
 }
 
+fn create_staging_dir(bundle_dir: &Path) -> Result<PathBuf, OrbitError> {
+    let parent = bundle_dir.parent().ok_or_else(|| {
+        OrbitError::Store(format!(
+            "task bundle path has no parent: {}",
+            bundle_dir.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(OrbitError::from)?;
+    let bundle_name = bundle_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            OrbitError::Store(format!("invalid task bundle path {}", bundle_dir.display()))
+        })?;
+
+    for _ in 0..32 {
+        let sequence = STAGING_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(
+            ".{bundle_name}.{}.{}.staging",
+            std::process::id(),
+            sequence
+        ));
+        match fs::create_dir(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(OrbitError::from(error)),
+        }
+    }
+    Err(OrbitError::Store(format!(
+        "could not allocate a staging directory for task bundle {}",
+        bundle_dir.display()
+    )))
+}
+
+fn sync_staged_bundle_dirs(staging_dir: &Path) -> Result<(), OrbitError> {
+    let artifact_dir = staging_dir.join(TASK_ARTIFACTS_DIR_NAME);
+    let artifact_files_dir = artifact_dir.join(TASK_ARTIFACT_FILES_DIR_NAME);
+    sync_parent_dir(&artifact_files_dir).map_err(OrbitError::from)?;
+    sync_parent_dir(&artifact_dir).map_err(OrbitError::from)?;
+    sync_parent_dir(&staging_dir).map_err(OrbitError::from)
+}
+
+fn publish_staged_bundle(staging_dir: &Path, bundle_dir: &Path) -> std::io::Result<()> {
+    fs::rename(staging_dir, bundle_dir)?;
+    sync_parent_dir(bundle_dir)
+}
+
 pub(crate) fn read_bundle_at(bundle_dir: &Path) -> Result<TaskBundleV2, OrbitError> {
     let expected_task_id = task_id_from_bundle_dir(bundle_dir)?;
+    read_bundle_for_id(bundle_dir, &expected_task_id).map_err(|error| match error {
+        OrbitError::NotFound {
+            kind: NotFoundKind::Task,
+            ..
+        }
+        | OrbitError::TaskBundleCorrupt { .. }
+        | OrbitError::Io(_) => error,
+        other => OrbitError::TaskBundleCorrupt {
+            task_id: expected_task_id,
+            path: bundle_dir.to_string_lossy().into_owned(),
+            reason: other.to_string(),
+        },
+    })
+}
+
+fn read_bundle_for_id(
+    bundle_dir: &Path,
+    expected_task_id: &str,
+) -> Result<TaskBundleV2, OrbitError> {
     let envelope_path = bundle_dir.join(TASK_ENVELOPE_FILE_NAME);
     if !envelope_path.is_file() {
-        return Err(OrbitError::not_found(NotFoundKind::Task, expected_task_id));
+        return Err(OrbitError::not_found(
+            NotFoundKind::Task,
+            expected_task_id.to_string(),
+        ));
     }
     let envelope: TaskEnvelopeV2 =
         read_migrated_yaml_file(&envelope_path, task_migrations::envelope_plan())?;
-    validate_bundle_dir_matches_task_id(bundle_dir, &envelope.id)?;
+    if envelope.id != expected_task_id {
+        return Err(OrbitError::Store(format!(
+            "task bundle directory {} represents task id {} but contains task id {}",
+            bundle_dir.display(),
+            expected_task_id,
+            envelope.id
+        )));
+    }
 
     let bundle = TaskBundleV2 {
         envelope,

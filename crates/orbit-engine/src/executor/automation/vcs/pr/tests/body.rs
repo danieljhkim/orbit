@@ -4,6 +4,93 @@ use super::super::body::*;
 use super::test_support::*;
 
 #[test]
+fn pr_body_at_github_byte_limit_is_preserved() {
+    let mut task = task_with_contract(
+        "ORB-10474",
+        "Bound PR body",
+        "x",
+        "Keep the generated body within GitHub's limit.",
+        &[],
+        None,
+    );
+    let initial_body = build_batch_pr_body(
+        &[task.clone()],
+        &freshness(),
+        &[],
+        &test_pr_config(None),
+        None,
+    );
+    task.execution_summary = "x".repeat(GITHUB_PR_BODY_BYTE_LIMIT - initial_body.len() + 1);
+
+    let body = build_batch_pr_body(&[task], &freshness(), &[], &test_pr_config(None), None);
+
+    assert_eq!(body.len(), GITHUB_PR_BODY_BYTE_LIMIT);
+    assert!(!body.contains("**Audit note:**"));
+}
+
+#[test]
+fn oversized_multibyte_pr_body_is_truncated_on_a_utf8_boundary() {
+    let task = task_with_contract(
+        "ORB-10474",
+        "Bound PR body",
+        &"é".repeat(GITHUB_PR_BODY_BYTE_LIMIT),
+        "Keep the generated body within GitHub's limit.",
+        &[],
+        None,
+    );
+
+    let body = build_batch_pr_body(&[task], &freshness(), &[], &test_pr_config(None), None);
+
+    assert!(body.len() <= GITHUB_PR_BODY_BYTE_LIMIT);
+    assert!(body.contains("**Audit note:**"));
+    assert!(body.contains("ORB-10474"));
+    assert!(std::str::from_utf8(body.as_bytes()).is_ok());
+}
+
+#[test]
+fn oversized_single_task_body_keeps_an_audit_reference_to_its_artifact() {
+    let task = task_with_contract(
+        "ORB-10474",
+        "Bound PR body",
+        &"x".repeat(GITHUB_PR_BODY_BYTE_LIMIT),
+        "Keep the generated body within GitHub's limit.",
+        &[],
+        None,
+    );
+
+    let body = build_batch_pr_body(&[task], &freshness(), &[], &test_pr_config(None), None);
+
+    assert!(body.len() <= GITHUB_PR_BODY_BYTE_LIMIT);
+    assert!(body.contains("complete task artifacts remain the durable record in the persisted Orbit task artifacts for ORB-10474"));
+}
+
+#[test]
+fn oversized_batch_body_keeps_an_audit_reference_to_every_task_artifact() {
+    let body = build_batch_pr_body(
+        &[
+            task(
+                "ORB-10474",
+                "First task",
+                &"x".repeat(GITHUB_PR_BODY_BYTE_LIMIT),
+            ),
+            task(
+                "ORB-10475",
+                "Second task",
+                &"x".repeat(GITHUB_PR_BODY_BYTE_LIMIT),
+            ),
+        ],
+        &freshness(),
+        &[],
+        &test_pr_config(None),
+        None,
+    );
+
+    assert!(body.len() <= GITHUB_PR_BODY_BYTE_LIMIT);
+    assert!(body.contains("ORB-10474, ORB-10475"));
+    assert!(body.contains("**Audit note:**"));
+}
+
+#[test]
 fn task_url_rendering_covers_template_and_external_ref_priority() {
     let plain = task_with_contract("T123", "Plain task", "done", "", &[], None);
     assert_eq!(task_url(&plain, &test_pr_config(None)), None);

@@ -927,6 +927,9 @@ spec:
         pr_number: "{{ input.pr_number }}"
     - id: guard
       target: activity:independent_review_guard
+      default_input:
+        candidate_head_sha: "{{ input.candidate_head_sha }}"
+        task_ids: "{{ input.task_ids }}"
 "#,
     )
     .expect("write review job");

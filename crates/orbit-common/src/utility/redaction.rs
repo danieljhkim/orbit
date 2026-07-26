@@ -31,7 +31,7 @@ use std::{
 use regex::Regex;
 use serde_json::Value;
 
-use crate::types::{ArtifactOrigin, OrbitError};
+use crate::types::{ArtifactOrigin, DependencyNotDelivered, OrbitError};
 
 const REDACTED_ENV_VALUE: &str = "[REDACTED_ENV]";
 static DEFAULT_PATTERN_REDACTOR: OnceLock<PatternRedactor> = OnceLock::new();
@@ -163,10 +163,37 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
             payload: redact_sensitive_env_json(payload),
         },
         OrbitError::Execution(m) => OrbitError::Execution(redact_sensitive_env_text(&m)),
+        OrbitError::RunCancellationIncomplete {
+            pid,
+            pgid,
+            term_sent,
+            kill_sent,
+            leader_alive,
+            group_alive,
+        } => OrbitError::RunCancellationIncomplete {
+            pid,
+            pgid,
+            term_sent,
+            kill_sent,
+            leader_alive,
+            group_alive,
+        },
+        OrbitError::TaskBundleCorrupt {
+            task_id,
+            path,
+            reason,
+        } => OrbitError::TaskBundleCorrupt {
+            task_id: redact_sensitive_env_text(&task_id),
+            path: redact_sensitive_env_text(&path),
+            reason: redact_sensitive_env_text(&reason),
+        },
         OrbitError::Store(m) => OrbitError::Store(redact_sensitive_env_text(&m)),
         OrbitError::TaskStatusTransition(m) => {
             OrbitError::TaskStatusTransition(redact_sensitive_env_text(&m))
         }
+        OrbitError::DependencyNotDelivered(diagnostic) => OrbitError::DependencyNotDelivered(
+            redact_dependency_not_delivered(*diagnostic, redact_sensitive_env_text),
+        ),
         OrbitError::JobRunStateTransition(m) => {
             OrbitError::JobRunStateTransition(redact_sensitive_env_text(&m))
         }
@@ -251,13 +278,53 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
             payload: redact_json_with(payload, redact_all),
         },
         OrbitError::Execution(m) => OrbitError::Execution(redact_all(&m)),
+        OrbitError::RunCancellationIncomplete {
+            pid,
+            pgid,
+            term_sent,
+            kill_sent,
+            leader_alive,
+            group_alive,
+        } => OrbitError::RunCancellationIncomplete {
+            pid,
+            pgid,
+            term_sent,
+            kill_sent,
+            leader_alive,
+            group_alive,
+        },
+        OrbitError::TaskBundleCorrupt {
+            task_id,
+            path,
+            reason,
+        } => OrbitError::TaskBundleCorrupt {
+            task_id: redact_all(&task_id),
+            path: redact_all(&path),
+            reason: redact_all(&reason),
+        },
         OrbitError::Store(m) => OrbitError::Store(redact_all(&m)),
         OrbitError::TaskStatusTransition(m) => OrbitError::TaskStatusTransition(redact_all(&m)),
+        OrbitError::DependencyNotDelivered(diagnostic) => OrbitError::DependencyNotDelivered(
+            redact_dependency_not_delivered(*diagnostic, redact_all),
+        ),
         OrbitError::JobRunStateTransition(m) => OrbitError::JobRunStateTransition(redact_all(&m)),
         OrbitError::Io(m) => OrbitError::Io(redact_all(&m)),
         OrbitError::WorkspaceError(m) => OrbitError::WorkspaceError(redact_all(&m)),
         OrbitError::Migration(m) => OrbitError::Migration(redact_all(&m)),
     }
+}
+
+fn redact_dependency_not_delivered(
+    diagnostic: DependencyNotDelivered,
+    redact: fn(&str) -> String,
+) -> Box<DependencyNotDelivered> {
+    Box::new(DependencyNotDelivered {
+        task_id: redact(&diagnostic.task_id),
+        dependency_id: redact(&diagnostic.dependency_id),
+        base_ref: redact(&diagnostic.base_ref),
+        base_sha: redact(&diagnostic.base_sha),
+        detail: redact(&diagnostic.detail),
+    })
 }
 
 fn redact_json_with(value: Value, redact: fn(&str) -> String) -> Value {
