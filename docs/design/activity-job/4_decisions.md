@@ -778,8 +778,27 @@ Recognition is the entire change: no safety gate moved. Non-terminal run, `--old
 
 ---
 
+## ADR-0288 — Independent review approves from durable per-criterion records, not a scalar response
+
+**Status:** Proposed · 2026-07 · [ORB-10467]
+
+**Context.** The independent-review child Run bound its verdict to the published candidate SHA and nothing else: `agent_review` loaded a task's description, criteria, plan, and context files and returned one `approve`/`request_changes` string, and the guard checked only that the reported SHA matched. Later task comments — where a scope correction actually lands — were never required reading, and an approval said nothing per acceptance criterion, so an unassessed criterion looked exactly like a met one. A published candidate was approved while violating a final scope deferral, and only a later manual patch audit caught it. The alternatives were to enrich the reviewer's response with per-criterion fields and gate on them, to parse the reviewer's prose for coverage, or to require a machine-readable record persisted on the task and gate on that. The first makes an advisory agent response load-bearing, and the second converts scalar prose into an unverified approval.
+
+**Decision.** The reviewer persists one `[independent-review]` record per participating task as a task comment before returning — candidate SHA, verdict, `reconciled_through`, `late_corrections`, and one `met`/`not_met` entry per acceptance criterion indexed from 1 — under an instruction that states the authority ordering: the newest comment or history entry that narrows, defers, or corrects the work outranks the acceptance criteria, which outrank the description and plan. `independent_review_guard` becomes runtime-backed, takes the bundle from the run's own input, reloads each task's criteria and comments, and recovers the newest record for the published SHA. The response verdict is cross-checked and disagreement fails the step; approval further requires full criterion coverage, every criterion `met`, and `reconciled_through` no older than the newest comment that is not itself a review record. Blocking verdicts are recorded without the coverage gate, and ship preflight rejects a deployed guard step that is not handed `task_ids` and `candidate_head_sha`.
+
+**Consequences.**
+- An approval carries durable, re-readable evidence of which criteria were assessed, on what candidate, and how current the reviewer's reading of task authority was.
+- Approving against an older reading of the task fails the review run instead of reaching the parent success gate, so a late correction cannot be silently outrun.
+- The reviewer's structured response stays advisory and is only cross-checked, so a missing response no longer decides anything by itself.
+- Cost: the review activity now writes task comments, so it is no longer read-only with respect to Orbit state, and an unpersisted or malformed record fails the run even when the review itself was sound.
+- Cost: a deployed `task_review_pipeline` predating this change fails closed at run time; asset and binary must be upgraded together (preflight names the missing field for ship submissions).
+- Cost: approval requires every criterion to be reported `met`, so criteria that no longer describe the agreed scope must be corrected before review can approve.
+
+---
+
 ## Task References
 
+- **[ORB-10467]** — Require independent review to reconcile late task authority and every acceptance criterion ([ADR-0288]).
 - **[ORB-10456]** — Resolve provider launchers at the shared CLI spawn boundary and add provider-aware missing-launcher diagnostics ([ADR-0259]).
 - **[ORB-10454]** — Allocate [ADR-0258] for the step-completion / response-content split and retire the IOU in ADR-0224's amendment block.
 - **[ORB-10427]** — Share one worktree-path derivation between `setup_worktree` and gc; collect bundles only when every member has settled.
