@@ -84,6 +84,21 @@ spec:
     Your final response is audit-only. Prefer concise JSON with `bundles`
     and `reasoning` when convenient, but the workflow does not consume it
     and downstream dispatch must not depend on it.
+  # The one sanctioned exception to the step-completion protocol check,
+  # declared rather than inherited.
+  #
+  # Every other agent_loop activity does real work whose absence must stop the
+  # pipeline, so an invocation that ends without a terminating Orbit response
+  # envelope fails its step. This one is genuinely decorative: dispatch is
+  # driven by the deterministic singleton bundles from `list_backlog_tasks`,
+  # and nothing reads these notes. An advisory note-taker that stalls has cost
+  # the run nothing, so failing the auto-pipeline over it would trade a real
+  # capability for a cosmetic one.
+  #
+  # This is a statement about *consequence*, not about output quality. Do not
+  # copy it onto an activity merely because its response is unstructured — the
+  # bar is that the activity not running at all is harmless.
+  require_completion_envelope: false
   tools:
     - orbit.task.*
     - orbit.friction.*

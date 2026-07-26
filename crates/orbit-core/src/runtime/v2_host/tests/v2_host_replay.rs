@@ -121,6 +121,7 @@ fn http_agent_loop_tool_update_persists_runtime_identity_family() {
         provider: Provider::Claude,
         wall_clock_timeout_seconds: 30,
         require_response_envelope: false,
+        require_completion_envelope: true,
         role: None,
         proc_allowed_programs: None,
     };

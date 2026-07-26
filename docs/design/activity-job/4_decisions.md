@@ -627,6 +627,21 @@ Rejected alternatives: reconciling by parent linkage (no parent run id is persis
 - Structured-output activities remain fail-closed through an explicit per-activity contract.
 - Cost: activity authors must classify the handoff correctly, and response-consuming activities need a regression that pins strict mode.
 
+**Amended by [ORB-10449].** This ADR's flag answers *"do downstream templates
+consume the response?"* — but it was also, silently, the only thing asking *"did
+the invocation finish at all?"*, and for artifact-backed activities the answer was
+"nobody is asking". A separate content-blind `require_completion_envelope`
+(default `true`) now carries the second question: it checks the envelope frame
+only — presence, `schemaVersion`, status token — never `result`/`error`, so an
+agent declaring `status: "failed"` satisfies it and agent-loop output stays
+advisory. The two flags are orthogonal and the completion check is deliberately
+more permissive about stream shape. Narrative, failure/recovery semantics, and
+the single declared exception (`dispatch_agent`) are in
+[§7.6a of `2_design.md`](./2_design.md). An ADR of its own is warranted — the
+executing activity's tool grant did not include `orbit.adr.add`, and
+[CONVENTIONS](../CONVENTIONS.md) forbids hand-authoring an unallocated heading,
+so allocation and the `4_decisions.md` entry are tracked as [ORB-10454].
+
 ---
 
 ## ADR-0225 — PR handoff recovery follows job checkpoints and exact remote leases
@@ -827,5 +842,6 @@ Recognition is the entire change: no safety gate moved. Non-terminal run, `--old
 - **[ORB-10313]** — Fail delivery before Git mutation when the durable execution outcome is not `Outcome: success`.
 - **[ORB-10363]** — Rebase task candidates after concurrent base advances and publish blocked PRs instead of stranding failed work.
 - **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer (`task_epic_pipeline`, `epic_orchestrator`, `pipeline_wait`, legacy parallel-batch executor).
+- **[ORB-10449]** — Split step-completion protocol from response content so a stalled agent-loop step fails where it happened (amends [ADR-0224]; see [§7.6a of `2_design.md`](./2_design.md)).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

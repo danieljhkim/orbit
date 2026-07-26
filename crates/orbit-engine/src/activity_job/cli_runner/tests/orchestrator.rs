@@ -217,8 +217,11 @@ fn run_cli_backend_rejects_schema_invalid_success_envelope() {
     );
 }
 
+/// [ORB-10449] The regression this task exists for: an agent that exits 0 with
+/// prose and no envelope did not finish its turn, and must not checkpoint as
+/// success just because the activity never opted into the *content* contract.
 #[test]
-fn run_cli_backend_accepts_claude_success_prose_without_envelope_for_artifact_activity() {
+fn run_cli_backend_fails_artifact_activity_when_exit_zero_carries_no_envelope() {
     let temp = tempdir().expect("tempdir");
     let script = temp.path().join("claude");
     let stdout = serde_json::json!({
@@ -254,16 +257,204 @@ fn run_cli_backend_accepts_claude_success_prose_without_envelope_for_artifact_ac
     )
     .expect("run cli backend");
 
+    assert!(!outcome.success);
+    assert_eq!(outcome.output["exit_code"], 0);
+    // The content contract is still opt-in and still off here — the step failed
+    // on the completion protocol alone.
+    assert_eq!(outcome.output["response_envelope_required"], false);
+    assert_eq!(outcome.output["completion_envelope_required"], true);
+    assert_eq!(outcome.output["completion_envelope_satisfied"], false);
+    let message = outcome.message.expect("completion protocol message");
+    assert!(message.contains("agent step did not complete"), "{message}");
+    assert!(
+        message.contains("does not contain an Orbit response envelope"),
+        "{message}"
+    );
+}
+
+/// The declared exception (`dispatch_agent`): an activity whose work is
+/// decorative keeps the pre-ORB-10449 behaviour, and the invalid envelope is
+/// still recorded as a diagnostic rather than acted on.
+#[test]
+fn run_cli_backend_keeps_advisory_activity_successful_without_an_envelope() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' 'advisory grouping notes, no envelope'\n",
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-advisory-response",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let mut spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+    spec.require_completion_envelope = false;
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-advisory-response",
+        audit,
+        &serde_json::json!({"prompt": "group the backlog"}),
+        None,
+    )
+    .expect("run cli backend");
+
     assert!(outcome.success);
     assert!(outcome.message.is_none());
-    assert_eq!(outcome.output["exit_code"], 0);
-    assert_eq!(outcome.output["response_envelope_required"], false);
-    assert_eq!(outcome.output["response_envelope_valid"], false);
+    assert_eq!(outcome.output["completion_envelope_required"], false);
+    assert_eq!(outcome.output["completion_envelope_satisfied"], false);
     assert!(
-        outcome.output["response_envelope_error"]
+        outcome.output["completion_envelope_error"]
             .as_str()
-            .is_some_and(|message| message.contains("does not contain an Orbit response envelope"))
+            .is_some_and(|message| message.contains("agent step did not complete"))
     );
+}
+
+/// The completion check is content-blind. An agent that declares
+/// `status: "failed"` ran its contract to the end, so it satisfies the protocol
+/// gate; whether that declared failure means anything is a question for durable
+/// state, not for this step's success. Guards the doctrine boundary: no
+/// activity decision may read an agent-loop response's content.
+#[test]
+fn run_cli_backend_completion_check_accepts_a_declared_failure_envelope() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("codex");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"failed\",\"result\":{},\"error\":{\"code\":\"blocked\",\"message\":\"cannot proceed\"}}'\n",
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-declared-failure",
+        "codex:gpt-5.5",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-declared-failure",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10449"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(outcome.success, "content must not decide step completion");
+    assert_eq!(outcome.output["completion_envelope_required"], true);
+    assert_eq!(outcome.output["completion_envelope_satisfied"], true);
+    assert!(outcome.output["completion_envelope_error"].is_null());
+}
+
+/// A provider that interleaves a wrapped tool's stdout with its own protocol
+/// output still terminated properly. The completion gate must key on the
+/// termination signal, not on the tidiness of the stream around it — a false
+/// positive here would fail completed work.
+#[test]
+fn run_cli_backend_completion_check_tolerates_interleaved_non_json_stdout() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("codex");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '[main abc1234] some commit'\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-interleaved-stdout",
+        "codex:gpt-5.5",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-interleaved-stdout",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10449"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(outcome.success);
+    assert_eq!(outcome.output["completion_envelope_satisfied"], true);
+}
+
+/// [ORB-10449] `jrun-20260726-1758-5` replayed as a fixture: claude exits 0
+/// with `stop_reason: end_turn` after parking itself on a background process,
+/// having emitted no envelope. Before this change the step checkpointed as
+/// success and the run failed three steps later at the delivery gate.
+#[test]
+fn run_cli_backend_fails_on_the_jrun_20260726_1758_5_stall_shape() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    let stdout = serde_json::json!({
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "stop_reason": "end_turn",
+        "result": "The nextest run is still executing in the background (no failures through \
+                   1782/2693 tests so far). I'll wait for the scheduled wakeup or task \
+                   notification before analyzing results and continuing the ORB-10436 audit."
+    })
+    .to_string();
+    // The captured prose contains an apostrophe, so route it through a file
+    // rather than a single-quoted shell literal.
+    let stdout_file = temp.path().join("stdout.json");
+    fs::write(&stdout_file, &stdout).expect("write stall stdout fixture");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\ncat '{}'\n",
+            stdout_file.display()
+        ),
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "jrun-20260726-1758-5",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    // `agent_implement`'s shipped shape: artifact-backed, so the content
+    // contract is off. Only the completion protocol stands between a stalled
+    // implementer and a green checkpoint.
+    let spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+    assert!(!spec.require_response_envelope);
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "jrun-20260726-1758-5",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10436"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(
+        !outcome.success,
+        "a stalled implementer must not checkpoint"
+    );
+    assert_eq!(outcome.output["exit_code"], 0);
+    assert_eq!(outcome.output["timed_out"], false);
+    let message = outcome.message.expect("stall message");
+    assert!(message.contains("agent step did not complete"), "{message}");
 }
 
 #[test]

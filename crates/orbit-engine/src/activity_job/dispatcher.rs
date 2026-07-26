@@ -580,8 +580,28 @@ fn run_agent_loop_activity(
             }
             run_agent_loop_via_driver(host, spec, run_id, audit, input, fs_profile)
         }
-        Backend::Cli => run_cli_backend(host, spec, run_id, audit, input, fs_profile),
+        Backend::Cli => run_cli_backend(host, spec, run_id, audit, input, fs_profile)
+            .map(|outcome| label_failure_with_step(activity_name, outcome)),
     }
+}
+
+/// [ORB-10449] Prefix a failing CLI agent-loop message with the step that
+/// produced it.
+///
+/// A run surfaces only its terminal message, and the executor's fallback
+/// (`step `<id>` completed with success=false`) is used only when the step
+/// reports no message at all. So a step that *does* report one was previously
+/// anonymous in the run record — an operator saw the symptom without the
+/// origin. Naming the step here keeps that fix in one place for every CLI
+/// agent-loop failure mode (timeout, nonzero exit, protocol violation,
+/// invalid envelope).
+fn label_failure_with_step(activity_name: &str, mut outcome: DispatchOutcome) -> DispatchOutcome {
+    if !outcome.success
+        && let Some(message) = outcome.message.take()
+    {
+        outcome.message = Some(format!("step `{activity_name}`: {message}"));
+    }
+    outcome
 }
 
 fn run_agent_loop_via_driver(

@@ -202,6 +202,76 @@ mod parse {
         assert_eq!(trace.duration_ms, 1234);
     }
 
+    // ----- [ORB-10449] step-completion protocol check ---------------------
+
+    #[test]
+    fn protocol_check_rejects_prose_only_stdout() {
+        // The stall shape: the provider exits 0 having emitted only prose, so
+        // there is no termination signal at all.
+        let stdout = r#"{"type":"result","subtype":"success","result":"still waiting on the background run"}"#;
+        let error = response_envelope_protocol_check(stdout).expect_err("no envelope");
+        assert!(
+            error
+                .to_string()
+                .contains("does not contain an Orbit response envelope"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn protocol_check_is_blind_to_declared_status() {
+        // Frame only: every protocol status token satisfies the check, because
+        // an agent that declares failure still ran its contract to the end.
+        for status in ["success", "failed", "timeout"] {
+            let stdout =
+                format!(r#"{{"schemaVersion":1,"status":"{status}","result":{{}},"error":null}}"#);
+            response_envelope_protocol_check(&stdout)
+                .unwrap_or_else(|error| panic!("status {status} must satisfy the frame: {error}"));
+        }
+    }
+
+    #[test]
+    fn protocol_check_rejects_an_unsupported_frame() {
+        let unsupported_version =
+            r#"{"schemaVersion":2,"status":"success","result":{},"error":null}"#;
+        assert!(
+            response_envelope_protocol_check(unsupported_version)
+                .expect_err("bad version")
+                .to_string()
+                .contains("unsupported schemaVersion: 2")
+        );
+
+        let unknown_status = r#"{"schemaVersion":1,"status":"partial","result":{},"error":null}"#;
+        assert!(
+            response_envelope_protocol_check(unknown_status)
+                .expect_err("bad status")
+                .to_string()
+                .contains("unknown status: partial")
+        );
+    }
+
+    #[test]
+    fn protocol_check_finds_the_envelope_past_interleaved_non_json_stdout() {
+        // A wrapped tool writing to the same stdout makes the document stream
+        // unparseable, but the agent still terminated. Failing a completed step
+        // over stray output would be worse than the defect this check catches.
+        let stdout = concat!(
+            "[main abc1234] chore: commit\n",
+            " 1 file changed, 2 insertions(+)\n",
+            r#"{"schemaVersion":1,"status":"success","result":{},"error":null}"#
+        );
+        response_envelope_protocol_check(stdout).expect("envelope after chatter");
+    }
+
+    #[test]
+    fn protocol_check_accepts_a_claude_wrapped_envelope() {
+        // The healthy claude shape: the Orbit envelope arrives as a JSON string
+        // nested in the wrapper's `result`.
+        let inner = r#"{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}"#;
+        let stdout = format!(r#"{{"type":"result","subtype":"success","result":"{inner}"}}"#);
+        response_envelope_protocol_check(&stdout).expect("wrapped envelope");
+    }
+
     #[test]
     fn peek_response_status_extracts_envelope_failed_from_claude_shaped_wrapper() {
         // Mimics the bug in T20260508-17: claude exits 0 with `result.subtype`

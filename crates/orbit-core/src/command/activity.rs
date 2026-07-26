@@ -289,6 +289,44 @@ mod tests {
         }
     }
 
+    /// [ORB-10449] The step-completion protocol contract, asserted across every
+    /// shipped `agent_loop` activity so an exception has to be *declared*.
+    ///
+    /// The flag defaults to `true`, so a new activity inherits the check by
+    /// omitting it; this test exists to make the opt-out list explicit and to
+    /// force a deliberate edit here when one is added. `dispatch_agent` is the
+    /// sole entry: its notes are advisory and nothing consumes them, so its
+    /// non-completion is harmless. Everything else does work whose absence must
+    /// stop the pipeline.
+    #[test]
+    fn agent_step_completion_contract_is_required_except_where_declared() {
+        const DECLARED_OPT_OUTS: &[&str] = &["dispatch_agent"];
+
+        let mut checked = 0;
+        for (name, yaml) in DEFAULT_ACTIVITY_FILES {
+            let asset = load_activity_asset(yaml)
+                .unwrap_or_else(|error| panic!("parse {name} activity: {error}"));
+            let ActivityV2Spec::AgentLoop(spec) = asset.spec.spec else {
+                continue;
+            };
+            checked += 1;
+            let expected = !DECLARED_OPT_OUTS.contains(name);
+            assert_eq!(
+                spec.require_completion_envelope, expected,
+                "{name} step-completion contract drifted; add it to DECLARED_OPT_OUTS \
+                 only if the activity not running at all is harmless"
+            );
+            // Opting into the content contract without the completion contract
+            // is incoherent: an absent envelope fails content validation too,
+            // so the pair would disagree about the same invocation.
+            assert!(
+                !spec.require_response_envelope || spec.require_completion_envelope,
+                "{name} requires response content but not step completion"
+            );
+        }
+        assert!(checked > 1, "expected several agent_loop activities");
+    }
+
     #[test]
     fn agent_review_is_read_only_and_requires_an_exact_head_verdict() {
         let (_, yaml) = DEFAULT_ACTIVITY_FILES

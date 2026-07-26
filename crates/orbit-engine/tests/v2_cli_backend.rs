@@ -64,10 +64,13 @@ fn scenario_a_cli_dispatch_emits_envelope_events() -> Result<(), Box<dyn std::er
     let tmp_audit = tempfile::tempdir()?;
     let (writer, _sink) = build_writer(tmp_audit.path(), "smoke-cli-a")?;
 
-    // `claude` that ignores stdin and prints a canned reply.
+    // `claude` that ignores stdin and prints a canned reply. [ORB-10449] The
+    // reply is a real Orbit response envelope: exiting 0 without one is now a
+    // step-completion protocol violation, so a bare `{"status":"ok"}` would
+    // fail the step for a reason this scenario is not about.
     let fake = fake_cli(
         "claude",
-        "#!/bin/sh\ncat > /dev/null\necho '{\"status\":\"ok\"}'\n",
+        "#!/bin/sh\ncat > /dev/null\necho '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
     )?;
 
     let spec = cli_agent_loop_spec(None);
@@ -314,7 +317,12 @@ fn scenario_h_cli_reference_asset_round_trip() -> Result<(), Box<dyn std::error:
 
     let tmp_audit = tempfile::tempdir()?;
     let (writer, _sink) = build_writer(tmp_audit.path(), "smoke-cli-h")?;
-    let fake = fake_cli("claude", "#!/bin/sh\ncat > /dev/null\necho ok\n")?;
+    // [ORB-10449] A round-tripped asset gets the default completion contract,
+    // so the fake must terminate with a real envelope like a live provider.
+    let fake = fake_cli(
+        "claude",
+        "#!/bin/sh\ncat > /dev/null\necho '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
+    )?;
     let host = ScriptHost::new(fake.cli_path());
     let outcome = dispatch_v2_activity(V2DispatchInput {
         activity_name: &asset.name,
@@ -367,9 +375,11 @@ fn scenario_j_cli_executor_static_args_are_audited() -> Result<(), Box<dyn std::
     let tmp_audit = tempfile::tempdir()?;
     let (writer, _sink) = build_writer(tmp_audit.path(), "smoke-cli-j")?;
 
+    // [ORB-10449] Terminate with a real envelope; this scenario is about argv,
+    // not about the step-completion protocol.
     let fake = fake_cli(
         "codex",
-        "#!/bin/sh\ncat > /dev/null\necho '{\"status\":\"ok\"}'\n",
+        "#!/bin/sh\ncat > /dev/null\necho '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
     )?;
 
     let mut spec = cli_agent_loop_spec(Some(Provider::Codex));
@@ -438,6 +448,7 @@ fn cli_agent_loop_spec(provider: Option<Provider>) -> AgentLoopSpec {
         provider: provider.unwrap_or(Provider::Claude),
         wall_clock_timeout_seconds: 30,
         require_response_envelope: false,
+        require_completion_envelope: true,
         role: None,
         proc_allowed_programs: None,
     }
@@ -517,6 +528,7 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
                 provider: Provider::Claude,
                 wall_clock_timeout_seconds: 30,
                 require_response_envelope: false,
+                require_completion_envelope: true,
                 role: None,
                 proc_allowed_programs: None,
             }),

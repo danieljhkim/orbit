@@ -346,6 +346,7 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec(
         provider: Provider::Codex,
         wall_clock_timeout_seconds: timeout.as_secs(),
         require_response_envelope: false,
+        require_completion_envelope: true,
         role: None,
         proc_allowed_programs: None,
     }
@@ -372,6 +373,7 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec_for(
         provider,
         wall_clock_timeout_seconds: timeout.as_secs(),
         require_response_envelope: false,
+        require_completion_envelope: true,
         role: None,
         proc_allowed_programs: None,
     }

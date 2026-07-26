@@ -4,7 +4,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use orbit_agent::{Agent, AgentConfig, AgentOperation, AgentRequest, peek_response_status};
+use orbit_agent::{
+    Agent, AgentConfig, AgentOperation, AgentRequest, peek_response_status,
+    response_envelope_protocol_check,
+};
 use orbit_common::types::activity_job::{AgentLoopSpec, V2AuditEventKind};
 use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, prepend_reminder_block};
 use orbit_common::utility::redaction::{PatternRedactor, redact_sensitive_env_text};
@@ -284,8 +287,28 @@ pub fn run_cli_backend(
         .as_ref()
         .and_then(|result| result.as_ref().err())
         .map(|error| response_diagnostic(error, &redaction));
-    // ADR-0224 / L-0087: parsing is advisory unless the activity opts into strict mode.
-    let success = exit_success && (!spec.require_response_envelope || response_envelope_valid);
+    // [ORB-10449]: the step-completion protocol check. Content-blind
+    // by construction — `response_envelope_protocol_check` reads the envelope
+    // frame and never `result`/`error`, so this asks only "did the invocation
+    // run its contract to the end", never "do we believe what it said". An
+    // agent that declares `status: "failed"` passes; one that yielded mid-turn
+    // emitted no envelope and does not.
+    //
+    // Only meaningful on an otherwise-clean exit: a timeout or nonzero exit
+    // already fails the step with a more specific message.
+    let completion_envelope_error = exit_success
+        .then(|| response_envelope_protocol_check(stdout_text.as_ref()))
+        .and_then(Result::err)
+        .map(|error| completion_diagnostic(&error.to_string(), &redaction));
+    let completion_protocol_violation =
+        spec.require_completion_envelope && completion_envelope_error.is_some();
+    // Two orthogonal contracts. `require_completion_envelope` gates step
+    // completion (above); `require_response_envelope` additionally gates the
+    // envelope's *content* for activities whose downstream templates consume it
+    // (ADR-0224 / L-0087) — outside that opt-in, parsing stays advisory.
+    let success = exit_success
+        && !completion_protocol_violation
+        && (!spec.require_response_envelope || response_envelope_valid);
     let trace = parse_cli_invocation_trace(
         stdout.protocol_bytes(),
         stderr.protocol_bytes(),
@@ -309,6 +332,13 @@ pub fn run_cli_backend(
         ))
     } else if spec.require_response_envelope {
         response_envelope_error.clone()
+    } else if completion_protocol_violation {
+        // Ordered last on purpose: an activity that opted into the content
+        // contract already produced a strictly more specific diagnostic above,
+        // and the two conditions largely overlap. This branch is what the
+        // remaining activities — the ones that only ever had the advisory
+        // parse — now report instead of silently checkpointing success.
+        completion_envelope_error.clone()
     } else {
         None
     };
@@ -346,6 +376,18 @@ pub fn run_cli_backend(
         (
             "response_envelope_error",
             response_envelope_error.map_or(Value::Null, Value::String),
+        ),
+        (
+            "completion_envelope_required",
+            Value::Bool(spec.require_completion_envelope),
+        ),
+        (
+            "completion_envelope_satisfied",
+            Value::Bool(!exit_success || completion_envelope_error.is_none()),
+        ),
+        (
+            "completion_envelope_error",
+            completion_envelope_error.map_or(Value::Null, Value::String),
         ),
         ("stdout_text", Value::String(stdout_text)),
         (
@@ -403,6 +445,27 @@ pub fn run_cli_backend(
 }
 
 fn response_diagnostic(error: &str, redactor: &PatternRedactor) -> String {
+    format!(
+        "cli response envelope invalid: {}",
+        bounded_diagnostic(error, redactor)
+    )
+}
+
+/// [ORB-10449] Name the protocol violation for what it is. The old surfaced
+/// failure was whatever deterministic gate tripped several steps later, which
+/// reads as a downstream defect; this says the agent stopped before finishing
+/// its turn and points at the evidence.
+fn completion_diagnostic(error: &str, redactor: &PatternRedactor) -> String {
+    format!(
+        "agent step did not complete: the provider exited 0 but stdout carried no valid \
+         terminating Orbit response envelope ({}). The invocation ended without finishing its \
+         contract — typically an agent that yielded mid-work — so this step's work is incomplete \
+         and only what it persisted before stopping is durable.",
+        bounded_diagnostic(error, redactor)
+    )
+}
+
+fn bounded_diagnostic(error: &str, redactor: &PatternRedactor) -> String {
     let redacted = redactor.apply_str(&redact_sensitive_env_text(error));
     let bounded: String = redacted
         .chars()
@@ -413,7 +476,7 @@ fn response_diagnostic(error: &str, redactor: &PatternRedactor) -> String {
     } else {
         ""
     };
-    format!("cli response envelope invalid: {bounded}{suffix}")
+    format!("{bounded}{suffix}")
 }
 
 struct CliLearningContext {

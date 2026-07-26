@@ -81,12 +81,41 @@ pub struct AgentLoopSpec {
     /// where the loop engine applies its own timeout.
     #[serde(default = "default_cli_wall_clock_timeout_seconds")]
     pub wall_clock_timeout_seconds: u64,
-    /// Require a valid Orbit response envelope before a CLI invocation may
-    /// report success. Defaults to `false` for artifact-backed activities,
-    /// whose durable task/review/git state is authoritative. Activities that
-    /// feed response fields into downstream templates opt in explicitly.
+    /// Require a fully valid Orbit response envelope — exit alignment,
+    /// `status: success`, object `result` — before a CLI invocation may report
+    /// success. This is the **content contract**: it exists for activities that
+    /// feed response fields into downstream templates. Defaults to `false` for
+    /// artifact-backed activities, whose durable task/review/git state is
+    /// authoritative.
+    ///
+    /// Distinct from [`AgentLoopSpec::require_completion_envelope`], which asks
+    /// only whether the invocation finished at all. Setting this implies the
+    /// completion check, since an absent envelope also fails validation.
     #[serde(default)]
     pub require_response_envelope: bool,
+    /// Require the CLI invocation to *terminate with* a well-formed Orbit
+    /// response envelope. This is the **step-completion protocol contract**
+    /// ([ORB-10449], extending ADR-0224), and it defaults to `true`.
+    ///
+    /// Every `backend: cli` invocation is prompted with the response-envelope
+    /// contract, so a provider that exits 0 with no envelope did not finish its
+    /// turn — it stopped mid-work. Checkpointing that as success lets the run
+    /// advance on work that never happened and defers the failure to whatever
+    /// deterministic gate notices first, several steps downstream.
+    ///
+    /// The check is content-blind: it reads the envelope *frame* only
+    /// (presence, `schemaVersion`, status token) and never `result` or `error`,
+    /// so an agent that declares `status: "failed"` satisfies it. Agent-loop
+    /// output remains advisory; only "did the contract complete" is enforced.
+    ///
+    /// Set to `false` only for an activity whose work is genuinely decorative —
+    /// one whose non-completion should not stop the pipeline. Record why in the
+    /// asset; the exception must be explicit, not incidental.
+    ///
+    /// **CLI only.** `backend: http` is driven by the engine's own loop, which
+    /// has its own termination accounting and never renders this envelope.
+    #[serde(default = "default_require_completion_envelope")]
+    pub require_completion_envelope: bool,
     /// Optional role tag (ADR-029). When set, the engine consults
     /// `[agent.<role>]` in `config.toml` and overrides `provider`/`model`/
     /// `backend` field-by-field at dispatch time. The step-level role on
@@ -671,4 +700,12 @@ const fn default_max_iterations() -> u32 {
 
 const fn default_cli_wall_clock_timeout_seconds() -> u64 {
     300
+}
+
+/// [ORB-10449] Fail closed. An agent-loop activity that omits the field gets
+/// the step-completion protocol check, so a new or legacy asset cannot silently
+/// inherit the pre-ORB-10449 behaviour of checkpointing a stalled agent as
+/// success.
+const fn default_require_completion_envelope() -> bool {
+    true
 }

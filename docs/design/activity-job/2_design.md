@@ -55,6 +55,8 @@ The common `agent_loop` fields are:
 - `wall_clock_timeout_seconds`
 - `require_response_envelope` (default `false`; opt in only when downstream
   templates consume structured response fields)
+- `require_completion_envelope` (default `true`; opt **out** only for an
+  activity whose non-completion is harmless — see §7.6a)
 
 A former `Groundhog(GroundhogSpec)` variant (a sibling activity kind from [T20260420-0510-2]) was removed as unused in [ORB-10332]; activity specs are now only `agent_loop` and `deterministic`.
 
@@ -242,6 +244,75 @@ The CLI path is driven by `cli_runner.rs`, added in [T20260419-0104]. The flow i
 7. Spawn the subprocess in that cwd with a wall-clock timeout.
 8. Emit `CliInvocationFinished` with stdout/stderr blob refs and timeout state.
 9. Parse the captured provider output with the existing Orbit response parser and persist its `InvocationTrace` through the host. After [ORB-10231] / [ADR-0224], envelope parsing is best-effort by default: provider exit status and timeout determine transport success while durable task/review/git artifacts remain authoritative. A valid envelope still projects its result fields, and an invalid or absent envelope is retained as bounded/redacted diagnostic metadata. Activities whose downstream templates require response fields set `require_response_envelope: true`, preserving fail-closed validation for that explicit contract.
+10. Apply the step-completion protocol check ([ORB-10449]) — see §7.6a.
+
+### 7.6a Step-completion protocol vs. response content
+
+[ORB-10231] / [ADR-0224] left one flag carrying two unrelated questions, and the
+second one went unasked. `require_response_envelope: false` was read as "this
+activity's response does not matter", when what it actually means is "nothing
+downstream *consumes* this activity's response". Whether the invocation ran its
+contract to the end is a different question, and nothing was asking it.
+
+[ORB-10449] splits them:
+
+| Flag | Question | Default | Reads |
+|---|---|---|---|
+| `require_completion_envelope` | Did the invocation finish? | `true` | envelope *frame* only |
+| `require_response_envelope` | Can downstream templates trust the fields? | `false` | full envelope incl. `result` |
+
+The completion check (`response_envelope_protocol_check` in `orbit-agent`) asks
+only whether stdout carried a well-formed Orbit response envelope: present,
+`schemaVersion: 1`, and one of the three protocol status tokens. It never reads
+`result` or `error`, and it does not care *which* status was declared — an agent
+that reports `status: "failed"` completed its contract exactly as much as one
+that reports success. **This keeps the doctrine intact**: agent-loop output stays
+advisory, and no job or activity decision reads its content. "Did the contract
+complete" is a property of the invocation, not a claim the agent makes about its
+work.
+
+Every `backend: cli` invocation is prompted with the response-envelope contract
+(`render_prompt_with_embedded_envelope`), so exiting 0 without one is a protocol
+violation, not a stylistic choice. The check applies only under `backend: cli`;
+`backend: http` is driven by the engine's own loop, which has its own
+termination accounting.
+
+Deliberate asymmetry: the completion check is *more* permissive than the content
+parser about stream shape. When the document stream will not parse — a wrapped
+tool writing to the same stdout, a stray warning line — it falls back to scanning
+the raw text for an embedded envelope. Failing a step that genuinely completed,
+over stdout tidiness, would be a worse defect than the one this check exists to
+catch.
+
+**Failure semantics.** A violation fails the step exactly as an opted-in envelope
+failure does: `DispatchOutcome { success: false }` with a message naming the step
+and the violation. Concretely, for `implement_one` in `task_pr_pipeline`:
+
+- **Not retried.** The step has no `retry:` block, and a repeat invocation of a
+  stalled agent has no new information to work with.
+- **No recovery agent.** `recovery_activity` fires on `Err`, not on a failed
+  outcome — which is the behaviour we want here. `step_failure_recovery` exists
+  to repair the *delivery path for completed work*; a stalled implementer is
+  incomplete work, and having it publish the candidate is the opposite of the fix.
+- **Run terminalizes at that step.** No later step runs, the step is audited as
+  `failed`, and the job-level `failure_activity` (`pr_failure_handoff`,
+  [ADR-0246]) still fires to preserve recoverable work.
+- **Task and worktree.** The worktree is retained with whatever the agent wrote
+  before it stopped; tasks coupled to the run move to `blocked` under the normal
+  terminal-run rules. Re-dispatch is an orchestrator decision, not an automatic
+  one.
+
+The durable `execution_summary` delivery gate ([ORB-10313] / [ADR-0236]) is
+unchanged and remains the last line. Nothing here weakens it, bypasses it, or
+synthesizes a summary to satisfy it — this check simply means a stalled
+implementer no longer reaches it.
+
+**Declared exceptions.** `dispatch_agent` is the only activity shipping
+`require_completion_envelope: false`: its backlog-grouping notes are advisory,
+deterministic singleton bundles drive dispatch, and nothing reads them, so its
+non-completion costs the run nothing. The bar is *consequence* — that the
+activity not running at all is harmless — not output quality. The opt-out list is
+pinned by a test so a new exception has to be a deliberate edit.
 
 After [T20260426-2313], stdout/stderr readers emit line-level `tracing::info!` events while the child runs, carrying `provider`, `stream`, `job_run_id`, `task_id`, and `line`. After [T20260508-8], those events also carry `cwd` when the CLI subprocess has a resolved cwd. After [T20260426-2349], the default tracing subscriber redacts formatted output. The readers still retain original bytes for the existing audit/blob path, so run logs follow blob refs rather than the live feed.
 
