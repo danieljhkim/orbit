@@ -637,10 +637,9 @@ agent declaring `status: "failed"` satisfies it and agent-loop output stays
 advisory. The two flags are orthogonal and the completion check is deliberately
 more permissive about stream shape. Narrative, failure/recovery semantics, and
 the single declared exception (`dispatch_agent`) are in
-[§7.6a of `2_design.md`](./2_design.md). An ADR of its own is warranted — the
-executing activity's tool grant did not include `orbit.adr.add`, and
-[CONVENTIONS](../CONVENTIONS.md) forbids hand-authoring an unallocated heading,
-so allocation and the `4_decisions.md` entry are tracked as [ORB-10454].
+[§7.6a of `2_design.md`](./2_design.md). The split is recorded on its own terms
+as [ADR-0258] (allocated by [ORB-10454]); this ADR is amended by it, not
+superseded, and its own flag keeps its meaning.
 
 ---
 
@@ -763,8 +762,25 @@ Recognition is the entire change: no safety gate moved. Non-terminal run, `--old
 
 ---
 
+## ADR-0258 — Step completion is a separate contract from response content
+
+**Status:** Accepted · 2026-07 · [ORB-10449], [ORB-10454]
+
+**Context.** [ADR-0224] made CLI response envelopes best-effort for artifact-backed activities, leaving `require_response_envelope` as the only flag that reads an agent-loop invocation's stdout. That flag answers *"do downstream templates consume the response?"* — but it was silently also the only thing answering *"did the invocation finish at all?"*, and for artifact-backed activities (`require_response_envelope: false`) nobody was asking. Every `backend: cli` invocation is prompted with the response-envelope contract, so a provider that yields mid-turn still exits 0: `implement_one` in `task_pr_pipeline` checkpointed as success on work that stopped halfway, and the failure surfaced several steps later at whatever deterministic gate noticed first, attributed to the wrong step. Two real alternatives were rejected. Flipping `require_response_envelope: true` everywhere conflates the content question with the completion question and forces full content validation — exit alignment, `status: success`, object `result` — onto activities whose responses nothing reads, re-breaking exactly what ADR-0224 fixed. Classifying the violation as a retryable `DispatchError` so `step_failure_recovery` fires inverts the fix: that hook exists to repair the delivery path for *completed* work, so it would publish a stalled implementer's partial candidate.
+
+**Decision.** Split the two questions into two orthogonal flags. `require_completion_envelope` (new, default `true`) is the step-completion protocol contract: under `backend: cli` it reads the envelope *frame* only — presence, supported `schemaVersion`, one of the three protocol status tokens — and never `result` or `error`, so an agent declaring `status: "failed"` satisfies it. `require_response_envelope` (default `false`) keeps its ADR-0224 meaning as the content contract. The doctrine is therefore intact: agent-loop output stays advisory, because "did the contract complete" is a property of the invocation, not a claim the agent makes about its work. A violation fails the step where it happened (`DispatchOutcome { success: false }`, message naming step and violation), is not retried, does not invoke `recovery_activity`, and still lets the job-level `failure_activity` ([ADR-0246]) preserve recoverable work. `backend: http` is out of scope — the engine's own loop has its own termination accounting. `dispatch_agent` is the single declared opt-out. This **amends [ADR-0224] rather than superseding it**; that flag keeps its meaning and its accepted status. The flag table, doctrine argument, and full failure/recovery semantics live in [§7.6a of `2_design.md`](./2_design.md) and are not restated here.
+
+**Consequences.**
+- A stalled CLI agent fails its own step, so triage reads the failure at the site where it happened instead of inferring it from a downstream gate's symptom.
+- The default is `true`, so every new `agent_loop` activity inherits the check; opting out is a deliberate, test-pinned edit with a recorded justification in the asset rather than an omission.
+- Cost: the completion check is deliberately *more* permissive about stdout stream shape than the content parser — when the JSON document stream will not parse (a wrapped tool sharing stdout, a stray warning line) it falls back to scanning raw text for an embedded envelope, which the content parser does not do. The two gates can therefore return different verdicts on the same invocation: an activity with both flags set can pass completion and fail content. The asymmetry is intentional — failing a step that genuinely completed, over stdout tidiness, is a worse defect than the one this check exists to catch — but nothing in the decision statement implies it, and a reader debugging a mismatched pair has to know it is by design.
+- Cost: activity authors now classify two independent questions per activity instead of one, and a miscarried classification is silent in the direction that matters least (an over-strict completion flag fails loudly; an over-permissive one restores the original blind spot).
+
+---
+
 ## Task References
 
+- **[ORB-10454]** — Allocate [ADR-0258] for the step-completion / response-content split and retire the IOU in ADR-0224's amendment block.
 - **[ORB-10427]** — Share one worktree-path derivation between `setup_worktree` and gc; collect bundles only when every member has settled.
 - **[ORB-10393]** — Port planning-duel planner and arbiter legs to seeded v2
   assets with per-slot model overrides and retire `DeterministicActionHost::invoke_activity`.
@@ -842,6 +858,6 @@ Recognition is the entire change: no safety gate moved. Non-terminal run, `--old
 - **[ORB-10313]** — Fail delivery before Git mutation when the durable execution outcome is not `Outcome: success`.
 - **[ORB-10363]** — Rebase task candidates after concurrent base advances and publish blocked PRs instead of stranding failed work.
 - **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer (`task_epic_pipeline`, `epic_orchestrator`, `pipeline_wait`, legacy parallel-batch executor).
-- **[ORB-10449]** — Split step-completion protocol from response content so a stalled agent-loop step fails where it happened (amends [ADR-0224]; see [§7.6a of `2_design.md`](./2_design.md)).
+- **[ORB-10449]** — Split step-completion protocol from response content so a stalled agent-loop step fails where it happened ([ADR-0258], amending [ADR-0224]; see [§7.6a of `2_design.md`](./2_design.md)).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
