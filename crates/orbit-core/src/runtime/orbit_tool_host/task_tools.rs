@@ -116,8 +116,13 @@ pub(super) fn lint(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
 }
 
 pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    let status = optional_string(&input, "status")?
-        .map(|value| parse_task_status("status", &value))
+    let statuses = optional_csv_or_string_list_alias(&input, &["status"])?
+        .map(|values| {
+            values
+                .into_iter()
+                .map(|value| parse_task_status("status", &value))
+                .collect::<Result<Vec<_>, _>>()
+        })
         .transpose()?;
     let task_type = optional_string_alias(&input, &["type", "task_type", "taskType"])?
         .map(|value| parse_task_type("type", &value))
@@ -132,7 +137,7 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     // ID ascending for ties); the filters below preserve that order, so the
     // trailing `take(limit)` yields the newest matching tasks (ORB-10310).
     let all_tasks = runtime.list_tasks_filtered(
-        status,
+        None,
         None,
         parent_id.as_deref(),
         job_run_id.as_deref(),
@@ -143,6 +148,11 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     Ok(Value::Array(
         all_tasks
             .into_iter()
+            .filter(|task| {
+                statuses
+                    .as_ref()
+                    .is_none_or(|values| values.contains(&task.status))
+            })
             .filter(|task| orbit_common::types::task_matches_tags(task, &tags))
             .filter(|task| ready != Some(true) || task_dependencies_ready(task, &status_by_id))
             .filter(|task| {
