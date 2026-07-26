@@ -77,7 +77,7 @@ Phase 1 covers tasks only. Phase 2 will add `source_kind = symbol` rows that emb
 | `orbit semantic install/uninstall` CLI | [2_design.md §6.1](./2_design.md) | [T20260510-9] |
 | `orbit search` CLI + MCP | [2_design.md §6](./2_design.md) | [T20260510-10] |
 | Index-on-mutation + index command | [2_design.md §7](./2_design.md) | [T20260510-9] |
-| Existing task store API | [crates/orbit-store/src/file/task_store/v2_store.rs](../../../crates/orbit-store/src/file/task_store/v2_store.rs) | — |
+| Existing task store API | [crates/orbit-store/src/file/task_store/v2/](../../../crates/orbit-store/src/file/task_store/v2/) | — |
 | Concerns & honest limitations | [2_design.md §8](./2_design.md) | [T20260510-3] |
 | ADR log | [4_decisions.md](./4_decisions.md) | [T20260510-3] |
 | Open questions, prior work | [3_vision.md](./3_vision.md) | [T20260510-3] |

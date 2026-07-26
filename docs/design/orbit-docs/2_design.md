@@ -17,7 +17,7 @@ related_artifacts: [ORB-00163, ORB-00206, ORB-10319, ADR-0169, ADR-0170, ADR-017
 
 This document specifies what [ORB-00163] and [ORB-00206] ship: the locked frontmatter schema, the strict-then-tolerant parser, the walker (including the `.orbit/` exclusion invariant), the CLI/admin doc verbs, unified agent MCP retrieval, doc-corpus embeddings, hybrid doc search, and the migration verb that backfills legacy docs. It also names the remaining limitations the follow-ups ([ORB-00164] through [ORB-00169]) address.
 
-The design lives in two files: [crates/orbit-core/src/command/docs.rs](../../../crates/orbit-core/src/command/docs.rs) (~1290 lines, parser + walker + verb implementations + tests) and [crates/orbit-cli/src/command/docs.rs](../../../crates/orbit-cli/src/command/docs.rs) (~250 lines, clap argument shapes + table rendering). The MCP twin lives in [crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs](../../../crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs).
+The design lives in [crates/orbit-core/src/command/docs/](../../../crates/orbit-core/src/command/docs/) (parser + walker + verb implementations + tests) and [crates/orbit-cli/src/command/docs.rs](../../../crates/orbit-cli/src/command/docs.rs) (~250 lines, clap argument shapes + table rendering). The MCP twin lives in [crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs](../../../crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs).
 
 ---
 
@@ -106,7 +106,7 @@ A `DocFrontmatter` struct with the six fields, ready to serialize as JSON for th
 
 ## 3. Tolerant Indexer
 
-Strict mode is the canonical contract. Tolerant mode is what makes the corpus queryable on day one without a flag-day migration. It is the path most reads go through ([crates/orbit-core/src/command/docs.rs:368](../../../crates/orbit-core/src/command/docs.rs)).
+Strict mode is the canonical contract. Tolerant mode is what makes the corpus queryable on day one without a flag-day migration. It is the path most reads go through ([crates/orbit-core/src/command/docs/](../../../crates/orbit-core/src/command/docs/)).
 
 ### 3.1 Algorithm
 
