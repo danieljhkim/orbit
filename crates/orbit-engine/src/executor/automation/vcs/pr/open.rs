@@ -12,7 +12,9 @@ use super::super::git::git_output;
 use super::super::handoff::{
     FailedHandoffPhase, HandoffContext, load_handoff_context, record_failed_handoff,
 };
-use super::body::{build_batch_pr_body, default_pr_title};
+use super::body::{
+    GITHUB_PR_BODY_BYTE_LIMIT, bound_pr_body, build_batch_pr_body, default_pr_title,
+};
 
 pub(in crate::executor::automation) fn pr_open<
     H: DeterministicActionHost + TaskHost + Sync + ?Sized,
@@ -89,6 +91,7 @@ fn open_or_reuse_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
                 pr_opener_model.as_deref(),
             )
         });
+    let body = bound_pr_body(body, &context.tasks);
     let tool_context = ToolContext {
         cwd: Some(context.workspace_path.to_string_lossy().to_string()),
         allowed_tools: vec![],
@@ -109,6 +112,11 @@ fn open_or_reuse_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
             freshness: &freshness,
         })),
         Ok(None) => {
+            tracing::info!(
+                constructed_body_bytes = body.len(),
+                allowed_body_bytes = GITHUB_PR_BODY_BYTE_LIMIT,
+                "creating pull request with bounded body projection"
+            );
             let created = host
                 .run_tool_with_context_and_role(
                     "github.pr.create",
@@ -168,6 +176,7 @@ pub(in crate::executor::automation::vcs) fn open_or_reuse_unchecked<
     title: &str,
     body: &str,
 ) -> Result<(String, Option<String>, bool), OrbitError> {
+    let body = bound_pr_body(body.to_string(), &[]);
     let tool_context = ToolContext {
         cwd: Some(workspace_path.to_string_lossy().to_string()),
         allowed_tools: vec![],
@@ -176,6 +185,11 @@ pub(in crate::executor::automation::vcs) fn open_or_reuse_unchecked<
     if let Some((number, url)) = find_pr_by_head(host, head, tool_context.clone())? {
         return Ok((number, url, false));
     }
+    tracing::info!(
+        constructed_body_bytes = body.len(),
+        allowed_body_bytes = GITHUB_PR_BODY_BYTE_LIMIT,
+        "creating unchecked pull request with bounded body projection"
+    );
     let created = host.run_tool_with_context_and_role(
         "github.pr.create",
         json!({
