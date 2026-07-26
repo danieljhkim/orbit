@@ -79,6 +79,7 @@ impl OrbitRuntime {
         self.index_docs(orbit_search::DocIndexParams {
             model: params.model,
             force: params.force,
+            source_root: self.docs_source_root().to_string_lossy().into_owned(),
         })
     }
 

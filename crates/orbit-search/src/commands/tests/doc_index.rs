@@ -20,9 +20,10 @@ fn doc_index_is_idempotent_by_content_hash() {
     let embedder = NoopEmbedder::small();
     let docs = vec![doc("docs/example.md", "Example", "same body")];
 
-    let first = run_with_embedder(&store, &docs, &embedder, false).unwrap();
-    let second = run_with_embedder(&store, &docs, &embedder, false).unwrap();
+    let first = run_with_embedder(&store, &docs, &embedder, false, "/repo".to_string()).unwrap();
+    let second = run_with_embedder(&store, &docs, &embedder, false, "/repo".to_string()).unwrap();
 
+    assert_eq!(first.source_root, "/repo");
     assert!(first.report.embedded_chunks > 0);
     assert_eq!(second.report.embedded_chunks, 0);
     assert!(second.report.skipped_fields > 0);

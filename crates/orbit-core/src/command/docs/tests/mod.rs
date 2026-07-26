@@ -13,6 +13,7 @@ mod migrate;
 mod path_util;
 mod search;
 mod walk;
+mod worktree;
 
 use std::io::Write;
 use std::path::Path;

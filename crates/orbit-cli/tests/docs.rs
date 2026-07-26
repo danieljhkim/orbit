@@ -3,7 +3,7 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::Output;
+use std::process::{Command, Output};
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use orbit_common::test_env::harden_dir;
@@ -662,6 +662,101 @@ fn cli_docs_index_is_semantic_docs_alias_for_json_output() {
     );
 
     assert_eq!(semantic, docs);
+}
+
+#[test]
+#[cfg(unix)]
+fn cli_docs_index_and_show_use_the_linked_worktree_source_root() {
+    let workspace = TestWorkspace::new();
+    workspace.write(
+        "docs/worktree.md",
+        "---\ntype: context\nsummary: Worktree document\n---\nPrimary body\n",
+    );
+    for args in [
+        ["init"].as_slice(),
+        ["config", "user.email", "docs@example.test"].as_slice(),
+        ["config", "user.name", "Docs Test"].as_slice(),
+        ["add", "."].as_slice(),
+        ["commit", "-m", "seed docs workspace"].as_slice(),
+    ] {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&workspace.work)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let linked = workspace
+        .work
+        .parent()
+        .expect("workspace parent")
+        .join("linked");
+    let output = Command::new("git")
+        .args([
+            "worktree",
+            "add",
+            "-b",
+            "docs-worktree",
+            linked.to_str().expect("utf-8 path"),
+        ])
+        .current_dir(&workspace.work)
+        .output()
+        .expect("create linked worktree");
+    assert!(
+        output.status.success(),
+        "git worktree add failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::write(
+        linked.join("docs/worktree.md"),
+        "---\ntype: context\nsummary: Worktree document\n---\nLinked worktree body\n",
+    )
+    .expect("edit linked worktree doc");
+    workspace.write_mock_companion();
+
+    let indexed = run_orbit_with_companion(
+        &linked,
+        &workspace.home,
+        &["docs", "index", "--force"],
+        Some(&workspace.companion),
+    );
+    assert!(
+        indexed.status.success(),
+        "docs index failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&indexed.stdout),
+        String::from_utf8_lossy(&indexed.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&indexed.stdout)
+            .contains(&format!("source_root={}", linked.display()))
+    );
+
+    let shown = run_orbit(
+        &linked,
+        &workspace.home,
+        &["docs", "show", "docs/worktree.md", "--json"],
+    );
+    assert!(
+        shown.status.success(),
+        "docs show failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&shown.stdout),
+        String::from_utf8_lossy(&shown.stderr)
+    );
+    let shown: Value = serde_json::from_slice(&shown.stdout).expect("parse docs show");
+    assert_eq!(shown["body"], "Linked worktree body\n");
+
+    let primary = workspace.run_with_companion(&["docs", "index", "--force"], "primary docs index");
+    assert!(
+        String::from_utf8_lossy(&primary.stdout)
+            .contains(&format!("source_root={}", workspace.work.display()))
+    );
 }
 
 #[test]

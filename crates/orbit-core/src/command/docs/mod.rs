@@ -22,6 +22,7 @@ pub use orbit_search::{
     AdrIndexParams, AdrIndexResult, DocIndexParams, DocIndexResult, SearchResult,
 };
 use orbit_search::{score_adr_record, score_doc_record, sort_search_results};
+use std::path::{Path, PathBuf};
 
 use crate::OrbitRuntime;
 
@@ -45,6 +46,20 @@ use self::search::{
 // The original impl block (291-408) is preserved verbatim except for path adjustments
 // that are mechanical (use of super:: paths). All bodies delegate to submodules.
 impl OrbitRuntime {
+    /// Returns the checkout whose documentation commands read and index.
+    ///
+    /// Linked worktrees intentionally share Orbit metadata with the primary
+    /// checkout, but their Markdown files are branch-local. Documentation
+    /// commands must therefore use the local `.orbit` parent rather than the
+    /// shared metadata root.
+    pub fn docs_source_root(&self) -> PathBuf {
+        let local_root = self.local_root();
+        local_root
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.paths().repo_root.clone())
+    }
+
     pub fn docs_roots(&self) -> Result<Vec<String>, OrbitError> {
         read_docs_roots_from_config_path(&self.config_path())
     }
@@ -62,7 +77,8 @@ impl OrbitRuntime {
         doc_type: Option<DocType>,
         tag: Option<&str>,
     ) -> Result<Vec<DocRecord>, OrbitError> {
-        let mut records = walk_docs_roots(&self.paths().repo_root, &self.docs_roots()?)?;
+        let source_root = self.docs_source_root();
+        let mut records = walk_docs_roots(&source_root, &self.docs_roots()?)?;
         if let Some(doc_type) = doc_type {
             records.retain(|record| record.frontmatter.doc_type == doc_type);
         }
@@ -81,7 +97,8 @@ impl OrbitRuntime {
     }
 
     pub fn show_doc(&self, path: &str) -> Result<DocShow, OrbitError> {
-        show_doc(&self.paths().repo_root, &self.docs_roots()?, path)
+        let source_root = self.docs_source_root();
+        show_doc(&source_root, &self.docs_roots()?, path)
     }
 
     pub fn search_docs(
@@ -133,7 +150,7 @@ impl OrbitRuntime {
         // agent-facing feature join uses normalized task tags as the feature
         // selectors until that storage field exists.
         related_docs_for_context(
-            &self.paths().repo_root,
+            &self.docs_source_root(),
             &roots,
             &task.context_files,
             &task.tags,
@@ -145,9 +162,11 @@ impl OrbitRuntime {
         add_docs_root(&self.paths().repo_root, &self.config_path(), path)
     }
 
-    pub fn index_docs(&self, params: DocIndexParams) -> Result<DocIndexResult, OrbitError> {
+    pub fn index_docs(&self, mut params: DocIndexParams) -> Result<DocIndexResult, OrbitError> {
         let roots = self.docs_roots()?;
-        let sources = doc_embedding_sources(&self.paths().repo_root, &roots)?;
+        let source_root = self.docs_source_root();
+        params.source_root = source_root.to_string_lossy().into_owned();
+        let sources = doc_embedding_sources(&source_root, &roots)?;
         orbit_search::doc_index(&self.stores().semantic_vector, &sources, params)
     }
 
@@ -158,7 +177,7 @@ impl OrbitRuntime {
     }
 
     pub fn migrate_docs(&self, dry_run: bool) -> Result<DocMigrationReport, OrbitError> {
-        migrate_docs(&self.paths().repo_root, dry_run)
+        migrate_docs(&self.docs_source_root(), dry_run)
     }
 }
 

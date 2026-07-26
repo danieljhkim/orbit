@@ -179,12 +179,14 @@ fn print_semantic_index_text(result: SemanticIndexResult) -> Result<(), OrbitErr
         }
         SemanticIndexResult::Docs {
             model_id,
+            source_root,
             report,
             indexed_sources,
             stale_sources,
         } => {
             println!(
-                "Indexed docs: model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
+                "Indexed docs: source_root={} model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
+                source_root,
                 model_id,
                 indexed_sources,
                 report.embedded_chunks,
@@ -229,10 +231,11 @@ fn print_semantic_index_text(result: SemanticIndexResult) -> Result<(), OrbitErr
             learnings,
         } => {
             println!(
-                "Indexed semantic search: tasks_model={} tasks_embedded_chunks={} tasks_skipped_fields={} docs_model={} docs_indexed_sources={} docs_embedded_chunks={} docs_skipped_fields={} docs_stale_sources={} adrs_model={} adrs_indexed_sources={} adrs_embedded_chunks={} adrs_skipped_fields={} adrs_stale_sources={} learnings_model={} learnings_indexed_sources={} learnings_embedded_chunks={} learnings_skipped_fields={} learnings_stale_sources={}",
+                "Indexed semantic search: tasks_model={} tasks_embedded_chunks={} tasks_skipped_fields={} docs_source_root={} docs_model={} docs_indexed_sources={} docs_embedded_chunks={} docs_skipped_fields={} docs_stale_sources={} adrs_model={} adrs_indexed_sources={} adrs_embedded_chunks={} adrs_skipped_fields={} adrs_stale_sources={} learnings_model={} learnings_indexed_sources={} learnings_embedded_chunks={} learnings_skipped_fields={} learnings_stale_sources={}",
                 tasks.model_id,
                 tasks.report.embedded_chunks,
                 tasks.report.skipped_fields,
+                docs.source_root,
                 docs.model_id,
                 docs.indexed_sources,
                 docs.report.embedded_chunks,

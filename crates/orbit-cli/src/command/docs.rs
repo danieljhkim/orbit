@@ -206,6 +206,7 @@ impl Execute for DocsIndexArgs {
 fn print_docs_index_text(result: SemanticIndexResult) -> Result<(), OrbitError> {
     let SemanticIndexResult::Docs {
         model_id,
+        source_root,
         report,
         indexed_sources,
         stale_sources,
@@ -216,7 +217,8 @@ fn print_docs_index_text(result: SemanticIndexResult) -> Result<(), OrbitError> 
         ));
     };
     println!(
-        "Indexed docs: model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
+        "Indexed docs: source_root={} model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
+        source_root,
         model_id,
         indexed_sources,
         report.embedded_chunks,

@@ -66,6 +66,7 @@ pub enum SemanticIndexResult {
     },
     Docs {
         model_id: String,
+        source_root: String,
         report: UpsertReport,
         indexed_sources: usize,
         stale_sources: Vec<String>,
@@ -103,6 +104,7 @@ impl From<DocIndexResult> for SemanticIndexResult {
     fn from(result: DocIndexResult) -> Self {
         Self::Docs {
             model_id: result.model_id,
+            source_root: result.source_root,
             report: result.report,
             indexed_sources: result.indexed_sources,
             stale_sources: result.stale_sources,
