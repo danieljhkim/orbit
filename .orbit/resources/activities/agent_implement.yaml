@@ -68,9 +68,12 @@ spec:
        unlisted file that must change to make the scoped edits compile, preserve
        an existing caller/API after a deletion or refactor, update tightly
        coupled registration/dispatch/audit metadata, update a directly affected
-       test or snapshot, or satisfy a stated acceptance criterion, add a task
-       comment with `orbit.task.update` naming the file and reason, then make
-       the smallest compatible change and include it in your summary.
+       test or snapshot, or satisfy a stated acceptance criterion, append it to
+       the task's `context_files` via `orbit.task.update` before proceeding.
+       Append only real modification targets, expressed as canonical `file:`,
+       `dir:`, or `symbol:` selectors, each resolving inside the workspace root.
+       Note the reason in your execution summary, then make the smallest
+       compatible change and include it in your summary.
        Stop after commenting instead of continuing when the unlisted file would
        introduce a new dependency edge, change behavior outside the task intent,
        require a broad refactor, or remain ambiguous after a quick local
