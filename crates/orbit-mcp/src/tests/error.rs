@@ -68,3 +68,17 @@ fn hub_transport_errors_keep_stable_codes_and_call_identity() {
     assert_eq!(remote["code"], "invalid_input");
     assert_eq!(remote["detail"], 7);
 }
+
+#[test]
+fn task_bundle_corruption_has_a_stable_code_and_structured_context() {
+    let payload = error_payload(&OrbitError::TaskBundleCorrupt {
+        task_id: "ORB-00123".to_string(),
+        path: "/safe/tasks/ORB-00123".to_string(),
+        reason: "missing description.md".to_string(),
+    });
+
+    assert_eq!(payload["code"], "task_bundle_corrupt");
+    assert_eq!(payload["task_id"], "ORB-00123");
+    assert_eq!(payload["path"], "/safe/tasks/ORB-00123");
+    assert_eq!(payload["reason"], "missing description.md");
+}

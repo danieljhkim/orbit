@@ -125,6 +125,12 @@ pub enum OrbitError {
         leader_alive: bool,
         group_alive: bool,
     },
+    #[error("task bundle corrupt for {task_id} at {path}: {reason}")]
+    TaskBundleCorrupt {
+        task_id: String,
+        path: String,
+        reason: String,
+    },
     #[error("store error: {0}")]
     Store(String),
     #[error("invalid task status transition: {0}")]
@@ -202,6 +208,17 @@ impl OrbitError {
             Self::InvalidInputDiagnostic { did_you_mean, .. } if !did_you_mean.is_empty() => {
                 Some(did_you_mean)
             }
+            _ => None,
+        }
+    }
+
+    pub fn task_bundle_corruption(&self) -> Option<(&str, &str, &str)> {
+        match self {
+            Self::TaskBundleCorrupt {
+                task_id,
+                path,
+                reason,
+            } => Some((task_id, path, reason)),
             _ => None,
         }
     }

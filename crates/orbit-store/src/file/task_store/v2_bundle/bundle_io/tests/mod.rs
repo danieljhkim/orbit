@@ -14,7 +14,7 @@ use tempfile::TempDir;
 
 use super::super::super::tests::test_support::{bundle_store, sample_bundle};
 use super::super::*;
-use super::read_task_events;
+use super::{read_task_events, write_bundle_atomically};
 
 #[test]
 fn write_and_read_bundle_round_trips_v2_shape() {
@@ -46,6 +46,50 @@ fn write_and_read_bundle_round_trips_v2_shape() {
             .join(TASK_ARTIFACTS_DIR_NAME)
             .join(TASK_ARTIFACT_FILES_DIR_NAME)
             .is_dir()
+    );
+}
+
+#[test]
+fn interrupted_bundle_publish_never_exposes_partial_final_directory() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = bundle_store(&temp);
+    let bundle = sample_bundle("ORB-00000");
+    let bundle_dir = store.bundle_path("ORB-00000").expect("bundle path");
+
+    let error = write_bundle_atomically(&bundle_dir, &bundle, None, |staging, final_path| {
+        assert!(
+            !final_path.exists(),
+            "final path must remain absent while staging"
+        );
+        assert!(staging.join(TASK_ENVELOPE_FILE_NAME).is_file());
+        assert!(staging.join(TASK_EVENTS_FILE_NAME).is_file());
+        assert!(
+            staging
+                .join(TASK_ARTIFACTS_DIR_NAME)
+                .join(TASK_ARTIFACT_FILES_DIR_NAME)
+                .is_dir()
+        );
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Interrupted,
+            "simulated interruption before rename",
+        ))
+    })
+    .expect_err("interrupted publish must fail");
+
+    assert!(matches!(error, OrbitError::Io(message) if message.contains("simulated interruption")));
+    assert!(
+        !bundle_dir.exists(),
+        "an interrupted writer must not expose the canonical bundle path"
+    );
+    let parent = bundle_dir.parent().expect("bundle parent");
+    let staging_entries = fs::read_dir(parent)
+        .expect("read bundle parent")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".staging"))
+        .collect::<Vec<_>>();
+    assert!(
+        staging_entries.is_empty(),
+        "handled failures clean their private staging directories"
     );
 }
 
@@ -204,7 +248,11 @@ fn read_bundle_rejects_directory_name_that_differs_from_task_id() {
 
     assert!(matches!(
         read_bundle_at(&renamed),
-        Err(OrbitError::Store(message)) if message.contains("does not match task id")
+        Err(OrbitError::TaskBundleCorrupt {
+            task_id,
+            reason,
+            ..
+        }) if task_id == "ORB-00009" && reason.contains("contains task id ORB-00000")
     ));
 }
 
@@ -258,7 +306,11 @@ fn read_bundle_rejects_manifest_entry_with_missing_artifact_file() {
 
     assert!(matches!(
         store.read_bundle("ORB-00000"),
-        Err(OrbitError::Store(message)) if message.contains("missing file")
+        Err(OrbitError::TaskBundleCorrupt {
+            task_id,
+            reason,
+            ..
+        }) if task_id == "ORB-00000" && reason.contains("missing file")
     ));
 }
 
@@ -277,6 +329,10 @@ fn read_bundle_rejects_event_status_newer_than_envelope_status() {
 
     assert!(matches!(
         store.read_bundle("ORB-00000"),
-        Err(OrbitError::Store(message)) if message.contains("event log status")
+        Err(OrbitError::TaskBundleCorrupt {
+            task_id,
+            reason,
+            ..
+        }) if task_id == "ORB-00000" && reason.contains("event log status")
     ));
 }

@@ -41,11 +41,17 @@ comments.jsonl
 Required directories:
 
 ```text
-review-threads/
 artifacts/
 ```
 
 `artifacts/manifest.yaml` is required when `artifacts/files/` contains any files.
+Legacy `review-threads/` directories are inert sidecars: readers ignore them
+when present and do not require, create, remove, or quarantine them when absent.
+
+New bundles must be assembled and validated in a unique sibling staging
+directory, including all manifest-referenced artifact blobs, then published by
+an atomic directory rename. An interrupted create must leave the canonical task
+path absent rather than expose a partial bundle.
 
 ## Local Store and Workspace Projection
 
@@ -149,18 +155,13 @@ Writers must not rewrite prior event lines except during explicit cutover or rep
 Comment bodies are Markdown strings. Multi-line bodies must be JSON escaped inside one JSONL row, not spread across lines.
 Comment appends follow the same atomicity and tail-repair rules as `events.jsonl`.
 
-## Review Threads
+## Retired Review-Thread Sidecars
 
-Each review thread uses:
-
-```text
-review-threads/<thread-id>.yaml
-review-threads/<thread-id>.md
-```
-
-The YAML file stores status, file path, line/range metadata, external review IDs, timestamps, and message metadata. The Markdown file stores message bodies in chronological order with stable message anchors.
-The YAML file must include `schema_version: 1`. YAML rewrites use write-temp-in-same-directory, file sync, atomic rename, and parent-directory sync.
-Review-thread rewrites must validate the complete replacement set before writing and must not remove `review-threads/` before the replacement is durable. Crash recovery may leave stale thread files behind, but it must not leave the bundle unreadable solely because the directory vanished.
+The `orbit.task.review_thread.*` surface was retired in [ORB-10332]. Existing
+`review-threads/` directories may remain for forensic inspection, but they are
+not part of bundle validity. Recovery is non-destructive: ordinary reads,
+lists, searches, and creates neither delete nor silently recreate those
+sidecars.
 
 ## Relations
 
@@ -200,9 +201,14 @@ The file bundle does not provide all-or-nothing transactions across Markdown sid
 - `task.yaml` remains canonical for structured metadata.
 - JSONL tail corruption is repaired only at the final partial row; corruption before the tail is an error.
 - The last event with `to_status` must match `task.yaml.status`; mismatches are corruption and must fail reads.
-- Review-thread tombstones hide deleted thread IDs if a rewrite crashes before orphan file pruning.
 - Generated indexes are invalid when count or `updated_at` stamps differ from registered bundle envelopes and must be rebuilt from bundles.
 - Artifact manifest entries must reference existing relative files with matching size and SHA-256; unmanifested files are ignored until a future compaction/prune command removes them.
+
+Malformed registered bundles surface as a typed `task_bundle_corrupt`
+diagnostic containing the task ID, canonical path, and reason. Direct lookup of
+another ID and allocation/publication of a new task must not scan the malformed
+bundle. List and search remain fail-loud and return that diagnostic. None of
+these query paths may delete, move, repair, or quarantine bundle bytes.
 
 ## Artifacts
 
@@ -239,7 +245,7 @@ Cutover from the current pre-reset task schema must:
 9. Preserve existing `execution-summary.md`.
 10. Convert YAML `history` to `events.jsonl`.
 11. Convert YAML `comments` to `comments.jsonl`.
-12. Convert YAML `review_threads` to `review-threads/`.
+12. Preserve any legacy review-thread files as inert sidecars.
 13. Rewrite `task.yaml` with schema version 1 and no old ID aliases.
 14. Rewrite or release active task-lock reservations.
 15. Record generated status, terminal-month, relation, tag, and semantic-index rebuild inputs.
@@ -248,4 +254,4 @@ Cutover must be idempotent for interrupted local runs. A partially converted tas
 
 ## Agent Signature
 
-Last revised by `codex` on 2026-05-11.
+Last revised by `codex` on 2026-07-26 for [ORB-10466].
