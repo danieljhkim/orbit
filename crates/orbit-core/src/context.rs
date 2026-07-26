@@ -409,45 +409,8 @@ impl OrbitContext {
         self.runtime.graph_editing
     }
 
-    pub(crate) fn pr_config(&self) -> &PrConfig {
-        self.runtime.pr_config()
-    }
-
-    /// Persisted default for the v2 `agent_loop` execution backend (§3.1
-    /// resolution precedence step 3). `None` means "not configured".
-    pub(crate) fn v2_backend(&self) -> Option<&str> {
-        self.runtime.v2_backend()
-    }
-
-    /// Default base branch for ship/duel-plan workflows. Sourced
-    /// from `[workflow] base_branch` in `config.toml`; falls back to
-    /// `"main"` when the key is absent.
-    pub(crate) fn workflow_base_branch(&self) -> &str {
-        self.runtime.workflow_base_branch()
-    }
-
-    /// Whether this workspace opted into unattended ship dispatch
-    /// (`[workflow] auto_ship` in `config.toml`, default `false`).
-    pub(crate) fn workflow_auto_ship(&self) -> bool {
-        self.runtime.workflow_auto_ship()
-    }
-
-    /// Whether this workspace is a routine source
-    /// (`[routines] role = "source"` in `config.toml`, default `false`).
-    pub(crate) fn routines_source(&self) -> bool {
-        self.runtime.routines_source()
-    }
-
-    pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {
-        self.runtime.crews()
-    }
-
-    pub(crate) fn default_crew(&self) -> Option<&str> {
-        self.runtime.default_crew()
-    }
-
-    pub(crate) fn duel_config(&self) -> &DuelConfig {
-        self.runtime.duel_config()
+    pub(crate) fn settings(&self) -> &OrbitRuntimeSettings {
+        &self.runtime
     }
 }
 

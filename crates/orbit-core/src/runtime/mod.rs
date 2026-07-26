@@ -398,20 +398,20 @@ impl OrbitRuntime {
     }
 
     pub fn pr_config(&self) -> &orbit_engine::PrConfig {
-        self.context.pr_config()
+        self.context.settings().pr_config()
     }
 
     /// Configured default for the v2 `agent_loop` execution backend (§3.1
     /// precedence step 3). Returns `None` when not set.
     pub fn v2_backend_config(&self) -> Option<&str> {
-        self.context.v2_backend()
+        self.context.settings().v2_backend()
     }
 
     /// Default base branch for ship/duel-plan workflows. Sourced
     /// from `[workflow] base_branch` in the active `config.toml`; defaults
     /// to `"main"` when no key is present.
     pub fn workflow_base_branch(&self) -> &str {
-        self.context.workflow_base_branch()
+        self.context.settings().workflow_base_branch()
     }
 
     /// Whether this workspace opted into unattended ship dispatch
@@ -419,7 +419,7 @@ impl OrbitRuntime {
     /// `false`). Consulted by `orbit run ship-sweep` and other schedulers
     /// before dispatching ship runs nobody explicitly asked for.
     pub fn workflow_auto_ship(&self) -> bool {
-        self.context.workflow_auto_ship()
+        self.context.settings().workflow_auto_ship()
     }
 
     /// Whether this workspace declared itself a routine source
@@ -427,17 +427,17 @@ impl OrbitRuntime {
     /// to `false`). Consulted by `orbit sweep` before loading routine
     /// definitions nobody registered explicitly.
     pub fn routines_source(&self) -> bool {
-        self.context.routines_source()
+        self.context.settings().routines_source()
     }
 
     /// Returns the configured `[duel] candidates` list (e.g. ["codex", "claude", "gemini", "grok"]).
     /// Used by `orbit run duel-plan --planner-a ...` overrides to validate explicit families.
     pub fn duel_candidate_families(&self) -> Vec<String> {
-        self.context.duel_config().candidates.clone()
+        self.context.settings().duel_config().candidates.clone()
     }
 
     pub(crate) fn duel_config(&self) -> &crate::config::DuelConfig {
-        self.context.duel_config()
+        self.context.settings().duel_config()
     }
 
     /// Build the activity catalog for `target: activity:<name>` resolution
