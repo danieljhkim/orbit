@@ -1,17 +1,15 @@
-use clap::{Parser, error::ErrorKind};
+use clap::{CommandFactory, Parser, error::ErrorKind};
 
 use crate::command::Cli;
 
-/// The trimmed `orbit task` surface (ORB-10000): 11 subcommands. Lock
-/// administration lives under the top-level `orbit locks` command (ORB-00420),
-/// not here.
-const EXPECTED_TASK_SUBCOMMANDS: [&str; 11] = [
-    "add", "artifact", "list", "show", "lint", "update", "start", "archive", "export", "import",
-    "reindex",
+/// The trimmed `orbit task` surface has 12 subcommands. ORB-10428 supersedes
+/// the ORB-00420/ORB-10000 placement and returns lock administration here.
+const EXPECTED_TASK_SUBCOMMANDS: [&str; 12] = [
+    "add", "artifact", "locks", "list", "show", "lint", "update", "start", "archive", "export",
+    "import", "reindex",
 ];
 
-const REMOVED_TASK_SUBCOMMANDS: [&str; 8] = [
-    "locks",
+const REMOVED_TASK_SUBCOMMANDS: [&str; 7] = [
     "approve",
     "reject",
     "unarchive",
@@ -28,6 +26,15 @@ fn task_help() -> String {
     };
     assert_eq!(err.kind(), ErrorKind::DisplayHelp);
     err.to_string()
+}
+
+fn root_help_section<'a>(help: &'a str, heading: &str) -> &'a str {
+    let (_, after_heading) = help
+        .split_once(&format!("{heading}:\n"))
+        .unwrap_or_else(|| panic!("root help missing `{heading}` section:\n{help}"));
+    after_heading
+        .split_once("\n\n")
+        .map_or(after_heading, |(section, _)| section)
 }
 
 #[test]
@@ -75,7 +82,35 @@ fn task_help_describes_update_status_transitions() {
 }
 
 #[test]
-fn lock_administration_lives_under_top_level_locks_command() {
+fn root_help_groups_scheduler_commands_in_layer_order() {
+    let help = Cli::command().render_long_help().to_string();
+    assert_eq!(
+        root_help_section(&help, "Scheduler"),
+        "  sweep       Fire due routines on this host (the scheduler pass)\n  routine     Inspect and control scheduled routines on this host\n  auto-task   Define recurring auto-task templates (the scheduler primitive)",
+        "{help}"
+    );
+    assert!(
+        !root_help_section(&help, "Operate").contains("sweep"),
+        "{help}"
+    );
+    assert!(
+        !root_help_section(&help, "Operate").contains("routine"),
+        "{help}"
+    );
+    assert!(
+        !root_help_section(&help, "Definitions").contains("auto-task"),
+        "{help}"
+    );
+    assert!(
+        !help
+            .lines()
+            .any(|line| line.trim_start().starts_with("locks")),
+        "{help}"
+    );
+}
+
+#[test]
+fn lock_administration_lives_under_task() {
     // `--locked` was removed from `task list` (ORB-00420).
     let err = match Cli::try_parse_from(["orbit", "task", "list", "--locked"]) {
         Ok(_) => panic!("`task list --locked` should no longer parse"),
@@ -83,18 +118,24 @@ fn lock_administration_lives_under_top_level_locks_command() {
     };
     assert_eq!(err.kind(), ErrorKind::UnknownArgument);
 
-    // Lock administration now lives under the top-level `orbit locks` command.
-    Cli::try_parse_from(["orbit", "locks", "list"]).expect("orbit locks list parses");
-    Cli::try_parse_from(["orbit", "locks", "list", "--json"])
-        .expect("orbit locks list --json parses");
-    Cli::try_parse_from(["orbit", "locks", "release", "R-123"])
-        .expect("orbit locks release <id> parses");
+    // ORB-10428 supersedes the ORB-00420/ORB-10000 placement: locks are task administration.
+    Cli::try_parse_from(["orbit", "task", "locks", "list"]).expect("task locks list parses");
+    Cli::try_parse_from(["orbit", "task", "locks", "list", "--json"])
+        .expect("task locks list --json parses");
+    Cli::try_parse_from(["orbit", "task", "locks", "release", "R-123"])
+        .expect("task locks release <id> parses");
 
-    let err = match Cli::try_parse_from(["orbit", "locks", "release"]) {
-        Ok(_) => panic!("`locks release` requires a reservation id"),
+    let err = match Cli::try_parse_from(["orbit", "task", "locks", "release"]) {
+        Ok(_) => panic!("`task locks release` requires a reservation id"),
         Err(err) => err,
     };
     assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
+
+    let err = match Cli::try_parse_from(["orbit", "locks", "list"]) {
+        Ok(_) => panic!("top-level `locks` should not parse"),
+        Err(err) => err,
+    };
+    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]

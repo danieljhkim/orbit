@@ -25,6 +25,7 @@
 
 ### Breaking Changes
 
+- **Task locks returned to task administration**: `orbit locks` is now `orbit task locks`. This partially reverses ORB-10000: unlike the other removed task verbs, which were consolidated into existing verbs, locks were only relocated to a more prominent top-level surface. Moving them back completes the original surface-reduction intent without changing the MCP tool surface. ([ORB-10428])
 - **Learning vote and comment surfaces removed**: `orbit.learning.upvote` and all `orbit.learning.comment.*` tools and CLI subcommands are gone — use `priority` + search rank for ranking, `update`/`supersede` for corrections, and `evidence` for provenance. ([ORB-10046])
 - **`orbit task` trimmed from 19 to 12 subcommands**: seven state-transition and read-projection verbs removed. `approve`/`reject`/`unarchive`/`delete` → `orbit task update --status …`; `locks` → `orbit locks`; `prune-context` → `orbit task lint --fix`; `templates` dropped. MCP tool surface unchanged. ([ORB-10000])
 
