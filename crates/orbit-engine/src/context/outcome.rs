@@ -111,15 +111,6 @@ pub struct DirectActivityRunOutcome {
 }
 
 #[derive(Debug, Clone)]
-pub struct JobRunResult {
-    pub job_id: String,
-    pub run_id: String,
-    pub state: JobRunState,
-    pub attempt: u32,
-    pub output: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone)]
 pub struct ActivityInvocationResult {
     pub response_json: Option<Value>,
     pub invocation_trace: InvocationTrace,

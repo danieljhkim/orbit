@@ -300,12 +300,6 @@ impl OrbitRuntime {
         Ok(audits)
     }
 
-    pub fn get_job(&self, job_id: &str) -> Result<Option<orbit_common::types::Job>, OrbitError> {
-        Err(OrbitError::Execution(format!(
-            "v1 job lookup is retired; refusing to resolve job '{job_id}' through OrbitRuntime::get_job. Use schemaVersion: 2 job assets with `orbit job run` or `orbit run` instead."
-        )))
-    }
-
     pub fn shared_root(&self) -> PathBuf {
         self.context.shared_root().to_path_buf()
     }
