@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use orbit_common::types::{NO_DIFF_EXPECTED_TAG, OrbitError};
 use serde_json::{Value, json};
 
-use crate::context::{RuntimeHost, TaskHost};
+use crate::context::{DeterministicActionHost, TaskHost};
 
 use super::super::input::{canonicalize_existing_dir, input_string_field, required_job_run_id};
 use super::git::{git_command_success, git_output, git_success};
@@ -22,7 +22,9 @@ use git_ops::{
 use message::{batch_commit_message, finalize_commit_message, task_commit_message};
 use scope::{changed_files_for_task, collect_worktree_changes, filter_changed_files_for_task};
 
-pub(in crate::executor::automation) fn git_commit<H: TaskHost + RuntimeHost + ?Sized>(
+pub(in crate::executor::automation) fn git_commit<
+    H: TaskHost + DeterministicActionHost + ?Sized,
+>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -37,7 +39,7 @@ pub(in crate::executor::automation) fn git_commit<H: TaskHost + RuntimeHost + ?S
     }
 }
 
-pub(super) fn commit_task_artifact_changes<H: TaskHost + RuntimeHost + ?Sized>(
+pub(super) fn commit_task_artifact_changes<H: TaskHost + DeterministicActionHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -112,7 +114,7 @@ pub(super) fn commit_task_artifact_changes<H: TaskHost + RuntimeHost + ?Sized>(
     }))
 }
 
-pub(super) fn commit_finalize_artifact_changes<H: TaskHost + RuntimeHost + ?Sized>(
+pub(super) fn commit_finalize_artifact_changes<H: TaskHost + DeterministicActionHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -166,7 +168,7 @@ pub(super) fn commit_finalize_artifact_changes<H: TaskHost + RuntimeHost + ?Size
     }))
 }
 
-pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
+pub(super) fn commit_batch_changes<H: TaskHost + DeterministicActionHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -279,7 +281,7 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
 /// Commit a terminally-failed shipment's dirty candidate without consulting
 /// the normal success-summary delivery gate. ADR-0246 confines this bypass to
 /// the failure handoff, which blocks rather than promotes the task.
-pub(super) fn commit_failure_candidate<H: RuntimeHost + ?Sized>(
+pub(super) fn commit_failure_candidate<H: DeterministicActionHost + ?Sized>(
     host: &H,
     run_id: &str,
     workspace_path: &Path,
@@ -528,7 +530,7 @@ fn worktree_status_counts(workspace_path: &Path) -> Result<WorktreeStatusCounts,
     Ok(counts)
 }
 
-fn resolve_workspace_path<H: RuntimeHost + ?Sized>(
+fn resolve_workspace_path<H: DeterministicActionHost + ?Sized>(
     host: &H,
     input: &Value,
     batch_id: &str,

@@ -751,7 +751,7 @@ Recognition is the entire change: no safety gate moved. Non-terminal run, `--old
 
 - **[ORB-10427]** — Share one worktree-path derivation between `setup_worktree` and gc; collect bundles only when every member has settled.
 - **[ORB-10393]** — Port planning-duel planner and arbiter legs to seeded v2
-  assets with per-slot model overrides and retire `RuntimeHost::invoke_activity`.
+  assets with per-slot model overrides and retire `DeterministicActionHost::invoke_activity`.
 - **[ORB-10385]** — Gate job admission on the runtime's deterministic-action registry; register `pr_failure_handoff` and `worktree_gc`.
 - **[ORB-10380]** — Pin `base_sha` from `worktree_setup` through `git_commit`; split the commit step's failure diagnostics.
 - **[T20260418-2018]** — Add `JobV2` DAG constructs (`parallel`, `fan_out`, `loop`, `retry`, `when`).

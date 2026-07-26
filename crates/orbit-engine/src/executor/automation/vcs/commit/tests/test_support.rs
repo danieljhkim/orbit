@@ -12,7 +12,7 @@ use serde_json::Value;
 use tempfile::tempdir;
 
 use crate::context::{
-    RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
+    DeterministicActionHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
 };
 
 use super::super::super::git::git_success;
@@ -133,7 +133,7 @@ impl TaskWriteHost for CommitTestHost {
     }
 }
 
-impl RuntimeHost for CommitTestHost {
+impl DeterministicActionHost for CommitTestHost {
     fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
         Ok(())
     }

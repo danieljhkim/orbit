@@ -4,7 +4,7 @@ use chrono::Utc;
 use orbit_common::types::{ExternalRef, OrbitError, TaskComment, TaskStatus};
 use serde_json::{Value, json};
 
-use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
+use crate::context::{DeterministicActionHost, TaskAutomationUpdate, TaskHost};
 use crate::executor::automation::input::{
     canonicalize_existing_dir, input_string_field, required_input_string,
 };
@@ -27,7 +27,7 @@ const FAILURE_HANDOFF_EVENT: &str = "pr_failure_handoff";
 /// push without rewriting unknown remote history, publish a blocked PR, and
 /// leave the task in `blocked` rather than `review`.
 pub(in crate::executor::automation) fn pr_failure_handoff<
-    H: RuntimeHost + TaskHost + Sync + ?Sized,
+    H: DeterministicActionHost + TaskHost + Sync + ?Sized,
 >(
     host: &H,
     input: &Value,

@@ -21,7 +21,7 @@
 //! # Key exports
 //! - v2 dispatcher, job executor, and audit writer types re-exported at the
 //!   crate root
-//! - [`RuntimeHost`] / [`TaskHost`] / [`EnvironmentHost`] / [`JobRunHost`] —
+//! - [`DeterministicActionHost`] / [`TaskHost`] / [`EnvironmentHost`] / [`JobRunHost`] —
 //!   the host trait boundary v2's deterministic actions dispatch against
 //! - [`execute_deterministic_action`] — the built-in automation actions
 //!   (git/PR/worktree/task-update) v2 job steps invoke
@@ -48,8 +48,8 @@ pub use activity_job::{
 };
 pub use context::{
     AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, ActivityInvocationResult, AgentRoleConfig,
-    EnvironmentHost, JobRunHost, PrConfig, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate,
-    TaskHost, TaskReadHost, TaskWriteHost, WORKFLOW_RUN_FAILED_EVENT,
+    DeterministicActionHost, EnvironmentHost, JobRunHost, PrConfig, TaskActivityUpdate,
+    TaskAutomationUpdate, TaskHost, TaskReadHost, TaskWriteHost, WORKFLOW_RUN_FAILED_EVENT,
     blocked_workflow_failure_update, ensure_task_can_enter_workflow,
 };
 pub use executor::automation::vcs::{WorktreeGcOptions, WorktreeGcResult, collect_worktrees};

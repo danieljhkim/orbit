@@ -36,7 +36,7 @@ pub struct StateExecutionContext {
 }
 
 pub fn execute_action<
-    H: crate::context::RuntimeHost
+    H: crate::context::DeterministicActionHost
         + crate::context::TaskHost
         + crate::context::EnvironmentHost
         + Sync

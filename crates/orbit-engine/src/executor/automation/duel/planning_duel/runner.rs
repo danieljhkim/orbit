@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use super::types::PlanningDuelPlanArtifact;
 use super::{artifacts, metrics, roles};
-use crate::context::{ActivityInvocationResult, RuntimeHost, TaskHost};
+use crate::context::{ActivityInvocationResult, DeterministicActionHost, TaskHost};
 use crate::executor::automation::input::{input_string_field, required_input_string};
 
 fn join_activity_result(
@@ -36,7 +36,7 @@ struct DuelAgentDispatch<'a> {
     audit: Arc<V2AuditWriter>,
 }
 
-fn dispatch_duel_agent_activity<H: RuntimeHost + ?Sized>(
+fn dispatch_duel_agent_activity<H: DeterministicActionHost + ?Sized>(
     host: &H,
     dispatch: DuelAgentDispatch<'_>,
 ) -> Result<ActivityInvocationResult, OrbitError> {
@@ -188,7 +188,7 @@ fn compact_diagnostic_text(value: &str) -> String {
     }
 }
 
-pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
+pub(crate) fn run_planning_duel<H: DeterministicActionHost + TaskHost + Sync + ?Sized>(
     host: &H,
     input: &Value,
     _debug: bool,

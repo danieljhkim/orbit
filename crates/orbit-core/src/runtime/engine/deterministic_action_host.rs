@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use orbit_common::types::{ActivityV2, AgentModelPair, JobRun, OrbitError, OrbitEvent, Role};
-use orbit_engine::{RuntimeHost, V2AuditWriter, V2RuntimeHost};
+use orbit_engine::{DeterministicActionHost, V2AuditWriter, V2RuntimeHost};
 use orbit_store::{InvocationQuery, InvocationRecord};
 use orbit_tools::ToolContext;
 use serde_json::Value;
@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::paths::current_repo_root;
 use crate::OrbitRuntime;
 
-impl RuntimeHost for OrbitRuntime {
+impl DeterministicActionHost for OrbitRuntime {
     fn record_event(&self, event: OrbitEvent) -> Result<(), OrbitError> {
         OrbitRuntime::record_event(self, event)
     }
