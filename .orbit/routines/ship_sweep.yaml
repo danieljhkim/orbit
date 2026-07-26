@@ -17,7 +17,7 @@ enabled: false
 hosts:
   - dk-server-1
 trigger:
-  cron: "*/20 * * * *"
+  cron: "*/30 * * * *"
   missed_run: skip
 target: job:workspace_ship_pipeline
 policy:

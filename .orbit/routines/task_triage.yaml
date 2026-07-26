@@ -14,7 +14,7 @@ description: >
   Hourly triage of tasks blocked by failed job runs: diagnose the failure,
   re-backlog environmental casualties, and leave everything else blocked
   with a diagnosis attached.
-enabled: true
+enabled: false
 hosts:
   - dk-server-1
 trigger:
