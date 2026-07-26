@@ -3,7 +3,7 @@ summary: "Activity / Job — Decisions"
 type: design
 title: "Activity / Job — Decisions"
 owner: codex
-last_updated: 2026-07-25
+last_updated: 2026-07-26
 status: Draft
 feature: activity-job
 doc_role: decisions
@@ -728,8 +728,28 @@ Commits found above the pinned base are adopted with a loud `warn` naming the sh
 
 ---
 
+## ADR-0253 — A worktree's identity is derived once, and a bundle is only collectable when every member has settled
+
+**Status:** Accepted · 2026-07 · [ORB-10427]
+
+**Context.** `orbit gc worktrees` had never reclaimed a byte. `setup_worktree` derived the worktree directory from `task_ids_from_input` (array-first, singular fallback) and named it `orbit-<run_id>`; the collector spelled the same rule out a second time, probing only the singular `task_id` that `task_pr_pipeline` does not emit, missing, and deriving the shared `parallel-batch-<run_id>` path instead. No entry in the collector's known-path map ever matched a real directory, so every worktree fell through to the on-disk sweep and was reported `skipped:unrecognized` — a terminal classification no flag can act on, which reads as "nothing to do" rather than "the collector is broken". Measured on dk-server-1 (binary `0.9.2`, gc source current): 6/6 worktrees in `codebases/orbit`, 4/4 in `knowledgebase/polaris`, 3/3 in `constellation`, `total_bytes_reclaimed=0` in each. The same singular probe attributed the worktree to a task, so repairing only the path derivation would have moved every worktree from `skipped:unrecognized` to `skipped:unattributed` and still reclaimed nothing. Two independent spellings of one rule is the defect; fixing the key probe at both sites would have left the shape intact, and a third site would drift the same way.
+
+**Decision.** One derivation, `WorktreeIdentity::from_input`, owns the task ids, the branch prefix, and the run token; `setup_worktree` creates from it and gc re-derives from it. The token resolves as `input.run_id`, then the engine's run id, then the task-derived fallback (`task-<id>` / `bundle-<hash>`) — setup passes no engine id because it only sees its own input, gc passes the run record's id because a stored `initial_input` never carries the one the engine injected at dispatch. That precedence closes the first divergence; gc also probes the fallback-token path as a second candidate, closing the second (a worktree setup named `task-<id>` was previously invisible to gc). Attribution reads the whole `task_ids` array, and the **bundle rule is unanimity**: a worktree serving several tasks is eligible only when *every* member resolves and is settled to `rejected`/`archived`/`done`, so a bundle is never easier to discard than its least-settled member. The first member that blocks becomes the reported `task_id`/`task_status`; an eligible bundle names all of them.
+
+Recognition is the entire change: no safety gate moved. Non-terminal run, `--older-than-hours`, symlink-or-not-a-directory, unregistered-with-Git, unresolvable task, ineligible status, dirty-rescue, and unknown-branch each still return their own `skipped:*` action, each now pinned by a test that fails if the gate is deleted, and `remove_worktree` is still called without `--force` so a last-moment dirtying makes Git fail closed. `skipped:unrecognized` is preserved for the case it was meant for — a directory matching no run record at all — and is still never deleted.
+
+**Consequences.**
+- gc works. Same three repos, dry run, branch build: zero `skipped:unrecognized`, every worktree attributed with a real `run_id`/`run_state`/`task_id`/`task_status`, `would_remove` on 10 of 12 with the other two correctly held by the non-terminal gate — 3.29 GB in `codebases/orbit` alone.
+- A dry run now reports the byte estimate per report and in the total, so `--dry-run` answers "how much would this reclaim" instead of always `0`. The envelope's `dry_run: true` remains the statement that nothing was freed.
+- Regression fixtures use the shape `task_pr_pipeline` actually emits (`task_ids` array, no `branch_prefix`, no `run_id`), captured from run `jrun-20260726-0305-2`. A fixture hand-built with a singular `task_id` passes against the broken code and proves nothing.
+- Cost: gc considers up to two candidate paths per run, so two runs over the same task both claiming the fallback name collide into `skipped:ambiguous_run_path` rather than either being collected. That is the fail-closed direction.
+- Out of scope, deliberately: no `--force`/`--include-unrecognized` reap flag for genuinely orphaned directories. Widening what gc will delete is a separate decision from making it see.
+
+---
+
 ## Task References
 
+- **[ORB-10427]** — Share one worktree-path derivation between `setup_worktree` and gc; collect bundles only when every member has settled.
 - **[ORB-10393]** — Port planning-duel planner and arbiter legs to seeded v2
   assets with per-slot model overrides and retire `RuntimeHost::invoke_activity`.
 - **[ORB-10385]** — Gate job admission on the runtime's deterministic-action registry; register `pr_failure_handoff` and `worktree_gc`.
