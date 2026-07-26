@@ -81,6 +81,10 @@
         "title": {
           "description": "ADR title (short noun phrase).",
           "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "type": "string"
         }
       },
       "required": [
@@ -102,6 +106,10 @@
         },
         "legacy_id": {
           "description": "Legacy ID alias (e.g. `activity-job/ADR-039`). Either `id` or `legacy_id` must be provided; specifying both is an error.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
           "type": "string"
         }
       },
@@ -130,6 +138,10 @@
         },
         "old_id": {
           "description": "ADR being superseded.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
           "type": "string"
         }
       },
@@ -277,6 +289,10 @@
             }
           ],
           "description": "Replacement validation_warnings list."
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "type": "string"
         }
       },
       "required": [
@@ -330,6 +346,10 @@
             }
           ],
           "description": "Task template: `{ title, description?, acceptance_criteria?, task_type?, tags?, priority?, crew?, status? }`. Provider-neutral — no turn knobs. Required."
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "type": "string"
         }
       },
       "required": [
@@ -348,6 +368,10 @@
       "properties": {
         "name": {
           "description": "Definition name. Required.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
           "type": "string"
         }
       },
@@ -369,6 +393,10 @@
         },
         "name": {
           "description": "Definition name. Required.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
           "type": "string"
         }
       },
@@ -424,6 +452,10 @@
             }
           ],
           "description": "Replacement task template object."
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "type": "string"
         }
       },
       "required": [
@@ -483,6 +515,10 @@
             }
           ],
           "description": "Friction taxonomy tags as a string or array; valid tags: build | docs | lifecycle | naming | other | policy | skill-guidance | tooling; defaults to other"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "type": "string"
         }
       },
       "required": [
@@ -497,7 +533,12 @@
     "description": "List configured friction taxonomy tags",
     "inputSchema": {
       "additionalProperties": true,
-      "properties": {},
+      "properties": {
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "name": "orbit_friction_tags"
@@ -556,6 +597,10 @@
         "summary": {
           "description": "One-line headline (≤ 280 chars). Required.",
           "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "type": "string"
         }
       },
       "required": [
@@ -573,6 +618,10 @@
       "properties": {
         "id": {
           "description": "learning ID",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
           "type": "string"
         }
       },
@@ -594,6 +643,10 @@
         },
         "with": {
           "description": "ID of the replacement learning. Must differ from `id`. Both records must exist.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
           "type": "string"
         }
       },
@@ -652,6 +705,10 @@
         },
         "summary": {
           "description": "Replace `summary` (≤ 280 chars).",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
           "type": "string"
         }
       },
@@ -732,6 +789,10 @@
             }
           ],
           "description": "AND-filter by tag. Repeat or pass an array. Applies to task, doc, learning, and ADR."
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "type": "string"
         }
       },
       "type": "object"
@@ -877,6 +938,10 @@
         "note": {
           "description": "Optional approval note",
           "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "type": "string"
         }
       },
       "required": [
@@ -911,6 +976,10 @@
         },
         "source_path": {
           "description": "Source file to store as a task artifact.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
           "type": "string"
         }
       },
@@ -992,6 +1061,10 @@
         "type": {
           "description": "Optional task type filter",
           "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "type": "string"
         }
       },
       "type": "object"
@@ -1046,6 +1119,10 @@
         "with_context": {
           "description": "Optional boolean. When true, include a `related_docs` array matched from task context selectors and feature tags.",
           "type": "boolean"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "type": "string"
         }
       },
       "required": [
@@ -1084,6 +1161,10 @@
         },
         "note": {
           "description": "Optional lifecycle note for the start transition",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
           "type": "string"
         }
       },
@@ -1247,6 +1328,10 @@
             "refactor",
             "chore"
           ],
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
           "type": "string"
         }
       },

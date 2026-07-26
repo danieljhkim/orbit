@@ -16,7 +16,7 @@ use serde_json::{Map, Value};
 
 use super::OrbitToolServer;
 use super::name_map::{ToolNameCollision, build_name_map};
-use super::schema::schema_to_tool;
+use super::schema::{ensure_workspace_selector, schema_to_tool};
 use super::structured::mcp_structured_content;
 use crate::error::tool_error_result;
 use crate::{McpCustomRequestError, McpRequestKind, McpResultDecoration, McpToolExtension};
@@ -109,15 +109,23 @@ impl OrbitToolServer {
             .collect())
     }
 
+    /// Resolve the advertised wire input schema for one canonical definition.
+    ///
+    /// Whoever owns the schema — the host resolver or an in-process extension —
+    /// the broker's workspace routing contract is the adapter's to advertise,
+    /// so the selector is injected here rather than duplicated in every
+    /// resolver.
     pub(super) fn input_schema_for(
         &self,
         definition: &McpToolDefinition,
     ) -> Result<Map<String, Value>, OrbitError> {
-        if let Some(extension) = self.extension_for(&definition.schema.name)? {
-            extension.input_schema(definition)
+        let mut schema = if let Some(extension) = self.extension_for(&definition.schema.name)? {
+            extension.input_schema(definition)?
         } else {
-            self.input_schema_resolver.input_schema(definition)
-        }
+            self.input_schema_resolver.input_schema(definition)?
+        };
+        ensure_workspace_selector(&mut schema, definition);
+        Ok(schema)
     }
 
     // pub(super) visibility widened from private so that adapter::tests (sibling under adapter)
