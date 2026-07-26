@@ -16,6 +16,16 @@ pub trait Tool: Send + Sync {
 
 The registry at `crates/orbit-tools/src/registry.rs:31` stores `Arc<dyn Tool>` keyed by `ToolSchema::name`. Adding a tool means: writing a struct, `impl Tool`, registering in `builtin::register_builtins`. The dispatcher never changes.
 
+## Destructive CLI confirmation
+
+CLI commands never prompt or read stdin. An irreversible single action exposes
+`--confirm` and refuses before mutation when it is absent. A migration or bulk
+cleanup command is non-destructive by default (report/dry-run) and uses
+`--confirm` to apply. Existing spellings may remain as compatibility aliases
+(`--yes` for worktree GC and `--delete` for learning prune), but new commands
+must not introduce another confirmation spelling. Reversible mutations should
+instead document and test their recovery command.
+
 Two codebase-specific shapes carry non-obvious lessons; everything else is straightforward `impl Tool`.
 
 ## Reference: host-action dispatcher (`OrbitPipelineInvokeTool`)

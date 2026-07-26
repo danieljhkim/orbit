@@ -2,7 +2,7 @@ use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_remote::{host_registry_service_at, require_local_hub_identity};
 
-use crate::command::Execute;
+use crate::command::{Execute, require_confirmation};
 
 use super::command::resolve_machine_id;
 
@@ -11,10 +11,14 @@ use super::command::resolve_machine_id;
 pub struct HostRetireArgs {
     /// Host name (or a tombstone alias resolving to the machine) to retire.
     name: String,
+    /// Confirm irreversible host retirement
+    #[arg(long)]
+    confirm: bool,
 }
 
 impl Execute for HostRetireArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        require_confirmation(self.confirm, "host retirement")?;
         let local_hub = require_local_hub_identity(&runtime.global_root())?;
         let service = host_registry_service_at(&runtime.global_root())?;
         service.require_configured_local_hub(&local_hub)?;

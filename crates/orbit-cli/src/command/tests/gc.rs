@@ -18,7 +18,7 @@ fn gc_worktrees_defaults_to_dry_run_and_accepts_scopes() {
         panic!("expected gc");
     };
     let GcTarget::Worktrees(args) = command.target;
-    assert!(!args.yes);
+    assert!(!args.confirm);
     assert_eq!(args.run.as_deref(), Some("jrun-1"));
     assert_eq!(args.older_than_hours, Some(24));
 }
@@ -36,10 +36,20 @@ fn gc_help_exposes_positional_worktree_class() {
 }
 
 #[test]
-fn gc_rejects_yes_with_explicit_dry_run() {
-    let error = match Cli::try_parse_from(["orbit", "gc", "worktrees", "--yes", "--dry-run"]) {
+fn gc_rejects_confirmation_with_explicit_dry_run() {
+    let error = match Cli::try_parse_from(["orbit", "gc", "worktrees", "--confirm", "--dry-run"]) {
         Ok(_) => panic!("destructive and dry-run flags conflict"),
         Err(error) => error,
     };
     assert!(error.to_string().contains("cannot be used with"));
+}
+
+#[test]
+fn gc_preserves_yes_as_confirmation_alias() {
+    let cli = Cli::parse_from(["orbit", "gc", "worktrees", "--yes"]);
+    let Commands::Gc(command) = cli.command else {
+        panic!("expected gc");
+    };
+    let GcTarget::Worktrees(args) = command.target;
+    assert!(args.confirm);
 }

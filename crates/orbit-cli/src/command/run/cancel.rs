@@ -4,7 +4,7 @@ use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{Execute, require_confirmation};
 
 #[derive(Args)]
 #[command(
@@ -13,7 +13,7 @@ use crate::command::Execute;
 owner process of a running run (TERM then KILL), releases the run's task \
 reservations, and finalizes the run as `cancelled`. The primary remediation \
 for a stuck `pending` run with no live worker (orphan reconciliation also \
-clears those on workspace open).\n\nExamples:\n  orbit run cancel jrun-20260706-0120-2\n  orbit run cancel jrun-20260706-0120-2 --json"
+clears those on workspace open).\n\nExamples:\n  orbit run cancel jrun-20260706-0120-2 --confirm\n  orbit run cancel jrun-20260706-0120-2 --confirm --json"
 )]
 pub struct RunCancelArgs {
     /// Job run ID to cancel
@@ -22,10 +22,15 @@ pub struct RunCancelArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+
+    /// Confirm process termination and irreversible run terminalization
+    #[arg(long)]
+    pub confirm: bool,
 }
 
 impl Execute for RunCancelArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        require_confirmation(self.confirm, "run cancellation")?;
         let result = runtime.cancel_job_run_with_context(&self.run_id, "cli", "run_cancel")?;
         if self.json {
             return crate::output::json::print_pretty(&json!({

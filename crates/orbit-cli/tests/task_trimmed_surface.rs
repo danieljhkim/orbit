@@ -193,12 +193,26 @@ fn task_add_attributes_from_model_flag_and_managed_identity_env() {
 fn locks_release_reaches_admin_tool_bypassing_agent_gate() {
     let workspace = TestWorkspace::new();
 
+    let refused = workspace.run_raw(&["task", "locks", "release", "no-such-reservation"]);
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("--confirm"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+
     // `orbit.task.locks.release` is inactive on the agent tool surface, so
     // `orbit task locks release` must reach it through the admin `runtime.run_tool`
     // bypass. An unknown reservation yields a structured `released: false`, NOT
     // the `ensure_tool_agent_facing` rejection.
     let output = workspace.run(
-        &["task", "locks", "release", "no-such-reservation"],
+        &[
+            "task",
+            "locks",
+            "release",
+            "no-such-reservation",
+            "--confirm",
+        ],
         "task locks release",
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("release JSON");
@@ -209,6 +223,92 @@ fn locks_release_reaches_admin_tool_bypassing_agent_gate() {
         !stderr.contains("inactive on the agent tool surface"),
         "locks-release must bypass the agent-surface gate:\n{stderr}"
     );
+}
+
+#[test]
+fn audit_prune_refuses_unconfirmed_then_deletes_when_confirmed() {
+    let workspace = TestWorkspace::new();
+    workspace.add_task("Create an audit event");
+    let before = workspace.task_json(&["audit", "list", "--limit", "100", "--json"]);
+    assert!(!before.as_array().expect("audit rows").is_empty());
+
+    let refused = workspace.run_raw(&["audit", "prune", "--older-than", "0s"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("--confirm"));
+    let after_refusal = workspace.task_json(&["audit", "list", "--limit", "100", "--json"]);
+    assert_eq!(after_refusal, before);
+
+    let confirmed = workspace.run(
+        &["audit", "prune", "--older-than", "0s", "--confirm"],
+        "confirmed audit prune",
+    );
+    assert!(String::from_utf8_lossy(&confirmed.stdout).contains("Pruned"));
+    let after = workspace.task_json(&["audit", "list", "--limit", "100", "--json"]);
+    assert!(after.as_array().expect("audit rows").is_empty());
+}
+
+#[test]
+fn run_cancel_confirmation_precedes_run_lookup() {
+    let workspace = TestWorkspace::new();
+
+    let refused = workspace.run_raw(&["run", "cancel", "jrun-does-not-exist"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("--confirm"));
+
+    let confirmed = workspace.run_raw(&["run", "cancel", "jrun-does-not-exist", "--confirm"]);
+    assert!(!confirmed.status.success());
+    let stderr = String::from_utf8_lossy(&confirmed.stderr);
+    assert!(stderr.contains("jrun-does-not-exist"), "{stderr}");
+    assert!(!stderr.contains("pass --confirm"), "{stderr}");
+}
+
+#[test]
+fn migrate_bare_invocation_inspects_and_confirm_applies() {
+    let workspace = TestWorkspace::new();
+    let marker = workspace.work.join(".orbit/state/layout.version");
+    fs::write(&marker, "1\n").expect("restore prior layout version");
+
+    let preview = workspace.run_raw(&["migrate"]);
+    assert!(!preview.status.success());
+    assert_eq!(
+        fs::read_to_string(&marker).expect("read previewed marker"),
+        "1\n",
+        "bare migrate must not advance the layout"
+    );
+    assert!(
+        String::from_utf8_lossy(&preview.stderr).contains("migrate --confirm"),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+
+    workspace.run(&["migrate", "--confirm"], "confirmed migration");
+    assert_eq!(
+        fs::read_to_string(&marker).expect("read applied marker"),
+        "2\n",
+        "confirmed migrate must advance the layout"
+    );
+}
+
+#[test]
+fn workspace_remove_is_recoverable_by_reinitializing_the_checkout() {
+    let workspace = TestWorkspace::new();
+
+    workspace.run(
+        &["workspace", "remove", "trimmed-surface-test"],
+        "deregister workspace",
+    );
+    let unregistered = workspace.run(&["workspace", "show"], "show unregistered workspace");
+    assert!(
+        String::from_utf8_lossy(&unregistered.stdout).contains("not registered as a workspace")
+    );
+
+    workspace.run(
+        &["workspace", "init", "--name", "trimmed-surface-test"],
+        "reregister workspace",
+    );
+    let restored = workspace.run(&["workspace", "show"], "show restored workspace");
+    assert!(String::from_utf8_lossy(&restored.stdout).contains("name:"));
+    assert!(String::from_utf8_lossy(&restored.stdout).contains("trimmed-surface-test"));
 }
 
 struct TestWorkspace {

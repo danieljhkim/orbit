@@ -79,7 +79,7 @@ fn spoke_routes_only_self_registration_and_rejects_direct_administration() {
 
     let mutation_commands = [
         vec!["host", "rename", "missing-host", "new-name"],
-        vec!["host", "retire", "missing-host"],
+        vec!["host", "retire", "missing-host", "--confirm"],
         vec![
             "workspace",
             "link",
@@ -341,6 +341,15 @@ fn rejected_current_host_rename_preserves_local_identity_and_registry_revision()
         .env("USERPROFILE", &home)
         .env_remove("ORBIT_ROOT")
         .args(["host", "retire", "remote"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--confirm"));
+    cargo_bin_cmd!("orbit")
+        .current_dir(&work)
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env_remove("ORBIT_ROOT")
+        .args(["host", "retire", "remote", "--confirm"])
         .assert()
         .success();
     cargo_bin_cmd!("orbit")

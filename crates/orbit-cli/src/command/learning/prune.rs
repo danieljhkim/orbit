@@ -10,8 +10,8 @@ pub struct LearningPruneArgs {
     #[arg(long = "stale-only", default_value_t = true)]
     pub stale_only: bool,
     /// Archive every stale learning (sets status=superseded, superseded_by=null).
-    #[arg(long, conflicts_with = "stale_only")]
-    pub delete: bool,
+    #[arg(long, visible_alias = "delete", conflicts_with = "stale_only")]
+    pub confirm: bool,
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
@@ -19,7 +19,7 @@ pub struct LearningPruneArgs {
 
 impl Execute for LearningPruneArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let (stale, deleted) = runtime.prune_learnings(self.delete)?;
+        let (stale, deleted) = runtime.prune_learnings(self.confirm)?;
         if self.json {
             crate::output::json::print_pretty(&json!({
                 "stale": stale,

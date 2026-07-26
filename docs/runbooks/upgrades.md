@@ -39,8 +39,9 @@ the complete authoritative-state inventory.
 
 ```sh
 orbit migrate --dry-run    # list pending without applying; exit 1 when any are pending
-orbit migrate              # open the workspace, auto-apply, and report
-orbit migrate --json       # machine-readable report
+orbit migrate              # same safe inspection default
+orbit migrate --confirm    # open the workspace, auto-apply, and report
+orbit migrate --json       # machine-readable inspection report
 ```
 
 Example dry run on a pre-upgrade workspace:
@@ -53,11 +54,12 @@ $ orbit migrate --dry-run
 Pending migrations:
   layout v1 (baseline) — adopt the versioned .orbit/ layout (records the current shape; changes nothing)
   schema v1 (baseline)
-error: execution failed: 2 migration(s) pending; run `orbit migrate` to apply
+error: execution failed: 2 migration(s) pending; run `orbit migrate --confirm` to apply
 ```
 
-`--dry-run` is the only way to see pending migrations. Any command that opens the workspace,
-including plain `orbit migrate`, applies them.
+Bare `orbit migrate` and the compatibility-explicit `--dry-run` form inspect without opening
+the runtime. Applying pending migrations always requires `--confirm`; the command never prompts
+or reads stdin.
 
 ## Respect the downgrade guard
 
@@ -77,8 +79,8 @@ Upgrade the binary. Never hand-edit `layout.version` to force the workspace open
 After reviewing the dry run:
 
 1. Replace or upgrade the binary.
-2. Run `orbit migrate --dry-run` to review any still-pending changes.
-3. Run `orbit migrate` to apply them.
+2. Run `orbit migrate` (or `orbit migrate --dry-run`) to review any still-pending changes.
+3. Run `orbit migrate --confirm` to apply them.
 4. Run `orbit doctor` and require all relevant checks to pass.
 5. Restart any independently managed dashboard process after swapping the binary.
 
