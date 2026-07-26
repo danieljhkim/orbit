@@ -15,8 +15,10 @@
 //! `/healthz?detailed=true` ([`DoctorCommands::health_check_store_writable`],
 //! [`DoctorCommands::health_check_graph_index`]) also live here.
 
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
+use fs2::FileExt;
 use orbit_common::types::{OrbitError, WorkspacePaths};
 use orbit_core::OrbitRuntime;
 use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
@@ -73,6 +75,10 @@ pub trait DoctorCommands {
     /// absent subsystems as `Skipped`.
     fn doctor_workspace(&self) -> Result<Vec<WorkspaceDoctorResult>, OrbitError>;
 
+    /// Remove lock files left by dead holders, without disturbing a lock that
+    /// is currently held by another process.
+    fn remove_stale_lock_files(&self) -> Result<usize, OrbitError>;
+
     /// Cheap store write probe for health endpoints: open the store and
     /// acquire + roll back the write lock without mutating anything.
     fn health_check_store_writable(&self) -> Result<String, OrbitError>;
@@ -98,6 +104,16 @@ impl DoctorCommands for OrbitRuntime {
             doctor_check_job_runs(self),
             doctor_check_task_relations(self),
         ])
+    }
+
+    fn remove_stale_lock_files(&self) -> Result<usize, OrbitError> {
+        let mut removed = 0;
+        for path in collect_lock_files(self.paths()) {
+            if remove_stale_lock_file(&path)? {
+                removed += 1;
+            }
+        }
+        Ok(removed)
     }
 
     fn health_check_store_writable(&self) -> Result<String, OrbitError> {
@@ -283,6 +299,55 @@ fn doctor_check_stale_locks(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
             ),
         )
     }
+}
+
+/// Delete one dead-holder lock only after acquiring its advisory lock. A
+/// fresh holder can win the race between the initial scan and this cleanup;
+/// in that case `try_lock_exclusive` reports contention and the file remains.
+fn remove_stale_lock_file(path: &Path) -> Result<bool, OrbitError> {
+    let Some(holder) = orbit_store::read_lock_holder(path) else {
+        return Ok(false);
+    };
+    if process_is_alive(holder.pid) {
+        return Ok(false);
+    }
+
+    let file = match OpenOptions::new().read(true).write(true).open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(OrbitError::Io(format!(
+                "open stale lock candidate {}: {error}",
+                path.display()
+            )));
+        }
+    };
+    match file.try_lock_exclusive() {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+        Err(error) => {
+            return Err(OrbitError::Store(format!(
+                "acquire stale lock candidate {}: {error}",
+                path.display()
+            )));
+        }
+    }
+
+    // Re-read after acquiring the advisory lock so a holder that appeared
+    // after the first liveness probe is never removed.
+    let should_remove = orbit_store::read_lock_holder(path)
+        .is_some_and(|current_holder| !process_is_alive(current_holder.pid));
+    if !should_remove {
+        return Ok(false);
+    }
+
+    std::fs::remove_file(path).map_err(|error| {
+        OrbitError::Io(format!(
+            "remove stale lock candidate {}: {error}",
+            path.display()
+        ))
+    })?;
+    Ok(true)
 }
 
 /// `running`/`pending` job runs with no live worker process — dead recorded

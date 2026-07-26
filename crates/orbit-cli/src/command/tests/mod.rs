@@ -33,6 +33,18 @@ fn assert_cli_rejects(args: &[&str], kind: ErrorKind, expected: &str) {
 }
 
 #[test]
+fn cli_parses_doctor_stale_lock_cleanup() {
+    let cli = Cli::parse_from(["orbit", "doctor", "--fix-stale-locks", "--json"]);
+    match cli.command {
+        Commands::Doctor(command) => {
+            assert!(command.fix_stale_locks);
+            assert!(command.json);
+        }
+        _ => panic!("expected top-level doctor command"),
+    }
+}
+
+#[test]
 fn cli_parses_mcp_init() {
     let cli = Cli::parse_from(["orbit", "mcp", "init"]);
     match cli.command {
