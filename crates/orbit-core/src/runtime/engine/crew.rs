@@ -94,9 +94,14 @@ impl ResolvedCrewProjection {
 
 impl OrbitRuntime {
     pub fn configured_crew_registry_projection(&self) -> ConfiguredCrewRegistryProjection {
-        let default_crew = self.context.default_crew().map(ToString::to_string);
+        let default_crew = self
+            .context
+            .settings()
+            .default_crew()
+            .map(ToString::to_string);
         let mut crews = self
             .context
+            .settings()
             .crews()
             .values()
             .map(|crew| {
@@ -117,7 +122,7 @@ impl OrbitRuntime {
         let Some(crew) = crew.map(str::trim).filter(|value| !value.is_empty()) else {
             return Ok(());
         };
-        resolve_crew(crew, self.context.crews()).map(|_| ())
+        resolve_crew(crew, self.context.settings().crews()).map(|_| ())
     }
 
     pub fn resolve_crew_for_task(
@@ -132,7 +137,7 @@ impl OrbitRuntime {
         let selection = select_crew_name(
             cli_override,
             task_crew,
-            self.context.default_crew(),
+            self.context.settings().default_crew(),
             None,
             None,
         );
@@ -143,7 +148,7 @@ impl OrbitRuntime {
                     .to_string(),
             ));
         };
-        resolve_crew(selected, self.context.crews())
+        resolve_crew(selected, self.context.settings().crews())
     }
 
     pub(crate) fn resolve_crew_for_run_input(&self, input: &Value) -> Result<Crew, OrbitError> {
@@ -184,7 +189,8 @@ impl OrbitRuntime {
             }));
         }
 
-        let has_resolvable_name = task.crew.is_some() || self.context.default_crew().is_some();
+        let has_resolvable_name =
+            task.crew.is_some() || self.context.settings().default_crew().is_some();
         if !has_resolvable_name {
             return Ok(None);
         }
@@ -233,7 +239,7 @@ impl OrbitRuntime {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            && let Ok(crew) = resolve_crew(crew_name, self.context.crews())
+            && let Ok(crew) = resolve_crew(crew_name, self.context.settings().crews())
             && let Some(family) = family_from_assignment(&crew.assignment)
         {
             return Ok((Some(family.clone()), Some(family)));

@@ -55,8 +55,9 @@ impl EnvironmentHost for OrbitRuntime {
     fn agent_role_config(&self, role: AgentRole) -> Option<AgentRoleConfig> {
         let crew = self
             .context
+            .settings()
             .default_crew()
-            .and_then(|name| self.context.crews().get(name))?;
+            .and_then(|name| self.context.settings().crews().get(name))?;
         let raw = crew.role(role.as_str())?;
         Some(typed_role_config_from_assignment(role, raw))
     }
