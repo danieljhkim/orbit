@@ -8,7 +8,7 @@
 //!
 //! The `resolve` sub-module implements root discovery. The `builder` sub-module
 //! wires together stores, policy, tool registry, and event bus into a complete
-//! [`OrbitRuntime`]. The `engine`, `audit`, `mutation`, and `pipeline` sub-modules
+//! [`OrbitRuntime`]. The `engine`, `audit`, `mutation`, and `tool_exec` sub-modules
 //! provide the high-level operations exposed to command handlers.
 
 pub mod audit;
@@ -17,13 +17,13 @@ pub mod engine;
 pub mod event_bus;
 pub mod mutation;
 pub(crate) mod orbit_tool_host;
-pub mod pipeline;
 mod resolve;
 pub mod run_audit;
 pub(crate) mod run_input;
 mod task_block_on_run_failure;
 mod task_records;
 mod task_reservation_cleanup;
+pub(crate) mod tool_exec;
 mod v2_host;
 
 #[cfg(test)]

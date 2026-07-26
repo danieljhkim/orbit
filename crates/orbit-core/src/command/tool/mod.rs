@@ -12,7 +12,7 @@ mod registry;
 #[cfg(test)]
 mod tests;
 
-pub use crate::runtime::pipeline::DryRunResult;
+pub use crate::runtime::tool_exec::DryRunResult;
 
 pub use dispatch::{
     AuditContext, ToolDispatchOutcome, ToolEntryPoint, audit_role_label,
