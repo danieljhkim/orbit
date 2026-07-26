@@ -1,7 +1,6 @@
 //! PR scoreboard auto-increment.
 //!
 //! Updates `.orbit/state/scoreboard/pr.json` when PR lifecycle events occur:
-//! - **review comment sync**: increment `pr-review-comments`
 //! - **merge without revision**: increment `pr-count-without-revision`
 //! - **merge with revision**: increment `pr-count-with-revision`
 
@@ -13,11 +12,6 @@ use super::common;
 
 const SCOREBOARD_FILENAME: &str = "pr.json";
 const LOCK_LABEL: &str = "pr scoreboard";
-
-/// Increment the `pr-review-comments` counter for the given model.
-pub fn record_pr_review_comment(scoreboard_dir: &Path, model: &str) -> Result<(), OrbitError> {
-    increment(scoreboard_dir, "pr-review-comments", model)
-}
 
 /// Increment the `pr-count-without-revision` counter for the given model.
 pub fn record_pr_count_without_revision(
