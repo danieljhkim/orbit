@@ -20,7 +20,6 @@
 //!                         orbit-store, orbit-agent, orbit-engine,
 //!                         orbit-core, orbit-cli
 
-pub mod activity;
 pub mod activity_job;
 pub mod actor;
 pub mod adr;
@@ -60,7 +59,6 @@ pub mod tool;
 pub mod tool_input;
 pub mod workspace;
 
-pub use activity::Activity;
 pub use activity_job::{
     AUDIT_ENVELOPE_SCHEMA_VERSION, ActivityAsset, ActivityV2, ActivityV2Spec, AgentLoopSpec,
     AssetLoadError, BackoffStrategy, BranchOutcome, DeterministicSpec, FanInSpec, FanOutBlock,

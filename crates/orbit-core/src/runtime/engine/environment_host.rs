@@ -1,6 +1,6 @@
+use orbit_common::types::CrewRoleAssignment;
 use orbit_common::types::activity_job::{AgentRole, Backend, Provider};
-use orbit_common::types::{CrewRoleAssignment, OrbitError};
-use orbit_engine::{AgentRoleConfig, EnvironmentHost, ExecutorLookupHost};
+use orbit_engine::{AgentRoleConfig, EnvironmentHost};
 
 use super::paths::codex_workspace_write_writable_dirs;
 use crate::OrbitRuntime;
@@ -122,14 +122,5 @@ pub(crate) fn typed_role_config_from_assignment(
         provider,
         model,
         backend,
-    }
-}
-
-impl ExecutorLookupHost for OrbitRuntime {
-    fn get_executor_def(
-        &self,
-        name: &str,
-    ) -> Result<Option<orbit_common::types::ExecutorDef>, OrbitError> {
-        self.stores().executors().get_executor_def(name)
     }
 }

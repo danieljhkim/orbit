@@ -14,7 +14,6 @@ use tempfile::tempdir;
 use crate::context::{
     RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
 };
-use crate::executor::registry::ActivityExecutorRegistry;
 
 use super::super::super::git::git_success;
 
@@ -24,7 +23,6 @@ pub struct CommitTestHost {
     repo_root: PathBuf,
     data_root: PathBuf,
     scoreboard_dir: PathBuf,
-    registry: ActivityExecutorRegistry,
 }
 
 impl CommitTestHost {
@@ -37,7 +35,6 @@ impl CommitTestHost {
             repo_root,
             data_root,
             scoreboard_dir,
-            registry: ActivityExecutorRegistry::default(),
         }
     }
 
@@ -151,10 +148,6 @@ impl RuntimeHost for CommitTestHost {
 
     fn data_root(&self) -> &Path {
         &self.data_root
-    }
-
-    fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
-        &self.registry
     }
 
     fn run_tool_with_context_and_role(

@@ -615,8 +615,8 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeterministicSpec {
-    /// Registered deterministic action name. The dispatcher looks this up in
-    /// the `ActivityExecutorRegistry` at runtime.
+    /// Registered deterministic action name. The dispatcher resolves this
+    /// through the engine's built-in action table at runtime.
     pub action: String,
     /// Optional literal configuration passed through to the action.
     #[serde(default)]

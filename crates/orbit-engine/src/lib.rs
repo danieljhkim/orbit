@@ -21,11 +21,10 @@
 //! # Key exports
 //! - v2 dispatcher, job executor, and audit writer types re-exported at the
 //!   crate root
-//! - [`ExecutionContext`] / [`AttemptOutcome`] / [`ExecutorHost`] — host
-//!   primitives still used by the kept v1 executors (cli_command,
-//!   direct_agent)
-//! - [`ActivityExecutorRegistry`] — registry of executors (still wired,
-//!   though v2 does not consult it at dispatch time)
+//! - [`RuntimeHost`] / [`TaskHost`] / [`EnvironmentHost`] / [`JobRunHost`] —
+//!   the host trait boundary v2's deterministic actions dispatch against
+//! - [`execute_deterministic_action`] — the built-in automation actions
+//!   (git/PR/worktree/task-update) v2 job steps invoke
 //!
 //! # Dependency direction
 //! orbit-common, orbit-agent, orbit-exec, orbit-store, orbit-tools
@@ -48,14 +47,12 @@ pub use activity_job::{
     validate_job, validate_job_deterministic_actions,
 };
 pub use context::{
-    AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, ActivityInvocationResult, AgentProtocolHost,
-    AgentRoleConfig, EnvironmentHost, ExecutionContext, ExecutorHost, ExecutorLookupHost,
-    JobRunHost, PrConfig, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskHost,
-    TaskReadHost, TaskWriteHost, WORKFLOW_RUN_FAILED_EVENT, blocked_workflow_failure_update,
-    ensure_task_can_enter_workflow,
+    AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, ActivityInvocationResult, AgentRoleConfig,
+    EnvironmentHost, JobRunHost, PrConfig, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate,
+    TaskHost, TaskReadHost, TaskWriteHost, WORKFLOW_RUN_FAILED_EVENT,
+    blocked_workflow_failure_update, ensure_task_can_enter_workflow,
 };
 pub use executor::automation::vcs::{WorktreeGcOptions, WorktreeGcResult, collect_worktrees};
 pub use executor::automation::{
     StateExecutionContext, execute_action as execute_deterministic_action,
 };
-pub use executor::registry::ActivityExecutorRegistry;

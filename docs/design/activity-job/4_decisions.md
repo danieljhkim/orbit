@@ -64,7 +64,8 @@ Folded instances:
 and arbiter prompts seeded `agent_loop` assets and applies their selected
 provider/model as immutable per-dispatch overrides. The deterministic duel
 runner may coordinate concurrent legs, but it does not regain a private v1
-`ActivityExecutor::execute` bridge.
+`ActivityExecutor::execute` bridge — [ORB-10395] deleted that trait and its
+registry outright, so v2 dispatch is now the only execution path.
 
 Folded instances:
 

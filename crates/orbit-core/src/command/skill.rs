@@ -1,7 +1,5 @@
 use std::path::Path;
 
-use std::collections::HashSet;
-
 use orbit_common::types::OrbitError;
 
 use orbit_common::utility::fs::write_text_with_parent;
@@ -167,21 +165,6 @@ impl OrbitRuntime {
                 message: row.message,
             })
             .collect())
-    }
-
-    pub(crate) fn resolve_activity_skill_refs(
-        &self,
-        refs: &[String],
-    ) -> Result<Vec<LoadedSkill>, OrbitError> {
-        let mut dedup = HashSet::new();
-        let mut output = Vec::new();
-        for skill_id in refs {
-            if !dedup.insert(skill_id.clone()) {
-                continue;
-            }
-            output.push(self.skill_catalog().load(skill_id)?);
-        }
-        Ok(output)
     }
 }
 

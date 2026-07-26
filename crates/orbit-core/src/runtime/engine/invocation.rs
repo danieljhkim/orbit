@@ -1,44 +1,12 @@
+use crate::OrbitRuntime;
 use orbit_common::types::OrbitError;
 use orbit_store::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,
     InvocationRecord, Store, TaskInvocationMetrics, ToolInvocationMetrics,
 };
-use serde_json::Value;
-
-use crate::OrbitRuntime;
 
 pub(super) fn open_invocation_store(runtime: &OrbitRuntime) -> Result<Store, OrbitError> {
     Store::open(&runtime.context.persistence().audit_db)
-}
-
-pub(super) fn associated_task_ids(input: &Value) -> Vec<String> {
-    let mut task_ids = Vec::new();
-    if let Some(task_id) = input.get("task_id").and_then(Value::as_str) {
-        push_unique_task_id(&mut task_ids, task_id);
-    }
-    if let Some(items) = input.get("task_ids").and_then(Value::as_array) {
-        for item in items {
-            if let Some(task_id) = item.as_str() {
-                push_unique_task_id(&mut task_ids, task_id);
-            }
-        }
-    }
-    if let Some(items) = input.get("tasks").and_then(Value::as_array) {
-        for item in items {
-            if let Some(task_id) = item.as_str() {
-                push_unique_task_id(&mut task_ids, task_id);
-                continue;
-            }
-            if let Some(task_id) = item
-                .get("id")
-                .and_then(Value::as_str)
-                .or_else(|| item.get("task_id").and_then(Value::as_str))
-            {
-                push_unique_task_id(&mut task_ids, task_id);
-            }
-        }
-    }
-    task_ids
 }
 
 impl OrbitRuntime {
@@ -75,12 +43,5 @@ impl OrbitRuntime {
         params: &InvocationInsertParams,
     ) -> Result<(), OrbitError> {
         open_invocation_store(self)?.insert_invocation_trace_record(params)
-    }
-}
-
-fn push_unique_task_id(task_ids: &mut Vec<String>, task_id: &str) {
-    let task_id = task_id.trim();
-    if !task_id.is_empty() && !task_ids.iter().any(|existing| existing == task_id) {
-        task_ids.push(task_id.to_string());
     }
 }

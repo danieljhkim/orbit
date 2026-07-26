@@ -1,14 +1,12 @@
 //! The host trait boundary between the engine and its runtime/store
 //! implementors, plus the task-update param types those traits consume.
 
-use crate::executor::registry::ActivityExecutorRegistry;
 use orbit_agent::AgentConfig;
-use orbit_common::types::InvocationTrace;
 use orbit_common::types::activity_job::{AgentRole, Backend, Provider};
 use orbit_common::types::{
-    ActivityV2, AgentModelPair, ExecutorDef, ExternalRef, JobRun, JobRunState, OrbitError,
-    OrbitEvent, PipelineState, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
-    TaskPriority, TaskStatus, all_agent_families,
+    ActivityV2, AgentModelPair, ExternalRef, JobRun, JobRunState, OrbitError, OrbitEvent,
+    PipelineState, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority,
+    TaskStatus, all_agent_families,
 };
 use orbit_exec::EnvironmentMode;
 use orbit_store::JobRunStepParams;
@@ -19,7 +17,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use super::execution::ExecutionContext;
 use crate::activity_job::{V2AuditWriter, V2RuntimeHost};
 
 #[derive(Debug, Clone, Default)]
@@ -150,13 +147,6 @@ pub fn ensure_task_can_enter_workflow<H: TaskReadHost + ?Sized>(
     )))
 }
 
-pub trait AgentProtocolHost {
-    fn build_agent_stdin_envelope_payload(
-        &self,
-        execution: &ExecutionContext,
-    ) -> Result<Vec<u8>, OrbitError>;
-}
-
 /// Resolved crew role assignment from `config.toml`. Each field
 /// is independently optional — the resolver in
 /// `crate::activity_job::agent_role` falls back to the inline activity value
@@ -234,10 +224,6 @@ pub trait EnvironmentHost {
     }
 }
 
-pub trait ExecutorLookupHost {
-    fn get_executor_def(&self, name: &str) -> Result<Option<ExecutorDef>, OrbitError>;
-}
-
 pub trait RuntimeHost {
     fn record_event(&self, event: OrbitEvent) -> Result<(), OrbitError>;
     fn repo_root(&self) -> Result<String, OrbitError>;
@@ -247,7 +233,6 @@ pub trait RuntimeHost {
         ))
     }
     fn data_root(&self) -> &Path;
-    fn activity_executor_registry(&self) -> &ActivityExecutorRegistry;
     fn cancel_job_run(&self, run_id: &str) -> Result<(), OrbitError> {
         Err(OrbitError::Execution(format!(
             "cancel_job_run is not implemented for run '{run_id}'"
@@ -336,12 +321,4 @@ pub trait RuntimeHost {
         PrConfig::default()
     }
     fn scoreboard_dir(&self) -> &Path;
-    fn persist_invocation_trace(
-        &self,
-        _job_run_id: &str,
-        _execution: &ExecutionContext,
-        _trace: &InvocationTrace,
-    ) -> Result<(), OrbitError> {
-        Ok(())
-    }
 }
