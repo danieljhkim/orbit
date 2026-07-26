@@ -11,6 +11,8 @@ use orbit_common::types::{
 use orbit_common::utility::fs::{atomic_write_text, with_exclusive_file_lock};
 use serde_json::{Value, json};
 
+use crate::file::yaml_doc::{parse_yaml_with, serialize_yaml_with};
+
 pub use orbit_common::types::validate_friction_id;
 
 const TAGS_FILENAME: &str = "tags.yaml";
@@ -569,8 +571,9 @@ fn load_tag_taxonomy(frictions_root: &Path) -> Result<BTreeSet<String>, OrbitErr
     let path = ensure_default_tag_taxonomy(frictions_root)?;
     let raw = fs::read_to_string(&path)
         .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
-    let value: serde_yaml::Value = serde_yaml::from_str(&raw)
-        .map_err(|error| OrbitError::InvalidInput(format!("parse {}: {error}", path.display())))?;
+    let value: serde_yaml::Value = parse_yaml_with(&raw, &path, |_, error| {
+        OrbitError::InvalidInput(format!("parse {}: {error}", path.display()))
+    })?;
     let mut tags = BTreeSet::new();
     collect_tags_from_yaml(&value, &mut tags);
     if tags.is_empty() {
@@ -703,8 +706,9 @@ fn write_record_at(
         during_task: record.during_task.clone(),
         resolved_by_task: record.resolved_by_task.clone(),
     };
-    let yaml = serde_yaml::to_string(&frontmatter)
-        .map_err(|error| OrbitError::Store(format!("serialize friction frontmatter: {error}")))?;
+    let yaml = serialize_yaml_with(&frontmatter, |error| {
+        OrbitError::Store(format!("serialize friction frontmatter: {error}"))
+    })?;
     let content = format!("---\n{}---\n{}\n", yaml, record.body.trim_end());
     atomic_write_text(path, &content).map_err(|error| OrbitError::Io(error.to_string()))?;
     Ok(StoredFrictionRecord {
@@ -722,7 +726,7 @@ fn read_record_at(path: &Path) -> Result<StoredFrictionRecord, OrbitError> {
             path.display()
         ))
     })?;
-    let frontmatter: FrictionFrontmatter = serde_yaml::from_str(yaml).map_err(|error| {
+    let frontmatter: FrictionFrontmatter = parse_yaml_with(yaml, path, |_, error| {
         OrbitError::Store(format!(
             "parse friction frontmatter {}: {error}",
             path.display()

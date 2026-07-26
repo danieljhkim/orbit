@@ -6,7 +6,7 @@ use orbit_common::types::{
     OrbitError, ResourceKind, ResourceMetadata, validate_resource_name,
 };
 
-use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
+use crate::file::yaml_doc::{parse_yaml_with, write_yaml_atomic_with};
 
 pub struct ExecutorDefFileStore {
     root: PathBuf,
@@ -61,33 +61,36 @@ impl ExecutorDefFileStore {
         let path = self.executor_path(&def.name)?;
         let dir = self.executors_dir();
         fs::create_dir_all(&dir).map_err(|e| OrbitError::Io(e.to_string()))?;
-        let content = serde_yaml::to_string(&ExecutorResource {
-            schema_version: EXECUTOR_RESOURCE_SCHEMA_VERSION,
-            kind: ResourceKind::Executor,
-            metadata: ResourceMetadata::named(def.name.clone()),
-            spec: ExecutorResourceSpec {
-                executor_type: def.executor_type,
-                command: def.command.clone(),
-                args: def.args.clone(),
-                stdout_format: def.stdout_format,
-                model_pair_override: def.model_pair_override.clone(),
-                model_flag: def.model_flag.clone(),
-                timeout_seconds: def.timeout_seconds,
-                env: def.env.clone(),
-                sandbox: def.sandbox,
-                allow_fallback: def.allow_fallback,
-                created_at: def.created_at,
-                updated_at: def.updated_at,
+        write_yaml_atomic_with(
+            &path,
+            &ExecutorResource {
+                schema_version: EXECUTOR_RESOURCE_SCHEMA_VERSION,
+                kind: ResourceKind::Executor,
+                metadata: ResourceMetadata::named(def.name.clone()),
+                spec: ExecutorResourceSpec {
+                    executor_type: def.executor_type,
+                    command: def.command.clone(),
+                    args: def.args.clone(),
+                    stdout_format: def.stdout_format,
+                    model_pair_override: def.model_pair_override.clone(),
+                    model_flag: def.model_flag.clone(),
+                    timeout_seconds: def.timeout_seconds,
+                    env: def.env.clone(),
+                    sandbox: def.sandbox,
+                    allow_fallback: def.allow_fallback,
+                    created_at: def.created_at,
+                    updated_at: def.updated_at,
+                },
             },
-        })
-        .map_err(|e| OrbitError::Execution(format!("failed to serialize executor def: {e}")))?;
-        write_atomic(&path, &content).map_err(Into::into)
+            |e| OrbitError::Execution(format!("failed to serialize executor def: {e}")),
+        )
     }
 }
 
 fn parse_executor_def(content: &str, label: String) -> Result<ExecutorDef, OrbitError> {
-    let doc: ExecutorResource = serde_yaml::from_str(content)
-        .map_err(|e| OrbitError::InvalidInput(format!("invalid executor def at {}: {e}", label)))?;
+    let doc: ExecutorResource = parse_yaml_with(content, std::path::Path::new(&label), |_, e| {
+        OrbitError::InvalidInput(format!("invalid executor def at {}: {e}", label))
+    })?;
     if doc.kind != ResourceKind::Executor {
         return Err(OrbitError::InvalidInput(format!(
             "invalid executor def at {}: expected kind Executor, found {}",

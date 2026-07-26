@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+use crate::file::yaml_doc::parse_yaml_with;
+
 const PURPOSE_SECTION: &str = "Purpose";
 const META_NAME: &str = "name";
 const META_SUMMARY: &str = "summary";
@@ -386,8 +388,9 @@ fn parse_frontmatter(raw: &str) -> Result<SkillFrontmatter, OrbitError> {
     }
 
     let fm_raw = fm_lines.join("\n");
-    serde_yaml::from_str::<SkillFrontmatter>(&fm_raw)
-        .map_err(|e| OrbitError::SkillValidation(format!("invalid skill frontmatter: {e}")))
+    parse_yaml_with(&fm_raw, Path::new("<skill frontmatter>"), |_, e| {
+        OrbitError::SkillValidation(format!("invalid skill frontmatter: {e}"))
+    })
 }
 
 fn parse_section_heading(raw: &str) -> Option<String> {
