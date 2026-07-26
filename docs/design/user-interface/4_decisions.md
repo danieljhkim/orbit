@@ -3,7 +3,7 @@ summary: "User Interface — Decisions"
 type: design
 title: "User Interface — Decisions"
 owner: gemini
-last_updated: 2026-07-02
+last_updated: 2026-07-26
 status: Draft
 feature: user-interface
 doc_role: decisions
@@ -131,6 +131,41 @@ Rejected alternative: workspace-prefixed route paths (`/api/:workspace/tasks`). 
 - Runtimes are built on first access and cached, so an unopenable or stale workspace degrades to being skipped instead of failing startup.
 - Cost: handlers that need a concrete workspace now depend on the `Ws` extractor's selection rules; the aggregate task endpoint reopens each workspace's store per request (no cross-workspace caching of task lists yet).
 
+## ADR-0256 — Top-Level Nav Is the Operator's Four Tabs
+
+**Status:** Accepted · 2026-07 · [ORB-10444]
+
+**Context.** Top-level nav is the dashboard's scarcest surface, and two of its six entries were not earning a slot: a deprecated review-threads tab that no longer had a backing view, and Scoreboard, a diagnostics-shaped read-only telemetry view sitting beside the operator's actual workflow tabs. Both pushed triage → dispatch → annotate down the visual hierarchy.
+
+**Decision.** The top-level nav is exactly Tasks, Audit, Diagnostics, Knowledge (plus the hash-only `run-detail` route). The deprecated tab is removed outright — nav entry, `TABS` route, pane markup, refresh branch, and CSS — rather than hidden, so no dead asset ships and no route resolves to a missing pane. Scoreboard becomes a Diagnostics subtab routed as `#diagnostics/scoreboard`; its markup moves verbatim into the diagnostics pane so every id `scoreboard.js` renders into (and therefore the `/api/scoreboard` contract and its tests) is untouched. Because the scoreboard needs full width, its subtab swaps the diagnostics two-column layout for a full-width `<main>` while leaving the subtab nav reachable.
+
+Rejected alternative: keep the nav entry and hide it behind a feature flag. Rejected because a hidden tab still ships its assets, its route, and its refresh branch — the cost the removal was meant to recover.
+
+Rejected alternative: promote the subtab nav out of the diagnostics panel header so the scoreboard could replace the whole pane. Rejected as a larger structural change to a shared layout for no operator-visible gain.
+
+**Consequences.**
+- The nav reads as the operator's workflow; telemetry lives one level down under Diagnostics.
+- Existing `#scoreboard` bookmarks no longer resolve and fall back to Tasks; the view is reachable at `#diagnostics/scoreboard`.
+- Cost: the diagnostics pane now owns two `<main>` elements and a visibility toggle keyed on the active subtab.
+
+## ADR-0257 — One-Click Ship and Human-Attributed Comments on Tasks
+
+**Status:** Accepted · 2026-07 · [ORB-10444]
+
+**Context.** The Tasks tab was read-only for the operator's two most common actions. Dispatching a backlog task meant leaving for the CLI or an MCP client, and there was no way to leave a note on a task at all. Both are writes against live state, so the question was how much configuration to expose and whose identity to record.
+
+**Decision.** Ship is one click with no configuration UI: the dashboard posts `{ task_ids: [id] }` to `POST /api/workflows/ship` and nothing else. The crew comes from the task's own record (the pipeline already resolves it) and the mode from the selected workspace's registry binding — so the endpoint's omitted-`mode` default changes from the hard-coded `pr` to that binding's ship mode, falling back to `pr` only when a runtime has no binding. Duplicate dispatch is refused server-side: an explicit task selection whose id is already carried by a non-terminal run is a `409 ship_run_in_flight` naming that run, and the UI additionally holds a per-task guard for the double-click window. Comments post to a new `POST /api/tasks/:id/comments`, which writes through `TaskUpdateParams::comment` into the task's existing review-thread structure — no new field on the task record — and forces a human author: an absent, agent-family, or model-constant author collapses to the `human` label rather than the server process's ambient identity.
+
+Rejected alternative: a UI-only idempotency guard. Rejected because the guard is then lost across a reload and untestable without a JS runner, which the dashboard does not have; the server-side check is deterministic and covers every surface.
+
+Rejected alternative: reuse `PATCH /api/tasks/:id` with a `comment` field for comments. Rejected because that path derives its actor from the runtime's ambient identity, which is exactly the model-constant attribution this decision exists to prevent.
+
+**Consequences.**
+- Triage, dispatch, and annotation all complete inside the dashboard; no context switch for routine operation.
+- A dashboard comment is always attributable to a person, even when the server runs inside a managed Orbit run.
+- Ship failures surface the server's error text instead of silently no-opping.
+- Cost: the ship endpoint now scans a bounded window of recent runs before submitting, and a task with a genuinely stuck non-terminal run must have that run cancelled before it can be re-shipped.
+
 ## Task References
 
 - [T20260427-29] introduced the Canon Refined UI direction.
@@ -142,5 +177,6 @@ Rejected alternative: workspace-prefixed route paths (`/api/:workspace/tasks`). 
 - [ORB-00146] extracted the dashboard and JSON API into the new `orbit-dashboard` internal crate (this document).
 - [ORB-00154] unified the Scoreboard tab into a metric-major leaderboard matrix.
 - [ORB-00030] made the dashboard global/multi-workspace (workspace-keyed state, `Ws` extractor, serve-from-anywhere, aggregate endpoints).
+- [ORB-10444] retired the deprecated tab, folded Scoreboard under Diagnostics, pinned the Knowledge detail pane, and added task ship + comments.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

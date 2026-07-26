@@ -1163,27 +1163,27 @@ function truncate(text, max) {
 // restores every panel.
 
 // ORB-00039: in aggregate mode the per-workspace fetches are skipped, so the
-// panels they feed (audit summary, cross-task review threads, locked files) show
-// an inline placeholder and the health strip is neutralized rather than left
-// displaying one workspace's stale counts.
+// panels they feed (audit summary, locked files) show an inline placeholder and
+// the health strip is neutralized rather than left displaying one workspace's
+// stale counts.
 function renderAggregatePlaceholders() {
   renderPanelPlaceholder("audit-summary-body");
-  renderPanelPlaceholder("threads-body");
   renderPanelPlaceholder("locks-body");
   const locksCount = $("locks-count");
   if (locksCount) locksCount.textContent = "—";
-  const threadsCount = $("threads-count");
-  if (threadsCount) threadsCount.textContent = "—";
   resetHealthStrip();
 }
 
 // ORB-00044: the Diagnostics tab is fed exclusively by per-workspace endpoints
-// (/api/job-runs and /api/diagnostics/{metrics,errors,friction,implement_one}),
-// so in aggregate mode every diagnostics panel — both subtab bodies and the
-// implement_one side card — shows the placeholder and the count is neutralized.
+// (/api/job-runs, /api/scoreboard, and
+// /api/diagnostics/{metrics,errors,friction,implement_one}), so in aggregate
+// mode every diagnostics panel — all subtab bodies (ORB-10444 folded the
+// scoreboard in as one) and the implement_one side card — shows the placeholder
+// and the count is neutralized.
 function renderDiagnosticsPlaceholders() {
   renderPanelPlaceholder("diag-body");
   renderPanelPlaceholder("runs-body");
+  renderPanelPlaceholder("scoreboard-body");
   renderPanelPlaceholder("diag-implement-one-body");
   const diagCount = $("diag-count");
   if (diagCount) diagCount.textContent = "—";
@@ -1334,26 +1334,6 @@ function activeRefreshJobs() {
     return jobs;
   }
 
-  if (activeTab === "scoreboard") {
-    // ORB-00337: boot fetch matches the visually-highlighted segment
-    // (`24h`); the user can pick a different window from the selector,
-    // which calls /api/scoreboard?window=... directly. /api/scoreboard is
-    // per-workspace, so it's skipped in aggregate mode (ORB-00040: the manual
-    // window-selector re-fetch is guarded in scoreboard.js) and the body shows
-    // the placeholder instead of stale or empty content.
-    if (aggregate) {
-      renderPanelPlaceholder("scoreboard-body");
-    } else {
-      jobs.push(fetchJson("/api/scoreboard?window=24h").then(renderScoreboard));
-    }
-    return jobs;
-  }
-
-  if (activeTab === "threads") {
-    // Threads payload is already in the global jobs above; nothing extra needed.
-    return jobs;
-  }
-
   if (activeTab === "audit") {
     if (getActiveAuditSubtab() === "policy") {
       jobs.push(fetchAndRenderPolicy(auditContext()));
@@ -1396,6 +1376,16 @@ function activeRefreshJobs() {
     // (subtab switches are likewise guarded in router.js setDiagSubtabImpl).
     if (aggregate) {
       renderDiagnosticsPlaceholders();
+      return jobs;
+    }
+    if (activeDiagSubtab === "scoreboard") {
+      // ORB-10444: Scoreboard folded in from the retired top-level tab.
+      // ORB-00337: the boot fetch matches the visually-highlighted segment
+      // (`24h`); picking a different window calls /api/scoreboard?window=...
+      // directly from scoreboard.js (itself aggregate-guarded, ORB-00040).
+      // The scoreboard subtab replaces the diagnostics two-column layout, so it
+      // returns early rather than also fetching the implement_one side card.
+      jobs.push(fetchJson("/api/scoreboard?window=24h").then(renderScoreboard));
       return jobs;
     }
     if (activeDiagSubtab === "runs") {

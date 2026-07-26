@@ -915,9 +915,30 @@
         color: var(--fg); 
       }
 
-      .action.cancel { 
-        border: 1px solid transparent; 
-        color: var(--fg-dim); 
+      /* ORB-10444: Ship is the one control here that starts a pipeline run, so
+         it carries the accent rather than a status colour. */
+      .action.ship {
+        border: 1px solid var(--accent);
+        color: var(--accent);
+      }
+      .action.ship:hover:not(:disabled) {
+        background: var(--accent);
+        color: #000;
+        box-shadow: 0 0 10px rgba(110, 159, 255, 0.3);
+      }
+
+      .action.comment {
+        border: 1px solid var(--border);
+        color: var(--fg-dim);
+      }
+      .action.comment:hover:not(:disabled) {
+        border-color: var(--fg);
+        color: var(--fg);
+      }
+
+      .action.cancel {
+        border: 1px solid transparent;
+        color: var(--fg-dim);
       }
       .action.cancel:hover:not(:disabled) { 
         color: var(--fg); 
@@ -936,15 +957,17 @@
         vertical-align: middle;
       }
       
-      .reject-form {
+      .reject-form,
+      .comment-form {
         display: flex;
         flex-direction: column;
         gap: 8px;
         width: 100%;
         animation: fadeIn 0.3s ease;
       }
-      
-      .reject-form textarea {
+
+      .reject-form textarea,
+      .comment-form textarea {
         background: var(--bg);
         color: var(--fg);
         border: 1px solid var(--border);
@@ -958,8 +981,9 @@
         transition: all 0.2s ease;
       }
       
-      .reject-form textarea:focus { 
-        border-color: var(--accent); 
+      .reject-form textarea:focus,
+      .comment-form textarea:focus {
+        border-color: var(--accent);
         box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
       }
       
@@ -2830,6 +2854,39 @@
         margin-left: 4px;
       }
 
+      /* The Knowledge artifact list (learnings/ADRs/frictions) is long enough to
+         scroll the page well past the detail pane, which used to carry the
+         reader out of view mid-read. The detail panel sticks below the fixed
+         chrome (header 61px + tabs 49px + health strip 60px = 170px) and is
+         bounded to the remaining viewport, so its body scrolls internally
+         instead of being clipped when the detail is taller than the screen. */
+      #learning-detail-panel,
+      #adr-detail-panel,
+      #friction-detail-panel {
+        position: sticky;
+        top: 170px;
+        align-self: start;
+        max-height: calc(100vh - 194px);
+        display: flex;
+        flex-direction: column;
+      }
+      #learning-detail-panel > .body,
+      #adr-detail-panel > .body,
+      #friction-detail-panel > .body {
+        overflow-y: auto;
+        min-height: 0;
+      }
+      /* Stacked single-column layout: the detail pane sits below the list, so
+         pinning it to the chrome offset would only shrink it. Declared after the
+         sticky rule above so it wins the equal-specificity tie. */
+      @media (max-width: 1000px) {
+        #learning-detail-panel,
+        #adr-detail-panel,
+        #friction-detail-panel {
+          position: static;
+          max-height: none;
+        }
+      }
       #learning-detail,
       #adr-detail,
       #friction-detail {
@@ -2837,7 +2894,6 @@
         display: flex;
         flex-direction: column;
         gap: 0;
-        min-height: calc(100vh - 360px);
         background: #050505;
       }
       .knowledge-detail-head {
@@ -3056,7 +3112,7 @@
         font-style: italic;
       }
       /* ORB-00039: placeholder shown in per-workspace panels while the aggregate
-         "All workspaces" view is active (audit summary, review threads, locks). */
+         "All workspaces" view is active (audit summary, locks, diagnostics). */
       .panel-placeholder {
         padding: 10px 16px;
         color: var(--fg-dim);
@@ -3207,366 +3263,4 @@
       .log-foot .right { margin-left: auto; cursor: pointer; user-select: none; }
       .log-foot .right.on { color: var(--accent); }
 
-      .tab-badge {
-        display: inline-block;
-        margin-left: 6px;
-        padding: 0 6px;
-        min-width: 16px;
-        height: 16px;
-        line-height: 16px;
-        border-radius: 8px;
-        background: var(--status-open, #f59e0b);
-        color: #000;
-        font-family: var(--font-mono);
-        font-size: 10px;
-        font-weight: 600;
-        text-align: center;
-      }
-
-      #threads-filters {
-        display: flex;
-        gap: 16px;
-        flex-wrap: wrap;
-        padding: 8px 12px;
-      }
-      .thread-filter-group {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .thread-filter-label {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        color: var(--fg-dim);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-
-      .thread-stats {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 16px;
-        padding: 12px 16px;
-        border-bottom: 1px solid var(--border);
-        background: var(--bg);
-      }
-      .thread-stat .label {
-        font-family: var(--font-mono);
-        font-size: 10px;
-        color: var(--fg-dim);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-      }
-      .thread-stat .row {
-        display: flex;
-        align-items: baseline;
-        gap: 8px;
-        margin-top: 2px;
-      }
-      .thread-stat .value {
-        font-family: var(--font-mono);
-        font-size: 20px;
-        color: var(--fg);
-        font-feature-settings: "tnum";
-        font-weight: 500;
-      }
-      .thread-stat .value.dim { color: var(--fg-dim); }
-      .thread-stat .meta {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        color: var(--fg-dim);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .thread-layout {
-        display: grid;
-        grid-template-columns: 420px minmax(0, 1fr);
-        min-height: calc(100vh - 320px);
-      }
-      .thread-list {
-        border-right: 1px solid var(--border);
-        overflow-y: auto;
-        max-height: calc(100vh - 320px);
-        min-width: 0;
-      }
-      .thread-row {
-        appearance: none;
-        width: 100%;
-        border: 0;
-        border-bottom: 1px solid var(--border);
-        border-left: 2px solid transparent;
-        border-radius: 0;
-        background: transparent;
-        color: var(--fg);
-        padding: 12px 14px;
-        display: grid;
-        gap: 6px;
-        text-align: left;
-        cursor: pointer;
-        transition: background-color 0.15s ease;
-      }
-      .thread-row:hover {
-        background: rgba(255, 255, 255, 0.02);
-      }
-      .thread-row.active {
-        background: rgba(255, 255, 255, 0.03);
-        border-left-color: var(--fg-dim);
-      }
-      .thread-row.unread .id {
-        color: var(--fg);
-        font-weight: 500;
-      }
-      .thread-row.unread .top::before {
-        content: "";
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--accent);
-        flex: none;
-      }
-      .thread-row .top {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-      }
-      .thread-row .id,
-      .thread-row .when {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        color: var(--fg-dim);
-      }
-      .thread-row .spacer { flex: 1; }
-      .thread-row .title {
-        font-size: 13px;
-        color: var(--fg);
-        font-weight: 500;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .thread-row .preview {
-        font-size: 12px;
-        color: var(--fg-dim);
-        line-height: 1.4;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-      }
-      .thread-row .preview .by {
-        color: var(--fg);
-        font-weight: 500;
-        margin-right: 4px;
-      }
-      .thread-row .meta {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        font-family: var(--font-mono);
-        font-size: 10.5px;
-        color: var(--fg-dim);
-        min-width: 0;
-      }
-      .thread-row .meta .dot {
-        color: rgba(255, 255, 255, 0.15);
-      }
-      .thread-task-status,
-      .thread-status-pill {
-        font-family: var(--font-mono);
-        font-size: 10px;
-        padding: 1px 6px;
-        border-radius: 2px;
-        border: 1px solid var(--border);
-        color: var(--fg-dim);
-        background: var(--bg);
-        letter-spacing: 0.02em;
-        white-space: nowrap;
-      }
-      .thread-status-pill::before {
-        content: "";
-        display: inline-block;
-        width: 5px;
-        height: 5px;
-        border-radius: 50%;
-        background: var(--status-proposed);
-        margin-right: 5px;
-        vertical-align: 1px;
-      }
-      .thread-status-pill.resolved::before { background: var(--status-done); }
-
-      .thread-detail {
-        display: flex;
-        flex-direction: column;
-        min-width: 0;
-        background: #050505;
-      }
-      .thread-detail.empty {
-        justify-content: center;
-      }
-      .thread-detail-head {
-        padding: 14px 20px;
-        border-bottom: 1px solid var(--border);
-        background: var(--bg);
-        display: grid;
-        gap: 6px;
-      }
-      .thread-detail-head .crumb,
-      .thread-detail-head .sub {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        flex-wrap: wrap;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        color: var(--fg-dim);
-      }
-      .thread-detail-head .crumb .id {
-        color: var(--fg);
-      }
-      .thread-detail-head h2 {
-        margin: 0;
-        font-size: 16px;
-        font-weight: 500;
-        color: var(--fg);
-        line-height: 1.35;
-      }
-      .thread-detail-head .actions {
-        display: flex;
-        gap: 8px;
-        margin-top: 4px;
-      }
-      .thread-detail .btn,
-      .thread-reply .btn {
-        font: inherit;
-        font-family: var(--font-sans);
-        font-size: 12px;
-        padding: 5px 12px;
-        border: 1px solid var(--border);
-        border-radius: 2px;
-        background: var(--bg-elev);
-        color: var(--fg);
-        cursor: pointer;
-      }
-      .thread-detail .btn:hover:not(:disabled),
-      .thread-reply .btn:hover:not(:disabled) {
-        border-color: var(--fg-dim);
-      }
-      .thread-detail .btn.primary,
-      .thread-reply .btn.send {
-        border-color: var(--fg-dim);
-        background: transparent;
-      }
-      .thread-detail .btn:disabled,
-      .thread-reply .btn:disabled {
-        opacity: 0.55;
-        cursor: wait;
-      }
-      .thread-messages {
-        flex: 1;
-        overflow-y: auto;
-        padding: 14px 20px 24px;
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-      }
-      .thread-message {
-        display: grid;
-        grid-template-columns: 32px minmax(0, 1fr);
-        gap: 12px;
-      }
-      .thread-message .avatar {
-        width: 32px;
-        height: 32px;
-        border-radius: 2px;
-        background: var(--bg-elev);
-        border: 1px solid var(--border);
-        color: var(--fg-dim);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-      }
-      .thread-message.human .avatar {
-        color: var(--fg);
-        border-color: var(--fg-dim);
-      }
-      .thread-message .bubble { min-width: 0; }
-      .thread-message .head {
-        display: flex;
-        align-items: baseline;
-        gap: 10px;
-        margin-bottom: 4px;
-      }
-      .thread-message .author {
-        font-size: 12.5px;
-        font-weight: 500;
-        color: var(--fg);
-      }
-      .thread-message .when {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        color: var(--fg-dim);
-      }
-      .thread-message .body {
-        font-size: 13px;
-        line-height: 1.55;
-        color: var(--fg);
-        background: var(--bg-elev);
-        border: 1px solid var(--border);
-        border-radius: 2px;
-        padding: 10px 12px;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-      .thread-reply {
-        border-top: 1px solid var(--border);
-        background: var(--bg);
-        padding: 12px 20px 14px;
-        display: grid;
-        gap: 8px;
-      }
-      .thread-reply textarea {
-        width: 100%;
-        min-height: 64px;
-        resize: vertical;
-        background: var(--bg-elev);
-        color: var(--fg);
-        border: 1px solid var(--border);
-        border-radius: 2px;
-        padding: 10px 12px;
-        font: inherit;
-        font-size: 13px;
-        outline: none;
-      }
-      .thread-reply textarea:focus {
-        border-color: var(--accent);
-      }
-      .thread-reply .row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .thread-reply .hint {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        color: var(--fg-dim);
-        flex: 1;
-      }
-      @media (max-width: 900px) {
-        .thread-stats {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-        .thread-layout {
-          grid-template-columns: 1fr;
-        }
-        .thread-list {
-          border-right: none;
-          max-height: none;
-        }
-      }
 

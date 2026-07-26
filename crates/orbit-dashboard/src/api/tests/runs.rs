@@ -1186,6 +1186,151 @@ async fn ship_endpoint_review_false_preserves_implementation_only_input() {
     assert!(input.get("review_crew").is_none());
 }
 
+/// ORB-10444: the dashboard's one-click Ship posts nothing but the task id —
+/// no crew and no mode. The dispatch must carry that task id through, resolve
+/// the mode from the selected workspace's own binding (`local` here, not the
+/// endpoint's historical `pr` default), and leave crew resolution to the
+/// pipeline, which reads the task's own record.
+#[tokio::test]
+async fn ship_endpoint_without_overrides_uses_task_id_and_workspace_ship_mode() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    write_replay_job_under(&global_root, "task_auto_pipeline");
+    let (beta_orbit, beta_repo) = seed_ship_workspace(tmp.path(), "beta");
+    let state = crate::state::DashboardState::global(
+        global_root.clone(),
+        vec![ship_workspace_entry("beta", beta_repo, beta_orbit.clone())],
+        Some("beta".to_string()),
+    );
+
+    // Exactly the body the Ship button sends: the task id and nothing else.
+    let response = request_ship_global(
+        state,
+        "/workflows/ship",
+        json!({ "task_ids": ["ORB-10444"] }),
+    )
+    .await;
+
+    let status = response.status();
+    let payload = body_json(response).await;
+    assert_eq!(status, StatusCode::OK, "unexpected response: {payload}");
+    let run_id = payload["run_id"].as_str().expect("run id");
+
+    let beta_runtime =
+        OrbitRuntime::from_roots(&global_root, &beta_orbit).expect("reopen beta workspace");
+    let input = beta_runtime
+        .show_job_run(run_id)
+        .expect("stored ship run")
+        .input
+        .expect("persisted run input");
+    assert_eq!(input["task_ids"], json!(["ORB-10444"]));
+    // The workspace entry is bound to `ShipMode::Local`, so an omitted `mode`
+    // resolves to `local` rather than the endpoint's legacy `pr` fallback.
+    assert_eq!(input["mode"], "local");
+    assert!(
+        input.get("crew").is_none() && input.get("review_crew").is_none(),
+        "one-click Ship must not send a crew override: {input}"
+    );
+    assert!(
+        input.get("review").is_none(),
+        "one-click Ship must not enable the review step: {input}"
+    );
+}
+
+/// ORB-10444: Ship is a write against a live pipeline, so a second click while
+/// the task already has a run in flight must not create a duplicate run. The
+/// in-flight run is seeded as `pending` with no owner pid, which the run-owner
+/// reconciler leaves alone inside its unclaimed grace window — so the guard,
+/// not a reconciliation race, is what this asserts.
+#[tokio::test]
+async fn ship_endpoint_refuses_second_dispatch_while_task_run_is_in_flight() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    write_replay_job(&runtime, "task_auto_pipeline");
+    let mut in_flight = seed_run(
+        &runtime,
+        "jrun-in-flight",
+        "task_auto_pipeline",
+        JobRunState::Pending,
+    );
+    in_flight.input = Some(json!({ "mode": "local", "task_ids": ["ORB-10444"] }));
+    write_seeded_run(&runtime, &in_flight);
+
+    let response = request_ship(
+        runtime.clone(),
+        Some(json!({ "task_ids": ["ORB-10444"], "mode": "local" })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let payload = body_json(response).await;
+    assert_eq!(payload["code"].as_str(), Some("ship_run_in_flight"));
+    assert_eq!(payload["run_id"].as_str(), Some("jrun-in-flight"));
+    assert_eq!(payload["task_id"].as_str(), Some("ORB-10444"));
+
+    let runs = runtime
+        .list_job_runs(JobRunListParams::default())
+        .expect("list runs");
+    assert_eq!(
+        runs.len(),
+        1,
+        "the rejected second click must not persist another run: {runs:?}"
+    );
+}
+
+/// The in-flight guard keys on the task id, so a *different* task is still
+/// shippable while one run is in flight, and auto (no task ids) mode — which
+/// has nothing to key on — is untouched.
+#[tokio::test]
+async fn ship_endpoint_in_flight_guard_is_scoped_to_the_shipped_task() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    write_replay_job(&runtime, "task_auto_pipeline");
+    let mut in_flight = seed_run(
+        &runtime,
+        "jrun-other-task",
+        "task_auto_pipeline",
+        JobRunState::Pending,
+    );
+    in_flight.input = Some(json!({ "mode": "local", "task_ids": ["ORB-10001"] }));
+    write_seeded_run(&runtime, &in_flight);
+
+    let response = request_ship(
+        runtime.clone(),
+        Some(json!({ "task_ids": ["ORB-10444"], "mode": "local" })),
+    )
+    .await;
+
+    let status = response.status();
+    let payload = body_json(response).await;
+    assert_eq!(status, StatusCode::OK, "unexpected response: {payload}");
+}
+
+/// A terminal run holding the same task id is history, not contention: the
+/// guard must not wedge re-shipping a task whose previous run already finished.
+#[tokio::test]
+async fn ship_endpoint_allows_dispatch_after_the_previous_run_is_terminal() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    write_replay_job(&runtime, "task_auto_pipeline");
+    let mut finished = seed_run(
+        &runtime,
+        "jrun-finished",
+        "task_auto_pipeline",
+        JobRunState::Success,
+    );
+    finished.input = Some(json!({ "mode": "local", "task_ids": ["ORB-10444"] }));
+    write_seeded_run(&runtime, &finished);
+
+    let response = request_ship(
+        runtime.clone(),
+        Some(json!({ "task_ids": ["ORB-10444"], "mode": "local" })),
+    )
+    .await;
+
+    let status = response.status();
+    let payload = body_json(response).await;
+    assert_eq!(status, StatusCode::OK, "unexpected response: {payload}");
+}
+
 #[tokio::test]
 async fn ship_endpoint_rejects_duplicate_task_ids() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
