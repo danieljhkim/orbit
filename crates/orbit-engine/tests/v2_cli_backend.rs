@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-// ORB-00013: Examples are user-facing smoke binaries that print progress and unwrap setup invariants.
+// ORB-00013: Integration fixtures exercise public behavior and unwrap setup invariants.
 #![allow(
     clippy::expect_used,
     clippy::print_stderr,
@@ -7,20 +7,18 @@
     clippy::unwrap_used
 )]
 
-//! v2 `backend: cli` smoke suite — T20260419-0104.
+//! v2 `backend: cli` integration coverage — T20260419-0104.
 //!
 //! Exercises the new §3.1 dispatch path, the §7.6 envelope events, the §6
 //! harness-delegated allowlist advisory, the §3.2 loader rejection, argv
-//! redaction, and wall-clock timeout. This is an example binary (repo policy
-//! prohibits unit tests) — each scenario logs a summary and panics on an
-//! unexpected outcome.
+//! redaction, and wall-clock timeout.
 //!
 //! The smoke substitutes the real `claude` CLI with tempdir shell scripts
 //! named `claude` so `AgentConfig::from_cli_config` resolves them to the
 //! retained `ClaudeRuntime` (§10.1 keep/delete table). This is what the task
 //! AC #11 means by "substitutable" CLI.
 //!
-//! Run: `cargo run -p orbit-engine --example v2_cli_backend_smoke`
+//! Runs under `cargo nextest run -p orbit-engine --test v2_cli_backend`.
 
 use std::fs;
 use std::io::Write;
@@ -42,9 +40,8 @@ use orbit_engine::{
 use serde_json::Value;
 use tempfile::TempDir;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("v2 cli-backend smoke — T20260419-0104");
-
+#[test]
+fn cli_backend_dispatch_regressions() -> Result<(), Box<dyn std::error::Error>> {
     scenario_a_cli_dispatch_emits_envelope_events()?;
     scenario_b_argv_redaction()?;
     scenario_c_wall_clock_timeout()?;
@@ -56,7 +53,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     scenario_i_existing_agent_loop_assets_still_deserialize()?;
     scenario_j_cli_executor_static_args_are_audited()?;
 
-    println!("OK — all scenarios passed");
     Ok(())
 }
 
@@ -339,7 +335,7 @@ fn scenario_h_cli_reference_asset_round_trip() -> Result<(), Box<dyn std::error:
 }
 
 /// I: existing Phase 3 v2 `agent_loop` YAML assets still deserialize with the
-/// new `AgentLoopSpec` fields (serde defaults). Covers AC #8 (HTTP reference)
+/// new `AgentLoopSpec` fields (serde defaults). Covers the default CLI
 /// + the loop/denial samples under `jobs/v2_samples/`.
 fn scenario_i_existing_agent_loop_assets_still_deserialize()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -350,15 +346,15 @@ fn scenario_i_existing_agent_loop_assets_still_deserialize()
     let yaml = fs::read_to_string(&asset_path)?;
     let asset = load_activity_asset(&yaml)?;
     if let ActivityV2Spec::AgentLoop(spec) = &asset.spec.spec {
-        // Defaults should produce `Http` + `Claude` when the YAML omits them.
-        assert_eq!(spec.backend, Backend::Http, "default backend must be Http");
+        // The post-sweep default is CLI with Claude as the provider.
+        assert_eq!(spec.backend, Backend::Cli, "default backend must be Cli");
         assert_eq!(spec.provider, Provider::Claude);
         assert!(spec.wall_clock_timeout_seconds > 0);
     } else {
         panic!("expected agent_loop");
     }
     println!(
-        "    {}: backend=http (default), provider=claude (default)",
+        "    {}: backend=cli (default), provider=claude (default)",
         asset.name
     );
     Ok(())
