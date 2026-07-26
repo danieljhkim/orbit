@@ -76,7 +76,7 @@ fn workspace_default_named_job_does_not_run_when_workflow_invoked_by_name() {
     let run = runtime
         .stores()
         .jobs()
-        .insert_run(job_name, 1, Utc::now(), Some(json!({})), None)
+        .insert_job_run(job_name, 1, Utc::now(), Some(json!({})), None)
         .expect("insert named pipeline run");
     runtime
         .stores()

@@ -196,12 +196,12 @@ pub(super) fn supersede(
     let old = runtime
         .stores()
         .learnings()
-        .get(&id)?
+        .get_learning(&id)?
         .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, id.clone()))?;
     let new = runtime
         .stores()
         .learnings()
-        .get(&with)?
+        .get_learning(&with)?
         .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, with.clone()))?;
     Ok(json!({
         "old": learning_to_json(&old),
@@ -210,15 +210,15 @@ pub(super) fn supersede(
 }
 
 pub(super) fn sync(runtime: &OrbitRuntime, _input: Value) -> Result<Value, OrbitError> {
-    runtime.stores().learnings().sync()?;
+    runtime.stores().learnings().sync_learnings()?;
     let active = runtime
         .stores()
         .learnings()
-        .list(Some(LearningStatus::Active))?;
+        .list_learnings(Some(LearningStatus::Active))?;
     let superseded = runtime
         .stores()
         .learnings()
-        .list(Some(LearningStatus::Superseded))?;
+        .list_learnings(Some(LearningStatus::Superseded))?;
     Ok(json!({
         "rebuilt_count": active.len() + superseded.len(),
     }))

@@ -114,7 +114,7 @@ impl OrbitRuntime {
             let last_run = self
                 .stores()
                 .jobs()
-                .list_runs_filtered(&JobRunQuery {
+                .list_job_runs_filtered(&JobRunQuery {
                     job_id: Some(job_id.to_string()),
                     state: None,
                     terminal_only: false,

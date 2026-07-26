@@ -95,7 +95,7 @@ impl OrbitRuntime {
     /// Ungated store-level create. Authoring surfaces must go through
     /// [`Self::author_learning`] so the [ORB-10364] caller-role gate applies.
     pub fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
-        let learning = self.stores().learnings().add(params)?;
+        let learning = self.stores().learnings().create_learning(params)?;
         self.record_id_allocation_audit("learning", &learning.id)?;
         Ok(learning)
     }
@@ -121,7 +121,9 @@ impl OrbitRuntime {
         id: &str,
         params: LearningCreateParams,
     ) -> Result<Learning, OrbitError> {
-        self.stores().learnings().finalize_preallocated(id, params)
+        self.stores()
+            .learnings()
+            .finalize_preallocated_learning(id, params)
     }
 
     /// [ORB-10330] Finalize a hub-preallocated ADR at the caller-supplied
@@ -132,14 +134,14 @@ impl OrbitRuntime {
         id: &str,
         params: orbit_store::AdrCreateParams,
     ) -> Result<orbit_common::types::Adr, OrbitError> {
-        self.stores().adrs().finalize_preallocated(id, params)
+        self.stores().adrs().finalize_preallocated_adr(id, params)
     }
 
     pub fn get_learning(&self, id: &str) -> Result<Learning, OrbitError> {
-        match self.stores().learnings().get_federated(id)? {
+        match self.stores().learnings().get_learning_federated(id)? {
             Some(learning) => Ok(learning),
             None => {
-                if let Some(stub) = self.stores().learnings().remote_stub(id)? {
+                if let Some(stub) = self.stores().learnings().get_learning_remote_stub(id)? {
                     return Err(remote_artifact_error("learning", &stub));
                 }
                 Err(OrbitError::not_found(
@@ -154,7 +156,7 @@ impl OrbitRuntime {
         &self,
         status: Option<LearningStatus>,
     ) -> Result<Vec<Learning>, OrbitError> {
-        self.stores().learnings().list(status)
+        self.stores().learnings().list_learnings(status)
     }
 
     pub fn list_learning_entries(
@@ -164,7 +166,7 @@ impl OrbitRuntime {
     ) -> Result<Vec<LearningListEntry>, OrbitError> {
         self.stores()
             .learnings()
-            .list_entries(status, include_remote)
+            .list_learning_entries(status, include_remote)
     }
 
     pub fn search_learnings(
@@ -172,7 +174,7 @@ impl OrbitRuntime {
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
         let params = normalize_learning_search_params(&self.paths().repo_root, params)?;
-        self.stores().learnings().search(params)
+        self.stores().learnings().search_learnings(params)
     }
 
     pub fn learning_search_config(&self) -> Result<LearningSearchConfig, OrbitError> {
@@ -253,7 +255,9 @@ impl OrbitRuntime {
         &self,
         since: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Vec<LearningUsageStat>, OrbitError> {
-        self.stores().audit_events().learning_usage(since.as_ref())
+        self.stores()
+            .audit_events()
+            .get_learning_usage_stats(since.as_ref())
     }
 
     /// [ORB-10364] Apply an `orbit.learning.update`-shaped payload *without*
@@ -280,7 +284,7 @@ impl OrbitRuntime {
         id: &str,
         params: LearningUpdateParams,
     ) -> Result<Learning, OrbitError> {
-        self.stores().learnings().update(id, params)
+        self.stores().learnings().update_learning(id, params)
     }
 
     /// Ungated store-level supersede. Authoring surfaces must go through
@@ -291,15 +295,15 @@ impl OrbitRuntime {
                 "learning '{old_id}' cannot supersede itself"
             )));
         }
-        self.stores().learnings().supersede(old_id, new_id)
+        self.stores().learnings().supersede_learning(old_id, new_id)
     }
 
     pub fn archive_learning(&self, id: &str) -> Result<bool, OrbitError> {
-        self.stores().learnings().archive(id)
+        self.stores().learnings().archive_learning(id)
     }
 
     pub fn sync_learnings(&self) -> Result<(), OrbitError> {
-        self.stores().learnings().sync()
+        self.stores().learnings().sync_learnings()
     }
 
     pub fn migrate_learning_layout(&self) -> Result<LearningLayoutMigrationReport, OrbitError> {
@@ -403,7 +407,7 @@ fn is_learning_stale(runtime: &OrbitRuntime, learning: &Learning, repo_root: &Pa
             EvidenceKind::Task => runtime
                 .stores()
                 .tasks()
-                .get(&ev.reference)
+                .get_task(&ev.reference)
                 .ok()
                 .flatten()
                 .is_some(),

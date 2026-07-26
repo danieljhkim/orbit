@@ -255,7 +255,7 @@ impl V2RuntimeHost for OrbitRuntime {
         if let Some(metrics) = crate::metrics::merge_invocation_trace(existing.as_ref(), trace) {
             self.stores()
                 .jobs()
-                .record_run_knowledge_metrics(job_run_id, metrics)
+                .record_job_run_knowledge_metrics(job_run_id, metrics)
                 .map_err(|error| {
                     DispatchError::JobExecution(format!(
                         "record job-run knowledge metrics: {error}"
@@ -418,12 +418,12 @@ mod tests {
         let run = runtime
             .stores()
             .jobs()
-            .insert_run(job_id, 1, chrono::Utc::now(), None, None)
+            .insert_job_run(job_id, 1, chrono::Utc::now(), None, None)
             .expect("insert job run");
         runtime
             .stores()
             .jobs()
-            .mark_run_running(&run.run_id, chrono::Utc::now(), std::process::id())
+            .mark_job_run_running(&run.run_id, chrono::Utc::now(), std::process::id())
             .expect("mark run running");
         run.run_id
     }

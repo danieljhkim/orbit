@@ -120,7 +120,7 @@ impl OrbitRuntime {
         scored.extend(
             self.stores()
                 .adrs()
-                .list()?
+                .list_adrs()?
                 .into_iter()
                 .filter(|adr| adr_status_in_docs_search(adr.status, include_superseded))
                 .map(adr_search_source)
@@ -164,7 +164,8 @@ impl OrbitRuntime {
     }
 
     pub fn index_adrs(&self, params: AdrIndexParams) -> Result<AdrIndexResult, OrbitError> {
-        let sources = adr_embedding_sources(&self.paths().repo_root, self.stores().adrs().list()?)?;
+        let sources =
+            adr_embedding_sources(&self.paths().repo_root, self.stores().adrs().list_adrs()?)?;
         orbit_search::adr_index(&self.stores().semantic_vector, &sources, params)
     }
 

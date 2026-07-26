@@ -8,12 +8,14 @@ use crate::OrbitRuntime;
 impl JobRunHost for OrbitRuntime {
     fn list_all_pending_or_running_runs(&self) -> Result<Vec<JobRun>, OrbitError> {
         self.reconcile_stale_job_runs(None)?;
-        self.stores().jobs().list_all_pending_or_running()
+        self.stores().jobs().list_all_pending_or_running_runs()
     }
 
     fn list_pending_or_running_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
         self.reconcile_stale_job_runs(Some(job_id))?;
-        self.stores().jobs().list_pending_or_running(job_id)
+        self.stores()
+            .jobs()
+            .list_pending_or_running_job_runs(job_id)
     }
 
     fn insert_job_run(
@@ -24,9 +26,13 @@ impl JobRunHost for OrbitRuntime {
         input: Option<serde_json::Value>,
         retry_source_run_id: Option<String>,
     ) -> Result<JobRun, OrbitError> {
-        self.stores()
-            .jobs()
-            .insert_run(job_id, attempt, scheduled_at, input, retry_source_run_id)
+        self.stores().jobs().insert_job_run(
+            job_id,
+            attempt,
+            scheduled_at,
+            input,
+            retry_source_run_id,
+        )
     }
 
     fn mark_job_run_running(
@@ -37,7 +43,7 @@ impl JobRunHost for OrbitRuntime {
     ) -> Result<bool, OrbitError> {
         self.stores()
             .jobs()
-            .mark_run_running(run_id, started_at, pid)
+            .mark_job_run_running(run_id, started_at, pid)
     }
 
     fn take_over_running_job_run(
@@ -48,7 +54,7 @@ impl JobRunHost for OrbitRuntime {
         started_at: DateTime<Utc>,
         pid: u32,
     ) -> Result<bool, OrbitError> {
-        self.stores().jobs().take_over_running_run(
+        self.stores().jobs().take_over_running_job_run(
             run_id,
             expected_pid,
             expected_pid_start_time,
@@ -62,7 +68,7 @@ impl JobRunHost for OrbitRuntime {
         run_id: &str,
         finished_at: DateTime<Utc>,
     ) -> Result<bool, OrbitError> {
-        self.stores().jobs().abandon_run(run_id, finished_at)
+        self.stores().jobs().abandon_job_run(run_id, finished_at)
     }
 
     fn complete_job_run_step(
@@ -70,7 +76,7 @@ impl JobRunHost for OrbitRuntime {
         run_id: &str,
         params: &JobRunStepParams,
     ) -> Result<bool, OrbitError> {
-        self.stores().jobs().complete_run_step(run_id, params)
+        self.stores().jobs().complete_job_run_step(run_id, params)
     }
 
     fn record_job_run_knowledge_metrics(
@@ -80,7 +86,7 @@ impl JobRunHost for OrbitRuntime {
     ) -> Result<bool, OrbitError> {
         self.stores()
             .jobs()
-            .record_run_knowledge_metrics(run_id, metrics)
+            .record_job_run_knowledge_metrics(run_id, metrics)
     }
 
     fn finalize_job_run(

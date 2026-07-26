@@ -13,14 +13,14 @@ impl OrbitRuntime {
     pub fn get_task(&self, id: &str) -> Result<Task, OrbitError> {
         self.stores()
             .tasks()
-            .get(id)?
+            .get_task(id)?
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
     }
 
     pub fn get_task_artifacts(&self, id: &str) -> Result<Vec<TaskArtifact>, OrbitError> {
         self.stores()
-            .tasks()
-            .get_artifacts(id)?
+            .task_artifacts()
+            .get_task_artifacts(id)?
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
     }
 
@@ -29,8 +29,8 @@ impl OrbitRuntime {
         id: &str,
     ) -> Result<Vec<ArtifactManifestFileV2>, OrbitError> {
         self.stores()
-            .tasks()
-            .get_artifact_manifest(id)?
+            .task_artifacts()
+            .get_task_artifact_manifest(id)?
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
     }
 
@@ -39,25 +39,25 @@ impl OrbitRuntime {
         id: &str,
         path: &str,
     ) -> Result<Option<TaskArtifact>, OrbitError> {
-        self.stores().tasks().get_artifact(id, path)
+        self.stores().task_artifacts().get_task_artifact(id, path)
     }
 
     pub fn get_task_comments(&self, id: &str) -> Result<Vec<TaskComment>, OrbitError> {
         self.stores()
-            .tasks()
-            .get_comments(id)?
+            .task_history()
+            .get_task_comments(id)?
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
     }
 
     pub fn get_task_history(&self, id: &str) -> Result<Vec<TaskHistoryEntry>, OrbitError> {
         self.stores()
-            .tasks()
-            .get_history(id)?
+            .task_history()
+            .get_task_history(id)?
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
     }
 
     pub fn list_tasks(&self) -> Result<Vec<Task>, OrbitError> {
-        self.stores().tasks().list()
+        self.stores().tasks().list_tasks()
     }
 
     /// Returns the coordination registry's global status projection for
@@ -65,11 +65,11 @@ impl OrbitRuntime {
     pub fn task_status_index(
         &self,
     ) -> Result<BTreeMap<String, orbit_common::types::TaskStatus>, OrbitError> {
-        self.stores().tasks().status_index()
+        self.stores().tasks().task_status_index()
     }
 
     pub fn list_tasks_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
-        self.stores().tasks().list_by_tags(tags)
+        self.stores().tasks().list_tasks_by_tags(tags)
     }
 
     /// Returns the `context_files` entries that would be dropped if the task
@@ -112,7 +112,7 @@ impl OrbitRuntime {
         external_ref: Option<&ExternalRef>,
         has_external_ref_system: Option<&str>,
     ) -> Result<Vec<Task>, OrbitError> {
-        self.stores().tasks().list_filtered(
+        self.stores().tasks().list_tasks_filtered(
             status,
             priority,
             parent_id,
@@ -123,7 +123,7 @@ impl OrbitRuntime {
     }
 
     pub fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError> {
-        self.stores().tasks().search(query)
+        self.stores().tasks().search_tasks(query)
     }
 
     pub fn search_tasks_filtered(
@@ -131,6 +131,6 @@ impl OrbitRuntime {
         query: &str,
         tags: &[String],
     ) -> Result<Vec<Task>, OrbitError> {
-        self.stores().tasks().search_filtered(query, tags)
+        self.stores().tasks().search_tasks_filtered(query, tags)
     }
 }

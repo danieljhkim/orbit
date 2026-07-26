@@ -116,7 +116,7 @@ impl TaskWriteHost for OrbitRuntime {
                 }
                 Some(refs)
             };
-            let task = self.stores().tasks().update(
+            let task = self.stores().task_records().update(
                 task_id,
                 StoreTaskUpdateParams {
                     actor: attribution.actor.clone(),

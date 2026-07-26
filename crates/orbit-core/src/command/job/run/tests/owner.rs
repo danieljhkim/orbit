@@ -78,7 +78,7 @@ fn live_owner_survives_tz_change_across_read_paths() {
         runtime
             .stores()
             .jobs()
-            .mark_run_running(&run.run_id, Utc::now() - Duration::seconds(1), sentinel_pid)
+            .mark_job_run_running(&run.run_id, Utc::now() - Duration::seconds(1), sentinel_pid)
             .expect("mark running under LA tz");
         runtime
             .show_job_run(&run.run_id)
@@ -186,7 +186,7 @@ fn legacy_unversioned_token_does_not_falsely_finalize_live_run() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, Utc::now() - Duration::seconds(1), sentinel_pid)
+        .mark_job_run_running(&run.run_id, Utc::now() - Duration::seconds(1), sentinel_pid)
         .expect("mark running");
 
     // Rewrite the stored token to look like a pre-fix unversioned value
@@ -378,7 +378,7 @@ fn show_job_run_reconciles_dead_pid_with_probe_outcome_in_message() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, started_at, 999_999)
+        .mark_job_run_running(&run.run_id, started_at, 999_999)
         .expect("mark running with impossible pid");
 
     let shown = runtime.show_job_run(&run.run_id).expect("show run");

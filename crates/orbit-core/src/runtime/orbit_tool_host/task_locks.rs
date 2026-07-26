@@ -27,7 +27,7 @@ pub(super) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
     let reservation_result = runtime
         .stores()
         .task_reservations()
-        .list_active(&workspace_orbit_dir(runtime), workspace_id.as_deref())?;
+        .list_active_task_reservations(&workspace_orbit_dir(runtime), workspace_id.as_deref())?;
     emit_expired_reservation_events(runtime, &reservation_result.expired_reservations)?;
 
     let mut tasks: Vec<_> = runtime
@@ -95,7 +95,7 @@ pub(super) fn release(
     let result = runtime
         .stores()
         .task_reservations()
-        .release(TaskReservationReleaseParams {
+        .release_task_reservation(TaskReservationReleaseParams {
             workspace_orbit_dir: workspace_orbit_dir(runtime),
             workspace_id: workspace_task_reservation_id(runtime)?,
             reservation_id: reservation_id.clone(),
@@ -193,7 +193,7 @@ pub(super) fn reserve(
         runtime
             .stores()
             .task_reservations()
-            .reserve(TaskReservationReserveParams {
+            .reserve_task_reservation(TaskReservationReserveParams {
                 workspace_orbit_dir: workspace_orbit_dir(runtime),
                 workspace_id: workspace_id.clone(),
                 task_ids: task_ids.clone(),
@@ -211,7 +211,7 @@ pub(super) fn reserve(
         let check = runtime
             .stores()
             .task_reservations()
-            .check(TaskReservationCheckParams {
+            .check_task_reservation_conflicts(TaskReservationCheckParams {
                 workspace_orbit_dir: workspace_orbit_dir(runtime),
                 workspace_id: workspace_id.clone(),
                 requested_files: requested_files.clone(),
@@ -379,7 +379,7 @@ pub(crate) fn requested_task_files(
     runtime: &OrbitRuntime,
     task_ids: &[String],
 ) -> Result<Vec<String>, OrbitError> {
-    let tasks = runtime.stores().tasks().list()?;
+    let tasks = runtime.stores().tasks().list_tasks()?;
     let task_map = tasks
         .into_iter()
         .map(|task| (task.id.clone(), task))
@@ -410,7 +410,7 @@ pub(crate) fn task_lock_conflicts(
     let mut tasks: Vec<Task> = runtime
         .stores()
         .tasks()
-        .list()?
+        .list_tasks()?
         .into_iter()
         .filter(|task| {
             matches!(task.status, TaskStatus::InProgress | TaskStatus::Review)

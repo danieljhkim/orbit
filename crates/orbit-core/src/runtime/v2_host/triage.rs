@@ -202,7 +202,7 @@ pub(super) fn list_triage_candidates(
     let mut blocked: Vec<Task> = runtime
         .stores()
         .tasks()
-        .list()
+        .list_tasks()
         .map_err(|error| action_failed(action, format!("list tasks: {error}")))?
         .into_iter()
         .filter(|task| task.status == TaskStatus::Blocked)

@@ -291,7 +291,7 @@ fn global_search_status_filter_applies_per_kind_tokens() {
     runtime
         .stores()
         .adrs()
-        .update_status(&accepted_adr, AdrStatus::Accepted)
+        .update_adr_status(&accepted_adr, AdrStatus::Accepted)
         .expect("accept adr");
 
     let response = runtime

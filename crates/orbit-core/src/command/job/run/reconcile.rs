@@ -48,7 +48,7 @@ impl OrbitRuntime {
         Ok(self
             .stores()
             .jobs()
-            .list_all_pending_or_running()?
+            .list_all_pending_or_running_runs()?
             .into_iter()
             .filter(|run| run.state == JobRunState::Running && running_run_owner_is_stale(run))
             .collect())
@@ -61,7 +61,7 @@ impl OrbitRuntime {
         Ok(self
             .stores()
             .jobs()
-            .list_all_pending_or_running()?
+            .list_all_pending_or_running_runs()?
             .into_iter()
             .filter(|run| pending_run_stale_reason(run).is_some())
             .collect())
@@ -72,9 +72,11 @@ impl OrbitRuntime {
         job_id: Option<&str>,
     ) -> Result<usize, OrbitError> {
         let runs = if let Some(job_id) = job_id {
-            self.stores().jobs().list_pending_or_running(job_id)?
+            self.stores()
+                .jobs()
+                .list_pending_or_running_job_runs(job_id)?
         } else {
-            self.stores().jobs().list_all_pending_or_running()?
+            self.stores().jobs().list_all_pending_or_running_runs()?
         };
 
         let mut reconciled = 0usize;
@@ -188,7 +190,7 @@ impl OrbitRuntime {
         });
         self.stores()
             .jobs()
-            .repair_terminal_run_timing(&run.run_id, finished_at, duration_ms)
+            .repair_terminal_job_run_timing(&run.run_id, finished_at, duration_ms)
     }
 
     fn run_finished_at_from_audit(

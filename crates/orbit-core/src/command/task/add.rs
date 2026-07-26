@@ -74,7 +74,7 @@ impl OrbitRuntime {
             prune_missing_context_files(&prune_root, normalized_context_files);
 
         let task = self.with_mutation(|| {
-            let task = self.stores().tasks().create(StoreTaskCreateParams {
+            let task = self.stores().task_records().create(StoreTaskCreateParams {
                 actor: create_label.clone(),
                 parent_id: params.parent_id.clone(),
                 title: params.title.clone(),
@@ -111,7 +111,7 @@ impl OrbitRuntime {
         let task = if dropped_context_files.is_empty() {
             task
         } else {
-            self.stores().tasks().update(
+            self.stores().task_records().update(
                 &task.id,
                 TaskRecordUpdateParams {
                     actor: create_label.clone(),

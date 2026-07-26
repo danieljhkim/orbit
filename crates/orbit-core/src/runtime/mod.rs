@@ -21,8 +21,8 @@ pub mod pipeline;
 mod resolve;
 pub mod run_audit;
 pub(crate) mod run_input;
-mod store_delegates;
 mod task_block_on_run_failure;
+mod task_records;
 mod task_reservation_cleanup;
 mod v2_host;
 
@@ -58,7 +58,7 @@ pub use resolve::{
 // `pub` for the runtime-less `orbit migrate --dry-run` inspection that moved
 // to `orbit-cmd` [ORB-10016].
 pub use resolve::{resolve_global_root, try_resolve_initialized_roots};
-pub(crate) use store_delegates::TaskRecordUpdateParams;
+pub(crate) use task_records::TaskRecordUpdateParams;
 
 #[derive(Clone)]
 pub struct OrbitRuntime {
@@ -643,39 +643,39 @@ impl OrbitRuntime {
     }
 
     pub fn list_executor_defs(&self) -> Result<Vec<orbit_common::types::ExecutorDef>, OrbitError> {
-        self.stores().executors().list()
+        self.stores().executors().list_executor_defs()
     }
 
     pub fn get_executor_def(
         &self,
         name: &str,
     ) -> Result<Option<orbit_common::types::ExecutorDef>, OrbitError> {
-        self.stores().executors().get(name)
+        self.stores().executors().get_executor_def(name)
     }
 
     pub fn upsert_executor_def(
         &self,
         def: &orbit_common::types::ExecutorDef,
     ) -> Result<(), OrbitError> {
-        self.stores().executors().upsert(def)
+        self.stores().executors().upsert_executor_def(def)
     }
 
     pub fn list_policy_defs(&self) -> Result<Vec<orbit_common::types::PolicyDef>, OrbitError> {
-        self.stores().policies().list()
+        self.stores().policies().list_policy_defs()
     }
 
     pub fn get_policy_def(
         &self,
         name: &str,
     ) -> Result<Option<orbit_common::types::PolicyDef>, OrbitError> {
-        self.stores().policies().get(name)
+        self.stores().policies().get_policy_def(name)
     }
 
     pub fn upsert_policy_def(
         &self,
         def: &orbit_common::types::PolicyDef,
     ) -> Result<(), OrbitError> {
-        self.stores().policies().upsert(def)
+        self.stores().policies().upsert_policy_def(def)
     }
 }
 
@@ -688,7 +688,7 @@ fn build_activity_executor_registry(
     context: &OrbitContext,
 ) -> Result<Arc<ActivityExecutorRegistry>, OrbitError> {
     let mut registry = ActivityExecutorRegistry::with_builtins();
-    let defs = context.stores().executors().list()?;
+    let defs = context.stores().executors().list_executor_defs()?;
     registry.load_from_defs(&defs);
     Ok(Arc::new(registry))
 }

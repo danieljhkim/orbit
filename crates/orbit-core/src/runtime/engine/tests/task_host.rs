@@ -63,7 +63,7 @@ fn insert_run_with_resolved_crew(runtime: &OrbitRuntime, job_id: &str, input: Va
     let run = runtime
         .stores()
         .jobs()
-        .insert_run(job_id, 1, Utc::now(), Some(input.clone()), None)
+        .insert_job_run(job_id, 1, Utc::now(), Some(input.clone()), None)
         .expect("insert job run");
     runtime
         .record_run_crew_from_input(&run.run_id, &input)

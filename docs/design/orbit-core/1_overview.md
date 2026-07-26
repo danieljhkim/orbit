@@ -1,7 +1,7 @@
 ---
 title: Orbit Core — Overview
 owner: claude
-last_updated: 2026-07-04
+last_updated: 2026-07-25
 status: Accepted
 feature: orbit-core
 doc_role: overview
@@ -57,9 +57,27 @@ demonstrably import.
 | Extracted command layer | `crates/orbit-cmd/src/` | [ORB-10016] |
 | Crate-boundary ADR log | [4_decisions.md](./4_decisions.md) | [ORB-10016] |
 
+## 4. Store Access Boundary
+
+[ORB-10355] removed orbit-core's hand-written per-domain store forwarding
+layer. `OrbitStores` now exposes each typed `orbit-store` backend directly, so
+adding a method to a backend trait makes it available to core callers without
+adding a matching forwarding method. Callers use the backend's canonical
+method names, which also keeps the persistence contract searchable from the
+call site.
+
+Direct exposure was chosen over macro-generated forwarders because a macro
+would still maintain a second method inventory in orbit-core and could drift
+from the owning trait. The only retained service is task-record mutation:
+creating, updating, and deleting a task coordinates multiple task backends
+with semantic-index side effects, so those operations are orchestration rather
+than pure delegation. Read-only task access goes directly to the relevant
+typed backend like every other domain.
+
 ## Task References
 
 - [ORB-10012] — introduced the versioned workspace-layout migration pre-flight the runtime open runs.
 - [ORB-10016] — extracted `orbit-cmd` from orbit-core and trimmed the root re-export surface.
+- [ORB-10355] — removed the hand-maintained store delegation layer in favor of direct typed backend access.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

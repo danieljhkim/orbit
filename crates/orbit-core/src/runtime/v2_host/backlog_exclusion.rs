@@ -128,7 +128,7 @@ pub(super) fn list_backlog_tasks(
         })
         .unwrap_or_default();
     let (mut tasks, excluded_entries) = if explicit_task_ids.is_empty() {
-        let all_tasks = runtime.stores().tasks().list().map_err(|err| {
+        let all_tasks = runtime.stores().tasks().list_tasks().map_err(|err| {
             DispatchError::DeterministicActionFailed {
                 action: action.to_string(),
                 message: format!("list tasks: {err}"),

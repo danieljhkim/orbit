@@ -97,7 +97,7 @@ impl OrbitRuntime {
                 run_id
             )));
         }
-        let job_id = self.stores().jobs().archive_run(run_id)?;
+        let job_id = self.stores().jobs().archive_job_run(run_id)?;
         self.record_event(OrbitEvent::JobRunArchived {
             job_id,
             run_id: run_id.to_string(),
@@ -116,7 +116,7 @@ impl OrbitRuntime {
                 run_id
             )));
         }
-        let job_id = self.stores().jobs().delete_run(run_id)?;
+        let job_id = self.stores().jobs().delete_job_run(run_id)?;
         self.record_event(OrbitEvent::JobRunDeleted {
             job_id,
             run_id: run_id.to_string(),

@@ -710,7 +710,7 @@ mod tests {
         let first = runtime
             .stores()
             .jobs()
-            .insert_run(
+            .insert_job_run(
                 "task_review_pipeline",
                 1,
                 chrono::Utc::now(),
@@ -734,7 +734,7 @@ mod tests {
         runtime
             .stores()
             .jobs()
-            .insert_run(
+            .insert_job_run(
                 "task_review_pipeline",
                 1,
                 chrono::Utc::now(),

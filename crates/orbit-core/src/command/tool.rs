@@ -709,7 +709,7 @@ fn read_input_identity(input: &Value) -> (Option<String>, Option<String>) {
 impl OrbitRuntime {
     /// Return runtime-enabled MCP definitions with schema and policy still paired.
     pub fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
-        let stored_tools = self.stores().tools().list()?;
+        let stored_tools = self.stores().tools().list_tools()?;
         let mut definitions = self
             .tool_registry()
             .mcp_tool_definitions()
@@ -740,7 +740,7 @@ impl OrbitRuntime {
         } else {
             self.tool_registry().schemas()
         };
-        let stored_tools = self.stores().tools().list()?;
+        let stored_tools = self.stores().tools().list_tools()?;
 
         let mut tools: Vec<ToolInfo> = registry_schemas
             .into_iter()
@@ -783,7 +783,7 @@ impl OrbitRuntime {
             .get_schema(name)
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Tool, name.to_string()))?;
 
-        let stored = self.stores().tools().get(name)?;
+        let stored = self.stores().tools().get_tool(name)?;
         let enabled = stored.is_none_or(|s| s.enabled);
         let active = self.tool_registry().is_active(&schema.name);
 
@@ -829,7 +829,7 @@ impl OrbitRuntime {
         };
 
         self.with_mutation(|| {
-            self.stores().tools().insert(&tool)?;
+            self.stores().tools().insert_tool(&tool)?;
             Ok((
                 (),
                 OrbitEvent::ToolAdded {
@@ -849,7 +849,7 @@ impl OrbitRuntime {
         }
 
         self.with_mutation(|| {
-            let deleted = self.stores().tools().delete(name)?;
+            let deleted = self.stores().tools().delete_tool(name)?;
             if !deleted {
                 return Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()));
             }
@@ -886,7 +886,7 @@ impl OrbitRuntime {
             }
 
             if !tool.builtin
-                && let Some(stored) = self.stores().tools().get(&tool.name)?
+                && let Some(stored) = self.stores().tools().get_tool(&tool.name)?
                 && !stored.path.is_empty()
             {
                 let path = std::path::Path::new(&stored.path);
@@ -935,7 +935,7 @@ impl OrbitRuntime {
             return Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()));
         }
 
-        let existing = self.stores().tools().get(name)?;
+        let existing = self.stores().tools().get_tool(name)?;
         if existing.is_none() {
             let schema = self
                 .tool_registry()
@@ -950,7 +950,7 @@ impl OrbitRuntime {
                 parameters: schema.parameters.clone(),
             };
             return self.with_mutation(|| {
-                self.stores().tools().insert(&tool)?;
+                self.stores().tools().insert_tool(&tool)?;
                 let event = if enabled {
                     OrbitEvent::ToolEnabled {
                         name: name.to_string(),
@@ -965,7 +965,7 @@ impl OrbitRuntime {
         }
 
         self.with_mutation(|| {
-            self.stores().tools().set_enabled(name, enabled)?;
+            self.stores().tools().set_tool_enabled(name, enabled)?;
             let event = if enabled {
                 OrbitEvent::ToolEnabled {
                     name: name.to_string(),

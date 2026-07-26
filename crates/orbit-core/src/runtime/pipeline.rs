@@ -158,7 +158,7 @@ impl OrbitRuntime {
     }
 
     fn check_tool_enabled(&self, name: &str) -> Result<(), OrbitError> {
-        if let Some(stored) = self.stores().tools().get(name)?
+        if let Some(stored) = self.stores().tools().get_tool(name)?
             && !stored.enabled
         {
             return Err(OrbitError::Execution(format!(
@@ -185,7 +185,7 @@ fn resolve_task_id_from_context(
         return Ok(None);
     }
 
-    let tasks = runtime.stores().tasks().list()?;
+    let tasks = runtime.stores().tasks().list_tasks()?;
     Ok(tasks.into_iter().next().map(|task| task.id))
 }
 

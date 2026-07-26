@@ -580,7 +580,7 @@ impl OrbitRuntime {
 
         let Some(query) = query else {
             let mut out = Vec::new();
-            for adr in self.stores().adrs().list()? {
+            for adr in self.stores().adrs().list_adrs()? {
                 if !statuses.contains(&adr.status) {
                     continue;
                 }
@@ -678,7 +678,7 @@ impl OrbitRuntime {
         let path = scope.params.path.as_deref();
         let mut candidates = lexical_adrs;
         for hit in semantic {
-            let adr = match self.stores().adrs().get(&hit.source_id) {
+            let adr = match self.stores().adrs().get_adr(&hit.source_id) {
                 Ok(Some(adr)) => adr,
                 Ok(None) | Err(_) => continue,
             };

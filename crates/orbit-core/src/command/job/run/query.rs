@@ -63,17 +63,17 @@ impl OrbitRuntime {
     // but to avoid dup, some private backends are here; reconcile has list_reconciled etc.
 
     pub(super) fn list_job_history_backend(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
-        self.stores().jobs().list_runs(job_id)
+        self.stores().jobs().list_job_runs(job_id)
     }
 
     pub(super) fn list_job_runs_filtered_backend(
         &self,
         query: &JobRunQuery,
     ) -> Result<Vec<JobRun>, OrbitError> {
-        self.stores().jobs().list_runs_filtered(query)
+        self.stores().jobs().list_job_runs_filtered(query)
     }
 
     pub(crate) fn get_job_run_backend(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError> {
-        self.stores().jobs().get_run(run_id)
+        self.stores().jobs().get_job_run(run_id)
     }
 }

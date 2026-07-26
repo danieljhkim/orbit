@@ -86,12 +86,12 @@ fn cancel_job_run_rejects_terminal_run_without_mutating_bundle() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, started_at, std::process::id())
+        .mark_job_run_running(&run.run_id, started_at, std::process::id())
         .expect("mark running");
     runtime
         .stores()
         .jobs()
-        .finalize_run(&run.run_id, JobRunState::Success, finished_at, Some(2_000))
+        .finalize_job_run(&run.run_id, JobRunState::Success, finished_at, Some(2_000))
         .expect("finalize success");
     let before = runtime.show_job_run(&run.run_id).expect("show before");
 
@@ -156,7 +156,7 @@ fn cancel_job_run_does_not_signal_reused_pid_identity_mismatch() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, started_at, sentinel_pid)
+        .mark_job_run_running(&run.run_id, started_at, sentinel_pid)
         .expect("mark running");
     // Versioned token guarantees we exercise the strict `Mismatch`
     // classification path; legacy unversioned tokens may flow through the
@@ -225,7 +225,7 @@ fn cancel_job_run_terminates_owner_process_group_and_child() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, Utc::now(), owner_pid)
+        .mark_job_run_running(&run.run_id, Utc::now(), owner_pid)
         .expect("mark running");
 
     let result = runtime.cancel_job_run(&run.run_id).expect("cancel run");

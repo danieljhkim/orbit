@@ -206,7 +206,7 @@ impl OrbitRuntime {
             }
 
             let submitted_at = Utc::now();
-            let run = self.stores().jobs().insert_run(
+            let run = self.stores().jobs().insert_job_run(
                 job_name,
                 1,
                 submitted_at,
@@ -220,7 +220,10 @@ impl OrbitRuntime {
                 .write_run_state(&run.run_id, &initial_state)?;
 
             self.reconcile_stale_job_runs(Some(job_name))?;
-            let active_runs = self.stores().jobs().list_pending_or_running(job_name)?;
+            let active_runs = self
+                .stores()
+                .jobs()
+                .list_pending_or_running_job_runs(job_name)?;
             let queued = !pipeline_run_is_runnable(&active_runs, &run.run_id, spec.max_active_runs);
 
             if let Err(error) = self.spawn_pipeline_worker(&run.run_id, actor) {
@@ -321,7 +324,7 @@ impl OrbitRuntime {
         if let Err(error) = self
             .stores()
             .jobs()
-            .claim_pending_run_owner(run_id, std::process::id())
+            .claim_pending_job_run_owner(run_id, std::process::id())
         {
             tracing::warn!(
                 target: "orbit.core.job_run",
@@ -359,7 +362,10 @@ impl OrbitRuntime {
             }
 
             self.reconcile_stale_job_runs(Some(&run.job_id))?;
-            let active_runs = self.stores().jobs().list_pending_or_running(&run.job_id)?;
+            let active_runs = self
+                .stores()
+                .jobs()
+                .list_pending_or_running_job_runs(&run.job_id)?;
             if !pipeline_run_is_runnable(&active_runs, &run.run_id, spec.max_active_runs) {
                 thread::sleep(Duration::from_secs(PIPELINE_WAIT_MIN_POLL_SECONDS));
                 continue;
@@ -386,10 +392,11 @@ impl OrbitRuntime {
 
     fn execute_pipeline_run_now(&self, run: &JobRun, yaml_path: &Path) -> Result<(), OrbitError> {
         let started_at = Utc::now();
-        let changed =
-            self.stores()
-                .jobs()
-                .mark_run_running(&run.run_id, started_at, std::process::id())?;
+        let changed = self.stores().jobs().mark_job_run_running(
+            &run.run_id,
+            started_at,
+            std::process::id(),
+        )?;
         if !changed {
             return Ok(());
         }
@@ -538,7 +545,7 @@ impl OrbitRuntime {
         let _ = self
             .stores()
             .jobs()
-            .complete_run_step(&run.run_id, &params)?;
+            .complete_job_run_step(&run.run_id, &params)?;
         Ok(())
     }
 
