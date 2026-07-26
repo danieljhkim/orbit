@@ -4,14 +4,16 @@ use orbit_common::types::{OrbitError, Role};
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
-use crate::context::{RuntimeHost, TaskHost};
+use crate::context::{DeterministicActionHost, TaskHost};
 
 use super::super::input::{canonicalize_existing_dir, input_string_field, required_job_run_id};
 use super::freshness::{commit_sha, remote_branch_sha};
 use super::git::{git_command_success, git_output, git_success};
 use super::handoff::{FailedHandoffPhase, load_handoff_context, record_failed_handoff};
 
-pub(in crate::executor::automation) fn push_batch_changes<H: RuntimeHost + TaskHost + ?Sized>(
+pub(in crate::executor::automation) fn push_batch_changes<
+    H: DeterministicActionHost + TaskHost + ?Sized,
+>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -37,7 +39,7 @@ pub(in crate::executor::automation) fn push_batch_changes<H: RuntimeHost + TaskH
     }
 }
 
-pub(super) fn push_batch_changes_inner<H: RuntimeHost + ?Sized>(
+pub(super) fn push_batch_changes_inner<H: DeterministicActionHost + ?Sized>(
     host: &H,
     input: &Value,
     workspace_path: &Path,
@@ -106,7 +108,7 @@ pub(super) fn push_batch_changes_inner<H: RuntimeHost + ?Sized>(
     ))
 }
 
-fn resolve_workspace_path<H: RuntimeHost + ?Sized>(
+fn resolve_workspace_path<H: DeterministicActionHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<PathBuf, OrbitError> {

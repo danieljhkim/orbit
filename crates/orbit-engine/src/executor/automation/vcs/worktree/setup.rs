@@ -4,7 +4,9 @@ use orbit_common::types::OrbitError;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost, ensure_task_can_enter_workflow};
+use crate::context::{
+    DeterministicActionHost, TaskAutomationUpdate, TaskHost, ensure_task_can_enter_workflow,
+};
 use crate::executor::automation::input::input_string_field;
 
 use super::super::git::{
@@ -21,7 +23,9 @@ const DEFAULT_BASE: &str = "main";
 ///
 /// Generic automation — not tied to duel or any specific workflow. Any
 /// pipeline can reuse this by passing a `branch_prefix`.
-pub(in crate::executor::automation) fn setup_worktree<H: RuntimeHost + TaskHost + ?Sized>(
+pub(in crate::executor::automation) fn setup_worktree<
+    H: DeterministicActionHost + TaskHost + ?Sized,
+>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {

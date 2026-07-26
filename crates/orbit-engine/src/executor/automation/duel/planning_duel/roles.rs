@@ -8,7 +8,7 @@ use orbit_common::types::{
 };
 use serde_json::{Value, json};
 
-use crate::context::RuntimeHost;
+use crate::context::DeterministicActionHost;
 
 use crate::executor::automation::input::{input_string_field, required_input_string};
 
@@ -22,7 +22,9 @@ thread_local! {
         const { RefCell::new(VecDeque::new()) };
 }
 
-fn next_permutation<H: RuntimeHost + ?Sized>(host: &H) -> Result<[usize; 3], OrbitError> {
+fn next_permutation<H: DeterministicActionHost + ?Sized>(
+    host: &H,
+) -> Result<[usize; 3], OrbitError> {
     let family_count = host.duel_candidate_families().len();
     let from_test = TEST_PERMUTATION_QUEUE.with(|cell| cell.borrow_mut().pop_front());
     if let Some(perm) = from_test {
@@ -36,7 +38,7 @@ fn next_permutation<H: RuntimeHost + ?Sized>(host: &H) -> Result<[usize; 3], Orb
     role_permutation_at(family_count, nanos as usize)
 }
 
-fn orchestrator_model_for<H: RuntimeHost + ?Sized>(
+fn orchestrator_model_for<H: DeterministicActionHost + ?Sized>(
     host: &H,
     family: &str,
 ) -> Result<String, OrbitError> {
@@ -52,7 +54,7 @@ fn orchestrator_model_for<H: RuntimeHost + ?Sized>(
         })
 }
 
-fn build_role_assignment<H: RuntimeHost + ?Sized>(
+fn build_role_assignment<H: DeterministicActionHost + ?Sized>(
     host: &H,
     family: &str,
 ) -> Result<PlanningRoleAssignment, OrbitError> {
@@ -63,7 +65,7 @@ fn build_role_assignment<H: RuntimeHost + ?Sized>(
 }
 
 // pub(crate) widened for tests/ layout under ORB-00225; test reaches via exposed surface.
-pub(crate) fn build_roles_output<H: RuntimeHost + ?Sized>(
+pub(crate) fn build_roles_output<H: DeterministicActionHost + ?Sized>(
     host: &H,
     perm: [usize; 3],
 ) -> Result<Value, OrbitError> {
@@ -106,7 +108,7 @@ pub(super) fn parse_planning_duel_roles(input: &Value) -> Result<PlanningRoles, 
     .map_err(|err| OrbitError::InvalidInput(format!("invalid planning_duel_roles payload: {err}")))
 }
 
-pub(super) fn select_planning_duel_roles<H: RuntimeHost + ?Sized>(
+pub(super) fn select_planning_duel_roles<H: DeterministicActionHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {

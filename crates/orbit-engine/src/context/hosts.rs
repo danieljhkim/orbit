@@ -224,7 +224,7 @@ pub trait EnvironmentHost {
     }
 }
 
-pub trait RuntimeHost {
+pub trait DeterministicActionHost {
     fn record_event(&self, event: OrbitEvent) -> Result<(), OrbitError>;
     fn repo_root(&self) -> Result<String, OrbitError>;
     fn list_job_runs_for_gc(&self) -> Result<Vec<JobRun>, OrbitError> {

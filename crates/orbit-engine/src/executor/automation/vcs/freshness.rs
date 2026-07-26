@@ -3,7 +3,7 @@ use std::path::Path;
 use orbit_common::types::OrbitError;
 use serde_json::{Value, json};
 
-use crate::context::{RuntimeHost, TaskHost};
+use crate::context::{DeterministicActionHost, TaskHost};
 
 use super::super::input::{input_string_field, required_input_string};
 use super::git::{BaseSyncMode, git_command_success, git_output, resolve_worktree_start_point};
@@ -19,7 +19,9 @@ pub(super) struct BranchFreshness {
     pub(super) commits_ahead: u64,
 }
 
-pub(in crate::executor::automation) fn prepare_pr_handoff<H: RuntimeHost + TaskHost + ?Sized>(
+pub(in crate::executor::automation) fn prepare_pr_handoff<
+    H: DeterministicActionHost + TaskHost + ?Sized,
+>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -88,7 +90,9 @@ fn prepare_error(error: OrbitError) -> (FailedHandoffPhase, OrbitError) {
     (FailedHandoffPhase::Prepare, error)
 }
 
-pub(in crate::executor::automation) fn rebase_pr_branch<H: RuntimeHost + TaskHost + ?Sized>(
+pub(in crate::executor::automation) fn rebase_pr_branch<
+    H: DeterministicActionHost + TaskHost + ?Sized,
+>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {

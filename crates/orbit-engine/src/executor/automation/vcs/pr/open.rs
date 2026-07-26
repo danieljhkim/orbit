@@ -2,7 +2,7 @@ use orbit_common::types::{OrbitError, Role};
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
-use crate::context::{RuntimeHost, TaskHost};
+use crate::context::{DeterministicActionHost, TaskHost};
 
 use super::super::super::input::{
     input_string_field, json_number_to_string, required_input_string,
@@ -14,7 +14,9 @@ use super::super::handoff::{
 };
 use super::body::{build_batch_pr_body, default_pr_title};
 
-pub(in crate::executor::automation) fn pr_open<H: RuntimeHost + TaskHost + Sync + ?Sized>(
+pub(in crate::executor::automation) fn pr_open<
+    H: DeterministicActionHost + TaskHost + Sync + ?Sized,
+>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -28,7 +30,7 @@ pub(in crate::executor::automation) fn pr_open<H: RuntimeHost + TaskHost + Sync 
     }
 }
 
-fn open_or_reuse_pr<H: RuntimeHost + TaskHost + ?Sized>(
+fn open_or_reuse_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
     host: &H,
     input: &Value,
     context: &HandoffContext,
@@ -156,7 +158,9 @@ fn open_or_reuse_pr<H: RuntimeHost + TaskHost + ?Sized>(
 /// Create or reuse a PR for an already-pushed recovery branch without the
 /// normal freshness/success gate. The caller owns candidate validation and
 /// must block, never promote, the associated task.
-pub(in crate::executor::automation::vcs) fn open_or_reuse_unchecked<H: RuntimeHost + ?Sized>(
+pub(in crate::executor::automation::vcs) fn open_or_reuse_unchecked<
+    H: DeterministicActionHost + ?Sized,
+>(
     host: &H,
     workspace_path: &std::path::Path,
     head: &str,
@@ -199,7 +203,7 @@ fn invalid_prepare(error: OrbitError) -> (FailedHandoffPhase, OrbitError) {
     (FailedHandoffPhase::PrLookup, error)
 }
 
-fn view_pr<H: RuntimeHost + ?Sized>(
+fn view_pr<H: DeterministicActionHost + ?Sized>(
     host: &H,
     selector: &str,
     tool_context: ToolContext,
@@ -228,7 +232,7 @@ fn view_pr<H: RuntimeHost + ?Sized>(
     Ok((pr_number, pr_url))
 }
 
-fn find_pr_by_head<H: RuntimeHost + ?Sized>(
+fn find_pr_by_head<H: DeterministicActionHost + ?Sized>(
     host: &H,
     head: &str,
     tool_context: ToolContext,

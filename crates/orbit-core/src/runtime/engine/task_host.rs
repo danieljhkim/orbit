@@ -3,7 +3,7 @@ use orbit_common::types::{
     TaskStatus, push_external_ref_if_missing,
 };
 use orbit_engine::{
-    RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
+    DeterministicActionHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
 };
 
 use crate::OrbitRuntime;
@@ -91,7 +91,7 @@ impl TaskWriteHost for OrbitRuntime {
         }
         let (agent, model) = self
             .try_canonical_agent_model_identity(update.agent.as_deref(), update.model.as_deref())?;
-        let runtime_model_identity = <Self as RuntimeHost>::actor_model_identity(self);
+        let runtime_model_identity = <Self as DeterministicActionHost>::actor_model_identity(self);
         let attribution = assemble_task_attribution(
             &existing_task,
             TaskAttributionInput {

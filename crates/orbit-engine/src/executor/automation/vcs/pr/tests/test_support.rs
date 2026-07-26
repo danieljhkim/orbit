@@ -15,7 +15,8 @@ use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
 
 use crate::context::{
-    PrConfig, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
+    DeterministicActionHost, PrConfig, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost,
+    TaskWriteHost,
 };
 
 use super::super::super::freshness::BranchFreshness;
@@ -263,7 +264,7 @@ impl TaskWriteHost for PrOpenTestHost {
     }
 }
 
-impl RuntimeHost for PrOpenTestHost {
+impl DeterministicActionHost for PrOpenTestHost {
     fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
         Ok(())
     }

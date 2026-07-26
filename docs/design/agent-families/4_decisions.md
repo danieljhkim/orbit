@@ -51,7 +51,7 @@ See full ADR-0151 for context, alternatives considered, and cost analysis.
 
 **Context.** Duel-plan previously walked the full `all_agent_families()` registry and used the same model-pair resolution chain as non-duel callers. That made local CLI availability load-bearing for every supported family and made reproducible planning-duel scoreboards depend on executor YAML state.
 
-**Decision.** Add a workspace `[duel]` section with `candidates` as a normalized subset of `all_agent_families()` and `[duel.models]` as flat orchestrator-only per-family overrides. Duel role selection reads those values through `RuntimeHost`; non-duel callers continue to use executor overrides and builtin model pairs.
+**Decision.** Add a workspace `[duel]` section with `candidates` as a normalized subset of `all_agent_families()` and `[duel.models]` as flat orchestrator-only per-family overrides. Duel role selection reads those values through `DeterministicActionHost`; non-duel callers continue to use executor overrides and builtin model pairs.
 
 **Consequences.**
 - Duel permutations remain dynamic but require at least three distinct configured families.

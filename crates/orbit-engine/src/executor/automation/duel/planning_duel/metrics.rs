@@ -5,7 +5,7 @@ use orbit_common::types::{
 use orbit_store::{InvocationQuery, InvocationRecord, planning_duel_scoreboard};
 use serde_json::{Value, json};
 
-use crate::context::{ActivityInvocationResult, RuntimeHost, TaskHost};
+use crate::context::{ActivityInvocationResult, DeterministicActionHost, TaskHost};
 use crate::executor::automation::input::{input_string_field, required_input_string};
 
 use super::artifacts::{
@@ -46,7 +46,7 @@ pub(super) fn aggregate_token_usage(records: &[InvocationRecord]) -> TokenUsage 
         })
 }
 
-fn token_usage_from_run_telemetry<H: RuntimeHost + ?Sized>(
+fn token_usage_from_run_telemetry<H: DeterministicActionHost + ?Sized>(
     host: &H,
     job_run_id: &str,
     task_id: &str,
@@ -84,7 +84,7 @@ pub(super) fn role_metrics_from_invocation(
     }
 }
 
-pub(super) fn record_planning_duel_scores<H: RuntimeHost + TaskHost + ?Sized>(
+pub(super) fn record_planning_duel_scores<H: DeterministicActionHost + TaskHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {

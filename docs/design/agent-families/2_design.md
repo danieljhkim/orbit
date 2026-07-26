@@ -58,7 +58,7 @@ The duel model precedence is:
 2. `.orbit/executors/<family>.yaml::model_pair_override`
 3. `resolve_agent_model_pair()` builtin defaults
 
-This precedence is scoped to duel role selection through `RuntimeHost::duel_orchestrator_model`; non-duel model identity, envelope rendering, review sync, and task-review scoring continue to start at executor overrides and builtin defaults.
+This precedence is scoped to duel role selection through `DeterministicActionHost::duel_orchestrator_model`; non-duel model identity, envelope rendering, review sync, and task-review scoring continue to start at executor overrides and builtin defaults.
 
 ## 6. Concerns & Honest Limitations
 

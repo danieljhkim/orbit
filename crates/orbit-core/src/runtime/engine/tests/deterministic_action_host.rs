@@ -1,11 +1,12 @@
-//! Sibling tests for `runtime_host.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
+//! Sibling tests for `deterministic_action_host.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
 
 use std::collections::HashMap;
 
 use chrono::Utc;
 use orbit_common::types::{ExecutorDef, ExecutorType};
 use orbit_engine::{
-    RuntimeHost, V2AgentDispatchOverride, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity,
+    DeterministicActionHost, V2AgentDispatchOverride, V2DispatchInput, V2RuntimeHost,
+    dispatch_v2_activity,
 };
 use orbit_store::InvocationQuery;
 use serde_json::json;
@@ -76,7 +77,8 @@ fn planning_duel_v2_dispatch_preserves_slot_model_and_task_attribution() {
     }
 
     let run_id = "planning-duel-v2-test";
-    let audit = RuntimeHost::v2_audit_writer(&runtime, run_id).expect("v2 audit writer");
+    let audit =
+        DeterministicActionHost::v2_audit_writer(&runtime, run_id).expect("v2 audit writer");
     for (activity_name, slot, provider, model) in [
         (
             "propose_duel_plan",
@@ -97,8 +99,8 @@ fn planning_duel_v2_dispatch_preserves_slot_model_and_task_attribution() {
             "duel-arbiter-model",
         ),
     ] {
-        let activity =
-            RuntimeHost::v2_activity(&runtime, activity_name).expect("load seeded duel activity");
+        let activity = DeterministicActionHost::v2_activity(&runtime, activity_name)
+            .expect("load seeded duel activity");
         let input = json!({
             "task_id": task.id,
             "planning_duel_slot": slot,

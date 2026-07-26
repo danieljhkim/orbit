@@ -9,7 +9,7 @@ use orbit_common::types::{
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
-use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
+use crate::context::{DeterministicActionHost, TaskAutomationUpdate, TaskHost};
 use crate::executor::automation::input::required_input_string;
 
 use super::context_files::extract_context_files_from_plan;
@@ -535,7 +535,9 @@ fn find_task_dir(tasks_root: &Path, task_id: &str) -> Result<Option<PathBuf>, Or
     }
 }
 
-pub(super) fn cleanup_stale_planning_duel_artifacts<H: RuntimeHost + TaskHost + ?Sized>(
+pub(super) fn cleanup_stale_planning_duel_artifacts<
+    H: DeterministicActionHost + TaskHost + ?Sized,
+>(
     host: &H,
     task_id: &str,
 ) -> Result<(), OrbitError> {
@@ -581,7 +583,7 @@ pub(super) fn cleanup_stale_planning_duel_artifacts<H: RuntimeHost + TaskHost + 
     Ok(())
 }
 
-pub(super) fn writeback_planning_duel_task<H: TaskHost + RuntimeHost + ?Sized>(
+pub(super) fn writeback_planning_duel_task<H: TaskHost + DeterministicActionHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {

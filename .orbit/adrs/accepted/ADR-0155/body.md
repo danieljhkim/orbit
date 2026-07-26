@@ -4,7 +4,7 @@ Duel-plan previously walked the full `all_agent_families()` registry and used th
 
 ## Decision
 
-Add a workspace `[duel]` section with `candidates` as a normalized subset of `all_agent_families()` and `[duel.models]` as flat orchestrator-only per-family overrides. Duel role selection reads those values through `RuntimeHost`; non-duel callers continue to use executor overrides and builtin model pairs.
+Add a workspace `[duel]` section with `candidates` as a normalized subset of `all_agent_families()` and `[duel.models]` as flat orchestrator-only per-family overrides. Duel role selection reads those values through `DeterministicActionHost`; non-duel callers continue to use executor overrides and builtin model pairs.
 
 ## Consequences
 
