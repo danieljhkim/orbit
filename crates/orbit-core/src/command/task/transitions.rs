@@ -180,17 +180,6 @@ impl OrbitRuntime {
         )
     }
 
-    pub fn start_task_with_identity(
-        &self,
-        id: &str,
-        note: Option<String>,
-        comment: Option<String>,
-        agent: Option<String>,
-        model: Option<String>,
-    ) -> Result<Task, OrbitError> {
-        self.start_task_with_identity_and_crew(id, note, comment, agent, model, None)
-    }
-
     pub fn start_task_with_identity_and_crew(
         &self,
         id: &str,

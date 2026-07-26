@@ -202,43 +202,6 @@ pub struct WorkflowInput {
     pub pr_number: Option<String>,
 }
 
-pub fn validate_workflow_flags(
-    workflow: &Workflow,
-    input: &WorkflowInput,
-) -> Result<(), OrbitError> {
-    if !workflow.supports_tasks && input.tasks.is_some() {
-        return Err(OrbitError::InvalidInput(format!(
-            "explicit task selection is not supported by workflow '{}'",
-            workflow.alias
-        )));
-    }
-    if !workflow.supports_parallelism && input.parallelism.is_some() {
-        return Err(OrbitError::InvalidInput(format!(
-            "--parallelism is not supported by workflow '{}'",
-            workflow.alias
-        )));
-    }
-    if !workflow.supports_base && input.base.is_some() {
-        return Err(OrbitError::InvalidInput(format!(
-            "--base is not supported by workflow '{}'",
-            workflow.alias
-        )));
-    }
-    if !workflow.supports_pr_number && input.pr_number.is_some() {
-        return Err(OrbitError::InvalidInput(format!(
-            "--pr-number is not supported by workflow '{}'",
-            workflow.alias
-        )));
-    }
-    if workflow.requires_pr_number && input.pr_number.is_none() {
-        return Err(OrbitError::InvalidInput(format!(
-            "--pr-number is required for workflow '{}'",
-            workflow.alias
-        )));
-    }
-    Ok(())
-}
-
 pub fn build_workflow_input(input: &WorkflowInput) -> Result<Value, OrbitError> {
     build_workflow_input_for(None, input)
 }

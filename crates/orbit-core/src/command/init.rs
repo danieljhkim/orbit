@@ -66,10 +66,6 @@ pub struct InitOptions {
 }
 
 impl OrbitRuntime {
-    pub fn init_workspace(&self) -> Result<InitResult, OrbitError> {
-        self.init_workspace_with_options(InitOptions::default())
-    }
-
     pub fn init_workspace_with_options(
         &self,
         options: InitOptions,
@@ -114,21 +110,6 @@ pub fn init_global(
         InitOptions {
             global_only: true,
             link_global_skills: true,
-            ..options
-        },
-    )
-}
-
-pub fn init_workspace_from_root_override(
-    root_override: Option<&Path>,
-    options: InitOptions,
-) -> Result<InitResult, OrbitError> {
-    let cwd = std::env::current_dir().map_err(|e| OrbitError::Io(e.to_string()))?;
-    let roots = OrbitRuntime::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
-    init_workspace_at_root(
-        &roots.shared_root,
-        InitOptions {
-            global_root_override: Some(roots.global_root),
             ..options
         },
     )
