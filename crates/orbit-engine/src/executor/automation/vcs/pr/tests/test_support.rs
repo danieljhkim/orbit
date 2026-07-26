@@ -17,7 +17,6 @@ use tempfile::{TempDir, tempdir};
 use crate::context::{
     PrConfig, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
 };
-use crate::executor::registry::ActivityExecutorRegistry;
 
 use super::super::super::freshness::BranchFreshness;
 
@@ -36,7 +35,6 @@ pub struct PrOpenTestHost {
     repo_root: PathBuf,
     data_root: PathBuf,
     scoreboard_dir: PathBuf,
-    registry: ActivityExecutorRegistry,
     tool_errors: Mutex<HashMap<String, String>>,
     queued_tool_results: Mutex<HashMap<String, VecDeque<Result<Value, String>>>>,
     pr_exists: Mutex<bool>,
@@ -55,7 +53,6 @@ impl PrOpenTestHost {
             repo_root,
             data_root,
             scoreboard_dir,
-            registry: ActivityExecutorRegistry::default(),
             tool_errors: Mutex::new(HashMap::new()),
             queued_tool_results: Mutex::new(HashMap::new()),
             pr_exists: Mutex::new(false),
@@ -277,10 +274,6 @@ impl RuntimeHost for PrOpenTestHost {
 
     fn data_root(&self) -> &Path {
         &self.data_root
-    }
-
-    fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
-        &self.registry
     }
 
     fn activity_implementer_identity(

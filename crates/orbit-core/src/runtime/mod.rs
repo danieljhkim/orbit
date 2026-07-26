@@ -35,7 +35,6 @@ use std::sync::Arc;
 use chrono::Utc;
 use orbit_common::types::activity_job::{CatalogDirectory, CatalogDirectoryList};
 use orbit_common::types::{Audit, LearningInjectionState, OrbitError, OrbitEvent, WorkspacePaths};
-use orbit_engine::ActivityExecutorRegistry;
 use orbit_store::{Store, V2AuditEventFilter, V2AuditEventRow, workspace_id_for_orbit_dir};
 use serde_json::Value;
 
@@ -64,7 +63,6 @@ pub(crate) use task_records::TaskRecordUpdateParams;
 pub struct OrbitRuntime {
     context: OrbitContext,
     workspace_binding: Option<Arc<WorkspaceRuntimeBinding>>,
-    activity_executors: Arc<ActivityExecutorRegistry>,
     pub event_log: event_bus::EventLog,
     /// Outcome of the [ORB-10012] workspace-layout pre-flight that ran when
     /// this runtime opened (empty `applied` when the layout was already
@@ -247,7 +245,6 @@ impl OrbitRuntime {
             binding.as_ref(),
         )?;
         let runtime = Self {
-            activity_executors: build_activity_executor_registry(&context)?,
             context,
             workspace_binding: binding.map(Arc::new),
             event_log: event_bus::EventLog::default(),
@@ -265,7 +262,6 @@ impl OrbitRuntime {
     pub fn in_memory() -> Result<Self, OrbitError> {
         let (context, temp_dir) = builder::build_context_in_memory()?;
         Ok(Self {
-            activity_executors: build_activity_executor_registry(&context)?,
             context,
             workspace_binding: None,
             event_log: event_bus::EventLog::default(),
@@ -584,10 +580,6 @@ impl OrbitRuntime {
         self.context.codex_execution_policy()
     }
 
-    pub(crate) fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
-        self.activity_executors.as_ref()
-    }
-
     pub fn list_executor_defs(&self) -> Result<Vec<orbit_common::types::ExecutorDef>, OrbitError> {
         self.stores().executors().list_executor_defs()
     }
@@ -628,15 +620,6 @@ impl OrbitRuntime {
 fn has_explicit_root_override(root_override: Option<&Path>) -> bool {
     root_override.is_some()
         || std::env::var("ORBIT_ROOT").is_ok_and(|value| !value.trim().is_empty())
-}
-
-fn build_activity_executor_registry(
-    context: &OrbitContext,
-) -> Result<Arc<ActivityExecutorRegistry>, OrbitError> {
-    let mut registry = ActivityExecutorRegistry::with_builtins();
-    let defs = context.stores().executors().list_executor_defs()?;
-    registry.load_from_defs(&defs);
-    Ok(Arc::new(registry))
 }
 
 fn warn_skipped_retired_activity_assets(dir: &Path, skipped: Vec<PathBuf>) {

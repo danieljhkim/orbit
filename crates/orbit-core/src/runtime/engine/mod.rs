@@ -1,6 +1,4 @@
-mod agent_protocol_host;
 mod crew;
-mod envelope;
 pub(crate) mod environment_host;
 mod identity;
 mod invocation;

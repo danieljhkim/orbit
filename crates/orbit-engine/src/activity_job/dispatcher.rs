@@ -260,8 +260,7 @@ pub struct V2AgentDispatchOverride<'a> {
     pub model: Option<&'a str>,
 }
 
-/// Outcome of a v2 dispatch attempt. Kept separate from v1's AttemptOutcome
-/// to avoid coupling v2 callers to the v1 engine context.
+/// Outcome of a v2 dispatch attempt.
 #[derive(Debug, Clone)]
 pub struct DispatchOutcome {
     pub success: bool,

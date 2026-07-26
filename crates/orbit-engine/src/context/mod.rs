@@ -1,21 +1,15 @@
-//! Execution-context primitives shared by the executors and the engine flows.
+//! Execution-context primitives shared by the engine flows.
 //!
 //! Split by concern; every item is re-exported here so `crate::context::X`
 //! paths (and the crate-root re-exports in `lib.rs`) stay stable:
-//! - [`execution`] — the [`ExecutionContext`] passed through dispatch, plus
-//!   working-directory resolution helpers.
-//! - [`outcome`] — attempt/run outcome types, error-code constants, and
+//! - [`outcome`] — run outcome types, error-code constants, and
 //!   workflow-failure helpers.
 //! - [`hosts`] — the host trait boundary (`JobRunHost`, `TaskHost`,
 //!   `EnvironmentHost`, `RuntimeHost`, ...) and the task-update param types.
-//! - [`executor_host`] — [`ExecutorHost`] and the narrowed per-executor
-//!   facades that delegate back to the full host.
-//! - [`env`] — environment-variable resolution (`env_set` overrides and
-//!   `ORBIT_*` state vars) applied on top of an `EnvironmentMode`.
+//! - [`env`] — subprocess provenance environment variables shared by every
+//!   engine spawn path.
 
 mod env;
-mod execution;
-mod executor_host;
 mod hosts;
 mod outcome;
 
@@ -23,15 +17,11 @@ mod outcome;
 mod tests;
 
 pub(crate) use env::{ProvenanceEnv, provenance_env};
-pub use env::{apply_env_set, inject_state_env, state_env_vars};
-pub use execution::{ExecutionContext, execution_working_directory, input_workspace_path};
-pub use executor_host::ExecutorHost;
 pub use hosts::{
-    AgentProtocolHost, AgentRoleConfig, EnvironmentHost, ExecutorLookupHost, JobRunHost, PrConfig,
-    RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskHost, TaskReadHost, TaskWriteHost,
-    ensure_task_can_enter_workflow,
+    AgentRoleConfig, EnvironmentHost, JobRunHost, PrConfig, RuntimeHost, TaskActivityUpdate,
+    TaskAutomationUpdate, TaskHost, TaskReadHost, TaskWriteHost, ensure_task_can_enter_workflow,
 };
 pub use outcome::{
-    ACTIVITY_EXECUTION_FAILED, AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, ActivityInvocationResult,
-    AttemptOutcome, WORKFLOW_RUN_FAILED_EVENT, blocked_workflow_failure_update,
+    AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, ActivityInvocationResult, WORKFLOW_RUN_FAILED_EVENT,
+    blocked_workflow_failure_update,
 };

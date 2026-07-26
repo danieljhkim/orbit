@@ -1,15 +1,11 @@
 use std::sync::Arc;
 
-use orbit_common::types::{
-    ActivityV2, AgentModelPair, InvocationTrace, JobRun, OrbitError, OrbitEvent, Role, RoleSlot,
-};
-use orbit_engine::{ExecutionContext, RuntimeHost, V2AuditWriter, V2RuntimeHost};
-use orbit_store::{InvocationInsertParams, InvocationQuery, InvocationRecord, token_scoreboard};
+use orbit_common::types::{ActivityV2, AgentModelPair, JobRun, OrbitError, OrbitEvent, Role};
+use orbit_engine::{RuntimeHost, V2AuditWriter, V2RuntimeHost};
+use orbit_store::{InvocationQuery, InvocationRecord};
 use orbit_tools::ToolContext;
 use serde_json::Value;
 
-use super::identity::normalize_agent_name;
-use super::invocation::{associated_task_ids, open_invocation_store};
 use super::paths::current_repo_root;
 use crate::OrbitRuntime;
 
@@ -28,10 +24,6 @@ impl RuntimeHost for OrbitRuntime {
 
     fn data_root(&self) -> &std::path::Path {
         self.context.data_root()
-    }
-
-    fn activity_executor_registry(&self) -> &orbit_engine::ActivityExecutorRegistry {
-        self.activity_executor_registry()
     }
 
     fn cancel_job_run(&self, run_id: &str) -> Result<(), OrbitError> {
@@ -153,51 +145,4 @@ impl RuntimeHost for OrbitRuntime {
     fn scoreboard_dir(&self) -> &std::path::Path {
         &self.context.paths().scoreboard_dir
     }
-
-    fn persist_invocation_trace(
-        &self,
-        job_run_id: &str,
-        execution: &ExecutionContext,
-        trace: &InvocationTrace,
-    ) -> Result<(), OrbitError> {
-        let requested_model = execution.model.as_deref();
-        let (agent, model) = self.invocation_agent_model_identity(
-            &execution.agent_cli,
-            requested_model,
-            trace.provider_model.as_deref(),
-            job_run_id,
-            &execution.activity.id,
-        );
-        let store = open_invocation_store(self)?;
-        store.insert_invocation_trace_record(&InvocationInsertParams {
-            job_run_id: job_run_id.to_string(),
-            activity_id: execution.activity.id.clone(),
-            agent: agent.unwrap_or_else(|| normalize_agent_name(&execution.agent_cli)),
-            model,
-            slot: role_slot_from_input(&execution.input),
-            task_ids: associated_task_ids(&execution.input),
-            trace: trace.clone(),
-        })?;
-
-        if let Err(error) =
-            token_scoreboard::write_token_scoreboard(&self.paths().scoreboard_dir, &store)
-        {
-            tracing::warn!(
-                target: "orbit.core.scoreboard",
-                error = %error,
-                "failed to refresh tokens scoreboard",
-            );
-        }
-
-        Ok(())
-    }
-}
-
-fn role_slot_from_input(input: &Value) -> Option<RoleSlot> {
-    input
-        .get("planning_duel_slot")
-        .or_else(|| input.get("role_slot"))
-        .or_else(|| input.get("slot"))
-        .and_then(Value::as_str)
-        .and_then(|value| value.parse().ok())
 }

@@ -50,7 +50,7 @@ a conservative title/status fallback.
 | [Agent Families](./design/agent-families/1_overview.md) | Orbit models AI coding systems as first-class agent families and groups concrete provider-model assignments into named crews. | Draft | grok |
 | [Auditability](./design/auditability/1_overview.md) | Auditability is Orbit's answer to the operator question that matters after an agent touches a real repository: what happened, why, and who is accountable? | Draft | codex |
 | [Auto-tasks](./design/auto-tasks/1_overview.md) | Dynamically-defined recurring task templates minted by one generic scheduler routine — periodic work as data, not code. | Accepted | claude |
-| [Executors](./design/executors/4_decisions.md) | ADR log for executor registration and the External Executor Protocol. | Draft | claude |
+| [Executors](./design/executors/4_decisions.md) | ADR log for executor registration and the (now retired) External Executor Protocol. | Draft | claude |
 | [Host Registry](./design/host-registry/1_overview.md) | First-class, validated machine identity plus a main-host inventory, enabling pull-based orchestrator-selected execution placement and a strict per-record data-placement split. | Accepted | claude |
 | [Orbit MCP Bridge](./design/mcp-bridge/1_overview.md) | One canonical local Orbit MCP front door that routes coordination to a single hub, keeps owner-authored knowledge and derived indexes local, and removes Bridge's duplicated Orbit parity layer. | Accepted | codex |
 | [MCP Session Context](./design/mcp-session-context/1_overview.md) | MCP session context is the trusted transport envelope carried from an Orbit MCP adapter or broker to tool dispatch. | Accepted | codex |
