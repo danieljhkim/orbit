@@ -26,20 +26,24 @@ pub(super) fn normalize_workspace_path(
     };
     let canonical_workspace = candidate.canonicalize().map_err(|error| {
         OrbitError::InvalidInput(format!(
-            "workspace_path '{}' must reference an existing directory inside the repository: {error}",
+            "workspace (`workspace_path` on the dashboard API) '{}' must be a filesystem path to \
+             an existing directory inside the repository — e.g. the repository root '.' — never a \
+             logical workspace id such as a bridge `ws_*` id: {error}",
             candidate.display()
         ))
     })?;
     if !canonical_workspace.is_dir() {
         return Err(OrbitError::InvalidInput(format!(
-            "workspace_path '{}' must reference a directory inside the repository",
+            "workspace (`workspace_path` on the dashboard API) '{}' must be a directory inside \
+             the repository, not a file",
             canonical_workspace.display()
         )));
     }
 
     if !canonical_workspace.starts_with(&canonical_repo_root) {
         return Err(OrbitError::InvalidInput(format!(
-            "workspace_path '{}' must stay within repository '{}'",
+            "workspace (`workspace_path` on the dashboard API) '{}' must be a filesystem path \
+             inside repository '{}', not outside it",
             canonical_workspace.display(),
             canonical_repo_root.display()
         )));

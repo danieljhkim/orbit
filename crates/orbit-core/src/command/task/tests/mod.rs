@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 mod add;
+mod paths;
 mod update;
 
 use crate::OrbitRuntime;
