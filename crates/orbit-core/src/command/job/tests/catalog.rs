@@ -617,6 +617,20 @@ fn independent_review_job_requires_structured_exact_head_verdict() {
         panic!("verdict guard must be an activity reference");
     };
     assert_eq!(guard.target, "activity:independent_review_guard");
+    // The guard reads acceptance criteria and comment authority from the task
+    // records, so it must be handed the run's own bundle. Templating these off
+    // the reviewer's response would let the thing being checked narrow the set
+    // of criteria that must be covered.
+    let guard_input = guard.default_input.as_ref().expect("guard input");
+    for (field, expected) in [
+        ("candidate_head_sha", "{{ input.candidate_head_sha }}"),
+        ("task_ids", "{{ input.task_ids }}"),
+    ] {
+        assert_eq!(
+            guard_input[field], expected,
+            "verdict guard must take {field} from the run input"
+        );
+    }
 }
 
 #[test]
