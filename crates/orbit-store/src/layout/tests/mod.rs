@@ -1,14 +1,16 @@
 //! Sibling tests for the workspace-layout migration registry (ORB-10012).
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use orbit_common::types::OrbitError;
+use orbit_common::types::{OrbitError, TaskStatus};
 
 use super::{
     LAYOUT_MIGRATIONS, LayoutMigration, SUPPORTED_LAYOUT_VERSION, current_layout_version,
     pending_layout_migrations, pending_with, upgrade_with, upgrade_workspace_layout,
 };
+use crate::file::task_store::v2_bundle::read_bundle_at;
 
 fn temp_orbit_dir() -> tempfile::TempDir {
     tempfile::tempdir().expect("create temp .orbit dir")
@@ -50,7 +52,10 @@ fn fresh_workspace_adopts_the_baseline_and_stamps_the_marker() {
     assert_eq!(report.from_version, 0);
     assert_eq!(report.to_version, SUPPORTED_LAYOUT_VERSION);
     assert_eq!(report.applied.len(), LAYOUT_MIGRATIONS.len());
-    assert_eq!(marker_contents(temp.path()).trim(), "1");
+    assert_eq!(
+        marker_contents(temp.path()).trim(),
+        SUPPORTED_LAYOUT_VERSION.to_string()
+    );
     assert_eq!(
         current_layout_version(temp.path()).expect("version"),
         SUPPORTED_LAYOUT_VERSION
@@ -104,6 +109,159 @@ fn corrupt_marker_is_a_typed_error_naming_the_file() {
     let message = error.to_string();
     assert!(message.contains("layout.version"), "{message}");
     assert!(message.contains("banana"), "{message}");
+}
+
+// ── shipping v2 migration ──
+
+fn seed_task_bundle(orbit_dir: &Path, id: &str, status: &str) -> std::path::PathBuf {
+    let bundle_dir = orbit_dir.join("tasks").join(id);
+    fs::create_dir_all(bundle_dir.join("artifacts")).expect("create task bundle");
+    fs::write(
+        bundle_dir.join("task.yaml"),
+        format!(
+            "schema_version: 1\nid: {id}\ntitle: Legacy task\nstatus: {status}\ntype: bug\npriority: medium\ncreated_at: 2026-07-01T00:00:00Z\nupdated_at: 2026-07-01T00:00:00Z\n"
+        ),
+    )
+    .expect("write task envelope");
+    for document in [
+        "description.md",
+        "acceptance.md",
+        "plan.md",
+        "execution-summary.md",
+    ] {
+        fs::write(bundle_dir.join(document), "").expect("write task document");
+    }
+    fs::write(
+        bundle_dir.join("events.jsonl"),
+        format!(
+            "{{\"schema_version\":1,\"event_id\":\"EV-0001\",\"at\":\"2026-07-01T00:00:00Z\",\"by\":\"codex\",\"type\":\"created\",\"to_status\":\"{status}\"}}\n\
+             {{\"schema_version\":1,\"event_id\":\"EV-0002\",\"at\":\"2026-07-01T00:01:00Z\",\"by\":\"codex\",\"type\":\"updated\",\"from_status\":\"{status}\"}}\n"
+        ),
+    )
+    .expect("write task events");
+    fs::write(bundle_dir.join("comments.jsonl"), "").expect("write task comments");
+    bundle_dir
+}
+
+fn workspace_bytes(root: &Path) -> BTreeMap<std::path::PathBuf, Vec<u8>> {
+    fn visit(root: &Path, current: &Path, files: &mut BTreeMap<std::path::PathBuf, Vec<u8>>) {
+        for entry in fs::read_dir(current).expect("read workspace fixture") {
+            let path = entry.expect("workspace fixture entry").path();
+            if path.is_dir() {
+                visit(root, &path, files);
+            } else {
+                files.insert(
+                    path.strip_prefix(root)
+                        .expect("relative fixture path")
+                        .to_path_buf(),
+                    fs::read(&path).expect("read fixture file"),
+                );
+            }
+        }
+    }
+
+    let mut files = BTreeMap::new();
+    visit(root, root, &mut files);
+    files
+}
+
+#[test]
+fn legacy_friction_task_fails_before_layout_upgrade_and_opens_after() {
+    let temp = temp_orbit_dir();
+    let bundle_dir = seed_task_bundle(temp.path(), "ORB-00001", "friction");
+    fs::create_dir_all(temp.path().join("state")).expect("create state");
+    fs::write(temp.path().join("state/layout.version"), "1\n").expect("stamp v1");
+
+    let before = read_bundle_at(&bundle_dir).expect_err("removed status must fail");
+    assert!(before.to_string().contains("friction"), "{before}");
+
+    let report = upgrade_workspace_layout(temp.path()).expect("apply v2 migration");
+    assert_eq!(report.from_version, 1);
+    assert_eq!(report.to_version, 2);
+    assert_eq!(report.applied.len(), 1);
+    assert_eq!(report.applied[0].name, "archive-friction-tasks");
+
+    let after = read_bundle_at(&bundle_dir).expect("migrated task bundle opens");
+    assert_eq!(after.envelope.status, TaskStatus::Archived);
+    assert_eq!(
+        after.events.first().and_then(|event| event.to_status),
+        Some(TaskStatus::Archived)
+    );
+    assert_eq!(
+        after.events.last().and_then(|event| event.from_status),
+        Some(TaskStatus::Archived)
+    );
+}
+
+#[test]
+fn friction_migration_is_idempotent_and_safe_to_replay_before_marker_advance() {
+    let temp = temp_orbit_dir();
+    let bundle_dir = seed_task_bundle(temp.path(), "ORB-00002", "friction");
+    fs::create_dir_all(temp.path().join("state")).expect("create state");
+    fs::write(temp.path().join("state/layout.version"), "1\n").expect("stamp v1");
+
+    // Simulate a crash after apply returned but before the marker advanced.
+    (LAYOUT_MIGRATIONS[1].apply)(temp.path()).expect("first apply");
+    let after_first_apply = workspace_bytes(temp.path());
+    assert_eq!(current_layout_version(temp.path()).expect("version"), 1);
+
+    let report = upgrade_workspace_layout(temp.path()).expect("replay after interruption");
+    assert_eq!(report.applied.len(), 1);
+    assert_eq!(report.applied[0].version, 2);
+    assert_eq!(
+        read_bundle_at(&bundle_dir).expect("bundle").envelope.status,
+        TaskStatus::Archived
+    );
+
+    let after_marker_advance = workspace_bytes(temp.path());
+    let rerun = upgrade_workspace_layout(temp.path()).expect("idempotent rerun");
+    assert!(rerun.applied.is_empty());
+    assert_eq!(workspace_bytes(temp.path()), after_marker_advance);
+
+    // The replay changed only the marker; task bundle bytes were already final
+    // after the first application.
+    for (path, bytes) in after_first_apply {
+        if path != Path::new("state/layout.version") {
+            assert_eq!(after_marker_advance.get(&path), Some(&bytes));
+        }
+    }
+}
+
+#[test]
+fn dry_run_metadata_lists_plain_friction_task_outcome() {
+    let temp = temp_orbit_dir();
+    fs::create_dir_all(temp.path().join("state")).expect("create state");
+    fs::write(temp.path().join("state/layout.version"), "1\n").expect("stamp v1");
+
+    let pending = pending_layout_migrations(temp.path()).expect("pending");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].version, 2);
+    assert_eq!(pending[0].name, "archive-friction-tasks");
+    assert!(pending[0].description.contains("status 'friction'"));
+    assert!(pending[0].description.contains("'archived'"));
+    assert!(pending[0].description.contains("preserving the task"));
+}
+
+#[test]
+fn legacy_review_thread_sidecars_are_ignored_when_bundle_opens() {
+    let temp = temp_orbit_dir();
+    let bundle_dir = seed_task_bundle(temp.path(), "ORB-00003", "backlog");
+    let review_threads = bundle_dir.join("review-threads");
+    fs::create_dir_all(&review_threads).expect("create legacy review threads");
+    fs::write(
+        review_threads.join("RT-0001.yaml"),
+        "schema_version: 1\nthread_id: RT-0001\nstatus: open\nmessages: []\ncreated_at: 2026-07-01T00:00:00Z\nupdated_at: 2026-07-01T00:00:00Z\n",
+    )
+    .expect("write legacy review metadata");
+    fs::write(review_threads.join("RT-0001.md"), "Legacy review body.\n")
+        .expect("write legacy review body");
+
+    let bundle = read_bundle_at(&bundle_dir).expect("legacy bundle opens");
+    assert_eq!(bundle.envelope.status, TaskStatus::Backlog);
+    assert!(
+        review_threads.is_dir(),
+        "opening leaves ignored sidecars untouched"
+    );
 }
 
 // ── test-only v2 registry: exercises a real layout change end to end ──
@@ -179,7 +337,8 @@ fn toy_v2_migration_applies_in_order_and_advances_the_marker() {
 fn upgrade_applies_only_migrations_newer_than_the_marker() {
     let temp = temp_orbit_dir();
     // Already on v1: only the v2 entry should run.
-    upgrade_workspace_layout(temp.path()).expect("adopt baseline");
+    fs::create_dir_all(temp.path().join("state")).expect("mkdir state");
+    fs::write(temp.path().join("state/layout.version"), "1\n").expect("stamp v1");
     fs::write(temp.path().join("notes.txt"), "hello").expect("write legacy file");
 
     let report = upgrade_with(temp.path(), TOY_V2_REGISTRY).expect("upgrade");

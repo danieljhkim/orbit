@@ -38,13 +38,15 @@
 //!   acquisition, so concurrent opens do not interleave migrations. The
 //!   up-to-date fast path never touches the lock.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
+use orbit_common::types::{OrbitError, is_valid_orb_task_id};
+use orbit_common::utility::fs::atomic_write_text;
 
 /// Highest workspace-layout version this binary knows how to produce.
 /// Bump together with a new [`LAYOUT_MIGRATIONS`] entry — never without one.
-pub const SUPPORTED_LAYOUT_VERSION: u32 = 1;
+pub const SUPPORTED_LAYOUT_VERSION: u32 = 2;
 
 /// Marker file recording the workspace's current layout version, relative to
 /// the workspace `.orbit` directory. Lives under `state/` (gitignored
@@ -72,18 +74,192 @@ pub(crate) struct LayoutMigration {
 /// Stable ordered registry of workspace-layout migrations. Append-only:
 /// never renumber or edit an entry that has shipped. Every breaking
 /// `.orbit/` layout change REQUIRES an entry here (see `RELEASING.md`).
-pub(crate) const LAYOUT_MIGRATIONS: &[LayoutMigration] = &[LayoutMigration {
-    version: 1,
-    name: "baseline",
-    description: "adopt the versioned .orbit/ layout (records the current shape; changes nothing)",
-    apply: apply_baseline_layout,
-}];
+pub(crate) const LAYOUT_MIGRATIONS: &[LayoutMigration] = &[
+    LayoutMigration {
+        version: 1,
+        name: "baseline",
+        description: "adopt the versioned .orbit/ layout (records the current shape; changes nothing)",
+        apply: apply_baseline_layout,
+    },
+    LayoutMigration {
+        version: 2,
+        name: "archive-friction-tasks",
+        description: "rewrite affected task records from status 'friction' to 'archived', preserving the task and its event history",
+        apply: apply_archive_friction_tasks,
+    },
+];
 
 /// v1 baseline: the current `.orbit/` shape. Intentionally a no-op — running
 /// it on any existing workspace changes nothing and then records version 1,
 /// which is how pre-versioning workspaces adopt the marker.
 fn apply_baseline_layout(_orbit_dir: &Path) -> Result<(), OrbitError> {
     Ok(())
+}
+
+/// v2: `TaskStatus::Friction` was removed in ORB-10202, so a persisted task
+/// carrying that status no longer deserializes. Preserve the record but keep
+/// it out of active work by mapping the removed status to `archived` in both
+/// the task envelope and its event history.
+///
+/// Task projections may be symlinks into the canonical global bundle store.
+/// `Path::is_dir` deliberately follows those direct projection entries; the
+/// migration never recurses beyond one task bundle.
+fn apply_archive_friction_tasks(orbit_dir: &Path) -> Result<(), OrbitError> {
+    let tasks_dir = orbit_dir.join("tasks");
+    let entries = match fs::read_dir(&tasks_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(layout_io_error(
+                "read projected task directory",
+                &tasks_dir,
+                error,
+            ));
+        }
+    };
+
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            layout_io_error("read projected task directory entry", &tasks_dir, error)
+        })?;
+        let bundle_dir = entry.path();
+        let is_task_bundle = bundle_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(is_valid_orb_task_id);
+        if !is_task_bundle || !bundle_dir.is_dir() {
+            continue;
+        }
+
+        migrate_event_statuses(&bundle_dir.join("events.jsonl"))?;
+        migrate_envelope_status(&bundle_dir.join("task.yaml"))?;
+    }
+    Ok(())
+}
+
+fn migrate_envelope_status(path: &Path) -> Result<(), OrbitError> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(layout_io_error("read task envelope", path, error)),
+    };
+    let mut value: serde_yaml::Value = serde_yaml::from_str(&raw).map_err(|error| {
+        OrbitError::Migration(format!(
+            "cannot parse task envelope '{}' while archiving removed friction status: {error}",
+            path.display()
+        ))
+    })?;
+    let Some(mapping) = value.as_mapping_mut() else {
+        return Err(OrbitError::Migration(format!(
+            "task envelope '{}' is not a YAML mapping",
+            path.display()
+        )));
+    };
+    if !replace_string_field(mapping, "status", "friction", "archived") {
+        return Ok(());
+    }
+
+    let migrated = serde_yaml::to_string(&value).map_err(|error| {
+        OrbitError::Migration(format!(
+            "cannot serialize migrated task envelope '{}': {error}",
+            path.display()
+        ))
+    })?;
+    atomic_write_text(path, &migrated)
+        .map_err(|error| layout_io_error("rewrite task envelope", path, error))
+}
+
+fn migrate_event_statuses(path: &Path) -> Result<(), OrbitError> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(layout_io_error("read task event history", path, error)),
+    };
+    let mut migrated = String::with_capacity(raw.len());
+    let mut changed = false;
+
+    for chunk in raw.split_inclusive('\n') {
+        // An unterminated final row is a crash tail ignored by the bundle
+        // reader. Preserve it byte-for-byte so this migration does not turn a
+        // partial append into an apparently committed event.
+        if !chunk.ends_with('\n') {
+            migrated.push_str(chunk);
+            continue;
+        }
+        let line = chunk
+            .strip_suffix('\n')
+            .unwrap_or(chunk)
+            .strip_suffix('\r')
+            .unwrap_or_else(|| chunk.strip_suffix('\n').unwrap_or(chunk));
+        let mut value: serde_json::Value = serde_json::from_str(line).map_err(|error| {
+            OrbitError::Migration(format!(
+                "cannot parse task event history row at '{}': {error}",
+                path.display()
+            ))
+        })?;
+        let row_changed = value.as_object_mut().is_some_and(|object| {
+            replace_json_string_field(object, "from_status", "friction", "archived")
+                | replace_json_string_field(object, "to_status", "friction", "archived")
+        });
+        if row_changed {
+            migrated.push_str(&serde_json::to_string(&value).map_err(|error| {
+                OrbitError::Migration(format!(
+                    "cannot serialize migrated task event history '{}': {error}",
+                    path.display()
+                ))
+            })?);
+            if chunk.ends_with("\r\n") {
+                migrated.push('\r');
+            }
+            migrated.push('\n');
+            changed = true;
+        } else {
+            migrated.push_str(chunk);
+        }
+    }
+
+    if !changed {
+        return Ok(());
+    }
+    atomic_write_text(path, &migrated)
+        .map_err(|error| layout_io_error("rewrite task event history", path, error))
+}
+
+fn replace_string_field(
+    mapping: &mut serde_yaml::Mapping,
+    field: &str,
+    old: &str,
+    new: &str,
+) -> bool {
+    let key = serde_yaml::Value::String(field.to_string());
+    let Some(value) = mapping.get_mut(&key) else {
+        return false;
+    };
+    if value.as_str() != Some(old) {
+        return false;
+    }
+    *value = serde_yaml::Value::String(new.to_string());
+    true
+}
+
+fn replace_json_string_field(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    old: &str,
+    new: &str,
+) -> bool {
+    let Some(value) = object.get_mut(field) else {
+        return false;
+    };
+    if value.as_str() != Some(old) {
+        return false;
+    }
+    *value = serde_json::Value::String(new.to_string());
+    true
+}
+
+fn layout_io_error(operation: &str, path: &Path, error: std::io::Error) -> OrbitError {
+    OrbitError::Migration(format!("{operation} '{}': {error}", path.display()))
 }
 
 /// Registry metadata for one layout migration, as surfaced to `orbit
