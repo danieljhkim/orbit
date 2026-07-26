@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use orbit_common::types::{Crew, WorkspacePaths};
+use orbit_common::types::{Crew, WorkspacePaths, normalize_agent_family_for_model};
 use orbit_engine::PrConfig;
 use orbit_policy::PolicyEngine;
 use orbit_search::{EmbedWorker, VectorStore};
@@ -21,6 +21,7 @@ const ORBIT_AGENT_MODEL: &str = "ORBIT_AGENT_MODEL";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActorKind {
+    Unknown,
     Human,
     Agent,
 }
@@ -32,6 +33,13 @@ pub struct ActorIdentity {
 }
 
 impl ActorIdentity {
+    pub fn unknown() -> Self {
+        Self {
+            kind: ActorKind::Unknown,
+            label: "unknown".to_string(),
+        }
+    }
+
     pub fn human(label: impl Into<String>) -> Self {
         Self {
             kind: ActorKind::Human,
@@ -46,20 +54,32 @@ impl ActorIdentity {
         }
     }
 
-    pub(crate) fn from_env() -> Self {
-        let actor_label = std::env::var(ORBIT_AGENT_MODEL)
+    /// Resolve the self-reported process identity used by CLI and dashboard
+    /// entry points.
+    ///
+    /// The environment is not an authentication boundary. Agent values are
+    /// therefore reduced to the same canonical family used by tool dispatch,
+    /// and an absent or inconsistent envelope is recorded as `unknown` rather
+    /// than claiming that a human was present.
+    pub fn from_env() -> Self {
+        let agent = std::env::var(ORBIT_AGENT_NAME)
             .ok()
-            .or_else(|| std::env::var(ORBIT_AGENT_NAME).ok())
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
+            .filter(|value| !value.trim().is_empty());
+        let model = std::env::var(ORBIT_AGENT_MODEL)
+            .ok()
+            .filter(|value| !value.trim().is_empty());
 
-        actor_label.map(Self::agent).unwrap_or_default()
+        normalize_agent_family_for_model(agent.as_deref(), model.as_deref())
+            .ok()
+            .flatten()
+            .map(Self::agent)
+            .unwrap_or_default()
     }
 }
 
 impl Default for ActorIdentity {
     fn default() -> Self {
-        Self::human("human")
+        Self::unknown()
     }
 }
 

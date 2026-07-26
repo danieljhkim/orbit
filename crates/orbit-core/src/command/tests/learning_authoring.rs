@@ -50,7 +50,7 @@ fn denial_message(result: Result<(), OrbitError>) -> String {
 }
 
 #[test]
-fn no_agent_identity_env_resolves_to_the_human_role_and_allows_every_write() {
+fn no_agent_identity_env_preserves_the_existing_authoring_policy() {
     let _env = scoped_identity_env(&[]);
 
     assert_eq!(learning_author_role(), LearningAuthorRole::Human);
@@ -79,7 +79,7 @@ fn agent_identity_env_without_opt_in_resolves_to_the_executor_role() {
     assert_eq!(
         learning_author_role(),
         LearningAuthorRole::Executor {
-            label: "claude-opus-5".to_string()
+            label: "claude".to_string()
         }
     );
 }
@@ -105,7 +105,7 @@ fn executor_add_is_refused_with_the_friction_redirect_and_the_attempted_payload(
     let message = denial_message(ensure_learning_write_allowed(add_attempt()));
 
     assert!(message.contains("learning add"), "names the operation");
-    assert!(message.contains("claude-opus-5"), "names the identity");
+    assert!(message.contains("claude"), "names the canonical identity");
     assert!(
         message.contains("orbit friction add") && message.contains("orbit.friction.add"),
         "redirects to the friction surface: {message}"
@@ -176,7 +176,7 @@ fn the_explicit_orchestrator_opt_in_allows_agent_context_writes() {
         assert_eq!(
             learning_author_role(),
             LearningAuthorRole::AuthorizedAgent {
-                label: "claude-opus-5".to_string()
+                label: "claude".to_string()
             },
             "`{truthy}` opts in"
         );
@@ -202,8 +202,8 @@ fn a_non_affirmative_opt_in_value_does_not_bypass_the_gate() {
     }
 }
 
-/// The opt-in alone is not an identity: without the agent env pair the caller
-/// is still simply a human, and nothing changes.
+/// The opt-in alone is not an identity. The runtime actor remains unknown,
+/// while this task deliberately preserves the existing authoring policy.
 #[test]
 fn the_opt_in_without_agent_identity_is_still_the_human_role() {
     let _env = scoped_identity_env(&[(LEARNING_AUTHOR_OPT_IN_ENV, "1")]);

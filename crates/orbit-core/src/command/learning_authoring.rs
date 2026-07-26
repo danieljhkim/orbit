@@ -105,6 +105,10 @@ impl LearningWriteAttempt<'_> {
 pub fn learning_author_role() -> LearningAuthorRole {
     let identity = ActorIdentity::from_env();
     match identity.kind {
+        // Unknown is an attribution state, not a new authorization policy.
+        // Preserve the pre-existing unenveloped CLI behavior until actor-aware
+        // gating is designed and shipped separately.
+        ActorKind::Unknown => LearningAuthorRole::Human,
         ActorKind::Human => LearningAuthorRole::Human,
         ActorKind::Agent if author_opt_in() => LearningAuthorRole::AuthorizedAgent {
             label: identity.label,

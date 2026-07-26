@@ -3,7 +3,7 @@ summary: "Auditability — Design"
 type: design
 title: "Auditability — Design"
 owner: codex
-last_updated: 2026-07-25
+last_updated: 2026-07-26
 status: Draft
 feature: auditability
 doc_role: design
@@ -40,7 +40,7 @@ The CLI RAII guard in `crates/orbit-cli/src/audit_middleware.rs` defaults to fai
 
 [ORB-10200] moved command and subcommand metadata selection out of the middleware into the exhaustive `Commands::operation` registry in `crates/orbit-cli/src/command/operation.rs`. The same operation declaration now owns dispatch, runtime bootstrap policy, audit metadata, JSON error preference, and hook error suppression, so a new top-level command cannot compile until all five concerns are declared; `audit_middleware.rs` owns only audit persistence.
 
-For `orbit tool run`, [T20260427-52] first collapsed duplicate `agent` + `model` inputs. [ORB-00080] later made the family the durable identity: agent-facing `model` inputs should be `codex`, `claude`, `gemini`, or `grok`, while full model strings remain accepted for compatibility and normalize to the family before persistence. Missing identity falls back to `agent` for tool dispatch, while direct non-tool CLI commands use `admin`.
+For `orbit tool run`, [T20260427-52] first collapsed duplicate `agent` + `model` inputs. [ORB-00080] later made the family the durable identity: agent-facing `model` inputs should be `codex`, `claude`, `gemini`, or `grok`, while full model strings remain accepted for compatibility and normalize to the family before persistence. [ORB-10451] applies that same trust boundary to runtime bootstrap: CLI and dashboard processes canonicalize `ORBIT_AGENT_NAME` / `ORBIT_AGENT_MODEL` to an agent family, and an absent or inconsistent envelope records `unknown` instead of asserting verified human presence. This changes attribution only; actor-based command gating remains separate work.
 
 After [T20260428-4], tool-invocation audit is written at the OrbitRuntime dispatch boundary for registered CLI/MCP tools. A `ToolEntryPoint` discriminator surfaces as `subcommand: "run"` or `"run-mcp"`, setup failures inside dispatch are audited, and `duration_ms` is clamped to at least `1`. [ORB-10225] extracted the shared boundary behind registry-backed dispatch and temporarily routed adapter-owned graph implementations through it; [ORB-10325] later removed graph from the registered tool and MCP surfaces, leaving `orbit graph` as a direct CLI command; [ORB-10357] then removed that CLI command too, so the graph has no audited surface of any kind. The legacy CLI guard skips its own emission when the runtime sets a per-thread `mark_tool_audit_recorded` signal; pre-runtime CLI failures such as invalid JSON still produce the existing guard-side row.
 
@@ -97,7 +97,7 @@ Dashboard log previews added by [T20260508-14] are derived views over `.orbit/st
 
 Orbit currently carries identity through related fields rather than one universal key:
 
-- Direct CLI commands preserve their human/admin and caller-input compatibility behavior. Standalone MCP is exactly `unverified`; only an authenticated managed envelope can supply MCP agent/model audit identity.
+- Direct CLI commands and dashboard runtime construction share the env-derived `agent family` / `unknown` actor rule. Standalone MCP is exactly `unverified`; only an authenticated managed envelope can supply MCP agent/model audit identity.
 - `V2AuditEnvelope.agent_identity` records the workflow-envelope actor. CLI-launched v2 runs use `system`; concrete provider activity appears in event bodies and metrics.
 - Task records carry `created_by`, `planned_by`, `implemented_by`, `agent`, and `model`.
 - Invocation metrics record agent family and configured runtime model beside job run and activity ids.
@@ -196,5 +196,6 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[ORB-10319]** — Move Remote MCP policy/preflight and global audit composition out of CLI/Core ownership while preserving the shared `ToolEntryPoint::Mcp` audit contract.
 - **[ORB-10325]** — Remove graph from MCP and registered tool dispatch while preserving the direct `orbit graph` CLI.
 - **[ORB-10357]** — Remove the direct `orbit graph` CLI too; the graph has no audited surface left.
+- **[ORB-10451]** — Attribute CLI and dashboard runtimes from the canonical agent env envelope, recording unenveloped callers as unknown.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

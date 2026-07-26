@@ -49,13 +49,14 @@ fn main() {
 
     let cli = command::Cli::parse();
     let root_override = cli.root.clone();
+    let actor = ActorIdentity::from_env();
     let CommandOperation {
         runtime_need,
         audit_meta,
         json_error_preference,
         suppress_errors,
         dispatch,
-    } = cli.command.operation();
+    } = cli.command.operation().attribute_to(&actor);
 
     if matches!(runtime_need, RuntimeNeed::Forbidden) {
         let result = dispatch(
@@ -77,9 +78,7 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        // Direct CLI commands are human-driven by default. Tool-dispatch paths
-        // reclassify themselves as agent-driven inside `execute_tool_command`.
-        .with_actor(ActorIdentity::human("human"));
+        .with_actor(actor);
 
     let context = DispatchContext::with_runtime(&runtime, root_override.as_deref());
     let result = match audit_meta {

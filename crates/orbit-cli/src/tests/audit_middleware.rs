@@ -8,7 +8,8 @@ use super::super::audit_middleware::*;
 use orbit_common::test_env::{self, AGENT_IDENTITY_ENV};
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::AuditEventStatus;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::context::ActorKind;
+use orbit_core::{ActorIdentity, OrbitError, OrbitRuntime};
 
 fn meta_for(args: &[&str]) -> CommandMeta {
     let cli = Cli::parse_from(args);
@@ -28,6 +29,53 @@ fn audit_event_for_meta_without_orbit_run_id(meta: CommandMeta) -> AuditEvent {
         .expect("list audit events");
     assert_eq!(events.len(), 1);
     events.into_iter().next().expect("single audit event")
+}
+
+fn audit_event_for_actor(actor: ActorIdentity) -> AuditEvent {
+    let runtime = OrbitRuntime::in_memory()
+        .expect("build in-memory runtime")
+        .with_actor(actor.clone());
+    let meta = Cli::parse_from(["orbit", "search", "actor"])
+        .command
+        .operation()
+        .attribute_to(&actor)
+        .audit_meta
+        .expect("search is audited");
+    {
+        let mut guard = AuditGuard::new(&runtime, meta);
+        guard.mark_success();
+    }
+
+    runtime
+        .list_audit_events(None, None, Some(AuditEventStatus::Success), None, 8)
+        .expect("list audit events")
+        .into_iter()
+        .next()
+        .expect("single audit event")
+}
+
+#[test]
+fn cli_agent_envelope_records_canonical_actor_family() {
+    let _env = test_env::unset(AGENT_IDENTITY_ENV.iter().copied());
+    // SAFETY: the shared test-env guard serializes and restores this mutation.
+    unsafe {
+        std::env::set_var("ORBIT_AGENT_MODEL", "gpt-5.6-sol");
+    }
+
+    let actor = ActorIdentity::from_env();
+    assert_eq!(actor.kind, ActorKind::Agent);
+    assert_eq!(actor.label, "codex");
+    assert_eq!(audit_event_for_actor(actor).role, "codex");
+}
+
+#[test]
+fn cli_without_agent_envelope_records_unknown_actor() {
+    let _env = test_env::unset(AGENT_IDENTITY_ENV.iter().copied());
+
+    let actor = ActorIdentity::from_env();
+    assert_eq!(actor.kind, ActorKind::Unknown);
+    assert_eq!(actor.label, "unknown");
+    assert_eq!(audit_event_for_actor(actor).role, "unknown");
 }
 
 #[test]
