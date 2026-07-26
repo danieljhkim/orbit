@@ -561,9 +561,10 @@ fn run_agent_loop_via_driver(
 ) -> Result<DispatchOutcome, DispatchError> {
     // Sourcing only: orbit-core pulls the provider credential from wherever
     // makes sense (env var, config, secrets manager). We treat a sourcing
-    // failure as `None` so `drive_agent_loop` can still honor the offline
-    // replay path (ORBIT_V2_REPLAY) without credentials. When the driver
-    // actually needs a key and none is present, it errors structurally.
+    // failure as `None` so a `replay`-enabled `drive_agent_loop` can still
+    // honor ORBIT_V2_REPLAY without credentials. Default builds ignore replay
+    // variables; when the driver needs a key and none is present, it errors
+    // structurally.
     let api_key = host.api_key_for("anthropic").ok();
     let started = Instant::now();
     let outcome = drive_agent_loop(

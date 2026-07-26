@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-07-25
+last_updated: 2026-07-26
 status: Draft
 feature: activity-job
 doc_role: design
@@ -220,7 +220,7 @@ The HTTP path is driven by `agent_loop_driver.rs`. It:
 - chooses a transport
 - runs `orbit-agent`'s `AgentLoop`
 
-This path is narrower than the schema: `Provider::has_http_transport()` currently returns true only for `claude`, so non-replay uses `AnthropicMessagesTransport`. `ORBIT_V2_REPLAY` and `ORBIT_V2_REPLAY_FIXTURE` provide scripted replay.
+This path is narrower than the schema: `Provider::has_http_transport()` currently returns true only for `claude`, so non-replay uses `AnthropicMessagesTransport`. Default builds ignore `ORBIT_V2_REPLAY` and `ORBIT_V2_REPLAY_FIXTURE`; scripted replay is enabled for explicit smoke and fixture use only when orbit-engine's `replay` cargo feature is selected ([ORB-10414]).
 
 The allowlist is enforced in the loop engine on this path. A denied tool becomes a structural `DispatchError::ToolDenied` so the job retry wrapper can classify it as non-retryable.
 
@@ -572,5 +572,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[ORB-00374]** — Remove the `shell` activity variant and `run_shell` dispatch (fail-closed resolution of security bug [ORB-00363]).
 - **[ORB-10232]** — Model recoverable PR handoff as checkpointed job activities with exact-SHA force-push provenance.
 - **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer (`task_epic_pipeline`, `epic_orchestrator`, `pipeline_wait`, legacy parallel-batch executor).
+- **[ORB-10414]** — Make HTTP replay an explicit default-off cargo feature and keep replay environment variables inert in default builds.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -15,6 +15,7 @@ spec:
           - id: reviewer
             spec:
               type: agent_loop
+              backend: http
               description: >
                 Iterative reviewer. Under ORBIT_V2_REPLAY_FIXTURE the fixture
                 scripts two iterations: iteration 1 emits a tool_use for

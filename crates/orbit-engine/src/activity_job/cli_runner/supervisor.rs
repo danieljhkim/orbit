@@ -153,7 +153,6 @@ pub(super) struct SpawnWithTimeoutRequest<'a> {
     pub(super) timeout: Duration,
     pub(super) sandbox: Option<&'a ResolvedSandbox>,
     pub(super) trace: SpawnTraceContext<'a>,
-    #[cfg(test)]
     pub(super) output_capture_limit: Option<usize>,
 }
 
@@ -183,7 +182,6 @@ pub(super) fn spawn_with_timeout(
         timeout,
         sandbox,
         trace,
-        #[cfg(test)]
         output_capture_limit,
     } = request;
 
@@ -206,10 +204,7 @@ pub(super) fn spawn_with_timeout(
         });
     }
 
-    #[cfg(test)]
     let output_limit = output_capture_limit.unwrap_or_else(default_output_capture_limit);
-    #[cfg(not(test))]
-    let output_limit = default_output_capture_limit();
     let stdout_buf = Arc::new(Mutex::new(RollingOutputCapture::new(output_limit)));
     let stderr_buf = Arc::new(Mutex::new(RollingOutputCapture::new(output_limit)));
     let dispatch = tracing::dispatcher::get_default(Clone::clone);

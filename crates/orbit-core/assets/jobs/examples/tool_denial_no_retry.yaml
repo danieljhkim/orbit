@@ -15,6 +15,7 @@ spec:
         backoff_strategy: exponential
       spec:
         type: agent_loop
+        backend: http
         description: >
           Under ORBIT_V2_REPLAY=tool_denial the replay emits a tool_use for
           `fs.delete` while the allowlist is `[fs.read]`. The driver surfaces
