@@ -585,8 +585,13 @@ impl HubCoordinationExecutor {
     }
 
     fn list_tasks(&self, input: Value) -> Result<Value, OrbitError> {
-        let status_filter = optional_string(&input, "status")?
-            .map(|value| super::input::parse_task_status("status", &value))
+        let status_filter = optional_csv_or_string_list_alias(&input, &["status"])?
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| super::input::parse_task_status("status", &value))
+                    .collect::<Result<Vec<_>, _>>()
+            })
             .transpose()?;
         let type_filter = optional_string_alias(&input, &["type", "task_type", "taskType"])?
             .map(|value| super::input::parse_task_type("type", &value))
@@ -604,7 +609,11 @@ impl HubCoordinationExecutor {
             .task
             .list_tasks()?
             .into_iter()
-            .filter(|task| status_filter.is_none_or(|value| task.status == value))
+            .filter(|task| {
+                status_filter
+                    .as_ref()
+                    .is_none_or(|values| values.contains(&task.status))
+            })
             .filter(|task| type_filter.is_none_or(|value| task.task_type == value))
             .filter(|task| task_matches_tags(task, &tags))
             .filter(|task| ready != Some(true) || task_dependencies_ready(task, &status))
@@ -920,5 +929,57 @@ mod checkoutless_hub_tests {
                 .any(|entry| entry.path().extension().is_some_and(|ext| ext == "md")),
             "friction persisted in the canonical workspace partition"
         );
+    }
+
+    #[test]
+    fn task_list_accepts_multi_status_filters_without_checkout() {
+        let (_root, executor, context) = executor();
+        for (title, status) in [
+            ("Backlog hub task", "backlog"),
+            ("In-progress hub task", "in-progress"),
+            ("Review hub task", "review"),
+            ("Done hub task", "done"),
+        ] {
+            let created = executor
+                .execute_tool(
+                    "orbit.task.add",
+                    json!({
+                        "workspace": "ws_checkoutless",
+                        "title": title,
+                        "description": "multi-status fixture",
+                        "model": "codex"
+                    }),
+                    context.clone(),
+                )
+                .expect("add checkoutless task");
+            executor
+                .execute_tool(
+                    "orbit.task.update",
+                    json!({
+                        "id": created["id"],
+                        "status": status,
+                        "plan": "Multi-status filter fixture.",
+                        "model": "codex"
+                    }),
+                    context.clone(),
+                )
+                .expect("set checkoutless task status");
+        }
+
+        for input in [
+            json!({ "status": "backlog,in-progress,review" }),
+            json!({ "status": ["backlog", "in-progress", "review"] }),
+        ] {
+            let output = executor
+                .execute_tool("orbit.task.list", input, context.clone())
+                .expect("multi-status filter succeeds");
+            let statuses = output
+                .as_array()
+                .expect("task array")
+                .iter()
+                .map(|task| task["status"].as_str().expect("task status"))
+                .collect::<std::collections::HashSet<_>>();
+            assert_eq!(statuses, ["backlog", "in-progress", "review"].into());
+        }
     }
 }

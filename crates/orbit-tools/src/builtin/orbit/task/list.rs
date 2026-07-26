@@ -10,8 +10,10 @@ impl Tool for OrbitTaskListTool {
         let mut parameters = vec![
             ToolParam {
                 name: "status".to_string(),
-                description: "Optional task status filter".to_string(),
-                param_type: "string".to_string(),
+                description:
+                    "Optional task status filter. Pass a comma-separated string or an array of status names."
+                        .to_string(),
+                param_type: "string_list".to_string(),
                 required: false,
             },
             ToolParam {

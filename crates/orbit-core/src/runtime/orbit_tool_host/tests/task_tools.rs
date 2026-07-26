@@ -1605,6 +1605,73 @@ fn task_list_tool_applies_status_filter_before_limit() {
 }
 
 #[test]
+fn task_list_tool_accepts_comma_delimited_and_array_status_filters() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let backlog = create_task(
+        &runtime,
+        &repo_root,
+        "Backlog status task",
+        "multi-status fixture",
+        TaskStatus::Backlog,
+        &[],
+    );
+    let in_progress = create_task(
+        &runtime,
+        &repo_root,
+        "In-progress status task",
+        "multi-status fixture",
+        TaskStatus::InProgress,
+        &[],
+    );
+    let review = create_task(
+        &runtime,
+        &repo_root,
+        "Review status task",
+        "multi-status fixture",
+        TaskStatus::Review,
+        &[],
+    );
+    create_task(
+        &runtime,
+        &repo_root,
+        "Done status task",
+        "multi-status fixture",
+        TaskStatus::Done,
+        &[],
+    );
+
+    let comma_delimited = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({ "status": "backlog,in-progress,review" }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("comma-delimited statuses succeed");
+    let array = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({ "status": ["backlog", "in-progress", "review"] }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("status array succeeds");
+
+    for output in [&comma_delimited, &array] {
+        let ids = output
+            .as_array()
+            .expect("task array")
+            .iter()
+            .map(|task| task["id"].as_str().expect("task id"))
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains(backlog.id.as_str()));
+        assert!(ids.contains(in_progress.id.as_str()));
+        assert!(ids.contains(review.id.as_str()));
+    }
+}
+
+#[test]
 fn task_update_tool_recovers_mcp_encoded_acceptance_array() {
     let (_root, runtime, repo_root) = test_runtime();
     let task = create_task(

@@ -2,4 +2,5 @@
 
 mod add;
 mod artifact_put;
+mod list;
 mod update;
