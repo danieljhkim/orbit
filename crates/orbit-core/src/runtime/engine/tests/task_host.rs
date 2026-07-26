@@ -14,8 +14,8 @@ use orbit_engine::{
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
-use crate::OrbitRuntime;
 use crate::command::task::{SYSTEM_ACTOR_LABEL, TaskAddParams, TaskUpdateParams};
+use crate::{ActorIdentity, OrbitRuntime};
 
 fn test_runtime() -> (tempfile::TempDir, OrbitRuntime) {
     let root = tempdir().expect("create tempdir");
@@ -843,17 +843,12 @@ fn generic_automation_status_update_uses_system_history_and_preserves_implemente
 }
 
 #[test]
-fn direct_update_task_keeps_default_human_attribution() {
-    let _env = orbit_common::test_env::unset(
-        orbit_common::test_env::AGENT_IDENTITY_ENV
-            .iter()
-            .chain(orbit_common::test_env::MANAGED_RUN_ENV)
-            .copied(),
-    );
+fn direct_update_task_uses_unknown_attribution_without_an_actor_envelope() {
     let (_root, runtime) = test_runtime();
+    let runtime = runtime.with_actor(ActorIdentity::unknown());
     let task = runtime
         .add_task(TaskAddParams {
-            title: "Human comment".to_string(),
+            title: "Unenveloped comment".to_string(),
             description: "Exercise direct update attribution.".to_string(),
             workspace_path: Some(".".to_string()),
             ..Default::default()
@@ -864,7 +859,7 @@ fn direct_update_task_keeps_default_human_attribution() {
         .update_task(
             &task.id,
             TaskUpdateParams {
-                comment: Some("Human-visible note.".to_string()),
+                comment: Some("Visible note.".to_string()),
                 ..Default::default()
             },
         )
@@ -873,9 +868,9 @@ fn direct_update_task_keeps_default_human_attribution() {
     let comments = runtime
         .get_task_comments(&task.id)
         .expect("reload comments");
-    let comment = comments.last().expect("human comment");
-    assert_eq!(comment.by, "human");
-    assert_eq!(comment.message, "Human-visible note.");
+    let comment = comments.last().expect("direct comment");
+    assert_eq!(comment.by, "unknown");
+    assert_eq!(comment.message, "Visible note.");
     // ORB-10311: the full comment is persisted, but no redundant `commented`
     // history entry is emitted alongside it.
     let history = runtime.get_task_history(&task.id).expect("reload history");

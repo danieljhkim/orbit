@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use orbit_common::types::{normalize_agent_family_for_model, normalize_optional_attribution_label};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::{ActorIdentity, OrbitError, OrbitRuntime};
 use serde_json::Value;
 
 use super::{Commands, Execute};
@@ -86,6 +86,17 @@ impl CommandOperation {
             suppress_errors,
             dispatch,
         }
+    }
+
+    /// Apply the process actor resolved by the runtime bootstrap to the CLI
+    /// guard's audit row. Tool dispatch may replace this row with its own
+    /// more specific audited invocation, but pre-dispatch failures and all
+    /// direct commands must use the same actor identity as the runtime.
+    pub fn attribute_to(mut self, actor: &ActorIdentity) -> Self {
+        if let Some(meta) = self.audit_meta.as_mut() {
+            meta.role.clone_from(&actor.label);
+        }
+        self
     }
 }
 

@@ -40,7 +40,7 @@ use axum::http::request::Parts;
 use axum::response::{IntoResponse, Json, Response};
 use orbit_common::types::WorkspaceStatus;
 use orbit_core::runtime::WorkspaceRuntimeBinding;
-use orbit_core::{ActorIdentity, OrbitError, OrbitRuntime, ShipMode};
+use orbit_core::{OrbitError, OrbitRuntime, ShipMode};
 use orbit_remote::{
     runtime::{RemoteRuntimeFactory, workspace_runtime_binding},
     workspace_registry,
@@ -263,8 +263,7 @@ impl StateInner {
             &orbit_dir,
             binding.clone(),
         )
-        .map_err(|e| WsRejection::build_failed(id, &e))?
-        .with_actor(ActorIdentity::human("human"));
+        .map_err(|e| WsRejection::build_failed(id, &e))?;
         let runtime = Arc::new(runtime);
 
         // Test seam: pause between build and publish so a test can rebind +
