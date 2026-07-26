@@ -89,10 +89,10 @@ template:
   - artifact-deprecation
   - no-diff-expected
   priority: medium
-  crew: opus
+  crew: sol
   status: backlog
 dedupe: skip_if_open
 created_by: system
 created_at: 2026-07-19T00:00:00Z
-updated_by: claude
+updated_by: daniel
 updated_at: 2026-07-25T00:00:00Z
