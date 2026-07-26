@@ -126,6 +126,7 @@ ci-fast:
 	./scripts/check-artifact-redaction-guardrail.sh
 	./scripts/check-changelog-style.sh
 	./scripts/check-error-translation.sh
+	./scripts/check-orphan-modules.sh
 
 # Verify every workspace crate declares its stability tier
 stability:

@@ -3,13 +3,15 @@ use crate::OrbitRuntime;
 use crate::command::task::{TaskAddParams, TaskUpdateParams};
 use crate::{ShipMode, WorkspaceRuntimeBinding};
 use chrono::Utc;
+use orbit_common::types::activity_job::V2ActivityCatalog;
 use orbit_common::types::{
-    NO_DIFF_EXPECTED_TAG, PipelineState, TaskPriority, TaskStatus, TaskType,
+    ActivityV2Spec, NO_DIFF_EXPECTED_TAG, PipelineState, TaskPriority, TaskStatus, TaskType,
 };
 use orbit_engine::DispatchError;
 use orbit_engine::V2RuntimeHost;
 use orbit_tools::ToolContext;
 use serde_json::json;
+use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
 fn seed_task(
@@ -346,5 +348,65 @@ fn waiting_locks_from_reserve_output_extracts_unique_conflict_files() {
             "dir:crates/orbit-core/src".to_string(),
             "file:src/lib.rs".to_string()
         ]
+    );
+}
+
+fn repo_root() -> PathBuf {
+    // CARGO_MANIFEST_DIR points at <repo>/crates/orbit-core. Walk up two
+    // levels to reach the workspace root.
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("orbit-core has a parent (crates/)")
+        .parent()
+        .expect("crates/ has a parent (repo root)")
+        .to_path_buf()
+}
+
+/// Loads every activity asset under `dir` through the same catalog loader
+/// `OrbitRuntime::v2_activity_catalog` uses at runtime, and returns the
+/// deterministic actions it names that this dispatcher does not register.
+/// A missing `dir` is not itself a failure — callers assert on the
+/// unregistered-actions list, so an empty (or absent) tree just yields none.
+fn unregistered_deterministic_actions(dir: &Path) -> Vec<String> {
+    if !dir.is_dir() {
+        return Vec::new();
+    }
+    let mut catalog = V2ActivityCatalog::new();
+    catalog
+        .load_dir_skipping_retired(dir)
+        .unwrap_or_else(|error| panic!("load activity assets from {}: {error}", dir.display()));
+
+    catalog
+        .names()
+        .filter_map(|name| {
+            let ActivityV2Spec::Deterministic(spec) = &catalog.get(name).expect("just listed").spec
+            else {
+                return None;
+            };
+            (!is_deterministic_action_registered(&spec.action))
+                .then(|| format!("{name} (action: {})", spec.action))
+        })
+        .collect()
+}
+
+/// [ORB-10415] Guardrail for orbit-engine cleanup audit §2/§11: a shipped
+/// activity asset naming a deterministic action this dispatcher does not
+/// register is exactly the live defect that silently broke the PR failure
+/// handoff (`pr_failure_handoff`) and the worktree GC routine (`worktree_gc`)
+/// until ORB-10410. Load through the real catalog loader (not grep) so any
+/// future asset drift fails a test instead of a production run.
+#[test]
+fn shipped_activity_assets_only_name_registered_deterministic_actions() {
+    let root = repo_root();
+    let mut unregistered =
+        unregistered_deterministic_actions(&root.join("crates/orbit-core/assets/activities"));
+    unregistered.extend(unregistered_deterministic_actions(
+        &root.join(".orbit/resources/activities"),
+    ));
+
+    assert!(
+        unregistered.is_empty(),
+        "shipped activity assets name deterministic actions missing from \
+         REGISTERED_DETERMINISTIC_ACTIONS: {unregistered:?}"
     );
 }
