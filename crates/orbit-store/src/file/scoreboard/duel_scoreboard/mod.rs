@@ -19,8 +19,8 @@
 //! - [`load_runs`] — reads all run entries back.
 //! - [`aggregate`] — pure function over `&[DuelRun]` returning a report.
 //! - [`derive_task_scope`] — classifies a diff into `TaskScope`; lives here
-//!   because `record_duel_scores` builds the `TaskClass` from git at record
-//!   time and the CLI never needs to touch git.
+//!   because scores are recorded with the `TaskClass` built from git at
+//!   record time and the CLI never needs to touch git.
 
 // ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]

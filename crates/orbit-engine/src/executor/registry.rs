@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use orbit_common::types::{ExecutorDef, ExecutorType};
 use tracing::warn;
 
-use super::automation::AutomationExecutor;
 use super::cli_command::CliCommandExecutor;
 use super::direct_agent::DirectAgentExecutor;
 use super::external::ExternalExecutor;
@@ -45,8 +44,6 @@ impl ActivityExecutorRegistry {
 
     pub fn register_builtins(&mut self) {
         let _ = self.register(CliCommandExecutor);
-        let _ = self.register(AutomationExecutor);
-        let _ = self.register(crate::activity_job::OrbitToolCallExecutor);
     }
 
     /// Load executor definitions from YAML resources. Entries override builtins by name.

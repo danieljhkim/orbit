@@ -1,9 +1,9 @@
 //! v2 Job DAG executor — the Phase 3 runtime for `JobV2` assets.
 //!
 //! Interprets a `JobV2` step tree with first-class `parallel:`, `when:`,
-//! `retry:`, `fan_out:/fan_in:`, and `loop:` constructs (design §4). The v1
-//! sequential/DAG runner in `crate::job_runner` is untouched — this module
-//! is purely additive.
+//! `retry:`, `fan_out:/fan_in:`, and `loop:` constructs (design §4). This
+//! module is purely additive; it shares only the boolean-expression
+//! evaluator (`crate::condition::evaluate_bool_expr`) with v1.
 //!
 //! ## Concurrency
 //! Parallel branches and fan-out workers run under `std::thread::scope`
@@ -41,7 +41,7 @@ use orbit_common::types::{JobRunState, PipelineState};
 use orbit_common::utility::jitter::JitterRng;
 use serde_json::Value;
 
-use crate::job_runner::evaluate_bool_expr;
+use crate::condition::evaluate_bool_expr;
 use crate::template::{self, TemplateContext};
 
 use super::agent_loop_driver::drive_agent_loop_with_session;

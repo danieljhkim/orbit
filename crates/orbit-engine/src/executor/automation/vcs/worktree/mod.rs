@@ -6,13 +6,25 @@ mod setup;
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::OrbitError;
+use serde_json::Value;
 
-pub(in crate::executor::automation) use cleanup::cleanup_worktree;
-pub use gc::{WorktreeGcOptions, WorktreeGcReport, WorktreeGcResult, collect_worktrees};
+pub use gc::{WorktreeGcOptions, WorktreeGcResult, collect_worktrees};
 pub(in crate::executor::automation) use merge::merge_batch_worktree_into_base;
 pub(in crate::executor::automation) use setup::setup_worktree;
 
 const SHARED_WORKTREE_NAME_PREFIX: &str = "parallel-batch";
+
+/// Extract the `run_id` from an activity input value, returning a trimmed
+/// non-empty string. Used by activities that need to resolve the shared
+/// worktree for a run.
+fn require_run_id<'a>(input: &'a Value, activity: &str) -> Result<&'a str, OrbitError> {
+    input
+        .get("run_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| OrbitError::InvalidInput(format!("{activity} requires input.run_id")))
+}
 
 pub(in crate::executor::automation) fn sanitize_worktree_token(
     value: &str,

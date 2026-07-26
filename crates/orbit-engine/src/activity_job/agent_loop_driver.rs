@@ -121,40 +121,6 @@ fn role_slot_from_input(input: &Value) -> Option<RoleSlot> {
         .and_then(|value| value.parse().ok())
 }
 
-/// Drive a v2 agent_loop activity with a caller-supplied ToolContext.
-///
-/// Callers use this entry to attach an in-memory verb host to the tool context
-/// while reusing the shared HTTP loop driver.
-pub fn drive_agent_loop_with_tool_context(
-    spec: &AgentLoopSpec,
-    api_key: Option<&str>,
-    run_id: &str,
-    audit: Arc<V2AuditWriter>,
-    input: &Value,
-    tool_ctx: ToolContext,
-) -> Result<LoopOutcome, DispatchError> {
-    let model = resolve_model(spec);
-    let provider = spec.provider.as_str();
-    let mut session = Session::new(provider, model.clone(), &spec.instruction, None);
-    let mut tool_ctx = tool_ctx;
-    if tool_ctx.agent_name.is_none() {
-        tool_ctx.agent_name = Some(provider.to_string());
-    }
-    if tool_ctx.model_name.is_none() {
-        tool_ctx.model_name = Some(model);
-    }
-    drive_inner(
-        spec,
-        api_key,
-        run_id,
-        audit,
-        &mut session,
-        input,
-        tool_ctx,
-        None,
-    )
-}
-
 #[allow(clippy::too_many_arguments)]
 fn drive_inner(
     spec: &AgentLoopSpec,

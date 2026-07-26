@@ -5,8 +5,6 @@ use orbit_common::types::{Activity, Job};
 use serde_json::Value;
 use std::path::PathBuf;
 
-use super::hosts::TaskReadHost;
-
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
     pub activity: Activity,
@@ -43,15 +41,4 @@ pub fn execution_working_directory(execution: &ExecutionContext) -> Option<Strin
         .workspace_path
         .clone()
         .or_else(|| input_workspace_path(&execution.input))
-}
-
-/// Resolve the working directory for an execution context, falling back to the
-/// task's workspace_path when neither the activity nor input provides one.
-/// This is the preferred variant for agent_invoke and cli_command executors
-/// where a [`TaskHost`](super::hosts::TaskHost) is available.
-pub fn execution_working_directory_with_task<H: TaskReadHost + ?Sized>(
-    _host: &H,
-    execution: &ExecutionContext,
-) -> Option<String> {
-    execution_working_directory(execution)
 }

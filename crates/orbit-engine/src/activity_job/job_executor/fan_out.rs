@@ -36,7 +36,6 @@ pub(super) fn run_fan_out(
             success: true,
             output: Value::Array(Vec::new()),
             message: None,
-            skipped: false,
         });
     }
 
@@ -183,7 +182,6 @@ pub(super) fn run_fan_out(
         success: block_ok,
         output: collected_value,
         message: None,
-        skipped: false,
     })
 }
 

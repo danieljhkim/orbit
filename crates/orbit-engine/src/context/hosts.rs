@@ -345,17 +345,3 @@ pub trait RuntimeHost {
         Ok(())
     }
 }
-
-/// Aggregates the store/runtime traits needed by the top-level engine flows
-/// (job orchestration, reconciliation, stale recovery). Executor dispatch uses
-/// [`ExecutorHost`](super::executor_host::ExecutorHost) instead of taking this
-/// full boundary directly.
-pub trait EngineHost:
-    JobRunHost + TaskHost + AgentProtocolHost + EnvironmentHost + RuntimeHost + Sync
-{
-}
-
-impl<T> EngineHost for T where
-    T: JobRunHost + TaskHost + AgentProtocolHost + EnvironmentHost + RuntimeHost + Sync
-{
-}

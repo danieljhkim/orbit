@@ -19,7 +19,6 @@ pub(super) fn run_step(step: &JobV2Step, ctx: &ExecCtx<'_>) -> Result<StepOutcom
                 success: true,
                 output: Value::Null,
                 message: None,
-                skipped: true,
             });
         }
     }
@@ -129,7 +128,6 @@ pub(super) fn run_step_with_retry(
             success: false,
             output: Value::Null,
             message: None,
-            skipped: false,
         }),
     }
 }

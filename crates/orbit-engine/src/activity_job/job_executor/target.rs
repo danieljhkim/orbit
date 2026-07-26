@@ -91,7 +91,6 @@ pub(super) fn run_target(
                 success: dispatch.success,
                 output: out,
                 message: dispatch.message,
-                skipped: false,
             })
         }
         _ => {
@@ -113,7 +112,6 @@ pub(super) fn run_target(
                 success: dispatch.success,
                 output: out,
                 message: dispatch.message,
-                skipped: false,
             })
         }
     }
@@ -204,7 +202,6 @@ pub(super) fn run_agent_loop_outcome(
         success: true,
         output: out_json,
         message: None,
-        skipped: false,
     })
 }
 
