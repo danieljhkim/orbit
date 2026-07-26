@@ -10,7 +10,7 @@ summary: Current implementation of the auto-task record, due-math, host-local cu
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10439, ORB-10446, ADR-0218, ADR-0217]
+related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ADR-0218, ADR-0217]
 ---
 
 # Auto-tasks — Design
@@ -63,7 +63,10 @@ fires nothing; otherwise it evaluates due-math. On `Fire`, if `dedupe =
 skip_if_open` and a task tagged `auto-task:<name>` is still open, it skips
 **without advancing the cursor** — so the pending occurrence fires (once,
 collapsed) the moment the queue drains. Otherwise it mints a `system_created`
-task from the template (tagged for provenance) and advances the cursor.
+task from the template (tagged for provenance) and advances the cursor. Every
+minted title is `[auto-task] ` followed by the template title; the prefix is
+applied at the shared template-to-task mapping, so definition YAML titles stay
+clean and an already-prefixed template is not double-prefixed.
 
 The pass is the deterministic `run_auto_task_scheduler` action
 (`dispatch.rs`), wrapped in `auto_task_scheduler_pipeline` (`max_active_runs:
@@ -87,8 +90,9 @@ definitions otherwise cost a week per typo). It lives on `crud.rs` alongside the
 other verbs and delegates to `scheduler::mint_task` — the scheduler's mint path
 is already separable from due-math (it needs only the definition), so there is
 exactly one template→task mapping and a manually minted task is field-for-field
-identical to a fired one: same field mapping, same `auto-task:<name>` tag, same
-`system_created` marker, same template-supplied status.
+identical to a fired one: same field mapping, same `[auto-task] ` title
+convention, same `auto-task:<name>` tag, same `system_created` marker, same
+template-supplied status.
 
 The mint is **unconditional**. It ignores schedule due-math, `dedupe`, and
 `enabled`, and it neither reads nor writes the host-local cursor — an operator
@@ -143,5 +147,6 @@ validation correctly produces only task-side effects.
 
 - ORB-10149 — Auto-task primitive.
 - ORB-10439 — on-demand manual mint (renamed to `orbit auto-task mint <name>` by ORB-10446).
+- ORB-10441 — mint-time visible title provenance.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

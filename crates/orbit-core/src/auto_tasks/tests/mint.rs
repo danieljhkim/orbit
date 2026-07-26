@@ -93,6 +93,36 @@ fn mint_matches_a_scheduler_fire_field_for_field() {
 }
 
 #[test]
+fn title_prefix_is_applied_once_for_scheduler_and_manual_mint() {
+    for (template_title, expected_title) in [
+        (
+            "Chore from a clean template",
+            "[auto-task] Chore from a clean template",
+        ),
+        (
+            "[auto-task] Chore from an already-prefixed template",
+            "[auto-task] Chore from an already-prefixed template",
+        ),
+    ] {
+        let runtime = runtime();
+        let mut params = interval_params("chore", 60);
+        params.template.title = template_title.to_string();
+        runtime.auto_task_add(params).expect("add");
+        let t0 = at(2026, 1, 1, 0, 0);
+
+        fire(&runtime, t0); // baseline
+        let reports = fire(&runtime, t0 + Duration::minutes(65));
+        let scheduler_task = runtime
+            .get_task(&reports[0].1.clone().expect("scheduler task id"))
+            .expect("scheduler task");
+        let minted_task = runtime.auto_task_mint("chore").expect("manual mint");
+
+        assert_eq!(scheduler_task.title, expected_title);
+        assert_eq!(minted_task.title, expected_title);
+    }
+}
+
+#[test]
 fn mint_succeeds_for_a_disabled_definition() {
     let runtime = runtime();
     runtime
