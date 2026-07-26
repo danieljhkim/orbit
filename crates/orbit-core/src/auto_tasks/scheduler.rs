@@ -64,16 +64,19 @@ pub struct SchedulerOptions {
 
 /// Run one scheduler pass over the definitions in `runtime`'s workspace at an
 /// explicit `now` (the test seam). Loads definitions from
-/// `<orbit_dir>/auto_tasks/`, cursors from `<orbit_dir>/state/auto-tasks.json`.
+/// `<local_orbit_dir>/auto_tasks/`, cursors from
+/// `<shared_orbit_dir>/state/auto-tasks.json`.
 pub fn run_auto_task_scheduler_at(
     runtime: &OrbitRuntime,
     now: DateTime<Utc>,
     options: SchedulerOptions,
 ) -> Result<AutoTaskSchedulerOutcome, OrbitError> {
-    let orbit_dir = runtime.paths().orbit_dir.clone();
+    // ADR-0286: definitions are tracked checkout content, while cursor state
+    // is host-local coordination state shared by linked worktrees.
+    let definition_root = runtime.paths().local_dir.clone();
     let state_path = cursor_state_path(&runtime.paths().state_dir);
 
-    let collection = collect_auto_tasks(&orbit_dir);
+    let collection = collect_auto_tasks(&definition_root);
     let cursors = load_cursor_state(&state_path);
 
     let mut reports = Vec::new();

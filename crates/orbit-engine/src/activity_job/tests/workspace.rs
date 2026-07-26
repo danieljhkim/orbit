@@ -152,3 +152,17 @@ fn resolve_subprocess_cwd_rejects_declared_missing_path() {
         other => panic!("expected CliInvocationFailed, got {other:?}"),
     }
 }
+
+#[test]
+fn vanished_untracked_staging_file_is_not_a_snapshot_failure() {
+    let root = tempdir().expect("tempdir");
+    let path = root.path().join(".tracked.yaml.refresh.tmp");
+    std::fs::write(&path, "staged").expect("stage file");
+    std::fs::remove_file(&path).expect("atomic rename consumed staging file");
+
+    assert_eq!(
+        untracked_file_identity(root.path(), ".tracked.yaml.refresh.tmp")
+            .expect("vanished staging file is benign"),
+        None
+    );
+}

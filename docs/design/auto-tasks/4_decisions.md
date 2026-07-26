@@ -1,7 +1,7 @@
 ---
 title: Auto-tasks — Decisions
 owner: claude
-last_updated: 2026-07-12
+last_updated: 2026-07-26
 status: Accepted
 feature: auto-tasks
 doc_role: decisions
@@ -10,7 +10,7 @@ summary: ADR log for the auto-task primitive.
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ADR-0218, ADR-0219]
+related_artifacts: [ADR-0218, ADR-0219, ADR-0286]
 ---
 
 # Auto-tasks — Decisions
@@ -73,9 +73,36 @@ Orbit creates neither an empty commit nor an empty PR.
 - Cost: a mistakenly tagged task can reach review without repository changes,
   so the tag is a privileged workflow exemption.
 
+## ADR-0286 — Route tracked auto-task definitions through the active worktree
+
+**Status:** Proposed · 2026-07 · [ORB-10472]
+
+**Context.** Auto-task definition CRUD used the shared Orbit root even when a
+workflow executor was assigned a linked worktree. That let a refresh expose
+tracked dirt in the registered primary checkout while unrelated implementation
+guards were sampling it. The alternatives were to tolerate `auto_tasks` drift
+in the integrity guard or to make tracked definition mutation worktree-local.
+
+**Decision.** Read and replace tracked auto-task definitions through the runtime
+local root. Keep scheduler cursors and coordination state under the shared root,
+and replace each definition atomically so a failed refresh cannot expose partial
+bytes.
+
+**Consequences.**
+
+- Linked-worktree refreshes become ordinary branch changes and concurrent
+  implementation guards continue to observe an unchanged primary checkout.
+- Primary-checkout operator commands retain existing behavior because local and
+  shared roots are identical there.
+- Cost: callers in linked worktrees see that checkout version of definition
+  YAML while scheduler cursor state remains shared, so definition and cursor
+  roots must remain deliberately separate.
+
 ## Task References
 
 - [ORB-10149] — Shipped the auto-task primitive (record, scheduler, CRUD, assets).
 - [ORB-10148] — Added the QA definition and no-diff workflow exemption.
+- [ORB-10472] — Isolated auto-task definition refresh from the registered
+  primary checkout.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
