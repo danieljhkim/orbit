@@ -10,7 +10,7 @@ summary: Current implementation of the auto-task record, due-math, host-local cu
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10439, ADR-0218, ADR-0217]
+related_artifacts: [ORB-10149, ORB-10439, ORB-10446, ADR-0218, ADR-0217]
 ---
 
 # Auto-tasks — Design
@@ -79,14 +79,14 @@ rejects duplicate names; update patches present fields; toggle flips `enabled`
 (cron parse / interval > 0) and crew at write time, so a bad definition is never
 persisted.
 
-## 5b. Manual mint — `generate` (ORB-10439)
+## 5b. Manual mint — `mint` (ORB-10439, renamed by ORB-10446)
 
-`orbit auto-task generate <name>` mints one task from a definition on demand, so
+`orbit auto-task mint <name>` mints one task from a definition on demand, so
 a new or edited definition can be exercised without waiting for its slot (weekly
 definitions otherwise cost a week per typo). It lives on `crud.rs` alongside the
 other verbs and delegates to `scheduler::mint_task` — the scheduler's mint path
 is already separable from due-math (it needs only the definition), so there is
-exactly one template→task mapping and a generated task is field-for-field
+exactly one template→task mapping and a manually minted task is field-for-field
 identical to a fired one: same field mapping, same `auto-task:<name>` tag, same
 `system_created` marker, same template-supplied status.
 
@@ -98,10 +98,10 @@ definition), so the CLI exits non-zero rather than silently no-op'ing.
 
 Deliberately rejected:
 
-- **A `generate`-local mint implementation.** A second template→task mapping
+- **A mint-local mint implementation.** A second template→task mapping
   would drift from the scheduler's, and the provenance parity that makes the
   feature worth having is precisely what drift destroys.
-- **Honoring `enabled`/`dedupe`/due-math.** That makes `generate` a "run the
+- **Honoring `enabled`/`dedupe`/due-math.** That makes `mint` a "run the
   scheduler early" button, which the existing `run_auto_task_scheduler` action
   already is. The gap being closed is *manual mint*, not *early fire*.
 - **Advancing the cursor.** It would consume a real scheduled slot, silently
@@ -111,13 +111,13 @@ Deliberately rejected:
   that `auto-task show` already renders. The surface is `<name>` plus `--json`,
   matching the sibling subcommands.
 
-One consequence follows from parity and is intended: because a generated task
+One consequence follows from parity and is intended: because a manually minted task
 carries the provenance tag, an open one is visible to `skip_if_open` on the next
 scheduler pass and defers that fire, exactly as an open fired instance does. The
 cursor does not advance, so the deferred occurrence fires once when the queue
 drains. This is the behavior the hand-copy workaround could not provide.
 
-`generate` is CLI-only. Per the mcp-bridge design (`docs/design/mcp-bridge/2_design.md`,
+`mint` is CLI-only. Per the mcp-bridge design (`docs/design/mcp-bridge/2_design.md`,
 auto_task placement row) the auto_task MCP tools manage the Git-versioned
 definition and do not mint tasks; no MCP tool was added.
 
@@ -142,6 +142,6 @@ validation correctly produces only task-side effects.
 ## Task References
 
 - ORB-10149 — Auto-task primitive.
-- ORB-10439 — `orbit auto-task generate <name>`, the on-demand manual mint.
+- ORB-10439 — on-demand manual mint (renamed to `orbit auto-task mint <name>` by ORB-10446).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

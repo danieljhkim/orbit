@@ -196,8 +196,8 @@ fn is_open_status(status: TaskStatus) -> bool {
 /// Mint one task from a definition's template — the single template→task
 /// mapping in the system. Deliberately independent of due-math, cursors, and
 /// dedupe: it needs only the definition, so the manual
-/// [`OrbitRuntime::auto_task_generate`](crate::OrbitRuntime::auto_task_generate)
-/// path reuses it verbatim and a generated task is field-for-field identical to
+/// [`OrbitRuntime::auto_task_mint`](crate::OrbitRuntime::auto_task_mint)
+/// path reuses it verbatim and a manually minted task is field-for-field identical to
 /// a fired one, provenance tag and `system_created` marker included.
 pub(super) fn mint_task(
     runtime: &OrbitRuntime,
