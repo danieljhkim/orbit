@@ -66,6 +66,12 @@ impl OrbitRuntime {
 
         self.check_tool_enabled(name)?;
 
+        // ORB-10453: the capability chokepoint. Every tool caller in the
+        // workspace reaches the registry through this function, so this is the
+        // only place a governed tool operation is authorized — a per-command
+        // guard would be reopened by the next entry point that skips it.
+        self.authorize_tool_operation(name, &tool_context.session_context)?;
+
         if !tool_context.allowed_tools.is_empty()
             && !tool_allowed(name, &tool_context.allowed_tools)
         {

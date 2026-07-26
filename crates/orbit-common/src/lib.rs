@@ -11,6 +11,8 @@
 //! Shared leaf crate for the Orbit workspace.
 //!
 //! The public surface is intentionally split into four namespaces:
+//! - [`authorization`] for the capability chokepoint every entry surface asks
+//!   before performing a governed operation (ORB-10453)
 //! - [`friction`] for shared friction taxonomy defaults and the friction
 //!   operation registry
 //! - [`migration`] for forward-only schema migrations of YAML artifacts
@@ -21,6 +23,7 @@
 //!   and blob storage
 //! - [`tracing`] as the shared structured-event facade used by Orbit crates
 
+pub mod authorization;
 pub mod friction;
 pub mod migration;
 pub mod model_defaults;

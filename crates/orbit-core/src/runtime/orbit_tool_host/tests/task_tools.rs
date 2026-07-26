@@ -6,7 +6,9 @@ use orbit_common::types::{TaskStatus, ToolSessionContext};
 use orbit_store::sqlite::task_registry::read_workspace_config;
 use serde_json::{Value, json};
 
-use super::super::test_support::{create_task, invalid_input_message, test_runtime};
+use super::super::test_support::{
+    create_task, invalid_input_message, run_tool_as_operator, test_runtime,
+};
 use crate::command::tool::ToolEntryPoint;
 
 struct CurrentDirGuard {
@@ -391,9 +393,11 @@ fn task_delete_tool_rejects_unforced_protected_statuses() {
     // which bypasses the agent gate, matching the CLI path
     // (`runtime.delete_task_guarded`) that admin workflows use in
     // production.
-    let message = invalid_input_message(
-        runtime.run_tool("orbit.task.delete", json!({ "id": task.id.clone() })),
-    );
+    let message = invalid_input_message(run_tool_as_operator(
+        &runtime,
+        "orbit.task.delete",
+        json!({ "id": task.id.clone() }),
+    ));
 
     assert_eq!(
         message,
@@ -423,9 +427,12 @@ fn task_delete_tool_allows_unforced_proposed_and_rejected_tasks() {
 
         // ORB-00289: see note above — `run_tool` exercises the tool
         // dispatch business logic without the agent-surface gate.
-        let output = runtime
-            .run_tool("orbit.task.delete", json!({ "id": task.id.clone() }))
-            .expect("unprotected delete succeeds");
+        let output = run_tool_as_operator(
+            &runtime,
+            "orbit.task.delete",
+            json!({ "id": task.id.clone() }),
+        )
+        .expect("unprotected delete succeeds");
 
         assert_eq!(output, json!({ "id": task.id, "deleted": true }));
     }
@@ -445,12 +452,12 @@ fn task_delete_tool_allows_forced_protected_statuses() {
 
     // ORB-00289: see note above — `run_tool` exercises the tool dispatch
     // business logic without the agent-surface gate.
-    let output = runtime
-        .run_tool(
-            "orbit.task.delete",
-            json!({ "id": task.id.clone(), "force": true }),
-        )
-        .expect("forced protected delete succeeds");
+    let output = run_tool_as_operator(
+        &runtime,
+        "orbit.task.delete",
+        json!({ "id": task.id.clone(), "force": true }),
+    )
+    .expect("forced protected delete succeeds");
 
     assert_eq!(output, json!({ "id": task.id.clone(), "deleted": true }));
     assert!(runtime.get_task(&task.id).is_err(), "task was deleted");

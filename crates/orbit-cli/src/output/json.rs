@@ -59,7 +59,7 @@ fn error_code(error: &OrbitError) -> &str {
             NotFoundKind::AgentSession => "agent_session_not_found",
             NotFoundKind::Workspace => "workspace_not_found",
         },
-        OrbitError::TaskApprovalRequired(_) => "task_approval_required",
+        OrbitError::CapabilityDenied(_) => "capability_denied",
         OrbitError::CompanionNotInstalled(_) => "companion_not_installed",
         OrbitError::InvalidInput(_) | OrbitError::InvalidInputDiagnostic { .. } => "invalid_input",
         OrbitError::SensitiveInput { .. } => "sensitive_input",

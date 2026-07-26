@@ -56,9 +56,17 @@ fn main() {
         json_error_preference,
         suppress_errors,
         dispatch,
+        governed,
     } = cli.command.operation().attribute_to(&actor);
 
     if matches!(runtime_need, RuntimeNeed::Forbidden) {
+        // A runtime-forbidden command has no store to authorize or audit
+        // against. None is governed; `Commands::operation` is exhaustive, so a
+        // future one that is would have to resolve this first.
+        debug_assert!(
+            governed.is_none(),
+            "a governed operation must be able to reach the authorization chokepoint"
+        );
         let result = dispatch(
             cli.command,
             DispatchContext::without_runtime(root_override.as_deref()),
@@ -81,18 +89,30 @@ fn main() {
         .with_actor(actor);
 
     let context = DispatchContext::with_runtime(&runtime, root_override.as_deref());
+    // ORB-10453: the CLI's single authorization chokepoint. Every command
+    // traverses it before dispatch, so a governed operation cannot be reached
+    // by adding a subcommand that forgets its own guard.
+    let authorize = |runtime: &orbit_core::OrbitRuntime| match governed {
+        Some(operation) => {
+            runtime.authorize_command_operation(operation.command, operation.subcommand)
+        }
+        None => Ok(()),
+    };
     let result = match audit_meta {
         Some(meta) => {
             let mut guard = audit_middleware::AuditGuard::new(&runtime, meta);
-            let result = dispatch(cli.command, context);
+            let result = authorize(&runtime).and_then(|()| dispatch(cli.command, context));
             match &result {
                 Ok(()) => guard.mark_success(),
-                Err(orbit_core::OrbitError::PolicyDenied(msg)) => guard.mark_denied(msg),
+                Err(
+                    orbit_core::OrbitError::PolicyDenied(msg)
+                    | orbit_core::OrbitError::CapabilityDenied(msg),
+                ) => guard.mark_denied(msg),
                 Err(err) => guard.mark_failure(err),
             }
             result
         }
-        None => dispatch(cli.command, context),
+        None => authorize(&runtime).and_then(|()| dispatch(cli.command, context)),
     };
 
     finish_command(result, suppress_errors, json_error_preference);

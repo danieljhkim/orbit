@@ -6,7 +6,7 @@ mod show;
 mod stats;
 mod support;
 
-pub use command::AuditCommand;
+pub use command::{AuditCommand, AuditSubcommand};
 
 #[cfg(test)]
 mod tests;

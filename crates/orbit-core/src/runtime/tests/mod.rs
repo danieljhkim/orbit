@@ -1,3 +1,4 @@
+mod authorization;
 mod builder;
 mod resolve;
 mod run_audit;

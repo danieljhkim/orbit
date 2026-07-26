@@ -51,7 +51,7 @@ fn error_code(err: &OrbitError) -> &str {
         },
         OrbitError::CompanionNotInstalled(_) => "companion_not_installed",
         OrbitError::PolicyDenied(_) => "policy_denied",
-        OrbitError::TaskApprovalRequired(_) => "approval_required",
+        OrbitError::CapabilityDenied(_) => "capability_denied",
         OrbitError::InvalidInput(_) | OrbitError::InvalidInputDiagnostic { .. } => "invalid_input",
         OrbitError::SensitiveInput { .. } => "sensitive_input",
         OrbitError::SkillValidation(_) | OrbitError::JobValidation(_) => "validation_failed",

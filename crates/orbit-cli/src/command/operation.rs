@@ -69,6 +69,24 @@ pub struct CommandOperation {
     pub json_error_preference: Option<bool>,
     pub suppress_errors: bool,
     pub dispatch: CommandDispatch,
+    /// The governed operation this invocation performs, when it performs one
+    /// [ORB-10453].
+    ///
+    /// An arm sets this to name *which* operation is being invoked; it never
+    /// names a capability. The requirement lives in
+    /// `orbit_common::authorization::GOVERNED_OPERATIONS` and the decision is
+    /// made once, in `main`, before dispatch.
+    ///
+    /// Commands whose destruction is flag-gated (`--confirm`) set it only for
+    /// the destructive invocation, so the read-only report stays reachable.
+    pub governed: Option<GovernedCommand>,
+}
+
+/// A `<command> <subcommand>` pair to authorize before dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GovernedCommand {
+    pub command: &'static str,
+    pub subcommand: &'static str,
 }
 
 impl CommandOperation {
@@ -85,7 +103,27 @@ impl CommandOperation {
             json_error_preference,
             suppress_errors,
             dispatch,
+            governed: None,
         }
+    }
+
+    /// Mark this invocation as performing a governed operation.
+    ///
+    /// `when` is the destructiveness predicate: `gc worktrees` reports without
+    /// it and reaps with it, and only the second is governed.
+    fn governed_when(
+        mut self,
+        when: bool,
+        command: &'static str,
+        subcommand: &'static str,
+    ) -> Self {
+        if when {
+            self.governed = Some(GovernedCommand {
+                command,
+                subcommand,
+            });
+        }
+        self
     }
 
     /// Apply the process actor resolved by the runtime bootstrap to the CLI
@@ -157,14 +195,16 @@ impl Commands {
             ),
             Commands::Workspace(command) => {
                 use super::workspace::WorkspaceSubcommand;
-                let (subcommand, runtime_need) = match &command.command {
-                    WorkspaceSubcommand::Init(_) => ("init", RuntimeNeed::Forbidden),
-                    WorkspaceSubcommand::List(_) => ("list", RuntimeNeed::Required),
-                    WorkspaceSubcommand::Show(_) => ("show", RuntimeNeed::Required),
-                    WorkspaceSubcommand::Link(_) => ("link", RuntimeNeed::Required),
-                    WorkspaceSubcommand::Role(_) => ("role", RuntimeNeed::Required),
-                    WorkspaceSubcommand::Remove(_) => ("remove", RuntimeNeed::Required),
-                    WorkspaceSubcommand::Teardown(_) => ("teardown", RuntimeNeed::Required),
+                let (subcommand, runtime_need, governed) = match &command.command {
+                    WorkspaceSubcommand::Init(_) => ("init", RuntimeNeed::Forbidden, false),
+                    WorkspaceSubcommand::List(_) => ("list", RuntimeNeed::Required, false),
+                    WorkspaceSubcommand::Show(_) => ("show", RuntimeNeed::Required, false),
+                    WorkspaceSubcommand::Link(_) => ("link", RuntimeNeed::Required, false),
+                    WorkspaceSubcommand::Role(_) => ("role", RuntimeNeed::Required, false),
+                    WorkspaceSubcommand::Remove(_) => ("remove", RuntimeNeed::Required, true),
+                    WorkspaceSubcommand::Teardown(args) => {
+                        ("teardown", RuntimeNeed::Required, args.confirm)
+                    }
                 };
                 CommandOperation::new(
                     runtime_need,
@@ -178,6 +218,7 @@ impl Commands {
                     false,
                     dispatch_workspace,
                 )
+                .governed_when(governed, "workspace", subcommand)
             }
             Commands::Host(command) => {
                 use super::host::HostSubcommand;
@@ -232,6 +273,7 @@ impl Commands {
                     false,
                     runtime_dispatch!(Semantic),
                 )
+                .governed_when(subcommand == "uninstall", "semantic", subcommand)
             }
             Commands::Migrate(command) => CommandOperation::new(
                 if command.confirm {
@@ -330,8 +372,8 @@ impl Commands {
             }
             Commands::Gc(command) => {
                 use super::gc::GcTarget;
-                let target = match &command.target {
-                    GcTarget::Worktrees(_) => "worktrees",
+                let (target, reaps) = match &command.target {
+                    GcTarget::Worktrees(args) => ("worktrees", args.confirm),
                 };
                 CommandOperation::new(
                     RuntimeNeed::Required,
@@ -345,6 +387,7 @@ impl Commands {
                     false,
                     runtime_dispatch!(Gc),
                 )
+                .governed_when(reaps, "gc", target)
             }
             Commands::Sweep(_) => CommandOperation::new(
                 RuntimeNeed::Forbidden,
@@ -487,18 +530,20 @@ impl Commands {
             }
             Commands::Learning(command) => {
                 use super::learning::LearningSubcommand;
-                let (subcommand, runtime_need) = match &command.command {
-                    LearningSubcommand::Add(_) => ("add", RuntimeNeed::Required),
-                    LearningSubcommand::List(_) => ("list", RuntimeNeed::Required),
-                    LearningSubcommand::Show(_) => ("show", RuntimeNeed::Required),
-                    LearningSubcommand::Stats(_) => ("stats", RuntimeNeed::Required),
-                    LearningSubcommand::Update(_) => ("update", RuntimeNeed::Required),
-                    LearningSubcommand::Supersede(_) => ("supersede", RuntimeNeed::Required),
-                    LearningSubcommand::Sync(_) => ("sync", RuntimeNeed::Required),
+                let (subcommand, runtime_need, governed) = match &command.command {
+                    LearningSubcommand::Add(_) => ("add", RuntimeNeed::Required, false),
+                    LearningSubcommand::List(_) => ("list", RuntimeNeed::Required, false),
+                    LearningSubcommand::Show(_) => ("show", RuntimeNeed::Required, false),
+                    LearningSubcommand::Stats(_) => ("stats", RuntimeNeed::Required, false),
+                    LearningSubcommand::Update(_) => ("update", RuntimeNeed::Required, false),
+                    LearningSubcommand::Supersede(_) => ("supersede", RuntimeNeed::Required, false),
+                    LearningSubcommand::Sync(_) => ("sync", RuntimeNeed::Required, false),
                     LearningSubcommand::MigrateLayout(_) => {
-                        ("migrate-layout", RuntimeNeed::Forbidden)
+                        ("migrate-layout", RuntimeNeed::Forbidden, false)
                     }
-                    LearningSubcommand::Prune(_) => ("prune", RuntimeNeed::Required),
+                    LearningSubcommand::Prune(args) => {
+                        ("prune", RuntimeNeed::Required, args.confirm)
+                    }
                 };
                 CommandOperation::new(
                     runtime_need,
@@ -512,14 +557,24 @@ impl Commands {
                     false,
                     dispatch_learning,
                 )
+                .governed_when(governed, "learning", subcommand)
             }
-            Commands::Audit(_) => CommandOperation::new(
-                RuntimeNeed::Required,
-                None,
-                None,
-                false,
-                runtime_dispatch!(Audit),
-            ),
+            Commands::Audit(command) => {
+                use super::audit::AuditSubcommand;
+                // `audit` emits no command-level audit row (it would audit
+                // reads of the audit log), so a denial here is recorded only by
+                // the authorization row the decision itself writes.
+                let prunes =
+                    matches!(&command.command, AuditSubcommand::Prune(args) if args.confirm);
+                CommandOperation::new(
+                    RuntimeNeed::Required,
+                    None,
+                    None,
+                    false,
+                    runtime_dispatch!(Audit),
+                )
+                .governed_when(prunes, "audit", "prune")
+            }
             Commands::Log(_) => CommandOperation::new(
                 RuntimeNeed::Required,
                 Some(admin_meta("log", Some("tail"), Some("log_feed"), None)),

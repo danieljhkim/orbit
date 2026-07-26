@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
-use orbit_common::types::{OrbitError, Role, optional_string_list_alias, unmet_task_dependencies};
+use orbit_common::types::{
+    McpCapability, OrbitError, Role, optional_string_list_alias, unmet_task_dependencies,
+};
 use orbit_engine::DispatchError;
 use orbit_engine::{StateExecutionContext, execute_deterministic_action};
 use orbit_tools::ToolContext;
@@ -77,7 +79,7 @@ pub(super) fn run_deterministic(
     action: &str,
     config: &Value,
     input: &Value,
-    tool_context: ToolContext,
+    mut tool_context: ToolContext,
 ) -> Result<Value, DispatchError> {
     // Reject anything the advertised capability list does not claim, so
     // `has_deterministic_action` can never report an action this function then
@@ -87,6 +89,16 @@ pub(super) fn run_deterministic(
             action.to_string(),
         ));
     }
+    // ORB-10453: this is the run's own machinery, not the agent it hosts, so
+    // it carries `Runner` — the grant that lets a run perform the destruction
+    // it exists to perform (`release_locks` frees another run's reservation).
+    // The sanction travels with the dispatcher's tool context rather than with
+    // ambient process state, so an agent inside the same run does not inherit
+    // it: `run_agent_loop_activity` builds its own context and never lands here.
+    tool_context
+        .session_context
+        .effective_capabilities
+        .insert(McpCapability::Runner);
     match action {
         "orbit_tool_call" => {
             // The `config` block shape (see deterministic_reference.yaml):

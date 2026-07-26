@@ -172,16 +172,6 @@ define_config_settings! {
         description: "Whether scoreboard metrics are recorded for task runs.",
         resolve: |raw: Option<bool>| Ok::<_, OrbitError>(raw.unwrap_or(true)),
     },
-    task_delegate_approval: bool => bool {
-        key: "task.approval.delegate_approval", value_type: "bool",
-        description: "Whether task approval can be delegated to another agent.",
-        resolve: |raw: Option<bool>| Ok::<_, OrbitError>(raw.unwrap_or(false)),
-    },
-    task_approval_required_for_agent: bool => bool {
-        key: "task.approval.required_for_agent", value_type: "bool",
-        description: "Whether agent-initiated tasks require human approval before running.",
-        resolve: |raw: Option<bool>| Ok::<_, OrbitError>(raw.unwrap_or(false)),
-    },
     tasks_id_start: Option<u32> => u32 {
         key: "tasks.id_start", value_type: "integer",
         description: "Floor for the local task-id allocator on this machine (forward-only; lets machines hold disjoint id ranges). Capped by ORB_TASK_ID_MAX.",
