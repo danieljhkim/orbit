@@ -149,6 +149,7 @@ spec:
         can produce it cheaply and accurately.
   tools:
     - orbit.task.*
+    - orbit.adr.add
     - orbit.friction.*
     - orbit.search
     - orbit.learning.show
