@@ -1,6 +1,7 @@
 ---
 type: pattern
 summary: "Per-Module Sibling tests/ Directory"
+last_validated: 2026-07-26
 ---
 # Per-Module Sibling tests/ Directory
 
