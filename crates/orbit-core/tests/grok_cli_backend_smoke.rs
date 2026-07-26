@@ -87,6 +87,7 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         }),
         audit: audit.clone(),
         run_id: "grok-installed-smoke",
+        agent_override: None,
         host: Some(&runtime),
     })
     .expect("dispatch grok cli backend");

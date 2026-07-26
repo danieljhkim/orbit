@@ -54,11 +54,17 @@ Folded instances:
 
 ## ADR-002 — Host boundaries and agent dispatch stay explicit
 
-**Status:** Accepted · 2026-05 · [T20260419-2014], [T20260418-2210], [T20260419-0104], [T20260423-0114], [T20260427-48], [T20260430-15], [T20260418-2018], [T20260419-0623-2], [T20260420-0510-2], [T20260428-9], [T20260428-12], [T20260506-16], [T20260506-17], [T20260505-22], [T20260506-18]
+**Status:** Accepted · 2026-05 · [T20260419-2014], [T20260418-2210], [T20260419-0104], [T20260423-0114], [T20260427-48], [T20260430-15], [T20260418-2018], [T20260419-0623-2], [T20260420-0510-2], [T20260428-9], [T20260428-12], [T20260506-16], [T20260506-17], [T20260505-22], [T20260506-18], [ORB-10393]
 
 **Context.** The agent-loop path is where activity/job can most easily leak provider implementation details, mutable sessions, or role configuration across crate boundaries. The split ADRs all defended the same shape: shared types live low, orbit-core hosts primitive services, the engine dispatches concrete activity specs, and provider/backends remain explicit choices.
 
 **Decision.** Keep activity/job types in `orbit-common`, keep orbit-core free of `orbit-agent` transport types, and route `backend: cli` through retained provider runtimes behind a host-resolved executor contract. Scope stateful agent features narrowly: loop `session:` is HTTP-only, the Groundhog activity kind was its own kind rather than an `agent_loop` mode bit (later removed as unused in [ORB-10332]), role config from `[agent.<role>]` overrides inline settings field-by-field, task-aware CLI envelopes carry durable run context, and provider static-arg fixups run before sandbox dispatch.
+
+**Planning-duel agent legs become v2 assets.** [ORB-10393] makes the planner
+and arbiter prompts seeded `agent_loop` assets and applies their selected
+provider/model as immutable per-dispatch overrides. The deterministic duel
+runner may coordinate concurrent legs, but it does not regain a private v1
+`ActivityExecutor::execute` bridge.
 
 Folded instances:
 
@@ -79,6 +85,8 @@ Folded instances:
 - Parsing, validation, dispatch, and CLI display share one Rust type family without making orbit-core depend on provider transport objects.
 - CLI and HTTP agent-loop paths remain intentionally different where their capabilities differ, especially around sessions and tool enforcement.
 - First-run and per-role agent choices live in user config while YAML stays reusable across workspaces.
+- Planning-duel legs now share the same CLI envelope, audit, timeout, tool
+  allowlist, and invocation-telemetry path as other v2 agent activities.
 - Costs retained from folded entries:
 - Cost: `orbit-common` now owns a wider slice of runtime vocabulary and has to stay disciplined about not accreting behavior.
 - Cost: session reuse becomes a narrowly scoped feature instead of a general-purpose memory layer.
@@ -92,6 +100,9 @@ Folded instances:
 - Cost: CLI stdin blobs now contain more task prose, so audit blob readers should continue treating those blobs as diagnostic artifacts rather than small control messages.
 - Cost: provider static-arg fixups mean executor YAML values such as Claude's `--debug-file` path are no longer honored verbatim; maintainers must read dispatcher behavior alongside assets.
 - Cost: prompt collection now owns display formatting and a small choice loop, so tests must cover interaction flow in addition to config values.
+- Cost: the dispatcher has a second clone-and-mutate path for explicit
+  provider/model overrides, and planning-duel prompt placeholders must remain
+  covered by parity tests rather than the retired v1 renderer.
 
 ## ADR-003 — Resolve `backend: auto` once, before dispatch
 
@@ -718,6 +729,8 @@ Commits found above the pinned base are adopted with a loud `warn` naming the sh
 
 ## Task References
 
+- **[ORB-10393]** — Port planning-duel planner and arbiter legs to seeded v2
+  assets with per-slot model overrides and retire `RuntimeHost::invoke_activity`.
 - **[ORB-10385]** — Gate job admission on the runtime's deterministic-action registry; register `pr_failure_handoff` and `worktree_gc`.
 - **[ORB-10380]** — Pin `base_sha` from `worktree_setup` through `git_commit`; split the commit step's failure diagnostics.
 - **[T20260418-2018]** — Add `JobV2` DAG constructs (`parallel`, `fan_out`, `loop`, `retry`, `when`).

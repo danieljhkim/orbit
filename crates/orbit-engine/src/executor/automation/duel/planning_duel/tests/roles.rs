@@ -1,35 +1,17 @@
-use super::super::roles::{arbiter_activity, planner_activity};
+use orbit_common::types::RoleSlot;
+
+use super::super::roles::{arbiter_input, planner_input_for_slot};
 
 #[test]
-fn planning_duel_roles_do_not_require_graph_mcp_tools() {
-    for activity in [planner_activity(), arbiter_activity()] {
-        assert!(
-            activity
-                .tools
-                .iter()
-                .all(|tool| !tool.starts_with("orbit.graph.")),
-            "{} must not grant removed graph MCP tools: {:?}",
-            activity.id,
-            activity.tools
-        );
-        assert!(activity.tools.iter().any(|tool| tool == "orbit.search"));
-        assert!(activity.tools.iter().any(|tool| tool == "fs.read"));
-        assert!(activity.proc_allowed_programs.is_empty());
+fn planning_duel_inputs_thread_the_active_role_slot() {
+    let planner_a = planner_input_for_slot("ORB-10393", RoleSlot::PlannerA);
+    let planner_b = planner_input_for_slot("ORB-10393", RoleSlot::PlannerB);
+    let arbiter = arbiter_input("ORB-10393");
 
-        let instruction = activity.spec_config["instruction"]
-            .as_str()
-            .expect("planning-duel instruction");
-        for removed_mandate in [
-            "orbit.graph.",
-            "map the call and import graph",
-            "enumerate its callers and consumers BY NAME",
-            "Reading symbol bodies alone is not enough",
-        ] {
-            assert!(
-                !instruction.contains(removed_mandate),
-                "{} still carries removed graph mandate {removed_mandate:?}",
-                activity.id
-            );
-        }
+    assert_eq!(planner_a["planning_duel_slot"], "planner_a");
+    assert_eq!(planner_b["planning_duel_slot"], "planner_b");
+    assert_eq!(arbiter["planning_duel_slot"], "arbiter");
+    for input in [planner_a, planner_b, arbiter] {
+        assert_eq!(input["task_id"], "ORB-10393");
     }
 }

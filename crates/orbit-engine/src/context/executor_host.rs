@@ -6,7 +6,7 @@
 use crate::executor::registry::ActivityExecutorRegistry;
 use orbit_common::types::activity_job::AgentRole;
 use orbit_common::types::{
-    Activity, AgentModelPair, ExecutorDef, ExternalRef, InvocationTrace, JobRun, OrbitError,
+    ActivityV2, AgentModelPair, ExecutorDef, ExternalRef, InvocationTrace, JobRun, OrbitError,
     OrbitEvent, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
 };
 use orbit_store::{InvocationQuery, InvocationRecord};
@@ -14,13 +14,14 @@ use orbit_tools::ToolContext;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use super::execution::ExecutionContext;
 use super::hosts::{
     AgentProtocolHost, AgentRoleConfig, EnvironmentHost, ExecutorLookupHost, RuntimeHost,
     TaskActivityUpdate, TaskAutomationUpdate, TaskHost, TaskReadHost, TaskWriteHost,
 };
-use super::outcome::ActivityInvocationResult;
+use crate::activity_job::{V2AuditWriter, V2RuntimeHost};
 
 #[derive(Clone, Copy)]
 pub struct ExecutorHost<'a> {
@@ -401,17 +402,16 @@ impl RuntimeHost for AutomationExecutorHost<'_> {
             .run_tool_with_context_and_role(name, input, role, tool_context)
     }
 
-    fn invoke_activity(
-        &self,
-        activity: Activity,
-        agent_cli: &str,
-        model: Option<&str>,
-        input: Value,
-        timeout_seconds: u64,
-        debug: bool,
-    ) -> Result<ActivityInvocationResult, OrbitError> {
-        self.runtime
-            .invoke_activity(activity, agent_cli, model, input, timeout_seconds, debug)
+    fn v2_runtime_host(&self) -> Result<&dyn V2RuntimeHost, OrbitError> {
+        self.runtime.v2_runtime_host()
+    }
+
+    fn v2_activity(&self, name: &str) -> Result<ActivityV2, OrbitError> {
+        self.runtime.v2_activity(name)
+    }
+
+    fn v2_audit_writer(&self, run_id: &str) -> Result<Arc<V2AuditWriter>, OrbitError> {
+        self.runtime.v2_audit_writer(run_id)
     }
 
     fn maybe_create_failure_task(

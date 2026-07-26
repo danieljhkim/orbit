@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::Utc;
 use orbit_common::types::{
-    Activity, AgentFamily, OrbitError, PlanningRoleAssignment, PlanningRoles, RoleSlot,
+    AgentFamily, OrbitError, PlanningRoleAssignment, PlanningRoles, RoleSlot,
 };
 use serde_json::{Value, json};
 
@@ -16,123 +16,6 @@ use super::super::{role_permutation_at, validate_role_permutation};
 
 pub(super) const PLANNER_ACTIVITY_ID: &str = "propose_duel_plan";
 pub(super) const ARBITER_ACTIVITY_ID: &str = "arbitrate_duel_plan";
-pub(super) const PLANNER_TIMEOUT_SECONDS: u64 = 1800;
-pub(super) const ARBITER_TIMEOUT_SECONDS: u64 = 900;
-
-const PLANNING_DUEL_INSTRUCTION: &str = r###"Only use skills listed in this activity's skill_refs. Ignore all others.
-You are a PLANNER in an Orbit planning duel. Inspect the task and surrounding
-code, draft one implementation-ready proposal, and persist it to the task's
-`artifacts/` directory. Do not edit source files, open PRs, or rely on your
-structured response as the workflow handoff.
-
-Steps:
-1. Load the task:
-   - Call orbit.task.show with input: {"id": "<task_id>"} to fetch the task title,
-     description, plan, acceptance_criteria, context_files, and workspace_path.
-
-2. Determine your artifact path from the active slot:
-   - Your active agent family is `{{agent_family}}`.
-   - Your active planning-duel slot is in input.planning_duel_slot.
-   - Your plan artifact path must be `planning-duel/<slot>.md`.
-
-3. Gather plan-level context BEFORE drafting. Start from the task's directories
-   and each task.context_files entry. Use `orbit.search` for related tasks,
-   decisions, and indexed docs, and use `fs.read` for the named source files,
-   nearby module roots, and manifests. Establish enough breadth to:
-   - Name the files, modules, and symbols the proposal will change.
-   - Identify directly visible consumers, imports, and integration points in
-     the inspected files without claiming exhaustive caller coverage.
-   - Read the full body of every symbol you intend to change.
-   - Map an unfamiliar area before you draft against it.
-   - Mark transitive blast-radius claims that need implementation/review
-     verification as risks, with exact `rg` commands that will verify them
-     later.
-   - If you discover pub(crate) imports, helper coupling, call sites, or
-     dependency edges not reflected in the task description, treat them as
-     hidden coupling — they belong in step 1 of your plan body.
-
-4. Draft exactly one proposal as markdown:
-   - Include these sections:
-     ## Plan
-     ## Context Files
-     ## Risks
-   - Ignore any existing planner artifact for the other role. Your proposal must
-     be independently reasoned.
-   - The plan MUST:
-     - Name every symbol being moved, renamed, removed, or added (functions,
-       types, modules, constants) BY IDENTIFIER, not by category.
-     - Name the directly visible consumers and integration points established
-       by the inspected files. Treat unverified transitive consumers as an
-       implementation/review risk rather than inventing exhaustive coverage.
-     - Specify exact verification commands the implementer should run — e.g.
-       `cargo build -p <crate>`, `cargo test -p <crate> <test_name>`,
-       `make ci-fast`, `rg '<symbol>' <path>`, or
-       `curl -s http://localhost:<port>/<route>` — that prove the change works.
-     - If hidden coupling exists (imports, helpers, call sites the task
-       description did not name), open the plan with step 1 enumerating it.
-   - The plan MUST NOT:
-     - Use hedge language: "this should just work", "should compile", "verify
-       it continues to compile", "we must verify", "this just works", or
-       similar. Replace each with the exact command above that proves it.
-     - Defer evidence to the implementer ("the implementer will discover X")
-       when inspecting the code now could have surfaced X.
-   - Length is not the goal. Named identifiers, grounded integration points,
-     and exact verification commands are.
-
-5. Persist the proposal as a task artifact:
-   - Use orbit.duel.plan.add to write the artifact under the slot-derived path. Orbit stamps the signature line.
-   - Exact example:
-     {"id":"<task_id>","planning_duel_slot":"planner_a","content":"## Plan\n..."}
-
-6. Stay narrowly scoped:
-   - Do not edit source files, update task.plan, or touch PR state.
-   - The only permitted mutation is writing your own planner artifact via orbit.duel.plan.add.
-
-7. Structured output is optional:
-   - The workflow does not depend on your response payload. Persist the artifact correctly even if you return null."###;
-const ARBITER_INSTRUCTION: &str = r#"Only use skills listed in this activity's skill_refs. Ignore all others.
-You are the ARBITER in an Orbit planning duel. Your job is to compare the
-two submitted planner artifacts, choose the better one, and persist the
-winning decision to the task artifact bundle.
-
-Steps:
-1. Load the task:
-   - Call orbit.task.show with input: {"id": "<task_id>"} to fetch the task title,
-     description, plan, acceptance_criteria, and context_files.
-
-2. Load only the planner artifacts:
-   - Call orbit.task.show with input: {"id":"<task_id>","field":"artifacts"} to fetch only the task artifacts.
-   - From that response, inspect planner markdown artifacts under `planning-duel/` and ignore `planning-duel/winner.json`.
-   - There must be exactly two planner markdown artifacts for this duel. If there are not exactly two, fail instead of guessing.
-   - Treat both planner artifacts as read-only inputs. Do not invent a third plan.
-
-3. Infer planner identity from the artifact signatures:
-   - The first line of each planner artifact must be `*authored by: <family> / <slot>*`.
-   - Parse those lines to recover each planner's family and slot.
-   - The artifact signature is the canonical planner identity source.
-
-4. Verify claims against the codebase:
-   - Use `fs.read` to spot-check the winning proposal's named symbols, files,
-     and directly visible integration points. Use `orbit.search` when related
-     tasks or indexed decisions can resolve ambiguity.
-   - Treat exhaustive caller and blast-radius verification as an
-     implementation/review gate. Require the proposal to name exact
-     `rg` commands for that later verification instead of
-     rejecting a plan because the shell-less arbiter cannot prove it now.
-
-5. Decide the winner:
-   - Choose the artifact proposal that is more feasible, complete, scoped, and aligned
-     with the current codebase.
-   - Keep a short `arbiter_rationale` that explains why the winning proposal is better.
-
-6. Persist the winner marker:
-   - Use orbit.duel.plan.winner to write `planning-duel/winner.json`.
-   - Exact example:
-     {"id":"<task_id>","winner_slot":"planner_a","arbiter_rationale":"More concrete writeback and test coverage."}
-
-7. Stay narrowly scoped:
-   - Do not edit source files, update task.plan directly, or open PRs.
-   - The only permitted mutation is writing `planning-duel/winner.json` via orbit.duel.plan.winner."#;
 
 thread_local! {
     static TEST_PERMUTATION_QUEUE: RefCell<VecDeque<[usize; 3]>> =
@@ -206,71 +89,6 @@ pub(crate) fn build_roles_output<H: RuntimeHost + ?Sized>(
             "arbiter": build_role_assignment(host, arbiter)?,
         }
     }))
-}
-
-fn planning_duel_agent_activity(
-    id: &str,
-    description: &str,
-    instruction: &str,
-    tools: &[&str],
-) -> Activity {
-    let now = Utc::now();
-    Activity {
-        id: id.to_string(),
-        spec_type: "agent_invoke".to_string(),
-        description: description.to_string(),
-        input_schema_json: json!({
-            "type": "object",
-            "required": ["task_id"],
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "Orbit task ID for the planning duel."
-                }
-            }
-        }),
-        output_schema_json: json!({}),
-        spec_config: json!({
-            "instruction": instruction,
-            "skill_refs": ["orbit"],
-        }),
-        tools: tools.iter().map(|tool| (*tool).to_string()).collect(),
-        proc_allowed_programs: Vec::new(),
-        executor: None,
-        workspace_path: None,
-        created_by: Some("system".to_string()),
-        is_active: true,
-        created_at: now,
-        updated_at: now,
-    }
-}
-
-pub(super) fn planner_activity() -> Activity {
-    planning_duel_agent_activity(
-        PLANNER_ACTIVITY_ID,
-        "Draft one planning-duel proposal, then persist it as a task artifact.",
-        PLANNING_DUEL_INSTRUCTION,
-        &[
-            "orbit.task.show",
-            "orbit.duel.plan.add",
-            "orbit.search",
-            "fs.read",
-        ],
-    )
-}
-
-pub(super) fn arbiter_activity() -> Activity {
-    planning_duel_agent_activity(
-        ARBITER_ACTIVITY_ID,
-        "Choose the better of two planning-duel task artifacts for a single task and persist the winner marker.",
-        ARBITER_INSTRUCTION,
-        &[
-            "orbit.task.show",
-            "orbit.duel.plan.winner",
-            "orbit.search",
-            "fs.read",
-        ],
-    )
 }
 
 pub(super) fn planner_input_for_slot(task_id: &str, slot: RoleSlot) -> Value {

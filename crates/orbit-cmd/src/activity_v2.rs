@@ -128,6 +128,7 @@ impl ActivityV2Commands for OrbitRuntime {
             input,
             audit: writer.clone(),
             run_id: &run_id,
+            agent_override: None,
             host: Some(self),
         });
 

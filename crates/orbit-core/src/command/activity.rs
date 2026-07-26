@@ -15,6 +15,10 @@ use super::seed_embedded_assets;
 /// runtime defaults.
 pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
+        "arbitrate_duel_plan",
+        include_str!("../../assets/activities/arbitrate_duel_plan.yaml"),
+    ),
+    (
         "agent_implement",
         include_str!("../../assets/activities/agent_implement.yaml"),
     ),
@@ -89,6 +93,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "pr_promote",
         include_str!("../../assets/activities/pr_promote.yaml"),
+    ),
+    (
+        "propose_duel_plan",
+        include_str!("../../assets/activities/propose_duel_plan.yaml"),
     ),
     (
         "reserve_locks",
@@ -198,6 +206,36 @@ mod tests {
                     assert_eq!(spec.action, action);
                 }
                 other => panic!("expected deterministic {name} activity, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn seeded_planning_duel_agent_activities_preserve_v1_contracts() {
+        let root = tempdir().expect("create tempdir");
+        let activities_dir = root.path().join("resources/activities");
+        seed_default_activities(&activities_dir, true).expect("seed default activities");
+
+        for (name, timeout, required_tool) in [
+            ("propose_duel_plan", 1_800, "orbit.duel.plan.add"),
+            ("arbitrate_duel_plan", 900, "orbit.duel.plan.winner"),
+        ] {
+            let yaml = std::fs::read_to_string(activities_dir.join(format!("{name}.yaml")))
+                .expect("read seeded planning-duel activity");
+            let asset = load_activity_asset(&yaml).expect("parse planning-duel activity");
+            match asset.spec.spec {
+                ActivityV2Spec::AgentLoop(spec) => {
+                    assert_eq!(
+                        spec.backend,
+                        orbit_common::types::activity_job::Backend::Cli
+                    );
+                    assert_eq!(spec.wall_clock_timeout_seconds, timeout);
+                    assert!(spec.tools.iter().any(|tool| tool == required_tool));
+                    assert!(spec.tools.iter().any(|tool| tool == "orbit.task.show"));
+                    assert!(spec.tools.iter().any(|tool| tool == "orbit.search"));
+                    assert!(spec.tools.iter().any(|tool| tool == "fs.read"));
+                }
+                other => panic!("expected agent_loop activity, got {other:?}"),
             }
         }
     }

@@ -26,8 +26,8 @@ pub use agent_role::{ResolvedAgentSettings, apply_resolved_settings, resolve_age
 pub use audit_writer::{V2AuditWriter, WriteError};
 pub use cli_runner::run_cli_backend;
 pub use dispatcher::{
-    DispatchError, DispatchOutcome, ResolvedCliExecutor, ResolvedSandbox, V2DispatchInput,
-    V2RuntimeHost, dispatch_error_to_orbit, dispatch_v2_activity,
+    DispatchError, DispatchOutcome, ResolvedCliExecutor, ResolvedSandbox, V2AgentDispatchOverride,
+    V2DispatchInput, V2RuntimeHost, dispatch_error_to_orbit, dispatch_v2_activity,
 };
 pub use job_executor::{
     JobOutcome, execute_job, execute_job_with_resume, resolve_job_catalog_refs_for_execution,

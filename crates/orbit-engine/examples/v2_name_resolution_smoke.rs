@@ -267,6 +267,7 @@ fn scenario_f_deterministic_activities_dispatch() -> Result<(), Box<dyn std::err
             input,
             audit: writer.clone(),
             run_id: &format!("smoke-f-{name}"),
+            agent_override: None,
             host: Some(&host),
         })?;
         assert!(outcome.success, "`{}` dispatch should succeed", name);
