@@ -7,11 +7,10 @@
 //! `DispatchError` so the DAG retry wrapper can classify denials as
 //! non-retryable.
 //!
-//! Offline replay: `ORBIT_V2_REPLAY=tool_denial` replays a single canned
-//! tool_use on turn 1 (Phase 2 denial smoke). `ORBIT_V2_REPLAY_FIXTURE=<path>`
-//! reads a JSON array of `ReplayTurn`-shaped objects and scripts an arbitrary
-//! multi-turn sequence — used by the Phase 3 loop sample to drive convergence
-//! across iterations without credentials.
+//! With the `replay` cargo feature enabled, `ORBIT_V2_REPLAY=tool_denial`
+//! replays a single canned tool_use on turn 1 (Phase 2 denial smoke), while
+//! `ORBIT_V2_REPLAY_FIXTURE=<path>` scripts an arbitrary multi-turn sequence
+//! from a JSON fixture. Default builds ignore both variables.
 
 // ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
@@ -274,7 +273,10 @@ fn resolve_model(spec: &AgentLoopSpec) -> String {
         .unwrap_or_else(|| ANTHROPIC_HTTP_DEFAULT_MODEL.to_string())
 }
 
-fn replay_active() -> bool {
+pub(crate) fn replay_active() -> bool {
+    if !cfg!(feature = "replay") {
+        return false;
+    }
     std::env::var("ORBIT_V2_REPLAY").is_ok() || std::env::var("ORBIT_V2_REPLAY_FIXTURE").is_ok()
 }
 
@@ -284,7 +286,7 @@ fn replay_active() -> bool {
 /// fixtures). Cleared by `reset_replay_transport` in tests.
 static REPLAY_TRANSPORT: OnceLock<Mutex<Option<Arc<ReplayTransport>>>> = OnceLock::new();
 
-#[cfg(test)]
+#[cfg(all(test, feature = "replay"))]
 pub(crate) static REPLAY_TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn acquire_replay_transport(model: &str) -> Result<Arc<ReplayTransport>, DispatchError> {

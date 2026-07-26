@@ -16,7 +16,7 @@
 //!    `tool.denied` envelope event is present.
 //!
 //! Usage:
-//!     cargo run -p orbit-engine --example v2_runtime_smoke
+//!     cargo run -p orbit-engine --features replay --example v2_runtime_smoke
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -36,7 +36,7 @@ use std::env;
 fn main() -> ExitCode {
     let mut failures: Vec<String> = Vec::new();
 
-    let references_dir = workspace_root().join("crates/orbit-core/assets/activities");
+    let references_dir = workspace_root().join("crates/orbit-core/assets/activities/examples");
     let tmp_audit_root = std::env::temp_dir().join("orbit-v2-smoke");
     let _ = std::fs::create_dir_all(&tmp_audit_root);
 

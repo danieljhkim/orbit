@@ -14,13 +14,19 @@ fi
 
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-# Keep examples covered by clippy's all-targets pass, but avoid re-running
-# their empty test harnesses in the test phase.
+# The replay smokes require an explicit feature, so the default workspace
+# clippy pass skips them. Keep that opt-in path compiled and linted too.
+cargo clippy -p orbit-engine --all-targets --features replay -- -D warnings
+# Keep examples covered by the clippy passes, but avoid re-running their empty
+# test harnesses in the test phase. Exercise orbit-engine's replay-dependent
+# tests separately so both default and opt-in configurations stay covered.
 if cargo nextest --version >/dev/null 2>&1; then
   cargo nextest run --workspace --lib --bins --tests
+  cargo nextest run -p orbit-engine --features replay --lib --bins --tests
 else
   echo "cargo-nextest not found; falling back to cargo test" >&2
   cargo test --workspace --lib --bins --tests
+  cargo test -p orbit-engine --features replay --lib --bins --tests
 fi
 cargo test --workspace --doc
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace

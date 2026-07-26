@@ -17,7 +17,7 @@
 //! (`ORBIT_V2_REPLAY{,_FIXTURE}`).
 //!
 //! Usage:
-//!     cargo run -p orbit-engine --example v2_job_runtime_smoke
+//!     cargo run -p orbit-engine --features replay --example v2_job_runtime_smoke
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -33,7 +33,7 @@ use orbit_engine::{
 use serde_json::Value;
 
 fn main() -> ExitCode {
-    let samples_dir = workspace_root().join("crates/orbit-core/assets/jobs");
+    let samples_dir = workspace_root().join("crates/orbit-core/assets/jobs/examples");
     let fixtures_dir = samples_dir.join("fixtures");
     let tmp_audit_root = std::env::temp_dir().join("orbit-v2-job-smoke");
     let _ = std::fs::create_dir_all(&tmp_audit_root);

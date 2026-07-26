@@ -298,11 +298,10 @@ fn role_override_does_not_apply_to_non_agent_loop_specs() {
     assert!(host.observed_lookups().is_empty());
 }
 
-/// Replay short-circuit regression (AC #9). The override is applied
-/// before session creation, so `replay_active()` must continue to see
-/// the env var and return `true` regardless of the override.
+/// Replay short-circuit regression (AC #9). Role resolution must not alter
+/// the shared feature-gated replay predicate.
 #[test]
-fn role_override_does_not_disable_replay_short_circuit() {
+fn role_override_does_not_change_feature_gated_replay_state() {
     // Use a unique env var name to avoid stomping other tests; we restore
     // it on drop.
     struct EnvGuard {
@@ -313,9 +312,7 @@ fn role_override_does_not_disable_replay_short_circuit() {
         fn set(key: &'static str, value: &str) -> Self {
             let prior = std::env::var(key).ok();
             // SAFETY: tests touching env vars must coordinate; we use a
-            // dedicated key and restore on drop, and replay_active() is
-            // a pure read of two specific keys so no other thread races
-            // it for the duration of this test.
+            // dedicated key and restore on drop.
             unsafe {
                 std::env::set_var(key, value);
             }
@@ -343,8 +340,10 @@ fn role_override_does_not_disable_replay_short_circuit() {
         .expect("resolve override")
         .expect("override expected");
     assert_eq!(overridden.provider, Provider::Codex);
-    // Replay short-circuit still triggers — independent of the override.
-    assert!(super::replay_active());
+    assert_eq!(
+        crate::activity_job::agent_loop_driver::replay_active(),
+        cfg!(feature = "replay")
+    );
 }
 
 // ----- Telemetry persistence is non-fatal (ORB-10367) -----------------

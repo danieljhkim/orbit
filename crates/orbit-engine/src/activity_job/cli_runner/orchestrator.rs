@@ -216,7 +216,6 @@ pub fn run_cli_backend(
             task_id: task_id_from_input(input),
             cwd: subprocess_cwd_string.as_deref(),
         },
-        #[cfg(test)]
         output_capture_limit: None,
     });
 

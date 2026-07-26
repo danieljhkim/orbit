@@ -3,6 +3,8 @@
 
 use super::*;
 
+use super::super::agent_loop_driver::replay_active;
+
 pub(super) fn run_target(
     step: &JobV2Step,
     t: &TargetStep,
@@ -47,7 +49,11 @@ pub(super) fn run_target(
                 let provider = agent_spec.provider.as_str();
                 Session::new(provider, model, &agent_spec.instruction, None)
             });
-            let api_key = ctx.host.api_key_for("anthropic").ok();
+            let api_key = if replay_active() {
+                None
+            } else {
+                ctx.host.api_key_for("anthropic").ok()
+            };
             run_agent_loop_outcome(
                 step,
                 agent_spec,
@@ -198,11 +204,6 @@ pub(super) fn run_agent_loop_outcome(
         message: None,
         skipped: false,
     })
-}
-
-#[cfg(test)]
-pub(super) fn replay_active() -> bool {
-    std::env::var("ORBIT_V2_REPLAY").is_ok() || std::env::var("ORBIT_V2_REPLAY_FIXTURE").is_ok()
 }
 
 /// Build a crew-overridden clone of an [`AgentLoopSpec`]. A declared activity
