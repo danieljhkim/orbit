@@ -796,6 +796,14 @@ Recognition is the entire change: no safety gate moved. Non-terminal run, `--old
 
 ---
 
+## ADR-0290 — Workflow admission verifies dependency delivery into the pinned base, not just lifecycle completion
+
+**Status:** Proposed · 2026-07 · [ORB-10464]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0290"}'`.
+
+---
+
 ## Task References
 
 - **[ORB-10467]** — Require independent review to reconcile late task authority and every acceptance criterion ([ADR-0288]).
@@ -879,5 +887,6 @@ Recognition is the entire change: no safety gate moved. Non-terminal run, `--old
 - **[ORB-10363]** — Rebase task candidates after concurrent base advances and publish blocked PRs instead of stranding failed work.
 - **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer (`task_epic_pipeline`, `epic_orchestrator`, `pipeline_wait`, legacy parallel-batch executor).
 - **[ORB-10449]** — Split step-completion protocol from response content so a stalled agent-loop step fails where it happened ([ADR-0258], amending [ADR-0224]; see [§7.6a of `2_design.md`](./2_design.md)).
+- **[ORB-10464]** — Refuse workflow admission when a done dependency's work is not in the base the worktree would be cut from ([ADR-0290], resolving [F2026-07-038]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
