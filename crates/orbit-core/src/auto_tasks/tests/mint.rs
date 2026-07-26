@@ -1,4 +1,4 @@
-//! Manual-mint tests [ORB-10439]: `auto_task_generate` is unconditional
+//! Manual-mint tests [ORB-10439, ORB-10446]: `auto_task_mint` is unconditional
 //! (ignores schedule due-math, `dedupe`, and `enabled`), leaves the host-local
 //! cursor untouched, and produces a task field-for-field identical to a
 //! scheduler fire.
@@ -53,7 +53,7 @@ fn content(task: &Task) -> Value {
 }
 
 #[test]
-fn generate_matches_a_scheduler_fire_field_for_field() {
+fn mint_matches_a_scheduler_fire_field_for_field() {
     let runtime = runtime();
     runtime
         .auto_task_add(interval_params("chore", 60))
@@ -67,33 +67,33 @@ fn generate_matches_a_scheduler_fire_field_for_field() {
         .get_task(&reports[0].1.clone().expect("task id"))
         .expect("fired task");
 
-    let generated = runtime.auto_task_generate("chore").expect("generate");
+    let minted = runtime.auto_task_mint("chore").expect("mint");
 
-    assert_ne!(generated.id, fired.id, "generate mints a distinct task");
+    assert_ne!(minted.id, fired.id, "mint creates a distinct task");
     assert_eq!(
-        content(&generated),
+        content(&minted),
         content(&fired),
-        "a generated task must be indistinguishable from a fired one"
+        "a manually minted task must be indistinguishable from a fired one"
     );
     assert!(
-        generated.tags.contains(&auto_task_tag("chore")),
+        minted.tags.contains(&auto_task_tag("chore")),
         "expected provenance tag, got {:?}",
-        generated.tags
+        minted.tags
     );
     assert_eq!(
-        generated.created_by.as_deref(),
+        minted.created_by.as_deref(),
         Some("system"),
-        "generate mints with the system_created identity"
+        "mint uses the system_created identity"
     );
     assert_eq!(
-        generated.status,
+        minted.status,
         TaskStatus::Backlog,
-        "generate honors the template-supplied status default"
+        "mint honors the template-supplied status default"
     );
 }
 
 #[test]
-fn generate_succeeds_for_a_disabled_definition() {
+fn mint_succeeds_for_a_disabled_definition() {
     let runtime = runtime();
     runtime
         .auto_task_add(interval_params("chore", 60))
@@ -102,56 +102,56 @@ fn generate_succeeds_for_a_disabled_definition() {
         .auto_task_toggle("chore", false)
         .expect("toggle off");
 
-    let generated = runtime.auto_task_generate("chore").expect("generate");
-    assert!(generated.tags.contains(&auto_task_tag("chore")));
+    let minted = runtime.auto_task_mint("chore").expect("mint");
+    assert!(minted.tags.contains(&auto_task_tag("chore")));
     assert_eq!(runtime.list_tasks().expect("tasks").len(), 1);
 }
 
 #[test]
-fn generate_succeeds_while_an_instance_is_open_under_skip_if_open() {
+fn mint_succeeds_while_an_instance_is_open_under_skip_if_open() {
     let runtime = runtime();
     let params = interval_params("chore", 60);
     assert_eq!(params.dedupe, DedupePolicy::SkipIfOpen);
     runtime.auto_task_add(params).expect("add");
 
-    let first = runtime.auto_task_generate("chore").expect("generate");
+    let first = runtime.auto_task_mint("chore").expect("mint");
     assert!(first.tags.contains(&auto_task_tag("chore")));
 
     // The first instance is open (backlog), yet a second manual mint still lands.
-    let second = runtime.auto_task_generate("chore").expect("generate again");
+    let second = runtime.auto_task_mint("chore").expect("mint again");
     assert_ne!(first.id, second.id);
     assert_eq!(runtime.list_tasks().expect("tasks").len(), 2);
 }
 
 #[test]
-fn generate_leaves_the_cursor_byte_identical() {
+fn mint_leaves_the_cursor_byte_identical() {
     let runtime = runtime();
     runtime
         .auto_task_add(interval_params("chore", 60))
         .expect("add");
     let t0 = at(2026, 1, 1, 0, 0);
 
-    // Before any scheduler pass the file does not exist — generate must not
+    // Before any scheduler pass the file does not exist — mint must not
     // create it.
     assert!(cursor_bytes(&runtime).is_none());
-    runtime.auto_task_generate("chore").expect("generate");
+    runtime.auto_task_mint("chore").expect("mint");
     assert!(
         cursor_bytes(&runtime).is_none(),
-        "generate must not create cursor state"
+        "mint must not create cursor state"
     );
 
     fire(&runtime, t0); // baseline writes the cursor
     let before = cursor_bytes(&runtime).expect("cursor state after baseline");
-    runtime.auto_task_generate("chore").expect("generate");
+    runtime.auto_task_mint("chore").expect("mint");
     assert_eq!(
-        cursor_bytes(&runtime).expect("cursor state after generate"),
+        cursor_bytes(&runtime).expect("cursor state after mint"),
         before,
-        "generate must not read-modify-write the cursor"
+        "mint must not read-modify-write the cursor"
     );
 }
 
 #[test]
-fn generate_does_not_change_the_next_scheduler_decision() {
+fn mint_does_not_change_the_next_scheduler_decision() {
     // `always` dedupe isolates the cursor question from the provenance-tag
     // question: the only thing that could move the next pass is the cursor.
     let mut params = interval_params("chore", 60);
@@ -168,31 +168,31 @@ fn generate_does_not_change_the_next_scheduler_decision() {
     )
     .expect("control pass");
 
-    let generated = runtime();
-    generated.auto_task_add(params).expect("add");
-    fire(&generated, t0); // baseline
-    generated.auto_task_generate("chore").expect("generate");
-    let generated_outcome = run_auto_task_scheduler_at(
-        &generated,
+    let minted_runtime = runtime();
+    minted_runtime.auto_task_add(params).expect("add");
+    fire(&minted_runtime, t0); // baseline
+    minted_runtime.auto_task_mint("chore").expect("mint");
+    let minted_outcome = run_auto_task_scheduler_at(
+        &minted_runtime,
         t0 + Duration::minutes(65),
         SchedulerOptions::default(),
     )
-    .expect("pass after generate");
+    .expect("pass after mint");
 
     assert_eq!(control_outcome.reports[0].action, "fired");
     assert_eq!(
-        generated_outcome.reports[0].action,
+        minted_outcome.reports[0].action,
         control_outcome.reports[0].action,
     );
     assert_eq!(
-        generated_outcome.reports[0].slot, control_outcome.reports[0].slot,
+        minted_outcome.reports[0].slot, control_outcome.reports[0].slot,
         "the consumed slot must be unaffected by a manual mint"
     );
 }
 
 #[test]
-fn an_open_generated_instance_defers_the_next_fire_like_a_fired_one() {
-    // The flip side of provenance parity: a generated task carries the
+fn an_open_manually_minted_instance_defers_the_next_fire_like_a_fired_one() {
+    // The flip side of provenance parity: a manually minted task carries the
     // `auto-task:<name>` tag, so `skip_if_open` sees it exactly as it sees a
     // fired instance. That is the point — a hand-copied task is invisible to
     // dedupe, and this surface exists so a manual mint is not.
@@ -203,7 +203,7 @@ fn an_open_generated_instance_defers_the_next_fire_like_a_fired_one() {
     let t0 = at(2026, 1, 1, 0, 0);
 
     fire(&runtime, t0); // baseline
-    let generated = runtime.auto_task_generate("chore").expect("generate");
+    let minted = runtime.auto_task_mint("chore").expect("mint");
 
     let deferred = fire(&runtime, t0 + Duration::minutes(65));
     assert_eq!(deferred[0].0, "skipped");
@@ -213,23 +213,23 @@ fn an_open_generated_instance_defers_the_next_fire_like_a_fired_one() {
     // moment the queue drains — the same recovery as a stalled fired instance.
     runtime
         .update_task(
-            &generated.id,
+            &minted.id,
             crate::command::task::TaskUpdateParams {
                 status: Some(TaskStatus::Rejected),
                 ..Default::default()
             },
         )
-        .expect("close generated task");
+        .expect("close manually minted task");
     let drained = fire(&runtime, t0 + Duration::minutes(125));
     assert_eq!(drained[0].0, "fired");
     assert_eq!(runtime.list_tasks().expect("tasks").len(), 2);
 }
 
 #[test]
-fn generate_with_an_unknown_name_errors_naming_the_definition() {
+fn mint_with_an_unknown_name_errors_naming_the_definition() {
     let runtime = runtime();
     let error = runtime
-        .auto_task_generate("nope")
+        .auto_task_mint("nope")
         .expect_err("unknown definition must fail");
     assert!(
         error.to_string().contains("nope"),

@@ -4,7 +4,7 @@
 //! methods are the single choke point that reads/writes them, so both entry
 //! points stay consistent. Disabling is a `toggle`, never a delete.
 //!
-//! `generate` (CLI-only by design — see `docs/design/mcp-bridge/2_design.md`)
+//! `mint` (CLI-only by design — see `docs/design/mcp-bridge/2_design.md`)
 //! rides here too: it mints a task from a definition on demand by reusing the
 //! scheduler's mint path, so there is exactly one template→task mapping.
 
@@ -143,11 +143,11 @@ impl OrbitRuntime {
     /// not perturb scheduler state. Because it reuses the scheduler's
     /// [`mint_task`], the result is field-for-field identical to a fired
     /// instance, provenance tag and `system_created` marker included; that also
-    /// means an open generated instance is visible to `skip_if_open` dedupe on
+    /// means an open manually minted instance is visible to `skip_if_open` dedupe on
     /// the next pass, exactly as a fired one would be.
     ///
     /// An unknown name is an `InvalidInput` error naming the definition.
-    pub fn auto_task_generate(&self, name: &str) -> Result<Task, OrbitError> {
+    pub fn auto_task_mint(&self, name: &str) -> Result<Task, OrbitError> {
         let definition = self.require_auto_task(name)?;
         mint_task(self, &definition)
     }

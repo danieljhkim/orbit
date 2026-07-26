@@ -10,7 +10,7 @@ summary: Dynamically-defined recurring task templates minted by one generic sche
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ADR-0218, ADR-0217]
+related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ADR-0218, ADR-0217]
 ---
 
 # Auto-tasks — Overview
@@ -50,7 +50,7 @@ becomes just the first definition.
   surface.
 - **Dedupe & provenance** — each minted task carries an `auto-task:<name>` tag;
   `skip_if_open` uses that tag to avoid firing while a prior instance is open.
-- **Manual mint** — `orbit auto-task generate <name>` mints one task from a
+- **Manual mint** — `orbit auto-task mint <name>` mints one task from a
   definition immediately, reusing the scheduler's mint path so the result is
   indistinguishable from a fired instance. Unconditional and cursor-inert: it
   ignores schedule, `dedupe`, and `enabled`, and never touches
@@ -66,7 +66,7 @@ becomes just the first definition.
 | Host-local cursor | `crates/orbit-core/src/auto_tasks/state.rs` | ORB-10149 |
 | Scheduler pass | `crates/orbit-core/src/auto_tasks/scheduler.rs` | ORB-10149 |
 | CRUD (CLI + MCP shared) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10149 |
-| Manual mint (`generate`, CLI-only) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10439 |
+| Manual mint (`mint`, CLI-only) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10439 |
 | Deterministic action | `crates/orbit-core/src/runtime/v2_host/dispatch.rs` | ORB-10149 |
 | Seeded assets | `crates/orbit-core/assets/{activities,jobs,routines}/…` | ORB-10149 |
 
