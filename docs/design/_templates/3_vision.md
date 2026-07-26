@@ -2,6 +2,7 @@
 title: <Feature> — Vision
 owner: <agent family: codex | claude | grok | gemini>
 last_updated: YYYY-MM-DD
+last_validated: YYYY-MM-DD
 status: Draft
 feature: <feature-slug>
 doc_role: vision
