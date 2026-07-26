@@ -84,20 +84,30 @@ pub(super) async fn list_job_runs(Ws(runtime): Ws, Query(q): Query<JobRunListQue
     }
 }
 
-/// Resume a terminal resumable run as a new linked run.
+/// Submit a resume of a terminal resumable run as a new linked run.
 ///
 /// Resume re-runs the first non-successful step and every subsequent step; it
 /// succeeds only when the underlying cause of the source failure is resolved.
+///
+/// [ORB-10470] One-shot, like `POST /workflows/ship`: it returns as soon as the
+/// resumed run is persisted and its detached worker is spawned, so the resumed
+/// pipeline never runs on a request thread. Callers poll `/job-runs/:id` for
+/// progress and can cancel the returned run id while it executes.
 pub(super) async fn resume_job_run_action(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let id = match validate_id(&id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
     };
-    match runtime.resume_job_run(id) {
-        Ok(result) => match runtime.show_job_run(&result.run_id) {
-            Ok(run) => Json(job_run_to_json(&run)).into_response(),
-            Err(e) => map_runtime_error(e),
-        },
+    match runtime.submit_resume_run(id, Some("dashboard")) {
+        Ok(invoke) => Json(json!({
+            "workflow": "resume",
+            "job_id": invoke.job_name,
+            "run_id": invoke.run_id,
+            "retry_source_run_id": id,
+            "state": if invoke.queued { "queued" } else { "submitted" },
+            "submitted_at": invoke.submitted_at,
+        }))
+        .into_response(),
         Err(orbit_core::OrbitError::JobValidation(message)) => {
             (StatusCode::CONFLICT, Json(json!({ "error": message }))).into_response()
         }

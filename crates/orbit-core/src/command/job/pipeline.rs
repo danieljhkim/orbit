@@ -18,6 +18,7 @@ use sha2::{Digest, Sha256};
 use orbit_engine::V2RuntimeHost;
 
 use crate::OrbitRuntime;
+use crate::command::job::resume::ResumePlan;
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -190,11 +191,72 @@ impl OrbitRuntime {
         Ok(())
     }
 
+    /// [ORB-10470] Submit a resume of a terminal run as a detached run.
+    ///
+    /// The non-blocking counterpart to
+    /// [`OrbitRuntime::resume_job_run`](crate::OrbitRuntime::resume_job_run):
+    /// it persists the resumed run (seeded with the source's checkpoints),
+    /// reconciles the retry lineage's task ownership, spawns the detached
+    /// pipeline worker, and returns the new run id as soon as the run is
+    /// durable. Nothing about the resumed execution happens on the caller's
+    /// thread, so run list / status / cancel stay answerable for its whole
+    /// duration (F2026-07-122 defect 3) and the run is cancellable by pid like
+    /// any other submitted run.
+    pub fn submit_resume_run(
+        &self,
+        source_run_id: &str,
+        actor: Option<&str>,
+    ) -> Result<PipelineInvokeResult, OrbitError> {
+        let plan = self.plan_job_run_resume(source_run_id)?;
+        self.submit_persisted_pipeline_run(
+            &plan.source.job_id,
+            plan.input.clone(),
+            Some(&plan),
+            actor,
+        )
+    }
+
     pub fn submit_pipeline_run(
         &self,
         job_name: &str,
         input: Value,
         priority: Option<&str>,
+        actor: Option<&str>,
+    ) -> Result<PipelineInvokeResult, OrbitError> {
+        let result = self.submit_persisted_pipeline_run(job_name, input.clone(), None, actor);
+
+        self.record_pipeline_audit(
+            "pipeline.invoke",
+            result.as_ref().ok().map(|value| value.run_id.as_str()),
+            actor,
+            match &result {
+                Ok(_) => AuditEventStatus::Success,
+                Err(_) => AuditEventStatus::Failure,
+            },
+            json!({
+                "actor": actor,
+                "job_name": job_name,
+                "priority": priority,
+                "run_id": result.as_ref().ok().map(|value| value.run_id.clone()),
+                "input_hash": input_hash(&input),
+            }),
+            result.as_ref().err().map(|error| error.to_string()),
+        )?;
+
+        result
+    }
+
+    /// Persist a pipeline run and hand it to a detached worker.
+    ///
+    /// `resume` distinguishes the two submission shapes: `None` is a fresh
+    /// attempt with a blank pipeline; `Some(plan)` links the new run to its
+    /// source, seeds it with that source's checkpoints, and reconciles the
+    /// lineage's task ownership before the worker can reach `worktree_setup`.
+    fn submit_persisted_pipeline_run(
+        &self,
+        job_name: &str,
+        input: Value,
+        resume: Option<&ResumePlan>,
         actor: Option<&str>,
     ) -> Result<PipelineInvokeResult, OrbitError> {
         let result = (|| {
@@ -208,16 +270,21 @@ impl OrbitRuntime {
             let submitted_at = Utc::now();
             let run = self.stores().jobs().insert_job_run(
                 job_name,
-                1,
+                resume.map_or(1, |plan| plan.attempt),
                 submitted_at,
                 Some(input.clone()),
-                None,
+                resume.map(|plan| plan.source.run_id.clone()),
             )?;
-            let initial_state =
-                PipelineState::new(run.run_id.clone(), run.job_id.clone(), input.clone());
+            let initial_state = match resume.and_then(|plan| plan.resume_state.as_ref()) {
+                Some(source_state) => super::exec::seeded_resume_state(source_state, &run),
+                None => PipelineState::new(run.run_id.clone(), run.job_id.clone(), input.clone()),
+            };
             self.stores()
                 .jobs()
                 .write_run_state(&run.run_id, &initial_state)?;
+            if let Some(plan) = resume {
+                self.reconcile_resume_task_ownership(plan, &run.run_id)?;
+            }
 
             self.reconcile_stale_job_runs(Some(job_name))?;
             let active_runs = self
@@ -244,23 +311,27 @@ impl OrbitRuntime {
             })
         })();
 
-        self.record_pipeline_audit(
-            "pipeline.invoke",
-            result.as_ref().ok().map(|value| value.run_id.as_str()),
-            actor,
-            match &result {
-                Ok(_) => AuditEventStatus::Success,
-                Err(_) => AuditEventStatus::Failure,
-            },
-            json!({
-                "actor": actor,
-                "job_name": job_name,
-                "priority": priority,
-                "run_id": result.as_ref().ok().map(|value| value.run_id.clone()),
-                "input_hash": input_hash(&input),
-            }),
-            result.as_ref().err().map(|error| error.to_string()),
-        )?;
+        if let Some(plan) = resume {
+            self.record_pipeline_audit(
+                "pipeline.resume",
+                result.as_ref().ok().map(|value| value.run_id.as_str()),
+                actor,
+                match &result {
+                    Ok(_) => AuditEventStatus::Success,
+                    Err(_) => AuditEventStatus::Failure,
+                },
+                json!({
+                    "actor": actor,
+                    "job_name": job_name,
+                    "source_run_id": plan.source.run_id,
+                    "attempt": plan.attempt,
+                    "resumed_from_checkpoints": plan.resume_state.is_some(),
+                    "checkpoint_batch_id": plan.checkpoint_batch_id,
+                    "run_id": result.as_ref().ok().map(|value| value.run_id.clone()),
+                }),
+                result.as_ref().err().map(|error| error.to_string()),
+            )?;
+        }
 
         result
     }
@@ -426,11 +497,25 @@ impl OrbitRuntime {
             attempt: run.attempt,
         })?;
 
-        let outcome = self.run_job_v2_from_yaml_with_run_id(
+        // [ORB-10470] The run's own persisted checkpoints are the resume
+        // cursor. A run seeded by `submit_resume_run` starts at the source's
+        // first non-successful step; a run whose previous worker died after
+        // checkpointing continues from where that worker stopped. Reusing a
+        // checkpoint is therefore idempotent — the successful steps are
+        // skipped, never re-dispatched.
+        let resume = self.read_run_state(&run.run_id)?.filter(|state| {
+            state
+                .step_states
+                .values()
+                .any(|step_state| *step_state == JobRunState::Success)
+        });
+        let outcome = self.run_job_v2_from_yaml_with_run_id_and_resume(
             yaml_path,
             input.clone(),
             None,
             Some(run.run_id.clone()),
+            run.retry_source_run_id.clone(),
+            resume.as_ref(),
         );
         let finished_at = Utc::now();
         let duration_ms = Some(

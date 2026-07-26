@@ -549,8 +549,12 @@ async fn replay_run_endpoint_returns_4xx_when_current_job_is_deleted() {
     );
 }
 
+/// [ORB-10470] Resume is a submission, not an execution: the response carries
+/// the new run id and its lineage as soon as the run is durable, and the
+/// resumed pipeline runs in a detached worker rather than on the request
+/// thread (F2026-07-122 defect 3).
 #[tokio::test]
-async fn resume_job_run_endpoint_returns_new_run_summary_and_lineage() {
+async fn resume_job_run_endpoint_submits_a_linked_run_without_executing_it_in_request() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     write_replay_job(&runtime, "web_resume_success");
     let mut source = seed_run(
@@ -573,16 +577,44 @@ async fn resume_job_run_endpoint_returns_new_run_summary_and_lineage() {
     let payload = body_json(response).await;
     let new_run_id = payload["run_id"].as_str().expect("new run id");
     assert_ne!(new_run_id, source.run_id);
-    assert_eq!(payload["state"], "success");
+    assert_eq!(payload["workflow"], "resume");
+    assert_eq!(payload["job_id"], "web_resume_success");
+    assert!(
+        matches!(payload["state"].as_str(), Some("submitted" | "queued")),
+        "resume returns a submission state, not a terminal one: {payload}",
+    );
     assert_eq!(
         payload["retry_source_run_id"].as_str(),
         Some(source.run_id.as_str())
     );
     let stored = runtime.show_job_run(new_run_id).expect("show resumed run");
-    assert_eq!(stored.state, JobRunState::Success);
     assert_eq!(
         stored.retry_source_run_id.as_deref(),
         Some(source.run_id.as_str())
+    );
+    assert_eq!(stored.attempt, source.attempt + 1);
+
+    // Run listing answers while the resumed run is outstanding.
+    let list_response = router()
+        .with_state(crate::state::DashboardState::single(Arc::new(
+            runtime.clone(),
+        )))
+        .oneshot(
+            Request::builder()
+                .uri("/job-runs?limit=10")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("list response");
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let list_payload = body_json(list_response).await;
+    assert!(
+        list_payload
+            .as_array()
+            .expect("runs array")
+            .iter()
+            .any(|run| run["run_id"].as_str() == Some(new_run_id))
     );
 }
 

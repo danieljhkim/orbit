@@ -1,6 +1,7 @@
 mod catalog;
 mod exec;
 pub(crate) mod pipeline;
+mod resume;
 mod run;
 
 #[cfg(test)]

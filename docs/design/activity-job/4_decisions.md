@@ -778,6 +778,11 @@ Recognition is the entire change: no safety gate moved. Non-terminal run, `--old
 
 ---
 
+## ADR-0289 — Resume is a durable submission scoped by explicit retry lineage
+
+**Status:** Proposed · 2026-07 · [ORB-10470]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0289"}'`.
 ## ADR-0288 — Independent review approves from durable per-criterion records, not a scalar response
 
 **Status:** Proposed · 2026-07 · [ORB-10467]
@@ -806,6 +811,7 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ## Task References
 
+- **[ORB-10470]** — Make resume submit a detached run that starts at the failed checkpoint, and reconcile blocked/re-stamped tasks against the run's retry lineage ([ADR-0289]).
 - **[ORB-10467]** — Require independent review to reconcile late task authority and every acceptance criterion ([ADR-0288]).
 - **[ORB-10456]** — Resolve provider launchers at the shared CLI spawn boundary and add provider-aware missing-launcher diagnostics ([ADR-0259]).
 - **[ORB-10454]** — Allocate [ADR-0258] for the step-completion / response-content split and retire the IOU in ADR-0224's amendment block.

@@ -321,6 +321,136 @@ fn resume_reexecuted_pr_output_reaches_promotion_and_checkpoint() {
     assert_eq!(resume.step_states.get(&1), Some(&JobRunState::Failed));
 }
 
+/// [ORB-10470] The `jrun-20260725-2246-3` sequence (F2026-07-121 /
+/// F2026-07-122): `worktree` … `sync_base` succeeded, `push` failed. The
+/// resume must start at `push`, must not re-dispatch the agent implementation,
+/// and must keep handing the delivery tail the batch id the checkpointed
+/// `worktree` output carries — the identity the durable task record is
+/// reconciled to. Re-resuming the result is then a no-op for `push`.
+#[test]
+fn resume_starts_at_the_failed_push_and_reuses_checkpoints_idempotently() {
+    let delivery_job = || {
+        let mut push = target_step("push", "git_push");
+        let JobV2StepBody::Target(target) = &mut push.body else {
+            panic!("target step");
+        };
+        target.default_input = Some(json!({
+            "job_run_id": "{{ steps.worktree.output.job_run_id }}",
+            "workspace_path": "{{ steps.worktree.output.workspace_path }}",
+        }));
+        let mut pr_open = target_step("pr_open", "pr_open");
+        let JobV2StepBody::Target(target) = &mut pr_open.body else {
+            panic!("target step");
+        };
+        target.default_input = Some(json!({
+            "job_run_id": "{{ steps.worktree.output.job_run_id }}",
+        }));
+        job_with_steps(vec![
+            target_step("worktree", "worktree_setup"),
+            target_step("implement_bundle", "agent_implement"),
+            target_step("commit", "git_commit"),
+            target_step("prepare_branch", "pr_prepare"),
+            target_step("sync_base", "git_rebase"),
+            push,
+            pr_open,
+        ])
+    };
+    let scripted = || {
+        ScriptedHost::new([
+            (
+                "worktree_setup",
+                vec![Action::Ok(json!({"replayed": true}))],
+            ),
+            (
+                "agent_implement",
+                vec![Action::Ok(json!({"replayed": true}))],
+            ),
+            ("git_commit", vec![Action::Ok(json!({"replayed": true}))]),
+            ("pr_prepare", vec![Action::Ok(json!({"replayed": true}))]),
+            ("git_rebase", vec![Action::Ok(json!({"replayed": true}))]),
+            ("git_push", vec![Action::Ok(json!({"pushed": true}))]),
+            ("pr_open", vec![Action::Ok(json!({"pr_number": "711"}))]),
+        ])
+    };
+
+    let mut resume = resume_state_with_completed_steps(&[
+        (
+            0,
+            "worktree",
+            json!({"job_run_id": "jrun-source", "workspace_path": "/wt/jrun-source"}),
+        ),
+        (1, "implement_bundle", json!({"implemented": true})),
+        (2, "commit", json!({"commit_sha": "7387d771"})),
+        (3, "prepare_branch", json!({"phase": "prepare"})),
+        (4, "sync_base", json!({"decision": "already_fresh"})),
+    ]);
+    resume.record_step(5, JobRunState::Failed, None, None);
+
+    let host = CheckpointHost::new(scripted());
+    let outcome = execute_job_with_resume(
+        &delivery_job(),
+        Value::Null,
+        "jrun-resume-1",
+        std::sync::Arc::new(test_writer("jrun-resume-1")),
+        &host,
+        Some(&resume),
+    )
+    .expect("resume reaches the delivery tail");
+
+    assert!(outcome.success);
+    for skipped in [
+        "worktree_setup",
+        "agent_implement",
+        "git_commit",
+        "pr_prepare",
+        "git_rebase",
+    ] {
+        assert_eq!(
+            host.inner.call_count(skipped),
+            0,
+            "resume must not re-execute the checkpointed step `{skipped}`",
+        );
+    }
+    assert_eq!(host.inner.call_count("git_push"), 1);
+    assert_eq!(host.inner.call_count("pr_open"), 1);
+    assert_eq!(
+        host.inputs_for("git_push"),
+        vec![json!({
+            "job_run_id": "jrun-source",
+            "workspace_path": "/wt/jrun-source",
+            "run_id": "jrun-resume-1",
+        })],
+        "the delivery tail keeps the checkpointed batch id as its ownership id",
+    );
+
+    // The resumed run's own checkpoints resume again without re-pushing —
+    // what a worker restart (or a second resume) does.
+    let mut second = resume.clone();
+    for (index, step_id, output, _) in host.checkpoints() {
+        second.record_step(index, JobRunState::Success, Some(output), None);
+        let _ = step_id;
+    }
+    let replay_host = CheckpointHost::new(scripted());
+    let replayed = execute_job_with_resume(
+        &delivery_job(),
+        Value::Null,
+        "jrun-resume-2",
+        std::sync::Arc::new(test_writer("jrun-resume-2")),
+        &replay_host,
+        Some(&second),
+    )
+    .expect("second resume is a no-op");
+
+    assert!(replayed.success);
+    assert_eq!(
+        replay_host.inner.call_count("git_push"),
+        0,
+        "checkpoint reuse is idempotent: a completed push is never repeated",
+    );
+    assert_eq!(replay_host.inner.call_count("pr_open"), 0);
+    assert!(replay_host.checkpoints().is_empty());
+}
+
 #[test]
 fn resume_seed_uses_only_successful_checkpoint_outputs() {
     let job = job_with_steps(vec![
