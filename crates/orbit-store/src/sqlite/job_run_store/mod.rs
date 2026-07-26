@@ -152,36 +152,6 @@ impl JobRunStoreBackend for SqliteJobRunStore {
         })
     }
 
-    fn take_over_running_job_run(
-        &self,
-        run_id: &str,
-        expected_pid: Option<u32>,
-        expected_pid_start_time: Option<String>,
-        started_at: DateTime<Utc>,
-        pid: u32,
-    ) -> Result<bool, OrbitError> {
-        self.update_run(run_id, |run| {
-            if run.state != JobRunState::Running
-                || run.pid != expected_pid
-                || run.pid_start_time != expected_pid_start_time
-            {
-                return Err(OrbitError::InvalidInput(
-                    "job run takeover mismatch".to_string(),
-                ));
-            }
-            run.started_at = run.started_at.or(Some(started_at));
-            run.pid = Some(pid);
-            run.pid_start_time = process_start_identity_token(pid);
-            Ok(())
-        })
-        .or_else(|err| match err {
-            OrbitError::InvalidInput(message) if message == "job run takeover mismatch" => {
-                Ok(false)
-            }
-            other => Err(other),
-        })
-    }
-
     fn claim_pending_job_run_owner(&self, run_id: &str, pid: u32) -> Result<bool, OrbitError> {
         let mut claimed = false;
         let found = self.update_run(run_id, |run| {
@@ -194,24 +164,6 @@ impl JobRunStoreBackend for SqliteJobRunStore {
             Ok(())
         })?;
         Ok(found && claimed)
-    }
-
-    fn abandon_job_run(
-        &self,
-        run_id: &str,
-        finished_at: DateTime<Utc>,
-    ) -> Result<bool, OrbitError> {
-        self.update_run(run_id, |run| {
-            if run.state.is_terminal() {
-                return Ok(());
-            }
-            run.state = run
-                .state
-                .try_transition(RunEvent::Abandon)
-                .map_err(OrbitError::JobRunStateTransition)?;
-            run.finished_at = Some(finished_at);
-            Ok(())
-        })
     }
 
     fn complete_job_run_step(

@@ -197,21 +197,11 @@ pub trait JobRunStoreBackend: Send + Sync {
         started_at: DateTime<Utc>,
         pid: u32,
     ) -> Result<bool, OrbitError>;
-    fn take_over_running_job_run(
-        &self,
-        run_id: &str,
-        expected_pid: Option<u32>,
-        expected_pid_start_time: Option<String>,
-        started_at: DateTime<Utc>,
-        pid: u32,
-    ) -> Result<bool, OrbitError>;
     /// [ORB-10070] Record `pid` (+ its start-time identity token) as the owner
     /// of a still-`pending` run so orphan reconciliation can distinguish a
     /// queued run with a live worker from one whose worker died. Returns
     /// `false` without writing when the run is missing or no longer pending.
     fn claim_pending_job_run_owner(&self, run_id: &str, pid: u32) -> Result<bool, OrbitError>;
-    fn abandon_job_run(&self, run_id: &str, finished_at: DateTime<Utc>)
-    -> Result<bool, OrbitError>;
     fn complete_job_run_step(
         &self,
         run_id: &str,
