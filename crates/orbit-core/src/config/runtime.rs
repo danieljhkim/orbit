@@ -22,7 +22,6 @@ pub(crate) struct RuntimeConfig {
     pub(crate) execution_env: ExecutionEnvPolicy,
     pub(crate) codex_execution: CodexExecutionPolicy,
     pub(crate) persistence: PersistenceConfig,
-    pub(crate) task_approval: TaskApprovalConfig,
     pub(crate) pr: PrConfig,
     pub(crate) scoring_enabled: bool,
     pub(crate) graph_editing: bool,
@@ -82,7 +81,6 @@ impl RuntimeConfig {
             execution_env: ExecutionEnvPolicy::from_snapshot(&snapshot),
             codex_execution: CodexExecutionPolicy::from_snapshot(&snapshot),
             persistence: PersistenceConfig::default_for_data_root(data_root),
-            task_approval: TaskApprovalConfig::from_snapshot(&snapshot),
             pr: PrConfig {
                 task_url_template: snapshot.pr_task_url_template.clone(),
             },
@@ -198,7 +196,6 @@ impl RuntimeConfig {
             execution_env: ExecutionEnvPolicy::from_snapshot(&snapshot),
             codex_execution: CodexExecutionPolicy::from_snapshot(&snapshot),
             persistence,
-            task_approval: TaskApprovalConfig::from_snapshot(&snapshot),
             pr: PrConfig {
                 task_url_template: snapshot.pr_task_url_template.clone(),
             },
@@ -456,21 +453,6 @@ impl CodexExecutionPolicy {
 
     pub(crate) fn approval_policy(&self) -> Option<&str> {
         self.approval_policy.as_deref()
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct TaskApprovalConfig {
-    pub(crate) required_for_agent: bool,
-    pub(crate) delegate_approval: bool,
-}
-
-impl TaskApprovalConfig {
-    fn from_snapshot(snapshot: &ConfigSnapshot) -> Self {
-        Self {
-            required_for_agent: snapshot.task_approval_required_for_agent,
-            delegate_approval: snapshot.task_delegate_approval,
-        }
     }
 }
 

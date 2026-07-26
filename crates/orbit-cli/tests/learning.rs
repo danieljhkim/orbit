@@ -214,10 +214,27 @@ fn cli_prune_stale_only_reports_without_modifying() {
 fn cli_prune_confirm_archives_stale_learnings_and_preserves_delete_alias() {
     let workspace = TestWorkspace::new();
     let learning = workspace.add_learning("stale", &["totally-nonexistent-dir-xyz-456/**"], &[]);
-    let result = workspace.run_json(
+
+    // ORB-10453: pruning is a governed operation, so an agent caller is
+    // refused at the CLI chokepoint before the command runs at all.
+    let refused = workspace.try_run_as(
         &["learning", "prune", "--confirm", "--json"],
-        "prune confirm",
+        &[("ORBIT_AGENT_NAME", "claude")],
     );
+    assert!(!refused.status.success());
+    let refusal = String::from_utf8_lossy(&refused.stderr);
+    assert!(refusal.contains("capability denied"), "{refusal}");
+    assert!(refusal.contains("ORBIT_OPERATOR"), "{refusal}");
+
+    // A test binary is not a terminal, so it claims the operator capability
+    // the same explicit way a deliberate human action would.
+    const OPERATOR: &[(&str, &str)] = &[("ORBIT_OPERATOR", "1")];
+
+    let result = json_output(workspace.run_as(
+        &["learning", "prune", "--confirm", "--json"],
+        OPERATOR,
+        "prune confirm",
+    ));
     let deleted: Vec<&str> = result["deleted"]
         .as_array()
         .unwrap()
@@ -239,10 +256,11 @@ fn cli_prune_confirm_archives_stale_learnings_and_preserves_delete_alias() {
     assert_eq!(shown["status"], "superseded");
     assert!(shown["superseded_by"].is_null());
 
-    let alias = workspace.run_json(
+    let alias = json_output(workspace.run_as(
         &["learning", "prune", "--delete", "--json"],
+        OPERATOR,
         "prune delete alias",
-    );
+    ));
     assert!(alias["deleted"].as_array().expect("deleted").is_empty());
 }
 
@@ -770,6 +788,11 @@ fn snapshot_files(root: &Path) -> Vec<(String, Vec<u8>)> {
 
 fn run_orbit(cwd: &Path, home: &Path, args: &[&str], stdin: Option<&str>) -> Output {
     run_orbit_with_env(cwd, home, args, stdin, &[])
+}
+
+/// Parse a successful command's stdout as JSON.
+fn json_output(output: Output) -> Value {
+    serde_json::from_slice(&output.stdout).expect("parse JSON output")
 }
 
 /// Spawn the CLI with a fully declared identity environment.

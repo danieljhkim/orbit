@@ -44,7 +44,7 @@ fn set_parses_toml_literal_types_not_just_strings() {
         .set_value("tasks.id_start", "10000")
         .expect("set integer literal");
     store
-        .set_value("task.approval.required_for_agent", "true")
+        .set_value("scoring.enabled", "true")
         .expect("set bool literal");
     store
         .set_value("execution.env.pass", "[\"HOME\", \"PATH\", \"CODEX_HOME\"]")
@@ -55,7 +55,7 @@ fn set_parses_toml_literal_types_not_just_strings() {
     let saved = fs::read_to_string(&path).expect("read saved config");
     // Written as real TOML types (unquoted), not `"10000"` / `"true"` strings.
     assert!(saved.contains("id_start = 10000"), "{saved}");
-    assert!(saved.contains("required_for_agent = true"), "{saved}");
+    assert!(saved.contains("enabled = true"), "{saved}");
 
     let reopened = ConfigStore::open(ConfigScope::Workspace, &path).expect("reopen store");
     assert_eq!(
@@ -66,8 +66,8 @@ fn set_parses_toml_literal_types_not_just_strings() {
     );
     assert_eq!(
         reopened
-            .effective_value("task.approval.required_for_agent")
-            .expect("get required_for_agent"),
+            .effective_value("scoring.enabled")
+            .expect("get scoring.enabled"),
         serde_json::json!(true)
     );
     assert_eq!(

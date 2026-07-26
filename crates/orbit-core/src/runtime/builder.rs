@@ -142,8 +142,6 @@ pub(crate) fn build_context_from_roots(
     let codex_execution_policy = runtime_config.codex_execution.clone();
     let persistence = runtime_config.persistence.clone();
     let actor = ActorIdentity::from_env();
-    let task_approval_required_for_agent = runtime_config.task_approval.required_for_agent;
-    let task_delegate_approval = runtime_config.task_approval.delegate_approval;
     let scoring_enabled = runtime_config.scoring_enabled;
     let graph_editing = runtime_config.graph_editing;
     let pr_config = runtime_config.pr_config().clone();
@@ -182,8 +180,6 @@ pub(crate) fn build_context_from_roots(
         OrbitRuntimeSettings::new(
             persistence,
             actor,
-            task_approval_required_for_agent,
-            task_delegate_approval,
             scoring_enabled,
             graph_editing,
             pr_config,

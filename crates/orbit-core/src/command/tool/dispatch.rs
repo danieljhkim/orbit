@@ -240,7 +240,9 @@ impl OrbitRuntime {
 
         let (status, exit_code, error_message) = match &result {
             Ok(_) => (AuditEventStatus::Success, 0, None),
-            Err(OrbitError::PolicyDenied(msg)) => (
+            // A refusal is not a failure: both the path-scoping denial and the
+            // ORB-10453 capability denial keep the row queryable as `denied`.
+            Err(OrbitError::PolicyDenied(msg) | OrbitError::CapabilityDenied(msg)) => (
                 AuditEventStatus::Denied,
                 1,
                 Some(redact_sensitive_env_text(msg)),

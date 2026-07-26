@@ -12,6 +12,7 @@
 //! provide the high-level operations exposed to command handlers.
 
 pub mod audit;
+mod authorization;
 pub mod builder;
 pub mod engine;
 pub mod event_bus;
@@ -376,14 +377,6 @@ impl OrbitRuntime {
         params: &orbit_store::V2AuditEventInsertParams,
     ) -> Result<(), OrbitError> {
         self.sqlite_store()?.insert_v2_audit_event(params)
-    }
-
-    pub fn task_approval_required_for_agent(&self) -> bool {
-        self.context.task_approval_required_for_agent()
-    }
-
-    pub fn task_delegate_approval(&self) -> bool {
-        self.context.task_delegate_approval()
     }
 
     pub fn scoring_enabled(&self) -> bool {

@@ -57,8 +57,13 @@ pub enum OrbitError {
     PolicyDenied(String),
     #[error("{kind} not found: {id}")]
     NotFound { kind: NotFoundKind, id: String },
-    #[error("task requires approval: {0}")]
-    TaskApprovalRequired(String),
+    /// A governed operation was refused because the caller lacked the required
+    /// capability [ORB-10453]. Distinct from [`Self::PolicyDenied`], which is
+    /// `orbit-policy`'s filesystem-scoping refusal: this one is about *who is
+    /// asking*, not *which path was touched*, and every surface maps it to a
+    /// `denied` audit status so refusals stay separable from failures.
+    #[error("capability denied: {0}")]
+    CapabilityDenied(String),
     #[error("Invalid ADR status transition: {0}")]
     AdrInvalidTransition(String),
     #[error("{kind} artifact unavailable for {id}")]

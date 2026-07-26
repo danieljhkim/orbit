@@ -92,8 +92,8 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
             kind,
             id: redact_sensitive_env_text(&id),
         },
-        OrbitError::TaskApprovalRequired(m) => {
-            OrbitError::TaskApprovalRequired(redact_sensitive_env_text(&m))
+        OrbitError::CapabilityDenied(m) => {
+            OrbitError::CapabilityDenied(redact_sensitive_env_text(&m))
         }
         OrbitError::AdrInvalidTransition(m) => {
             OrbitError::AdrInvalidTransition(redact_sensitive_env_text(&m))
@@ -190,7 +190,7 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
             kind,
             id: redact_all(&id),
         },
-        OrbitError::TaskApprovalRequired(m) => OrbitError::TaskApprovalRequired(redact_all(&m)),
+        OrbitError::CapabilityDenied(m) => OrbitError::CapabilityDenied(redact_all(&m)),
         OrbitError::AdrInvalidTransition(m) => OrbitError::AdrInvalidTransition(redact_all(&m)),
         OrbitError::RemoteArtifactUnavailable {
             kind,

@@ -26,10 +26,6 @@ pass = ["HOME", "PATH", "CODEX_HOME", "TMPDIR", "USER"]
 [execution.codex]
 sandbox = "danger-full-access"
 
-[task.approval]
-required_for_agent = true
-delegate_approval = true
-
 [crews.terra]
 provider = "codex"
 backend = "cli"

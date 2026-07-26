@@ -190,8 +190,15 @@ fn task_add_attributes_from_model_flag_and_managed_identity_env() {
 }
 
 #[test]
-fn locks_release_reaches_admin_tool_bypassing_agent_gate() {
+fn locks_release_reaches_the_admin_tool_only_with_the_operator_capability() {
     let workspace = TestWorkspace::new();
+    const RELEASE: &[&str] = &[
+        "task",
+        "locks",
+        "release",
+        "no-such-reservation",
+        "--confirm",
+    ];
 
     let refused = workspace.run_raw(&["task", "locks", "release", "no-such-reservation"]);
     assert!(!refused.status.success());
@@ -201,20 +208,20 @@ fn locks_release_reaches_admin_tool_bypassing_agent_gate() {
         String::from_utf8_lossy(&refused.stderr)
     );
 
-    // `orbit.task.locks.release` is inactive on the agent tool surface, so
-    // `orbit task locks release` must reach it through the admin `runtime.run_tool`
-    // bypass. An unknown reservation yields a structured `released: false`, NOT
-    // the `ensure_tool_agent_facing` rejection.
-    let output = workspace.run(
-        &[
-            "task",
-            "locks",
-            "release",
-            "no-such-reservation",
-            "--confirm",
-        ],
-        "task locks release",
-    );
+    // ORB-10453: `orbit task locks release` reaches an MCP-inactive tool
+    // through the admin `runtime.run_tool` path — the bypass this task closed.
+    // The tool chokepoint governs that path too, so an unidentified caller is
+    // refused there rather than silently executing.
+    let ungoverned = workspace.run_raw(RELEASE);
+    assert!(!ungoverned.status.success());
+    let denial = String::from_utf8_lossy(&ungoverned.stderr);
+    assert!(denial.contains("capability denied"), "{denial}");
+    assert!(denial.contains("operator or runner"), "{denial}");
+
+    // With the capability claimed, the tool runs its own business logic: an
+    // unknown reservation yields a structured `released: false`, NOT the
+    // `ensure_tool_agent_facing` rejection.
+    let output = workspace.run_as_operator(RELEASE, "task locks release");
     let value: Value = serde_json::from_slice(&output.stdout).expect("release JSON");
     assert_eq!(value["released"], json!(false));
 
@@ -238,7 +245,7 @@ fn audit_prune_refuses_unconfirmed_then_deletes_when_confirmed() {
     let after_refusal = workspace.task_json(&["audit", "list", "--limit", "100", "--json"]);
     assert_eq!(after_refusal, before);
 
-    let confirmed = workspace.run(
+    let confirmed = workspace.run_as_operator(
         &["audit", "prune", "--older-than", "0s", "--confirm"],
         "confirmed audit prune",
     );
@@ -293,7 +300,7 @@ fn migrate_bare_invocation_inspects_and_confirm_applies() {
 fn workspace_remove_is_recoverable_by_reinitializing_the_checkout() {
     let workspace = TestWorkspace::new();
 
-    workspace.run(
+    workspace.run_as_operator(
         &["workspace", "remove", "trimmed-surface-test"],
         "deregister workspace",
     );
@@ -405,6 +412,22 @@ impl TestWorkspace {
     fn run_raw(&self, args: &[&str]) -> Output {
         run_orbit(&self.work, &self.home, args)
     }
+
+    /// Run a governed command as an explicit operator [ORB-10453].
+    ///
+    /// A test binary is not a terminal, so the capability chokepoint resolves
+    /// it as an unidentified caller; claiming the capability is the same
+    /// deliberate act the denial message asks for.
+    fn run_as_operator(&self, args: &[&str], label: &str) -> Output {
+        let output = run_orbit_as_operator(&self.work, &self.home, args);
+        assert!(
+            output.status.success(),
+            "{label} failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    }
 }
 
 fn run_orbit(cwd: &Path, home: &Path, args: &[&str]) -> Output {
@@ -419,6 +442,21 @@ fn run_orbit(cwd: &Path, home: &Path, args: &[&str]) -> Output {
         .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
         .args(args);
     command.output().expect("run orbit")
+}
+
+fn run_orbit_as_operator(cwd: &Path, home: &Path, args: &[&str]) -> Output {
+    let mut command = cargo_bin_cmd!("orbit");
+    command
+        .current_dir(cwd)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("ORBIT_OPERATOR", "1")
+        .env_remove("ORBIT_ROOT")
+        .env_remove("ORBIT_AGENT_NAME")
+        .env_remove("ORBIT_AGENT_MODEL")
+        .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
+        .args(args);
+    command.output().expect("run orbit as operator")
 }
 
 fn run_orbit_with_identity(

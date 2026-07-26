@@ -10,7 +10,8 @@ use super::super::task_locks::{
     task_lock_conflicts,
 };
 use crate::runtime::orbit_tool_host::test_support::{
-    create_context_task, invalid_input_message, test_runtime, unmanaged_tool_env_guard,
+    create_context_task, invalid_input_message, run_tool_as_operator, test_runtime,
+    unmanaged_tool_env_guard,
 };
 
 fn v2_test_runtime() -> (TempDir, OrbitRuntime, std::path::PathBuf) {
@@ -285,15 +286,15 @@ fn reservation_conflicts_clear_immediately_after_release() {
         }])
     );
 
-    let release = runtime
-        .run_tool(
-            "orbit.task.locks.release",
-            json!({
-                "reservation_id": reservation_id,
-                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
-            }),
-        )
-        .expect("release reservation");
+    let release = run_tool_as_operator(
+        &runtime,
+        "orbit.task.locks.release",
+        json!({
+            "reservation_id": reservation_id,
+            "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
+        }),
+    )
+    .expect("release reservation");
     assert_eq!(release["released"], true);
 
     let second_reserve = runtime
@@ -438,15 +439,15 @@ fn files_shape_reservations_conflict_and_release_like_task_reservations() {
         }])
     );
 
-    let release = runtime
-        .run_tool(
-            "orbit.task.locks.release",
-            json!({
-                "reservation_id": reservation_id,
-                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
-            }),
-        )
-        .expect("release direct reservation");
+    let release = run_tool_as_operator(
+        &runtime,
+        "orbit.task.locks.release",
+        json!({
+            "reservation_id": reservation_id,
+            "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
+        }),
+    )
+    .expect("release direct reservation");
     assert_eq!(release["released"], true);
 
     let task_reserve = runtime
@@ -515,15 +516,15 @@ fn release_audit_without_owner_has_no_task_or_job_run_id() {
     std::fs::write(repo_root.join("src/lib.rs"), "pub fn ok() {}\n").expect("write source file");
 
     let reservation_id = reserve_files(&runtime, None);
-    let release = runtime
-        .run_tool(
-            "orbit.task.locks.release",
-            json!({
-                "reservation_id": reservation_id.clone(),
-                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
-            }),
-        )
-        .expect("release reservation");
+    let release = run_tool_as_operator(
+        &runtime,
+        "orbit.task.locks.release",
+        json!({
+            "reservation_id": reservation_id.clone(),
+            "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
+        }),
+    )
+    .expect("release reservation");
     assert_eq!(release["released"], true);
 
     let row = task_lock_audit_event(
@@ -544,15 +545,15 @@ fn release_audit_uses_reservation_owner_run_id() {
     std::fs::write(repo_root.join("src/lib.rs"), "pub fn ok() {}\n").expect("write source file");
 
     let reservation_id = reserve_files(&runtime, Some("jrun-owner"));
-    let release = runtime
-        .run_tool(
-            "orbit.task.locks.release",
-            json!({
-                "reservation_id": reservation_id.clone(),
-                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
-            }),
-        )
-        .expect("release reservation");
+    let release = run_tool_as_operator(
+        &runtime,
+        "orbit.task.locks.release",
+        json!({
+            "reservation_id": reservation_id.clone(),
+            "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
+        }),
+    )
+    .expect("release reservation");
     assert_eq!(release["released"], true);
 
     let row = task_lock_audit_event(

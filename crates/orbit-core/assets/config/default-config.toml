@@ -18,10 +18,6 @@ sandbox = "danger-full-access"
 # Optional: enable escalation requests for workflows that legitimately need approval.
 # approval_policy = "on-request"
 
-[task.approval]
-required_for_agent = true
-delegate_approval = true
-
 [scoring]
 enabled = true
 

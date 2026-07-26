@@ -243,8 +243,6 @@ impl OrbitPolicyContext {
 pub(crate) struct OrbitRuntimeSettings {
     persistence: PersistenceConfig,
     actor: ActorIdentity,
-    task_approval_required_for_agent: bool,
-    task_delegate_approval: bool,
     scoring_enabled: bool,
     graph_editing: bool,
     pr_config: PrConfig,
@@ -269,8 +267,6 @@ impl OrbitRuntimeSettings {
     pub(crate) fn new(
         persistence: PersistenceConfig,
         actor: ActorIdentity,
-        task_approval_required_for_agent: bool,
-        task_delegate_approval: bool,
         scoring_enabled: bool,
         graph_editing: bool,
         pr_config: PrConfig,
@@ -285,8 +281,6 @@ impl OrbitRuntimeSettings {
         Self {
             persistence,
             actor,
-            task_approval_required_for_agent,
-            task_delegate_approval,
             scoring_enabled,
             graph_editing,
             pr_config,
@@ -407,14 +401,6 @@ impl OrbitContext {
 
     pub(crate) fn set_actor(&mut self, actor: ActorIdentity) {
         self.runtime.actor = actor;
-    }
-
-    pub(crate) fn task_approval_required_for_agent(&self) -> bool {
-        self.runtime.task_approval_required_for_agent
-    }
-
-    pub(crate) fn task_delegate_approval(&self) -> bool {
-        self.runtime.task_delegate_approval
     }
 
     pub(crate) fn scoring_enabled(&self) -> bool {

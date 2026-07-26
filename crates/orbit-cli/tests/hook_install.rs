@@ -251,6 +251,11 @@ impl TestWorkspace {
             .current_dir(&self.work)
             .env("HOME", &self.home)
             .env("USERPROFILE", &self.home)
+            // ORB-10453: a test binary is not a terminal, so the capability
+            // chokepoint resolves it as an unidentified caller and refuses
+            // `workspace teardown`. Claiming the operator capability explicitly
+            // is exactly the escape hatch the denial names.
+            .env("ORBIT_OPERATOR", "1")
             .env_remove("ORBIT_ROOT")
             .args(args)
             .output()
