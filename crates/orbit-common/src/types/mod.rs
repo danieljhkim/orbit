@@ -95,7 +95,9 @@ pub use duel::{
     PlanningRoleAssignment, PlanningRoles, ReviewerStats, RoleAssignment, RoleSlot, Roles, Scores,
     Severity, TaskClass, TaskScope, ValidIssuesBySeverity, Verdict,
 };
-pub use error::{ArtifactOrigin, ArtifactOriginMode, NotFoundKind, OrbitError};
+pub use error::{
+    ArtifactOrigin, ArtifactOriginMode, DependencyNotDelivered, NotFoundKind, OrbitError,
+};
 pub use event::OrbitEvent;
 pub use execution_profile::{
     CREW_DISCOVERY_SCHEMA_VERSION, CrewDiscoveryV1, EXECUTION_CONFIG_DIGEST_DOMAIN,

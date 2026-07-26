@@ -50,6 +50,23 @@ impl std::fmt::Display for NotFoundKind {
     }
 }
 
+/// Evidence behind [`OrbitError::DependencyNotDelivered`]: which task was
+/// refused, which of its done dependencies is missing from the base, the base
+/// itself, and `detail` — the delivery commits found elsewhere in the
+/// repository plus the remedy.
+///
+/// Boxed into the error enum: five inline strings would widen every
+/// `Result<_, OrbitError>` in the workspace past the large-error threshold for
+/// one rare refusal.
+#[derive(Debug, Serialize)]
+pub struct DependencyNotDelivered {
+    pub task_id: String,
+    pub dependency_id: String,
+    pub base_ref: String,
+    pub base_sha: String,
+    pub detail: String,
+}
+
 #[derive(Debug, Error, Serialize)]
 #[non_exhaustive]
 pub enum OrbitError {
@@ -129,6 +146,15 @@ pub enum OrbitError {
     Store(String),
     #[error("invalid task status transition: {0}")]
     TaskStatusTransition(String),
+    /// A workflow run was refused because a dependency that reached `done` has
+    /// not been delivered into the base the run would be cut from
+    /// [ORB-10464]. Distinct from [`Self::TaskStatusTransition`]: the
+    /// lifecycle transition is legal, the *baseline* is wrong.
+    #[error(
+        "task '{}' depends on '{}', which is done but not delivered into base '{}' ({}): {}",
+        .0.task_id, .0.dependency_id, .0.base_ref, .0.base_sha, .0.detail
+    )]
+    DependencyNotDelivered(Box<DependencyNotDelivered>),
     #[error("invalid job run state transition: {0}")]
     JobRunStateTransition(String),
     #[error("workspace error: {0}")]

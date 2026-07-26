@@ -360,6 +360,15 @@ impl OrbitRuntime {
         }
     }
 
+    /// Lifecycle half of workflow admission: is this task's *status* one a
+    /// workflow may start from?
+    ///
+    /// It deliberately does not answer whether the task's done dependencies
+    /// have been delivered into the base the run will be cut from — that
+    /// question needs the effective base, which only the worktree step knows,
+    /// and is answered there before the worktree is created (ORB-10464,
+    /// `orbit-engine`'s `vcs::worktree::dependency_delivery`). Both halves
+    /// must hold for a task to be genuinely ready.
     pub(crate) fn admit_task_for_workflow_as_system(
         &self,
         id: &str,

@@ -58,6 +58,7 @@ fn error_code(err: &OrbitError) -> &str {
         OrbitError::TaskStatusTransition(_)
         | OrbitError::JobRunStateTransition(_)
         | OrbitError::AdrInvalidTransition(_) => "invalid_transition",
+        OrbitError::DependencyNotDelivered { .. } => "dependency_not_delivered",
         OrbitError::RemoteArtifactUnavailable { .. } => "remote_artifact_unavailable",
         OrbitError::ArtifactNotLocal { .. } => "artifact_not_local",
         OrbitError::AgentProtocolViolation(_) => "agent_protocol_violation",

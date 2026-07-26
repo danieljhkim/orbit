@@ -31,7 +31,7 @@ use std::{
 use regex::Regex;
 use serde_json::Value;
 
-use crate::types::{ArtifactOrigin, OrbitError};
+use crate::types::{ArtifactOrigin, DependencyNotDelivered, OrbitError};
 
 const REDACTED_ENV_VALUE: &str = "[REDACTED_ENV]";
 static DEFAULT_PATTERN_REDACTOR: OnceLock<PatternRedactor> = OnceLock::new();
@@ -182,6 +182,9 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         OrbitError::TaskStatusTransition(m) => {
             OrbitError::TaskStatusTransition(redact_sensitive_env_text(&m))
         }
+        OrbitError::DependencyNotDelivered(diagnostic) => OrbitError::DependencyNotDelivered(
+            redact_dependency_not_delivered(*diagnostic, redact_sensitive_env_text),
+        ),
         OrbitError::JobRunStateTransition(m) => {
             OrbitError::JobRunStateTransition(redact_sensitive_env_text(&m))
         }
@@ -283,11 +286,27 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
         },
         OrbitError::Store(m) => OrbitError::Store(redact_all(&m)),
         OrbitError::TaskStatusTransition(m) => OrbitError::TaskStatusTransition(redact_all(&m)),
+        OrbitError::DependencyNotDelivered(diagnostic) => OrbitError::DependencyNotDelivered(
+            redact_dependency_not_delivered(*diagnostic, redact_all),
+        ),
         OrbitError::JobRunStateTransition(m) => OrbitError::JobRunStateTransition(redact_all(&m)),
         OrbitError::Io(m) => OrbitError::Io(redact_all(&m)),
         OrbitError::WorkspaceError(m) => OrbitError::WorkspaceError(redact_all(&m)),
         OrbitError::Migration(m) => OrbitError::Migration(redact_all(&m)),
     }
+}
+
+fn redact_dependency_not_delivered(
+    diagnostic: DependencyNotDelivered,
+    redact: fn(&str) -> String,
+) -> Box<DependencyNotDelivered> {
+    Box::new(DependencyNotDelivered {
+        task_id: redact(&diagnostic.task_id),
+        dependency_id: redact(&diagnostic.dependency_id),
+        base_ref: redact(&diagnostic.base_ref),
+        base_sha: redact(&diagnostic.base_sha),
+        detail: redact(&diagnostic.detail),
+    })
 }
 
 fn redact_json_with(value: Value, redact: fn(&str) -> String) -> Value {
