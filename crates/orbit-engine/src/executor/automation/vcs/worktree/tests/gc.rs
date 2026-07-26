@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
 
 use chrono::{Duration, Utc};
 use orbit_common::types::{
@@ -22,7 +21,11 @@ use super::super::{
     WorktreeIdentity, resolve_shared_worktree_path, resolve_worktree_path_from_prefix,
 };
 
-static WORKTREE_ROOT_ENV_LOCK: Mutex<()> = Mutex::new(());
+// Environment variables are process-global: mutating ORBIT_WORKTREE_ROOT in
+// this parallel test binary races every test that resolves a worktree path.
+// Run the two environment-specific cases in isolated copies of the test
+// process so the rest of the module stays parallel without observing them.
+const RESOLVER_ENV_CHILD: &str = "ORBIT_GC_RESOLVER_ENV_CHILD";
 
 struct FakeTaskHost {
     tasks: BTreeMap<String, Task>,
@@ -307,31 +310,39 @@ fn unattributed_run_is_retained_and_reported() {
 
 #[test]
 fn resolver_uses_workspace_local_root_without_override() {
-    let _lock = WORKTREE_ROOT_ENV_LOCK.lock().unwrap();
-    let old = std::env::var_os("ORBIT_WORKTREE_ROOT");
-    // SAFETY: this module serializes mutations of this test-only variable and
-    // restores its prior value before releasing the lock.
-    unsafe { std::env::remove_var("ORBIT_WORKTREE_ROOT") };
+    if !is_resolver_env_child("workspace-local") {
+        run_resolver_test_in_child(
+            "resolver_uses_workspace_local_root_without_override",
+            "workspace-local",
+            None,
+        );
+        return;
+    }
+
     let temp = tempdir().unwrap();
     let repo = temp.path().join("repo");
     let path = resolve_worktree_path_from_prefix(&repo, "orbit", "jrun-local").unwrap();
     assert_eq!(path, repo.join(".orbit/state/worktrees/orbit-jrun-local"));
-    restore_worktree_root(old);
 }
 
 #[test]
 fn resolver_uses_external_root_and_repository_name_when_configured() {
-    let _lock = WORKTREE_ROOT_ENV_LOCK.lock().unwrap();
-    let old = std::env::var_os("ORBIT_WORKTREE_ROOT");
+    if !is_resolver_env_child("external-root") {
+        let temp = tempdir().unwrap();
+        let root = temp.path().join("worktrees");
+        run_resolver_test_in_child(
+            "resolver_uses_external_root_and_repository_name_when_configured",
+            "external-root",
+            Some(&root),
+        );
+        return;
+    }
+
     let temp = tempdir().unwrap();
     let repo = temp.path().join("my-repo");
-    let root = temp.path().join("worktrees");
-    // SAFETY: this module serializes mutations of this test-only variable and
-    // restores its prior value before releasing the lock.
-    unsafe { std::env::set_var("ORBIT_WORKTREE_ROOT", &root) };
+    let root = PathBuf::from(std::env::var_os("ORBIT_WORKTREE_ROOT").unwrap());
     let path = resolve_worktree_path_from_prefix(&repo, "orbit", "jrun-external").unwrap();
     assert_eq!(path, root.join("my-repo/orbit-jrun-external"));
-    restore_worktree_root(old);
 }
 
 /// ORB-10427: the collector reclaimed nothing in production because it probed
@@ -829,12 +840,32 @@ fn git(current_dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-fn restore_worktree_root(value: Option<std::ffi::OsString>) {
-    // SAFETY: callers hold WORKTREE_ROOT_ENV_LOCK.
-    unsafe {
-        match value {
-            Some(value) => std::env::set_var("ORBIT_WORKTREE_ROOT", value),
-            None => std::env::remove_var("ORBIT_WORKTREE_ROOT"),
+fn is_resolver_env_child(case: &str) -> bool {
+    std::env::var_os(RESOLVER_ENV_CHILD).is_some_and(|value| value == case)
+}
+
+fn run_resolver_test_in_child(test_name: &str, case: &str, root: Option<&Path>) {
+    let module = module_path!()
+        .strip_prefix(concat!(env!("CARGO_CRATE_NAME"), "::"))
+        .unwrap_or(module_path!());
+    let exact_test_name = format!("{module}::{test_name}");
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command
+        .args(["--exact", &exact_test_name, "--nocapture"])
+        .env(RESOLVER_ENV_CHILD, case);
+    match root {
+        Some(root) => {
+            command.env("ORBIT_WORKTREE_ROOT", root);
+        }
+        None => {
+            command.env_remove("ORBIT_WORKTREE_ROOT");
         }
     }
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "isolated resolver test {exact_test_name} failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
