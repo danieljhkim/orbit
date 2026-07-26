@@ -470,30 +470,20 @@ impl Commands {
                     runtime_dispatch!(Adr),
                 )
             }
+            // ADR-0209 bearing 1 [ORB-10358]: friction is registry-driven, so
+            // this arm reads the invocation instead of matching verb by verb.
+            // A new friction verb needs no edit here.
             Commands::Friction(command) => {
-                use super::friction::FrictionSubcommand;
-                let (subcommand, target_id, json) = match &command.command {
-                    FrictionSubcommand::Add(args) => ("add", None, args.json),
-                    FrictionSubcommand::List(args) => ("list", None, args.json),
-                    FrictionSubcommand::Show(args) => ("show", Some(args.id.as_str()), args.json),
-                    FrictionSubcommand::Stats(args) => ("stats", None, args.json),
-                    FrictionSubcommand::Tags(args) => ("tags", None, args.json),
-                    FrictionSubcommand::Update(args) => {
-                        ("update", Some(args.id.as_str()), args.json)
-                    }
-                    FrictionSubcommand::Resolve(args) => {
-                        ("resolve", Some(args.id.as_str()), args.json)
-                    }
-                };
+                let invocation = &command.command;
                 CommandOperation::new(
                     RuntimeNeed::Required,
                     Some(admin_meta(
                         "friction",
-                        Some(subcommand),
+                        Some(invocation.spec.name),
                         Some("friction"),
-                        target_id,
+                        invocation.target_id(),
                     )),
-                    json.then_some(true),
+                    invocation.json.then_some(true),
                     false,
                     runtime_dispatch!(Friction),
                 )

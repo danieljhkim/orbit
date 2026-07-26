@@ -1,4 +1,14 @@
-//! Shared friction taxonomy defaults.
+//! Shared friction taxonomy defaults and the friction operation registry.
+//!
+//! [`operations`] is the single declaration site for every friction verb
+//! (ADR-0209 bearing 1, ORB-10358). CLI, MCP, dashboard, and runtime handler
+//! wiring all derive from it.
+
+pub mod operations;
+
+pub use operations::{
+    FRICTION_OPERATIONS, FrictionOperation, FrictionVerb, friction_operation, friction_operations,
+};
 
 /// Default friction tags and their human-readable glosses.
 ///
@@ -26,3 +36,6 @@ pub fn friction_tags_literal() -> String {
         .collect::<Vec<_>>()
         .join(" | ")
 }
+
+#[cfg(test)]
+mod tests;

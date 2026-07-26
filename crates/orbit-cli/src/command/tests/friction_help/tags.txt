@@ -1,0 +1,8 @@
+List configured friction taxonomy tags
+
+Usage: orbit friction tags [OPTIONS]
+
+Options:
+      --json         Output as JSON
+      --root <ROOT>  Override the Orbit root directory (highest precedence)
+  -h, --help         Print help

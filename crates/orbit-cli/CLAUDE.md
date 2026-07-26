@@ -75,6 +75,28 @@ The source tree stays flat — never create a grouping subdirectory under
 `environment/`, `observe/`) made it impossible to tell from `ls` whether a
 directory was a parent command or a folder, and were removed in ORB-00279.
 
+## Registry-derived commands
+
+Some parent commands are **not** hand-written clap structs. `friction` is
+derived from an operation registry declared once in `orbit-common`
+(ADR-0209 bearing 1, ORB-10358): `command/operation_args.rs` builds the
+subcommand tree, the args, and the tool input from that registry, and
+`command/friction.rs` holds only the trait glue and the response renderers.
+Adding a friction verb is a registry entry plus a handler — no edit under
+`command/`, including no new arm in `command/operation.rs`, whose friction arm
+reads the invocation instead of matching verb by verb.
+
+`command/operation_args.rs` is generic over the noun's verb type, so the next
+noun to migrate reuses it unchanged. Before migrating one, read
+[docs/design/operations-as-data/references/cookbook.md](../../docs/design/operations-as-data/references/cookbook.md)
+— in particular Step 0, which freezes the current `--help` output as fixtures
+before any code moves. That is the only thing that makes "argv is unchanged"
+checkable rather than hopeful.
+
+Two idioms therefore coexist under `command/`, and that is expected (ADR-0209's
+adoption model). Hand-written clap is still correct for a command that has not
+been migrated; do not half-migrate one.
+
 ## Crate boundary
 
 `orbit-cli` is a clap entry point. Domain logic lives in `orbit-core` and

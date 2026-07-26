@@ -3,6 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::Utc;
+use orbit_common::friction::FrictionVerb;
 use orbit_common::types::{
     FrictionStatus, NotFoundKind, OrbitError, Task, TaskComment, TaskPriority, TaskStatus,
     TaskType, ToolSessionContext, is_valid_friction_id, normalize_optional_attribution_label,
@@ -639,30 +640,35 @@ impl HubCoordinationExecutor {
         )
     }
 
+    /// The hub-coordination half of the friction handler table.
+    ///
+    /// Exhaustive over [`FrictionVerb`] on purpose (ADR-0209 bearing 1,
+    /// ORB-10358): a new friction verb has to state here whether the
+    /// checkoutless hub can serve it, rather than silently falling through.
     fn friction(
         &self,
-        action: OrbitBuiltinAction,
+        verb: FrictionVerb,
         input: Value,
         model: Option<String>,
     ) -> Result<Value, OrbitError> {
-        match action {
-            OrbitBuiltinAction::FrictionList => {
+        match verb {
+            FrictionVerb::List => {
                 let root = self.readable_friction_root()?;
                 let mut value = super::friction_tools::list_at_root(&root, input)?;
                 strip_private_friction_paths(&mut value);
                 Ok(value)
             }
-            OrbitBuiltinAction::FrictionShow => {
+            FrictionVerb::Show => {
                 let root = self.readable_friction_root()?;
                 let mut value = super::friction_tools::show_at_root(&root, input)?;
                 strip_private_friction_paths(&mut value);
                 Ok(value)
             }
-            OrbitBuiltinAction::FrictionTags => {
+            FrictionVerb::Tags => {
                 let root = self.readable_friction_root()?;
                 Ok(json!(friction_tags(&root)?))
             }
-            OrbitBuiltinAction::FrictionAdd => {
+            FrictionVerb::Add => {
                 let root = self.friction_root()?;
                 let model = model
                     .filter(|value| !value.trim().is_empty())
@@ -687,7 +693,7 @@ impl HubCoordinationExecutor {
                 )?;
                 friction_json(stored)
             }
-            OrbitBuiltinAction::FrictionUpdate => {
+            FrictionVerb::Update => {
                 let root = self.friction_root()?;
                 let id = required_string(&input, &["id"], "id")?;
                 let status = optional_string(&input, "status")?
@@ -715,7 +721,12 @@ impl HubCoordinationExecutor {
                     },
                 )?)
             }
-            _ => unreachable!(),
+            // Aggregate stats need the task store, and resolution is an
+            // operator action taken against a real checkout.
+            FrictionVerb::Stats | FrictionVerb::Resolve => Err(OrbitError::InvalidInput(format!(
+                "action {} is outside the checkoutless hub coordination executor",
+                verb.tool_name()
+            ))),
         }
     }
 }
@@ -738,11 +749,7 @@ impl OrbitToolHost for HubCoordinationExecutor {
             OrbitBuiltinAction::TaskShow => self.show_task(input),
             OrbitBuiltinAction::TaskList => self.list_tasks(input),
             OrbitBuiltinAction::TaskUpdate => self.update_task(input, agent, model),
-            OrbitBuiltinAction::FrictionAdd
-            | OrbitBuiltinAction::FrictionList
-            | OrbitBuiltinAction::FrictionShow
-            | OrbitBuiltinAction::FrictionTags
-            | OrbitBuiltinAction::FrictionUpdate => self.friction(action, input, model),
+            OrbitBuiltinAction::Friction(verb) => self.friction(verb, input, model),
             _ => Err(OrbitError::InvalidInput(format!(
                 "action {action:?} is outside the checkoutless hub coordination executor"
             ))),

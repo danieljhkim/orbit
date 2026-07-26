@@ -1,262 +1,76 @@
-use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
-use serde_json::{Map, Value};
+//! The friction CLI, derived from the friction operation registry.
+//!
+//! ADR-0209 bearing 1 pilot [ORB-10358]. Each friction verb used to be a clap
+//! `Args` struct plus an `Execute` impl that hand-built the tool input — the
+//! same names, help strings, and field mapping the MCP tool file and the
+//! dashboard handler each restated. All of that is now declared once in
+//! `orbit_common::friction::operations`, and the clap and input derivation is the
+//! noun-agnostic adapter in [`super::operation_args`].
+//!
+//! Adding a friction verb requires no edit here. What is left in this file is
+//! genuinely friction-specific: how to render a friction response as text.
 
+use clap::{ArgMatches, Args, Command, FromArgMatches, Subcommand};
+use orbit_common::friction::{FRICTION_OPERATIONS, FrictionVerb, friction_operation};
+use orbit_common::operation::CliRender;
+use orbit_core::{OrbitError, OrbitRuntime};
+use serde_json::Value;
+
+use super::operation_args::{Invocation, augment_subcommands, invocation_from_matches};
 use crate::command::Execute;
+
+/// One parsed friction verb invocation.
+pub type FrictionInvocation = Invocation<FrictionVerb>;
 
 #[derive(Args)]
 #[command(about = "Report, list, and triage Orbit friction records")]
 pub struct FrictionCommand {
     #[command(subcommand)]
-    pub command: FrictionSubcommand,
+    pub command: FrictionInvocation,
 }
 
-#[derive(Subcommand)]
-pub enum FrictionSubcommand {
-    /// Append an Orbit friction report
-    Add(FrictionAddArgs),
-    /// List Orbit friction records
-    List(FrictionListArgs),
-    /// Show a single Orbit friction record
-    Show(FrictionShowArgs),
-    /// Compute friction rates
-    Stats(FrictionStatsArgs),
-    /// List configured friction taxonomy tags
-    Tags(FrictionTagsArgs),
-    /// Update triage metadata for an Orbit friction record
-    Update(FrictionUpdateArgs),
-    /// Mark an Orbit friction record as resolved
-    Resolve(FrictionResolveArgs),
+impl Subcommand for FrictionInvocation {
+    fn augment_subcommands(cmd: Command) -> Command {
+        augment_subcommands(cmd, FRICTION_OPERATIONS)
+    }
+
+    fn augment_subcommands_for_update(cmd: Command) -> Command {
+        <Self as Subcommand>::augment_subcommands(cmd)
+    }
+
+    fn has_subcommand(name: &str) -> bool {
+        friction_operation(name).is_some()
+    }
 }
 
-#[derive(Args)]
-pub struct FrictionAddArgs {
-    /// Markdown body describing what happened and why it caused friction
-    #[arg(long)]
-    pub body: String,
-    /// Friction taxonomy tag; repeat or comma-separate for multiple tags
-    #[arg(long = "tag", value_delimiter = ',')]
-    pub tags: Vec<String>,
-    /// Optional task ID being worked on when friction occurred
-    #[arg(long)]
-    pub during_task: Option<String>,
-    /// Agent family to attribute the record to (`codex`, `claude`, `gemini`, or `grok`)
-    #[arg(long)]
-    pub model: String,
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-}
+impl FromArgMatches for FrictionInvocation {
+    fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        invocation_from_matches(FRICTION_OPERATIONS, "friction", matches)
+    }
 
-#[derive(Args)]
-pub struct FrictionListArgs {
-    /// Optional model filter
-    #[arg(long)]
-    pub model: Option<String>,
-    /// Optional status filter: open, triaged, or resolved
-    #[arg(long)]
-    pub status: Option<String>,
-    /// Optional tag filter
-    #[arg(long)]
-    pub tag: Option<String>,
-    /// Optional YYYY-MM month filter for reported records
-    #[arg(long)]
-    pub month: Option<String>,
-    /// Optional case-insensitive query over id, model, tags, status, task, and body
-    #[arg(long)]
-    pub q: Option<String>,
-    /// Optional RFC3339 lower bound for created_at
-    #[arg(long)]
-    pub from: Option<String>,
-    /// Optional RFC3339 upper bound for created_at
-    #[arg(long)]
-    pub to: Option<String>,
-    /// Optional maximum number of records to return
-    #[arg(long)]
-    pub limit: Option<usize>,
-    /// Optional number of records to skip
-    #[arg(long)]
-    pub offset: Option<usize>,
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Args)]
-pub struct FrictionShowArgs {
-    /// Friction record id, e.g. F2026-05-001
-    pub id: String,
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Args)]
-pub struct FrictionStatsArgs {
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Args)]
-pub struct FrictionTagsArgs {
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Args)]
-pub struct FrictionUpdateArgs {
-    /// Friction record id, e.g. F2026-05-001
-    pub id: String,
-    /// Optional status: open, triaged, or resolved
-    #[arg(long)]
-    pub status: Option<String>,
-    /// Optional replacement taxonomy tag; repeat or comma-separate for multiple tags
-    #[arg(long = "tag", value_delimiter = ',')]
-    pub tags: Vec<String>,
-    /// Optional replacement markdown body
-    #[arg(long)]
-    pub body: Option<String>,
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Args)]
-pub struct FrictionResolveArgs {
-    /// Friction record id, e.g. F2026-05-001
-    pub id: String,
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
+    fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), clap::Error> {
+        *self = Self::from_arg_matches(matches)?;
+        Ok(())
+    }
 }
 
 impl Execute for FrictionCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        self.command.execute(runtime)
+        let FrictionInvocation { spec, input, json } = self.command;
+        let value = runtime.run_tool(spec.tool_name, input)?;
+        render(&value, spec.cli_render, json)
     }
 }
 
-impl Execute for FrictionSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        match self {
-            Self::Add(args) => args.execute(runtime),
-            Self::List(args) => args.execute(runtime),
-            Self::Show(args) => args.execute(runtime),
-            Self::Stats(args) => args.execute(runtime),
-            Self::Tags(args) => args.execute(runtime),
-            Self::Update(args) => args.execute(runtime),
-            Self::Resolve(args) => args.execute(runtime),
-        }
-    }
-}
-
-impl Execute for FrictionAddArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let mut input = Map::new();
-        input.insert("body".to_string(), Value::String(self.body));
-        insert_string_list(&mut input, "tags", self.tags);
-        insert_optional_string(&mut input, "during_task", self.during_task);
-        input.insert("model".to_string(), Value::String(self.model));
-        let value = runtime.run_tool("orbit.friction.add", Value::Object(input))?;
-        print_record_or_json(&value, self.json)
-    }
-}
-
-impl Execute for FrictionListArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let mut input = Map::new();
-        insert_optional_string(&mut input, "model", self.model);
-        insert_optional_string(&mut input, "status", self.status);
-        insert_optional_string(&mut input, "tag", self.tag);
-        insert_optional_string(&mut input, "month", self.month);
-        insert_optional_string(&mut input, "q", self.q);
-        insert_optional_string(&mut input, "from", self.from);
-        insert_optional_string(&mut input, "to", self.to);
-        insert_optional_usize(&mut input, "limit", self.limit);
-        insert_optional_usize(&mut input, "offset", self.offset);
-        let value = runtime.run_tool("orbit.friction.list", Value::Object(input))?;
-        if self.json {
-            crate::output::json::print_pretty(&value)
-        } else {
-            print_records_table(&value)
-        }
-    }
-}
-
-impl Execute for FrictionShowArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let value = runtime.run_tool("orbit.friction.show", id_input(self.id))?;
-        print_record_or_json(&value, self.json)
-    }
-}
-
-impl Execute for FrictionStatsArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let value = runtime.run_tool("orbit.friction.stats", Value::Object(Map::new()))?;
-        crate::output::json::print_pretty(&value)
-    }
-}
-
-impl Execute for FrictionTagsArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let value = runtime.run_tool("orbit.friction.tags", Value::Object(Map::new()))?;
-        if self.json {
-            crate::output::json::print_pretty(&value)
-        } else {
-            print_tags(&value)
-        }
-    }
-}
-
-impl Execute for FrictionUpdateArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let mut input = Map::new();
-        input.insert("id".to_string(), Value::String(self.id));
-        insert_optional_string(&mut input, "status", self.status);
-        insert_string_list(&mut input, "tags", self.tags);
-        insert_optional_string(&mut input, "body", self.body);
-        let value = runtime.run_tool("orbit.friction.update", Value::Object(input))?;
-        print_record_or_json(&value, self.json)
-    }
-}
-
-impl Execute for FrictionResolveArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let value = runtime.run_tool("orbit.friction.resolve", id_input(self.id))?;
-        print_record_or_json(&value, self.json)
-    }
-}
-
-fn id_input(id: String) -> Value {
-    Value::Object(Map::from_iter([("id".to_string(), Value::String(id))]))
-}
-
-fn insert_optional_string(input: &mut Map<String, Value>, key: &str, value: Option<String>) {
-    if let Some(value) = value
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    {
-        input.insert(key.to_string(), Value::String(value));
-    }
-}
-
-fn insert_optional_usize(input: &mut Map<String, Value>, key: &str, value: Option<usize>) {
-    if let Some(value) = value {
-        input.insert(key.to_string(), Value::from(value));
-    }
-}
-
-fn insert_string_list(input: &mut Map<String, Value>, key: &str, values: Vec<String>) {
-    let values = values
-        .into_iter()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .map(Value::String)
-        .collect::<Vec<_>>();
-    if !values.is_empty() {
-        input.insert(key.to_string(), Value::Array(values));
+/// Render a friction response, honoring the spec's declared default rendering.
+fn render(value: &Value, kind: CliRender, json: bool) -> Result<(), OrbitError> {
+    match kind {
+        CliRender::Record if !json => print_record(value),
+        CliRender::RecordTable if !json => print_records_table(value),
+        CliRender::TagList if !json => print_tags(value),
+        // `AlwaysJson` responses have no useful flat rendering, and `--json`
+        // asks for this branch explicitly.
+        _ => crate::output::json::print_pretty(value),
     }
 }
 
@@ -281,11 +95,7 @@ fn print_records_table(value: &Value) -> Result<(), OrbitError> {
     Ok(())
 }
 
-fn print_record_or_json(value: &Value, json: bool) -> Result<(), OrbitError> {
-    if json {
-        return crate::output::json::print_pretty(value);
-    }
-
+fn print_record(value: &Value) -> Result<(), OrbitError> {
     if !value.is_object() {
         return crate::output::json::print_pretty(value);
     }

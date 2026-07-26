@@ -11,8 +11,11 @@
 //! Shared leaf crate for the Orbit workspace.
 //!
 //! The public surface is intentionally split into four namespaces:
-//! - [`friction`] for shared friction taxonomy defaults
+//! - [`friction`] for shared friction taxonomy defaults and the friction
+//!   operation registry
 //! - [`migration`] for forward-only schema migrations of YAML artifacts
+//! - [`operation`] for the operations-as-data kernel every noun registry is
+//!   declared in (ADR-0209 bearing 1)
 //! - [`types`] for Orbit domain types, `OrbitError`, IDs, and the v2 schemas
 //! - [`utility`] for generic helpers like filesystem, redaction, logging,
 //!   and blob storage
@@ -21,6 +24,7 @@
 pub mod friction;
 pub mod migration;
 pub mod model_defaults;
+pub mod operation;
 pub mod types;
 pub mod utility;
 

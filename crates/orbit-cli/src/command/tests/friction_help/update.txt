@@ -1,0 +1,14 @@
+Update triage metadata for an Orbit friction record
+
+Usage: orbit friction update [OPTIONS] <ID>
+
+Arguments:
+  <ID>  Friction record id, e.g. F2026-05-001
+
+Options:
+      --root <ROOT>      Override the Orbit root directory (highest precedence)
+      --status <STATUS>  Optional status: open, triaged, or resolved
+      --tag <TAGS>       Optional replacement taxonomy tag; repeat or comma-separate for multiple tags
+      --body <BODY>      Optional replacement markdown body
+      --json             Output as JSON
+  -h, --help             Print help

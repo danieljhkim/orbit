@@ -1,9 +1,11 @@
 // Content moved from inline #[cfg(test)] mod tests in command/mod.rs per ORB-00221.
 // tests/mod.rs can directly contain tests for the declaring parent module (exempt from orphan rules).
 
+mod friction;
 mod gc;
 mod init;
 mod operation;
+mod operation_args;
 mod sweep;
 
 use clap::{Parser, error::ErrorKind};
@@ -13,7 +15,6 @@ use orbit_common::types::McpCapability;
 use super::{
     Cli, Commands,
     docs::DocsSubcommand,
-    friction::FrictionSubcommand,
     hook::HookSubcommand,
     mcp::McpSubcommand,
     search::{SearchKindArg, SearchSubcommand},
@@ -310,45 +311,6 @@ fn cli_rejects_learning_reindex() {
         ErrorKind::InvalidSubcommand,
         "unrecognized subcommand 'reindex'",
     );
-}
-
-#[test]
-fn cli_parses_friction_list() {
-    let cli = Cli::parse_from(["orbit", "friction", "list", "--status", "open"]);
-    match cli.command {
-        Commands::Friction(command) => match command.command {
-            FrictionSubcommand::List(args) => {
-                assert_eq!(args.status.as_deref(), Some("open"));
-            }
-            _ => panic!("expected friction list"),
-        },
-        _ => panic!("expected top-level friction command"),
-    }
-}
-
-#[test]
-fn cli_parses_friction_update() {
-    let cli = Cli::parse_from([
-        "orbit",
-        "friction",
-        "update",
-        "F2026-05-001",
-        "--status",
-        "triaged",
-        "--tag",
-        "tooling,docs",
-    ]);
-    match cli.command {
-        Commands::Friction(command) => match command.command {
-            FrictionSubcommand::Update(args) => {
-                assert_eq!(args.id, "F2026-05-001");
-                assert_eq!(args.status.as_deref(), Some("triaged"));
-                assert_eq!(args.tags, vec!["tooling", "docs"]);
-            }
-            _ => panic!("expected friction update"),
-        },
-        _ => panic!("expected top-level friction command"),
-    }
 }
 
 #[test]

@@ -4,6 +4,7 @@ pub mod docs;
 pub mod duel;
 pub mod friction;
 pub mod learning;
+pub mod operation;
 pub mod pipeline;
 pub mod search;
 pub mod semantic;
@@ -72,30 +73,11 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register_inactive(docs::OrbitDocsAddTool);
     registry.register_inactive(docs::OrbitDocsIndexTool);
     registry.register_inactive(docs::OrbitDocsMigrateTool);
-    registry.register_mcp(
-        friction::add::OrbitFrictionAddTool,
-        agent_operator(McpToolPlacement::Hub),
-    );
-    // Non-destructive triage reads are canonical hub/operator operations.
-    // Resolution and aggregate administration remain inactive.
-    registry.register_mcp(
-        friction::list::OrbitFrictionListTool,
-        McpToolPolicy::operator_only(McpToolPlacement::Hub),
-    );
-    registry.register_inactive(friction::resolve::OrbitFrictionResolveTool);
-    registry.register_mcp(
-        friction::show::OrbitFrictionShowTool,
-        McpToolPolicy::operator_only(McpToolPlacement::Hub),
-    );
-    registry.register_inactive(friction::stats::OrbitFrictionStatsTool);
-    registry.register_mcp(
-        friction::tags::OrbitFrictionTagsTool,
-        agent_operator(McpToolPlacement::Hub),
-    );
-    registry.register_mcp(
-        friction::update::OrbitFrictionUpdateTool,
-        McpToolPolicy::operator_only(McpToolPlacement::Hub),
-    );
+    // ADR-0209 bearing 1 [ORB-10358]: every friction verb — its schema, its
+    // placement, and whether MCP advertises it at all — is declared once in
+    // `orbit_common::friction::operations` and registered from there. Adding a
+    // friction verb needs no edit in this function.
+    friction::register(registry);
     registry.register_mcp(
         task::add::OrbitTaskAddTool,
         agent_operator(McpToolPlacement::Hub),

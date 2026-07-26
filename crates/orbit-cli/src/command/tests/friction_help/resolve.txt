@@ -1,0 +1,11 @@
+Mark an Orbit friction record as resolved
+
+Usage: orbit friction resolve [OPTIONS] <ID>
+
+Arguments:
+  <ID>  Friction record id, e.g. F2026-05-001
+
+Options:
+      --json         Output as JSON
+      --root <ROOT>  Override the Orbit root directory (highest precedence)
+  -h, --help         Print help
