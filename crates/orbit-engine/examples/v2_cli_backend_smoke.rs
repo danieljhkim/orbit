@@ -83,6 +83,7 @@ fn scenario_a_cli_dispatch_emits_envelope_events() -> Result<(), Box<dyn std::er
         input: serde_json::json!({ "prompt": "hello" }),
         audit: writer.clone(),
         run_id: "smoke-cli-a",
+        agent_override: None,
         host: Some(&host),
     })?;
 
@@ -122,6 +123,7 @@ fn scenario_b_argv_redaction() -> Result<(), Box<dyn std::error::Error>> {
         input: serde_json::json!({ "prompt": "redact me" }),
         audit: writer.clone(),
         run_id: "smoke-cli-b",
+        agent_override: None,
         host: Some(&host),
     })?;
 
@@ -165,6 +167,7 @@ fn scenario_c_wall_clock_timeout() -> Result<(), Box<dyn std::error::Error>> {
         input: serde_json::json!({ "prompt": "ignored" }),
         audit: writer.clone(),
         run_id: "smoke-cli-c",
+        agent_override: None,
         host: Some(&host),
     })?;
     let elapsed = started.elapsed();
@@ -205,6 +208,7 @@ fn scenario_d_no_silent_fallback_unwired_http() -> Result<(), Box<dyn std::error
         input: serde_json::json!({ "prompt": "ignored" }),
         audit: writer.clone(),
         run_id: "smoke-cli-d",
+        agent_override: None,
         host: Some(&host),
     })
     .expect_err("expected UnwiredHttpTransport");
@@ -273,6 +277,7 @@ fn scenario_g_auto_backend_unresolved_is_structural_error() -> Result<(), Box<dy
         input: serde_json::json!({ "prompt": "ignored" }),
         audit: writer.clone(),
         run_id: "smoke-cli-g",
+        agent_override: None,
         host: Some(&host),
     })
     .expect_err("expected UnresolvedAutoBackend");
@@ -322,6 +327,7 @@ fn scenario_h_cli_reference_asset_round_trip() -> Result<(), Box<dyn std::error:
         input: serde_json::json!({ "prompt": "hello from the yaml round-trip" }),
         audit: writer.clone(),
         run_id: "smoke-cli-h",
+        agent_override: None,
         host: Some(&host),
     })?;
     assert!(outcome.success);
@@ -381,6 +387,7 @@ fn scenario_j_cli_executor_static_args_are_audited() -> Result<(), Box<dyn std::
         input: serde_json::json!({ "prompt": "hello" }),
         audit: writer.clone(),
         run_id: "smoke-cli-j",
+        agent_override: None,
         host: Some(&host),
     })?;
 

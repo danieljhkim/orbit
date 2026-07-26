@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use orbit_common::types::activity_job::V2AuditEventKind;
 use orbit_common::types::activity_job::{
-    ActivityV2Spec, AgentLoopSpec, AgentRole, Backend, DeterministicSpec,
+    ActivityV2Spec, AgentLoopSpec, AgentRole, Backend, DeterministicSpec, Provider,
 };
 
 use crate::context::AgentRoleConfig;
@@ -244,10 +244,20 @@ pub struct V2DispatchInput<'a> {
     pub input: Value,
     pub audit: Arc<V2AuditWriter>,
     pub run_id: &'a str,
+    /// Optional caller-selected provider/model for this invocation. This is
+    /// applied to a cloned agent-loop spec, so catalog assets remain immutable
+    /// and concurrent dispatches can select different duel roles safely.
+    pub agent_override: Option<V2AgentDispatchOverride<'a>>,
     /// Runtime host for agent_loop + deterministic paths. A `None` host is only
     /// valid for callers that never dispatch a host-backed activity; host-backed
     /// specs return `DispatchError::HostRequired` when it is absent.
     pub host: Option<&'a dyn V2RuntimeHost>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct V2AgentDispatchOverride<'a> {
+    pub provider: &'a str,
+    pub model: Option<&'a str>,
 }
 
 /// Outcome of a v2 dispatch attempt. Kept separate from v1's AttemptOutcome
@@ -431,7 +441,9 @@ fn dispatch_v2_activity_inner(
     } else {
         input.input.clone()
     };
-    let activity_type = match input.spec {
+    let overridden_spec = overridden_agent_spec(input.spec, input.agent_override)?;
+    let spec = overridden_spec.as_ref().unwrap_or(input.spec);
+    let activity_type = match spec {
         ActivityV2Spec::AgentLoop(_) => "agent_loop",
         ActivityV2Spec::Deterministic(_) => "deterministic",
     };
@@ -447,7 +459,7 @@ fn dispatch_v2_activity_inner(
         .map_err(|err| DispatchError::AuditFailed(format!("{err:?}")))?;
     input.audit.push_parent_lossy(activity_event_id);
 
-    let result = match input.spec {
+    let result = match spec {
         ActivityV2Spec::AgentLoop(spec) => match input.host {
             Some(host) => run_agent_loop_activity(
                 host,
@@ -487,6 +499,29 @@ fn dispatch_v2_activity_inner(
     );
 
     result
+}
+
+pub(crate) fn overridden_agent_spec(
+    spec: &ActivityV2Spec,
+    agent_override: Option<V2AgentDispatchOverride<'_>>,
+) -> Result<Option<ActivityV2Spec>, DispatchError> {
+    let Some(agent_override) = agent_override else {
+        return Ok(None);
+    };
+    let ActivityV2Spec::AgentLoop(agent_spec) = spec else {
+        return Err(DispatchError::JobValidation(
+            "agent override requires an agent_loop activity".to_string(),
+        ));
+    };
+    let provider = Provider::parse(agent_override.provider)
+        .map_err(|error| DispatchError::JobValidation(error.to_string()))?;
+    let mut overridden = agent_spec.clone();
+    overridden.provider = provider;
+    overridden.model = agent_override.model.map(ToOwned::to_owned);
+    overridden.instruction = overridden
+        .instruction
+        .replace("{{agent_family}}", provider.as_str());
+    Ok(Some(ActivityV2Spec::AgentLoop(overridden)))
 }
 
 fn inject_run_id(input: &Value, run_id: &str) -> Value {

@@ -6,7 +6,7 @@ use orbit_agent::AgentConfig;
 use orbit_common::types::InvocationTrace;
 use orbit_common::types::activity_job::{AgentRole, Backend, Provider};
 use orbit_common::types::{
-    Activity, AgentModelPair, ExecutorDef, ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics,
+    ActivityV2, AgentModelPair, ExecutorDef, ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics,
     OrbitError, OrbitEvent, PipelineState, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
     TaskPriority, TaskStatus, all_agent_families,
 };
@@ -17,9 +17,10 @@ use orbit_tools::ToolContext;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use super::execution::ExecutionContext;
-use super::outcome::ActivityInvocationResult;
+use crate::activity_job::{V2AuditWriter, V2RuntimeHost};
 
 #[derive(Debug, Clone, Default)]
 pub struct TaskAutomationUpdate {
@@ -309,18 +310,20 @@ pub trait RuntimeHost {
         role: Role,
         tool_context: ToolContext,
     ) -> Result<Value, OrbitError>;
-    fn invoke_activity(
-        &self,
-        _activity: Activity,
-        _agent_cli: &str,
-        _model: Option<&str>,
-        _input: Value,
-        _timeout_seconds: u64,
-        _debug: bool,
-    ) -> Result<ActivityInvocationResult, OrbitError> {
+    fn v2_runtime_host(&self) -> Result<&dyn V2RuntimeHost, OrbitError> {
         Err(OrbitError::Execution(
-            "invoke_activity is not implemented for this host".to_string(),
+            "v2 runtime host is not available on this host".to_string(),
         ))
+    }
+    fn v2_activity(&self, name: &str) -> Result<ActivityV2, OrbitError> {
+        Err(OrbitError::Execution(format!(
+            "v2 activity '{name}' is not available on this host"
+        )))
+    }
+    fn v2_audit_writer(&self, run_id: &str) -> Result<Arc<V2AuditWriter>, OrbitError> {
+        Err(OrbitError::Execution(format!(
+            "v2 audit writer is not available for run '{run_id}'"
+        )))
     }
     /// Create a task capturing a job run failure, skipping creation if an open
     /// task for the same `job_id` + `error_code` combination already exists.

@@ -1,10 +1,9 @@
-use std::collections::HashMap;
+use std::sync::Arc;
 
 use orbit_common::types::{
-    Activity, AgentModelPair, InvocationTrace, JobRun, JobRunState, OrbitError, OrbitEvent, Role,
-    RoleSlot,
+    ActivityV2, AgentModelPair, InvocationTrace, JobRun, OrbitError, OrbitEvent, Role, RoleSlot,
 };
-use orbit_engine::{ActivityInvocationResult, ExecutionContext, ExecutorHost, RuntimeHost};
+use orbit_engine::{ExecutionContext, RuntimeHost, V2AuditWriter, V2RuntimeHost};
 use orbit_store::{InvocationInsertParams, InvocationQuery, InvocationRecord, token_scoreboard};
 use orbit_tools::ToolContext;
 use serde_json::Value;
@@ -94,62 +93,30 @@ impl RuntimeHost for OrbitRuntime {
         OrbitRuntime::run_tool_with_context_and_role(self, name, input, role, tool_context)
     }
 
-    fn invoke_activity(
-        &self,
-        activity: Activity,
-        agent_cli: &str,
-        model: Option<&str>,
-        input: Value,
-        timeout_seconds: u64,
-        debug: bool,
-    ) -> Result<ActivityInvocationResult, OrbitError> {
-        if !is_planning_duel_agent_activity(&activity.id) {
-            return Err(retired_invoke_activity_error(&activity.id));
-        }
+    fn v2_runtime_host(&self) -> Result<&dyn V2RuntimeHost, OrbitError> {
+        Ok(self)
+    }
 
-        let executor = self
-            .activity_executor_registry()
-            .get(agent_cli)
-            .ok_or_else(|| {
-                OrbitError::Execution(format!(
-                    "planning duel activity '{}' requires direct-agent executor '{}'",
-                    activity.id, agent_cli
-                ))
-            })?;
-        let execution = ExecutionContext {
-            activity,
-            job: None,
-            agent_cli: agent_cli.to_string(),
-            model: model.map(ToOwned::to_owned),
-            timeout_seconds,
-            env_extra: Vec::new(),
-            env_set: HashMap::new(),
-            input,
-            debug,
-            steps_outputs: HashMap::new(),
-            run_id: None,
-            step_index: None,
-            state_dir: None,
-        };
-        let outcome = executor.execute(ExecutorHost::new(self), &execution);
-        if outcome.state != JobRunState::Success {
-            return Err(OrbitError::Execution(outcome.error_message.unwrap_or_else(
-                || {
-                    format!(
-                        "planning duel activity '{}' failed with state {}",
-                        execution.activity.id, outcome.state
-                    )
-                },
-            )));
-        }
-        Ok(ActivityInvocationResult {
-            response_json: outcome.response_json,
-            invocation_trace: outcome.invocation_trace.clone(),
-            exit_code: outcome.exit_code,
-            duration_ms: outcome
-                .duration_ms
-                .unwrap_or(outcome.invocation_trace.duration_ms),
-        })
+    fn v2_activity(&self, name: &str) -> Result<ActivityV2, OrbitError> {
+        self.v2_activity_catalog()
+            .map_err(|error| {
+                OrbitError::InvalidInput(format!("build v2 activity catalog: {error}"))
+            })?
+            .get(name)
+            .cloned()
+            .ok_or_else(|| OrbitError::InvalidInput(format!("v2 activity '{name}' not found")))
+    }
+
+    fn v2_audit_writer(&self, run_id: &str) -> Result<Arc<V2AuditWriter>, OrbitError> {
+        V2AuditWriter::with_disk_sinks(
+            &self.paths().audit_dir,
+            self.sqlite_store()?,
+            self.workspace_id()?,
+            run_id,
+            "system",
+            Some(self.paths().repo_root.as_path()),
+        )
+        .map_err(|error| OrbitError::Execution(format!("v2 audit sinks: {error}")))
     }
 
     fn maybe_create_failure_task(
@@ -233,14 +200,4 @@ fn role_slot_from_input(input: &Value) -> Option<RoleSlot> {
         .or_else(|| input.get("slot"))
         .and_then(Value::as_str)
         .and_then(|value| value.parse().ok())
-}
-
-fn is_planning_duel_agent_activity(activity_id: &str) -> bool {
-    matches!(activity_id, "propose_duel_plan" | "arbitrate_duel_plan")
-}
-
-fn retired_invoke_activity_error(activity_id: &str) -> OrbitError {
-    OrbitError::Execution(format!(
-        "v1 invoke_activity is retired; activity '{activity_id}' cannot be dispatched via RuntimeHost"
-    ))
 }

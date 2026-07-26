@@ -81,6 +81,7 @@ pub(super) fn run_target(
                 input: rendered_input.clone(),
                 audit: ctx.audit.clone(),
                 run_id: &ctx.run_id,
+                agent_override: None,
                 host: Some(ctx.host),
             })?;
             persist_dispatch_invocation(ctx, &step.id, &rendered_input, &dispatch);
@@ -102,6 +103,7 @@ pub(super) fn run_target(
                 input: rendered_input.clone(),
                 audit: ctx.audit.clone(),
                 run_id: &ctx.run_id,
+                agent_override: None,
                 host: Some(ctx.host),
             })?;
             persist_dispatch_invocation(ctx, &step.id, &rendered_input, &dispatch);
