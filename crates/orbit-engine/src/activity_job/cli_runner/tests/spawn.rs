@@ -5,7 +5,10 @@ use std::ffi::OsString;
 use tempfile::tempdir;
 
 use super::super::super::dispatcher::ResolvedSandbox;
-use super::super::spawn::{SpawnError, SpawnedChild, spawn_bare, spawn_macos_sandboxed_with};
+use super::super::spawn::{
+    SpawnError, SpawnedChild, resolve_provider_launcher_with, spawn_bare,
+    spawn_macos_sandboxed_with,
+};
 use super::test_support::{sandbox_for_test, sh_args};
 
 #[test]
@@ -106,6 +109,68 @@ fn spawn_io_error_classification_table() {
             classified.permanent, expect_permanent,
             "kind {kind:?} misclassified (permanent={})",
             classified.permanent
+        );
+    }
+}
+
+#[test]
+fn provider_launcher_resolution_falls_back_to_temp_home_with_scrubbed_path() {
+    let temp = tempdir().expect("tempdir");
+    let fake_path = temp.path().join("system-bin");
+    let home = temp.path().join("home");
+    let provider_bin = home.join(".local/bin");
+    std::fs::create_dir_all(&fake_path).expect("create fake PATH");
+    std::fs::create_dir_all(&provider_bin).expect("create provider bin");
+    let launcher = provider_bin.join("claude");
+    std::fs::write(&launcher, "#!/bin/sh\nexit 0\n").expect("write fake provider launcher");
+
+    let resolved = resolve_provider_launcher_with(
+        "claude",
+        "claude",
+        Some(fake_path.as_os_str()),
+        Some(&home),
+        None,
+    )
+    .expect("HOME fallback should resolve provider");
+
+    assert_eq!(resolved, launcher.to_string_lossy());
+}
+
+#[test]
+fn missing_provider_launcher_error_names_provider_and_searched_locations() {
+    let temp = tempdir().expect("tempdir");
+    let fake_path = temp.path().join("system-bin");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&fake_path).expect("create fake PATH");
+    std::fs::create_dir_all(&home).expect("create fake HOME");
+
+    let error = resolve_provider_launcher_with(
+        "claude",
+        "claude",
+        Some(fake_path.as_os_str()),
+        Some(&home),
+        None,
+    )
+    .expect_err("missing launcher must fail");
+
+    assert!(error.permanent, "missing launcher must remain permanent");
+    assert!(
+        error.message.contains("provider `claude`"),
+        "error should name the provider: {}",
+        error.message
+    );
+    for searched in [
+        fake_path.join("claude"),
+        home.join(".local/bin/claude"),
+        home.join(".orbit/bin/claude"),
+        home.join(".cargo/bin/claude"),
+        home.join("bin/claude"),
+    ] {
+        assert!(
+            error.message.contains(&searched.display().to_string()),
+            "error should name searched location {}: {}",
+            searched.display(),
+            error.message
         );
     }
 }

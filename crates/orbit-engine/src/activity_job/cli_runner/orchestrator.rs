@@ -29,6 +29,7 @@ use super::envelope::{
     cli_agent_envelope_json, parse_cli_invocation_trace, parse_cli_response_result,
     task_id_from_input,
 };
+use super::spawn::resolve_provider_launcher;
 use super::supervisor::{
     DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS, SpawnTraceContext, SpawnWithTimeoutRequest,
     spawn_with_timeout,
@@ -148,6 +149,9 @@ pub fn run_cli_backend(
         .invoke(agent_req)
         .map_err(|err| DispatchError::CliInvocationPermanent(format!("agent invoke: {err}")))?;
     let model = agent.model_name().map(str::to_string);
+    let resolved_program =
+        resolve_provider_launcher(&provider, &invocation.program, subprocess_cwd.as_deref())
+            .map_err(|err| DispatchError::CliInvocationPermanent(err.message))?;
 
     let mut subprocess_args = Vec::with_capacity(cli_executor.args.len() + invocation.args.len());
     subprocess_args.extend(cli_executor.args.iter().cloned());
@@ -158,8 +162,7 @@ pub fn run_cli_backend(
     // under bare exec it's `<program> <args...>`. The redactor still scrubs
     // the child's program name + args so secrets in argv stay redacted.
     let redaction = PatternRedactor::with_argv_secrets();
-    let audit_argv =
-        audit_argv_for_dispatch(&invocation.program, &subprocess_args, sandbox.as_ref());
+    let audit_argv = audit_argv_for_dispatch(&resolved_program, &subprocess_args, sandbox.as_ref());
     let argv_redacted: Vec<String> = audit_argv.iter().map(|a| redaction.apply_str(a)).collect();
 
     let stdin_blob_ref = audit.write_blob(&invocation.stdin);
@@ -206,7 +209,7 @@ pub fn run_cli_backend(
         agent_task_id: task_id,
     });
     let spawn_result = spawn_with_timeout(SpawnWithTimeoutRequest {
-        program: &invocation.program,
+        program: &resolved_program,
         args: &subprocess_args,
         stdin_bytes: &invocation.stdin,
         env: &child_env,

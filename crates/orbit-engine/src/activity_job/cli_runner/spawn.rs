@@ -1,4 +1,6 @@
-use std::path::Path;
+use std::collections::HashSet;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 use orbit_common::types::ExecutorSandboxKind;
@@ -54,6 +56,100 @@ impl SpawnError {
             _ => Self::transient(message),
         }
     }
+}
+
+/// Resolve a provider launcher without relying solely on the parent process's
+/// ambient `PATH`.
+///
+/// ADR-0259: every CLI-backed provider enters through this resolver so service,
+/// routine, dashboard, and interactive dispatches use the same lookup policy.
+pub(crate) fn resolve_provider_launcher(
+    provider: &str,
+    program: &str,
+    cwd: Option<&Path>,
+) -> Result<String, SpawnError> {
+    let path = std::env::var_os("PATH");
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    resolve_provider_launcher_with(provider, program, path.as_deref(), home.as_deref(), cwd)
+}
+
+// pub(crate) widened for sibling tests under the repository's enforced test layout.
+pub(crate) fn resolve_provider_launcher_with(
+    provider: &str,
+    program: &str,
+    path: Option<&OsStr>,
+    home: Option<&Path>,
+    cwd: Option<&Path>,
+) -> Result<String, SpawnError> {
+    let configured = Path::new(program);
+    if configured.components().count() > 1 {
+        return Ok(program.to_string());
+    }
+
+    let mut search_dirs = Vec::new();
+    let mut seen = HashSet::new();
+    if let Some(path) = path {
+        for dir in std::env::split_paths(path) {
+            let dir = if dir.is_relative() {
+                cwd.map_or(dir.clone(), |cwd| cwd.join(&dir))
+            } else {
+                dir
+            };
+            if seen.insert(dir.clone()) {
+                search_dirs.push(dir);
+            }
+        }
+    }
+    if let Some(home) = home {
+        for relative in [".local/bin", ".orbit/bin", ".cargo/bin", "bin"] {
+            let dir = home.join(relative);
+            if seen.insert(dir.clone()) {
+                search_dirs.push(dir);
+            }
+        }
+    }
+
+    let mut searched = Vec::with_capacity(search_dirs.len());
+    for dir in search_dirs {
+        let candidate = dir.join(program);
+        searched.push(candidate.clone());
+        if candidate.is_file() {
+            return Ok(candidate.to_string_lossy().into_owned());
+        }
+        #[cfg(windows)]
+        if configured.extension().is_none() {
+            for extension in windows_executable_extensions() {
+                let candidate = dir.join(format!("{program}{extension}"));
+                searched.push(candidate.clone());
+                if candidate.is_file() {
+                    return Ok(candidate.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+
+    let searched = if searched.is_empty() {
+        "<no PATH or HOME search locations available>".to_string()
+    } else {
+        searched
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    Err(SpawnError::permanent(format!(
+        "provider launcher `{program}` for provider `{provider}` was not found; searched: {searched}"
+    )))
+}
+
+#[cfg(windows)]
+fn windows_executable_extensions() -> Vec<String> {
+    std::env::var("PATHEXT")
+        .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string())
+        .split(';')
+        .filter(|extension| !extension.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect()
 }
 
 #[derive(Debug)]
