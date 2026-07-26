@@ -98,11 +98,15 @@ export default defineConfig({
             { slug: 'architecture', label: 'Overview' },
             {
               label: 'Design Mirror',
-              autogenerate: {
-                directory: 'architecture/design',
-                collapsed: true,
-              },
               collapsed: true,
+              items: [
+                {
+                  autogenerate: {
+                    directory: 'architecture/design',
+                    collapsed: true,
+                  },
+                },
+              ],
             },
           ],
         },
@@ -111,11 +115,15 @@ export default defineConfig({
           items: [
             {
               label: 'Graph Benchmarks',
-              autogenerate: {
-                directory: 'benchmarks/graph',
-                collapsed: true,
-              },
               collapsed: true,
+              items: [
+                {
+                  autogenerate: {
+                    directory: 'benchmarks/graph',
+                    collapsed: true,
+                  },
+                },
+              ],
             },
           ],
         },
