@@ -71,6 +71,12 @@ Each step names the exact file or command. Do them in order.
    derives the binary tag as `v${PKG.version}`; this field is the source of
    truth that gets in front of users.
 
+   If this release is a **major** version bump, first work through the
+   CHANGELOG archiving convention in
+   [`RELEASING.md`](../../RELEASING.md#changelog-archiving) — it moves
+   released history out of `CHANGELOG.md` before this runbook's steps touch
+   any version fields. This runbook does not restate that policy.
+
 2. **Bump the plugin manifest versions** in
    [`plugin/.claude-plugin/plugin.json`](../../plugin/.claude-plugin/plugin.json)
    and

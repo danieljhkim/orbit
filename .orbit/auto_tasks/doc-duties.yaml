@@ -67,11 +67,12 @@ template:
     In scope: `docs/design/**` (excluding `docs/design/_archive/**`),
     `docs/runbooks/**`, and the other prose under `docs/`.
 
-    Never modify: `.orbit/adrs/**` and `CHANGELOG.md` (historical records — a
-    citation that was accurate when written is provenance, not staleness),
-    `docs/design/_archive/**`, `.orbit/tasks/`, `.orbit/graph/`, and any other
-    generated or stored state. Do not author new documents or new sections; if
-    you find a real documentation gap, report it rather than filling it.
+    Never modify: `.orbit/adrs/**`, `CHANGELOG.md`, and `docs/changelogs/**`
+    (historical records — a citation that was accurate when written is
+    provenance, not staleness), `docs/design/_archive/**`, `.orbit/tasks/`,
+    `.orbit/graph/`, and any other generated or stored state. Do not author
+    new documents or new sections; if you find a real documentation gap,
+    report it rather than filling it.
 
     Do not add project-specific identifiers (person names, task/ADR/friction
     ids) to anything under `crates/*/assets/**` — those assets seed every
@@ -87,7 +88,7 @@ template:
   - Exactly the batch of least-recently-validated in-scope docs was worked, selected by missing-then-oldest `last_validated`.
   - Every doc stamped with today's `last_validated` was actually verified against the code, with the verification named in the execution summary.
   - Docs or individual claims that could not be verified were left unstamped and unmodified, and are listed in the execution summary.
-  - No file under .orbit/adrs/, CHANGELOG.md, docs/design/_archive/, or generated state was modified.
+  - No file under .orbit/adrs/, CHANGELOG.md, docs/changelogs/, docs/design/_archive/, or generated state was modified.
   - No frontmatter block was created for a doc that lacked one; such docs are listed instead.
   - No new document or new section was authored.
   - Formatting changes are limited to genuinely broken markdown; no prose reflowing or rewrapping appears in the diff.
