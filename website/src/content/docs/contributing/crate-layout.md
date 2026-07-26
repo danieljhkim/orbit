@@ -10,12 +10,12 @@ sidebar:
 | Crate | Responsibility |
 |-------|----------------|
 | `orbit-cli` | Clap-based entrypoint and local client-configuration surface; delegates Remote behavior to `orbit-remote`. |
-| `orbit-cmd` | CLI-facing command layer extracted from `orbit-core` (ORB-10016): doctor, migrate, diagnostics, hooks, agent-rules, direct v2 activity runs. Exposes `*Commands` extension traits over `OrbitRuntime`. |
+| `orbit-cmd` | CLI-facing command layer extracted from `orbit-core`: doctor, migrate, diagnostics, hooks, agent-rules, direct v2 activity runs. Exposes `*Commands` extension traits over `OrbitRuntime`. |
 | `orbit-core` | Neutral runtime bootstrap, config layering, default asset seeding, and runtime-integrated command modules. Surfaces `OrbitRuntime` to `orbit-cmd`, `orbit-cli`, `orbit-dashboard`, and `orbit-remote`. Does **not** depend on `orbit-agent`, `orbit-cmd`, or `orbit-remote`. |
 | `orbit-remote` | Vertical host/workspace registry, registry persistence, MCP contract/extensions, broker, hub, bounded SSH link, and spoke-registration composition. |
-| `orbit-dashboard` | Read-only web dashboard over Core runtime projections and Remote registry state. |
+| `orbit-dashboard` | Web dashboard and HTTP API over Core runtime projections and Remote registry state. |
 | `orbit-engine` | Activity and job execution, template rendering, retry logic. Owns the `backend: cli` subprocess runner, which references `orbit-agent::{Agent, AgentConfig}` directly. |
-| `orbit-agent` | Per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, openai_compat, anthropic, ollama, mock_agent). Hosts HTTP `LoopTransport` primitives. |
+| `orbit-agent` | Per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, gemini_http, grok, openai_compat, anthropic, ollama, mock_agent). Hosts HTTP `LoopTransport` primitives. |
 | `orbit-tools` | Generic tool registry plus workspace-scoped builtins, filesystem tools, and policy-aware exec tools. |
 | `orbit-graph` | Worktree-local derived graph index and query API; folds language extraction and the (dependent-free, no-command-surface) former CLI layer as modules. |
 | `orbit-policy` | Filesystem-scoping policy engine. Owns `FsProfile` resolution and `denyRead` / `denyModify` evaluation. |
@@ -48,7 +48,6 @@ flowchart LR
   Remote --> Store
   Remote --> Tools
   Remote --> MCP["orbit-mcp"]
-  Remote --> Graph["orbit-graph"]
   Remote --> Common["orbit-common"]
   Graph --> Common
   MCP --> Common["orbit-common"]

@@ -7,7 +7,9 @@ sidebar:
 
 Orbit ships two default workflows under `orbit run`. Each wraps a seeded job pipeline under `crates/orbit-core/assets/jobs/`; the same pipelines are runnable directly via `orbit run job <name>`.
 
-All three workflows default `--base` to `agent-main` — the convention for agent-targeted long-lived branches that humans merge into `main` after review. Pass `--base <branch>` to target a different branch.
+Both workflows default `--base` to `[workflow].base_branch` from
+`config.toml`, or `main` when it is unset. Pass `--base <branch>` to target a
+different branch.
 
 ## `orbit run ship`
 
@@ -15,9 +17,9 @@ Submit backlog tasks or one or more named tasks through the gated shipment pipel
 
 ```bash
 orbit run ship
-orbit run ship T20260506-1
-orbit run ship T20260506-1 T20260506-2 --mode local
-orbit run ship T20260506-1 --base main
+orbit run ship "$TASK_ID"
+orbit run ship "$TASK_ID" "$SECOND_TASK_ID" --mode local
+orbit run ship "$TASK_ID" --base main
 ```
 
 Underlying job: `task_auto_pipeline`, which fans into `task_gate_pipeline` and then routes to `task_pr_pipeline` or `task_local_pipeline` from `--mode`.
@@ -27,9 +29,9 @@ Underlying job: `task_auto_pipeline`, which fans into `task_gate_pipeline` and t
 Submit a planning duel for a single task: two planner agents draft proposals independently, an arbiter picks the winner, and the winning plan lands on the task. The command returns a run ID immediately by default; pass `--wait` when you want the terminal to block until the duel finishes and report the terminal wait status.
 
 ```bash
-orbit run duel-plan T20260506-1
-orbit run duel-plan T20260506-1 --base main --json
-orbit run duel-plan T20260506-1 --wait
+orbit run duel-plan "$TASK_ID"
+orbit run duel-plan "$TASK_ID" --base main --json
+orbit run duel-plan "$TASK_ID" --wait
 ```
 
 Default text output includes `Workflow`, `Job ID`, `Run ID`, `State`, and an `Inspect:` command. JSON output returns the submitted dispatch result with `workflow`, `job_id`, `run_id`, `state`, and `attempt` fields.
@@ -56,13 +58,3 @@ orbit run history -j job_duel_plan_pipeline
 orbit run show <RUN_ID>
 orbit run logs <RUN_ID>
 ```
-
-## Choosing a Backend
-
-**v1 supports `backend: cli` only.** For `agent_loop` activities, backend resolution follows: `--backend` → `ORBIT_BACKEND` → `[runtime] backend` in config → hard-coded fallback `http`. Pin `cli` explicitly until v2:
-
-```bash
-orbit run ship T20260506-1 --backend cli
-```
-
-`backend: http` is wired but not part of the v1 release surface — treat it as preview only.

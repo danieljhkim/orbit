@@ -1,8 +1,8 @@
 # Orbit Website — Design
 
 **Status:** Draft
-**Owner:** daniel
-**Last updated:** 2026-04-26
+**Owner:** Orbit contributors
+**Last updated:** 2026-07-26
 
 ---
 
@@ -12,7 +12,7 @@ The Orbit website is a **documentation site**, not a marketing site. It exists t
 
 - Reference documentation (CLI commands, activity/job YAML schemas, policy formats)
 - How-to guides (task lifecycle, writing activities, scoping rules)
-- Architecture and design docs (surface the `docs/design/` tree in readable form)
+- Architecture summaries grounded in the source tree
 - Conceptual explainers (activity/job model, knowledge graph, agent runtimes)
 
 **Primary audience:** engineers evaluating or actively using Orbit. They arrive via search, know roughly what they want, and leave as soon as they have it. The site optimizes for that path.
@@ -74,7 +74,7 @@ Three-column, fixed:
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  Logo           Search (⌘K)              GitHub  ☾   │
+│  Logo           Search (⌘K)                      ☾   │
 ├──────────┬───────────────────────────┬───────────────┤
 │  Nav     │  Content (max ~720px)     │  On this page │
 │  (left)  │                           │  (right)      │
@@ -85,13 +85,13 @@ Three-column, fixed:
 - Left nav: collapsible sections. Active page marked with a 2px accent bar on the left edge.
 - Content column: max-width ~720px, measure 65–75ch for prose.
 - Right rail: sticky "On this page" TOC. Muted until the corresponding section is in view.
-- Top bar: logo, search, GitHub, theme toggle. Nothing else.
+- Top bar: logo, search, theme toggle. Nothing else.
 
 ### 3.5 Landing page
 
 The homepage uses an in-content hero in place of Starlight's auto-rendered title (which is hidden via a scoped CSS rule on the homepage only):
 
-- **Eyebrow** — mono uppercase tag (`v0.4 · early access`).
+- **Eyebrow** — mono uppercase tag (`v0.9.2 · early access`).
 - **Headline** — 2.75rem display heading. The only heading on the site that exceeds the body type scale.
 - **Lede + install bar + primary/secondary CTAs.** Install bar carries a `$` prompt and a Copy action.
 - **Orbit diagram** — single rotating ring in the hero column. Respects `prefers-reduced-motion`.
@@ -111,7 +111,7 @@ Initial top-level sections (left nav, in order):
 3. **Concepts** — tasks, activities/jobs, policies, knowledge graph, agents
 4. **How-to Guides** — task-oriented recipes
 5. **Reference** — CLI, YAML schemas, config, scoping rules
-6. **Architecture** — surfaced from `docs/design/`, read-only mirror
+6. **Architecture** — current crate boundaries and dependency direction
 7. **Contributing** — local dev, crate layout, PR workflow
 
 Each section has an index page that lists its children with one-line descriptions. No "coming soon" placeholders — sections appear only when populated.
@@ -144,7 +144,7 @@ Nextra is reserved for a future scenario where interactive React widgets become 
 - **Headings:** start at `h2` within content (Starlight renders `h1` from frontmatter).
 - **Code blocks:** always language-tagged. Long examples collapsible.
 - **Cross-links:** relative paths only; no hardcoded domains.
-- **Task references:** when a doc cites an Orbit task, link format is `[T20260423-001234](../architecture/...)` or inline code if unresolved.
+- **Internal references:** do not publish repository-internal artifact identifiers.
 - **Voice:** terse, declarative, second-person ("you run", not "the user runs"). No marketing adjectives.
 
 ---
@@ -152,8 +152,8 @@ Nextra is reserved for a future scenario where interactive React widgets become 
 ## 7. Open Questions
 
 1. **Domain name.** `orbit.dev`, `orbitcli.dev`, subdomain of an existing property? orbit-cli.com
-2. **Versioning.** Starlight supports versioned docs via directory structure. Needed at v1? Probably no — add when Orbit has breaking releases.
-3. **Architecture mirror.** Do we render `docs/design/**/*.md` directly, or hand-curate a summary? Leaning toward direct render with a build-time copy step to preserve single source of truth.
+2. **Versioning.** Starlight supports versioned docs via directory structure. Add it when release-specific documentation becomes necessary.
+3. **Architecture detail.** Keep public summaries current without exposing internal decision history.
 4. **Logo design.** Ring-with-offset-dot concept agreed; actual SVG not yet drawn.
 5. **Analytics.** Plausible (privacy-respecting) or none at all? Default to none unless there's a decision to measure something specific.
 

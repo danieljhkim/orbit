@@ -12,7 +12,7 @@ Use this section when you are setting up Orbit for the first time.
 <div class="orbit-card-grid">
   <a class="orbit-card" href="./install/">
     <h3>Install Orbit</h3>
-    <p>Choose curl, Homebrew, or a source build.</p>
+    <p>Install through npm, a trusted installer checkout, or a source build.</p>
   </a>
   <a class="orbit-card" href="./first-task/">
     <h3>First Task</h3>
@@ -26,6 +26,8 @@ Use this section when you are setting up Orbit for the first time.
 
 ## Prerequisites
 
-You need an LLM provider API key for agent execution. For the default PR path, you also need the GitHub CLI authenticated in the environment where Orbit runs.
+You need an authenticated supported provider CLI for the default CLI backend.
+PR mode also requires the GitHub CLI to be authenticated in the environment
+where Orbit runs.
 
 Orbit itself can be installed without Rust. You only need a Rust toolchain if you build from source or contribute to the Rust workspace.
