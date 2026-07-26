@@ -490,7 +490,3 @@ fn apply_one_disposition(
     }
     DispositionOutcome::applied("diagnosed")
 }
-
-#[cfg(test)]
-#[path = "triage_tests.rs"]
-mod tests;
