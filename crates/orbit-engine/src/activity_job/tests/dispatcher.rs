@@ -121,6 +121,7 @@ fn per_dispatch_agent_override_sets_provider_model_and_renders_family() {
         max_iterations: 20,
         wall_clock_timeout_seconds: 300,
         require_response_envelope: false,
+        require_completion_envelope: true,
         role: None,
         proc_allowed_programs: None,
     });

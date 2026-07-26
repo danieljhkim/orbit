@@ -666,6 +666,7 @@ fn recovery_agent_loop_spec(
         provider,
         wall_clock_timeout_seconds: 30,
         require_response_envelope: false,
+        require_completion_envelope: true,
         role,
         proc_allowed_programs: None,
     }

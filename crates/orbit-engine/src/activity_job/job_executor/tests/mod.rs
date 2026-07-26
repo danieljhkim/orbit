@@ -193,6 +193,10 @@ pub(super) struct ScriptedHost {
     /// [ORB-10385] Action names this host reports as absent from its registry,
     /// modelling a runtime older than the loaded catalog asset.
     unregistered: Vec<String>,
+    /// [ORB-10449] Executable this host hands back for `backend: cli` agent
+    /// loops. `None` keeps the default "no CLI mapping" refusal, so only tests
+    /// that opt in can reach the CLI runner.
+    cli_program: Option<String>,
 }
 
 impl ScriptedHost {
@@ -208,7 +212,15 @@ impl ScriptedHost {
             in_flight: AtomicUsize::new(0),
             peak_in_flight: AtomicUsize::new(0),
             unregistered: Vec::new(),
+            cli_program: None,
         }
+    }
+
+    /// [ORB-10449] Route `backend: cli` agent loops at `program`, so a test can
+    /// drive a real provider invocation through the whole step machinery.
+    pub(super) fn with_cli_program(mut self, program: impl Into<String>) -> Self {
+        self.cli_program = Some(program.into());
+        self
     }
 
     /// [ORB-10385] Make this host report `actions` as unregistered, the way an
@@ -305,9 +317,15 @@ impl V2RuntimeHost for ScriptedHost {
         &self,
         _provider: &str,
     ) -> Result<super::super::dispatcher::ResolvedCliExecutor, DispatchError> {
-        Err(DispatchError::CliInvocationFailed(
-            "scripted host: no CLI mapping".into(),
-        ))
+        match &self.cli_program {
+            Some(command) => Ok(super::super::dispatcher::ResolvedCliExecutor {
+                command: command.clone(),
+                args: Vec::new(),
+            }),
+            None => Err(DispatchError::CliInvocationFailed(
+                "scripted host: no CLI mapping".into(),
+            )),
+        }
     }
 
     fn tool_context_for_activity(

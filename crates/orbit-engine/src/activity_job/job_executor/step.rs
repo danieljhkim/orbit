@@ -75,6 +75,12 @@ pub(super) fn run_step_with_retry(
     };
 
     let mut last_err: Option<DispatchError> = None;
+    // [ORB-10449] Keep the last failing attempt's diagnostic. A step that fails
+    // via `Ok(success: false)` — every CLI agent-loop failure, including the
+    // step-completion protocol violation — used to have its message dropped on
+    // retry exhaustion, leaving the run's terminal error as the generic
+    // "completed with success=false" fallback.
+    let mut last_failed_outcome: Option<StepOutcome> = None;
     let max_attempts = retry.max_attempts.max(1);
     // Full-jitter backoff (ORB-10006): parallel workers retrying the same
     // failing dependency draw sleeps from decorrelated streams instead of
@@ -87,10 +93,12 @@ pub(super) fn run_step_with_retry(
                     return Ok(outcome);
                 }
                 // Treat a "not-success-but-no-error" outcome as retryable:
-                // another attempt may succeed. No built-in dispatch leaf
-                // produces this today (leaves signal failure via `Err`); it is
-                // retained as the block-level outcome contract. See ADR-0194.
+                // another attempt may succeed. This is the block-level outcome
+                // contract (ADR-0194), and the CLI agent-loop leaf reaches it
+                // for every provider-level failure — timeout, nonzero exit, and
+                // the [ORB-10449] step-completion protocol violation.
                 last_err = None;
+                last_failed_outcome = Some(outcome);
             }
             Err(err) if err.is_non_retryable() => {
                 emit_denied_if_applicable(&err, &step.id, &ctx.audit, ctx.task_id());
@@ -124,11 +132,11 @@ pub(super) fn run_step_with_retry(
 
     match last_err {
         Some(err) => recover_or_return_original(step, ctx, err, max_attempts, max_attempts),
-        None => Ok(StepOutcome {
+        None => Ok(last_failed_outcome.unwrap_or(StepOutcome {
             success: false,
             output: Value::Null,
             message: None,
-        }),
+        })),
     }
 }
 

@@ -271,3 +271,184 @@ fn backoff_bound_grows_monotonically_to_cap_under_exponential() {
     }
     assert_eq!(previous, retry.backoff_cap_ms, "bound must saturate at cap");
 }
+
+// ----- [ORB-10449] Step-completion protocol -------------------------------
+
+use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
+
+/// Build the shipped `implement_one` shape: a `backend: cli` agent loop that is
+/// artifact-backed, so the *content* contract stays off and only the
+/// step-completion contract can catch a stalled agent.
+fn agent_implement_shaped_step(id: &str, retry: Option<RetrySpec>) -> JobV2Step {
+    let spec = AgentLoopSpec {
+        instruction: "implement the task".to_string(),
+        tools: Vec::new(),
+        on_denial: OnDenial::Terminate,
+        model: None,
+        max_iterations: 1,
+        backend: Backend::Cli,
+        provider: Provider::Claude,
+        wall_clock_timeout_seconds: 30,
+        require_response_envelope: false,
+        require_completion_envelope: true,
+        role: None,
+        proc_allowed_programs: None,
+    };
+    JobV2Step {
+        id: id.to_string(),
+        when: None,
+        retry,
+        recovery_activity: None,
+        resolved_recovery_activity: None,
+        body: JobV2StepBody::Target(TargetStep {
+            spec: ActivityV2Spec::AgentLoop(spec),
+            activity_name: None,
+            fs_profile: None,
+            default_input: None,
+            timeout_seconds: 0,
+            session: None,
+            role: None,
+        }),
+    }
+}
+
+/// Write a fake provider that exits 0 after printing `stdout` and nothing else.
+fn stalled_provider(dir: &std::path::Path, stdout: &str) -> std::path::PathBuf {
+    let script = dir.join("claude");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{stdout}'\n"),
+    )
+    .expect("write fake provider");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&script).expect("stat").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).expect("chmod");
+    }
+    script
+}
+
+/// `jrun-20260726-1758-5` replayed end to end: the implementer exits 0 with
+/// prose and no response envelope. The run must fail *at that step* — not
+/// checkpoint it and surface a downstream symptom several steps later.
+#[test]
+fn stalled_agent_step_fails_at_the_step_that_produced_it() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let script = stalled_provider(
+        temp.path(),
+        "{\"type\":\"result\",\"subtype\":\"success\",\"stop_reason\":\"end_turn\",\
+         \"result\":\"Waiting on the background nextest run before continuing.\"}",
+    );
+    let host = ScriptedHost::new([("commit", vec![Action::Ok(json!({"committed": true}))])])
+        .with_cli_program(script.display().to_string());
+    let job = job_with_steps(vec![
+        agent_implement_shaped_step("implement_one", None),
+        target_step("commit", "commit"),
+    ]);
+
+    let writer = std::sync::Arc::new(test_writer("run-stalled"));
+    let outcome = execute_job(
+        &job,
+        json!({"task_id": "ORB-10436"}),
+        "run-stalled",
+        writer.clone(),
+        &host,
+    )
+    .expect("execute_job ok");
+
+    assert!(!outcome.success, "a stalled implementer must fail its step");
+    let message = outcome.message.expect("terminal message");
+    // Criterion: the terminal error names the step *and* the protocol
+    // violation, rather than whatever gate would have tripped later.
+    assert!(message.contains("implement_one"), "{message}");
+    assert!(message.contains("agent step did not complete"), "{message}");
+    assert!(
+        message.contains("does not contain an Orbit response envelope"),
+        "{message}"
+    );
+
+    // Recovery/retry contract: the step is not retried, and the run stops
+    // there — no later step runs on work that never happened.
+    assert_eq!(
+        host.call_count("commit"),
+        0,
+        "downstream steps must not run after a protocol violation"
+    );
+    // The step is recorded as failed, so a resume cannot skip past it.
+    let events = writer.events_snapshot().expect("audit");
+    assert!(
+        events.iter().any(|event| matches!(
+            &event.kind,
+            V2AuditEventKind::StepFinished { step_id, outcome, .. }
+                if step_id == "implement_one" && outcome == "failed"
+        )),
+        "implement_one must finish as failed, never as a success checkpoint"
+    );
+}
+
+/// An agent step that *does* terminate properly still succeeds, so the gate
+/// costs nothing on the healthy path.
+#[test]
+fn completed_agent_step_still_checkpoints_and_advances() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let script = stalled_provider(
+        temp.path(),
+        "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
+    );
+    let host = ScriptedHost::new([("commit", vec![Action::Ok(json!({"committed": true}))])])
+        .with_cli_program(script.display().to_string());
+    let job = job_with_steps(vec![
+        agent_implement_shaped_step("implement_one", None),
+        target_step("commit", "commit"),
+    ]);
+
+    let outcome = run_job(
+        &host,
+        &job,
+        json!({"task_id": "ORB-10449"}),
+        "run-completed",
+    );
+
+    assert!(outcome.success, "{:?}", outcome.message);
+    assert_eq!(host.call_count("commit"), 1);
+}
+
+/// [ORB-10449] Retry exhaustion must preserve the last attempt's diagnostic.
+/// A step that fails via `Ok(success: false)` — which is every CLI agent-loop
+/// failure — used to have its message dropped, leaving the run's terminal
+/// error as the generic "completed with success=false" fallback.
+#[test]
+fn retry_exhaustion_preserves_the_last_failure_message() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let script = stalled_provider(
+        temp.path(),
+        "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"still working\"}",
+    );
+    let host = ScriptedHost::new([]).with_cli_program(script.display().to_string());
+    let job = job_with_steps(vec![agent_implement_shaped_step(
+        "implement_one",
+        Some(RetrySpec {
+            max_attempts: 2,
+            initial_backoff_ms: 1,
+            backoff_cap_ms: 1,
+            backoff_strategy: BackoffStrategy::Linear,
+        }),
+    )]);
+
+    let outcome = run_job(
+        &host,
+        &job,
+        json!({"task_id": "ORB-10449"}),
+        "run-retry-msg",
+    );
+
+    assert!(!outcome.success);
+    let message = outcome.message.expect("terminal message");
+    assert!(
+        !message.contains("completed with success=false"),
+        "the generic fallback hides the real cause: {message}"
+    );
+    assert!(message.contains("agent step did not complete"), "{message}");
+}
