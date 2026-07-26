@@ -709,6 +709,8 @@ fn automation_update_under_agent_runtime_uses_model_identity_for_attribution() {
 
 #[test]
 fn automation_update_without_agent_runtime_falls_back_to_system_attribution() {
+    let _env =
+        orbit_common::test_env::unset(orbit_common::test_env::AGENT_IDENTITY_ENV.iter().copied());
     let (_root, runtime) = test_runtime();
     let task = runtime
         .add_task(TaskAddParams {
