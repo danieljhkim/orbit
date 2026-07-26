@@ -27,7 +27,12 @@ impl Tool for OrbitTaskAddTool {
             // but process cwd must never be used as the fallback.
             ToolParam {
                 name: "workspace".to_string(),
-                description: "Workspace path for the task".to_string(),
+                description:
+                    "Filesystem path to an existing directory inside the target repository \
+                     (e.g. the repository root). This is a repository path, never a logical/bridge \
+                     workspace id (such as a `ws_*` id). Falls back to the MCP session's \
+                     `_meta.orbit.workspace` when omitted."
+                        .to_string(),
                 param_type: "string".to_string(),
                 required: false,
             },
