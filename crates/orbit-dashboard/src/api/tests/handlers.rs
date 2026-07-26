@@ -285,7 +285,8 @@ async fn tasks_with_stale_explicit_crew_fall_back_to_default_projection() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    let rows = body.as_array().expect("tasks response array");
+    // ORB-10400: GET /tasks answers `{ items, total, limit, truncated }`.
+    let rows = body["items"].as_array().expect("tasks response items");
     let task = rows
         .iter()
         .find(|task| task["id"].as_str() == Some(task_id.as_str()))
@@ -388,7 +389,8 @@ async fn tasks_resolve_dependency_statuses_from_all_tasks() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    let rows = body.as_array().expect("tasks response array");
+    // ORB-10400: GET /tasks answers `{ items, total, limit, truncated }`.
+    let rows = body["items"].as_array().expect("tasks response items");
     assert!(
         rows.iter()
             .any(|task| task["id"].as_str() == Some(&visible.id))

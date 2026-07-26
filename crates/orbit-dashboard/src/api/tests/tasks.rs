@@ -9,7 +9,7 @@ use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::TaskArtifact;
 use orbit_common::types::task_artifacts::{TaskRelation, TaskRelationType};
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
-use orbit_core::{OrbitRuntime, TaskComplexity, TaskStatus};
+use orbit_core::{OrbitRuntime, TaskComplexity, TaskStatus, TaskType};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -138,8 +138,14 @@ fn seed_lock_task(
 }
 
 async fn request(runtime: OrbitRuntime, uri: &str) -> axum::response::Response {
+    request_shared(Arc::new(runtime), uri).await
+}
+
+/// `request` against an already-shared runtime, so one fixture can serve several
+/// query variants without reseeding (ORB-10400's filter matrix).
+async fn request_shared(runtime: Arc<OrbitRuntime>, uri: &str) -> axum::response::Response {
     router()
-        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .with_state(crate::state::DashboardState::single(runtime))
         .oneshot(
             Request::builder()
                 .method(Method::GET)
@@ -851,7 +857,7 @@ async fn list_tasks_includes_complexity_when_set() {
     let response = request(runtime, "/tasks").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    let arr = body.as_array().expect("tasks list is array");
+    let arr = task_items(&body);
     let found = arr
         .iter()
         .find(|t| t["id"] == serde_json::json!(with_complexity.id))
@@ -868,15 +874,41 @@ fn seed_task_with_status(
     title: &str,
     status: TaskStatus,
 ) -> orbit_core::Task {
+    seed_filterable_task(runtime, title, status, Vec::new(), None)
+}
+
+/// Seed a task with the attributes `GET /tasks` can filter on (ORB-10400).
+fn seed_filterable_task(
+    runtime: &OrbitRuntime,
+    title: &str,
+    status: TaskStatus,
+    tags: Vec<&str>,
+    task_type: Option<TaskType>,
+) -> orbit_core::Task {
     runtime
         .add_task(TaskAddParams {
             title: title.to_string(),
             description: format!("Fixture task: {title}."),
             status: Some(status),
             workspace_path: Some(".".to_string()),
+            tags: tags.into_iter().map(str::to_string).collect(),
+            task_type,
             ..Default::default()
         })
         .expect("seed task")
+}
+
+/// `GET /tasks` answers the ORB-10400 page envelope
+/// `{ items, total, limit, truncated }`; unwrap `items` for row assertions.
+fn task_items(body: &Value) -> &Vec<Value> {
+    body["items"].as_array().expect("items is an array")
+}
+
+fn task_ids(body: &Value) -> Vec<&str> {
+    task_items(body)
+        .iter()
+        .map(|row| row["id"].as_str().expect("task id"))
+        .collect()
 }
 
 /// ORB-10310: `GET /tasks` is status-neutral — `done` and `archived` tasks
@@ -893,7 +925,7 @@ async fn list_tasks_includes_done_and_archived_statuses_newest_first() {
     let response = request(runtime, "/tasks").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    let rows = body.as_array().expect("tasks list is array");
+    let rows = task_items(&body);
 
     for expected in [&proposed.id, &done.id, &to_archive.id] {
         assert!(
@@ -939,7 +971,7 @@ async fn list_tasks_is_bounded_to_default_limit() {
     let response = request(runtime, "/tasks").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    let rows = body.as_array().expect("tasks list is array");
+    let rows = task_items(&body);
     assert_eq!(rows.len(), 50, "default limit bounds the response to 50");
     let oldest = oldest.expect("seeded at least one task");
     assert!(
@@ -948,6 +980,229 @@ async fn list_tasks_is_bounded_to_default_limit() {
             .any(|row| row["id"].as_str() == Some(oldest.as_str())),
         "the oldest task must fall outside the newest 50"
     );
+    // ORB-10400: the page metadata is what tells a client the window is partial.
+    assert_eq!(
+        body["total"],
+        json!(55),
+        "total counts every match pre-limit"
+    );
+    assert_eq!(body["limit"], json!(50));
+    assert_eq!(body["truncated"], json!(true));
+}
+
+/// ORB-10400: every filter predicate is applied *before* the limit. The
+/// regression fixture puts the only matching task beyond the first
+/// `DEFAULT_TASK_LIST_LIMIT` unfiltered rows — the exact shape that made
+/// matches unrecoverable to bridge, which could only filter the already
+/// truncated array client-side.
+#[tokio::test]
+async fn list_tasks_filters_before_limit() {
+    let runtime = Arc::new(OrbitRuntime::in_memory().expect("build runtime"));
+    let buried = seed_filterable_task(
+        &runtime,
+        "Buried proposed task",
+        TaskStatus::Proposed,
+        vec!["auto-task:qa-sweep"],
+        None,
+    );
+    // 60 newer tasks bury it well outside the unfiltered 50-row window.
+    for index in 0..60 {
+        seed_task_with_status(
+            &runtime,
+            &format!("Newer backlog task {index:02}"),
+            TaskStatus::Backlog,
+        );
+    }
+
+    let unfiltered = body_json(request_shared(runtime.clone(), "/tasks").await).await;
+    assert!(
+        !task_ids(&unfiltered).contains(&buried.id.as_str()),
+        "fixture must bury the match outside the unfiltered window"
+    );
+
+    for uri in [
+        "/tasks?status=proposed",
+        "/tasks?tag=auto-task:qa-sweep",
+        "/tasks?status=proposed&tag=auto-task:qa-sweep",
+    ] {
+        let response = request_shared(runtime.clone(), uri).await;
+        assert_eq!(response.status(), StatusCode::OK, "{uri}");
+        let body = body_json(response).await;
+        assert_eq!(
+            task_ids(&body),
+            vec![buried.id.as_str()],
+            "{uri} must return the buried match"
+        );
+        assert_eq!(body["total"], json!(1), "{uri}");
+        assert_eq!(
+            body["truncated"],
+            json!(false),
+            "{uri} is a complete result, not a truncated window"
+        );
+    }
+}
+
+/// ORB-10400: a colon-bearing tag is matched as one whole tag through Orbit's
+/// `normalize_task_tags`/`task_matches_tags` semantics — never split on `:` into
+/// `auto-task` + `qa-sweep`. Only `,` separates values.
+#[tokio::test]
+async fn list_tasks_matches_colon_bearing_tag_exactly() {
+    let runtime = Arc::new(OrbitRuntime::in_memory().expect("build runtime"));
+    let sweep = seed_filterable_task(
+        &runtime,
+        "Sweep task",
+        TaskStatus::Backlog,
+        vec!["auto-task:qa-sweep"],
+        None,
+    );
+    // Decoys that would match if the tag were split on `:` or matched by prefix.
+    seed_filterable_task(
+        &runtime,
+        "Other auto task",
+        TaskStatus::Backlog,
+        vec!["auto-task"],
+        None,
+    );
+    seed_filterable_task(
+        &runtime,
+        "Other sweep task",
+        TaskStatus::Backlog,
+        vec!["qa-sweep"],
+        None,
+    );
+    seed_filterable_task(
+        &runtime,
+        "Longer sweep tag",
+        TaskStatus::Backlog,
+        vec!["auto-task:qa-sweep-extended"],
+        None,
+    );
+
+    let body =
+        body_json(request_shared(runtime.clone(), "/tasks?tag=auto-task:qa-sweep").await).await;
+    assert_eq!(task_ids(&body), vec![sweep.id.as_str()]);
+    assert_eq!(body["total"], json!(1));
+
+    // Percent-encoded `%3A` is the same tag, and tags are normalized (trimmed,
+    // lowercased) exactly as the CLI normalizes `--tag`.
+    let encoded =
+        body_json(request_shared(runtime.clone(), "/tasks?tag=%20AUTO-TASK%3Aqa-sweep").await)
+            .await;
+    assert_eq!(task_ids(&encoded), vec![sweep.id.as_str()]);
+
+    // Repeated `tag` is AND, so a tag the task lacks yields a complete empty
+    // result — distinguishable from truncation by `total: 0`.
+    let anded =
+        body_json(request_shared(runtime, "/tasks?tag=auto-task:qa-sweep&tag=qa-sweep").await)
+            .await;
+    assert!(task_items(&anded).is_empty());
+    assert_eq!(anded["total"], json!(0));
+    assert_eq!(anded["truncated"], json!(false));
+}
+
+/// ORB-10400: status is OR across values (repeated and/or comma-separated),
+/// type is an equality filter, and `limit` overrides the default — matching
+/// `orbit task list` semantics for the same flags.
+#[tokio::test]
+async fn list_tasks_honors_status_type_and_limit_filters() {
+    let runtime = Arc::new(OrbitRuntime::in_memory().expect("build runtime"));
+    let bug = seed_filterable_task(
+        &runtime,
+        "Bug task",
+        TaskStatus::Proposed,
+        Vec::new(),
+        Some(TaskType::Bug),
+    );
+    let feature = seed_filterable_task(
+        &runtime,
+        "Feature task",
+        TaskStatus::Review,
+        Vec::new(),
+        Some(TaskType::Feature),
+    );
+    let chore = seed_filterable_task(
+        &runtime,
+        "Chore task",
+        TaskStatus::Backlog,
+        Vec::new(),
+        Some(TaskType::Chore),
+    );
+
+    let csv =
+        body_json(request_shared(runtime.clone(), "/tasks?status=proposed,review").await).await;
+    let mut ids = task_ids(&csv);
+    ids.sort_unstable();
+    let mut expected = vec![bug.id.as_str(), feature.id.as_str()];
+    expected.sort_unstable();
+    assert_eq!(ids, expected, "status is OR across values");
+
+    let repeated =
+        body_json(request_shared(runtime.clone(), "/tasks?status=proposed&status=review").await)
+            .await;
+    assert_eq!(
+        task_items(&repeated).len(),
+        2,
+        "repeated status accumulates"
+    );
+
+    let typed = body_json(request_shared(runtime.clone(), "/tasks?type=chore").await).await;
+    assert_eq!(task_ids(&typed), vec![chore.id.as_str()]);
+
+    // Filters compose: a type that no `proposed` task carries is empty.
+    let composed =
+        body_json(request_shared(runtime.clone(), "/tasks?status=proposed&type=chore").await).await;
+    assert!(task_items(&composed).is_empty());
+    assert_eq!(composed["total"], json!(0));
+
+    // `limit` truncates the filtered set and is reported back with `truncated`.
+    let limited = body_json(request_shared(runtime, "/tasks?limit=1").await).await;
+    assert_eq!(task_items(&limited).len(), 1);
+    assert_eq!(limited["limit"], json!(1));
+    assert_eq!(limited["total"], json!(3));
+    assert_eq!(limited["truncated"], json!(true));
+}
+
+/// ORB-10400: an unparseable filter is a loud 400. Silently dropping it would
+/// answer an unfiltered page that a client cannot distinguish from a real match
+/// set — the failure mode this task exists to remove.
+#[tokio::test]
+async fn list_tasks_rejects_invalid_filter_values() {
+    for uri in [
+        "/tasks?status=nonsense",
+        "/tasks?type=nonsense",
+        "/tasks?limit=0",
+        "/tasks?limit=many",
+    ] {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let response = request(runtime, uri).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        let body = body_json(response).await;
+        assert!(
+            body["error"].as_str().is_some_and(|msg| !msg.is_empty()),
+            "{uri} must explain the rejected value: {body:?}"
+        );
+    }
+}
+
+/// ORB-10400: empty filter values behave like an omitted filter (matching the
+/// `?workspace=` convention), and the `?workspace=` selector itself — which
+/// shares this query string — is never mistaken for a task filter.
+#[tokio::test]
+async fn list_tasks_ignores_empty_values_and_the_workspace_selector() {
+    let runtime = Arc::new(OrbitRuntime::in_memory().expect("build runtime"));
+    seed_task_with_status(&runtime, "Only task", TaskStatus::Backlog);
+
+    for uri in [
+        "/tasks?status=&tag=&type=&limit=",
+        "/tasks?workspace=default",
+    ] {
+        let response = request_shared(runtime.clone(), uri).await;
+        assert_eq!(response.status(), StatusCode::OK, "{uri}");
+        let body = body_json(response).await;
+        assert_eq!(task_items(&body).len(), 1, "{uri}");
+        assert_eq!(body["limit"], json!(50), "{uri} keeps the default limit");
+        assert_eq!(body["truncated"], json!(false), "{uri}");
+    }
 }
 
 /// ORB-00042: `workspace` is a selector and lives in the query string, never

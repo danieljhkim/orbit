@@ -1,16 +1,16 @@
 ---
 title: "Remote Access — Design"
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-07-26
 status: Accepted
 feature: remote-access
 doc_role: design
 type: design
-summary: "The two shipped surfaces — global multi-workspace serve (the only mode since ORB-10029) and SSH-tunnel connect — their state model, and how they compose."
+summary: "The two shipped surfaces — global multi-workspace serve (the only mode since ORB-10029) and SSH-tunnel connect — their state model, the dashboard task-list endpoint contract, and how they compose."
 tags: [remote-access]
 paths: ["crates/orbit-dashboard/**", "crates/orbit-remote/src/runtime.rs", "crates/orbit-remote/src/workspace_registry.rs", "crates/orbit-cli/src/command/web.rs", "crates/orbit-cli/src/command/operation.rs"]
 related_features: [remote-access, user-interface, host-registry]
-related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ORB-10200, ORB-10294, ORB-10319, ADR-0200, ADR-0201, ADR-0234]
+related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ORB-10200, ORB-10294, ORB-10310, ORB-10319, ORB-10400, ADR-0200, ADR-0201, ADR-0234]
 ---
 
 # Remote Access — Design
@@ -55,6 +55,32 @@ Two aggregate endpoints expose the machine-wide surface:
 
 The frontend adds a header workspace selector and an "All workspaces" aggregate task view. `common.js` wraps every fetch in `withWorkspace()` (appending `?workspace=` unless already present); `app.js` uses `/api/tasks/all` when more than one workspace exists and none is selected.
 
+### 2.2 `GET /api/tasks` — server-side filters and page metadata ([ORB-10400])
+
+The workspace-scoped task list is the endpoint programmatic clients (notably Bridge's `orbit_task_list`) read, so it carries the native `orbit task list` filters rather than making each client re-derive them:
+
+| Query parameter | Semantics |
+|---|---|
+| `status` | Repeatable and/or comma-separated. **OR** across values; omitted is status-neutral (every lifecycle status, `done`/`archived` included — [ORB-10310]). |
+| `tag` (alias `tags`) | Repeatable and/or comma-separated. **AND** across values, normalized by `normalize_task_tags`/`task_matches_tags` — the same predicate `orbit task list --tag` uses. Only `,` separates values, so a colon is ordinary tag content and `auto-task:qa-sweep` matches that whole tag. |
+| `type` (alias `task_type`) | A single `feature`/`bug`/`refactor`/`chore`. |
+| `limit` | Positive integer; defaults to `DEFAULT_TASK_LIST_LIMIT` (50). |
+
+Unknown keys are ignored — the `?workspace=<id>` selector consumed by the `Ws` extractor shares this query string — but an *unparseable* value for a recognized key is a `400`, never a silently dropped filter that would return an unfiltered page a client cannot distinguish from a real match set.
+
+The response is a page envelope rather than a bare array:
+
+```json
+{ "items": [ /* task objects, newest first */ ], "total": 137, "limit": 50, "truncated": true }
+```
+
+Two properties make this usable as a provider contract:
+
+- **Every predicate is applied before the limit.** `items` holds the newest *matching* tasks, so a match older than the newest `limit` unfiltered tasks is still reachable by passing its filters. Before [ORB-10400] the handler truncated the unfiltered set to 50 and offered no filters at all, so any client filtering the response client-side simply lost every older match — Bridge saw one `auto-task:qa-sweep` task where the CLI saw seven, and 13 `proposed` where the CLI saw 14.
+- **`total` and `truncated` distinguish empty from truncated.** `total` is the pre-limit match count and `truncated` is `total > items.len()`, so `{"items": [], "total": 0}` is a genuinely empty result while a partial window announces itself.
+
+Consumers accept either shape (`items` when present, else the array) — the `/api/tasks/all` aggregate is still a bare array, takes no filters, and is bounded by the same default limit. `common.js` exposes `listItems(payload)` for the frontend; Bridge's `_as_items` already had the same tolerance.
+
 ## 3. SSH-tunnel connect
 
 [`connect`](../../../crates/orbit-dashboard/src/connect.rs) automates the manual `ssh -L 7878:localhost:7878 <host> "orbit web serve --no-open"` dance and nothing more. Given `orbit web connect <ssh-host>`:
@@ -93,6 +119,8 @@ Neither surface touches the loopback-only bind guard from [ORB-00360]: `check_bi
 - [ORB-10029] — Made global mode the only mode for `orbit web serve`; `--global` is now a deprecated no-op kept for `connect` passthrough compatibility.
 - [ORB-10200] — Moved runtime-free web dispatch into the exhaustive command-operation registry.
 - [ORB-10294] — Live per-request registry refresh (§2.1): native workspace add/remove/rebind is honored without a restart, with atomic snapshot swap, runtime eviction, keep-last-valid on malformed reads, and no auto-delete. See [ADR-0234](./4_decisions.md).
+- [ORB-10310] — Made every task-listing surface status-neutral and bounded by `DEFAULT_TASK_LIST_LIMIT`.
 - [ORB-10319] — Moved logical-workspace catalog and registered-checkout runtime construction into `orbit-remote`; dashboard behavior is unchanged.
+- [ORB-10400] — Gave `GET /api/tasks` server-side status/tag/type filters applied before the limit, plus the `{ items, total, limit, truncated }` page envelope (§2.2). Prerequisite for Bridge's `orbit_task_list` (ws_bridge ORB-10398), which could previously only filter an already-truncated array client-side.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -336,7 +336,8 @@ async fn cross_workspace_dependency_resolves_global_status_not_missing() {
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    let tasks = body.as_array().expect("array");
+    // ORB-10400: GET /tasks answers `{ items, total, limit, truncated }`.
+    let tasks = body["items"].as_array().expect("items");
     assert_eq!(
         tasks.len(),
         1,
@@ -418,10 +419,10 @@ async fn task_titles(state: &DashboardState, workspace: &str) -> Vec<String> {
         .await
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
-    body_json(response)
-        .await
+    // ORB-10400: GET /tasks answers `{ items, total, limit, truncated }`.
+    body_json(response).await["items"]
         .as_array()
-        .expect("array")
+        .expect("items")
         .iter()
         .map(|t| t["title"].as_str().expect("title").to_string())
         .collect()

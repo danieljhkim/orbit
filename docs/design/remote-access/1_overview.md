@@ -1,7 +1,7 @@
 ---
 title: "Remote Access — Overview"
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-07-26
 status: Accepted
 feature: remote-access
 doc_role: overview
@@ -10,7 +10,7 @@ summary: "How an operator views Orbit across every local workspace and across ma
 tags: [remote-access]
 paths: ["crates/orbit-dashboard/**", "crates/orbit-remote/src/runtime.rs", "crates/orbit-remote/src/workspace_registry.rs", "crates/orbit-cli/src/command/web.rs", "crates/orbit-cli/src/command/operation.rs"]
 related_features: [remote-access, user-interface, host-registry]
-related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ORB-10200, ORB-10319, ADR-0200, ADR-0201]
+related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ORB-10200, ORB-10310, ORB-10319, ORB-10400, ADR-0200, ADR-0201]
 ---
 
 # Remote Access — Overview
@@ -60,6 +60,7 @@ Remote access shows what already exists on a machine that is online and reachabl
 | Workspace-keyed runtime map + `Ws` extractor | [crates/orbit-dashboard/src/state.rs](../../../crates/orbit-dashboard/src/state.rs) | [ORB-00030] |
 | Logical-workspace catalog + registered-checkout runtime construction | [crates/orbit-remote/src/workspace_registry.rs](../../../crates/orbit-remote/src/workspace_registry.rs), [crates/orbit-remote/src/runtime.rs](../../../crates/orbit-remote/src/runtime.rs) | [ORB-10319] |
 | Aggregate endpoints (`/api/workspaces`, `/api/tasks/all`) | [crates/orbit-dashboard/src/api/workspaces.rs](../../../crates/orbit-dashboard/src/api/workspaces.rs) | [ORB-00030] |
+| Task-list filters + page envelope (`GET /api/tasks`) | [crates/orbit-dashboard/src/api/tasks.rs](../../../crates/orbit-dashboard/src/api/tasks.rs) | [ORB-10310], [ORB-10400] |
 | SSH tunnel, port selection, teardown | [crates/orbit-dashboard/src/connect.rs](../../../crates/orbit-dashboard/src/connect.rs) | [ORB-00029] |
 | CLI runtime-free operation policy (dispatch before eager runtime init) | [crates/orbit-cli/src/command/operation.rs](../../../crates/orbit-cli/src/command/operation.rs) | [ORB-00029], [ORB-00030], [ORB-10200] |
 | `web` subcommand wiring | [crates/orbit-cli/src/command/web.rs](../../../crates/orbit-cli/src/command/web.rs) | [ORB-00029] |
@@ -77,5 +78,7 @@ Remote access shows what already exists on a machine that is online and reachabl
 - [ORB-10029] — Made global mode the default and only mode for `orbit web serve`; `--global` is now a deprecated no-op retained for `connect` passthrough.
 - [ORB-10200] — Moved runtime-free web dispatch into the exhaustive command-operation registry.
 - [ORB-10319] — Made the dashboard consume the Remote-owned workspace catalog and runtime factory instead of Core-owned registry composition.
+- [ORB-10310] — Made task listing status-neutral and bounded by a default limit across the CLI, MCP, and dashboard surfaces.
+- [ORB-10400] — Gave `GET /api/tasks` server-side status/tag/type filters applied before the limit, plus `{ items, total, limit, truncated }` page metadata. See [2_design.md §2.2](./2_design.md).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
