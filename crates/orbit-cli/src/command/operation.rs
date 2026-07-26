@@ -365,6 +365,7 @@ impl Commands {
                 )
             }
             Commands::Task(command) => {
+                use super::locks::LocksSubcommand;
                 use super::task::TaskSubcommand;
                 use super::task::artifact::TaskArtifactSubcommand;
                 let (subcommand, target_type, target_id) = match &command.command {
@@ -373,6 +374,14 @@ impl Commands {
                         TaskArtifactSubcommand::Put(args) => {
                             ("artifact-put", Some("task"), Some(args.id.as_str()))
                         }
+                    },
+                    TaskSubcommand::Locks(command) => match &command.command {
+                        LocksSubcommand::List(_) => ("locks-list", None, None),
+                        LocksSubcommand::Release(args) => (
+                            "locks-release",
+                            Some("reservation"),
+                            Some(args.reservation_id.as_str()),
+                        ),
                     },
                     TaskSubcommand::List(_) => ("list", None, None),
                     TaskSubcommand::Show(args) => ("show", Some("task"), Some(args.id.as_str())),
@@ -398,29 +407,6 @@ impl Commands {
                     None,
                     false,
                     boxed_runtime_dispatch!(Task),
-                )
-            }
-            Commands::Locks(command) => {
-                use super::locks::LocksSubcommand;
-                let (subcommand, target_type, target_id) = match &command.command {
-                    LocksSubcommand::List(_) => ("list", None, None),
-                    LocksSubcommand::Release(args) => (
-                        "release",
-                        Some("reservation"),
-                        Some(args.reservation_id.as_str()),
-                    ),
-                };
-                CommandOperation::new(
-                    RuntimeNeed::Required,
-                    Some(admin_meta(
-                        "locks",
-                        Some(subcommand),
-                        target_type,
-                        target_id,
-                    )),
-                    None,
-                    false,
-                    runtime_dispatch!(Locks),
                 )
             }
             Commands::Search(command) => CommandOperation::new(

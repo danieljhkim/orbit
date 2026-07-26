@@ -67,10 +67,7 @@ Environment:
 Operate:
   run         Run a workflow (ship, duel-plan, job)
   gc          Inspect and explicitly reap Orbit-managed garbage
-  sweep       Fire due routines on this host (the scheduler pass)
-  routine     Inspect and control scheduled routines on this host
   task        Create, update, and manage tasks
-  locks       Inspect and release task file locks
   docs        Search and manage the indexed docs corpus
   adr         List and inspect Architecture Decision Records
   friction    Report, list, and triage friction records
@@ -83,12 +80,16 @@ Observe:
   doctor      Diagnose workspace health (config, database, disk, indexes)
 
 Definitions:
-  auto-task   Define recurring auto-task templates (the scheduler primitive)
   activity    View activity definitions
   job         View job definitions
   tool        View tool registry
   policy      View filesystem policies
   executor    View executors
+
+Scheduler:
+  sweep       Fire due routines on this host (the scheduler pass)
+  routine     Inspect and control scheduled routines on this host
+  auto-task   Define recurring auto-task templates (the scheduler primitive)
 
 Services:
   mcp         Register MCP client integrations and run the MCP server
@@ -120,29 +121,30 @@ pub enum Commands {
     // ── Operate ──
     Run(run::RunCommand),
     Gc(gc::GcCommand),
-    Sweep(sweep::SweepCommand),
-    Routine(routine::RoutineCommand),
     Task(Box<task::TaskCommand>),
-    Locks(locks::LocksCommand),
-    Search(search::SearchCommand),
     Docs(docs::DocsCommand),
     Adr(adr::AdrCommand),
     Friction(friction::FrictionCommand),
     Learning(learning::LearningCommand),
 
     // ── Observe ──
+    Search(search::SearchCommand),
     Audit(audit::AuditCommand),
     Log(log::LogCommand),
     Doctor(doctor::DoctorCommand),
 
     // ── Definitions ──
-    #[command(name = "auto-task")]
-    AutoTask(auto_task::AutoTaskCommand),
     Activity(activity::ActivityCommand),
     Job(job::JobCommand),
     Tool(tool::ToolCommand),
     Policy(policy::PolicyCommand),
     Executor(executor::ExecutorCommand),
+
+    // ── Scheduler ──
+    Sweep(sweep::SweepCommand),
+    Routine(routine::RoutineCommand),
+    #[command(name = "auto-task")]
+    AutoTask(auto_task::AutoTaskCommand),
 
     // ── Services ──
     Mcp(mcp::McpCommand),

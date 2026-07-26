@@ -2,10 +2,10 @@
 // ORB-00013: Tests use unwrap/expect to keep fixture setup readable.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-//! End-to-end coverage for the trimmed `orbit task` surface (ORB-10000):
+//! End-to-end coverage for the task surface after ORB-10428:
 //! approve/reject/unarchive folded into `update --status` and `prune-context`
-//! folded into `lint --fix`. Lock administration lives under the top-level
-//! `orbit locks` command (`list`/`release`, ORB-00420).
+//! folded into `lint --fix`. Lock administration lives under `task locks`
+//! (`list`/`release`).
 
 use std::fs;
 use std::path::Path;
@@ -94,13 +94,13 @@ fn locks_list_projects_files_held_by_active_tasks() {
         "start with context",
     );
 
-    let output = workspace.run(&["locks", "list", "--json"], "locks list");
+    let output = workspace.run(&["task", "locks", "list", "--json"], "task locks list");
     let value: Value = serde_json::from_slice(&output.stdout).expect("locked JSON");
     assert_eq!(value["total_tasks"], json!(1));
     assert_eq!(value["locked_files"], json!(["file:held.rs"]));
     assert_eq!(value["by_task"][0]["id"], json!(id));
 
-    let text = workspace.run(&["locks", "list"], "locks list text");
+    let text = workspace.run(&["task", "locks", "list"], "task locks list text");
     let stdout = String::from_utf8_lossy(&text.stdout);
     assert!(stdout.contains("file:held.rs"), "{stdout}");
 }
@@ -194,12 +194,12 @@ fn locks_release_reaches_admin_tool_bypassing_agent_gate() {
     let workspace = TestWorkspace::new();
 
     // `orbit.task.locks.release` is inactive on the agent tool surface, so
-    // `orbit locks release` must reach it through the admin `runtime.run_tool`
+    // `orbit task locks release` must reach it through the admin `runtime.run_tool`
     // bypass. An unknown reservation yields a structured `released: false`, NOT
     // the `ensure_tool_agent_facing` rejection.
     let output = workspace.run(
-        &["locks", "release", "no-such-reservation"],
-        "locks release",
+        &["task", "locks", "release", "no-such-reservation"],
+        "task locks release",
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("release JSON");
     assert_eq!(value["released"], json!(false));

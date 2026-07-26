@@ -1,4 +1,4 @@
-//! `orbit locks ...` — task file-lock administration.
+//! `orbit task locks ...` — task file-lock administration.
 //!
 //! `list` renders the file-lock projection over active (in-progress/review)
 //! tasks. `release` clears a stale reservation by ID.

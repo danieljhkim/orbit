@@ -2,6 +2,7 @@ use clap::{Args, Subcommand};
 use orbit_core::{OrbitError, OrbitRuntime};
 
 use crate::command::Execute;
+use crate::command::locks::LocksCommand;
 
 use super::add::TaskAddArgs;
 use super::artifact::TaskArtifactCommand;
@@ -33,6 +34,8 @@ pub enum TaskSubcommand {
     Add(TaskAddArgs),
     /// Manage task artifact files
     Artifact(TaskArtifactCommand),
+    /// Inspect and release task file locks
+    Locks(LocksCommand),
     /// List tasks with optional filters
     List(TaskListArgs),
     /// Show detailed information about a task
@@ -59,6 +62,7 @@ impl Execute for TaskSubcommand {
         match self {
             TaskSubcommand::Add(args) => args.execute(runtime),
             TaskSubcommand::Artifact(cmd) => cmd.execute(runtime),
+            TaskSubcommand::Locks(cmd) => cmd.execute(runtime),
             TaskSubcommand::List(args) => args.execute(runtime),
             TaskSubcommand::Show(args) => args.execute(runtime),
             TaskSubcommand::Lint(args) => args.execute(runtime),
