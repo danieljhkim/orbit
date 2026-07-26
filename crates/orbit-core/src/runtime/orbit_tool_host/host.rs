@@ -95,12 +95,38 @@ impl HubCoordinationExecutor {
         legacy_friction_root: Option<PathBuf>,
     ) -> Result<Self, OrbitError> {
         let workspace_id = workspace_id.into();
+        let task_partition_id = workspace_id.clone();
+        Self::new_with_task_partition(
+            global_root,
+            workspace_id,
+            task_partition_id,
+            legacy_friction_root,
+        )
+    }
+
+    /// Same as [`HubCoordinationExecutor::new`], but pins the coordination task
+    /// registry to an explicit partition key.
+    ///
+    /// `orbit workspace init` writes one ID to the host registry, the checkout
+    /// identity, and the task registry, so the two keys normally coincide. For
+    /// workspaces registered before that convergence they differ (L-0098), and
+    /// the task registry only answers to the checkout-identity key. A caller
+    /// that has resolved a validated local checkout passes that key here so
+    /// coordination reads and writes land in the partition the checkout-local
+    /// surfaces already use; `workspace_id` stays the logical ID that owns
+    /// friction partitioning and audit identity.
+    pub fn new_with_task_partition(
+        global_root: &Path,
+        workspace_id: impl Into<String>,
+        task_partition_id: impl Into<String>,
+        legacy_friction_root: Option<PathBuf>,
+    ) -> Result<Self, OrbitError> {
         let registry = TaskRegistryStore::open(&task_registry_path(global_root))?;
-        let tasks = coordination_task_backends(registry, workspace_id.clone());
+        let tasks = coordination_task_backends(registry, task_partition_id.into());
         Ok(Self {
             inner: Arc::new(HubCoordinationState {
                 global_root: global_root.to_path_buf(),
-                workspace_id,
+                workspace_id: workspace_id.into(),
                 legacy_friction_root,
                 tasks,
             }),

@@ -767,3 +767,199 @@ fn mcp_registered_calls_are_audited_but_removed_graph_names_are_not_dispatched()
     let rows: Value = serde_json::from_slice(&output.stdout).expect("parse graph audit rows");
     assert_eq!(rows, json!([]));
 }
+
+/// ORB-10448 / F2026-07-099: the managed-executor shape.
+///
+/// An activity runs from a linked Git worktree and reaches Orbit through a
+/// general-purpose MCP client, which cannot announce `_meta.orbit.workspace`
+/// at initialize. Two things had to hold for that to work and neither did:
+/// the workspace selector must be advertised so a schema-following caller can
+/// supply it, and the selector must route coordination reads to the partition
+/// the checkout-local surfaces use, even for a workspace whose logical
+/// registry ID and checkout identity diverged before `orbit workspace init`
+/// converged them (L-0098).
+#[test]
+fn worktree_backed_activity_routes_task_and_search_by_advertised_workspace_argument() {
+    let workspace = McpWorkspace::init();
+
+    // Diverge the logical registry ID from the checkout identity that keys the
+    // coordination task registry. This is the production shape the friction was
+    // filed from; a freshly initialized workspace writes both from one value.
+    let registry_path = workspace.home.join(".orbit").join("workspaces.json");
+    let registry = std::fs::read_to_string(&registry_path).expect("read workspace registry");
+    std::fs::write(
+        &registry_path,
+        registry.replace("ws_mcp-roundtrip", "ws_legacy-logical"),
+    )
+    .expect("write diverged workspace registry");
+    let identity =
+        std::fs::read_to_string(workspace.work.join(".orbit").join("config.yaml")).expect("read");
+    assert!(
+        identity.contains("ws_mcp-roundtrip"),
+        "checkout identity must keep the pre-divergence ID: {identity}"
+    );
+
+    // A task authored through the checkout-local CLI surface. Before the fix,
+    // MCP looked for it under the logical ID and found an empty partition.
+    let add_input = json!({
+        "title": "Worktree routing regression",
+        "description": "Authored via the CLI fallback",
+        "workspace": workspace.work.to_str().expect("utf8 checkout path"),
+        "model": "codex",
+    })
+    .to_string();
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["tool", "run", "orbit.task.add", "--input", &add_input])
+        .output()
+        .expect("author task through the CLI fallback");
+    assert!(
+        output.status.success(),
+        "CLI task add failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let created: Value = serde_json::from_slice(&output.stdout).expect("parse created task");
+    let task_id = created["id"].as_str().expect("task id").to_string();
+
+    let worktree = add_linked_worktree(&workspace.work);
+
+    // The executor's client: no `_meta.orbit.workspace`, cwd inside the linked
+    // worktree.
+    let child = McpWorkspace::orbit_command(&worktree, &workspace.home)
+        .args(["mcp", "serve"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn worktree-backed MCP server");
+    let mut client = McpClient::new(child);
+    client.request(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "managed-executor", "version": "0" }
+        }),
+    );
+    client.notify("notifications/initialized");
+
+    // Every workspace-scoped tool must advertise the selector it requires.
+    let listed = client.request("tools/list", Value::Null);
+    let unadvertised = listed["result"]["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .filter(|tool| tool["inputSchema"]["properties"]["workspace"].is_null())
+        .filter_map(|tool| tool["name"].as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        unadvertised.is_empty(),
+        "workspace-scoped tools require a selector they do not advertise: {unadvertised:?}"
+    );
+
+    let selector = worktree.to_str().expect("utf8 worktree path");
+    for workspace_selector in [selector, "ws_legacy-logical"] {
+        let shown = client.call_tool_ok(
+            "orbit_task_show",
+            json!({ "id": task_id, "workspace": workspace_selector }),
+        );
+        assert_eq!(
+            shown["id"],
+            json!(task_id),
+            "task show must resolve through selector `{workspace_selector}`"
+        );
+        assert_eq!(shown["title"], "Worktree routing regression");
+    }
+
+    let updated = client.call_tool_ok(
+        "orbit_task_update",
+        json!({
+            "id": task_id,
+            "execution_summary": "Routed from a linked worktree",
+            "workspace": selector,
+            "model": "codex",
+        }),
+    );
+    assert_eq!(
+        updated["execution_summary"],
+        "Routed from a linked worktree"
+    );
+
+    let found = client.call_tool_ok(
+        "orbit_search",
+        json!({ "query": "Worktree routing regression", "workspace": selector }),
+    );
+    assert!(
+        found["results"]
+            .as_array()
+            .expect("search results")
+            .iter()
+            .any(|hit| hit["id"] == json!(task_id)),
+        "search must reach the same workspace from the worktree: {found}"
+    );
+    drop(client);
+
+    // The `orbit tool run` fallback stays functional from the worktree, and it
+    // observes the write MCP just made — both surfaces address one partition.
+    let output = McpWorkspace::orbit_command(&worktree, &workspace.home)
+        .args([
+            "tool",
+            "run",
+            "orbit.task.show",
+            "--input",
+            &format!(r#"{{"id":"{task_id}"}}"#),
+            "--fields",
+            "id,execution_summary",
+        ])
+        .output()
+        .expect("run the CLI fallback from the worktree");
+    assert!(
+        output.status.success(),
+        "CLI fallback failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let shown: Value = serde_json::from_slice(&output.stdout).expect("parse CLI task show");
+    assert_eq!(shown["id"], json!(task_id));
+    assert_eq!(shown["execution_summary"], "Routed from a linked worktree");
+}
+
+/// Commit the checkout and attach a linked worktree, mirroring how the engine
+/// stages a managed run.
+fn add_linked_worktree(work: &Path) -> PathBuf {
+    let commit = Command::new("git")
+        .args([
+            "-c",
+            "user.email=mcp-roundtrip@orbit.test",
+            "-c",
+            "user.name=mcp-roundtrip",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "worktree fixture base",
+        ])
+        .current_dir(work)
+        .output()
+        .expect("commit worktree base");
+    assert!(commit.status.success(), "git commit failed: {commit:?}");
+
+    let worktree = work
+        .parent()
+        .expect("checkout parent")
+        .join("linked-worktree");
+    let added = Command::new("git")
+        .args([
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "orbit/worktree-fixture",
+            worktree.to_str().expect("utf8 worktree path"),
+        ])
+        .current_dir(work)
+        .output()
+        .expect("attach linked worktree");
+    assert!(added.status.success(), "git worktree add failed: {added:?}");
+    worktree
+}

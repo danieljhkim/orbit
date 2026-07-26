@@ -529,6 +529,44 @@ impl BrokerMcpHost {
             .map_err(|error| OrbitError::Execution(format!("serialize crew discovery: {error}")))
     }
 
+    /// Resolve the coordination task-registry partition key for a workspace.
+    ///
+    /// The host registry keys workspaces by their logical ID while the
+    /// coordination task registry partitions by the checkout identity recorded
+    /// in `.orbit/config.yaml`. `orbit workspace init` writes both from the same
+    /// value, but workspaces registered before that convergence carry two
+    /// distinct keys (L-0098) — and reading coordination tasks under the
+    /// logical key then silently resolves an empty partition, so every hub-
+    /// placement task tool reports `task not found` for tasks the checkout-local
+    /// surfaces serve fine (F2026-07-099, ORB-10448).
+    ///
+    /// A validated exact-checkout binding already carries the identity key and
+    /// is authoritative. Without one, fall back to the registered checkout's
+    /// identity document, then to the logical ID for a genuinely checkoutless
+    /// workspace.
+    fn coordination_workspace_id(
+        &self,
+        workspace_id: &str,
+        binding: Option<&ExactCheckoutBinding>,
+    ) -> String {
+        if let Some(binding) = binding {
+            return binding.key.workspace_id.clone();
+        }
+        let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
+        let Ok(registry) = crate::workspace_registry::load_registry_from(&registry_path) else {
+            return workspace_id.to_string();
+        };
+        registry
+            .checkouts
+            .iter()
+            .find(|checkout| checkout.workspace_id == workspace_id)
+            .and_then(|checkout| {
+                read_workspace_identity(&checkout.orbit_dir.join("config.yaml")).ok()
+            })
+            .map(|identity| identity.workspace_id)
+            .unwrap_or_else(|| workspace_id.to_string())
+    }
+
     fn legacy_friction_root(
         &self,
         workspace_id: &str,
@@ -671,8 +709,14 @@ impl BrokerMcpHost {
                 return result;
             }
             let legacy_root = self.legacy_friction_root(&workspace_id, binding.as_ref());
-            let result = HubCoordinationExecutor::new(&self.global_root, workspace_id, legacy_root)
-                .and_then(|executor| executor.execute_tool(name, input, context.clone()));
+            let task_partition_id = self.coordination_workspace_id(&workspace_id, binding.as_ref());
+            let result = HubCoordinationExecutor::new_with_task_partition(
+                &self.global_root,
+                workspace_id,
+                task_partition_id,
+                legacy_root,
+            )
+            .and_then(|executor| executor.execute_tool(name, input, context.clone()));
             self.record_coordination_outcome(name, &context, &result);
             return result;
         }

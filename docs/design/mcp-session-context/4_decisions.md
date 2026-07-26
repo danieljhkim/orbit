@@ -3,14 +3,14 @@ summary: "MCP Session Context — Decisions"
 type: design
 title: "MCP Session Context — Decisions"
 owner: codex
-last_updated: 2026-07-18
+last_updated: 2026-07-26
 status: Accepted
 feature: mcp-session-context
 doc_role: decisions
 tags: ["mcp-session-context", "mcp", "workspace"]
 paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool.rs"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-00406", "ORB-10228", "ORB-10262", "ORB-10319", "ADR-0181", "ADR-0199", "ADR-0149"]
+related_artifacts: ["ORB-00256", "ORB-00406", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ADR-0181", "ADR-0199", "ADR-0149"]
 ---
 
 # MCP Session Context — Decisions
@@ -21,7 +21,7 @@ ADR log for MCP session context. Format follows [docs/design/CONVENTIONS.md §4]
 
 ## ADR-0181 — MCP ambient workspace session context
 
-**Status:** Accepted · 2026-05 · [ORB-00256], amended 2026-07 · [ORB-10228]
+**Status:** Accepted · 2026-05 · [ORB-00256], amended 2026-07 · [ORB-10228], selector advertised 2026-07 · [ORB-10448]
 
 **Context.** MCP tools need CLI-like workspace ergonomics, but [ADR-0149] makes process-cwd defaults unsafe because worktree cwd can bind to a different `workspace_id`. The viable alternatives were per-call workspace input forever, a one-shot workspace lookup tool that clients cache, or a deliberate session-level signal from the MCP client.
 
@@ -39,7 +39,7 @@ ADR log for MCP session context. Format follows [docs/design/CONVENTIONS.md §4]
 
 ## ADR-0199 — Workspace_path-addressable MCP host tools with surface-scoped containment
 
-**Status:** Accepted · 2026-07 · [ORB-00406], implemented by [ORB-10262]
+**Status:** Accepted · 2026-07 · [ORB-00406], implemented by [ORB-10262], coordination partition key corrected 2026-07 · [ORB-10448]
 
 **Context.** MCP host tools (`orbit.task.*`, `orbit.adr.*`, `orbit.learning.*`, `orbit.friction.*`, `orbit.search`) bind to a single `OrbitRuntime` resolved at `serve` launch from cwd discovery; when none is found the server installs `EmptyMcpHost` and advertises an empty `tools/list`, so clients that launch the server without the repo as cwd lose the entire host surface (e.g. Cowork, which launches with cwd / `CLAUDE_PROJECT_DIR` set to an internal scratchpad; see [ORB-00405] and learning L-0065). [ADR-0181] already routes workspace *addressing* per-call → session-context, but tool *registration* still gates on launch discovery. The real alternatives were to keep launch-gated registration and require every client to fix cwd, or to advertise host tools unconditionally and resolve the runtime per call.
 
@@ -58,5 +58,6 @@ ADR log for MCP session context. Format follows [docs/design/CONVENTIONS.md §4]
 - [ORB-10228] accepted and implemented the trusted-provenance amendment to [ADR-0181].
 - [ORB-10262] accepted and implemented ADR-0199 through the exact-checkout local broker.
 - [ORB-10319] consolidated the broker/session implementation in `orbit-remote`; it does not change ADR-0181 or ADR-0199 semantics.
+- [ORB-10448] made both ADRs reachable from a managed worktree activity: the `workspace` selector is now advertised on every workspace-scoped tool, and hub-placement coordination reads address the checkout-identity partition. Neither changes ADR-0181 or ADR-0199 semantics; see [2_design.md §3a–3b](./2_design.md). The advertised-selector contract is a breaking `tools/list` schema change (RELEASING.md) and may warrant its own allocated ADR — this task's activity was not granted `orbit.adr.add`, so no global ID was allocated.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

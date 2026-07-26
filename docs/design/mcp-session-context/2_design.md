@@ -3,14 +3,14 @@ summary: "MCP Session Context — Design"
 type: design
 title: "MCP Session Context — Design"
 owner: codex
-last_updated: 2026-07-19
+last_updated: 2026-07-26
 status: Accepted
 feature: mcp-session-context
 doc_role: design
 tags: ["mcp-session-context", "mcp", "workspace"]
 paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool.rs"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10262", "ORB-10319", "ADR-0181", "ADR-0199", "ADR-0149"]
+related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ADR-0181", "ADR-0199", "ADR-0149"]
 ---
 
 # MCP Session Context — Design
@@ -58,6 +58,36 @@ selector to a logical workspace and, when placement requires it, an exact checko
 Remote preflight owns routing and authorization; it does not replace the builtin's
 explicit-over-session input contract. [ORB-10262], [ORB-10319]
 
+### 3a. The selector is advertised, not implied
+
+Step 1 is the only step a general-purpose MCP client can reach: no shipping client lets a
+caller inject `initialize.params._meta`, so a managed executor speaking through one has the
+`workspace` argument and nothing else. `crates/orbit-mcp/src/adapter/schema.rs` therefore
+injects an optional `workspace` string property into the advertised input schema of every
+`McpToolScope::WorkspaceRequired` definition, and
+`OrbitToolServer::input_schema_for` applies it to host-resolved and extension-owned schemas
+alike. A tool that declares its own `workspace` parameter — `orbit.task.add` ([ADR-0149]),
+`orbit.crew.list` — keeps its own description. Global-scoped tools get nothing.
+
+Advertising at the adapter rather than in each tool's `ToolSchema` keeps the requirement
+stated once, next to the scope that creates it: the broker rejects a scoped call without a
+selector, so the broker's schema layer is what owns telling callers about it. [ORB-10448]
+
+### 3b. Coordination reads follow checkout identity
+
+A hub-placement call resolves against the coordination task registry, which partitions by the
+workspace identity written to `.orbit/config.yaml` — not by the logical ID in the host
+registry. `orbit workspace init` writes both from one value, so they normally coincide; for
+workspaces registered before that convergence they differ (L-0098), and a validated
+`ExactCheckoutBinding` carries the identity key precisely because of it.
+
+`BrokerMcpHost::coordination_workspace_id` resolves the partition key from that binding, then
+from the registered checkout's identity document, then falls back to the logical ID for a
+genuinely checkoutless workspace. Friction partitioning and audit identity stay on the logical
+ID. Without this, every hub-placement task tool addressed an empty partition on a diverged
+workspace and reported `task not found` for tasks the checkout-local CLI served fine
+(F2026-07-099). [ORB-10448]
+
 ## 4. Task Add
 
 `orbit.task.add` advertises `workspace` as optional over the tool schema while still accepting explicit callers unchanged. The host action still receives a concrete `workspace` field because the tool wrapper resolves or rejects before dispatch.
@@ -82,5 +112,6 @@ The external channel carries a workspace address, not a trusted workspace ID. Th
 - [ORB-10228] implemented trusted provenance, anti-spoofing, capability-set propagation and audit, call correlation, and audit migration v7.
 - [ORB-10262] implemented exact-checkout workspace resolution, placement preflight, capability enforcement, and runtime caching by exact binding.
 - [ORB-10319] moved broker/session resolution and MCP composition into the vertical `orbit-remote` feature crate while leaving runtime audit/dispatch in Core.
+- [ORB-10448] advertised the workspace selector on every workspace-scoped tool and routed hub-placement coordination reads by checkout identity, making the [ADR-0181] "clients that cannot send initialize metadata pass `workspace` explicitly" path reachable from a managed worktree activity.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

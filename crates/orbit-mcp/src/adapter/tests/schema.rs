@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use orbit_common::types::{McpCapability, McpTransport, ToolParam, ToolSessionContext};
+use orbit_common::types::{
+    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolScope, McpTransport,
+    ToolParam, ToolSchema, ToolSessionContext,
+};
 use rmcp::model::{ClientCapabilities, Implementation, InitializeRequestParams, Meta};
 
 use super::super::dispatch::session_context_from_initialize;
@@ -127,6 +130,111 @@ fn required_string_list_param_is_advertised_as_string_or_array() {
             .iter()
             .any(|shape| shape.get("type").and_then(Value::as_str) == Some("string")),
         "selectors must accept a bare string: {any_of:?}"
+    );
+}
+
+// --- ORB-10448 / F2026-07-099: the broker's workspace selector must be
+// advertised on every workspace-scoped tool. A managed executor speaks through
+// a general-purpose MCP client that cannot inject initialize `_meta`, so the
+// call argument is its only routing surface.
+
+fn definition_with_scope(
+    name: &str,
+    parameters: Vec<ToolParam>,
+    scope: McpToolScope,
+) -> McpToolDefinition {
+    let schema = ToolSchema {
+        name: name.to_string(),
+        description: String::new(),
+        parameters,
+        builtin: true,
+    };
+    let policy = McpToolPolicy::agent_and_operator(McpToolPlacement::Hub).with_scope(scope);
+    McpToolDefinition::new(schema, policy).expect("test definition policy is valid")
+}
+
+fn advertised_properties(definition: &McpToolDefinition) -> serde_json::Map<String, Value> {
+    let server = OrbitToolServer::new(Arc::new(SessionContextHost::default()));
+    let schema = server
+        .input_schema_for(definition)
+        .expect("input schema resolves");
+    schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .expect("properties object")
+}
+
+#[test]
+fn workspace_scoped_tool_advertises_the_broker_workspace_selector() {
+    let definition = definition_with_scope(
+        "orbit.task.show",
+        vec![param("id")],
+        McpToolScope::WorkspaceRequired,
+    );
+
+    let properties = advertised_properties(&definition);
+    let workspace = properties
+        .get("workspace")
+        .and_then(Value::as_object)
+        .expect("workspace selector advertised on a workspace-scoped tool");
+
+    assert_eq!(
+        workspace.get("type").and_then(Value::as_str),
+        Some("string")
+    );
+    let description = workspace
+        .get("description")
+        .and_then(Value::as_str)
+        .expect("selector carries routing guidance");
+    assert!(
+        description.contains("absolute path to a local checkout"),
+        "selector must document the checkout-path form: {description}"
+    );
+    assert!(
+        description.contains("worktree"),
+        "selector must state that a linked worktree resolves: {description}"
+    );
+}
+
+#[test]
+fn global_scoped_tool_does_not_advertise_a_workspace_selector() {
+    let definition = definition_with_scope(
+        "orbit.workspace.list",
+        vec![param("limit")],
+        McpToolScope::Global,
+    );
+
+    let properties = advertised_properties(&definition);
+
+    assert!(
+        !properties.contains_key("workspace"),
+        "a global tool routes without a workspace: {properties:?}"
+    );
+}
+
+#[test]
+fn tool_declaring_its_own_workspace_param_keeps_that_description() {
+    let declared = ToolParam {
+        name: "workspace".to_string(),
+        description: "Workspace path for the task".to_string(),
+        param_type: "string".to_string(),
+        required: false,
+    };
+    let definition = definition_with_scope(
+        "orbit.task.add",
+        vec![param("title"), declared],
+        McpToolScope::WorkspaceRequired,
+    );
+
+    let properties = advertised_properties(&definition);
+
+    assert_eq!(
+        properties["workspace"]
+            .get("description")
+            .and_then(Value::as_str),
+        Some("Workspace path for the task"),
+        "injection must not overwrite a tool's own selector documentation"
     );
 }
 

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use orbit_common::types::{ToolParam, ToolSchema};
+use orbit_common::types::{McpToolDefinition, McpToolScope, ToolParam, ToolSchema};
 use rmcp::model::{JsonObject, Tool};
 use serde_json::{Map, Value, json};
 
@@ -10,6 +10,43 @@ pub(super) fn schema_to_tool(schema: ToolSchema, input_schema: JsonObject) -> To
     let description = schema.description.clone();
     let advertised_name = sanitize_tool_name(&schema.name);
     Tool::new(advertised_name, description, Arc::new(input_schema))
+}
+
+/// Canonical name of the broker's workspace-routing argument.
+pub(crate) const WORKSPACE_SELECTOR_PARAM: &str = "workspace";
+
+const WORKSPACE_SELECTOR_DESCRIPTION: &str = "Workspace selector for broker routing: a registered logical workspace ID or an absolute \
+     path to a local checkout (a linked Git worktree resolves to its registered checkout). \
+     Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never \
+     inferred from process cwd.";
+
+/// Advertise the workspace selector on every workspace-scoped tool.
+///
+/// The broker rejects a [`McpToolScope::WorkspaceRequired`] call that carries
+/// no selector, taking it from either the `workspace` argument or the trusted
+/// session context announced through initialize `_meta`. General-purpose MCP
+/// clients cannot inject custom initialize metadata, so the argument is the
+/// only selector a managed executor can actually supply — and a tool that
+/// requires it without advertising it is uncallable from a schema-following
+/// caller (F2026-07-099, ORB-10448). Tools that already declare their own
+/// `workspace` parameter keep their own description.
+pub(super) fn ensure_workspace_selector(schema: &mut JsonObject, definition: &McpToolDefinition) {
+    if definition.policy.scope() != McpToolScope::WorkspaceRequired {
+        return;
+    }
+    let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) else {
+        return;
+    };
+    if properties.contains_key(WORKSPACE_SELECTOR_PARAM) {
+        return;
+    }
+    properties.insert(
+        WORKSPACE_SELECTOR_PARAM.to_string(),
+        json!({
+            "type": "string",
+            "description": WORKSPACE_SELECTOR_DESCRIPTION,
+        }),
+    );
 }
 
 pub(crate) fn build_input_schema(tool_name: &str, params: &[ToolParam]) -> JsonObject {
