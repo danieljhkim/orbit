@@ -1,7 +1,7 @@
 ---
 title: Design Doc Conventions
 owner: daniel
-last_updated: 2026-07-20
+last_updated: 2026-07-26
 last_validated: 2026-07-26
 status: Accepted
 ---
@@ -21,7 +21,7 @@ docs/design/<feature>/
 ├── 1_overview.md       recommended — what and why
 ├── 2_design.md         recommended — current implementation
 ├── 3_vision.md         recommended — forward-looking
-├── 4_decisions.md      recommended — ADR log (append-only)
+├── 4_decisions.md      recommended — ADR pointer index
 ├── specs/              recommended folder; may be empty initially
 │   └── <mechanism>.md  one mechanism per file
 └── references/         recommended folder; may be empty initially
@@ -65,7 +65,7 @@ The template frontmatter also carries the orbit-docs retrieval fields (`type`, `
 | **1_overview.md** | Elevator paragraph · §1 Motivation · §2 Core Concepts · §3 At a Glance (table: concern → file → task) · Task References |
 | **2_design.md** | Scope paragraph · mechanism sections (variable count, numbered) · §N Concerns & Honest Limitations (mandatory last section) · Task References |
 | **3_vision.md** | Scope paragraph · §1 Open Questions (numbered) · §2 Prior Work (subsections by category) · §3 What May Be Distinctive · §4 References (Orbit-internal + External) · Task References |
-| **4_decisions.md** | Format explainer · ADR entries in ascending number order |
+| **4_decisions.md** | Pointer-index explainer (including the `orbit.adr.show` command) · ADR pointers in ascending number order |
 
 Every numbered doc ends with a **Task References** section listing only the task IDs cited in that doc, plus the line:
 
@@ -75,18 +75,18 @@ Every numbered doc ends with a **Task References** section listing only the task
 
 ## 4. ADR Template (strict)
 
-**Allocation order is non-negotiable.** Before writing the heading or body, allocate the global ID via `orbit.adr.add` (see the `orbit-knowledge` skill and [ADR-0153]). The local heading then uses the allocated global ID verbatim — never invent a four-digit number that "looks global." The store is the source of truth for ID, status, owner, `related_features`, and `related_tasks`; the local `4_decisions.md` entry is the long-form narrative log keyed on that same global ID.
+**Allocation order is non-negotiable.** Before adding an ADR pointer, allocate the global ID via `orbit.adr.add` (see the `orbit-knowledge` skill and [ADR-0153]). The local pointer then uses the allocated global ID verbatim — never invent a four-digit number that "looks global." The store is the source of truth for the title, body, ID, status, owner, `related_features`, and `related_tasks`; `4_decisions.md` is an ordered pointer index, not a second narrative log.
 
-Copy the ADR block from [`_templates/4_decisions.md`](./_templates/4_decisions.md): a `## ADR-NNNN — <title>` heading, a `**Status:** <status> · YYYY-MM · [task]` line, then `Context` / `Decision` / `Consequences`, where the Consequences list ends with a `Cost:` bullet.
+Copy the pointer from [`_templates/4_decisions.md`](./_templates/4_decisions.md): `- **ADR-NNNN — <title>** — <status>.` Readers retrieve the authoritative `Context` / `Decision` / `Consequences` body with `orbit tool run orbit.adr.show --input '{"id":"ADR-NNNN"}'`. The store body, not the local index, must carry the ADR's mandatory `Cost:` consequence.
 
 Rules:
 
-- **Allocate first.** `orbit.adr.add` returns the global `ADR-NNNN` (4-digit, zero-padded). That ID is your local heading. Never hand-author headings under `## ADR-` without an allocation behind them. Bypassing this is the failure mode [ORB-00098] resolved; see [ADR-0153].
+- **Allocate first.** `orbit.adr.add` returns the global `ADR-NNNN` (4-digit, zero-padded). That ID is your local pointer. Never hand-author an `ADR-NNNN` pointer without an allocation behind it. Bypassing this is the failure mode [ORB-00098] resolved; see [ADR-0153].
 - **Inline cross-references** use the global ID (`[ADR-0042]`), resolvable via `orbit tool run orbit.adr.show --input '{"id":"ADR-0042"}'`.
-- Numbers are append-only; superseded entries stay in place with status updated.
-- `Proposed` allowed only before the relevant task ships. Flip to `Accepted` + task ID via `orbit.adr.update` (which also flips the markdown status line on the next edit) when it lands.
-- Every ADR must cite at least one cost. No cost = the decision wasn't real.
-- **Legacy 3-digit headings.** Existing local 3-digit headings (`## ADR-NNN`) authored before the global-ID convention are grandfathered. They may be backfilled opportunistically when a folder is being substantially edited; when backfilled, the local heading is rewritten to the allocated global ID and the original local ID is preserved as a `legacy_id` in the store record. See `docs/design/project-learnings/4_decisions.md` and `docs/design/agent-families/4_decisions.md` for worked examples.
+- Numbers are append-only; superseded records stay in the index with their store status.
+- `Proposed` is allowed only before the relevant task ships. Flip the store record to `Accepted` via `orbit.adr.update` when it lands, then refresh the index status on its next edit.
+- Every ADR body must cite at least one cost. No cost = the decision wasn't real.
+- **Legacy 3-digit headings.** Existing local 3-digit headings (`## ADR-NNN`) authored before the global-ID convention are grandfathered narrative records until separately backfilled. When backfilled, allocate the global ID first, preserve the original local ID as a `legacy_id` in the store record, verify that the store body carries the narrative, and replace the local body with its global pointer. See `docs/design/project-learnings/4_decisions.md` and `docs/design/agent-families/4_decisions.md` for worked examples.
 
 An entry earns its own ADR only if **all three** hold:
 
@@ -103,8 +103,8 @@ If only one or two hold, the decision belongs in `2_design.md` prose, as a row i
 When a cluster of accepted ADRs all instantiate the same underlying decision (e.g. "added language X to the tree-sitter extractor set"), the cluster may be folded into a single rollup ADR:
 
 - The rollup either reuses the parent ADR's number with an expanded body and a per-instance table, or claims a new number that lists the cluster.
-- Each folded entry stays in place with `Status: Superseded by ADR-NNN (folded)` and a one-line pointer; the body is removed.
-- The rollup must preserve every Cost line from the folded entries that doesn't duplicate a cost already named.
+- Each folded entry stays in the index with the store status (for example, `Superseded by ADR-NNN (folded)`).
+- The rollup's store body must preserve every Cost line from the folded entries that doesn't duplicate a cost already named.
 - Compaction is a normal maintenance operation, not an emergency cleanup. Owners should fold a cluster when the third instance lands, not the tenth.
 
 ---
@@ -125,7 +125,7 @@ Rules:
 
 Copy [`_templates/specs/_mechanism.md`](./_templates/specs/_mechanism.md): a one-paragraph contract statement, a **Why This Exists** section, mechanism-specific sections, and an optional **Agent Signature**.
 
-A spec is **prescriptive**. It names invariants ("writes do not fall back"), failure modes ("detached HEAD errors"), and migration paths. It is *not* a design-rationale doc — rationale lives in `4_decisions.md`.
+A spec is **prescriptive**. It names invariants ("writes do not fall back"), failure modes ("detached HEAD errors"), and migration paths. It is *not* a design-rationale doc — rationale lives in the ADR store and is indexed by `4_decisions.md`.
 
 ---
 
