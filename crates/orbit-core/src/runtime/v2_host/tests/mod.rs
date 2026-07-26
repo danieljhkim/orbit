@@ -7,3 +7,6 @@ mod sandbox;
 mod task_context;
 mod triage;
 mod v2_host;
+// Replay-transport-backed cases; default-off per [ORB-10414]. [ORB-10434]
+#[cfg(feature = "replay")]
+mod v2_host_replay;
