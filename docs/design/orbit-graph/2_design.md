@@ -3,7 +3,7 @@ summary: "Orbit Graph — Design"
 type: design
 title: "Orbit Graph — Design"
 owner: claude
-last_updated: 2026-07-25
+last_updated: 2026-07-26
 status: Draft
 feature: orbit-graph
 doc_role: design
@@ -19,7 +19,7 @@ This document specifies the design of `orbit-graph` at the architectural level: 
 
 The companion ADR log is in [4_decisions.md](./4_decisions.md); forward-looking work (write surface, embeddings, cross-language refs) lives in [3_vision.md](./3_vision.md).
 
-> **Status (ORB-10357, 2026-07-25):** the three-crate layout and the `orbit graph` CLI surface described below are historical. `orbit-graph-extract` and `orbit-graph-cli` are now modules inside `orbit-graph` (`extract`, `cli`); the `orbit graph` subcommand no longer exists on `orbit-cli`, and `orbit-graph` has zero workspace dependents. See [1_overview.md](./1_overview.md) and the amended ADR-0199 in [4_decisions.md](./4_decisions.md#adr-0199--reintroduce-orbit-graph-as-a-thin-wrapper-over-orbit-graph-cli). The crate-boundary and CLI sections below are kept for historical rationale, not as a description of the current surface.
+> **Status (ORB-10357, 2026-07-25):** the three-crate layout and the `orbit graph` CLI surface described below are historical. `orbit-graph-extract` and `orbit-graph-cli` are now modules inside `orbit-graph` (`extract`, `cli`); the `orbit graph` subcommand no longer exists on `orbit-cli`, and `orbit-graph` has zero workspace dependents. See [1_overview.md](./1_overview.md) and the amended ADR-0285 (formerly the locally-invented `ADR-0199`) in [4_decisions.md](./4_decisions.md#adr-0285--reintroduce-orbit-graph-as-a-thin-wrapper-over-orbit-graph-cli). The crate-boundary and CLI sections below are kept for historical rationale, not as a description of the current surface.
 
 ---
 
