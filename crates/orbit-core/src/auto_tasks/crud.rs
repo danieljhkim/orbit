@@ -3,10 +3,14 @@
 //! are git-versioned YAML under `<orbit_dir>/auto_tasks/<name>.yaml`; these
 //! methods are the single choke point that reads/writes them, so both entry
 //! points stay consistent. Disabling is a `toggle`, never a delete.
+//!
+//! `generate` (CLI-only by design — see `docs/design/mcp-bridge/2_design.md`)
+//! rides here too: it mints a task from a definition on demand by reusing the
+//! scheduler's mint path, so there is exactly one template→task mapping.
 
 use orbit_common::types::{
     AUTO_TASK_SCHEMA_VERSION, AutoTaskDefinition, AutoTaskSchedule, AutoTaskTemplate, DedupePolicy,
-    OrbitError,
+    OrbitError, Task,
 };
 use orbit_common::utility::fs::write_text_with_parent;
 
@@ -14,6 +18,7 @@ use crate::OrbitRuntime;
 
 use super::loader::{collect_auto_tasks, definition_path};
 use super::schedule::validate_schedule;
+use super::scheduler::mint_task;
 
 /// Parameters for creating a definition.
 #[derive(Debug, Clone)]
@@ -125,6 +130,26 @@ impl OrbitRuntime {
         let mut definition = self.require_auto_task(name)?;
         definition.enabled = enabled;
         self.stamp_and_write(definition)
+    }
+
+    /// Mint one task from a definition on demand — the manual counterpart to a
+    /// scheduler fire, so a new or edited definition can be exercised without
+    /// waiting for its cron slot [ORB-10439].
+    ///
+    /// The mint is **unconditional**: schedule due-math, `dedupe`, and
+    /// `enabled` are all ignored, and the host-local cursor at
+    /// `<orbit_dir>/state/auto-tasks.json` is neither read nor written — an
+    /// operator naming a definition explicitly means it, and a manual mint must
+    /// not perturb scheduler state. Because it reuses the scheduler's
+    /// [`mint_task`], the result is field-for-field identical to a fired
+    /// instance, provenance tag and `system_created` marker included; that also
+    /// means an open generated instance is visible to `skip_if_open` dedupe on
+    /// the next pass, exactly as a fired one would be.
+    ///
+    /// An unknown name is an `InvalidInput` error naming the definition.
+    pub fn auto_task_generate(&self, name: &str) -> Result<Task, OrbitError> {
+        let definition = self.require_auto_task(name)?;
+        mint_task(self, &definition)
     }
 
     fn require_auto_task(&self, name: &str) -> Result<AutoTaskDefinition, OrbitError> {

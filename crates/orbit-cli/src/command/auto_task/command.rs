@@ -4,6 +4,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 use crate::command::Execute;
 
 use super::add::AutoTaskAddArgs;
+use super::generate::AutoTaskGenerateArgs;
 use super::list::AutoTaskListArgs;
 use super::show::AutoTaskShowArgs;
 use super::toggle::AutoTaskToggleArgs;
@@ -34,6 +35,9 @@ pub enum AutoTaskSubcommand {
     Update(AutoTaskUpdateArgs),
     /// Enable or disable a definition (the kill-switch; not a delete)
     Toggle(AutoTaskToggleArgs),
+    /// Mint a task from a definition now (ignores schedule, dedupe, and
+    /// `enabled`; leaves the scheduler cursor untouched)
+    Generate(AutoTaskGenerateArgs),
 }
 
 impl Execute for AutoTaskSubcommand {
@@ -44,6 +48,7 @@ impl Execute for AutoTaskSubcommand {
             AutoTaskSubcommand::Show(args) => args.execute(runtime),
             AutoTaskSubcommand::Update(args) => args.execute(runtime),
             AutoTaskSubcommand::Toggle(args) => args.execute(runtime),
+            AutoTaskSubcommand::Generate(args) => args.execute(runtime),
         }
     }
 }

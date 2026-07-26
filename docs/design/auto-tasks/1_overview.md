@@ -1,7 +1,7 @@
 ---
 title: Auto-tasks — Overview
 owner: claude
-last_updated: 2026-07-25
+last_updated: 2026-07-26
 status: Accepted
 feature: auto-tasks
 doc_role: overview
@@ -10,7 +10,7 @@ summary: Dynamically-defined recurring task templates minted by one generic sche
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ADR-0218, ADR-0217]
+related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ADR-0218, ADR-0217]
 ---
 
 # Auto-tasks — Overview
@@ -50,6 +50,11 @@ becomes just the first definition.
   surface.
 - **Dedupe & provenance** — each minted task carries an `auto-task:<name>` tag;
   `skip_if_open` uses that tag to avoid firing while a prior instance is open.
+- **Manual mint** — `orbit auto-task generate <name>` mints one task from a
+  definition immediately, reusing the scheduler's mint path so the result is
+  indistinguishable from a fired instance. Unconditional and cursor-inert: it
+  ignores schedule, `dedupe`, and `enabled`, and never touches
+  `<orbit_dir>/state/auto-tasks.json` (ORB-10439).
 
 ## 3. At a Glance
 
@@ -61,6 +66,7 @@ becomes just the first definition.
 | Host-local cursor | `crates/orbit-core/src/auto_tasks/state.rs` | ORB-10149 |
 | Scheduler pass | `crates/orbit-core/src/auto_tasks/scheduler.rs` | ORB-10149 |
 | CRUD (CLI + MCP shared) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10149 |
+| Manual mint (`generate`, CLI-only) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10439 |
 | Deterministic action | `crates/orbit-core/src/runtime/v2_host/dispatch.rs` | ORB-10149 |
 | Seeded assets | `crates/orbit-core/assets/{activities,jobs,routines}/…` | ORB-10149 |
 
@@ -80,5 +86,6 @@ becomes just the first definition.
 - ORB-10148 — qa-sweep V1 (first definition; depends on this).
 - ORB-10318 — learning-deprecation-review definition (report-only stale-learning review; superseded by ORB-10348).
 - ORB-10348 — Generalized the definition into artifact-deprecation-review, adding the comment-reference sweep.
+- ORB-10439 — `orbit auto-task generate <name>`, the on-demand manual mint.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
