@@ -55,7 +55,6 @@ pub mod init;
 pub mod job;
 pub mod learning;
 pub(crate) mod learning_authoring;
-pub(crate) mod pipeline_run;
 pub(crate) mod policy;
 pub(crate) mod routine;
 pub(crate) mod search;

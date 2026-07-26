@@ -1,4 +1,4 @@
-//! Sibling tests for `pipeline.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
+//! Sibling tests for `tool_exec.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
 
 use crate::OrbitRuntime;
 use orbit_common::types::Role;

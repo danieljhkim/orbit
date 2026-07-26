@@ -8,7 +8,7 @@ use tempfile::TempDir;
 
 use crate::OrbitRuntime;
 use crate::command::job::JobRunListParams;
-use crate::command::pipeline_run::{
+use crate::command::job::pipeline::{
     configure_pipeline_worker_command, resolve_pipeline_worker_executable,
 };
 use crate::command::task::TaskAddParams;
