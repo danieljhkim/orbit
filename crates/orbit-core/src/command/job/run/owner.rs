@@ -28,6 +28,9 @@ pub(super) fn signal_run_owner_process(run: &JobRun) -> Result<String, OrbitErro
     if pid == std::process::id() {
         return Ok("self_not_signalled".to_string());
     }
+    if !process_is_alive(pid) {
+        return Ok("already_exited".to_string());
+    }
     if !matches!(classify_run_owner(run), OwnerIdentity::Verified) {
         return Ok("owner_identity_mismatch".to_string());
     }
@@ -42,7 +45,8 @@ pub(super) fn signal_run_owner_process(run: &JobRun) -> Result<String, OrbitErro
         match send_signal_to_process_group(pgid, libc::SIGTERM) {
             Ok(()) => {}
             Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {
-                return Ok("already_exited".to_string());
+                return verify_owner_termination(pid, Some(pgid), true, false)
+                    .map(|()| "already_exited".to_string());
             }
             Err(error) => {
                 return Err(OrbitError::Execution(format!(
@@ -51,14 +55,17 @@ pub(super) fn signal_run_owner_process(run: &JobRun) -> Result<String, OrbitErro
             }
         }
 
-        if wait_for_process_group_exit(pgid, RUN_OWNER_TERMINATION_GRACE) {
+        if wait_for_process_group_exit(pgid, RUN_OWNER_TERMINATION_GRACE)
+            && verify_owner_termination(pid, Some(pgid), true, false).is_ok()
+        {
             return Ok("terminated_process_group".to_string());
         }
 
         match send_signal_to_process_group(pgid, libc::SIGKILL) {
             Ok(()) => {}
             Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {
-                return Ok("terminated_process_group".to_string());
+                return verify_owner_termination(pid, Some(pgid), true, true)
+                    .map(|()| "killed_process_group".to_string());
             }
             Err(error) => {
                 return Err(OrbitError::Execution(format!(
@@ -66,20 +73,23 @@ pub(super) fn signal_run_owner_process(run: &JobRun) -> Result<String, OrbitErro
                 )));
             }
         }
-        let _ = wait_for_process_group_exit(pgid, RUN_OWNER_TERMINATION_GRACE);
-        return Ok("killed_process_group".to_string());
+        wait_for_process_group_exit(pgid, RUN_OWNER_TERMINATION_GRACE);
+        return verify_owner_termination(pid, Some(pgid), true, true)
+            .map(|()| "killed_process_group".to_string());
     }
 
     // Fallback for platforms/configurations where the owner process group
     // cannot be resolved. The PID identity guard above still protects against
     // killing a reused PID.
     send_signal_to_pid(pid, libc::SIGTERM)?;
-    if wait_for_owner_exit(pid, RUN_OWNER_TERMINATION_GRACE) {
+    if wait_for_owner_exit(pid, RUN_OWNER_TERMINATION_GRACE)
+        && verify_owner_termination(pid, None, true, false).is_ok()
+    {
         Ok("terminated_owner".to_string())
     } else {
         send_signal_to_pid(pid, libc::SIGKILL)?;
-        let _ = wait_for_owner_exit(pid, RUN_OWNER_TERMINATION_GRACE);
-        Ok("killed_owner".to_string())
+        wait_for_owner_exit(pid, RUN_OWNER_TERMINATION_GRACE);
+        verify_owner_termination(pid, None, true, true).map(|()| "killed_owner".to_string())
     }
 }
 
@@ -151,11 +161,74 @@ fn process_group_is_alive(pgid: libc::pid_t) -> bool {
     if pgid <= 1 {
         return false;
     }
+    #[cfg(target_os = "linux")]
+    if let Some(alive) = linux_process_group_is_alive(pgid) {
+        return alive;
+    }
     let rc = unsafe { libc::kill(-pgid, 0) };
     if rc == 0 {
         return true;
     }
     std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Linux keeps unreaped processes visible to `kill(..., 0)`, even though they
+/// can no longer run or receive signals. Treat a group consisting solely of
+/// zombies as terminated so a parent which reaps after cancellation does not
+/// make a successful cancellation look incomplete.
+#[cfg(target_os = "linux")]
+fn linux_process_group_is_alive(pgid: libc::pid_t) -> Option<bool> {
+    let entries = std::fs::read_dir("/proc").ok()?;
+    let mut found_group_member = false;
+    for entry in entries.flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let Some((state, member_pgid)) = linux_process_state(pid) else {
+            continue;
+        };
+        if member_pgid != pgid {
+            continue;
+        }
+        found_group_member = true;
+        if state != 'Z' {
+            return Some(true);
+        }
+    }
+    found_group_member.then_some(false)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_state(pid: u32) -> Option<(char, libc::pid_t)> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let (_, tail) = stat.rsplit_once(')')?;
+    let mut fields = tail.split_whitespace();
+    let state = fields.next()?.chars().next()?;
+    let _parent_pid = fields.next()?;
+    let process_group = fields.next()?.parse().ok()?;
+    Some((state, process_group))
+}
+
+#[cfg(unix)]
+pub(super) fn verify_owner_termination(
+    pid: u32,
+    pgid: Option<libc::pid_t>,
+    term_sent: bool,
+    kill_sent: bool,
+) -> Result<(), OrbitError> {
+    let leader_alive = process_is_alive(pid);
+    let group_alive = pgid.is_some_and(process_group_is_alive);
+    if !leader_alive && !group_alive {
+        return Ok(());
+    }
+    Err(OrbitError::RunCancellationIncomplete {
+        pid,
+        pgid: pgid.map(|group| group as i32),
+        term_sent,
+        kill_sent,
+        leader_alive,
+        group_alive,
+    })
 }
 
 /// Returns true only for Running runs whose owner is conclusively stale
@@ -381,6 +454,10 @@ where
 #[cfg(unix)]
 pub(super) fn process_is_alive(pid: u32) -> bool {
     if pid == 0 || pid > i32::MAX as u32 {
+        return false;
+    }
+    #[cfg(target_os = "linux")]
+    if matches!(linux_process_state(pid), Some(('Z', _))) {
         return false;
     }
     // Safety: signal 0 performs existence/permission checking only.

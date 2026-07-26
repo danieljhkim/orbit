@@ -114,6 +114,17 @@ pub enum OrbitError {
     },
     #[error("execution failed: {0}")]
     Execution(String),
+    #[error(
+        "run cancellation incomplete: pid={pid}, pgid={pgid:?}, term_sent={term_sent}, kill_sent={kill_sent}, leader_alive={leader_alive}, group_alive={group_alive}"
+    )]
+    RunCancellationIncomplete {
+        pid: u32,
+        pgid: Option<i32>,
+        term_sent: bool,
+        kill_sent: bool,
+        leader_alive: bool,
+        group_alive: bool,
+    },
     #[error("store error: {0}")]
     Store(String),
     #[error("invalid task status transition: {0}")]
