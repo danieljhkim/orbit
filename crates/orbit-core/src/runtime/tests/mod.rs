@@ -4,5 +4,6 @@ mod run_audit;
 mod run_input;
 mod runtime;
 mod task_block_on_run_failure;
+mod task_locks;
 mod task_reservation_cleanup;
 mod tool_exec;

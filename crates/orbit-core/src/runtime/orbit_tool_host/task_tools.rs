@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use orbit_common::types::{
     OrbitError, TaskPriority, optional_csv_or_string_list_alias, optional_raw_string,
     optional_string, optional_string_alias, optional_string_list_alias, required_string,
@@ -331,22 +329,6 @@ pub(super) fn update(
         model,
     )?;
     serialize_task(runtime, &task)
-}
-
-pub(crate) fn parse_task_ids(input: &Value) -> Result<Vec<String>, OrbitError> {
-    let task_ids = optional_string_list_alias(input, &["task_ids", "taskIds", "task-ids"])?
-        .ok_or_else(|| OrbitError::InvalidInput("missing `task_ids`".to_string()))?;
-    parse_task_id_list(task_ids)
-}
-
-fn parse_task_id_list(task_ids: Vec<String>) -> Result<Vec<String>, OrbitError> {
-    let deduped = task_ids.into_iter().collect::<BTreeSet<_>>();
-    if deduped.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "`task_ids` must contain at least one task ID".to_string(),
-        ));
-    }
-    Ok(deduped.into_iter().collect())
 }
 
 fn optional_raw_string_alias(input: &Value, keys: &[&str]) -> Result<Option<String>, OrbitError> {

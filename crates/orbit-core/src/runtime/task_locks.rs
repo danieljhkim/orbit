@@ -20,8 +20,6 @@ use serde_json::{Value, json};
 use crate::OrbitRuntime;
 use crate::command::task::canonicalize_context_files_for_read;
 
-use super::json::{task_lock_status_rank, task_lock_to_json};
-
 pub(super) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
     let workspace_id = workspace_task_reservation_id(runtime)?;
     let reservation_result = runtime
@@ -307,6 +305,12 @@ pub(super) fn parse_task_lock_reservation_scope(
             parse_file_lock_selectors(files).map(TaskLockReservationScope::Files)
         }
     }
+}
+
+pub(crate) fn parse_task_ids(input: &Value) -> Result<Vec<String>, OrbitError> {
+    let task_ids = optional_string_list_alias(input, &["task_ids", "taskIds", "task-ids"])?
+        .ok_or_else(|| OrbitError::InvalidInput("missing `task_ids`".to_string()))?;
+    parse_task_id_list(task_ids)
 }
 
 fn parse_task_id_list(task_ids: Vec<String>) -> Result<Vec<String>, OrbitError> {
@@ -596,153 +600,21 @@ fn owner_run_id_from_payload(payload: &Value) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use orbit_common::types::{AuditEvent, Role, TaskStatus};
-    use orbit_tools::{ReservationOwnerContext, ToolContext};
-    use serde_json::{Value, json};
+fn task_lock_to_json(task: &Task) -> Value {
+    json!({
+        "id": task.id,
+        "title": task.title,
+        "status": task.status.to_string(),
+        "job_run_id": task.job_run_id,
+        "crew": task.crew,
+        "context_files": task.context_files,
+    })
+}
 
-    use super::super::test_support::{create_context_task, test_runtime, unmanaged_tool_env_guard};
-
-    fn task_lock_audit_event(runtime: &OrbitRuntime, tool_name: &str, command: &str) -> AuditEvent {
-        runtime
-            .list_audit_events(None, Some(tool_name.to_string()), None, None, 16)
-            .expect("list audit events")
-            .into_iter()
-            .find(|event| event.command == command)
-            .expect("task lock audit event")
-    }
-
-    fn reserve_files(runtime: &OrbitRuntime, owner_run_id: Option<&str>) -> String {
-        let input = json!({
-            "files": ["file:src/lib.rs"],
-            "ttl_seconds": 3600,
-            "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
-        });
-        let output = match owner_run_id {
-            Some(owner_run_id) => runtime
-                .run_tool_with_context_and_role(
-                    "orbit.task.locks.reserve",
-                    input,
-                    Role::Admin,
-                    ToolContext {
-                        reservation_owner: Some(ReservationOwnerContext {
-                            owner_run_id: owner_run_id.to_string(),
-                            owner_metadata_json: None,
-                        }),
-                        ..ToolContext::default()
-                    },
-                )
-                .expect("reserve direct file selectors with owner"),
-            None => runtime
-                .run_tool("orbit.task.locks.reserve", input)
-                .expect("reserve direct file selectors"),
-        };
-
-        output
-            .get("reservation_id")
-            .and_then(Value::as_str)
-            .expect("reservation id")
-            .to_string()
-    }
-
-    #[test]
-    fn release_audit_without_owner_has_no_task_or_job_run_id() {
-        let _env = unmanaged_tool_env_guard();
-        let (_root, runtime, repo_root) = test_runtime();
-        std::fs::create_dir_all(repo_root.join("src")).expect("create src dir");
-        std::fs::write(repo_root.join("src/lib.rs"), "pub fn ok() {}\n")
-            .expect("write source file");
-
-        let reservation_id = reserve_files(&runtime, None);
-        let release = runtime
-            .run_tool(
-                "orbit.task.locks.release",
-                json!({
-                    "reservation_id": reservation_id.clone(),
-                    "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
-                }),
-            )
-            .expect("release reservation");
-        assert_eq!(release["released"], true);
-
-        let row = task_lock_audit_event(
-            &runtime,
-            "orbit.task.locks.release",
-            "task.locks.reserve.released",
-        );
-        assert_eq!(row.target_id.as_deref(), Some(reservation_id.as_str()));
-        assert!(row.task_id.is_none());
-        assert!(row.job_run_id.is_none());
-    }
-
-    #[test]
-    fn release_audit_uses_reservation_owner_run_id() {
-        let _env = unmanaged_tool_env_guard();
-        let (_root, runtime, repo_root) = test_runtime();
-        std::fs::create_dir_all(repo_root.join("src")).expect("create src dir");
-        std::fs::write(repo_root.join("src/lib.rs"), "pub fn ok() {}\n")
-            .expect("write source file");
-
-        let reservation_id = reserve_files(&runtime, Some("jrun-owner"));
-        let release = runtime
-            .run_tool(
-                "orbit.task.locks.release",
-                json!({
-                    "reservation_id": reservation_id.clone(),
-                    "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
-                }),
-            )
-            .expect("release reservation");
-        assert_eq!(release["released"], true);
-
-        let row = task_lock_audit_event(
-            &runtime,
-            "orbit.task.locks.release",
-            "task.locks.reserve.released",
-        );
-        assert_eq!(row.target_id.as_deref(), Some(reservation_id.as_str()));
-        assert!(row.task_id.is_none());
-        assert_eq!(row.job_run_id.as_deref(), Some("jrun-owner"));
-    }
-
-    #[test]
-    fn reserve_audit_for_task_scope_records_first_task_id() {
-        let _env = unmanaged_tool_env_guard();
-        let (_root, runtime, repo_root) = test_runtime();
-        std::fs::create_dir_all(repo_root.join("src")).expect("create src dir");
-        std::fs::write(repo_root.join("src/lib.rs"), "pub fn ok() {}\n")
-            .expect("write source file");
-        let task = create_context_task(
-            &runtime,
-            &repo_root,
-            TaskStatus::Backlog,
-            &["file:src/lib.rs"],
-        );
-
-        let reserve = runtime
-            .run_tool(
-                "orbit.task.locks.reserve",
-                json!({
-                    "task_ids": [task.id.clone()],
-                    "ttl_seconds": 3600,
-                    "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
-                }),
-            )
-            .expect("reserve task scope");
-        assert_eq!(reserve["reserved"], true);
-        let reservation_id = reserve["reservation_id"]
-            .as_str()
-            .expect("reservation id")
-            .to_string();
-
-        let row = task_lock_audit_event(
-            &runtime,
-            "orbit.task.locks.reserve",
-            "task.locks.reserve.granted",
-        );
-        assert_eq!(row.target_id.as_deref(), Some(reservation_id.as_str()));
-        assert_eq!(row.task_id.as_deref(), Some(task.id.as_str()));
+fn task_lock_status_rank(status: TaskStatus) -> u8 {
+    match status {
+        TaskStatus::InProgress => 0,
+        TaskStatus::Review => 1,
+        _ => 2,
     }
 }

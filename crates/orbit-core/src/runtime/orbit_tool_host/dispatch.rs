@@ -68,12 +68,12 @@ pub(super) fn execute(
         OrbitBuiltinAction::TaskDelete => super::task_tools::delete(runtime, input),
         OrbitBuiltinAction::TaskLint => super::task_tools::lint(runtime, input),
         OrbitBuiltinAction::TaskList => super::task_tools::list(runtime, input),
-        OrbitBuiltinAction::TaskLocks => super::task_locks::list(runtime),
+        OrbitBuiltinAction::TaskLocks => crate::runtime::task_locks::list(runtime),
         OrbitBuiltinAction::TaskLocksRelease => {
-            super::task_locks::release(runtime, input, agent, model)
+            crate::runtime::task_locks::release(runtime, input, agent, model)
         }
         OrbitBuiltinAction::TaskLocksReserve => {
-            super::task_locks::reserve(runtime, input, agent, model, reservation_owner)
+            crate::runtime::task_locks::reserve(runtime, input, agent, model, reservation_owner)
         }
         OrbitBuiltinAction::TaskReject => super::task_tools::reject(runtime, input, agent, model),
         OrbitBuiltinAction::TaskShow => super::task_tools::show(runtime, input),

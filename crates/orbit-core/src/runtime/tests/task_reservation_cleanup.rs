@@ -6,7 +6,7 @@ use orbit_common::types::JobRunState;
 use orbit_store::TaskReservationReleaseReason;
 use serde_json::json;
 
-use super::super::orbit_tool_host::{workspace_orbit_dir, workspace_task_reservation_id};
+use super::super::task_locks::{workspace_orbit_dir, workspace_task_reservation_id};
 
 use chrono::Duration;
 use orbit_common::types::{AuditEventStatus, Role, TaskPriority, TaskStatus, TaskType};
