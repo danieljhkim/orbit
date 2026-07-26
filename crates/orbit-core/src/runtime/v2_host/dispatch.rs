@@ -27,8 +27,11 @@ use super::{backlog_exclusion, pipeline_actions, triage};
 /// Adding an arm below without adding its name here makes validation reject a
 /// job the runtime could actually run; adding a name here without an arm
 /// reintroduces exactly the skew this list exists to prevent. The seeded-asset
-/// coverage test in `mod.rs` pins the direction that broke in production —
-/// every shipped deterministic activity's action must be registered here.
+/// coverage tests in `command/job/catalog.rs` pin the direction that broke in
+/// production — every shipped deterministic activity's action must be
+/// registered here — and [ORB-10410] adds behavioral cover for the two actions
+/// the skew actually reached: `pr_failure_handoff` (the `task_pr_pipeline`
+/// terminal hook, in `command/job/exec.rs`) and `worktree_gc` (below).
 pub(super) const REGISTERED_DETERMINISTIC_ACTIONS: &[&str] = &[
     "apply_triage_dispositions",
     "context_conflict_check",
@@ -624,6 +627,46 @@ mod tests {
         let diff_task = runtime.get_task(&diff_task).expect("promoted PR task");
         assert_eq!(diff_task.status, TaskStatus::Review);
         assert_eq!(diff_task.github_pr_number(), Some("42"));
+    }
+
+    /// [ORB-10410] `worktree_gc` ships as a deterministic activity reached
+    /// through the seeded (deliberately disabled) `worktree_gc` routine, so
+    /// nothing exercised it until an operator opted in — and by then the v2
+    /// allowlist no longer carried its name. Invoking the action directly must
+    /// reach the engine's reaper and return its structured GC envelope.
+    #[test]
+    fn worktree_gc_is_dispatchable_directly_through_the_v2_host() {
+        let (_root, runtime, repo_root) =
+            super::super::test_support::runtime_with_workspace_layout();
+        let git_init = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(&repo_root)
+            .output()
+            .expect("run git init");
+        assert!(
+            git_init.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&git_init.stderr)
+        );
+
+        let output = runtime
+            .run_deterministic(
+                "worktree_gc",
+                &json!({}),
+                &json!({ "older_than_hours": 24 }),
+                ToolContext::default(),
+            )
+            .expect("worktree_gc must dispatch through the v2 host");
+
+        // This workspace has recorded no job runs, so the reaper considers no
+        // worktrees. The assertion is the envelope itself: only the real
+        // action produces it, and an unregistered name never gets this far.
+        assert_eq!(output["reports"], json!([]));
+        assert_eq!(output["bytes_reclaimed"], json!(0));
+        assert!(
+            output["dry_run"].is_boolean(),
+            "GC envelope reports its deletion mode: {output}"
+        );
     }
 
     #[test]

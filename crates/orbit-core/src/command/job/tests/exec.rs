@@ -68,13 +68,16 @@ fn seed_gate_task(runtime: &OrbitRuntime, repo_root: &Path, status: TaskStatus) 
         .id
 }
 
-fn resolved_gate_job(runtime: &OrbitRuntime) -> orbit_common::types::activity_job::JobV2 {
+fn resolved_job(
+    runtime: &OrbitRuntime,
+    job_name: &str,
+) -> orbit_common::types::activity_job::JobV2 {
     let (_path, mut job) = runtime
-        .load_v2_job_asset_by_name("task_gate_pipeline")
-        .expect("load task gate pipeline");
+        .load_v2_job_asset_by_name(job_name)
+        .unwrap_or_else(|err| panic!("load {job_name}: {err}"));
     let catalog = runtime.v2_activity_catalog().expect("activity catalog");
     resolve_job_catalog_refs_for_execution(&mut job, &catalog)
-        .expect("resolve task gate activities");
+        .unwrap_or_else(|err| panic!("resolve {job_name} activities: {err}"));
     job
 }
 
@@ -95,7 +98,25 @@ fn try_execute_gate_job(
     input: Value,
     run_id: &str,
 ) -> Result<JobOutcome, DispatchError> {
-    let job = resolved_gate_job(runtime);
+    try_execute_named_job(
+        runtime,
+        repo_root,
+        host,
+        "task_gate_pipeline",
+        input,
+        run_id,
+    )
+}
+
+fn try_execute_named_job(
+    runtime: &OrbitRuntime,
+    repo_root: &Path,
+    host: &dyn V2RuntimeHost,
+    job_name: &str,
+    input: Value,
+    run_id: &str,
+) -> Result<JobOutcome, DispatchError> {
+    let job = resolved_job(runtime, job_name);
     let writer = V2AuditWriter::with_disk_sinks(
         &runtime.paths().audit_dir,
         runtime
@@ -110,6 +131,154 @@ fn try_execute_gate_job(
     )
     .expect("audit writer");
     execute_job_with_resume(&job, input, run_id, writer, host, None)
+}
+
+const WORKTREE_FIXTURE_FAILURE: &str = "fixture: worktree setup exploded";
+
+/// Runs `task_pr_pipeline` against the real runtime dispatch table with a
+/// seeded first-step failure, recording how every deterministic action
+/// resolved so the terminal failure hook's fate is observable — the
+/// executor deliberately swallows that hook's own error.
+struct FailureHandoffHost<'a> {
+    runtime: &'a OrbitRuntime,
+    dispatches: Mutex<Vec<(String, String)>>,
+}
+
+impl FailureHandoffHost<'_> {
+    fn new(runtime: &OrbitRuntime) -> FailureHandoffHost<'_> {
+        FailureHandoffHost {
+            runtime,
+            dispatches: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn record(&self, action: &str, outcome: String) {
+        self.dispatches
+            .lock()
+            .expect("dispatch log")
+            .push((action.to_string(), outcome));
+    }
+
+    fn outcomes(&self, action: &str) -> Vec<String> {
+        self.dispatches
+            .lock()
+            .expect("dispatch log")
+            .iter()
+            .filter(|(recorded, _)| recorded == action)
+            .map(|(_, outcome)| outcome.clone())
+            .collect()
+    }
+}
+
+impl V2RuntimeHost for FailureHandoffHost<'_> {
+    fn run_deterministic(
+        &self,
+        action: &str,
+        config: &Value,
+        input: &Value,
+        tool_context: ToolContext,
+    ) -> Result<Value, DispatchError> {
+        if action == "worktree_setup" {
+            self.record(action, "seeded_failure".to_string());
+            return Err(DispatchError::DeterministicActionFailed {
+                action: action.to_string(),
+                message: WORKTREE_FIXTURE_FAILURE.to_string(),
+            });
+        }
+        let result = <OrbitRuntime as V2RuntimeHost>::run_deterministic(
+            self.runtime,
+            action,
+            config,
+            input,
+            tool_context,
+        );
+        let outcome = match &result {
+            Ok(_) => "ok".to_string(),
+            Err(DispatchError::DeterministicActionNotRegistered(name)) => {
+                format!("not_registered: {name}")
+            }
+            Err(other) => format!("dispatched: {other}"),
+        };
+        self.record(action, outcome);
+        result
+    }
+
+    fn has_deterministic_action(&self, action: &str) -> bool {
+        <OrbitRuntime as V2RuntimeHost>::has_deterministic_action(self.runtime, action)
+    }
+
+    fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {
+        <OrbitRuntime as V2RuntimeHost>::api_key_for(self.runtime, provider)
+    }
+
+    fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
+        <OrbitRuntime as V2RuntimeHost>::resolve_cli_executor(self.runtime, provider)
+    }
+
+    fn tool_context_for_activity(
+        &self,
+        run_id: Option<&str>,
+        fs_profile: Option<&str>,
+        fs_audit: Option<Arc<dyn FsAuditLogger>>,
+        proc_allowed_programs: Option<&[String]>,
+    ) -> ToolContext {
+        <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+            self.runtime,
+            run_id,
+            fs_profile,
+            fs_audit,
+            proc_allowed_programs,
+        )
+    }
+}
+
+/// [ORB-10410] `task_pr_pipeline` binds `pr_failure_handoff` as its
+/// terminal `failure_activity`, and that hook resolves through the same v2
+/// deterministic dispatch table as any ordinary step. While the allowlist
+/// omitted the name, every terminal PR-pipeline failure ran the hook as
+/// `DeterministicActionNotRegistered`: the recoverable candidate was never
+/// published, and the registry miss masked the real failure. The hook must
+/// reach its own implementation, and the original step error must stay
+/// authoritative.
+#[test]
+fn failed_pr_pipeline_dispatches_the_failure_handoff_and_keeps_the_original_error() {
+    let (_root, runtime, repo_root, global_root) = test_runtime();
+    seed_default_catalogs(&global_root);
+    let host = FailureHandoffHost::new(&runtime);
+
+    let error = try_execute_named_job(
+        &runtime,
+        &repo_root,
+        &host,
+        "task_pr_pipeline",
+        json!({
+            "task_ids": ["ORB-FAILURE-HANDOFF"],
+            "base_branch": "agent-main",
+            "base_sync": "local",
+            "review": false,
+        }),
+        "run-pr-failure-handoff",
+    )
+    .expect_err("the seeded worktree failure must terminalize the run");
+
+    assert!(
+        error.to_string().contains(WORKTREE_FIXTURE_FAILURE),
+        "the original step error stays authoritative: {error}"
+    );
+
+    let handoff = host.outcomes("pr_failure_handoff");
+    assert_eq!(
+        handoff.len(),
+        1,
+        "the terminal hook runs exactly once: {handoff:?}"
+    );
+    // The hook reached its own input validation — it failed on this run's
+    // missing `worktree` checkpoint, not on the dispatch registry guard.
+    assert!(
+        handoff[0].contains("missing pipeline.worktree checkpoint"),
+        "the handoff must execute its implementation, not be rejected as unregistered: {}",
+        handoff[0]
+    );
 }
 
 struct ReserveThenStatusHost<'a> {
