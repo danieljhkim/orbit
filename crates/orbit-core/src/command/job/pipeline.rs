@@ -316,6 +316,8 @@ impl OrbitRuntime {
     }
 
     pub fn execute_pipeline_run_worker(&self, run_id: &str) -> Result<(), OrbitError> {
+        self.preflight_pipeline_worker_store()?;
+
         // [ORB-10070] Claim the queued run for this worker process so orphan
         // reconciliation can tell a pending run whose worker is alive and
         // polling for its admission slot apart from one whose worker died
@@ -373,6 +375,18 @@ impl OrbitRuntime {
 
             return self.execute_pipeline_run_now(&run, &yaml_path);
         }
+    }
+
+    /// Reopen the shared SQLite store before the worker claims a run.
+    ///
+    /// ADR-0287: another Orbit process may advance the host-global database
+    /// while this runtime remains alive. Reopening here applies migrations
+    /// supported by this binary or trips the downgrade guard before any agent
+    /// work. Invocation persistence still reopens independently, but it can no
+    /// longer be the first compatibility check after useful work completes.
+    pub(crate) fn preflight_pipeline_worker_store(&self) -> Result<(), OrbitError> {
+        drop(self.sqlite_store()?);
+        Ok(())
     }
 
     pub fn normalize_pipeline_wait_timeout(raw: Option<u64>) -> Result<u64, OrbitError> {

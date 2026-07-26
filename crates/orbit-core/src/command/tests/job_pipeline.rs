@@ -3,7 +3,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use chrono::Utc;
-use orbit_common::types::{AuditEventStatus, JobRunState};
+use orbit_common::types::{AuditEventStatus, JobRunState, OrbitError};
+use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
 use tempfile::TempDir;
 
 use crate::OrbitRuntime;
@@ -156,6 +157,80 @@ fn worker_exit_before_claim_terminalizes_persisted_run_with_diagnostic() {
                 .as_deref()
                 .is_some_and(|error| error.contains("before claiming"))
     }));
+}
+
+#[test]
+fn long_lived_worker_reopens_and_applies_compatible_pending_schema() {
+    let (_root, runtime) = test_runtime();
+    let store = runtime.sqlite_store().expect("open store fixture");
+    {
+        let connection = store.connection();
+        let conn = connection.lock().expect("store connection");
+        conn.execute("DELETE FROM schema_meta WHERE key = 'migration.v0011'", [])
+            .expect("rewind routine migration ledger");
+        conn.execute_batch(
+            "DROP TABLE routine_pauses;
+             DROP TABLE routine_fires;
+             DROP TABLE routine_cursors;",
+        )
+        .expect("rewind routine schema");
+    }
+
+    runtime
+        .preflight_pipeline_worker_store()
+        .expect("compatible worker preflight");
+
+    assert_eq!(
+        store.schema_version().expect("schema after preflight"),
+        SUPPORTED_SCHEMA_VERSION
+    );
+    let connection = store.connection();
+    let conn = connection.lock().expect("store connection");
+    let routine_tables: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name IN (
+                 'routine_cursors', 'routine_fires', 'routine_pauses'
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count routine tables");
+    assert_eq!(routine_tables, 3);
+}
+
+#[test]
+fn newer_schema_fails_before_worker_claims_or_executes() {
+    let (_root, runtime) = test_runtime();
+    let run = runtime
+        .stores()
+        .jobs()
+        .insert_job_run("task_gate_pipeline", 1, Utc::now(), None, None)
+        .expect("insert pending run");
+    let store = runtime.sqlite_store().expect("open store fixture");
+    {
+        let connection = store.connection();
+        let conn = connection.lock().expect("store connection");
+        conn.execute(
+            "INSERT INTO schema_meta(key, value, updated_at)
+             VALUES (?1, 'future_schema', '2099-01-01T00:00:00Z')",
+            [format!(
+                "migration.v{:04}",
+                SUPPORTED_SCHEMA_VERSION.saturating_add(1)
+            )],
+        )
+        .expect("advance store beyond worker");
+    }
+
+    let error = runtime
+        .execute_pipeline_run_worker(&run.run_id)
+        .expect_err("newer schema must fail worker preflight");
+    assert!(matches!(error, OrbitError::Migration(_)), "{error:?}");
+
+    let stored = runtime.show_job_run(&run.run_id).expect("show pending run");
+    assert_eq!(stored.state, JobRunState::Pending);
+    assert_eq!(stored.pid, None);
+    assert!(stored.steps.is_empty());
 }
 
 #[test]

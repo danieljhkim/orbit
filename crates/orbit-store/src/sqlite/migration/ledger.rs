@@ -86,12 +86,19 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "invocation_telemetry_columns",
         apply: super::apply_invocation_telemetry_columns,
     },
+    // ADR-0287: baseline v1 is frozen; schema added later always advances
+    // through an append-only ledger entry.
+    Migration {
+        version: 11,
+        name: "routine_scheduler_schema",
+        apply: super::apply_routine_scheduler_schema,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 10;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 11;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 
