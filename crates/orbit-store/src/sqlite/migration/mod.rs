@@ -88,6 +88,9 @@ pub fn pending_schema_migrations_after(current_version: u32) -> Vec<PendingSchem
 /// run on both a fresh database and any legacy database created by the
 /// pre-versioning migration code, which is how existing databases adopt
 /// the versioned ledger.
+///
+/// ADR-0287: this shipped structure is immutable. Later schema belongs in a
+/// new migration so databases that already recorded v1 receive it too.
 fn apply_baseline_schema(conn: &Connection) -> Result<(), OrbitError> {
     conn.execute_batch(
         r#"
@@ -174,10 +177,8 @@ fn apply_baseline_schema(conn: &Connection) -> Result<(), OrbitError> {
                 input_tokens INTEGER NOT NULL DEFAULT 0,
                 cache_read_tokens INTEGER NOT NULL DEFAULT 0,
                 cache_create_tokens INTEGER NOT NULL DEFAULT 0,
-                cache_create_1h_tokens INTEGER NOT NULL DEFAULT 0,
                 output_tokens INTEGER NOT NULL DEFAULT 0,
-                tool_call_count INTEGER NOT NULL DEFAULT 0,
-                provider_cost_usd REAL
+                tool_call_count INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS invocation_tasks (
@@ -234,9 +235,8 @@ fn apply_baseline_schema(conn: &Connection) -> Result<(), OrbitError> {
     ensure_audit_events_schema(conn)?;
     ensure_task_reservations_schema(conn)?;
     ensure_learning_index_schema(conn)?;
-    ensure_invocation_schema(conn)?;
+    ensure_invocation_schema_v1(conn)?;
     ensure_v2_state_consolidation_schema(conn)?;
-    ensure_routine_schema(conn)?;
 
     Ok(())
 }
@@ -608,11 +608,6 @@ fn apply_invocation_telemetry_columns(conn: &Connection) -> Result<(), OrbitErro
     {
         return Ok(());
     }
-    ensure_invocation_schema(conn)
-}
-
-fn ensure_invocation_schema(conn: &Connection) -> Result<(), OrbitError> {
-    add_column_if_missing(conn, "ALTER TABLE invocations ADD COLUMN slot TEXT")?;
     add_column_if_missing(
         conn,
         "ALTER TABLE invocations ADD COLUMN provider_cost_usd REAL",
@@ -621,6 +616,11 @@ fn ensure_invocation_schema(conn: &Connection) -> Result<(), OrbitError> {
         conn,
         "ALTER TABLE invocations ADD COLUMN cache_create_1h_tokens INTEGER NOT NULL DEFAULT 0",
     )?;
+    ensure_invocation_schema_v1(conn)
+}
+
+fn ensure_invocation_schema_v1(conn: &Connection) -> Result<(), OrbitError> {
+    add_column_if_missing(conn, "ALTER TABLE invocations ADD COLUMN slot TEXT")?;
     conn.execute_batch(
         r#"
             CREATE INDEX IF NOT EXISTS idx_invocations_job_run_id
@@ -684,12 +684,10 @@ fn ensure_v2_state_consolidation_schema(conn: &Connection) -> Result<(), OrbitEr
                 retry_source_run_id TEXT,
                 knowledge_metrics_json TEXT,
                 resolved_crew TEXT,
-                crew_model TEXT,
                 planner_model TEXT,
                 implementer_model TEXT,
                 reviewer_model TEXT,
                 pipeline_state_json TEXT,
-                archived_at TEXT,
                 PRIMARY KEY(workspace_id, run_id)
             );
 
@@ -748,6 +746,14 @@ fn apply_flat_crew_model(conn: &Connection) -> Result<(), OrbitError> {
 
 fn apply_job_run_archive_stage(conn: &Connection) -> Result<(), OrbitError> {
     add_column_if_missing(conn, "ALTER TABLE job_runs ADD COLUMN archived_at TEXT")
+}
+
+/// v11 `routine_scheduler_schema` migration (ORB-10462): routine tables were
+/// added only to the mutable v1 baseline after the ledger shipped. Register
+/// the idempotent schema step so existing databases receive the same tables
+/// as fresh databases before the baseline is frozen by ADR-0287.
+fn apply_routine_scheduler_schema(conn: &Connection) -> Result<(), OrbitError> {
+    ensure_routine_schema(conn)
 }
 
 /// v5 `host_registry_core` migration (ORB-10255): durable machine identity,
