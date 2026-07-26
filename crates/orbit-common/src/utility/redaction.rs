@@ -163,6 +163,21 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
             payload: redact_sensitive_env_json(payload),
         },
         OrbitError::Execution(m) => OrbitError::Execution(redact_sensitive_env_text(&m)),
+        OrbitError::RunCancellationIncomplete {
+            pid,
+            pgid,
+            term_sent,
+            kill_sent,
+            leader_alive,
+            group_alive,
+        } => OrbitError::RunCancellationIncomplete {
+            pid,
+            pgid,
+            term_sent,
+            kill_sent,
+            leader_alive,
+            group_alive,
+        },
         OrbitError::Store(m) => OrbitError::Store(redact_sensitive_env_text(&m)),
         OrbitError::TaskStatusTransition(m) => {
             OrbitError::TaskStatusTransition(redact_sensitive_env_text(&m))
@@ -251,6 +266,21 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
             payload: redact_json_with(payload, redact_all),
         },
         OrbitError::Execution(m) => OrbitError::Execution(redact_all(&m)),
+        OrbitError::RunCancellationIncomplete {
+            pid,
+            pgid,
+            term_sent,
+            kill_sent,
+            leader_alive,
+            group_alive,
+        } => OrbitError::RunCancellationIncomplete {
+            pid,
+            pgid,
+            term_sent,
+            kill_sent,
+            leader_alive,
+            group_alive,
+        },
         OrbitError::Store(m) => OrbitError::Store(redact_all(&m)),
         OrbitError::TaskStatusTransition(m) => OrbitError::TaskStatusTransition(redact_all(&m)),
         OrbitError::JobRunStateTransition(m) => OrbitError::JobRunStateTransition(redact_all(&m)),
