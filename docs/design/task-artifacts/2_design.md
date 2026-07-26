@@ -3,7 +3,7 @@ summary: "Task Artifacts — Design"
 type: design
 title: "Task Artifacts — Design"
 owner: codex
-last_updated: 2026-05-17
+last_updated: 2026-07-26
 status: Draft
 feature: task-artifacts
 doc_role: design
@@ -33,9 +33,6 @@ The v2 task bundle is status-neutral. The canonical bundle lives in the user's l
         execution-summary.md
         events.jsonl
         comments.jsonl
-        review-threads/
-          RT-0001.yaml
-          RT-0001.md
         artifacts/
           manifest.yaml
           files/
@@ -119,11 +116,9 @@ APIs should treat the Markdown file as the source of truth. They may offer parse
 {"schema_version":1,"comment_id":"C-0001","at":"2026-05-11T00:00:00Z","by":"daniel","body":"Start over from the schema reset."}
 ```
 
-Review threads get one metadata envelope and one Markdown body per thread. This keeps thread state structured while making review prose easy to read and diff.
+JSONL appends use a single-line JSON record, append mode, flush, and file sync before success. Readers tolerate a final unterminated or invalid line as tail corruption: valid preceding rows remain readable, and repair may truncate only the corrupt tail. Sidecar rewrites use write-temp-in-same-directory, file sync, atomic rename, and parent-directory sync.
 
-JSONL appends use a single-line JSON record, append mode, flush, and file sync before success. Readers tolerate a final unterminated or invalid line as tail corruption: valid preceding rows remain readable, and repair may truncate only the corrupt tail. Sidecar rewrites and review-thread YAML updates use write-temp-in-same-directory, file sync, atomic rename, and parent-directory sync.
-
-V2 does not provide cross-file transactions. A crash can leave an appended event before the envelope status update, artifact files before the manifest update, or updated review-thread files before stale thread files are removed. The store must keep every intermediate state readable and recoverable, but generated repair/indexing passes are responsible for reconciling partial multi-file mutations.
+V2 does not provide cross-file transactions for later mutations. A crash can leave an appended event before the envelope status update or artifact files before the manifest update. New-bundle creation is stricter: Orbit assembles and validates the entire bundle in a sibling staging directory, fsyncs it, and atomically renames the directory into its canonical path. A failed or interrupted create therefore leaves the final task path absent rather than exposing a partial bundle.
 
 ## 5. Artifact Manifest
 
@@ -195,8 +190,9 @@ The v2 bundle is local and file-backed, so multi-file mutations are not fully tr
 - Document updates may write Markdown sidecars before `task.yaml`; readers return the sidecar content and the previous envelope metadata until the next successful mutation.
 - History updates may append `events.jsonl` before `task.yaml`; readers reject bundles when the last status event does not match the envelope status.
 - Artifact updates may write files before `manifest.yaml`; unreferenced files under `artifacts/files/` are ignored, while manifest entries with missing files, size drift, or hash drift are corruption and fail loudly.
-- Review-thread rewrites tombstone removed thread IDs before pruning files, so a crash before prune does not resurrect deleted threads.
 - Generated index writes may fail after the envelope changes; `updated_at` validation detects the stale row and rebuilds from bundles before indexed reads.
+
+Malformed registered bundles produce a typed `task_bundle_corrupt` diagnostic naming the affected task and canonical path. Direct reads and task creation do not scan unrelated bundles, while list and search retain their fail-loud behavior. Diagnosis never deletes, moves, or repairs the malformed directory; operators can inspect or quarantine it explicitly. Legacy `review-threads/` sidecars were retired in [ORB-10332], so either their presence or absence is ignored non-destructively.
 
 Task lock reservations in v2 mode require `.orbit/config.yaml` to provide the workspace binding. If that file disappears while a runtime is active, lock writes fail instead of silently creating legacy `NULL`-workspace reservations.
 
@@ -243,12 +239,11 @@ The public task API should expose the v2 bundle model directly:
 - envelope metadata from `task.yaml`;
 - Markdown documents by document name (`description`, `acceptance`, `plan`, `execution-summary`);
 - append-only streams for events and comments;
-- review-thread metadata plus Markdown message bodies;
 - artifact manifest entries.
 
-CLI and tool selectors may keep friendly names such as `description`, `plan`, and `execution-summary`, but they should be implemented as first-class document reads and writes. New internal code should operate on a bundle abstraction with explicit envelope, document, log, thread, and artifact fields.
+CLI and tool selectors may keep friendly names such as `description`, `plan`, and `execution-summary`, but they should be implemented as first-class document reads and writes. New internal code should operate on a bundle abstraction with explicit envelope, document, log, and artifact fields.
 
-The public `Task` DTO should not embed legacy relation fields (`parent_id`, `dependencies`, `source_task_id`), local workspace bindings (`workspace_path`, `repo_root`), append-heavy streams (`comments`, `history`, `review_threads`), or internal execution-routing fields (`agent`, `model`). It carries typed `relations`, `job_run_id`, envelope metadata, and durable attribution fields. Consumers that need comments, history, review threads, or workspace binding metadata should call the dedicated bundle/registry APIs.
+The public `Task` DTO should not embed legacy relation fields (`parent_id`, `dependencies`, `source_task_id`), local workspace bindings (`workspace_path`, `repo_root`), append-heavy streams (`comments`, `history`), or internal execution-routing fields (`agent`, `model`). It carries typed `relations`, `job_run_id`, envelope metadata, and durable attribution fields. Consumers that need comments, history, or workspace binding metadata should call the dedicated bundle/registry APIs.
 
 `orbit.task.locks.*` remains a local operational surface, not a task artifact. Lock reservations live in SQLite keyed by workspace binding and canonical `ORB-*` task IDs, and expire by TTL.
 
@@ -264,13 +259,12 @@ Lexical and semantic search should index each logical field independently:
 - `plan`
 - `execution_summary`
 - `comments`
-- `review_threads` (message bodies, message authors, and paths)
 - `external_refs` (system and id)
 - artifact paths plus selected artifact text, when media type permits
 
 This preserves field-aware semantic search while making file boundaries visible in snippets. The embedding index should store field names that match the v2 logical document names; `execution-summary.md` is exposed as `execution_summary` to match the tool/API field.
 
-The current Phase 5 implementation is intentionally asymmetric while indexes are still being wired. Lexical search scans the broader set above. Semantic search indexes task title, description, acceptance, plan, and execution summary; semantic parity for comments, review messages and paths/authors, external refs, and artifacts remains Phase 5 follow-up work.
+The current Phase 5 implementation is intentionally asymmetric while indexes are still being wired. Lexical search scans the broader set above. Semantic search indexes task title, description, acceptance, plan, and execution summary; semantic parity for comments, external refs, and artifacts remains Phase 5 follow-up work.
 
 Until generated full-text indexes land, the working implementation performs O(N x files-per-task) lexical scans by reading every registered bundle and any candidate text artifact files. That is acceptable only as a cutover bridge; generated search rows will replace the per-query artifact reads.
 
@@ -294,7 +288,7 @@ The reset should be a one-time cutover rather than a long-lived compatibility la
 8. Keep existing `plan.md` and `execution-summary.md`.
 9. Move `history` into `events.jsonl`.
 10. Move `comments` into `comments.jsonl`.
-11. Move `review_threads` into `review-threads/`.
+11. Leave any legacy review-thread sidecars outside the active v2 model.
 12. Rewrite `task.yaml` as the v2 envelope without old IDs or embedded prose.
 13. Rewrite task-lock reservations from old IDs to canonical IDs or release stale reservations with an audit event.
 14. Rebuild task tag, semantic, status, terminal-month, and relation indexes from disk.
@@ -321,6 +315,8 @@ Binary artifacts increase storage flexibility and require stronger validation. C
 
 ## Task References
 
+- [ORB-10332] — Retired the unused review-thread task surface and made legacy sidecars inert.
+- [ORB-10466] — Made new-bundle publication atomic and isolated unrelated operations from malformed bundles.
 - [T20260505-12] — Designed git-orphan-branch task sync and documented the current sync-era task bundle assumptions.
 - [T20260506-11] — Removed knowledge-graph task attribution and documented why old task IDs were only local search keys.
 

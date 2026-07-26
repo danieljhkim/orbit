@@ -40,6 +40,13 @@ pub fn error_payload(error: &OrbitError) -> Value {
     {
         object.insert("artifact_origin".to_string(), json!(artifact_origin));
     }
+    if let Some((task_id, path, reason)) = error.task_bundle_corruption()
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert("task_id".to_string(), json!(task_id));
+        object.insert("path".to_string(), json!(path));
+        object.insert("reason".to_string(), json!(reason));
+    }
     payload
 }
 
@@ -72,6 +79,7 @@ fn error_code(error: &OrbitError) -> &str {
         OrbitError::OutcomeUnknown { .. } => "outcome_unknown",
         OrbitError::RemoteTool { code, .. } => code.as_str(),
         OrbitError::Execution(_) => "execution_failed",
+        OrbitError::TaskBundleCorrupt { .. } => "task_bundle_corrupt",
         OrbitError::Store(_) => "store_error",
         OrbitError::TaskStatusTransition(_) => "task_status_transition",
         OrbitError::JobRunStateTransition(_) => "job_run_state_transition",

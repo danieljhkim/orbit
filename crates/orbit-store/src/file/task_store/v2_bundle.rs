@@ -21,8 +21,8 @@ pub(crate) mod lock;
 pub(crate) mod task_bundle_types;
 
 pub(crate) use bundle_io::{
-    append_jsonl_row, cleanup_partial_bundle_best_effort, copy_artifact_blobs, read_bundle_at,
-    write_bundle_at,
+    append_jsonl_row, cleanup_partial_bundle_best_effort, read_bundle_at, write_bundle_at,
+    write_bundle_with_artifacts_at,
 };
 pub(crate) use lock::{
     ensure_projection_entry_removable, remove_projection_entry, remove_task_bundle_lock_sentinel,

@@ -178,6 +178,15 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
             leader_alive,
             group_alive,
         },
+        OrbitError::TaskBundleCorrupt {
+            task_id,
+            path,
+            reason,
+        } => OrbitError::TaskBundleCorrupt {
+            task_id: redact_sensitive_env_text(&task_id),
+            path: redact_sensitive_env_text(&path),
+            reason: redact_sensitive_env_text(&reason),
+        },
         OrbitError::Store(m) => OrbitError::Store(redact_sensitive_env_text(&m)),
         OrbitError::TaskStatusTransition(m) => {
             OrbitError::TaskStatusTransition(redact_sensitive_env_text(&m))
@@ -280,6 +289,15 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
             kill_sent,
             leader_alive,
             group_alive,
+        },
+        OrbitError::TaskBundleCorrupt {
+            task_id,
+            path,
+            reason,
+        } => OrbitError::TaskBundleCorrupt {
+            task_id: redact_all(&task_id),
+            path: redact_all(&path),
+            reason: redact_all(&reason),
         },
         OrbitError::Store(m) => OrbitError::Store(redact_all(&m)),
         OrbitError::TaskStatusTransition(m) => OrbitError::TaskStatusTransition(redact_all(&m)),

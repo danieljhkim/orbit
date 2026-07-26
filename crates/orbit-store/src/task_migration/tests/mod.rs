@@ -653,7 +653,7 @@ fn round_trip_preserves_artifact_blobs() {
 /// module docs stays honest.
 #[test]
 fn backfill_via_copy_artifact_blobs_restores_stranded_bundle() {
-    use crate::file::task_store::v2_bundle::copy_artifact_blobs;
+    use crate::file::task_store::v2_bundle::bundle_io::copy_artifact_blobs;
 
     let src = TempDir::new().unwrap();
     let dst = TempDir::new().unwrap();
