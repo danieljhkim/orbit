@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderValue, Method, Request, StatusCode, header};
+use axum::response::Response;
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::TaskArtifact;
 use orbit_common::types::task_artifacts::{TaskRelation, TaskRelationType};
@@ -1413,5 +1414,144 @@ async fn create_task_rejects_invalid_relation_target() {
             .as_str()
             .is_some_and(|m| m.contains("not-a-task-id")),
         "error must carry Orbit's validation text: {body}"
+    );
+}
+
+/// A runtime whose ambient actor is an *agent* — what the dashboard server
+/// process looks like when it runs inside a managed Orbit run.
+///
+/// The agent-identity env is cleared first so the injected actor is the only
+/// agent identity in play however the suite was launched (ORB-10350), then set
+/// deterministically. The comment write path is asserted against this runtime
+/// because it is the case that used to leak a model constant into `by`.
+fn runtime_with_ambient_agent_identity() -> OrbitRuntime {
+    let _env =
+        orbit_common::test_env::unset(orbit_common::test_env::AGENT_IDENTITY_ENV.iter().copied());
+    OrbitRuntime::in_memory()
+        .expect("build runtime")
+        .with_actor(orbit_core::ActorIdentity::agent("ambient-server-model"))
+}
+
+async fn post_task_comment(runtime: OrbitRuntime, task_id: &str, body: Value) -> Response {
+    router()
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(post_json(&format!("/tasks/{task_id}/comments"), body))
+        .await
+        .expect("response")
+}
+
+/// ORB-10444: a human can comment on a task from the dashboard, and the comment
+/// survives the request — it is read back from the task's own review-thread
+/// structure (the bundle's comments store), not from a new field on the task
+/// record, so a page reload shows it.
+#[tokio::test]
+async fn task_comment_endpoint_persists_into_the_review_thread_structure() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let task = seed_backlog_task(&runtime, "commentable task");
+
+    let response = post_task_comment(
+        runtime.clone(),
+        &task.id,
+        json!({ "message": "  needs a smaller first commit  " }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(
+        body["comments"][0]["message"].as_str(),
+        Some("needs a smaller first commit"),
+        "the response must echo the stored comment: {body}"
+    );
+
+    // Durable across the request: re-read from the task's comment store, which
+    // is what a subsequent page load renders from.
+    let stored = runtime.get_task_comments(&task.id).expect("task comments");
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].message, "needs a smaller first commit");
+    assert!(
+        runtime
+            .get_task(&task.id)
+            .expect("task")
+            .description
+            .contains("Fixture task"),
+        "commenting must not disturb the task record itself"
+    );
+}
+
+/// ORB-10444: the recorded author is a human identity even when the server
+/// process's ambient actor is an agent model. This is the regression the write
+/// path exists to prevent — an operator's note attributed to a model constant.
+#[tokio::test]
+async fn task_comment_author_is_human_not_the_ambient_model() {
+    let runtime = runtime_with_ambient_agent_identity();
+    let task = seed_backlog_task(&runtime, "ambient identity task");
+
+    let response =
+        post_task_comment(runtime.clone(), &task.id, json!({ "message": "ship it" })).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let stored = runtime.get_task_comments(&task.id).expect("task comments");
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].by, "human");
+    assert_ne!(stored[0].by, "ambient-server-model");
+}
+
+/// A caller-supplied author is honored only when it is a human identity: an
+/// agent family or a model constant collapses back to the human label rather
+/// than being recorded as the comment's author.
+#[tokio::test]
+async fn task_comment_author_rejects_model_constants_but_keeps_human_names() {
+    let runtime = runtime_with_ambient_agent_identity();
+
+    for author in [
+        "claude",
+        "codex",
+        TEST_CODEX_MODEL,
+        "claude-opus-4",
+        "system",
+    ] {
+        let task = seed_backlog_task(&runtime, "authored comment");
+        let response = post_task_comment(
+            runtime.clone(),
+            &task.id,
+            json!({ "message": "note", "author": author }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let stored = runtime.get_task_comments(&task.id).expect("task comments");
+        assert_eq!(
+            stored[0].by, "human",
+            "`{author}` is a model/agent identity and must not author a comment"
+        );
+    }
+
+    let task = seed_backlog_task(&runtime, "operator comment");
+    let response = post_task_comment(
+        runtime.clone(),
+        &task.id,
+        json!({ "message": "note", "author": "operator" }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let stored = runtime.get_task_comments(&task.id).expect("task comments");
+    assert_eq!(stored[0].by, "operator");
+}
+
+/// An empty (or whitespace-only) comment is a clean 400 rather than an empty
+/// row in the thread.
+#[tokio::test]
+async fn task_comment_endpoint_rejects_blank_messages() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let task = seed_backlog_task(&runtime, "blank comment task");
+
+    let response = post_task_comment(runtime.clone(), &task.id, json!({ "message": "   " })).await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(
+        runtime
+            .get_task_comments(&task.id)
+            .expect("task comments")
+            .is_empty()
     );
 }

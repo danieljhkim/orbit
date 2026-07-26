@@ -390,10 +390,11 @@ fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
             "router subtab switch must render the {body} placeholder in aggregate mode"
         );
     }
+    // ORB-10444 added the scoreboard subtab, so there are three re-render sites.
     assert_eq!(
         router.matches("if (isAggregateView())").count(),
-        2,
-        "both subtab re-render sites in router.js must be guarded"
+        3,
+        "every subtab re-render site in router.js must be guarded"
     );
 
     // Knowledge detail panels: each list guard also replaces its detail panel
@@ -432,6 +433,269 @@ fn dashboard_recent_history_filters_before_limiting() {
         filter_at < slice_at,
         "the `commented`-stub filter must run before the recent-history slice"
     );
+}
+
+/// ORB-10444: the top-level nav is exactly Tasks, Audit, Diagnostics, Knowledge.
+/// A deprecated tab was retired outright — nav entry, route and pane — and
+/// Scoreboard, being a diagnostics-shaped view, moved under Diagnostics. A route
+/// left behind in `TABS` would resolve to a pane that no longer exists, so the
+/// router's tab list is asserted alongside the markup.
+#[tokio::test]
+async fn dashboard_top_level_nav_is_the_four_operator_tabs() {
+    let body = response_body(serve_index().await).await;
+    let router = include_str!("../../assets/dashboard/router.js");
+
+    let nav: Vec<&str> = body
+        .match_indices(r#"<button class="tab" data-tab=""#)
+        .map(|(index, needle)| {
+            let rest = &body[index + needle.len()..];
+            match rest.find('"') {
+                Some(end) => &rest[..end],
+                None => panic!("unterminated data-tab attribute in the nav"),
+            }
+        })
+        .collect();
+    assert_eq!(nav, vec!["tasks", "audit", "diagnostics", "knowledge"]);
+
+    assert!(
+        router.contains(
+            r#"const TABS = ["tasks", "audit", "diagnostics", "knowledge", "run-detail"];"#
+        ),
+        "the router's tab list must match the nav (plus the hash-only run-detail route)"
+    );
+    // Every routable tab must still have a pane to render into.
+    for tab in ["tasks", "audit", "diagnostics", "knowledge", "run-detail"] {
+        assert!(
+            body.contains(&format!(r#"<section class="tab-pane" data-tab="{tab}">"#)),
+            "routable tab `{tab}` must have a pane"
+        );
+    }
+    assert!(
+        !body.contains(r#"data-tab="scoreboard""#),
+        "Scoreboard must no longer be a top-level tab or pane"
+    );
+}
+
+/// ORB-10444: Scoreboard content stays reachable after the move — as a
+/// Diagnostics subtab whose markup (and therefore every id `scoreboard.js`
+/// renders into, so the scoreboard API contract is untouched) lives inside the
+/// diagnostics pane.
+#[tokio::test]
+async fn dashboard_scoreboard_is_reachable_under_diagnostics() {
+    let body = response_body(serve_index().await).await;
+    let router = include_str!("../../assets/dashboard/router.js");
+    let app = include_str!("../../assets/dashboard/app.js");
+
+    let diagnostics_at = body
+        .find(r#"<section class="tab-pane" data-tab="diagnostics">"#)
+        .expect("diagnostics pane");
+    let scoreboard_at = body
+        .find(r#"id="diagnostics-scoreboard-main""#)
+        .expect("scoreboard host inside diagnostics");
+    assert!(
+        diagnostics_at < scoreboard_at,
+        "the scoreboard markup must live inside the diagnostics pane"
+    );
+    assert!(
+        body.contains(r#"<button class="subtab" data-subtab="scoreboard" type="button">"#),
+        "Scoreboard must be offered as a diagnostics subtab"
+    );
+    // The panels scoreboard.js renders into came across unchanged.
+    for id in [
+        "scoreboard-body",
+        "scoreboard-count",
+        "scoreboard-window-selector",
+        "scoreboard-narrative",
+        "scoreboard-agent-strip",
+        "scoreboard-duel-matrix-host",
+        "scoreboard-insights",
+    ] {
+        assert!(body.contains(&format!(r#"id="{id}""#)), "{id} must survive");
+    }
+    assert!(
+        router.contains(r#"const DIAG_SUBTABS = ["runs", "metrics", "errors", "scoreboard"];"#),
+        "the scoreboard must route as a diagnostics subtab"
+    );
+    assert!(
+        app.contains(r#"if (activeDiagSubtab === "scoreboard")"#)
+            && app.contains(r#"fetchJson("/api/scoreboard?window=24h")"#),
+        "the scoreboard fetch must hang off the diagnostics subtab branch"
+    );
+}
+
+/// ORB-10444: the Knowledge artifact list is long enough to scroll the detail
+/// pane out of view mid-read. The pane is pinned below the fixed chrome and
+/// bounded to the remaining viewport so its body scrolls internally rather than
+/// being clipped when the detail is taller than the screen.
+#[test]
+fn dashboard_knowledge_detail_pane_is_sticky_and_internally_scrollable() {
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    let sticky_at = css
+        .find(
+            "#learning-detail-panel,\n      #adr-detail-panel,\n      #friction-detail-panel {\n        position: sticky;",
+        )
+        .expect("the knowledge detail panels must be sticky");
+    assert!(
+        css[sticky_at..].starts_with(
+            "#learning-detail-panel,\n      #adr-detail-panel,\n      #friction-detail-panel {\n        position: sticky;\n        top: 170px;\n        align-self: start;\n        max-height: calc(100vh - 194px);",
+        ),
+        "the pane must pin below the chrome and stay inside the viewport"
+    );
+    assert!(
+        css.contains(
+            "#learning-detail-panel > .body,\n      #adr-detail-panel > .body,\n      #friction-detail-panel > .body {\n        overflow-y: auto;",
+        ),
+        "detail content taller than the pane must scroll inside it, not be clipped"
+    );
+    assert!(
+        !css.contains("min-height: calc(100vh - 360px)"),
+        "the old fixed min-height fought the bounded sticky pane and must be gone"
+    );
+    // The single-column breakpoint stacks the pane under the list, where
+    // pinning would only shrink it — the override must come after the sticky
+    // rule so it wins the equal-specificity tie.
+    let unpin_at = css
+        .find("          position: static;\n          max-height: none;")
+        .expect("the narrow-viewport override must exist");
+    assert!(sticky_at < unpin_at);
+}
+
+/// ORB-10444: the Tasks tab's two write actions. Ship is one click — the
+/// dispatch carries the task id alone, so the pipeline resolves the crew from
+/// the task and the mode from the workspace — and comments post to the
+/// task's review-thread endpoint rather than patching the task record.
+#[test]
+fn dashboard_task_write_actions_are_configuration_free() {
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+
+    assert!(
+        tasks.contains(r#"const SHIP_STATUSES = new Set(["backlog"]);"#),
+        "Ship must be offered only on backlog tasks"
+    );
+    assert!(
+        tasks.contains(r#"postJson("/api/workflows/ship", { task_ids: [task.id] })"#),
+        "Ship must dispatch the task id with no crew or mode override"
+    );
+    assert!(
+        tasks.contains("taskActionNotice = `${task.id}: ship run ${runId} ${state}`"),
+        "the resulting run must be surfaced to the operator"
+    );
+    assert!(
+        tasks.contains(r#"text: `ship failed: ${error.message || String(error)}`"#),
+        "a failed dispatch must surface the server error, not silently no-op"
+    );
+    // A second click must not launch a duplicate run: the guard is taken before
+    // the request and released only when the dispatch failed.
+    assert!(
+        tasks.contains("if (shipInFlightTaskIds.has(task.id)) return;")
+            && tasks.contains("shipInFlightTaskIds.add(task.id);"),
+        "Ship must guard against a duplicate dispatch from the UI side"
+    );
+    assert_eq!(
+        tasks
+            .matches("shipInFlightTaskIds.delete(task.id);")
+            .count(),
+        1,
+        "the in-flight guard may be released on the failure path only"
+    );
+
+    assert!(
+        tasks.contains(
+            r#"postJson(`/api/tasks/${encodeURIComponent(task.id)}/comments`, { message })"#
+        ),
+        "comments must post to the task's review-thread endpoint"
+    );
+    assert!(
+        !tasks.contains("author:"),
+        "the dashboard must not name the comment author; the server records the human identity"
+    );
+}
+
+/// ORB-10444: dashboard assets are a shipped, project-agnostic surface. A
+/// personal name, an Orbit/knowledge id, or a checkout path baked into them
+/// would ship to every install, so the served assets carry none.
+#[test]
+fn dashboard_assets_carry_no_project_specific_identifiers() {
+    let assets = [
+        (
+            "index.html",
+            include_str!("../../assets/dashboard/index.html"),
+        ),
+        (
+            "dashboard.css",
+            include_str!("../../assets/dashboard/dashboard.css"),
+        ),
+        ("app.js", include_str!("../../assets/dashboard/app.js")),
+        (
+            "common.js",
+            include_str!("../../assets/dashboard/common.js"),
+        ),
+        (
+            "markdown.js",
+            include_str!("../../assets/dashboard/markdown.js"),
+        ),
+        ("tasks.js", include_str!("../../assets/dashboard/tasks.js")),
+        ("audit.js", include_str!("../../assets/dashboard/audit.js")),
+        (
+            "scoreboard.js",
+            include_str!("../../assets/dashboard/scoreboard.js"),
+        ),
+        (
+            "log-tail.js",
+            include_str!("../../assets/dashboard/log-tail.js"),
+        ),
+        (
+            "diagnostics.js",
+            include_str!("../../assets/dashboard/diagnostics.js"),
+        ),
+        (
+            "router.js",
+            include_str!("../../assets/dashboard/router.js"),
+        ),
+        ("runs.js", include_str!("../../assets/dashboard/runs.js")),
+        (
+            "run-detail.js",
+            include_str!("../../assets/dashboard/run-detail.js"),
+        ),
+    ];
+    // Personal names and layout paths of the machine Orbit is developed on, plus
+    // the workspace names it registers. `orbit`/`ORB-` themselves are the
+    // product's own vocabulary and are not project-specific.
+    let banned = [
+        "daniel",
+        "/home/",
+        "constellation",
+        "knowledgebase",
+        "polaris",
+        "almanac",
+        "dk-server",
+        "sextant",
+        "agentbase",
+    ];
+
+    for (name, source) in assets {
+        let lowered = source.to_lowercase();
+        for needle in banned {
+            assert!(
+                !lowered.contains(needle),
+                "{name} must not name `{needle}` — dashboard assets ship to every install"
+            );
+        }
+        for (line_index, line) in source.lines().enumerate() {
+            // Knowledge-artifact ids (L-0021, ADR-0001, F2026-07-015) name
+            // records that exist only in the authoring workspace. Task ids are
+            // the exception: they are the repo's own change provenance and are
+            // cited in comments across the codebase.
+            for prefix in ["L-", "ADR-", "F20"] {
+                assert!(
+                    !line.contains(prefix),
+                    "{name}:{} references a knowledge id (`{prefix}…`): {line}",
+                    line_index + 1
+                );
+            }
+        }
+    }
 }
 
 async fn response_body(response: Response) -> String {

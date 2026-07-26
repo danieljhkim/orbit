@@ -3,7 +3,7 @@ summary: "User Interface — Design"
 type: design
 title: "User Interface — Design"
 owner: gemini
-last_updated: 2026-05-18
+last_updated: 2026-07-26
 status: Draft
 feature: user-interface
 doc_role: design
@@ -42,7 +42,21 @@ Diagnostics no longer has a Friction sub-tab after [ORB-00060]. The Friction nam
 
 Knowledge is now a top-level dashboard tab after [ORB-00061]. Its first sub-tab, Learnings, mirrors the dense task-list pattern: a left scan table backed by `/api/learnings`, a right detail panel backed by the same learning JSON shape as CLI/MCP output, and compact stats tiles for `total`, `superseded`, and `last indexed`. Supersession stays an explicit local action (`POST /api/learnings/:id/supersede`) guarded by the localhost-origin middleware, so curation can happen without leaving the dashboard.
 
-## 6. Concerns & Honest Limitations
+Knowledge detail panels stay pinned while the artifact list scrolls after [ORB-10444]. The list grows well past a viewport, and scrolling it used to carry the pane the operator was reading out of view. The detail panel is sticky below the fixed chrome (header, tabs, health strip) and bounded to the remaining viewport height, so detail content taller than the screen scrolls inside the pane rather than being clipped. The single-column breakpoint unpins it, where the pane already stacks below the list.
+
+## 6. Top-Level Navigation
+
+The top-level nav carries exactly the operator's four workflow surfaces — Tasks, Audit, Diagnostics, Knowledge — plus the hash-only `run-detail` route [ORB-10444] [ADR-0256]. A deprecated review-threads tab was removed outright rather than hidden: nav entry, route, pane, refresh branch, and styles all went, so no dead asset ships and no route resolves to a missing pane. Scoreboard is diagnostics-shaped telemetry rather than a workflow surface, so it moved under Diagnostics as the `#diagnostics/scoreboard` sub-tab. Its markup moved verbatim, so every element `scoreboard.js` renders into — and therefore the `/api/scoreboard` response contract — is unchanged; the sub-tab swaps the diagnostics two-column layout for a full-width one while keeping the sub-tab nav reachable.
+
+## 7. Task Write Actions
+
+The Tasks tab is writable for the two actions that otherwise force a context switch to the CLI [ORB-10444] [ADR-0257].
+
+**Ship** appears on `backlog` tasks and is one click with no configuration UI: it posts only the task id to `POST /api/workflows/ship`. The crew is resolved by the pipeline from the task's own record and the mode from the selected workspace's registry binding, so that endpoint's omitted-`mode` default is the workspace ship mode (falling back to `pr` for a runtime with no binding). The resulting run id and state are surfaced as a notice, and a failed dispatch shows the server's error text instead of silently no-opping. Duplicate dispatch is refused: an explicit task selection whose id is already carried by a non-terminal run answers `409` with code `ship_run_in_flight` naming that run, and the UI holds a per-task guard across the double-click window.
+
+**Comments** post to `POST /api/tasks/:id/comments`, which writes through the task's existing review-thread structure rather than adding a field to the task record, so a comment survives a reload like any other task history. Authorship is forced to a human identity: an absent, agent-family, or model-constant author collapses to the `human` label, because the dashboard process may itself run inside a managed Orbit run where the runtime's ambient actor is a model.
+
+## 8. Concerns & Honest Limitations
 
 Accessibility still needs a real WCAG pass; responsive behavior remains optimized for wide desktop viewports; raw HTML, CSS variables, and dashboard JavaScript keep the runtime simple but leave duplication across project surfaces.
 
@@ -57,5 +71,6 @@ Accessibility still needs a real WCAG pass; responsive behavior remains optimize
 - [ORB-00060] collapsed Diagnostics > Friction into Recent Runs diagnostics columns.
 - [ORB-00061] added the Knowledge tab and Learnings curation surface.
 - [ORB-00144] grouped scoreboard metrics and added knowledge counters plus duel matrix data.
+- [ORB-10444] retired a deprecated tab, folded Scoreboard under Diagnostics, pinned the Knowledge detail pane, and added task ship + comments.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

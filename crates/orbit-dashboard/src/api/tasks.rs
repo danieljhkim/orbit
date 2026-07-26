@@ -6,7 +6,10 @@ use axum::extract::{Path, RawQuery};
 use axum::http::{HeaderName, HeaderValue, header};
 use axum::response::{IntoResponse, Json, Response};
 use orbit_common::types::task_artifacts::TaskRelation;
-use orbit_common::types::validate_relative_artifact_path;
+use orbit_common::types::{
+    agent_family_from_cli, all_agent_families, infer_agent_family_from_model,
+    validate_relative_artifact_path,
+};
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{
     DEFAULT_TASK_LIST_LIMIT, ExternalRef, OrbitRuntime, Task, TaskComplexity, TaskCreateStatus,
@@ -15,8 +18,13 @@ use orbit_core::{
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 
-use super::{bad_request, map_runtime_error, server_error, validate_id};
+use super::{bad_request, map_runtime_error, non_empty_string, server_error, validate_id};
 use crate::projections::{task_locks_json, task_to_json_with_sidecars};
+
+/// Actor recorded for a dashboard-authored comment when the request supplies no
+/// usable human identity. The dashboard is a human-operated surface, so this is
+/// the floor — never the server process's ambient agent identity.
+const HUMAN_ACTOR_LABEL: &str = "human";
 
 struct ArtifactResponsePolicy {
     content_type: &'static str,
@@ -36,6 +44,17 @@ pub(super) struct RejectBody {
     note: String,
     #[serde(default)]
     comment: Option<String>,
+}
+
+/// Body for `POST /tasks/:id/comments`. `author` is the operator's own name;
+/// it is sanitized to a human identity by [`human_comment_author`], never taken
+/// as-is when it names an agent family or a model.
+#[derive(Deserialize, Default)]
+pub(super) struct CommentBody {
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    author: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -549,6 +568,70 @@ pub(super) async fn update_task_action(
             Err(e) => server_error(e),
         },
         Err(e) => map_runtime_error(e),
+    }
+}
+
+/// `POST /tasks/:id/comments` — append a human comment to a task.
+///
+/// Comments are stored in the task's existing review-thread structure (the
+/// bundle's `comments.jsonl`, written through `TaskUpdateParams::comment`), so
+/// this adds no parallel persistence model on the task record.
+///
+/// Authorship is forced to a human identity (ORB-10444). The dashboard server
+/// process may itself be running inside a managed Orbit run, where the runtime's
+/// ambient actor is an agent model — attributing an operator's note to that
+/// model would be a lie, so the author comes from the request (sanitized by
+/// [`human_comment_author`]) and never from the ambient identity.
+pub(super) async fn add_task_comment_action(
+    Ws(runtime): Ws,
+    Path(id): Path<String>,
+    Json(body): Json<CommentBody>,
+) -> Response {
+    let id = match validate_id(&id) {
+        Ok(id) => id,
+        Err(message) => return bad_request(message),
+    };
+    let Some(message) = non_empty_string(&body.message) else {
+        return bad_request("comment message must not be empty".to_string());
+    };
+    let author = human_comment_author(body.author.as_deref());
+    let params = TaskUpdateParams {
+        comment: Some(message),
+        ..TaskUpdateParams::default()
+    };
+    match runtime.update_task_with_identity(id, params, Some(author), None) {
+        Ok(task) => match dashboard_status_index(&runtime) {
+            Ok(status_by_id) => match task_to_json_with_sidecars(&runtime, &task, &status_by_id) {
+                Ok(value) => Json(value).into_response(),
+                Err(e) => server_error(e),
+            },
+            Err(e) => server_error(e),
+        },
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+/// Resolve the author label recorded for a dashboard comment.
+///
+/// A caller-supplied label is kept only if it is a genuine human identity: a
+/// blank value, a known agent family (`codex`/`claude`/…), a string that maps to
+/// one of those families as a model constant, or the `system`/`agent` role words
+/// all collapse to [`HUMAN_ACTOR_LABEL`]. That keeps a model constant out of the
+/// `by` field whether it arrives from a confused client or from the ambient
+/// identity the runtime would otherwise supply.
+fn human_comment_author(requested: Option<&str>) -> String {
+    let Some(label) = requested.and_then(non_empty_string) else {
+        return HUMAN_ACTOR_LABEL.to_string();
+    };
+    let normalized = agent_family_from_cli(&label);
+    let looks_like_agent = normalized == "system"
+        || normalized == "agent"
+        || all_agent_families().contains(&normalized.as_str())
+        || infer_agent_family_from_model(&label).is_some();
+    if looks_like_agent {
+        HUMAN_ACTOR_LABEL.to_string()
+    } else {
+        label
     }
 }
 
