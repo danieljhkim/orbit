@@ -226,11 +226,17 @@ render_design_rows() {
 
 render_index() {
   local output="$1"
+  local last_validated
+
+  last_validated="$(frontmatter_value "$docs_dir/INDEX.md" last_validated)"
 
   {
     printf '%s\n' '---'
     printf '%s\n' 'type: context'
     printf '%s\n' 'summary: Entry point for Orbit feature designs and operational runbooks.'
+    if [[ -n "$last_validated" ]]; then
+      printf 'last_validated: %s\n' "$last_validated"
+    fi
     printf '%s\n' 'tags: [docs, index, design, operations, runbooks]'
     printf '%s\n' 'related_features: [orbit-docs, activity-job, auditability, routines]'
     printf '%s\n' 'related_artifacts: [ORB-10014]'

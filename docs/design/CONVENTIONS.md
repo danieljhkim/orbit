@@ -2,6 +2,7 @@
 title: Design Doc Conventions
 owner: daniel
 last_updated: 2026-07-20
+last_validated: 2026-07-26
 status: Accepted
 ---
 

@@ -4,6 +4,7 @@ type: design
 title: "Activity / Job — Design"
 owner: codex
 last_updated: 2026-07-26
+last_validated: 2026-07-26
 status: Draft
 feature: activity-job
 doc_role: design
@@ -393,36 +394,37 @@ After [ORB-10313], the VCS handoff seam uses one shared durable predicate (`reje
 
 Risk-weighted regression tests live next to the executor modules they guard
 under `crates/orbit-engine/src/activity_job/job_executor/tests/`
-([T20260509-7]). Each executor-block module has a sibling `*_tests.rs` and
-each test names the specific invariant it guards in the function name. The
+([T20260509-7]). Each executor-block module has a matching test module under
+`tests/`, and each test names the specific invariant it guards in the function
+name. The
 current surface:
 
-- `step_tests.rs` (`step.rs`) — linear step success and pipeline propagation,
+- `step.rs` (`step.rs`) — linear step success and pipeline propagation,
   failure short-circuit (mod.rs:131-148), retry `max_attempts` exhaustion,
   non-retryable bypass, success on intermediate attempt, and
   `compute_backoff_ms` linear/exponential monotonicity and cap behavior.
-- `parallel_tests.rs` (`parallel.rs`) — `JoinMode::All`, `JoinMode::Any`,
+- `parallel.rs` (`parallel.rs`) — `JoinMode::All`, `JoinMode::Any`,
   `JoinMode::Quorum`, `StepJoin` audit event ordering, and audit
   parent-stack inheritance into branch threads.
-- `fanout_tests.rs` (`fan_out.rs`) — empty items emit `FanoutDispatched{0}`
+- `fanout.rs` (`fan_out.rs`) — empty items emit `FanoutDispatched{0}`
   and `FaninJoined{0,0}`, collected outputs are spawn-index ordered even
   when workers complete out of order, `max_workers` semaphore caps
   in-flight workers, structural error surfaces under unsatisfied join,
   `fan_in.collect` writes the collected value under the alias key, and
   per-worker `WorkerState` events appear in `dispatched`→`finished` order.
-- `loop_tests.rs` (`loop_block.rs`) — `items` length over `max_iterations`
+- `loop.rs` (`loop_block.rs`) — `items` length over `max_iterations`
   errors, `break_when` exits with `LoopIterationEnd{broke=true}`,
   exhausting iterations emits `LoopDidNotConverge`, and the loop exits on
   first body failure.
-- `pipeline_durability_tests.rs` (`exec_ctx.rs`, `fan_out.rs:53-56`) —
+- `pipeline_durability.rs` (`exec_ctx.rs`, `fan_out.rs:53-56`) —
   a step's output remains visible to later steps via
   `{{ steps.<id>.output.* }}`, and the pipeline snapshot taken into
   fan-out workers preserves upstream values past the fan-out boundary.
 
 Shared host scaffolding (`ScriptedHost`, `Action`, job/step builders) lives
 in `tests/mod.rs` so each block module stays focused on its own invariants.
-New executor blocks must land with a sibling `*_tests.rs` covering the
-analogous invariants — see [ADR-0011].
+New executor blocks must land with a matching test module under `tests/`
+covering the analogous invariants — see [ADR-047](./4_decisions.md#adr-047--each-new-executor-block-ships-with-a-sibling-test-module).
 
 ---
 

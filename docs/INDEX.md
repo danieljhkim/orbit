@@ -1,6 +1,7 @@
 ---
 type: context
 summary: Entry point for Orbit feature designs and operational runbooks.
+last_validated: 2026-07-26
 tags: [docs, index, design, operations, runbooks]
 related_features: [orbit-docs, activity-job, auditability, routines]
 related_artifacts: [ORB-10014]
