@@ -96,7 +96,7 @@ pub mod token_scoreboard {
 
 pub mod learning_layout {
     pub use crate::file::learning_store::migration::{
-        LearningLayoutMigrationReport, migrate_learning_layout,
+        LearningLayoutMigrationReport, inspect_learning_layout, migrate_learning_layout,
     };
 }
 

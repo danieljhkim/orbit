@@ -3,7 +3,7 @@ summary: "Project Learnings — Design"
 type: design
 title: "Project Learnings — Design"
 owner: claude
-last_updated: 2026-07-25
+last_updated: 2026-07-26
 status: Draft
 feature: project-learnings
 doc_role: design
@@ -92,7 +92,7 @@ evidence:
 supersedes: null                  # set to L-id if this replaces an older entry
 ```
 
-The legacy flat layout (`.orbit/learnings/<id>.yaml` plus `.orbit/learnings/superseded/<id>.yaml`) is rejected on load with an actionable migration error. `orbit learning migrate-layout` performs the explicit one-way move and leaves `tags.yaml` at `.orbit/learnings/tags.yaml`.
+The legacy flat layout (`.orbit/learnings/<id>.yaml` plus `.orbit/learnings/superseded/<id>.yaml`) is rejected on load with an actionable migration error. `orbit learning migrate-layout` reports the one-way move without changing files; `orbit learning migrate-layout --confirm` performs it and leaves `tags.yaml` at `.orbit/learnings/tags.yaml` ([ORB-10452]).
 
 ### 2.2 SQLite index
 
@@ -321,7 +321,7 @@ A learning is **stale** if any of these are true:
 - All `evidence` commit SHAs no longer exist on the active branch.
 - All `evidence` task IDs are deleted.
 
-`orbit learning prune --stale-only` reports staleness; with `--delete` it archives the record. Staleness detection is opportunistic, not automatic; nothing fires it on every commit. Phase 2 may wire it into the knowledge graph rebuild path.
+`orbit learning prune` reports staleness; with `--confirm` it archives the record. The former `--delete` spelling remains a compatibility alias. Staleness detection is opportunistic, not automatic; nothing fires it on every commit. Phase 2 may wire it into the knowledge graph rebuild path ([ORB-10452]).
 
 ### 7.3.1 Approved physical retirement
 
@@ -411,5 +411,6 @@ Learnings are workspace-scoped and checked into the repo. They travel exactly wh
 - [ORB-10346] — Removed automatic learning delivery and adopted pull delivery with reference comments.
 - [ORB-10348] — Generalized the review into `artifact-deprecation-review`: added the comment-reference sweep (Stream B) alongside the original learning-corpus-health stream ([§7.6](#76-recurring-deprecation-review-auto-task)).
 - [ORB-10364] — Gated the `add`/`update`/`supersede` authoring surfaces on caller role and redirected executors to `friction add` ([§5.1](#51-cli), [§5.2](#52-mcp-tools), ADR-0250).
+- [ORB-10452] — Made learning layout migration and stale-learning pruning non-destructive by default, with the shared non-interactive `--confirm` apply convention.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

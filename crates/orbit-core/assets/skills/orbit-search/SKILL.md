@@ -83,7 +83,7 @@ Recommended (not enforced) layout: `docs/design/<feature>/`, `docs/design-patter
 | Show | `orbit docs show <path> --json` |
 | Add root | `orbit docs add <path>` (existing non-`.orbit/` roots only) |
 | Index | `orbit docs index --json` (after substantial edits/moves; idempotent via content hashes) |
-| Migrate | `orbit docs migrate --dry-run` then without, to backfill locked frontmatter for legacy `docs/design/<feature>/*.md` and `docs/design-patterns/*.md` — never touches `.orbit/` |
+| Migrate | `orbit docs migrate` to preview, then `orbit docs migrate --confirm` to backfill locked frontmatter for legacy `docs/design/<feature>/*.md` and `docs/design-patterns/*.md` — never touches `.orbit/` |
 
 ## Common Mistakes
 

@@ -234,10 +234,10 @@ impl Commands {
                 )
             }
             Commands::Migrate(command) => CommandOperation::new(
-                if command.dry_run {
-                    RuntimeNeed::Forbidden
-                } else {
+                if command.confirm {
                     RuntimeNeed::Required
+                } else {
+                    RuntimeNeed::Forbidden
                 },
                 Some(admin_meta("migrate", None, Some("workspace"), None)),
                 None,
@@ -868,7 +868,7 @@ fn dispatch_mcp(command: Commands, context: DispatchContext<'_>) -> Result<(), O
 
 fn dispatch_migrate(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
     match command {
-        Commands::Migrate(command) if command.dry_run => {
+        Commands::Migrate(command) if !command.confirm => {
             command.execute_without_runtime(context.root_override)
         }
         Commands::Migrate(command) => command.execute(context.runtime()?),

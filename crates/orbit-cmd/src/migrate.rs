@@ -5,10 +5,11 @@
 //! registry in the [`OrbitRuntime::from_resolved_roots`] pre-flight —
 //! so `orbit migrate` is the *explicit* surface over the same machinery:
 //!
-//! - `orbit migrate` (apply): opens the runtime normally, which applies
+//! - `orbit migrate --confirm` (apply): opens the runtime normally, which applies
 //!   everything pending, then reports the resulting versions and what the
 //!   open applied.
-//! - `orbit migrate --dry-run`: inspects explicit resolved roots *without*
+//! - `orbit migrate` (the default) and `orbit migrate --dry-run`: inspect
+//!   explicit resolved roots *without*
 //!   opening the runtime (see [`migrate_dry_run_at`]) so pending migrations
 //!   are listed instead of silently applied — the only way to see "pending"
 //!   given auto-migration on open. Environment and workspace-catalog
@@ -90,7 +91,7 @@ pub fn migrate_dry_run_at(
 /// `orbit migrate` command surface for [`OrbitRuntime`] (extension trait —
 /// the implementation moved out of orbit-core in [ORB-10016]).
 pub trait MigrateCommands {
-    /// Migration status of an open runtime (the `orbit migrate` apply path).
+    /// Migration status of an open runtime (the `orbit migrate --confirm` apply path).
     /// Opening the runtime already applied everything pending — layout in
     /// the open pre-flight, schema inside `Store::open` — so this reports
     /// the resulting versions plus which layout migrations that open

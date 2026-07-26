@@ -76,8 +76,11 @@ pub struct DocsIndexArgs {
 
 #[derive(Args)]
 pub struct DocsMigrateArgs {
-    /// Print planned diffs without writing files
-    #[arg(long)]
+    /// Apply the migration; without this flag the command only reports
+    #[arg(long, conflicts_with = "dry_run")]
+    pub confirm: bool,
+    /// Explicitly request the default non-destructive mode
+    #[arg(long, conflicts_with = "confirm")]
     pub dry_run: bool,
     /// Output as JSON
     #[arg(long)]
@@ -225,7 +228,7 @@ fn print_docs_index_text(result: SemanticIndexResult) -> Result<(), OrbitError> 
 
 impl Execute for DocsMigrateArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let report = runtime.migrate_docs(self.dry_run)?;
+        let report = runtime.migrate_docs(!self.confirm)?;
         if self.json {
             print_json(&report)
         } else if report.changed.is_empty() {

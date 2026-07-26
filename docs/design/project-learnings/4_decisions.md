@@ -3,7 +3,7 @@ summary: "Project Learnings — Decisions"
 type: design
 title: "Project Learnings — Decisions"
 owner: claude
-last_updated: 2026-07-25
+last_updated: 2026-07-26
 status: Draft
 feature: project-learnings
 doc_role: decisions
@@ -72,7 +72,7 @@ A flat-markdown approach can be retrofitted with an index, but at that point it'
 
 ## ADR-0110 — Workspace-scoped, checked into git (not workspace-private state)
 
-**Status:** Accepted · 2026-05 · [T20260510-11] · [T20260511-5] · legacy_id: `project-learnings/ADR-003`
+**Status:** Accepted · 2026-07 · [T20260510-11] · [T20260511-5] · [ORB-10452] · legacy_id: `project-learnings/ADR-003`
 
 **Context.** Where do learning records live on disk?
 
@@ -87,6 +87,8 @@ The cross-workspace case ([3_vision.md §1.4](./3_vision.md)) is real but second
 **Decision.** Phase 1 stores learnings at `.orbit/learnings/<id>/learning.yaml`, scoped `WorkspaceOnly` per the Scoping Rules table, checked into git. The SQLite index lives under `.orbit/state/` and is rebuildable from the YAML; it does not need to be checked in.
 
 **Amendment — ORB-00096.** Learnings moved from the original flat `.orbit/learnings/<id>.yaml` / `.orbit/learnings/superseded/<id>.yaml` layout to per-entity directories at `.orbit/learnings/<id>/learning.yaml`. Status now lives only in the YAML body, and the explicit `orbit learning migrate-layout` command performs the one-way migration.
+
+**Amendment — ORB-10452.** The one-way migration is now report-only on a bare invocation and applies only with the standard non-interactive `--confirm` flag. The explicit gate preserves scriptability without an stdin prompt and makes the irreversible layout operation follow the CLI-wide destructive-command convention.
 
 **Consequences.**
 - Learnings travel with the repo. New collaborator clones, gets all the project knowledge from day zero.
@@ -311,5 +313,6 @@ Alternatives considered:
 - [ORB-10346] — Retired automatic learning delivery while retaining pull discovery, `learning_shown`, and historical usage stats.
 - [ORB-10366] — Removed the `--hooks` flag from `orbit workspace init` and the tracked inert shims; kept `orbit hook install` as an opt-in escape hatch (ADR-0248).
 - [ORB-10364] — Gated the learning authoring surfaces on caller role and redirected executors to `friction add` (ADR-0250).
+- [ORB-10452] — Made the legacy learning-layout migration report-only by default and require the standard `--confirm` apply flag (ADR-0110 amendment).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

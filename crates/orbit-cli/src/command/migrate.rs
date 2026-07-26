@@ -11,14 +11,17 @@ use crate::command::Execute;
 /// Both migration ledgers auto-apply on workspace open (the SQLite schema
 /// ledger inside `Store::open`, the workspace-layout registry in the runtime
 /// pre-flight), so the apply path simply opens the runtime and reports what
-/// happened. `--dry-run` inspects *without* opening a runtime, which is the
-/// only way to list pending migrations instead of silently applying them.
+/// happened. The default and `--dry-run` inspect *without* opening a runtime,
+/// which is the only way to list pending migrations instead of silently
+/// applying them. `--confirm` selects the apply path.
 #[derive(Args)]
 #[command(about = "Apply or inspect pending .orbit layout and store schema migrations")]
 pub struct MigrateCommand {
-    /// List pending migrations without applying them (exits nonzero when any
-    /// are pending)
-    #[arg(long)]
+    /// Apply pending migrations
+    #[arg(long, conflicts_with = "dry_run")]
+    pub confirm: bool,
+    /// Explicitly request the default non-destructive inspection mode
+    #[arg(long, conflicts_with = "confirm")]
     pub dry_run: bool,
     /// Emit machine-readable JSON instead of the table.
     #[arg(long)]
@@ -55,7 +58,7 @@ impl MigrateCommand {
         let pending = status.pending_total();
         if pending > 0 {
             return Err(OrbitError::Execution(format!(
-                "{pending} migration(s) pending; run `orbit migrate` to apply"
+                "{pending} migration(s) pending; run `orbit migrate --confirm` to apply"
             )));
         }
         Ok(())
@@ -153,7 +156,7 @@ fn print_status(
         println!("  schema v{} ({})", pending.version, pending.name);
     }
     println!(
-        "\nRun `orbit migrate` to apply (migrations also auto-apply on workspace open).\n\
+        "\nRun `orbit migrate --confirm` to apply (migrations also auto-apply on workspace open).\n\
          Before a major upgrade, consider backing up workspace state first:\n\
          cp -a {orbit_dir} {orbit_dir}.bak",
         orbit_dir = status.orbit_dir.display()

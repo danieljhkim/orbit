@@ -34,6 +34,33 @@ fn cli_docs_list_and_show_json() {
 }
 
 #[test]
+fn cli_docs_migrate_is_dry_run_by_default_and_confirm_applies() {
+    let workspace = TestWorkspace::new();
+    workspace.write(
+        "docs/design-patterns/legacy.md",
+        "# Legacy Pattern\n\nBody\n",
+    );
+    let path = workspace.work.join("docs/design-patterns/legacy.md");
+    let before = fs::read_to_string(&path).expect("read legacy doc");
+
+    let preview = workspace.run_json(&["docs", "migrate", "--json"], "docs migrate preview");
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(
+        fs::read_to_string(&path).expect("read previewed doc"),
+        before
+    );
+
+    let applied = workspace.run_json(
+        &["docs", "migrate", "--confirm", "--json"],
+        "docs migrate apply",
+    );
+    assert_eq!(applied["dry_run"], false);
+    let after = fs::read_to_string(&path).expect("read migrated doc");
+    assert_ne!(after, before);
+    assert!(after.starts_with("---\n"));
+}
+
+#[test]
 fn cli_orbit_search_federates_docs_and_adrs() {
     // ORB-00202: federated lexical search moved from `orbit docs search` to
     // `orbit search <query> --kind all` / `--kind doc` / `--kind adr`.

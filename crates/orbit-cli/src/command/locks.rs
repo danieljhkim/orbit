@@ -15,8 +15,8 @@ use clap::{Args, Subcommand};
 use orbit_core::{OrbitError, OrbitRuntime, TaskStatus};
 use serde_json::{Map, Value, json};
 
-use crate::command::Execute;
 use crate::command::task::output::{print_task_locks, task_lock_to_json};
+use crate::command::{Execute, require_confirmation};
 
 #[derive(Args)]
 #[command(about = "Inspect and release task file locks")]
@@ -104,10 +104,14 @@ fn lock_status_rank(status: TaskStatus) -> u8 {
 pub struct LocksReleaseArgs {
     /// Reservation ID to release (from the reservation store / debug tooling)
     pub reservation_id: String,
+    /// Confirm release of the reservation
+    #[arg(long)]
+    pub confirm: bool,
 }
 
 impl Execute for LocksReleaseArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        require_confirmation(self.confirm, "task lock release")?;
         let mut input = Map::new();
         input.insert(
             "reservation_id".to_string(),

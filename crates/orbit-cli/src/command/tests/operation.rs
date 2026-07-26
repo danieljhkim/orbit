@@ -14,6 +14,7 @@ fn runtime_free_command_set_is_derived_from_operations() {
         &["orbit", "mcp", "init"],
         &["orbit", "mcp", "remove"],
         &["orbit", "mcp", "serve"],
+        &["orbit", "migrate"],
         &["orbit", "migrate", "--dry-run"],
         &["orbit", "learning", "migrate-layout"],
         &["orbit", "run", "ship-sweep", "--dry-run"],
@@ -33,7 +34,7 @@ fn runtime_free_command_set_is_derived_from_operations() {
 
     let runtime_required: &[&[&str]] = &[
         &["orbit", "workspace", "list"],
-        &["orbit", "migrate"],
+        &["orbit", "migrate", "--confirm"],
         &["orbit", "learning", "list"],
         &["orbit", "run", "history"],
         &["orbit", "task", "list"],
@@ -45,6 +46,22 @@ fn runtime_free_command_set_is_derived_from_operations() {
             "{args:?} must bootstrap a workspace runtime"
         );
     }
+}
+
+#[test]
+fn migrate_only_bootstraps_the_applying_form() {
+    assert_eq!(
+        operation_for(&["orbit", "migrate"]).runtime_need,
+        RuntimeNeed::Forbidden
+    );
+    assert_eq!(
+        operation_for(&["orbit", "migrate", "--dry-run"]).runtime_need,
+        RuntimeNeed::Forbidden
+    );
+    assert_eq!(
+        operation_for(&["orbit", "migrate", "--confirm"]).runtime_need,
+        RuntimeNeed::Required
+    );
 }
 
 #[test]

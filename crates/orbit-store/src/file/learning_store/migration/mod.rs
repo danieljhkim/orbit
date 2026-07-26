@@ -77,6 +77,21 @@ pub fn migrate_learning_layout(
     })
 }
 
+/// Report the legacy learning-layout changes without acquiring the migration
+/// lock or modifying the filesystem.
+pub fn inspect_learning_layout(root: &Path) -> Result<LearningLayoutMigrationReport, OrbitError> {
+    let active = legacy_flat_learning_paths(root)?;
+    let superseded_dir = root.join(SUPERSEDED_DIR_NAME);
+    let superseded = legacy_superseded_learning_paths(&superseded_dir)?;
+    let already_migrated = active.is_empty() && superseded.is_empty() && !superseded_dir.exists();
+    Ok(LearningLayoutMigrationReport {
+        already_migrated,
+        moved_active: active.len(),
+        moved_superseded: superseded.len(),
+        removed_superseded_dir: superseded_dir.exists(),
+    })
+}
+
 fn has_legacy_flat_layout(root: &Path) -> Result<bool, OrbitError> {
     Ok(!legacy_flat_learning_paths(root)?.is_empty()
         || !legacy_superseded_learning_paths(&root.join(SUPERSEDED_DIR_NAME))?.is_empty())

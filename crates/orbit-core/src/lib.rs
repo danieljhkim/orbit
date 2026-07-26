@@ -66,7 +66,7 @@ pub use orbit_tools::prepare_remote_task_artifact_put;
 
 // Command-layer types the CLI names in its clap surfaces.
 pub use command::docs::{DocType, TaskRelatedDoc};
-pub use command::learning::migrate_learning_layout_at;
+pub use command::learning::{inspect_learning_layout_at, migrate_learning_layout_at};
 pub use command::search::{
     GlobalSearchHit, GlobalSearchKind, GlobalSearchParams, task_selectors_contain_path,
 };

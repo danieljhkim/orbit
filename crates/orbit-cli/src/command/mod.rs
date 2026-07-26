@@ -40,6 +40,17 @@ pub trait Execute {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError>;
 }
 
+/// Require the standard non-interactive confirmation flag before an
+/// irreversible CLI operation proceeds.
+pub(crate) fn require_confirmation(confirm: bool, action: &str) -> Result<(), OrbitError> {
+    if confirm {
+        return Ok(());
+    }
+    Err(OrbitError::InvalidInput(format!(
+        "{action} is irreversible; pass --confirm to proceed"
+    )))
+}
+
 // Clap derive does not support per-variant subcommand `help_heading`
 // (`next_help_heading` is args-only; `subcommand_help_heading` only renames
 // the single `Commands:` block). To render grouped sections in `--help` we

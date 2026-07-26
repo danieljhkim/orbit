@@ -211,10 +211,13 @@ fn cli_prune_stale_only_reports_without_modifying() {
 }
 
 #[test]
-fn cli_prune_delete_archives_stale_learnings() {
+fn cli_prune_confirm_archives_stale_learnings_and_preserves_delete_alias() {
     let workspace = TestWorkspace::new();
     let learning = workspace.add_learning("stale", &["totally-nonexistent-dir-xyz-456/**"], &[]);
-    let result = workspace.run_json(&["learning", "prune", "--delete", "--json"], "prune delete");
+    let result = workspace.run_json(
+        &["learning", "prune", "--confirm", "--json"],
+        "prune confirm",
+    );
     let deleted: Vec<&str> = result["deleted"]
         .as_array()
         .unwrap()
@@ -235,6 +238,12 @@ fn cli_prune_delete_archives_stale_learnings() {
     );
     assert_eq!(shown["status"], "superseded");
     assert!(shown["superseded_by"].is_null());
+
+    let alias = workspace.run_json(
+        &["learning", "prune", "--delete", "--json"],
+        "prune delete alias",
+    );
+    assert!(alias["deleted"].as_array().expect("deleted").is_empty());
 }
 
 #[test]
@@ -259,8 +268,21 @@ fn cli_migrate_layout_preserves_records_and_is_idempotent() {
     let superseded_before = workspace.learning_projection("superseded");
 
     workspace.convert_learning_store_to_legacy_flat();
+    let before_dry_run = snapshot_files(&workspace.work.join(".orbit/learnings"));
     let output = workspace.run(
         &["learning", "migrate-layout"],
+        None,
+        "inspect legacy learning layout",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Would migrate learning layout"));
+    assert_eq!(
+        snapshot_files(&workspace.work.join(".orbit/learnings")),
+        before_dry_run
+    );
+
+    let output = workspace.run(
+        &["learning", "migrate-layout", "--confirm"],
         None,
         "migrate legacy learning layout",
     );
@@ -288,7 +310,7 @@ fn cli_migrate_layout_preserves_records_and_is_idempotent() {
 
     let before_rerun = snapshot_files(&learnings_root);
     let output = workspace.run(
-        &["learning", "migrate-layout"],
+        &["learning", "migrate-layout", "--confirm"],
         None,
         "rerun migrated layout",
     );

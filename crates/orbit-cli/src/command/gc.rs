@@ -37,11 +37,11 @@ impl Execute for GcTarget {
 #[derive(Args)]
 pub struct WorktreeGcArgs {
     /// Perform removals; without this flag the command only reports
-    #[arg(long, conflicts_with = "dry_run")]
-    pub yes: bool,
+    #[arg(long, visible_alias = "yes", conflicts_with = "dry_run")]
+    pub confirm: bool,
 
     /// Explicitly request the default non-destructive mode
-    #[arg(long, conflicts_with = "yes")]
+    #[arg(long, conflicts_with = "confirm")]
     pub dry_run: bool,
 
     /// Restrict collection to one job run
@@ -59,7 +59,7 @@ pub struct WorktreeGcArgs {
 
 impl Execute for WorktreeGcArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let result = runtime.gc_worktrees(self.yes, self.run, self.older_than_hours)?;
+        let result = runtime.gc_worktrees(self.confirm, self.run, self.older_than_hours)?;
         if self.json {
             return crate::output::json::print_pretty(&serde_json::to_value(result).map_err(
                 |error| {
