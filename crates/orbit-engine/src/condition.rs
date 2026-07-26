@@ -11,30 +11,9 @@
 //!   `"{{steps.a.state.status}} == success && {{steps.b.output.match}} != false"`
 //!   `"{{steps.a.state.status}} == success || {{steps.b.state.status}} == success"`
 
-use orbit_common::types::{OrbitError, StepCondition};
+use orbit_common::types::OrbitError;
 
 use crate::template::{self, TemplateContext};
-
-/// Evaluate a step condition against the given template context.
-///
-/// Keyword variants (`Always`, `OnSuccess`, etc.) are evaluated with the
-/// provided `keyword_eval` closure, which lets callers keep their existing
-/// sequential/DAG keyword logic. `Expr` variants resolve templates and
-/// evaluate the resulting boolean expression.
-#[allow(dead_code)]
-pub(crate) fn evaluate_condition(
-    condition: &StepCondition,
-    ctx: &TemplateContext,
-    keyword_eval: impl FnOnce(&StepCondition) -> bool,
-) -> Result<bool, OrbitError> {
-    match condition {
-        StepCondition::Expr(expr) => {
-            let resolved = template::render(expr, ctx)?;
-            evaluate_expr(&resolved)
-        }
-        _ => Ok(keyword_eval(condition)),
-    }
-}
 
 /// Render a boolean expression through the template engine and evaluate the
 /// result. Shared between v1's `StepCondition::Expr` and v2's `when:` / loop

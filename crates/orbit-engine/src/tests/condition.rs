@@ -1,7 +1,6 @@
 #![allow(missing_docs)]
 
 use crate::template::TemplateContext;
-use orbit_common::types::StepCondition;
 
 use super::super::condition::*;
 
@@ -84,19 +83,4 @@ fn test_whitespace_handling() {
 #[test]
 fn test_invalid_atom() {
     assert!(evaluate_expr("no_operator_here").is_err());
-}
-
-#[test]
-fn test_evaluate_condition_keyword() {
-    let ctx = TemplateContext::default();
-    let result = evaluate_condition(&StepCondition::Always, &ctx, |_| true).unwrap();
-    assert!(result);
-}
-
-#[test]
-fn test_evaluate_condition_expr() {
-    let ctx = TemplateContext::default();
-    let condition = StepCondition::Expr("success == success".to_string());
-    let result = evaluate_condition(&condition, &ctx, |_| false).unwrap();
-    assert!(result);
 }

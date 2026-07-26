@@ -71,11 +71,6 @@ pub(super) struct StepOutcome {
     pub(super) success: bool,
     pub(super) output: Value,
     pub(super) message: Option<String>,
-    /// `true` when `when:` returned false and the step did not run. Kept for
-    /// future callers that need to distinguish a skipped-but-successful step
-    /// from one that actually executed.
-    #[allow(dead_code)]
-    pub(super) skipped: bool,
 }
 
 pub(super) fn record_pipeline(ctx: &ExecCtx<'_>, key: &str, v: Value) {

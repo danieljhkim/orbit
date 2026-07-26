@@ -19,10 +19,7 @@ pub(in crate::executor::automation) fn merge_batch_worktree_into_base<H: Runtime
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
-    let run_id = crate::executor::automation::batch::require_run_id(
-        input,
-        "merge_batch_worktree_into_base",
-    )?;
+    let run_id = super::require_run_id(input, "merge_batch_worktree_into_base")?;
     let repo_root_str = host.repo_root()?;
     let repo_root = canonicalize_existing_dir(&repo_root_str, "repo_root")?;
     let workspace_path = match input_string_field(input, "workspace_path") {

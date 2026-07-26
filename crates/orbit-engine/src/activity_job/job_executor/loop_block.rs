@@ -62,7 +62,6 @@ pub(super) fn run_loop(
                     success: false,
                     output: outcome.output,
                     message: outcome.message,
-                    skipped: false,
                 });
             }
         }
@@ -114,6 +113,5 @@ pub(super) fn run_loop(
         success: true,
         output: out,
         message: None,
-        skipped: false,
     })
 }

@@ -2,18 +2,14 @@
 //! helpers.
 
 use orbit_common::types::{InvocationTrace, JobRunState, TaskStatus};
-use orbit_common::utility::redaction::{redact_sensitive_env_json, redact_sensitive_env_option};
 use serde_json::Value;
 
 use super::hosts::TaskAutomationUpdate;
 
-pub const AGENT_PROTOCOL_VIOLATION: &str = "AGENT_PROTOCOL_VIOLATION";
 pub const AGENT_INVOCATION_FAILED: &str = "AGENT_INVOCATION_FAILED";
-pub const AGENT_COMMIT_FAILED: &str = "AGENT_COMMIT_FAILED";
 pub const AGENT_TIMEOUT: &str = "AGENT_TIMEOUT";
 pub const ACTIVITY_EXECUTION_FAILED: &str = "ACTIVITY_EXECUTION_FAILED";
 pub const WORKFLOW_RUN_FAILED_EVENT: &str = "workflow_run_failed";
-pub const STALE_RUN_GRACE_SECONDS: u64 = 30;
 
 pub fn workflow_failure_note(
     job_id: &str,
@@ -102,24 +98,9 @@ impl AttemptOutcome {
 }
 
 #[derive(Debug, Clone)]
-pub struct DirectActivityRunOutcome {
-    pub state: JobRunState,
-    pub duration_ms: Option<u64>,
-    pub error_code: Option<String>,
-    pub error_message: Option<String>,
-    pub protocol_violation: bool,
-}
-
-#[derive(Debug, Clone)]
 pub struct ActivityInvocationResult {
     pub response_json: Option<Value>,
     pub invocation_trace: InvocationTrace,
     pub exit_code: Option<i32>,
     pub duration_ms: u64,
-}
-
-pub fn redact_attempt_outcome(mut outcome: AttemptOutcome) -> AttemptOutcome {
-    outcome.response_json = outcome.response_json.map(redact_sensitive_env_json);
-    outcome.error_message = redact_sensitive_env_option(outcome.error_message);
-    outcome
 }

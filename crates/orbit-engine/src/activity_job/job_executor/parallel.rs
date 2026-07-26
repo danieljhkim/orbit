@@ -14,7 +14,6 @@ pub(super) fn run_parallel(
             success: true,
             output: Value::Array(Vec::new()),
             message: None,
-            skipped: false,
         });
     }
     let inherited_parent_stack = ctx
@@ -114,7 +113,6 @@ pub(super) fn run_parallel(
         success: block_ok,
         output: out,
         message: None,
-        skipped: false,
     })
 }
 
