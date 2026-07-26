@@ -9,7 +9,7 @@ use orbit_common::utility::process_identity::process_start_identity_token;
 use rusqlite::TransactionBehavior;
 
 use crate::backend::{JobRunQuery, JobRunStepParams, JobRunStoreBackend};
-use crate::file::layout::validate_path_stem;
+use crate::file::path_safety::validate_path_stem;
 use crate::{Store, parse_timestamp};
 
 #[derive(Clone)]

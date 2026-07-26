@@ -6,7 +6,7 @@ use chrono::Utc;
 use orbit_common::types::{NotFoundKind, OrbitError, PipelineState};
 use serde_json::Value;
 
-use crate::file::layout::validate_path_stem;
+use crate::file::path_safety::validate_path_stem;
 use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
 
 pub mod import;

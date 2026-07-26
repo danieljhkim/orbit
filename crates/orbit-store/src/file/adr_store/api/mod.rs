@@ -20,7 +20,7 @@ use super::doc::AdrFileDocument;
 use super::layout::{AdrStateDir, adr_dir, state_dir_path, validate_adr_id};
 use super::lock::acquire_adr_lock;
 use crate::backend::{AdrCreateParams, AdrDocumentUpdateParams, AdrListFilter};
-use crate::file::layout::read_child_dirs;
+use crate::file::path_safety::read_child_dirs;
 use crate::{
     AdrArtifact, AdrArtifactResolution, AdrListEntry, IdAllocationRecord, IdAllocator,
     RemoteArtifactStub, Store,
