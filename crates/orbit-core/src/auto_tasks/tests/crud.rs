@@ -1,7 +1,10 @@
 //! CRUD-surface tests [ORB-10149]: add/list/show/update/toggle roundtrip,
 //! duplicate rejection, fail-closed parsing, and the no-turn-knobs guarantee.
 
+use std::fs;
+
 use orbit_common::types::{AutoTaskSchedule, DedupePolicy, parse_auto_task_yaml};
+use tempfile::tempdir;
 
 use crate::OrbitRuntime;
 use crate::auto_tasks::crud::AutoTaskUpdateParams;
@@ -142,4 +145,92 @@ template:
   title: Chore
 "#;
     assert!(parse_auto_task_yaml(top_level_turns).is_err());
+}
+
+#[test]
+fn linked_worktree_refresh_is_atomic_and_never_mutates_primary_definition() {
+    let root = tempdir().expect("tempdir");
+    let global_root = root.path().join("global");
+    let primary_orbit = root.path().join("primary/.orbit");
+    let worktree_orbit = root.path().join("worktree/.orbit");
+    for path in [&global_root, &primary_orbit, &worktree_orbit] {
+        fs::create_dir_all(path).expect("runtime root");
+    }
+    let runtime = OrbitRuntime::from_resolved_roots(&global_root, &primary_orbit, &worktree_orbit)
+        .expect("two-root runtime");
+
+    runtime
+        .auto_task_add(interval_params("doc-duties", 60))
+        .expect("seed worktree definition");
+    let worktree_path = worktree_orbit.join("auto_tasks/doc-duties.yaml");
+    let primary_path = primary_orbit.join("auto_tasks/doc-duties.yaml");
+    fs::create_dir_all(primary_path.parent().expect("primary parent")).expect("primary parent");
+    fs::copy(&worktree_path, &primary_path).expect("seed primary definition");
+    let primary_before = fs::read(&primary_path).expect("primary before");
+
+    runtime
+        .auto_task_update(
+            "doc-duties",
+            AutoTaskUpdateParams {
+                description: Some("refreshed in the assigned worktree".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("refresh");
+
+    assert_eq!(
+        fs::read(&primary_path).expect("primary after"),
+        primary_before,
+        "tracked primary definition must stay byte-identical"
+    );
+    let refreshed = fs::read_to_string(&worktree_path).expect("worktree definition");
+    assert!(refreshed.contains("refreshed in the assigned worktree"));
+    assert!(
+        fs::read_dir(worktree_path.parent().expect("worktree parent"))
+            .expect("list worktree auto_tasks")
+            .all(|entry| {
+                !entry
+                    .expect("directory entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".tmp")
+            }),
+        "atomic replacement must not leave staging files"
+    );
+}
+
+#[test]
+fn failed_linked_worktree_refresh_preserves_primary_and_names_definition() {
+    let root = tempdir().expect("tempdir");
+    let global_root = root.path().join("global");
+    let primary_orbit = root.path().join("primary/.orbit");
+    let worktree_orbit = root.path().join("worktree/.orbit");
+    for path in [&global_root, &primary_orbit, &worktree_orbit] {
+        fs::create_dir_all(path).expect("runtime root");
+    }
+
+    let primary_path = primary_orbit.join("auto_tasks/doc-duties.yaml");
+    fs::create_dir_all(primary_path.parent().expect("primary parent")).expect("primary parent");
+    fs::write(&primary_path, "primary-definition-bytes\n").expect("primary definition");
+    let primary_before = fs::read(&primary_path).expect("primary before");
+
+    // A non-directory local `auto_tasks` path makes the refresh fail before a
+    // staged file can be committed. This models a filesystem failure without
+    // relying on platform-specific permission behavior.
+    fs::write(worktree_orbit.join("auto_tasks"), "not a directory").expect("blocking path");
+    let runtime = OrbitRuntime::from_resolved_roots(&global_root, &primary_orbit, &worktree_orbit)
+        .expect("two-root runtime");
+    let error = runtime
+        .auto_task_add(interval_params("doc-duties", 60))
+        .expect_err("refresh must fail");
+
+    assert!(
+        error.to_string().contains("doc-duties"),
+        "durable tool error must identify the auto-task: {error}"
+    );
+    assert_eq!(
+        fs::read(&primary_path).expect("primary after"),
+        primary_before,
+        "failed refresh must leave primary byte-identical"
+    );
 }

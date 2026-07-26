@@ -10,7 +10,7 @@ summary: Current implementation of the auto-task record, due-math, host-local cu
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ADR-0218, ADR-0217]
+related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ADR-0218, ADR-0217, ADR-0286]
 ---
 
 # Auto-tasks — Design
@@ -31,10 +31,14 @@ documented under `docs/design/routines/`.
 (default `backlog`). Per ADR-0217 there are **no turn-based knobs**; `deny_unknown_fields`
 makes a stray `max_turns`/`turns` a hard parse error.
 
-Definitions live as `.orbit/auto_tasks/<name>.yaml`. Discovery
-(`loader.rs`) scans the directory, parses each file fail-closed, and rejects any
-file whose stem ≠ its `name`, so the on-disk identity and the `auto-task:<name>`
-provenance tag stay in lockstep.
+Definitions live as `.orbit/auto_tasks/<name>.yaml` in the active checkout.
+Discovery (`loader.rs`) scans the directory, parses each file fail-closed, and
+rejects any file whose stem ≠ its `name`, so the on-disk identity and the
+`auto-task:<name>` provenance tag stay in lockstep. In a linked-worktree
+runtime, definition discovery and CRUD use `WorkspacePaths::local_dir`;
+host-local cursor state continues to use the shared root. This split makes
+definition edits ordinary branch content instead of transient tracked dirt in
+the registered primary checkout (ADR-0286).
 
 ## 2. Due computation and catch-up collapse
 
@@ -80,7 +84,9 @@ add/list/show/update/toggle`) and the MCP tools (`orbit.auto_task.*`). Add
 rejects duplicate names; update patches present fields; toggle flips `enabled`
 (disabling is preserved, never a delete). Both surfaces validate the schedule
 (cron parse / interval > 0) and crew at write time, so a bad definition is never
-persisted.
+persisted. Successful writes replace the target atomically; a staging or rename
+failure leaves the previous definition bytes intact. In a primary checkout the
+local and shared roots are identical, preserving the operator-facing path.
 
 ## 5b. Manual mint — `mint` (ORB-10439, renamed by ORB-10446)
 
@@ -148,5 +154,6 @@ validation correctly produces only task-side effects.
 - ORB-10149 — Auto-task primitive.
 - ORB-10439 — on-demand manual mint (renamed to `orbit auto-task mint <name>` by ORB-10446).
 - ORB-10441 — mint-time visible title provenance.
+- ORB-10472 — worktree-local, atomic definition refresh.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

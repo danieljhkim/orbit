@@ -3,6 +3,7 @@
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use orbit_common::types::{TaskStatus, auto_task_tag};
+use tempfile::tempdir;
 
 use crate::OrbitRuntime;
 use crate::auto_tasks::scheduler::{SchedulerOptions, run_auto_task_scheduler_at};
@@ -162,4 +163,38 @@ fn dry_run_creates_nothing_and_persists_no_cursor() {
     let again = run_auto_task_scheduler_at(&runtime, t0, SchedulerOptions { dry_run: true })
         .expect("dry run 2");
     assert_eq!(again.reports[0].action, "would_baseline");
+}
+
+#[test]
+fn linked_worktree_scheduler_reads_local_definition_and_writes_shared_cursor() {
+    let root = tempdir().expect("tempdir");
+    let global_root = root.path().join("global");
+    let primary_orbit = root.path().join("primary/.orbit");
+    let worktree_orbit = root.path().join("worktree/.orbit");
+    for path in [&global_root, &primary_orbit, &worktree_orbit] {
+        std::fs::create_dir_all(path).expect("runtime root");
+    }
+    let runtime = OrbitRuntime::from_resolved_roots(&global_root, &primary_orbit, &worktree_orbit)
+        .expect("two-root runtime");
+    runtime
+        .auto_task_add(interval_params("local-chore", 60))
+        .expect("local definition");
+
+    let outcome =
+        run_auto_task_scheduler_at(&runtime, at(2026, 1, 1, 0, 0), SchedulerOptions::default())
+            .expect("scheduler pass");
+
+    assert_eq!(outcome.reports[0].name, "local-chore");
+    assert!(
+        primary_orbit.join("state/auto-tasks.json").is_file(),
+        "cursor state remains shared"
+    );
+    assert!(
+        !worktree_orbit.join("state/auto-tasks.json").exists(),
+        "linked worktree must not fork host-local cursor state"
+    );
+    assert!(
+        !primary_orbit.join("auto_tasks/local-chore.yaml").exists(),
+        "scheduler/CRUD must not materialize tracked definitions in primary"
+    );
 }

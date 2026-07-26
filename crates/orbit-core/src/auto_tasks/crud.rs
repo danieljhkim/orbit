@@ -1,8 +1,10 @@
 //! Auto-task CRUD [ORB-10149]: the shared domain surface behind both the CLI
 //! (`orbit auto-task …`) and the MCP tools (`orbit.auto_task.*`). Definitions
-//! are git-versioned YAML under `<orbit_dir>/auto_tasks/<name>.yaml`; these
-//! methods are the single choke point that reads/writes them, so both entry
-//! points stay consistent. Disabling is a `toggle`, never a delete.
+//! are git-versioned YAML under `<local_orbit_dir>/auto_tasks/<name>.yaml`;
+//! these methods are the single choke point that reads/writes them, so both
+//! entry points stay consistent. In a linked worktree, `local_orbit_dir`
+//! belongs to that checkout rather than the registered primary checkout.
+//! Disabling is a `toggle`, never a delete.
 //!
 //! `mint` (CLI-only by design — see `docs/design/mcp-bridge/2_design.md`)
 //! rides here too: it mints a task from a definition on demand by reusing the
@@ -12,7 +14,7 @@ use orbit_common::types::{
     AUTO_TASK_SCHEMA_VERSION, AutoTaskDefinition, AutoTaskSchedule, AutoTaskTemplate, DedupePolicy,
     OrbitError, Task,
 };
-use orbit_common::utility::fs::write_text_with_parent;
+use orbit_common::utility::fs::atomic_write_text;
 
 use crate::OrbitRuntime;
 
@@ -64,7 +66,7 @@ impl OrbitRuntime {
         };
         self.validate_auto_task(&definition)?;
 
-        let path = definition_path(&self.paths().orbit_dir, &definition.name);
+        let path = definition_path(&self.paths().local_dir, &definition.name);
         if path.exists() {
             return Err(OrbitError::InvalidInput(format!(
                 "auto-task '{}' already exists; update or toggle it instead",
@@ -79,7 +81,7 @@ impl OrbitRuntime {
     /// Fail-closed load errors are surfaced as an error only when nothing
     /// loaded; otherwise malformed files are simply skipped by the loader.
     pub fn auto_task_list(&self) -> Result<Vec<AutoTaskDefinition>, OrbitError> {
-        let collection = collect_auto_tasks(&self.paths().orbit_dir);
+        let collection = collect_auto_tasks(&self.paths().local_dir);
         Ok(collection
             .definitions
             .into_iter()
@@ -89,7 +91,7 @@ impl OrbitRuntime {
 
     /// Show one definition by name, or `None` if it does not exist.
     pub fn auto_task_show(&self, name: &str) -> Result<Option<AutoTaskDefinition>, OrbitError> {
-        let path = definition_path(&self.paths().orbit_dir, name);
+        let path = definition_path(&self.paths().local_dir, name);
         if !path.exists() {
             return Ok(None);
         }
@@ -181,11 +183,18 @@ impl OrbitRuntime {
     }
 
     fn write_auto_task(&self, definition: &AutoTaskDefinition) -> Result<(), OrbitError> {
-        let path = definition_path(&self.paths().orbit_dir, &definition.name);
+        // ADR-0286: tracked definition mutation belongs to the active
+        // worktree; shared state remains under `orbit_dir`.
+        let path = definition_path(&self.paths().local_dir, &definition.name);
         let yaml = serde_yaml::to_string(definition).map_err(|error| {
             OrbitError::Io(format!("encode auto-task '{}': {error}", definition.name))
         })?;
-        write_text_with_parent(&path, &yaml)
-            .map_err(|error| OrbitError::Io(format!("write {}: {error}", path.display())))
+        atomic_write_text(&path, &yaml).map_err(|error| {
+            OrbitError::Io(format!(
+                "atomically refresh auto-task '{}' at {}: {error}",
+                definition.name,
+                path.display()
+            ))
+        })
     }
 }

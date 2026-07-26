@@ -1264,6 +1264,194 @@ fn two_in_flight_worktrees_survive_one_primary_merge_advance() {
 }
 
 #[test]
+fn concurrent_auto_task_refresh_stays_in_assigned_worktree_during_boundary_checks() {
+    let fixture = linked_worktree_fixture();
+    let definition_dir = fixture.assigned.join(".orbit/auto_tasks");
+    fs::create_dir_all(&definition_dir).expect("definition dir");
+    let definition_path = definition_dir.join("doc-duties.yaml");
+    fs::write(
+        &definition_path,
+        "schemaVersion: 1\nname: doc-duties\nrevision: 0\n",
+    )
+    .expect("seed definition");
+    git_ok(
+        &fixture.assigned,
+        &["add", ".orbit/auto_tasks/doc-duties.yaml"],
+    );
+    git_ok(
+        &fixture.assigned,
+        &["commit", "-m", "seed auto-task definition"],
+    );
+    git_ok(
+        &fixture.primary,
+        &["merge", "--ff-only", "orbit-integrity-test"],
+    );
+
+    let implement_worktree = fixture.root().join("disjoint-implement");
+    git_ok(
+        &fixture.primary,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "orbit-disjoint-implement",
+            implement_worktree
+                .to_str()
+                .expect("utf8 implement worktree"),
+        ],
+    );
+    let implement_worktree = implement_worktree
+        .canonicalize()
+        .expect("canonical implement worktree");
+    let input_one = worktree_input(&fixture, "ORB-AUTO-TASK-REFRESH");
+    let input_two = serde_json::json!({
+        "prompt": "implement disjoint work",
+        "task_id": "ORB-DISJOINT-IMPLEMENT",
+        "workspace_path": implement_worktree,
+        "repo_root": implement_worktree,
+    });
+    let pair_one = validate_declared_worktree_pair(
+        &input_one,
+        None,
+        "run-auto-task-refresh",
+        "codex",
+        Some(&fixture.primary),
+    )
+    .expect("validate refresh pair")
+    .expect("refresh linked pair");
+    let pair_two = validate_declared_worktree_pair(
+        &input_two,
+        None,
+        "run-disjoint-implement",
+        "claude",
+        Some(&fixture.primary),
+    )
+    .expect("validate implement pair")
+    .expect("implement linked pair");
+    let refresh_guard = WorktreeBoundaryGuard::capture(
+        &input_one,
+        None,
+        "run-auto-task-refresh",
+        "codex",
+        Some(&fixture.assigned),
+        Some(&fixture.primary),
+        Some(&pair_one),
+    )
+    .expect("capture refresh guard")
+    .expect("refresh guard enabled");
+    let implement_guard = WorktreeBoundaryGuard::capture(
+        &input_two,
+        None,
+        "run-disjoint-implement",
+        "claude",
+        Some(&implement_worktree),
+        Some(&fixture.primary),
+        Some(&pair_two),
+    )
+    .expect("capture implement guard")
+    .expect("implement guard enabled");
+    let primary_before = git_bytes(&fixture.primary, &["status", "--porcelain=v2", "-z"]);
+
+    let (staged_tx, staged_rx) = std::sync::mpsc::channel();
+    let (continue_tx, continue_rx) = std::sync::mpsc::channel();
+    let writer = std::thread::spawn(move || {
+        for revision in 1..=32 {
+            let staged = definition_dir.join(format!(".doc-duties.{revision}.tmp"));
+            fs::write(
+                &staged,
+                format!("schemaVersion: 1\nname: doc-duties\nrevision: {revision}\n"),
+            )
+            .expect("stage definition");
+            if revision == 1 {
+                staged_tx.send(()).expect("signal staged refresh");
+                continue_rx.recv().expect("continue refresh");
+            }
+            fs::rename(&staged, &definition_path).expect("atomically refresh definition");
+        }
+    });
+
+    staged_rx.recv().expect("refresh reached staging point");
+    implement_guard
+        .verify()
+        .expect("disjoint boundary snapshot must not report primary checkout drift");
+    continue_tx.send(()).expect("release refresh");
+    writer.join().expect("refresh thread");
+    refresh_guard
+        .verify()
+        .expect("refresh boundary must remain inside its assigned worktree");
+
+    assert_eq!(
+        git_bytes(&fixture.primary, &["status", "--porcelain=v2", "-z"]),
+        primary_before,
+        "concurrent refresh must leave registered primary byte-identical"
+    );
+    assert!(
+        fixture
+            .assigned
+            .join(".orbit/auto_tasks/doc-duties.yaml")
+            .is_file()
+    );
+}
+
+#[test]
+fn failed_auto_task_refresh_preserves_primary_and_audits_definition_and_run() {
+    let fixture = linked_worktree_fixture();
+    let primary_before = git_bytes(&fixture.primary, &["status", "--porcelain=v2", "-z"]);
+    let script = fixture.root().join("codex");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nmkdir -p .orbit/auto_tasks\nprintf 'partial\\n' > .orbit/auto_tasks/.doc-duties.tmp\nrm .orbit/auto_tasks/.doc-duties.tmp\nprintf 'auto-task doc-duties refresh failed\\n' >&2\nexit 23\n",
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink.clone();
+    let audit = Arc::new(V2AuditWriter::new(
+        "run-auto-task-refresh-failed",
+        "codex:gpt-5.5",
+        sink_for_writer,
+    ));
+
+    let outcome = run_cli_backend(
+        &host,
+        &test_agent_loop_spec(Duration::from_secs(5)),
+        "run-auto-task-refresh-failed",
+        audit.clone(),
+        &worktree_input(&fixture, "ORB-AUTO-TASK-REFRESH"),
+        None,
+    )
+    .expect("failed provider remains an audited dispatch outcome");
+
+    assert!(!outcome.success);
+    assert_eq!(
+        git_bytes(&fixture.primary, &["status", "--porcelain=v2", "-z"]),
+        primary_before,
+        "failed refresh must leave registered primary byte-identical"
+    );
+    let events = audit.events_snapshot().expect("audit events");
+    let failed = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            V2AuditEventKind::CliInvocationFinished {
+                exit_code,
+                stderr_blob_ref,
+                ..
+            } if *exit_code == Some(23) => Some((
+                event.envelope.run_id.as_str(),
+                stderr_blob_ref.as_deref().expect("stderr blob"),
+            )),
+            _ => None,
+        })
+        .expect("durable failed-refresh event");
+    assert_eq!(failed.0, "run-auto-task-refresh-failed");
+    assert_eq!(
+        sink.blob(failed.1).as_deref(),
+        Some(b"auto-task doc-duties refresh failed\n".as_slice()),
+        "failure evidence must identify the auto-task"
+    );
+}
+
+#[test]
 fn unchanged_pre_dirty_path_is_excluded_from_escape_diagnostic() {
     let fixture = linked_worktree_fixture();
     fs::write(
