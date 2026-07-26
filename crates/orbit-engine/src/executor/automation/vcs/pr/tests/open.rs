@@ -2,6 +2,7 @@ use super::super::open::pr_open;
 use super::super::promote::pr_promote;
 use super::test_support::*;
 
+use super::super::body::GITHUB_PR_BODY_BYTE_LIMIT;
 use crate::context::TaskReadHost;
 use orbit_common::types::TaskStatus;
 use serde_json::json;
@@ -270,4 +271,26 @@ fn pr_open_preserves_non_empty_explicit_body() {
 
     pr_open(&host, &input).expect("create PR with explicit body");
     assert_eq!(host.pr_create_body(), "Custom reviewer handoff.");
+}
+
+#[test]
+fn pr_open_bounds_an_oversized_explicit_body_before_github_create() {
+    let workspace = pr_workspace();
+    let host = PrOpenTestHost::new(
+        vec![batch_task(
+            "ORB-10474",
+            "Bound explicit body",
+            "Outcome: success\nChanges:\n- Ready.",
+        )],
+        workspace.repo.clone(),
+    );
+    let mut input = pr_open_input(&workspace.repo, vec!["ORB-10474"]);
+    input["body"] = json!("é".repeat(GITHUB_PR_BODY_BYTE_LIMIT));
+
+    pr_open(&host, &input).expect("create PR with bounded explicit body");
+
+    let body = host.pr_create_body();
+    assert!(body.len() <= GITHUB_PR_BODY_BYTE_LIMIT);
+    assert!(body.contains("**Audit note:**"));
+    assert!(body.contains("ORB-10474"));
 }
