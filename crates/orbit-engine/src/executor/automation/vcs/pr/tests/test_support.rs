@@ -7,16 +7,15 @@ use std::sync::Mutex;
 use chrono::Utc;
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::{
-    Activity, ExternalRef, Job, JobTargetType, NotFoundKind, OrbitError, OrbitEvent, Role, Task,
-    TaskArtifact, TaskComment, TaskPriority, TaskStatus, TaskType, push_external_ref_if_missing,
+    ExternalRef, NotFoundKind, OrbitError, OrbitEvent, Role, Task, TaskArtifact, TaskComment,
+    TaskPriority, TaskStatus, TaskType, push_external_ref_if_missing,
 };
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
 
 use crate::context::{
-    JobRunResult, PrConfig, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost,
-    TaskWriteHost,
+    PrConfig, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
 };
 use crate::executor::registry::ActivityExecutorRegistry;
 
@@ -293,31 +292,6 @@ impl RuntimeHost for PrOpenTestHost {
             .clone()
             .map(|(agent, model)| (Some(agent), Some(model)))
             .unwrap_or((None, None)))
-    }
-
-    fn run_job_now_with_input_debug(
-        &self,
-        _job_id: &str,
-        _input: Value,
-        _debug: bool,
-    ) -> Result<JobRunResult, OrbitError> {
-        Err(OrbitError::Execution(
-            "run_job_now_with_input_debug is not needed by pr_open tests".to_string(),
-        ))
-    }
-
-    fn validate_activity_target_exists(
-        &self,
-        _target_type: JobTargetType,
-        _target_id: &str,
-    ) -> Result<Activity, OrbitError> {
-        Err(OrbitError::Execution(
-            "validate_activity_target_exists is not needed by pr_open tests".to_string(),
-        ))
-    }
-
-    fn get_job(&self, _job_id: &str) -> Result<Option<Job>, OrbitError> {
-        Ok(None)
     }
 
     fn run_tool_with_context_and_role(

@@ -6,9 +6,8 @@
 use crate::executor::registry::ActivityExecutorRegistry;
 use orbit_common::types::activity_job::AgentRole;
 use orbit_common::types::{
-    Activity, AgentModelPair, ExecutorDef, ExternalRef, InvocationTrace, Job, JobRun,
-    JobTargetType, OrbitError, OrbitEvent, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
-    TaskPriority, TaskStatus,
+    Activity, AgentModelPair, ExecutorDef, ExternalRef, InvocationTrace, JobRun, OrbitError,
+    OrbitEvent, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
 };
 use orbit_store::{InvocationQuery, InvocationRecord};
 use orbit_tools::ToolContext;
@@ -21,7 +20,7 @@ use super::hosts::{
     AgentProtocolHost, AgentRoleConfig, EnvironmentHost, ExecutorLookupHost, RuntimeHost,
     TaskActivityUpdate, TaskAutomationUpdate, TaskHost, TaskReadHost, TaskWriteHost,
 };
-use super::outcome::{ActivityInvocationResult, JobRunResult};
+use super::outcome::ActivityInvocationResult;
 
 #[derive(Clone, Copy)]
 pub struct ExecutorHost<'a> {
@@ -369,31 +368,8 @@ impl RuntimeHost for AutomationExecutorHost<'_> {
         self.runtime.activity_executor_registry()
     }
 
-    fn run_job_now_with_input_debug(
-        &self,
-        job_id: &str,
-        input: Value,
-        debug: bool,
-    ) -> Result<JobRunResult, OrbitError> {
-        self.runtime
-            .run_job_now_with_input_debug(job_id, input, debug)
-    }
-
     fn cancel_job_run(&self, run_id: &str) -> Result<(), OrbitError> {
         self.runtime.cancel_job_run(run_id)
-    }
-
-    fn validate_activity_target_exists(
-        &self,
-        target_type: JobTargetType,
-        target_id: &str,
-    ) -> Result<Activity, OrbitError> {
-        self.runtime
-            .validate_activity_target_exists(target_type, target_id)
-    }
-
-    fn get_job(&self, job_id: &str) -> Result<Option<Job>, OrbitError> {
-        self.runtime.get_job(job_id)
     }
 
     fn invocation_records(

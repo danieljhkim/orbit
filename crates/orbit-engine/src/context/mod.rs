@@ -37,6 +37,6 @@ pub use hosts::{
 pub use outcome::{
     ACTIVITY_EXECUTION_FAILED, AGENT_COMMIT_FAILED, AGENT_INVOCATION_FAILED,
     AGENT_PROTOCOL_VIOLATION, AGENT_TIMEOUT, ActivityInvocationResult, AttemptOutcome,
-    DirectActivityRunOutcome, JobRunResult, STALE_RUN_GRACE_SECONDS, WORKFLOW_RUN_FAILED_EVENT,
+    DirectActivityRunOutcome, STALE_RUN_GRACE_SECONDS, WORKFLOW_RUN_FAILED_EVENT,
     blocked_workflow_failure_update, redact_attempt_outcome, workflow_failure_note,
 };

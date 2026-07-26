@@ -451,7 +451,7 @@ This feature spans a migration, so the retained surfaces are explicit.
 | v2 `agent_loop` HTTP path | Kept | Canonical typed runtime path from [T20260418-2010]. |
 | v2 `agent_loop` CLI path | Kept | Implemented by the retained `AgentRuntime` trait and `providers/*_cli.rs` after [T20260419-0104]. |
 | `TargetRef` authoring form | Kept at authoring/load time only | Human-friendly YAML surface; resolved away before execution since [T20260418-2019]. |
-| v1 `crate::job_runner` | Kept | Older sequential/DAG runtime still exists beside the v2 executor; Phase 3 was additive in [T20260418-2018]. |
+| v1 `crate::job_runner` | Kept, condition grammar only | The older sequential/DAG runtime was removed in [ORB-10390]; the module now holds only `condition::evaluate_bool_expr`, consumed by the v2 executor's `when` and `break_when` evaluation (`job_executor/step.rs`, `job_executor/loop_block.rs`). |
 | Legacy `run_parallel_task_pipeline` | Removed | The legacy parallel-batch executor was removed as unused in [ORB-10332]; the live pipelines still dispatch and join children through `orbit.pipeline.invoke` / `orbit.pipeline.wait`. |
 | Seeded reference activities and jobs | Kept | They act as runnable contracts and examples, and were moved into init seeding in [T20260419-2347]. |
 

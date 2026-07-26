@@ -327,18 +327,6 @@ fn activity_catalog_accepts_intentionally_empty_audit_wildcard() {
 }
 
 #[test]
-fn get_job_rejects_retired_v1_lookup() {
-    let (_root, runtime, _global_root, _workspace_root) = test_runtime();
-    let err = runtime
-        .get_job("legacy_job")
-        .expect_err("v1 job lookup should be fenced");
-
-    let message = err.to_string();
-    assert!(message.contains("v1 job lookup is retired"), "{message}");
-    assert!(message.contains("orbit job run"), "{message}");
-}
-
-#[test]
 fn default_activity_catalog_allowlists_resolve_registered_tools() {
     let (_root, runtime, global_root, _workspace_root) = test_runtime();
     let activities_dir = global_root.join("resources/activities");

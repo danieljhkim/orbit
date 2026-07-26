@@ -6,9 +6,9 @@ use orbit_agent::AgentConfig;
 use orbit_common::types::InvocationTrace;
 use orbit_common::types::activity_job::{AgentRole, Backend, Provider};
 use orbit_common::types::{
-    Activity, AgentModelPair, ExecutorDef, ExternalRef, Job, JobRun, JobRunState, JobTargetType,
-    KnowledgeRunMetrics, OrbitError, OrbitEvent, PipelineState, Role, Task, TaskArtifact,
-    TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus, all_agent_families,
+    Activity, AgentModelPair, ExecutorDef, ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics,
+    OrbitError, OrbitEvent, PipelineState, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
+    TaskPriority, TaskStatus, all_agent_families,
 };
 use orbit_exec::EnvironmentMode;
 use orbit_store::JobRunStepParams;
@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::execution::ExecutionContext;
-use super::outcome::{ActivityInvocationResult, JobRunResult};
+use super::outcome::ActivityInvocationResult;
 
 #[derive(Debug, Clone, Default)]
 pub struct TaskAutomationUpdate {
@@ -267,23 +267,11 @@ pub trait RuntimeHost {
     }
     fn data_root(&self) -> &Path;
     fn activity_executor_registry(&self) -> &ActivityExecutorRegistry;
-    fn run_job_now_with_input_debug(
-        &self,
-        job_id: &str,
-        input: Value,
-        debug: bool,
-    ) -> Result<JobRunResult, OrbitError>;
     fn cancel_job_run(&self, run_id: &str) -> Result<(), OrbitError> {
         Err(OrbitError::Execution(format!(
             "cancel_job_run is not implemented for run '{run_id}'"
         )))
     }
-    fn validate_activity_target_exists(
-        &self,
-        target_type: JobTargetType,
-        target_id: &str,
-    ) -> Result<Activity, OrbitError>;
-    fn get_job(&self, job_id: &str) -> Result<Option<Job>, OrbitError>;
     fn invocation_records(
         &self,
         _query: InvocationQuery,

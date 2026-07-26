@@ -4,16 +4,15 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use orbit_common::types::{
-    Activity, Job, JobTargetType, OrbitError, OrbitEvent, Role, Task, TaskArtifact, TaskPriority,
-    TaskStatus,
+    OrbitError, OrbitEvent, Role, Task, TaskArtifact, TaskPriority, TaskStatus,
 };
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use crate::context::{
-    EnvironmentHost, JobRunResult, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate,
-    TaskReadHost, TaskWriteHost,
+    EnvironmentHost, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost,
+    TaskWriteHost,
 };
 use crate::executor::automation::StateExecutionContext;
 use crate::executor::registry::ActivityExecutorRegistry;
@@ -75,31 +74,6 @@ impl RuntimeHost for CommandTestHost {
 
     fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
         &self.registry
-    }
-
-    fn run_job_now_with_input_debug(
-        &self,
-        _job_id: &str,
-        _input: Value,
-        _debug: bool,
-    ) -> Result<JobRunResult, OrbitError> {
-        Err(OrbitError::Execution(
-            "run_job_now_with_input_debug is not needed by command tests".to_string(),
-        ))
-    }
-
-    fn validate_activity_target_exists(
-        &self,
-        _target_type: JobTargetType,
-        _target_id: &str,
-    ) -> Result<Activity, OrbitError> {
-        Err(OrbitError::Execution(
-            "validate_activity_target_exists is not needed by command tests".to_string(),
-        ))
-    }
-
-    fn get_job(&self, _job_id: &str) -> Result<Option<Job>, OrbitError> {
-        Ok(None)
     }
 
     fn run_tool_with_context_and_role(

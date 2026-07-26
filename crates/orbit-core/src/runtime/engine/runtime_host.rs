@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use orbit_common::types::{
-    Activity, AgentModelPair, InvocationTrace, JobRun, JobRunState, JobTargetType, OrbitError,
-    OrbitEvent, Role, RoleSlot,
+    Activity, AgentModelPair, InvocationTrace, JobRun, JobRunState, OrbitError, OrbitEvent, Role,
+    RoleSlot,
 };
 use orbit_engine::{ActivityInvocationResult, ExecutionContext, ExecutorHost, RuntimeHost};
 use orbit_store::{InvocationInsertParams, InvocationQuery, InvocationRecord, token_scoreboard};
@@ -35,33 +35,8 @@ impl RuntimeHost for OrbitRuntime {
         self.activity_executor_registry()
     }
 
-    fn run_job_now_with_input_debug(
-        &self,
-        job_id: &str,
-        _input: Value,
-        _debug: bool,
-    ) -> Result<orbit_engine::JobRunResult, OrbitError> {
-        Err(OrbitError::Execution(format!(
-            "v1 job dispatch is retired; refusing to run job '{job_id}' via RuntimeHost"
-        )))
-    }
-
     fn cancel_job_run(&self, run_id: &str) -> Result<(), OrbitError> {
         OrbitRuntime::cancel_job_run(self, run_id).map(|_| ())
-    }
-
-    fn validate_activity_target_exists(
-        &self,
-        _target_type: JobTargetType,
-        target_id: &str,
-    ) -> Result<Activity, OrbitError> {
-        Err(OrbitError::Execution(format!(
-            "v1 activity lookup is retired; refusing to resolve activity '{target_id}'"
-        )))
-    }
-
-    fn get_job(&self, job_id: &str) -> Result<Option<orbit_common::types::Job>, OrbitError> {
-        OrbitRuntime::get_job(self, job_id)
     }
 
     fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
