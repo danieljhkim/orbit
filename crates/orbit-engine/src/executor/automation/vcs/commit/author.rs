@@ -21,7 +21,7 @@ impl GitAuthor {
     }
 
     pub(super) fn resolved_model(model: &str) -> Self {
-        Self::new(format!("orbit ({model})"), "agent@orbit.invalid")
+        Self::new(format!("orbit[{model}]"), "agent@orbit.invalid")
     }
 
     pub(super) fn name(&self) -> &str {

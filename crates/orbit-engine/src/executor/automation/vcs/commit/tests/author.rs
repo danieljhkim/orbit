@@ -59,12 +59,12 @@ fn git_commit_uses_resolved_model_author_without_mutating_local_human_config() {
             .expect("read git committer");
         assert_eq!(
             actual_author,
-            format!("orbit ({resolved_model}) <agent@orbit.invalid>")
+            format!("orbit[{resolved_model}] <agent@orbit.invalid>")
         );
         assert_eq!(actual_committer, "orbit <orbit@orbit.local>");
         assert_ne!(
             actual_author,
-            format!("orbit ({crew_alias}) <agent@orbit.invalid>"),
+            format!("orbit[{crew_alias}] <agent@orbit.invalid>"),
             "the author must use the resolved model, not crew alias '{crew_alias}'"
         );
         author_names.push(author_name);
@@ -97,7 +97,7 @@ fn git_commit_uses_resolved_model_author_without_mutating_local_human_config() {
     }
     assert_eq!(
         author_names,
-        ["orbit (claude-opus-5)", "orbit (gpt-5.6-terra)"],
+        ["orbit[claude-opus-5]", "orbit[gpt-5.6-terra]"],
         "plain git log author names distinguish the two resolved models"
     );
 }
@@ -154,7 +154,7 @@ fn git_commit_treats_bare_configured_model_as_opaque() {
 
     assert_eq!(
         git_output(workspace, &["log", "-1", "--format=%an"]).expect("read model author"),
-        "orbit (opus)"
+        "orbit[opus]"
     );
 }
 
@@ -182,7 +182,7 @@ fn git_commit_gives_hook_the_same_model_and_preserves_other_trailers() {
 
     let author = git_output(workspace, &["log", "-1", "--format=%an"]).expect("read model author");
     let body = git_output(workspace, &["log", "-1", "--format=%B"]).expect("read commit body");
-    assert_eq!(author, "orbit (claude-opus-5)");
+    assert_eq!(author, "orbit[claude-opus-5]");
     assert!(body.contains("Agent-Run: inherited-run"), "{body}");
     assert!(body.contains("Agent-Model: claude-opus-5"), "{body}");
     assert!(body.contains("Agent-Task: T1"), "{body}");
@@ -234,7 +234,7 @@ fn git_commit_batch_uses_templated_single_task_message() {
         "a".repeat(66),
         title
     );
-    assert_eq!(actual_author, "orbit (claude-opus-5) <agent@orbit.invalid>");
+    assert_eq!(actual_author, "orbit[claude-opus-5] <agent@orbit.invalid>");
     assert_eq!(actual_committer, "orbit <orbit@orbit.local>");
     assert_eq!(body, expected_body);
     assert_eq!(
@@ -423,7 +423,7 @@ fn git_commit_batch_commits_dirty_residue_above_implement_authored_commits() {
     );
     assert_eq!(
         git_output(workspace, &["log", "-1", "--format=%an <%ae>"]).expect("read residue author"),
-        "orbit (gpt-5.6-terra) <agent@orbit.invalid>"
+        "orbit[gpt-5.6-terra] <agent@orbit.invalid>"
     );
 }
 
