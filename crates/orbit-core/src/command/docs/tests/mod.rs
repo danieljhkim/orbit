@@ -18,15 +18,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use orbit_common::types::OrbitError;
 use serde_yaml;
-
-use super::frontmatter::parse_doc_frontmatter_strict;
-use super::types::DocFrontmatter;
-
-pub(crate) fn parse_frontmatter(raw: &str) -> Result<DocFrontmatter, OrbitError> {
-    parse_doc_frontmatter_strict(Path::new("docs/example.md"), raw)
-}
 
 pub(crate) fn yaml_string<'a>(mapping: &'a serde_yaml::Mapping, key: &str) -> Option<&'a str> {
     mapping

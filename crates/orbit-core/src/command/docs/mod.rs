@@ -19,27 +19,15 @@ mod tests;
 
 use orbit_common::types::{OrbitError, Task};
 pub use orbit_search::{
-    AdrIndexParams, AdrIndexResult, AdrSearchResult, DocIndexParams, DocIndexResult,
-    DocSearchResult, SearchResult,
+    AdrIndexParams, AdrIndexResult, DocIndexParams, DocIndexResult, SearchResult,
 };
 use orbit_search::{score_adr_record, score_doc_record, sort_search_results};
 
 use crate::OrbitRuntime;
 
 pub use config::{AdrSearchConfig, DocsSearchConfig};
-pub use frontmatter::parse_doc_frontmatter_strict;
-pub use types::{
-    ArtifactRef, DocAddOutcome, DocFrontmatter, DocMigrationChange, DocMigrationReport, DocRecord,
-    DocShow, DocType, TaskRelatedDoc,
-};
+pub use types::{DocAddOutcome, DocMigrationReport, DocRecord, DocShow, DocType, TaskRelatedDoc};
 pub use walk::walk_docs_roots;
-
-// Re-export the toml parsers at the docs root so `command::docs::parse_*_from_config_toml`
-// surface is unchanged.
-pub use config::{
-    parse_adr_search_config_from_config_toml, parse_docs_roots_from_config_toml,
-    parse_docs_search_config_from_config_toml,
-};
 
 // Bring helper fns into scope so the pasted impl block (lines 291-408 of original)
 // continues to compile with bare calls.

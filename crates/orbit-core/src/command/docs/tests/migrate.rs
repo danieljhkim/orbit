@@ -5,7 +5,7 @@ use std::path::Path;
 
 use tempfile::tempdir;
 
-use super::super::frontmatter::split_frontmatter;
+use super::super::frontmatter::{parse_doc_strict, split_frontmatter};
 use super::super::migrate::{migrate_doc_content, migration_diff};
 use super::super::types::DocType;
 use super::*;
@@ -20,8 +20,9 @@ fn migrate_adds_locked_fields_to_legacy_frontmatter() {
     )
     .expect("migrate")
     .expect("changed");
-    let parsed =
-        parse_doc_frontmatter_strict(Path::new("doc.md"), &updated).expect("valid locked schema");
+    let parsed = parse_doc_strict(Path::new("doc.md"), &updated)
+        .expect("valid locked schema")
+        .frontmatter;
     assert_eq!(parsed.doc_type, DocType::Design);
     assert_eq!(parsed.tags, vec!["sample"]);
     assert!(
@@ -77,7 +78,7 @@ fn migrate_preserves_multiline_frontmatter_values() {
     );
     assert_eq!(yaml_string(mapping, "type"), Some("design"));
     assert_eq!(yaml_string(mapping, "summary"), Some("Example"));
-    parse_doc_frontmatter_strict(Path::new("doc.md"), &updated).expect("valid locked schema");
+    parse_doc_strict(Path::new("doc.md"), &updated).expect("valid locked schema");
 }
 
 #[test]

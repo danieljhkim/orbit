@@ -501,10 +501,6 @@ impl ExecutionEnvPolicy {
         self.inherit
     }
 
-    pub(crate) fn pass(&self) -> &[String] {
-        &self.pass
-    }
-
     pub(crate) fn hydrated_allowlist_env_with_extras(
         &self,
         extras: &[String],

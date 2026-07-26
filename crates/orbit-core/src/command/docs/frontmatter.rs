@@ -5,10 +5,6 @@ use orbit_common::types::OrbitError;
 use super::path_util::component_str;
 use super::types::{DocFrontmatter, DocType, FrontmatterBlock, ParsedDoc, RawDocFrontmatter};
 
-pub fn parse_doc_frontmatter_strict(path: &Path, raw: &str) -> Result<DocFrontmatter, OrbitError> {
-    parse_doc_strict(path, raw).map(|parsed| parsed.frontmatter)
-}
-
 pub(super) fn parse_doc_strict(path: &Path, raw: &str) -> Result<ParsedDoc, OrbitError> {
     let block = split_frontmatter(raw).map_err(|message| {
         OrbitError::InvalidInput(format!(
