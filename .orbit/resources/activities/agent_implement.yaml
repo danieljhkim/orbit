@@ -150,6 +150,7 @@ spec:
   tools:
     - orbit.task.*
     - orbit.adr.add
+    - orbit.adr.update
     - orbit.friction.*
     - orbit.search
     - orbit.learning.show
