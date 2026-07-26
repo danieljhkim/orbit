@@ -26,7 +26,9 @@ The constraints are the point — they're what keep agent-assisted code shippabl
 
 - **Structured audit log.** Every tool call, provider request/response, and task transition becomes a queryable event with agent identity attached — append-only, tamper-evident, exportable. → [docs/design/auditability/](docs/design/auditability/)
 
-- **Code-graph engine (parked).** A parsed SQLite code index (symbols, imports, references, implementors) exists in-tree, but as of ORB-10357 it has no CLI, MCP, or tool-registry surface — agents use `grep`/`rg` and direct file reads instead. Kept as a single dependent-free crate pending deletion; historical numbers in [`benchmarks/graph/`](benchmarks/graph/). → [docs/design/orbit-graph/](docs/design/orbit-graph/)
+- **Dependency-ordered execution.** Tasks carry `dependencies` and typed `relations` (`blocked_by`, …). The pipeline gates admission on them, so a dependent task waits for its blocker to reach `done` instead of being hand-sequenced by whoever is dispatching — declare the order once and let the queue enforce it.
+
+- **Recurring work as data, not code.** `orbit auto-task add/list/show/update/toggle` defines `.orbit/auto_tasks/*.yaml` templates with a cron or interval schedule and a dedupe policy; a seeded scheduler routine mints tasks from the due ones, collapsing catch-up runs and skipping duplicates when one is already open. Provider-neutral, checked into the repo.
 
 - **Conflict-aware parallel execution.** For `orbit run ship`, each agent run lands in its own git worktree per task, and the gate pipeline reserves task `context_files` as locks before fanning out, rejecting overlapping reservations up front instead of producing merge conflicts later (see [merge throughput chart](docs/assets/merge-throughput.png)). → [docs/design/activity-job/](docs/design/activity-job/)
 
@@ -55,7 +57,7 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 >
 > I am a staff/principal/founding engineer who already uses multiple coding agents heavily (Claude Code, Codex, Gemini, Aider, etc.) and has started to feel the long-term maintainability cost of moving fast without enough structure.
 >
-> Your job is to install and configure Orbit inside this repository so that I can keep using my existing agents while gaining durable tasks, structured audit, ADRs, safe parallel execution, and a code knowledge graph.
+> Your job is to install and configure Orbit inside this repository so that I can keep using my existing agents while gaining durable tasks, structured audit, ADRs, and safe parallel execution.
 >
 > Follow these steps carefully:
 >
@@ -84,9 +86,9 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 
 </details>
 
-### Manual Setup (old school way)
+### Install the Binary
 
-Not recommended unless you're a contrarian or you're in a highly restricted environment where you can't clone things. This way is harder and less flexible - really makes little sense to choose this route. But if you must:
+Faster to get running, and the right choice if you don't need to change how Orbit works: `curl`, Homebrew, or an agent plugin all give you a released, signed build. You give up the ability to reshape Orbit's conventions in place — you can always clone later and keep your `.orbit/` state.
 
 **Prerequisites:** at least one supported agent CLI (Codex, Claude Code, or Gemini CLI), authenticated. For PR-based workflows (i.e., `orbit run ship` in the default `--mode pr`), `gh` installed and authenticated; otherwise use `--mode local`.
 
@@ -227,50 +229,24 @@ First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are h
 
 ## Orbit MCP Surface
 
-`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin. The table below is a registered-tool reference; inactive or CLI/operator-only rows are called out separately from the active agent MCP surface. Run `orbit tool list` for the live registry (it's the source of truth; this table can drift).
+`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin.
 
-The parsed code graph has no CLI, MCP, or tool-registry surface as of ORB-10357; it is not reachable by any command.
+**`orbit tool list` is the tool reference.** It prints the live registry with descriptions and active/inactive state. This file deliberately doesn't reproduce it — a hand-maintained table drifts from the registry the first time a tool is added, and then quietly misinforms.
+
+The surface is namespaced by artifact:
+
+| Namespace | What it covers |
+|---|---|
+| `orbit.task.*` | Create, update, show, list, start; dependencies and relations; context files; artifacts; locks |
+| `orbit.search` | Unified query across tasks, docs, learnings, and ADRs — `kind` narrows the corpus, `hybrid: true` opts task results into BM25 + cosine ranking, `semantic: "<task-id>"` returns cosine neighbors. Cross-kind filters: `tag`, `all`, `status`, `path` |
+| `orbit.adr.*` | Author, edit, show, supersede Architecture Decision Records |
+| `orbit.learning.*` | Author, edit, show, list, supersede project learnings |
+| `orbit.friction.*` | Record, edit, show, list, resolve operational frictions; list taxonomy tags |
+| `orbit.docs.*` | List and show indexed Markdown under `[docs].roots`; register additional roots |
 
 Not every tool is intended for agent calls. Lifecycle/admin operations (`docs.index`, `docs.migrate`, `semantic.*`, `learning.sync`, `task.locks.*`, and `friction.*` reads/updates) are typically driven by humans via the CLI; the recommended agent permission profile auto-allows discovery/write tools and prompts on the rest. See `.claude/settings.json` (and `.codex/`, `.grok/`, `.gemini/` equivalents) in the seeded workspace for the default agent-facing subset.
 
-<details>
-<summary><strong>Full tool reference</strong> — task, review, search, semantic, adr, docs, learning, friction (click to expand)
-</summary>
-
-Agents discover project docs through `orbit.search`; docs, lock, semantic setup/index/status, learning sync/list, and friction stats operations are CLI-only admin/setup workflows. Five further admin/destructive tools — `orbit.task.delete`, `orbit.task.lint`, `orbit.semantic.uninstall`, `orbit.adr.list` (use `orbit search --kind adr` from agents), `orbit.learning.prune` — remain registered for admin use via `orbit tool run` and the `orbit adr list` / `orbit task lint` CLI surfaces, but are hidden from the agent MCP surface (ORB-00289). ORB-10046 removed the learning vote and comment surfaces entirely — corrections go through `update`/`supersede`, provenance through `evidence`.
-
-| Namespace | Tool | Purpose |
-|---|---|---|
-| **task** | `orbit.task.add` | Create a new task |
-| | `orbit.task.update` | Mutate task fields (status, plan, acceptance criteria) |
-| | `orbit.task.show` | Fetch full task detail |
-| | `orbit.task.list` | List tasks filtered by status / scope / `path` |
-| | `orbit.task.start` | Transition into in-progress |
-| | `orbit.task.approve` | Approve a task (`proposed → backlog`, or `review → done`) |
-| | `orbit.task.reject` | Reject a task |
-| | `orbit.task.artifact.put` | Attach a generated artifact to a task |
-| | `orbit.task.locks` | List files currently locked by active tasks |
-| **search** | `orbit.search` | Unified search across tasks, docs, learnings, and ADRs. `kind` narrows the corpus; `hybrid: true` opts task results into BM25 + cosine ranking; `semantic: "<task-id>"` returns cosine neighbors. Cross-kind filters: `tag` (AND), `all` (kind-aware status widener), `status` (`kind:value` tokens), `path` (selector-mapping for tasks, glob-containment for learnings/ADRs; docs remain content-indexed). |
-| **adr** | `orbit.adr.add` | Author an Architecture Decision Record |
-| | `orbit.adr.update` | Edit an ADR |
-| | `orbit.adr.show` | Fetch an ADR |
-| | `orbit.adr.supersede` | Mark an ADR superseded by another |
-| **docs** | `orbit.docs.list` | List indexed Markdown docs under configured `[docs].roots` |
-| | `orbit.docs.show` | Show a single doc with parsed frontmatter and body |
-| | `orbit.docs.add` | Register an additional docs root |
-| **learning** | `orbit.learning.add` | Author a project learning |
-| | `orbit.learning.update` | Edit a learning |
-| | `orbit.learning.show` | Fetch a learning |
-| | `orbit.learning.list` | List learnings by tag / scope / `path` (glob-containment) |
-| | `orbit.learning.supersede` | Mark a learning superseded |
-| **friction** | `orbit.friction.add` | Record an operational friction |
-| | `orbit.friction.update` | Edit a friction |
-| | `orbit.friction.show` | Fetch a friction |
-| | `orbit.friction.list` | List frictions by tag / status |
-| | `orbit.friction.tags` | List configured friction taxonomy tags |
-| | `orbit.friction.resolve` | Mark a friction resolved |
-
-</details>
+A few admin and destructive tools — `orbit.task.delete`, `orbit.task.lint`, `orbit.semantic.uninstall`, `orbit.adr.list` (agents use `orbit search --kind adr`), `orbit.learning.prune` — stay registered for operator use via `orbit tool run` and their CLI equivalents, but are hidden from the agent MCP surface.
 
 ---
 
@@ -289,7 +265,7 @@ Agents discover project docs through `orbit.search`; docs, lock, semantic setup/
 ├── adrs/                        # proposed/, accepted/, superseded/
 ├── learnings/                   # your team's durable knowledge
 ├── frictions/                   # local friction log + tags.yaml
-├── graph/                       # parsed code-graph index (.db, per worktree); vestigial, no command writes it (ORB-10357)
+├── graph/                       # parsed code-graph index (.db, per worktree); vestigial, no command writes it
 ├── resources/                   # activities, jobs, executors, policies (customizable)
 └── state/
     ├── audit/                   # reserved; audit events live in ~/.orbit/orbit.db
@@ -318,15 +294,16 @@ Couple things to note:
 
 ## Current Status
 
-Orbit is v0.9.x — work in progress.
+Pre-1.0 and under active development. Breaking changes ride a minor bump (`0.9.x → 0.10.0`); see [CHANGELOG.md](CHANGELOG.md) and [RELEASING.md](RELEASING.md).
 
-- Core local execution, workflows, MCP, tasks, reviews, ADRs, frictions, and audit infrastructure are usable today. (The code-graph engine is parked, dependent-free, with no CLI/MCP surface as of ORB-10357.)
+- Core local execution, workflows, MCP, tasks, reviews, ADRs, frictions, and audit infrastructure are usable today.
+- **Parked:** the parsed code-graph index. It exists in-tree as a dependent-free crate but has no CLI, MCP, or tool-registry surface and is not reachable by any command — agents use `grep`/`rg` and direct file reads instead. Historical benchmarks in [`benchmarks/graph/`](benchmarks/graph/).
 
 ---
 
 ## Contributing
 
-Contributions especially welcome on graph-aware scheduling, locking, worktree/session management, execution primitives, reconciliation, audit coverage, and tool-calling interfaces.
+Contributions especially welcome on locking, worktree/session management, execution primitives, reconciliation, audit coverage, and tool-calling interfaces.
 
 Before contributing: [docs/INDEX.md](docs/INDEX.md#designs),
 [docs/design/CONVENTIONS.md](docs/design/CONVENTIONS.md), and [CLAUDE.md](CLAUDE.md).
