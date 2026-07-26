@@ -16,7 +16,7 @@
 //!   native), with catch-up collapse.
 //! - [`state`] — host-local, workspace-scoped last-fired cursors.
 //! - [`scheduler`] — the pass itself + the deterministic-action projection.
-//! - [`crud`] — the shared add/list/show/update/toggle domain surface.
+//! - [`crud`] — the shared add/list/show/update/toggle/generate domain surface.
 
 pub mod crud;
 pub mod loader;

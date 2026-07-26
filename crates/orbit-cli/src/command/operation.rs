@@ -531,6 +531,7 @@ impl Commands {
                     AutoTaskSubcommand::Show(args) => ("show", Some(args.name.as_str())),
                     AutoTaskSubcommand::Update(args) => ("update", Some(args.name.as_str())),
                     AutoTaskSubcommand::Toggle(args) => ("toggle", Some(args.name.as_str())),
+                    AutoTaskSubcommand::Generate(args) => ("generate", Some(args.name.as_str())),
                 };
                 CommandOperation::new(
                     RuntimeNeed::Required,

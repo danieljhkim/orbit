@@ -5,6 +5,7 @@ use orbit_common::types::{
 use crate::auto_tasks::crud::AutoTaskAddParams;
 
 mod crud;
+mod generate;
 mod schedule;
 mod scheduler;
 mod shipped;
