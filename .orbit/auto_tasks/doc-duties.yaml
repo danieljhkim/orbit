@@ -1,0 +1,107 @@
+schemaVersion: 1
+name: doc-duties
+description: Daily rolling documentation upkeep — validates the least-recently-validated docs and stamps last_validated
+enabled: true
+schedule:
+  cron: 30 6 * * *
+template:
+  title: Doc duties — validate the least-recently-validated docs
+  description: |
+    Rolling upkeep of this repo's documentation. Each run takes a small batch of
+    the docs that have gone longest without being checked, verifies them against
+    the code, fixes what is wrong, and records that they were checked. Over
+    successive runs the whole corpus cycles.
+
+    ## Selecting this run's batch
+
+    The `last_validated` frontmatter key records when a doc's claims were last
+    checked against reality. It is NOT `last_updated`: editing a doc changes
+    `last_updated`, confirming a doc is still true changes `last_validated`.
+
+    1. List every in-scope doc together with its `last_validated` value.
+    2. Order them: docs with **no** `last_validated` key first (never validated),
+       then oldest date first. Break ties by path so the order is stable.
+    3. Take the **6 oldest**. That is this run's batch. Do not take more — a
+       bounded batch that is done properly beats a broad pass that is not.
+
+    Docs that have no frontmatter block at all are **out of the rotation**: do
+    not invent a frontmatter block for them, because `type` and `summary` are
+    required fields and guessing them corrupts the docs corpus. List them in
+    your execution summary instead so a human can decide.
+
+    ## What to do with each doc in the batch
+
+    Three passes, in this order:
+
+    1. **Staleness — the one that matters.** Check the doc's factual claims
+       against the current code: file and module paths, type/trait/function
+       names, CLI commands and flags, config keys, crate names, version claims,
+       described behavior. Verify each with a command (`ls`, `grep`, `--help`,
+       reading the source). Correct what has drifted.
+    2. **Spelling.** Fix genuine misspellings. Do not impose style preferences —
+       hyphenation, dialect, and voice are the author's, not yours.
+    3. **Formatting.** Fix broken markdown: malformed tables, unclosed code
+       fences, broken relative links, inconsistent heading levels. Do not reflow
+       prose, rewrap lines, or restructure a document that renders correctly.
+
+    Then set `last_validated: <today, YYYY-MM-DD>` in that doc's frontmatter —
+    adding the key if absent, updating it if present.
+
+    ## The rule that makes this scheme worth anything
+
+    **Only stamp a doc you actually validated.** A `last_validated` date you did
+    not earn is worse than no date at all: it removes the doc from the rotation
+    while leaving it wrong, and nobody will look at it again. If you could not
+    verify a doc's claims — the ground truth is not observable from this repo,
+    or the doc is too large for the remaining budget — leave it unstamped, say
+    so in the execution summary, and move on. Reporting five validated docs and
+    one skipped is a good run. Six stamps and one lie is a bad one.
+
+    Likewise: where you cannot verify a specific claim inside an otherwise
+    checkable doc, leave that claim alone rather than rewriting it on belief,
+    and note it. A plausible wrong fact is harder to catch than an obviously
+    old one.
+
+    ## Scope
+
+    In scope: `docs/design/**` (excluding `docs/design/_archive/**`),
+    `docs/runbooks/**`, and the other prose under `docs/`.
+
+    Never modify: `.orbit/adrs/**` and `CHANGELOG.md` (historical records — a
+    citation that was accurate when written is provenance, not staleness),
+    `docs/design/_archive/**`, `.orbit/tasks/`, `.orbit/graph/`, and any other
+    generated or stored state. Do not author new documents or new sections; if
+    you find a real documentation gap, report it rather than filling it.
+
+    Do not add project-specific identifiers (person names, task/ADR/friction
+    ids) to anything under `crates/*/assets/**` — those assets seed every
+    workspace and must stay project-agnostic.
+
+    ## Reporting
+
+    Your execution summary is the artifact a human reads. State: which docs were
+    in the batch and why they were selected, what you changed in each with the
+    verification command behind it, which docs or claims you left unvalidated
+    and why, and the docs you found with no frontmatter block.
+  acceptance_criteria:
+  - Exactly the batch of least-recently-validated in-scope docs was worked, selected by missing-then-oldest `last_validated`.
+  - Every doc stamped with today's `last_validated` was actually verified against the code, with the verification named in the execution summary.
+  - Docs or individual claims that could not be verified were left unstamped and unmodified, and are listed in the execution summary.
+  - No file under .orbit/adrs/, CHANGELOG.md, docs/design/_archive/, or generated state was modified.
+  - No frontmatter block was created for a doc that lacked one; such docs are listed instead.
+  - No new document or new section was authored.
+  - Formatting changes are limited to genuinely broken markdown; no prose reflowing or rewrapping appears in the diff.
+  - make ci-fast passes.
+  task_type: chore
+  tags:
+  - doc-duties
+  - docs
+  - staleness
+  priority: medium
+  crew: luna
+  status: backlog
+dedupe: skip_if_open
+created_by: human
+created_at: 2026-07-26T00:00:00Z
+updated_by: human
+updated_at: 2026-07-26T00:00:00Z
