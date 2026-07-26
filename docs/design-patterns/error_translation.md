@@ -1,6 +1,7 @@
 ---
 type: pattern
 summary: "Crate-Boundary Error Translation"
+last_validated: 2026-07-26
 ---
 # Crate-Boundary Error Translation
 
@@ -72,13 +73,9 @@ pub fn graph_error_to_orbit(error: GraphError) -> OrbitError {
 }
 ```
 
-Used at every cross-crate edge — e.g. `crates/orbit-remote/src/mcp/graph.rs`:
+The graph crate currently has no workspace dependents, so there is no live cross-crate call site for this translator; `graph_error_to_orbit` remains at the graph crate root for any future boundary. The former `crates/orbit-remote/src/mcp/graph.rs` adapter was removed when graph access was consolidated and removed from MCP.
 
-```rust
-to_json(graph.search(&query).map_err(graph_error_to_orbit)?)
-```
-
-Other live translators in the same shape: `selector_error_to_orbit` (`orbit-common::utility::selector`, re-exported through `orbit-graph::extract` for graph consumers), `rpc_error_to_orbit` (`orbit-search::rpc`), and `dispatch_error_to_orbit` (`orbit-engine`, dispatcher module).
+Other live translators in the same shape: `selector_error_to_orbit` (`orbit-common::utility::selector`; `Selector` and `SelectorParseError` are re-exported through `orbit-graph::extract` for graph consumers), `rpc_error_to_orbit` (`orbit-search::rpc`), and `dispatch_error_to_orbit` (`orbit-engine`, dispatcher module).
 
 Patterns to copy:
 

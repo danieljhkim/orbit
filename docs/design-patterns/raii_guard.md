@@ -1,6 +1,7 @@
 ---
 type: pattern
 summary: "RAII Guard Pattern"
+last_validated: 2026-07-26
 ---
 # RAII Guard Pattern
 
@@ -22,7 +23,7 @@ Four shapes in the codebase carry distinct lessons.
 
 ## Reference: `AuditGuard` — record the scope's outcome once
 
-From `crates/orbit-cli/src/audit_middleware.rs:39`:
+From `crates/orbit-cli/src/audit_middleware.rs:28`:
 
 ```rust
 pub struct AuditGuard<'a> {
@@ -59,7 +60,7 @@ Patterns to copy:
 
 ## Reference: `StagedTextFile` — `Drop` as rollback
 
-From `crates/orbit-common/src/utility/fs.rs:74`:
+From `crates/orbit-common/src/utility/fs.rs:112`:
 
 ```rust
 pub struct StagedTextFile {
@@ -137,41 +138,29 @@ Patterns to copy:
 - **Hold a `'static` mutex as a field.** `_lock: MutexGuard<'static, ()>` makes "one guard at a time, process-wide" structurally impossible to violate.
 - **Hand-rollback on partial install.** `Drop` only runs on values that successfully return; mid-construction failures must unwind their own work before returning `Err`.
 
-## Reference: `GraphLockGuard` — explicit release with `Drop` fallback
+## Reference: `DbLockGuard` — resource held until `Drop`
 
-From `crates/orbit-knowledge/src/lock.rs:209`:
+From `crates/orbit-graph/src/sync/scanner.rs:150`:
 
 ```rust
-pub struct GraphLockGuard {
-    /* ...selectors, owner, paths... */
-    released: bool,
+pub(crate) struct DbLockGuard {
+    _file: File,
 }
 
-impl GraphLockGuard {
-    pub fn release(&mut self) -> Result<(), KnowledgeError> {
-        if self.released { return Ok(()); }
-        /* ...unlock each selector, persist store... */
-        self.released = true;
-        Ok(())
-    }
-}
-
-impl Drop for GraphLockGuard {
-    fn drop(&mut self) {
-        if self.released { return; }
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if let Err(error) = self.release() {
-                tracing::warn!(target: "orbit.knowledge.lock", error = %error, "...");
-            }
-        }));
+impl DbLockGuard {
+    pub(crate) fn acquire(db_path: &Path) -> Result<Self, GraphError> {
+        let lock_path = lock_path_for(db_path);
+        let file = /* open the sidecar and acquire an exclusive lock */;
+        Ok(Self { _file: file })
     }
 }
 ```
 
 Patterns to copy:
 
-- **`released: bool` for idempotency.** `release()` followed by scope exit is a no-op, not a double-release.
-- **Explicit `release()` returns `Result`; `Drop` only logs.** Callers that can react to a release error get a real error path. Callers that can't (or whose scope just ended) get the Drop fallback.
+- **Hold the resource in a field.** `DbLockGuard` keeps the locked sidecar `File` alive in `_file`; dropping the file releases the OS lock. There is no separate explicit release path to call or duplicate.
+
+The live implementation is `crates/orbit-graph/src/sync/scanner.rs:150`. The former `GraphLockGuard` reference belonged to the retired `orbit-knowledge` lock store.
 
 ---
 
