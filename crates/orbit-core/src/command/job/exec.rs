@@ -117,7 +117,7 @@ impl OrbitRuntime {
     ) -> Result<V2JobRunResult, OrbitError> {
         let job_name = load_job_name(yaml_path)?;
         let scheduled_at = chrono::Utc::now();
-        let run = self.stores().jobs().insert_run(
+        let run = self.stores().jobs().insert_job_run(
             &job_name,
             attempt,
             scheduled_at,
@@ -141,10 +141,11 @@ impl OrbitRuntime {
             .write_run_state(&run.run_id, &initial_state)?;
 
         let started_at = chrono::Utc::now();
-        let changed =
-            self.stores()
-                .jobs()
-                .mark_run_running(&run.run_id, started_at, std::process::id())?;
+        let changed = self.stores().jobs().mark_job_run_running(
+            &run.run_id,
+            started_at,
+            std::process::id(),
+        )?;
         if !changed {
             return Err(OrbitError::not_found(NotFoundKind::JobRun, run.run_id));
         }
@@ -373,7 +374,7 @@ impl OrbitRuntime {
                 .num_milliseconds()
                 .max(0) as u64,
         );
-        self.stores().jobs().complete_run_step(
+        self.stores().jobs().complete_job_run_step(
             &run.run_id,
             &JobRunStepParams {
                 step_index: 0,
@@ -934,12 +935,12 @@ spec:
         let run = runtime
             .stores()
             .jobs()
-            .insert_run("task_pr_pipeline", 1, Utc::now(), None, None)
+            .insert_job_run("task_pr_pipeline", 1, Utc::now(), None, None)
             .expect("insert failed pipeline run");
         runtime
             .stores()
             .jobs()
-            .mark_run_running(&run.run_id, Utc::now(), std::process::id())
+            .mark_job_run_running(&run.run_id, Utc::now(), std::process::id())
             .expect("mark failed pipeline run running");
         runtime
             .finalize_job_run_with_reservation_cleanup(
@@ -1378,7 +1379,7 @@ spec:
         let run = runtime
             .stores()
             .jobs()
-            .insert_run("qa_ckpt", 1, Utc::now(), Some(json!({"seconds": 0})), None)
+            .insert_job_run("qa_ckpt", 1, Utc::now(), Some(json!({"seconds": 0})), None)
             .expect("insert run");
         let initial = orbit_common::types::PipelineState::new(
             run.run_id.clone(),
@@ -1469,7 +1470,7 @@ spec:
         let run = runtime
             .stores()
             .jobs()
-            .insert_run("qa_resume_ckpt", 1, Utc::now(), Some(input.clone()), None)
+            .insert_job_run("qa_resume_ckpt", 1, Utc::now(), Some(input.clone()), None)
             .expect("insert run");
         let initial = orbit_common::types::PipelineState::new(
             run.run_id.clone(),
@@ -1491,7 +1492,7 @@ spec:
         runtime
             .stores()
             .jobs()
-            .mark_run_running(&run.run_id, Utc::now(), child.id())
+            .mark_job_run_running(&run.run_id, Utc::now(), child.id())
             .expect("mark running under fake worker pid");
         <OrbitRuntime as V2RuntimeHost>::checkpoint_step(
             &runtime,

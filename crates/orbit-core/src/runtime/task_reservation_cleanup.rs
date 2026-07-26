@@ -33,10 +33,10 @@ impl OrbitRuntime {
             .get_job_run_backend(run_id)?
             .map(|run| run.state.is_terminal())
             .unwrap_or(false);
-        let changed = self
-            .stores()
-            .jobs()
-            .finalize_run(run_id, state, finished_at, duration_ms)?;
+        let changed =
+            self.stores()
+                .jobs()
+                .finalize_job_run(run_id, state, finished_at, duration_ms)?;
         if state.is_terminal() {
             self.best_effort_release_task_reservations_for_owner_run_id(run_id, release_reason);
             // Coupling-out: block the run's coupled tasks only on the first
@@ -60,8 +60,10 @@ impl OrbitRuntime {
         owner_run_id: &str,
         release_reason: TaskReservationReleaseReason,
     ) -> Result<Vec<ReleasedTaskReservation>, OrbitError> {
-        let result = self.stores().task_reservations().release_by_owner_run_id(
-            TaskReservationReleaseByOwnerParams {
+        let result = self
+            .stores()
+            .task_reservations()
+            .release_task_reservations_by_owner_run_id(TaskReservationReleaseByOwnerParams {
                 workspace_orbit_dir: workspace_orbit_dir(self),
                 workspace_id: workspace_task_reservation_id(self)?,
                 owner_run_id: owner_run_id.to_string(),
@@ -73,8 +75,7 @@ impl OrbitRuntime {
                     })
                     .to_string(),
                 ),
-            },
-        )?;
+            })?;
         emit_expired_reservation_events(self, &result.expired_reservations)?;
         for reservation in &result.released_reservations {
             emit_task_lock_release_event(self, reservation, release_reason)?;
@@ -103,14 +104,15 @@ impl OrbitRuntime {
         requested_files: &[String],
         limit: usize,
     ) -> Result<Vec<ReleasedTaskReservation>, OrbitError> {
-        let candidates = self.stores().task_reservations().list_owned_conflicts(
-            TaskReservationOwnedConflictsParams {
+        let candidates = self
+            .stores()
+            .task_reservations()
+            .list_owned_task_reservation_conflicts(TaskReservationOwnedConflictsParams {
                 workspace_orbit_dir: workspace_orbit_dir(self),
                 workspace_id: workspace_task_reservation_id(self)?,
                 requested_files: requested_files.to_vec(),
                 limit,
-            },
-        )?;
+            })?;
         emit_expired_reservation_events(self, &candidates.expired_reservations)?;
 
         let mut released = Vec::new();

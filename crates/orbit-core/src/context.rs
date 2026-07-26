@@ -125,6 +125,62 @@ impl OrbitStores {
             policy_def,
         }
     }
+
+    pub(crate) fn tasks(&self) -> &dyn TaskStoreBackend {
+        self.task.as_ref()
+    }
+
+    pub(crate) fn task_documents(&self) -> &dyn TaskDocumentStoreBackend {
+        self.task_document.as_ref()
+    }
+
+    pub(crate) fn task_history(&self) -> &dyn TaskHistoryStoreBackend {
+        self.task_history.as_ref()
+    }
+
+    pub(crate) fn task_artifacts(&self) -> &dyn TaskArtifactStoreBackend {
+        self.task_artifact.as_ref()
+    }
+
+    pub(crate) fn adrs(&self) -> &dyn AdrStoreBackend {
+        self.adr.as_ref()
+    }
+
+    pub(crate) fn learnings(&self) -> &dyn LearningStoreBackend {
+        self.learning.as_ref()
+    }
+
+    pub(crate) fn semantic_vector(&self) -> &VectorStore {
+        self.semantic_vector.as_ref()
+    }
+
+    pub(crate) fn semantic_worker(&self) -> &EmbedWorker {
+        self.semantic_worker.as_ref()
+    }
+
+    pub(crate) fn task_reservations(&self) -> &dyn TaskReservationStoreBackend {
+        self.task_reservation.as_ref()
+    }
+
+    pub(crate) fn jobs(&self) -> &dyn JobRunStoreBackend {
+        self.job_run.as_ref()
+    }
+
+    pub(crate) fn tools(&self) -> &dyn ToolStoreBackend {
+        self.tool.as_ref()
+    }
+
+    pub(crate) fn audit_events(&self) -> &dyn AuditEventStoreBackend {
+        self.audit_event.as_ref()
+    }
+
+    pub(crate) fn executors(&self) -> &dyn ExecutorDefStoreBackend {
+        self.executor_def.as_ref()
+    }
+
+    pub(crate) fn policies(&self) -> &dyn PolicyDefStoreBackend {
+        self.policy_def.as_ref()
+    }
 }
 
 #[derive(Clone)]

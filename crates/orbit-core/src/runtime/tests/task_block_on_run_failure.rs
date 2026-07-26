@@ -35,7 +35,7 @@ fn create_backlog_task(
 ) -> String {
     runtime
         .stores()
-        .tasks()
+        .task_records()
         .create(TaskCreateParams {
             actor: "test".to_string(),
             parent_id: None,
@@ -85,12 +85,12 @@ fn insert_running_pipeline_run(runtime: &OrbitRuntime) -> JobRun {
     let run = runtime
         .stores()
         .jobs()
-        .insert_run(PIPELINE_JOB, 1, Utc::now(), None, None)
+        .insert_job_run(PIPELINE_JOB, 1, Utc::now(), None, None)
         .expect("insert pipeline run");
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, Utc::now(), std::process::id())
+        .mark_job_run_running(&run.run_id, Utc::now(), std::process::id())
         .expect("mark run running");
     run
 }
@@ -102,7 +102,7 @@ fn record_failing_step(runtime: &OrbitRuntime, run_id: &str) {
     runtime
         .stores()
         .jobs()
-        .complete_run_step(
+        .complete_job_run_step(
             run_id,
             &JobRunStepParams {
                 step_index: 0,

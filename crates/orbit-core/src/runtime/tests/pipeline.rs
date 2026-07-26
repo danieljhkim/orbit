@@ -13,7 +13,7 @@ fn run_tool_context_allowlist_honors_task_wildcard() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let task = runtime
         .stores()
-        .tasks()
+        .task_records()
         .create(TaskCreateParams {
             actor: "test".to_string(),
             parent_id: None,

@@ -91,7 +91,7 @@ fn record_run_crew_persists_singleton_task_ids_task_crew_models() {
     let run = runtime
         .stores()
         .jobs()
-        .insert_run("agent_implement", 1, Utc::now(), Some(input.clone()), None)
+        .insert_job_run("agent_implement", 1, Utc::now(), Some(input.clone()), None)
         .expect("insert run");
 
     let crew = runtime

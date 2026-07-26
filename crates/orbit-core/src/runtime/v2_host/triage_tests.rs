@@ -37,7 +37,7 @@ fn create_backlog_task(
 ) -> String {
     runtime
         .stores()
-        .tasks()
+        .task_records()
         .create(TaskCreateParams {
             actor: "test".to_string(),
             parent_id: None,
@@ -76,12 +76,12 @@ fn fail_pipeline_run_for_task(runtime: &OrbitRuntime, task_id: &str) -> String {
     let run = runtime
         .stores()
         .jobs()
-        .insert_run(PIPELINE_JOB, 1, Utc::now(), None, None)
+        .insert_job_run(PIPELINE_JOB, 1, Utc::now(), None, None)
         .expect("insert pipeline run");
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, Utc::now(), std::process::id())
+        .mark_job_run_running(&run.run_id, Utc::now(), std::process::id())
         .expect("mark run running");
     runtime
         .apply_task_automation_update(
@@ -97,7 +97,7 @@ fn fail_pipeline_run_for_task(runtime: &OrbitRuntime, task_id: &str) -> String {
     runtime
         .stores()
         .jobs()
-        .complete_run_step(
+        .complete_job_run_step(
             &run.run_id,
             &JobRunStepParams {
                 step_index: 0,
@@ -190,12 +190,12 @@ fn human_blocked_tasks_are_never_candidates() {
     let run = runtime
         .stores()
         .jobs()
-        .insert_run(PIPELINE_JOB, 1, Utc::now(), None, None)
+        .insert_job_run(PIPELINE_JOB, 1, Utc::now(), None, None)
         .expect("insert run");
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, Utc::now(), std::process::id())
+        .mark_job_run_running(&run.run_id, Utc::now(), std::process::id())
         .expect("mark running");
     runtime
         .finalize_job_run_with_reservation_cleanup(

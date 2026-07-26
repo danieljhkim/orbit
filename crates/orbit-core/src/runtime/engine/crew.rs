@@ -206,7 +206,7 @@ impl OrbitRuntime {
             crew_model = %crew.assignment.model,
             "crew resolved for run",
         );
-        self.stores().jobs().record_run_crew(run_id, &crew)?;
+        self.stores().jobs().record_job_run_crew(run_id, &crew)?;
         Ok(crew)
     }
 

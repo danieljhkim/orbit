@@ -28,7 +28,7 @@ pub(crate) fn insert_pending_run(runtime: &OrbitRuntime, job_id: &str) -> JobRun
     runtime
         .stores()
         .jobs()
-        .insert_run(
+        .insert_job_run(
             job_id,
             1,
             Utc::now() - chrono::Duration::seconds(5),

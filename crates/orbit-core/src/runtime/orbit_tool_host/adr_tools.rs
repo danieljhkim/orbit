@@ -12,7 +12,7 @@ use orbit_common::types::{
 };
 use orbit_store::{
     AdrArtifact, AdrArtifactResolution, AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry,
-    RemoteArtifactStub,
+    AdrListFilter, RemoteArtifactStub,
 };
 use serde_json::{Value, json};
 
@@ -37,7 +37,7 @@ pub(super) fn add(
     let tags = optional_string_list_alias(&input, &["tags"])?.unwrap_or_default();
     let paths = optional_string_list_alias(&input, &["paths"])?.unwrap_or_default();
 
-    let adr = runtime.stores().adrs().add(AdrCreateParams {
+    let adr = runtime.stores().adrs().add_adr(AdrCreateParams {
         title,
         owner,
         related_features,
@@ -71,8 +71,10 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
 
     let adrs = runtime.stores().adrs();
     let resolved_id = if by_legacy {
-        let matches =
-            adrs.list_filtered(None, None, None, None, Some(&id_value), None, None, None)?;
+        let matches = adrs.list_adrs_filtered(AdrListFilter {
+            legacy_id: Some(&id_value),
+            ..AdrListFilter::default()
+        })?;
         if matches.len() > 1 {
             return Err(OrbitError::InvalidInput(format!(
                 "legacy_id `{id_value}` resolves to {} ADRs; specify the canonical id",
@@ -87,7 +89,7 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     } else {
         id_value
     };
-    let artifact = readable_artifact(&resolved_id, adrs.resolve_artifact(&resolved_id)?)?;
+    let artifact = readable_artifact(&resolved_id, adrs.resolve_adr_artifact(&resolved_id)?)?;
     Ok(adr_artifact_to_json(&artifact))
 }
 
@@ -107,15 +109,17 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         super::input::optional_bool_alias(&input, &["include_remote", "includeRemote"])?
             .unwrap_or(false);
 
-    let adrs = runtime.stores().adrs().list_entries_filtered(
-        status,
-        owner.as_deref(),
-        feature.as_deref(),
-        task_id.as_deref(),
-        legacy_id.as_deref(),
-        tag.as_deref(),
-        path.as_deref(),
-        validation_warned,
+    let adrs = runtime.stores().adrs().list_adr_entries_filtered(
+        AdrListFilter {
+            status,
+            owner: owner.as_deref(),
+            feature: feature.as_deref(),
+            task_id: task_id.as_deref(),
+            legacy_id: legacy_id.as_deref(),
+            tag: tag.as_deref(),
+            path: path.as_deref(),
+            validation_warned,
+        },
         include_remote,
     )?;
     Ok(Value::Array(adrs.iter().map(adr_entry_to_json).collect()))
@@ -129,7 +133,7 @@ pub(super) fn update(
 ) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
     let adrs = runtime.stores().adrs();
-    let existing = local_artifact(&id, adrs.resolve_artifact(&id)?)?.adr;
+    let existing = local_artifact(&id, adrs.resolve_adr_artifact(&id)?)?.adr;
 
     let new_status = optional_string(&input, "status")?
         .map(|raw| AdrStatus::from_str(&raw).map_err(OrbitError::InvalidInput))
@@ -156,7 +160,7 @@ pub(super) fn update(
     };
 
     if has_document_changes(&fields) {
-        adrs.update_document(&id, &fields)?;
+        adrs.update_adr_document(&id, &fields)?;
     }
 
     if let Some(target) = new_status {
@@ -184,7 +188,7 @@ pub(super) fn update(
         }
 
         if target != from {
-            adrs.update_status(&id, target)?;
+            adrs.update_adr_status(&id, target)?;
             let task_id = if target == AdrStatus::Accepted {
                 fields
                     .related_tasks
@@ -209,7 +213,7 @@ pub(super) fn update(
     }
 
     let updated = adrs
-        .get(&id)?
+        .get_adr(&id)?
         .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id.clone()))?;
     Ok(adr_to_json(&updated))
 }
@@ -223,9 +227,9 @@ pub(super) fn supersede(
     let old_id = required_string(&input, &["old_id", "old", "oldId"], "old_id")?;
     let new_id = required_string(&input, &["new_id", "new", "newId"], "new_id")?;
     let adrs = runtime.stores().adrs();
-    let before = local_artifact(&old_id, adrs.resolve_artifact(&old_id)?)?.adr;
-    local_artifact(&new_id, adrs.resolve_artifact(&new_id)?)?;
-    adrs.supersede(&old_id, &new_id)?;
+    let before = local_artifact(&old_id, adrs.resolve_adr_artifact(&old_id)?)?.adr;
+    local_artifact(&new_id, adrs.resolve_adr_artifact(&new_id)?)?;
+    adrs.supersede_adr(&old_id, &new_id)?;
     record_transition_audit(
         runtime,
         "orbit.adr.supersede",
@@ -238,7 +242,7 @@ pub(super) fn supersede(
         Some(&new_id),
     )?;
     let updated = adrs
-        .get(&old_id)?
+        .get_adr(&old_id)?
         .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, old_id.clone()))?;
     Ok(adr_to_json(&updated))
 }

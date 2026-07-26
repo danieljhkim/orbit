@@ -14,7 +14,7 @@ impl OrbitRuntime {
     pub(crate) fn configured_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
         self.stores()
             .executors()
-            .get(agent_cli)
+            .get_executor_def(agent_cli)
             .ok()
             .flatten()
             .and_then(|def| {

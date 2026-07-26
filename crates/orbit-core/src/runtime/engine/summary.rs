@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
-use orbit_common::types::{AdrStatus, OrbitError};
-use orbit_store::JobRunQuery;
+use orbit_common::types::OrbitError;
 use orbit_store::scoreboard_summary::{ScoreboardInputs, ScoreboardWindow};
+use orbit_store::{AdrListFilter, JobRunQuery};
 
 use crate::OrbitRuntime;
 
@@ -39,18 +39,12 @@ impl OrbitRuntime {
         let job_runs = self
             .stores()
             .jobs()
-            .list_runs_filtered(&JobRunQuery::default())?;
+            .list_job_runs_filtered(&JobRunQuery::default())?;
         let learnings = self.list_learnings(None)?;
-        let adrs = self.stores().adrs().list_filtered(
-            None::<AdrStatus>,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )?;
+        let adrs = self
+            .stores()
+            .adrs()
+            .list_adrs_filtered(AdrListFilter::default())?;
         let frictions = orbit_store::friction_store::list_frictions(
             &self.data_root().join("frictions"),
             &orbit_store::friction_store::FrictionListFilter::default(),

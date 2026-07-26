@@ -110,7 +110,7 @@ fn worker_exit_before_claim_terminalizes_persisted_run_with_diagnostic() {
     let run = runtime
         .stores()
         .jobs()
-        .insert_run("task_gate_pipeline", 1, Utc::now(), None, None)
+        .insert_job_run("task_gate_pipeline", 1, Utc::now(), None, None)
         .expect("insert pending run");
     let child = Command::new("sh")
         .args(["-c", "exit 23"])

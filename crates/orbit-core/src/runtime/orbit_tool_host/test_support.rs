@@ -29,7 +29,7 @@ pub(super) fn create_task(
 ) -> Task {
     runtime
         .stores()
-        .tasks()
+        .task_records()
         .create(TaskCreateParams {
             actor: "test".to_string(),
             parent_id: None,

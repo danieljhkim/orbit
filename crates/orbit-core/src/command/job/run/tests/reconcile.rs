@@ -14,7 +14,7 @@ fn show_job_run_reconciles_stale_running_owner() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, started_at, 999_999)
+        .mark_job_run_running(&run.run_id, started_at, 999_999)
         .expect("mark running with impossible pid");
 
     let shown = runtime.show_job_run(&run.run_id).expect("show run");
@@ -44,7 +44,7 @@ fn show_job_run_keeps_live_owner_running() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, Utc::now(), pid)
+        .mark_job_run_running(&run.run_id, Utc::now(), pid)
         .expect("mark current process running");
 
     let shown = runtime.show_job_run(&run.run_id).expect("show run");
@@ -75,12 +75,12 @@ fn show_job_run_repairs_terminal_run_missing_timing() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, started_at, std::process::id())
+        .mark_job_run_running(&run.run_id, started_at, std::process::id())
         .expect("mark running");
     runtime
         .stores()
         .jobs()
-        .finalize_run(&run.run_id, JobRunState::Success, finished_at, Some(5_000))
+        .finalize_job_run(&run.run_id, JobRunState::Success, finished_at, Some(5_000))
         .expect("finalize success");
     let finalized = runtime.show_job_run(&run.run_id).expect("show finalized");
     strip_run_timing(&runtime, &finalized);
@@ -104,12 +104,12 @@ fn workspace_open_reconciles_orphaned_pending_children_of_interrupted_parent() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&parent.run_id, Utc::now() - Duration::days(4), 999_999)
+        .mark_job_run_running(&parent.run_id, Utc::now() - Duration::days(4), 999_999)
         .expect("mark parent running");
     runtime
         .stores()
         .jobs()
-        .finalize_run(
+        .finalize_job_run(
             &parent.run_id,
             JobRunState::Interrupted,
             Utc::now() - Duration::days(4),
@@ -189,7 +189,7 @@ fn pending_run_with_live_claimed_owner_stays_pending() {
         runtime
             .stores()
             .jobs()
-            .claim_pending_run_owner(&run.run_id, pid)
+            .claim_pending_job_run_owner(&run.run_id, pid)
             .expect("claim pending run")
     );
     backdate_run_created_at(&runtime, &run, Utc::now() - Duration::days(4));
@@ -217,7 +217,7 @@ fn pending_run_with_dead_claimed_owner_is_reconciled() {
         runtime
             .stores()
             .jobs()
-            .claim_pending_run_owner(&run.run_id, 999_999)
+            .claim_pending_job_run_owner(&run.run_id, 999_999)
             .expect("claim with impossible pid")
     );
 
@@ -245,7 +245,7 @@ fn list_job_runs_reconciles_before_state_filtering() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, Utc::now() - Duration::seconds(3), 999_999)
+        .mark_job_run_running(&run.run_id, Utc::now() - Duration::seconds(3), 999_999)
         .expect("mark stale running");
 
     let running = runtime

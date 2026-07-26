@@ -59,7 +59,7 @@ impl OrbitRuntime {
 
         let result = match task.status {
             TaskStatus::Proposed => self.with_mutation(|| {
-                let task = self.stores().tasks().update(
+                let task = self.stores().task_records().update(
                     id,
                     StoreTaskUpdateParams {
                         actor: effective_label.clone(),
@@ -81,7 +81,7 @@ impl OrbitRuntime {
                 ))
             }),
             TaskStatus::Review => self.with_mutation(|| {
-                let task = self.stores().tasks().update(
+                let task = self.stores().task_records().update(
                     id,
                     StoreTaskUpdateParams {
                         actor: effective_label.clone(),
@@ -304,7 +304,7 @@ impl OrbitRuntime {
                 warn_unmet_dependencies();
                 let result = self.with_mutation(|| {
                     let at = chrono::Utc::now();
-                    let task = self.stores().tasks().update(
+                    let task = self.stores().task_records().update(
                         id,
                         StoreTaskUpdateParams {
                             actor: effective_label.clone(),
@@ -338,7 +338,7 @@ impl OrbitRuntime {
             TaskStatus::Backlog | TaskStatus::Someday | TaskStatus::Blocked => {
                 warn_unmet_dependencies();
                 let task = self.with_mutation(|| {
-                    let task = self.stores().tasks().update(
+                    let task = self.stores().task_records().update(
                         id,
                         StoreTaskUpdateParams {
                             actor: effective_label.clone(),
@@ -417,7 +417,7 @@ impl OrbitRuntime {
 
         let approved_from_proposed = task.status == TaskStatus::Proposed;
         let updated = self.with_mutation(|| {
-            let task = self.stores().tasks().update(
+            let task = self.stores().task_records().update(
                 id,
                 StoreTaskUpdateParams {
                     actor: SYSTEM_ACTOR_LABEL.to_string(),
@@ -480,7 +480,7 @@ impl OrbitRuntime {
 
         let result = match task.status {
             TaskStatus::Proposed => self.with_mutation(|| {
-                let task = self.stores().tasks().update(
+                let task = self.stores().task_records().update(
                     id,
                     StoreTaskUpdateParams {
                         actor: effective_label.clone(),
@@ -500,7 +500,7 @@ impl OrbitRuntime {
                 ))
             }),
             TaskStatus::Review => self.with_mutation(|| {
-                let task = self.stores().tasks().update(
+                let task = self.stores().task_records().update(
                     id,
                     StoreTaskUpdateParams {
                         actor: effective_label.clone(),
@@ -520,7 +520,7 @@ impl OrbitRuntime {
                 ))
             }),
             TaskStatus::Backlog => self.with_mutation(|| {
-                let task = self.stores().tasks().update(
+                let task = self.stores().task_records().update(
                     id,
                     StoreTaskUpdateParams {
                         actor: effective_label.clone(),
@@ -540,7 +540,7 @@ impl OrbitRuntime {
                 ))
             }),
             TaskStatus::InProgress => self.with_mutation(|| {
-                let task = self.stores().tasks().update(
+                let task = self.stores().task_records().update(
                     id,
                     StoreTaskUpdateParams {
                         actor: effective_label.clone(),
@@ -577,7 +577,7 @@ impl OrbitRuntime {
         }
 
         self.with_mutation(|| {
-            let _ = self.stores().tasks().update(
+            let _ = self.stores().task_records().update(
                 id,
                 StoreTaskUpdateParams {
                     actor: self.actor_label().to_string(),
@@ -593,7 +593,7 @@ impl OrbitRuntime {
 
     pub fn delete_task(&self, id: &str) -> Result<(), OrbitError> {
         self.with_mutation(|| {
-            let deleted = self.stores().tasks().delete(id)?;
+            let deleted = self.stores().task_records().delete(id)?;
             if !deleted {
                 return Err(OrbitError::not_found(NotFoundKind::Task, id.to_string()));
             }

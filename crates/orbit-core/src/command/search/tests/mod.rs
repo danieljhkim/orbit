@@ -23,7 +23,7 @@ fn add_adr(runtime: &OrbitRuntime, title: &str, body: &str) -> String {
     runtime
         .stores()
         .adrs()
-        .add(AdrCreateParams {
+        .add_adr(AdrCreateParams {
             title: title.to_string(),
             owner: "codex".to_string(),
             related_features: Vec::new(),
@@ -39,7 +39,7 @@ fn add_adr(runtime: &OrbitRuntime, title: &str, body: &str) -> String {
 fn add_task_with_status(runtime: &OrbitRuntime, title: &str, status: TaskStatus) -> String {
     runtime
         .stores()
-        .tasks()
+        .task_records()
         .create(TaskCreateParams {
             actor: "test".to_string(),
             parent_id: None,

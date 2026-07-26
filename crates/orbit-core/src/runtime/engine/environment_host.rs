@@ -129,6 +129,6 @@ impl ExecutorLookupHost for OrbitRuntime {
         &self,
         name: &str,
     ) -> Result<Option<orbit_common::types::ExecutorDef>, OrbitError> {
-        self.stores().executors().get(name)
+        self.stores().executors().get_executor_def(name)
     }
 }

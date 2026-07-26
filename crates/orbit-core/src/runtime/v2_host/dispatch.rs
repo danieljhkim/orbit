@@ -201,7 +201,7 @@ pub(super) fn run_deterministic(
             let reservation_check = runtime
                 .stores()
                 .task_reservations()
-                .check(orbit_store::TaskReservationCheckParams {
+                .check_task_reservation_conflicts(orbit_store::TaskReservationCheckParams {
                     workspace_orbit_dir: workspace_orbit_dir(runtime),
                     workspace_id: workspace_task_reservation_id(runtime).map_err(|error| {
                         DispatchError::DeterministicActionFailed {
@@ -423,7 +423,7 @@ fn unmet_dependency_ids_for_input(
         return Ok(Vec::new());
     };
     let task_ids = parse_task_ids(&serde_json::json!({ "task_ids": raw_task_ids }))?;
-    let tasks = runtime.stores().tasks().list()?;
+    let tasks = runtime.stores().tasks().list_tasks()?;
     let status_by_id = runtime.task_status_index()?;
     let task_by_id = tasks
         .into_iter()
@@ -744,7 +744,7 @@ mod tests {
         let run = runtime
             .stores()
             .jobs()
-            .insert_run("task_gate_pipeline", 1, Utc::now(), Some(json!({})), None)
+            .insert_job_run("task_gate_pipeline", 1, Utc::now(), Some(json!({})), None)
             .expect("insert run");
         runtime
             .stores()

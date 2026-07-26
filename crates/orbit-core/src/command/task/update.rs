@@ -210,7 +210,7 @@ impl OrbitRuntime {
             });
         }
         let updated = self.with_mutation(|| {
-            let task = self.stores().tasks().update(
+            let task = self.stores().task_records().update(
                 id,
                 TaskRecordUpdateParams {
                     actor: effective_label.clone(),
