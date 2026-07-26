@@ -34,13 +34,11 @@ pub(super) fn execute(
         OrbitBuiltinAction::DocsAdd => super::docs_tools::add(runtime, input),
         OrbitBuiltinAction::DocsIndex => super::docs_tools::index(runtime, input),
         OrbitBuiltinAction::DocsMigrate => super::docs_tools::migrate(runtime, input),
-        OrbitBuiltinAction::FrictionAdd => super::friction_tools::add(runtime, input, model),
-        OrbitBuiltinAction::FrictionList => super::friction_tools::list(runtime, input),
-        OrbitBuiltinAction::FrictionResolve => super::friction_tools::resolve(runtime, input),
-        OrbitBuiltinAction::FrictionShow => super::friction_tools::show(runtime, input),
-        OrbitBuiltinAction::FrictionStats => super::friction_tools::stats(runtime),
-        OrbitBuiltinAction::FrictionTags => super::friction_tools::tags(runtime),
-        OrbitBuiltinAction::FrictionUpdate => super::friction_tools::update(runtime, input),
+        // ADR-0209 bearing 1 [ORB-10358]: the friction handler table lives with
+        // the other friction handlers, keyed by the registry's verb enum.
+        OrbitBuiltinAction::Friction(verb) => {
+            super::friction_tools::dispatch(runtime, verb, input, model)
+        }
         OrbitBuiltinAction::LearningAdd => super::learning_tools::add(runtime, input, agent, model),
         OrbitBuiltinAction::LearningList => super::learning_tools::list(runtime, input),
         OrbitBuiltinAction::LearningPrune => super::learning_tools::prune(runtime, input),

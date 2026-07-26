@@ -18,6 +18,7 @@ pub mod log;
 pub mod mcp;
 pub mod migrate;
 pub mod operation;
+pub mod operation_args;
 pub mod policy;
 pub mod routine;
 pub mod run;

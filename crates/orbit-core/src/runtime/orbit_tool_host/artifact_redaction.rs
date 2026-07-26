@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use orbit_common::friction::FrictionVerb;
 use orbit_common::types::{
     AuditEventStatus, OrbitError, audit_execution_id, normalize_optional_attribution_label,
 };
@@ -215,14 +216,14 @@ fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
             path_arrays: &[],
             nested_arrays: &[],
         }),
-        OrbitBuiltinAction::FrictionAdd => Some(ActionPolicy {
+        OrbitBuiltinAction::Friction(FrictionVerb::Add) => Some(ActionPolicy {
             free_text_fields: &["body", "description"],
             free_text_arrays: &[],
             path_fields: &[],
             path_arrays: &[],
             nested_arrays: &[],
         }),
-        OrbitBuiltinAction::FrictionUpdate => Some(ActionPolicy {
+        OrbitBuiltinAction::Friction(FrictionVerb::Update) => Some(ActionPolicy {
             free_text_fields: &["body"],
             free_text_arrays: &[],
             path_fields: &[],
@@ -254,8 +255,7 @@ fn is_covered_mutating_action(action: OrbitBuiltinAction) -> bool {
             | OrbitBuiltinAction::TaskAdd
             | OrbitBuiltinAction::TaskUpdate
             | OrbitBuiltinAction::TaskReject
-            | OrbitBuiltinAction::FrictionAdd
-            | OrbitBuiltinAction::FrictionUpdate
+            | OrbitBuiltinAction::Friction(FrictionVerb::Add | FrictionVerb::Update)
     )
 }
 
@@ -503,7 +503,7 @@ fn artifact_target(
                 task_id: Some(id),
             })
         }
-        OrbitBuiltinAction::FrictionAdd | OrbitBuiltinAction::FrictionUpdate => {
+        OrbitBuiltinAction::Friction(FrictionVerb::Add | FrictionVerb::Update) => {
             Ok(ArtifactTarget {
                 artifact_type: "friction",
                 artifact_id: response_string(response, "id")?,
@@ -546,8 +546,8 @@ fn tool_name(action: OrbitBuiltinAction) -> &'static str {
         OrbitBuiltinAction::TaskAdd => "orbit.task.add",
         OrbitBuiltinAction::TaskUpdate => "orbit.task.update",
         OrbitBuiltinAction::TaskReject => "orbit.task.reject",
-        OrbitBuiltinAction::FrictionAdd => "orbit.friction.add",
-        OrbitBuiltinAction::FrictionUpdate => "orbit.friction.update",
+        OrbitBuiltinAction::Friction(FrictionVerb::Add) => "orbit.friction.add",
+        OrbitBuiltinAction::Friction(FrictionVerb::Update) => "orbit.friction.update",
         _ => "orbit.unknown",
     }
 }
@@ -671,7 +671,7 @@ mod tests {
                 }),
             ),
             (
-                OrbitBuiltinAction::FrictionAdd,
+                OrbitBuiltinAction::Friction(FrictionVerb::Add),
                 json!({
                     "body": "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd123456",
                 }),

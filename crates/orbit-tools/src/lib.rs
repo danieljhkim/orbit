@@ -47,6 +47,7 @@ use std::sync::Arc;
 use orbit_policy::PolicyEngine;
 use serde_json::{Map, Value};
 
+use orbit_common::friction::FrictionVerb;
 use orbit_common::types::{OrbitError, RoleSlot, ToolSchema};
 
 /// Fast operation timeout (1 s). Used for local command resolution (e.g. `which`).
@@ -92,13 +93,9 @@ pub enum OrbitBuiltinAction {
     DocsAdd,
     DocsIndex,
     DocsMigrate,
-    FrictionAdd,
-    FrictionList,
-    FrictionResolve,
-    FrictionShow,
-    FrictionStats,
-    FrictionTags,
-    FrictionUpdate,
+    /// ADR-0209 bearing 1 [ORB-10358]: friction verbs are registry data, so one
+    /// action variant carries the verb instead of one variant per verb.
+    Friction(FrictionVerb),
     LearningAdd,
     LearningList,
     LearningPrune,

@@ -21,3 +21,66 @@ Record five bearings as orbit's north star. This is an **incremental bearing, no
 - The transition is unbounded by design, so registry-shaped and inherent-method slices will coexist indefinitely; the registry idiom is the tie-breaker, not a deadline.
 - No single code anchor; convention enforced via review.
 - Cost: two coexisting idioms during the (unbounded) incremental transition — readers must recognize both the registry shape and the legacy inherent-method shape — and request/response indirection adds per-operation boilerplate (a request type, a response type, a registration) compared to calling an inherent method directly.
+
+## Pilot outcome — bearing 1, friction noun [ORB-10358]
+
+**Status of bearing 1:** piloted and proven on one noun. Not yet applied to the
+other three hand-copied nouns; that is the ratchet below, not a backlog item.
+
+**What shipped.** Every friction verb (`add`, `list`, `show`, `stats`, `tags`,
+`update`, `resolve`) is declared exactly once as an `OperationSpec` in
+`orbit_common::friction::operations`. All four surfaces are now derived adapters
+over that table: `orbit-tools` builds each `ToolSchema` and MCP exposure policy
+from the spec (seven hand-written `Tool` impls deleted), `orbit-cli` builds the
+clap subcommand tree and the tool input from the spec (seven `Args` structs and
+seven `Execute` impls deleted), `orbit-dashboard` takes its tool names and
+parameter names from the registry, and `orbit-core` holds the handler half of
+the table keyed on `FrictionVerb`. `OrbitBuiltinAction`'s seven `Friction*`
+variants collapsed to one `Friction(FrictionVerb)`.
+
+**Contract stability was proven, not asserted.** `crates/orbit-cli/tests/snapshots/mcp_tools_list.json`
+is byte-unchanged, and `orbit friction [<verb>] --help` was captured from the
+pre-migration binary and frozen as fixtures under
+`crates/orbit-cli/src/command/tests/friction_help/`; the derived CLI reproduces
+all eight help pages byte-for-byte.
+
+**The layering correction to the bearing.** Bearing 1 as written implies one
+table holding both the operation definition and its handler. That is not
+achievable while handlers need `&OrbitRuntime`, which lives well above the leaf
+crate every surface can read. The working shape is a **split table joined by a
+typed verb enum**: the spec table is `&'static [OperationSpec<V>]` in
+`orbit-common`, the handler table is one exhaustive `match` on `V` in
+`orbit-core`, and the compiler rejects a verb that has a spec but no handler.
+Future noun migrations should adopt that shape rather than trying to co-locate
+handlers with specs.
+
+**What did not become data, deliberately.** Response rendering stayed per-noun
+(the CLI's friction table/record printers know friction field names), and
+dashboard route shapes stayed hand-written — a REST path is an HTTP design
+choice, not a property of the verb. The registry declares *which* rendering a
+verb wants; the renderer itself is presentation.
+
+**Touch-it-move-it ratchet.** The next feature that touches any hand-copied noun
+migrates that noun to the registry as part of that work. "Touches" means adding
+or removing a verb, changing a verb's parameters, or changing how any surface
+wires that noun — not an unrelated edit inside an existing handler. A reviewer
+seeing a new hand-wired adapter for a noun that could have been migrated should
+ask for the migration or an explicit reason in the PR. Migration cookbook, with
+the friction diff as the worked example: `docs/design/operations-as-data/`.
+
+**Costs the pilot actually surfaced.**
+- The registry is a wall of literal strings, and every one of them is shipped
+  contract. This trades scattered-but-local duplication for centralized
+  contract, which is the point, but it makes the registry file a high-blast-radius
+  edit.
+- Two descriptions per parameter where MCP and CLI wording legitimately differ
+  (`show`'s id is `friction ID` over MCP and `Friction record id, e.g.
+  F2026-05-001` on the CLI). The spec models this rather than forcing them to
+  converge, because converging them would have been a wire change.
+- `clap::Arg::value_name` takes only `&'static str`, so building a clap surface
+  from runtime data requires interning. The adapter leaks a bounded number of
+  short strings for the process lifetime.
+- Derived clap `--help` output is only byte-stable because the adapter
+  reproduces `#[derive(Args)]`'s conventions exactly (arg id, SCREAMING_SNAKE
+  value name, declaration-order display). Any future noun migration must freeze
+  its pre-migration help output as fixtures before starting, as this one did.

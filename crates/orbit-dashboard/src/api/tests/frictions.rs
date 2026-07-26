@@ -355,3 +355,36 @@ async fn stats_shape_exposes_triage_counts() {
         );
     }
 }
+
+/// ADR-0209 bearing 1 [ORB-10358]: the dashboard's friction field names come
+/// from the operation registry, not from literals. This asserts the coupling —
+/// every parameter these routes set is one the registry declares — so a
+/// registry rename that the dashboard misses fails here rather than silently
+/// dropping a filter at runtime.
+#[test]
+fn dashboard_friction_parameters_are_declared_by_the_registry() {
+    use orbit_common::friction::FrictionVerb;
+
+    let used: &[(FrictionVerb, &[&str])] = &[
+        (
+            FrictionVerb::List,
+            &["status", "tag", "month", "q", "limit", "offset"],
+        ),
+        (FrictionVerb::Add, &["model", "body", "tags", "during_task"]),
+        (FrictionVerb::Show, &["id"]),
+        (FrictionVerb::Update, &["id", "status", "tags"]),
+        (FrictionVerb::Resolve, &["id"]),
+        (FrictionVerb::Stats, &[]),
+    ];
+
+    for (verb, params) in used {
+        let declared: Vec<&str> = verb.spec().params.iter().map(|param| param.name).collect();
+        for param in *params {
+            assert!(
+                declared.contains(param),
+                "{} does not declare `{param}`; declared: {declared:?}",
+                verb.tool_name()
+            );
+        }
+    }
+}

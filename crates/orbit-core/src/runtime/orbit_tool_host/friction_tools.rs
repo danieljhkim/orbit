@@ -1,6 +1,16 @@
+//! The friction handler table [ORB-10358].
+//!
+//! ADR-0209 bearing 1: friction verbs are declared once as data in
+//! `orbit_common::friction::operations`. Handlers need `&OrbitRuntime`, which
+//! lives above that leaf crate, so the handler half of the table lives here and
+//! is joined to the spec half by [`FrictionVerb`]. [`dispatch`] is the join
+//! point, and its exhaustive `match` is what makes a spec without a handler a
+//! compile error.
+
 use std::str::FromStr;
 
 use chrono::{DateTime, TimeZone, Utc};
+use orbit_common::friction::FrictionVerb;
 use orbit_common::types::{
     FrictionRecord, FrictionStatus, OrbitError, optional_csv_or_string_list_alias, optional_string,
     required_string,
@@ -14,11 +24,28 @@ use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
 
-pub(super) fn add(
+/// Route one friction verb to its handler.
+///
+/// Exhaustive by construction: adding a [`FrictionVerb`] variant breaks this
+/// match until the verb has an implementation.
+pub(super) fn dispatch(
     runtime: &OrbitRuntime,
+    verb: FrictionVerb,
     input: Value,
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
+    match verb {
+        FrictionVerb::Add => add(runtime, input, model),
+        FrictionVerb::List => list(runtime, input),
+        FrictionVerb::Show => show(runtime, input),
+        FrictionVerb::Stats => stats(runtime),
+        FrictionVerb::Tags => tags(runtime),
+        FrictionVerb::Update => update(runtime, input),
+        FrictionVerb::Resolve => resolve(runtime, input),
+    }
+}
+
+fn add(runtime: &OrbitRuntime, input: Value, model: Option<String>) -> Result<Value, OrbitError> {
     let body = required_string(&input, &["body", "description"], "body")?;
     let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default();
     let during_task = optional_string(&input, "during_task")?
@@ -42,7 +69,7 @@ pub(super) fn add(
     record_to_json(stored)
 }
 
-pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     list_at_root(&runtime.data_root().join("frictions"), input)
 }
 
@@ -82,7 +109,7 @@ pub(super) fn list_at_root(root: &std::path::Path, input: Value) -> Result<Value
     ))
 }
 
-pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     show_at_root(&runtime.data_root().join("frictions"), input)
 }
 
@@ -96,18 +123,18 @@ pub(super) fn show_at_root(root: &std::path::Path, input: Value) -> Result<Value
     record_to_json(stored)
 }
 
-pub(super) fn stats(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
+fn stats(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
     let tasks = runtime.list_tasks()?;
     friction_stats(&runtime.data_root().join("frictions"), &tasks)
 }
 
-pub(super) fn tags(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
+fn tags(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
     Ok(json!(friction_tags(
         &runtime.data_root().join("frictions")
     )?))
 }
 
-pub(super) fn update(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+fn update(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
     let status = optional_string(&input, "status")?
         .map(|status| parse_status(&status))
@@ -133,7 +160,7 @@ pub(super) fn update(runtime: &OrbitRuntime, input: Value) -> Result<Value, Orbi
     record_to_json(stored)
 }
 
-pub(super) fn resolve(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+fn resolve(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
     let stored = resolve_friction(&runtime.data_root().join("frictions"), &id, Utc::now())?;
     record_to_json(stored)
