@@ -12,10 +12,20 @@ pub struct DoctorCommand {
     /// Emit machine-readable JSON instead of the table.
     #[arg(long)]
     pub json: bool,
+
+    /// Remove lock files whose recorded holder process is dead before diagnosing the workspace.
+    #[arg(long)]
+    pub fix_stale_locks: bool,
 }
 
 impl Execute for DoctorCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        if self.fix_stale_locks {
+            let removed = runtime.remove_stale_lock_files()?;
+            if !self.json {
+                println!("Removed {removed} stale lock file(s).");
+            }
+        }
         let results = runtime.doctor_workspace()?;
         let failures = results
             .iter()

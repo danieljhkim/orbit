@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use chrono::Utc;
+use fs2::FileExt;
 use orbit_common::types::{JobRun, JobRunState};
 
 use orbit_core::OrbitRuntime;
@@ -170,6 +171,64 @@ fn dead_holder_lock_file_is_reported_stale() {
         "message names the stale lock and its op: {}",
         locks.message
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn stale_task_learning_and_adr_lock_files_are_removed() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    let paths = runtime.paths();
+    let stale_locks = [
+        paths.tasks_dir.join(".ORB-00001.lock"),
+        paths.learnings_dir.join(".L-0001.lock"),
+        paths.adrs_dir.join(".locks").join("adr-0001.lock"),
+    ];
+
+    let dead_pid = reaped_child_pid();
+    for path in &stale_locks {
+        write_holder_lock(path, dead_pid, "crashed op");
+    }
+
+    assert_eq!(
+        runtime
+            .remove_stale_lock_files()
+            .expect("remove stale locks"),
+        stale_locks.len()
+    );
+    assert!(
+        stale_locks.iter().all(|path| !path.exists()),
+        "all dead-holder files must be removed: {stale_locks:?}"
+    );
+    assert_eq!(
+        status_of(&runtime.doctor_workspace().expect("doctor"), "stale-locks").status,
+        WorkspaceDoctorStatus::Ok
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cleanup_preserves_a_lock_held_by_a_live_process() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    let lock_path = runtime.paths().tasks_dir.join(".ORB-00001.lock");
+    write_holder_lock(&lock_path, reaped_child_pid(), "stale metadata");
+
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .expect("open lock file");
+    file.lock_exclusive().expect("hold lock");
+
+    assert_eq!(
+        runtime
+            .remove_stale_lock_files()
+            .expect("clean stale locks"),
+        0
+    );
+    assert!(lock_path.exists(), "a held lock file must remain");
+    file.unlock().expect("unlock lock file");
 }
 
 #[cfg(unix)]
