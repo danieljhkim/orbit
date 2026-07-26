@@ -48,3 +48,4 @@ fi
 "$repo_root/scripts/check-artifact-redaction-guardrail.sh"
 "$repo_root/scripts/check-changelog-style.sh"
 "$repo_root/scripts/check-error-translation.sh"
+"$repo_root/scripts/check-orphan-modules.sh"
