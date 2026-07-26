@@ -799,6 +799,8 @@ fn task_add_tool_recovers_mcp_encoded_acceptance_and_context_arrays() {
 
 #[test]
 fn task_add_tool_infers_agent_from_model_only_input() {
+    let _env =
+        orbit_common::test_env::unset(orbit_common::test_env::AGENT_IDENTITY_ENV.iter().copied());
     let (_root, runtime, _repo_root) = test_runtime();
 
     let output = runtime

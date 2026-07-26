@@ -17,7 +17,11 @@ default = []
 [dependencies]
 chrono.workspace = true
 hostname.workspace = true
-orbit-common = { path = "../orbit-common" }
+# test-util threaded through the normal dependency (not a dev-dependency
+# duplicate, the usual idiom) because dep_boundary::
+# command_layer_dependency_is_test_only_for_the_cross_layer_canary pins
+# dev-dependencies' orbit-* set to the orbit-cmd canary alone.
+orbit-common = { path = "../orbit-common", features = ["test-util"] }
 orbit-core = { path = "../orbit-core" }
 orbit-mcp = { path = "../orbit-mcp" }
 orbit-store = { path = "../orbit-store" }

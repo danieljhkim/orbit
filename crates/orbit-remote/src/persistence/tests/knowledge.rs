@@ -72,6 +72,8 @@ fn context(workspace_id: &str, call_id: &str) -> ToolSessionContext {
 
 #[test]
 fn two_workspace_activation_seeds_above_every_legacy_max_and_allocates_with_atomic_audit() {
+    let _env =
+        orbit_common::test_env::unset(orbit_common::test_env::MANAGED_RUN_ENV.iter().copied());
     let store = RemoteStore::open_in_memory().expect("store");
     let service = service(store.clone(), &["ws_alpha", "ws_beta"]);
     let state = service
@@ -337,6 +339,8 @@ fn activation_requires_the_exact_nonempty_registered_workspace_inventory_set() {
 
 #[test]
 fn audit_failure_rolls_back_sequence_occupancy_and_ledger() {
+    let _env =
+        orbit_common::test_env::unset(orbit_common::test_env::MANAGED_RUN_ENV.iter().copied());
     let store = RemoteStore::open_in_memory().expect("store");
     let service = service(store.clone(), &["ws_alpha"]);
     service
@@ -450,6 +454,8 @@ fn activation_authority_update_failure_rolls_back_inventory_sequences_and_reconc
 
 #[test]
 fn concurrent_file_backed_allocations_are_unique_and_monotonic() {
+    let _env =
+        orbit_common::test_env::unset(orbit_common::test_env::MANAGED_RUN_ENV.iter().copied());
     let directory = tempfile::tempdir().expect("tempdir");
     let database = directory.path().join("remote.db");
     let store = RemoteStore::open(&database).expect("store");
@@ -507,6 +513,8 @@ fn concurrent_file_backed_allocations_are_unique_and_monotonic() {
 
 #[test]
 fn restart_is_idempotent_and_late_workspace_reconciliation_is_required() {
+    let _env =
+        orbit_common::test_env::unset(orbit_common::test_env::MANAGED_RUN_ENV.iter().copied());
     let directory = tempfile::tempdir().expect("tempdir");
     let database = directory.path().join("remote.db");
     let initial = inventory(
@@ -562,6 +570,8 @@ fn restart_is_idempotent_and_late_workspace_reconciliation_is_required() {
 
 #[test]
 fn late_reconciliation_reports_all_collisions_and_ledger_is_immutable() {
+    let _env =
+        orbit_common::test_env::unset(orbit_common::test_env::MANAGED_RUN_ENV.iter().copied());
     let store = RemoteStore::open_in_memory().expect("store");
     let initial = service(store.clone(), &["ws_a"]);
     initial
@@ -624,6 +634,8 @@ fn late_reconciliation_reports_all_collisions_and_ledger_is_immutable() {
 
 #[test]
 fn overflow_and_invalid_identity_do_not_advance_or_leave_partial_rows() {
+    let _env =
+        orbit_common::test_env::unset(orbit_common::test_env::MANAGED_RUN_ENV.iter().copied());
     let store = RemoteStore::open_in_memory().expect("store");
     let service = service(store.clone(), &["ws_alpha"]);
     service
@@ -700,6 +712,8 @@ fn overflow_and_invalid_identity_do_not_advance_or_leave_partial_rows() {
 
 #[test]
 fn adr_and_learning_sequences_interleave_independently_and_allow_legacy_gaps() {
+    let _env =
+        orbit_common::test_env::unset(orbit_common::test_env::MANAGED_RUN_ENV.iter().copied());
     let store = RemoteStore::open_in_memory().expect("store");
     let service = service(store, &["ws_alpha", "ws_beta"]);
     service

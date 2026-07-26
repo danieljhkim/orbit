@@ -27,6 +27,20 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 /// `--agent`/`--model` and no input attribution.
 pub const AGENT_IDENTITY_ENV: &[&str] = &["ORBIT_AGENT_NAME", "ORBIT_AGENT_MODEL"];
 
+/// The variables an `orbit-engine` managed run exports into every spawned
+/// activity (see `orbit-engine/src/context/env.rs`): job/task/session
+/// identity plus the "this is a managed run" marker. A test that asserts
+/// unmanaged-run behavior (default human attribution, an unleased audit
+/// context, …) is only correct when these are genuinely unset — a child of a
+/// managed Orbit run inherits them all (ORB-10436).
+pub const MANAGED_RUN_ENV: &[&str] = &[
+    "ORBIT_RUN_ID",
+    "ORBIT_TASK_ID",
+    "ORBIT_ACTIVE_TASK_ID",
+    "ORBIT_SESSION_ID",
+    "ORBIT_MANAGED_RUN_CONTEXT",
+];
+
 /// Restores the variables captured by [`unset`] when dropped.
 ///
 /// Holds a process-wide lock for its lifetime, so concurrent tests cannot
