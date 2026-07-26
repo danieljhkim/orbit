@@ -2,8 +2,17 @@ schema_version: 1
 id: L-0076
 status: active
 scope:
-  paths: []
-  tags: []
+  paths:
+  - crates/orbit-core/assets/jobs/task_pr_pipeline.yaml
+  - crates/orbit-engine/src/executor/automation/vcs/commit/mod.rs
+  - crates/orbit-engine/src/activity_job/workspace.rs
+  - crates/orbit-engine/src/activity_job/cli_runner/envelope.rs
+  - crates/orbit-core/src/runtime/v2_host/task_context.rs
+  - crates/orbit-store/src/backend/contracts/params.rs
+  tags:
+  - pr-pipeline
+  - workspace-path
+  - worktree
 summary: 'Orbit PR pipeline: implement step leaves changes UNCOMMITTED (pr_open commits them), and task-context workspace_path serializes as JSON null when undeclared'
 body: |-
   Two non-obvious invariants when touching the ship `--mode pr` pipeline commit/cwd paths:
@@ -17,5 +26,5 @@ evidence:
 - kind: task
   reference: ORB-10134
 created_at: 2026-07-12T00:39:40.086091981Z
-updated_at: 2026-07-12T00:39:40.086091981Z
+updated_at: 2026-07-26T22:25:01.971936732Z
 created_by: claude
