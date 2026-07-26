@@ -1,6 +1,6 @@
 ---
 title: Knowledge Graph
-description: "The parsed codebase structure Orbit's graph engine models; parked with no command surface as of ORB-10357."
+description: "The parsed codebase structure modeled by Orbit's parked graph engine."
 sidebar:
   order: 5
 ---
@@ -9,7 +9,10 @@ sidebar:
 
 The knowledge graph is Orbit's parsed, SQLite-backed model of a repository. It contains directories, files, extracted symbols, import edges, trait implementors, call sites, and source references.
 
-**Status:** as of ORB-10357, the graph engine (`orbit-graph`) has no CLI, MCP, or tool-registry surface — it is not reachable by agents or humans through any command. Agents query code context with `grep`/`rg` and direct file reads instead. The engine ships as a single dependent-free crate pending deletion; this page documents its data model for historical reference.
+**Status:** the graph engine (`orbit-graph`) has no CLI, MCP, or tool-registry
+surface. Agents query code context with `grep`/`rg` and direct file reads
+instead. The engine remains as a dependency-free crate pending deletion; this
+page documents its data model for historical reference.
 
 ```mermaid
 graph TD

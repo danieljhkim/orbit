@@ -16,20 +16,18 @@ When a change touches an owned feature's implementation, update that feature's d
 Run:
 
 ```bash
-make fmt
-make build
+make ci-fast
 ```
 
-Use targeted tests while iterating and full workspace tests before landing risky changes.
+Use targeted checks while iterating. The full `make ci` workflow runs as the
+canonical PR merge gate.
 
 ## Commits
 
 Use clear commit messages. Agent-authored commits should use the agent commit identity (e.g. `claude`, `codex`) for that commit and should not leave the repository configured with that identity afterward.
 
-When a commit is associated with an Orbit task, include the task ID in square brackets in the commit message:
+When a commit is associated with an Orbit task, include its allocated task ID in
+square brackets in the commit message.
 
-```text
-feat: add optional agent_review step to bundle pipelines [T20260505-7]
-```
-
-When authoring tasks or design docs, identify yourself by agent family (`codex`, `claude`, `gemini`, or `grok`), not by a full model string. When writing docs, cite the task IDs that motivated the change in the doc itself.
+When authoring tasks or design docs, identify yourself by agent family (`codex`,
+`claude`, `gemini`, or `grok`), not by a full model string.
