@@ -12,14 +12,7 @@ pub(crate) mod friction_store;
 pub(crate) mod layout;
 pub(crate) mod learning_store;
 pub(crate) mod policy_def_store;
-pub(crate) mod scoreboard {
-    pub(crate) mod common;
-    pub(crate) mod duel_scoreboard;
-    pub(crate) mod planning_duel_scoreboard;
-    pub(crate) mod pr_scoreboard;
-    pub(crate) mod scoreboard_summary;
-    pub(crate) mod token_scoreboard;
-}
+pub(crate) mod scoreboard;
 pub(crate) mod skill_store;
 pub(crate) mod sort;
 pub(crate) mod task_store;
