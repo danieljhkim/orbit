@@ -84,9 +84,11 @@ Each step names the exact file or command. Do them in order.
    exactly the previous version — anything else means an unrelated regression
    in one of the files the check inspects.
 
-4. **Commit the version bumps** and merge to the release branch
-   (`agent-main`). One commit, one PR, one bump set — do not let the two
-   plugin manifests or the npm package drift across commits.
+4. **Commit the version bumps** and merge to `agent-main`, the development
+   integration branch. One commit, one PR, one bump set — do not let the two
+   plugin manifests or the npm package drift across commits. This is not the
+   final release landing: after the tag and release CI, step 6 directs the
+   required promotion to `main`.
 
 5. **Push the matching tag.** From the merge commit:
 
@@ -118,7 +120,11 @@ Each step names the exact file or command. Do them in order.
    receives a CLI asset, but semantic search is unsupported because the
    companion has no x86_64-apple-darwin ONNX Runtime prebuilt.
 
-   All five must be green before step 7.
+   All five must be green before step 7. At that point, follow
+   [`RELEASING.md` §10b](../../RELEASING.md#10b-promote-to-main) to promote
+   `agent-main` to the production release branch (`main`), then follow
+   [`RELEASING.md` §10c](../../RELEASING.md#10c-post-merge-back-merge-to-agent-main)
+   to back-merge `main` to `agent-main` in the same session.
 
 7. **Publish to npm manually.** From the merged commit on your laptop:
 
