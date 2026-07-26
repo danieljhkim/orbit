@@ -16,28 +16,17 @@ related_artifacts: [ADR-NNNN]
 
 # <Feature> — Decisions
 
-ADR log for <feature>. Entries are append-only and ordered by ascending global
-ID. **Allocate the global `ADR-NNNN` via `orbit.adr.add` before writing the
-heading** — never hand-author a four-digit number. The store owns ID, status,
-owner, and links; this file is the long-form narrative keyed on that same ID.
-See [CONVENTIONS.md §4](../CONVENTIONS.md#4-adr-template-strict) for the full rules
-(when a decision earns an ADR, the mandatory Cost line, rollups).
+Ordered pointer index for <feature>'s ADRs. **Allocate the global `ADR-NNNN`
+via `orbit.adr.add` before adding the pointer** — never hand-author a four-digit
+number. The store owns the title, status, body, owner, and links; retrieve an
+ADR's authoritative narrative with `orbit tool run orbit.adr.show --input
+'{"id":"ADR-NNNN"}'`. See [CONVENTIONS.md §4](../CONVENTIONS.md#4-adr-template-strict)
+for the full rules (when a decision earns an ADR, the mandatory Cost line,
+rollups).
 
 <!-- Copy the block below for each new ADR. Delete this comment in real docs. -->
 
-## ADR-NNNN — <short title, noun phrase>
-
-**Status:** <Accepted | Proposed | Superseded by ADR-MMMM> · YYYY-MM · [ORB-NNNNN]
-
-**Context.** <1–3 sentences. Why this forced a decision.>
-
-**Decision.** <1–3 sentences. What we chose.>
-
-**Consequences.**
-
-- <consequence>
-- Cost: <explicit tradeoff — every ADR must name at least one cost a reader
-  could not infer from the decision itself>
+- **ADR-NNNN — <short title, noun phrase>** — <Accepted | Proposed | Superseded by ADR-MMMM>.
 
 ## Task References
 
