@@ -95,7 +95,7 @@ pub struct AgentLoopSpec {
     pub require_response_envelope: bool,
     /// Require the CLI invocation to *terminate with* a well-formed Orbit
     /// response envelope. This is the **step-completion protocol contract**
-    /// ([ORB-10449], extending ADR-0224), and it defaults to `true`.
+    /// ([ADR-0258] / [ORB-10449], amending ADR-0224), and it defaults to `true`.
     ///
     /// Every `backend: cli` invocation is prompted with the response-envelope
     /// contract, so a provider that exits 0 with no envelope did not finish its

@@ -41,7 +41,7 @@ pub fn peek_response_status(stdout: &str) -> Option<String> {
 /// Content-blind check that a provider's stdout *terminated with* a well-formed
 /// Orbit response envelope.
 ///
-/// This is the step-completion protocol signal ([ORB-10449]), not a
+/// This is the step-completion protocol signal ([ADR-0258] / [ORB-10449]), not a
 /// judgement about the work: it reads only the envelope frame — that stdout
 /// parsed as JSON, that a recognizable envelope is present, that its
 /// `schemaVersion` is supported, and that its `status` is one of the three
