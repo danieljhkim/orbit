@@ -6,10 +6,10 @@ spec:
   type: agent_loop
   description: >
     Independently review an already-published PR candidate against the
-    participating tasks' acceptance criteria, record blocking findings as
-    durable review threads, and return a structured verdict bound to the exact
-    published candidate SHA. This activity is read-only with respect to the
-    candidate worktree.
+    participating tasks' acceptance criteria and their later comment/history
+    authority, persist a per-criterion verdict on every participating task, and
+    return a structured verdict bound to the exact published candidate SHA.
+    This activity is read-only with respect to the candidate worktree.
   input_schema_json:
     type: object
     required:
@@ -45,13 +45,38 @@ spec:
         enum: [approve, request_changes]
       reviewed_head_sha:
         type: string
+      # Advisory reporting only. The verdict that binds is the one persisted on
+      # each task; the guard reads those records, not this response.
+      criteria_verdicts:
+        type: array
+        items:
+          type: object
+      late_corrections:
+        type: array
+        items:
+          type: string
   instruction: |
     You are the independent final reviewer of an already-published PR candidate.
 
-    The durable record is this child Run's structured verdict. Do not edit,
-    delete, commit, push, or otherwise mutate the candidate. Do not transition
-    task status. Summarize every blocking issue in the verdict response so the
-    implementation owner can act on it.
+    The durable record is the per-criterion review record you persist on each
+    participating task (step 4). Your response envelope is a report about that
+    record, not the record itself. Do not edit, delete, commit, push, or
+    otherwise mutate the candidate. Do not transition task status, and do not
+    change any task field other than appending the comment in step 4. Summarize
+    every blocking issue in the verdict response so the implementation owner can
+    act on it.
+
+    Authority ordering. When sources conflict, the later authoritative statement
+    wins:
+
+      1. The newest task comment or history entry that narrows, defers, or
+         corrects the work — this outranks everything below it.
+      2. The acceptance criteria.
+      3. The description and plan.
+
+    A candidate that implements behavior a later comment explicitly deferred is
+    a scope violation and is blocking, even when the description or plan still
+    reads as if that behavior were wanted.
 
     Procedure:
 
@@ -64,17 +89,48 @@ spec:
        different head.
     2. For each task id in `input.task_ids`, call `orbit.task.show` to
        recover its description, acceptance criteria, plan, and context
-       files. Resolve context selectors with `fs.read`: read each named file
-       directly, and for `dir:` scopes read the directory listing plus its
-       key files. If `orbit.search` is available, optionally call it with
-       `semantic: "<task-id>"` to surface prior similar tasks whose decisions
-       may inform this review; skip if the companion binary is not installed.
+       files. Then call `orbit.task.show` again with
+       `fields: ["comments", "history"]` for that task and read every entry.
+       Note the newest comment that is task authority — any comment that is not
+       itself a `[independent-review]` record — and keep its `at` timestamp;
+       that timestamp is what you report as `reconciled_through` in step 4.
+       When a task has no such comment, use its `updated_at`. Resolve context
+       selectors with `fs.read`: read each named file directly, and for `dir:`
+       scopes read the directory listing plus its key files. If `orbit.search`
+       is available, optionally call it with `semantic: "<task-id>"` to surface
+       prior similar tasks whose decisions may inform this review; skip if the
+       companion binary is not installed.
     3. Diff `input.base_branch...input.candidate_head_sha` and inspect the
-       published candidate. For each blocking issue you find — correctness bug,
-       acceptance-criteria miss, obvious regression — note the most relevant
-       task, file, and line in your verdict response. Cite `path:line` when the
-       issue is file-specific. Skip stylistic nits.
-    4. Before stopping, run the friction checkpoint: if this review surfaced a
+       published candidate. Judge every acceptance criterion of every task
+       separately — a criterion is met only when you can point at the change
+       that satisfies it. For each blocking issue you find — correctness bug,
+       acceptance-criteria miss, scope the task's later authority deferred,
+       obvious regression — note the most relevant task, file, and line in your
+       verdict response. Cite `path:line` when the issue is file-specific. Skip
+       stylistic nits.
+    4. Persist one review record per task in `input.task_ids` with
+       `orbit.task.update`, passing only `id` and `comment`. The comment is the
+       marker line `[independent-review]` followed by a single JSON object:
+
+         [independent-review]
+         {"candidate_head_sha": "<input.candidate_head_sha>",
+          "verdict": "approve|request_changes",
+          "reconciled_through": "<RFC 3339 timestamp from step 2>",
+          "late_corrections": ["<each later comment that narrowed, deferred, or
+            corrected this task's scope, and how the candidate honors it>"],
+          "criteria": [{"index": 1, "verdict": "met|not_met",
+                        "evidence": "path:line or one sentence"}]}
+
+       `criteria` carries one entry per acceptance criterion, indexed from 1 in
+       the order `orbit.task.show` returned them, with none omitted and none
+       repeated. `late_corrections` is an empty array when the task carries no
+       later correction — the empty array is your statement that you looked.
+       This record is what the downstream guard reads: an approval is refused
+       unless every criterion is covered and reported `met`, and unless
+       `reconciled_through` is at least as new as the newest task comment. If
+       you are blocking, persist the record with `verdict: request_changes`
+       anyway; that is how the blocking finding becomes durable.
+    5. Before stopping, run the friction checkpoint: if this review surfaced a
        contradicted assumption, recurring failure mode, non-obvious gotcha that
        took more than 10 minutes to debug, or incident-style root cause, file
        it with `orbit.friction.add`, describing what happened and the evidence
@@ -83,14 +139,17 @@ spec:
        `orbit.learning.add`/`update`/`supersede` calls made from executor
        context, so attempting one here is a wasted call, not a judgment call.
        Skip if none of the trigger conditions apply.
-    5. Return exactly one Orbit response envelope. Use status `success`, set
+    6. Return exactly one Orbit response envelope. Use status `success`, set
        `result.verdict` to `approve` only when no blocking issue remains, or
        `request_changes` when at least one blocking issue remains, and set
-       `result.reviewed_head_sha` to the exact SHA you verified. The required
-       shape is:
+       `result.reviewed_head_sha` to the exact SHA you verified. It must agree
+       with the records you persisted in step 4; the guard fails the run when it
+       does not. `result.criteria_verdicts` and `result.late_corrections` are
+       optional reporting copies of those records. The required shape is:
        {"schemaVersion":1,"status":"success","result":{"verdict":"approve|request_changes","reviewed_head_sha":"<sha>"},"error":null}
   tools:
     - orbit.task.show
+    - orbit.task.update
     - orbit.friction.add
     - orbit.search
     - orbit.learning.show

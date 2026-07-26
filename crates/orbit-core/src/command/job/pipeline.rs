@@ -1099,18 +1099,35 @@ fn validate_review_job_contract(job: &JobV2) -> Result<(), OrbitError> {
     let guards = job
         .steps
         .iter()
-        .filter(|step| {
-            matches!(
-                &step.body,
-                JobV2StepBody::TargetRef(target)
-                    if target.target == "activity:independent_review_guard"
-            )
+        .filter_map(|step| match &step.body {
+            JobV2StepBody::TargetRef(target)
+                if target.target == "activity:independent_review_guard" =>
+            {
+                Some(target)
+            }
+            _ => None,
         })
-        .count();
-    if guards != 1 {
+        .collect::<Vec<_>>();
+    if guards.len() != 1 {
         return Err(review_asset_error(format!(
-            "deployed task_review_pipeline has {guards} exact-head verdict guards (expected one)"
+            "deployed task_review_pipeline has {} exact-head verdict guards (expected one)",
+            guards.len()
         )));
+    }
+    // The guard reads acceptance criteria and comment authority from the task
+    // records themselves, so a deployed guard step that is not handed the run's
+    // own bundle would silently degrade to the head-binding check alone.
+    let guard_input = guards[0]
+        .default_input
+        .as_ref()
+        .and_then(Value::as_object)
+        .ok_or_else(|| review_asset_error("deployed verdict guard step has no input object"))?;
+    for field in ["candidate_head_sha", "task_ids"] {
+        if !guard_input.contains_key(field) {
+            return Err(review_asset_error(format!(
+                "deployed verdict guard step omits '{field}', so approval coverage cannot be checked against durable task state"
+            )));
+        }
     }
     Ok(())
 }
