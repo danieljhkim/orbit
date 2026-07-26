@@ -79,6 +79,10 @@ becomes just the first definition.
   and resolved against their registries) via `execution_summary`; never
   mutates learnings, ADRs, tasks, friction records, or comments (ORB-10318,
   ORB-10348, [project-learnings §7.6](../project-learnings/2_design.md#76-recurring-deprecation-review-auto-task)).
+- `friction-curation` — daily evidence-first pass that deduplicates open
+  friction records, re-verifies survivors against current behavior, resolves
+  records that no longer reproduce, and files non-duplicate fix tasks for
+  verified-real issues (ORB-10440).
 
 ## Task References
 
@@ -86,6 +90,7 @@ becomes just the first definition.
 - ORB-10148 — qa-sweep V1 (first definition; depends on this).
 - ORB-10318 — learning-deprecation-review definition (report-only stale-learning review; superseded by ORB-10348).
 - ORB-10348 — Generalized the definition into artifact-deprecation-review, adding the comment-reference sweep.
-- ORB-10439 — on-demand manual mint (renamed to `orbit auto-task mint <name>` by ORB-10446).
+- ORB-10439 — `orbit auto-task generate <name>`, the on-demand manual mint.
+- ORB-10440 — Daily friction-curation definition.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
