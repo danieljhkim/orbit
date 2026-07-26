@@ -9,7 +9,7 @@ Both surfaces (MCP `orbit_task_*` / CLI `orbit tool run orbit.task.*`) accept id
 
 ## 1. Create
 
-Create a task another engineer or agent can execute without guessing: a crisp problem description plus strong acceptance criteria. The execution plan is authored later, at pickup.
+Create a task another engineer or agent can execute without guessing: a crisp problem description plus strong acceptance criteria. The execution plan is authored later, at pickup, and persisted with `orbit.task.update`.
 
 **Workflow:**
 1. Confirm objective, constraints, and done criteria.
@@ -18,7 +18,7 @@ Create a task another engineer or agent can execute without guessing: a crisp pr
 4. Optionally enumerate files/dirs/symbols this task will modify or delete as canonical selectors (`file:`, `dir:`, `symbol:path#name:kind`) in `context_files`. `context_files` is optional unless your workspace's own policy requires it — leaving it empty is valid, and never guess entries to avoid an empty field. When you do fill it: only modification targets — not read-for-context files, conventions/pattern docs (cite those in prose instead), or files that don't exist yet. Design docs your repo co-locates with the code they describe are the exception (co-change with implementation). Every selector must resolve inside the target workspace's root; an out-of-root path fails pipeline admission. Prefer `file:`/`symbol:` over `dir:` when changes can be named more precisely.
 5. Set `complexity` (`low`/`medium`/`hard`) whenever scope is clear enough to judge — batching honors this when dispatching work.
 6. Add assumptions, risks, and rollback notes to the description when they matter.
-7. Call `orbit.task.add` with description, acceptance criteria, `context_files` (when filled), workspace, complexity, and `model`. Leave `plan` blank unless pre-seeding is justified.
+7. Call `orbit.task.add` with description, acceptance criteria, `context_files` (when filled), workspace, complexity, and `model`. Do not pass the retired `plan` field; persist the plan later at pickup with `orbit.task.update`.
 8. Confirm via the tool result, or re-fetch with `orbit.task.show`.
 
 **Operating rules:** Never edit task files directly. Never invent task IDs — `orbit.task.add` allocates them. `description` should be multi-line markdown for non-trivial tasks. Required: `title`, `description`, `workspace`. Strongly prefer `acceptance_criteria` and `complexity`. Valid `type`: `feature`, `bug`, `refactor`, `chore` — use friction (below) for self-reported tooling issues, not a task type. Blank/missing companion files (`plan.md`, `execution-summary.md`) are blank fields — repair via `orbit.task.update`, never by hand.
@@ -35,7 +35,7 @@ orbit tool run orbit.task.add --input '{
   "title": "<title>", "description": "<multi-line markdown>",
   "acceptance_criteria": ["<observable outcome 1>", "<observable outcome 2>"],
   "context_files": ["file:src/lib.rs", "dir:src/command", "symbol:src/lib.rs#run:function"],
-  "plan": "", "workspace": "<path>", "priority": "<low|medium|high|critical>",
+  "workspace": "<path>", "priority": "<low|medium|high|critical>",
   "complexity": "<low|medium|hard>", "type": "<feature|bug|refactor|chore>",
   "model": "<agent-family>"
 }'
@@ -64,7 +64,7 @@ Carry a task (or human request, once created above) from intent to verified impl
 
 **Step 3 — Start.** `orbit.task.start` with a `note`. Moves `backlog`/`proposed` → `in-progress` (records approval automatically). Starting from `proposed` still requires a real plan.
 
-**Step 4 — Implement and validate.** Follow the plan, inspecting files directly with `fs.read`. Verify transitive impact during implementation/review with `rg` (with shell access) or by inspecting callers directly; run the repo-approved verification commands (honor repo instructions if tests are forbidden).
+**Step 4 — Implement and validate.** Follow the plan, inspecting files directly with `fs.read`. Verify transitive impact during implementation/review with `rg` (with shell access) or by inspecting callers directly; run the repo-approved verification commands (honor repo instructions if tests are forbidden). In a linked pipeline worktree, never use positional `git stash`/`git stash pop`: refs and the stash list are repository-global, so a positional pop can restore another session's work. Instead, record the assigned worktree's initial `git rev-parse HEAD` value and compare against that explicit baseline with `git diff <baseline-sha> -- <paths>`.
 
 **Step 5 — Summarize and hand off.** Persist `execution_summary` via `orbit.task.update` first (template below). Friction checkpoint: if the task surfaced a contradicted assumption, recurring failure mode, non-obvious gotcha, or incident root cause, file it with `orbit.friction.add` (see §4). Project learnings are curated by the workspace's orchestrator or owner, not by task executors — the learning authoring gate refuses `orbit.learning.add`/`update`/`supersede` from executor context, so calling `orbit-knowledge`'s `add` action here is a wasted call, not a judgment call. Skip filing if none of the trigger conditions apply. Then:
 - **Under an activity envelope** (e.g. `agent_implement`): persist the summary only — the pipeline owns the `review` transition after commit/merge/PR steps succeed.
