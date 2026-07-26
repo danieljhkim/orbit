@@ -17,6 +17,8 @@ This ADR log records the decisions that define the current Activity / Job substr
 
 The log now keeps four load-bearing rollup ADR bodies. Folded entries remain at their original numbers with `Status: Superseded by ADR-NNN (folded)` and a one-line pointer, per [CONVENTIONS §4a](../CONVENTIONS.md#4a-rollup-adrs).
 
+Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `activity-job/ADR-0252` → ADR-0282, `activity-job/ADR-052` → ADR-0281.
+
 ---
 
 ## ADR-001 — Canonical v2 assets normalize into one execution contract
@@ -553,19 +555,11 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 - Timed-out child work gets the same run-cancellation path operators use elsewhere, including bounded process-group signaling for running pipeline workers.
 - Cost: the retained legacy path now depends on the v2 pipeline tool surface and polls active workers, so completion can lag by the polling interval rather than waking on an in-process channel send.
 
-## ADR-052 — Unified async ship dispatch
+## ADR-0281 — Unified async ship dispatch
 
-**Status:** Proposed · 2026-05 · [ORB-00075]
+**Status:** Proposed · 2026-05 · [ORB-00075] · legacy_id: `activity-job/ADR-052`
 
-**Context.** Orbit had three shipment aliases: `ship`, `ship-local`, and `ship-auto`. Operators used the auto path because it already queued behind dependency and lock gates, while explicit shipment still failed fast before the waiting-reason surfaces could explain parked work.
-
-**Decision.** Use `orbit run ship` as the only public shipment command. Omitted task IDs run backlog auto mode, provided task IDs seed explicit singleton bundles, and both forms submit `task_auto_pipeline`; mode still routes inside `task_gate_pipeline` to `task_{{ input.mode }}_pipeline`. The companion global ADR is ADR-0152.
-
-**Consequences.**
-- Explicit task selection now waits inside the gated job path instead of failing at CLI dispatch time.
-- `orbit run ship` returns after `submit_pipeline_run`, and operators inspect waiting or terminal state with `orbit run history -j task_auto_pipeline` and `orbit run show <RUN_ID>`.
-- The deprecated `ship-auto` CLI form errors toward `orbit run ship`, and `ship-local` is no longer a workflow alias.
-- Cost: dispatch output no longer contains the former synchronous auto-shipment summary because terminal pipeline state is unavailable at submit time.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0281"}'`.
 
 ## ADR-0194 — The v2 shell activity surface is removed, not sandboxed
 
@@ -726,20 +720,11 @@ Commits found above the pinned base are adopted with a loud `warn` naming the sh
 
 ---
 
-## ADR-0252 — The runtime reports its deterministic-action registry, and job validation gates on it
+## ADR-0282 — The runtime reports its deterministic-action registry, and job validation gates on it
 
-**Status:** Accepted · 2026-07 · [ORB-10385]
+**Status:** Accepted · 2026-07 · [ORB-10385] · legacy_id: `activity-job/ADR-0252`
 
-**Context.** Catalog assets and the installed binary are independently versioned artifacts. `pr_failure_handoff` shipped as an activity asset bound to `task_pr_pipeline`'s `failure_activity` ([ADR-0246]) while orbit-core's v2 dispatch table never gained a forwarding arm for it, so the hook answered `deterministic action not registered` on every invocation — jrun-20260725-1620-4, -1642-3, and -1620-10, each after the job had admitted a task, built a worktree, and spent 18–42 minutes implementing and validating it. Nothing was committed, pushed, or published. `worktree_gc` carried the identical gap. A failure hook is the last preservation boundary, so discovering incompatibility *inside* it is the worst possible time. The real alternatives were to version installed assets against the binary (a distribution mechanism for what is really a runtime-capability question, and it cannot see workspace-local catalogs at all), or to make the dispatcher tolerate unknown actions (silently skipping a preservation hook is strictly worse than failing).
-
-**Decision.** Make the runtime host report its capability: `V2RuntimeHost::has_deterministic_action(action)` — defaulting to `true` so hosts that cannot enumerate a registry keep surfacing misses at dispatch. `validate_job_deterministic_actions` consults it for every reachable resolved deterministic activity (job- and step-level `recovery_activity`, job `failure_activity`, and every target, recursing through `parallel:`/`fan_out:`/`loop:`) and runs inside `execute_job_with_resume` before the first step, so an unavailable action fails the run ahead of `worktree_setup`'s workflow admission with a `DeterministicActionUnavailable` naming the activity and the action. orbit-core's dispatch table publishes its names as one list that also rejects unlisted actions up front, so the advertised capability cannot exceed what dispatch accepts, and the missing `pr_failure_handoff` / `worktree_gc` arms are registered.
-
-**Consequences.**
-- Catalog/runtime skew is a load-time failure with no task-lifecycle or worktree side effect, instead of a terminal failure that strands completed work.
-- A seeded-asset sweep pins the direction that actually broke: every shipped job's reachable actions and every seeded deterministic activity's action must be dispatchable, so a future asset can no longer reference an action the binary lacks without CI failing.
-- The failure hook's contract is unchanged: an action that becomes unavailable after admission still leaves the original failed-step error authoritative.
-- Cost: hosts now own a capability list that must track their dispatch arms. An over-claiming list rejects nothing at validation and still fails at dispatch (a `debug_assert` catches it in dev); an under-claiming one rejects a healthy job.
-- Cost: the check is per-run rather than cached, and a workspace-local activity naming a genuinely new action must ship with a runtime that implements it.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0282"}'`.
 
 ---
 

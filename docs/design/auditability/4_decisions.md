@@ -3,7 +3,7 @@ summary: "Auditability — Decisions"
 type: design
 title: "Auditability — Decisions"
 owner: codex
-last_updated: 2026-07-25
+last_updated: 2026-07-26
 status: Draft
 feature: auditability
 doc_role: decisions
@@ -13,6 +13,8 @@ tags: ["auditability"]
 # Auditability — Decisions
 
 This is the append-only ADR log for Auditability. Entries are ordered by ADR number. New entries should use the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
+
+Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `auditability/ADR-012` → ADR-0278, `auditability/ADR-022` → ADR-0279, `auditability/ADR-023` → ADR-0280.
 
 ---
 
@@ -162,17 +164,11 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - The terminal-console mockup can use real Orbit events, and library crates fail clippy if raw prints return.
 - Cost: scheduler-event semantics remain aspirational, follow mode is v1, and the reader keeps the file in memory before applying `-n`.
 
-## ADR-012 — Friction scorekeeping derives from lifecycle history
+## ADR-0278 — Friction scorekeeping derives from lifecycle history
 
-**Status:** Superseded · 2026-05 · [T20260510-13]
+**Status:** Superseded · 2026-05 · [T20260510-13] · legacy_id: `auditability/ADR-012`
 
-**Context.** Friction reports once used a dedicated task type, but untriaged reports shared `status: proposed` with human-authored proposals, making scoreboard derivation ambiguous.
-
-**Decision.** Add `status: friction` as the creation status for self-reports, infer legacy friction routing at creation, and rebuild `friction_bounty.json` from task history.
-
-**Consequences.**
-- Friction inbox items were separated from human proposals while legacy task records remained readable during migration.
-- Cost: legacy untriaged reports need migration, and already-triaged legacy histories depend on existing transition records.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0278"}'`.
 
 ## ADR-013 — Unified log feed exposes shared backend surfaces for dashboard UI
 
@@ -283,33 +279,19 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - Runs with no loop-level provider/tool events no longer leave empty loop JSONL placeholders.
 - Cost: consumers must treat a missing loop JSONL file as "no loop events were emitted", not as a missing run; the v2 envelope file remains the canonical run spine.
 
-## ADR-022 — Automated git commits carry implementer authorship
+## ADR-0279 — Automated git commits carry implementer authorship
 
-**Status:** Superseded by [ADR-0249] · 2026-07 · [ORB-10369]
+**Status:** Superseded by [ADR-0249] · 2026-07 · [ORB-10369] · legacy_id: `auditability/ADR-022`
 
-**Context.** Task records already store `implemented_by`, but automated `git_commit` actions previously delegated commit authorship to local git config, hiding the agent that actually produced the change.
-
-**Decision.** Pass a per-commit `--author` derived from `task.implemented_by` for single-implementer commits. Mixed-implementer batch commits use `orbit <orbit@orbit.local>` as the aggregate author and add one `Co-Authored-By` trailer per distinct implementer identity. ADR-023 extends this provenance to committer identity without reusing repo-local user config.
-
-**Consequences.**
-- Reviewers can see implementation provenance directly in git history without joining back through run audit events.
-- Local git config is not written by workflow commit automation and is no longer the source of committer identity for those commits.
-- Cost: multi-implementer batch commits require trailer-aware attribution queries; `git log --author` finds the aggregate commit author, not every co-author trailer.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0279"}'`.
 
 ---
 
-## ADR-023 — Workflow git commit identity is process-scoped
+## ADR-0280 — Workflow git commit identity is process-scoped
 
-**Status:** Superseded by [ADR-0249] · 2026-07 · [ORB-10369]
+**Status:** Superseded by [ADR-0249] · 2026-07 · [ORB-10369] · legacy_id: `auditability/ADR-023`
 
-**Context.** Reusing local Git config for workflow committers made agent identities sticky in developer repositories. If `user.name` or `user.email` was set to an agent identity in repo-local config, later human commits inherited that attribution.
-
-**Decision.** Automated `git_commit` actions set author and committer identity only for the spawned `git commit` process. Single-implementer commits use that implementer's scoped identity for both author and committer. Mixed-implementer commits use `orbit <orbit@orbit.local>` as the aggregate author and committer while preserving distinct implementers as `Co-Authored-By` trailers. Workflows must not write agent or aggregate identities into repo-local Git config.
-
-**Consequences.**
-- Human `user.name` and `user.email` settings remain byte-for-byte stable across workflow commits.
-- Worktrees with no local `user.*` config can still create workflow-owned commits with explicit provenance.
-- The public `git.commit` tool remains user-directed and ambient-config based; workflow-owned commit automation uses this scoped path instead.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0280"}'`.
 
 ---
 
