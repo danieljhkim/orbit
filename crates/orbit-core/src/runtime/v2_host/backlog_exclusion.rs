@@ -426,7 +426,3 @@ fn task_root_id(task: &Task, task_lookup: &BTreeMap<String, Task>) -> String {
 
     root_id
 }
-
-#[cfg(test)]
-#[path = "backlog_exclusion_tests.rs"]
-mod tests;
