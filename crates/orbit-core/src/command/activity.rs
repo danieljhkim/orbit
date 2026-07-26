@@ -171,7 +171,9 @@ pub(crate) fn seed_default_activities(
 
 #[cfg(test)]
 mod tests {
-    use orbit_common::types::activity_job::{AgentRole, OnDenial, tool_allowed};
+    use orbit_common::types::activity_job::{
+        AgentRole, OnDenial, tool_allowed, validate_tool_allowlist,
+    };
     use orbit_common::types::{ActivityV2Spec, load_activity_asset};
     use tempfile::tempdir;
 
@@ -261,6 +263,27 @@ mod tests {
                 assert!(instruction.contains("Before the first write"));
                 assert!(instruction.contains("git rev-parse --show-toplevel"));
                 assert!(instruction.contains("worktree_mismatch"));
+            }
+            other => panic!("expected agent_loop activity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_implement_grants_concrete_adr_allocation() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "agent_implement")
+            .expect("agent implement activity is seeded");
+        let asset = load_activity_asset(yaml).expect("parse agent implement activity");
+        match asset.spec.spec {
+            ActivityV2Spec::AgentLoop(spec) => {
+                assert!(
+                    spec.tools.iter().any(|tool| tool == "orbit.adr.add"),
+                    "implementers must be able to allocate global ADR IDs"
+                );
+                validate_tool_allowlist(&spec.tools)
+                    .expect("agent implement allowlist must remain valid");
+                assert!(tool_allowed("orbit.adr.add", &spec.tools));
             }
             other => panic!("expected agent_loop activity, got {other:?}"),
         }
