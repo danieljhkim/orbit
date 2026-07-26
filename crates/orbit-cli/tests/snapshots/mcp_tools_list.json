@@ -962,8 +962,18 @@
           "type": "boolean"
         },
         "status": {
-          "description": "Optional task status filter",
-          "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Optional task status filter. Pass a comma-separated string or an array of status names."
         },
         "tag": {
           "anyOf": [
