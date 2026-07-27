@@ -726,6 +726,82 @@ fn run_detail_uses_v2_audit_steps_when_step_bundle_is_empty() {
 }
 
 #[test]
+fn run_detail_exposes_the_provider_pid_and_liveness_for_an_open_agent_step() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let run_id = "jrun-web-provider-pid";
+    seed_v2_audit_events(
+        &runtime,
+        run_id,
+        vec![
+            json!({
+                "schemaVersion": 1,
+                "event_type": "step.started",
+                "event_id": "evt-step-started",
+                "ts": "2026-07-27T02:41:01Z",
+                "run_id": run_id,
+                "agent_identity": "codex",
+                "body_kind": "step_started",
+                "step_id": "agent_implement"
+            }),
+            json!({
+                "schemaVersion": 1,
+                "event_type": "cli.invocation.process",
+                "event_id": "evt-pid",
+                "ts": "2026-07-27T02:41:02Z",
+                "run_id": run_id,
+                "agent_identity": "codex",
+                "parent_event_id": "evt-step-started",
+                "body_kind": "cli_invocation_process",
+                "provider": "codex",
+                // Unreachable PID: the probe must resolve it as gone rather
+                // than reporting a live child that does not exist.
+                "pid": u32::MAX - 1,
+                "pid_start_time": "ps-lstart-utc-v1:seeded"
+            }),
+        ],
+    );
+    let scheduled_at = chrono::DateTime::parse_from_rfc3339("2026-07-27T02:41:00Z")
+        .expect("parse scheduled")
+        .with_timezone(&Utc);
+    let run = orbit_core::JobRun {
+        run_id: run_id.to_string(),
+        job_id: "task_pr_pipeline".to_string(),
+        attempt: 1,
+        state: JobRunState::Running,
+        scheduled_at,
+        started_at: Some(scheduled_at),
+        finished_at: None,
+        duration_ms: None,
+        created_at: scheduled_at,
+        pid: None,
+        pid_start_time: None,
+        input: None,
+        retry_source_run_id: None,
+        knowledge_metrics: None,
+        resolved_crew: None,
+        crew_model: None,
+        steps: Vec::new(),
+    };
+
+    let detail = job_run_detail_to_json(&runtime, &run);
+    let processes = detail["provider_processes"]
+        .as_array()
+        .expect("provider_processes array");
+
+    assert_eq!(processes.len(), 1);
+    assert_eq!(processes[0]["pid"], u32::MAX - 1);
+    assert_eq!(processes[0]["provider"], "codex");
+    assert_eq!(processes[0]["step_id"], "agent_implement");
+    assert_eq!(processes[0]["finished"], false);
+    assert_eq!(processes[0]["exit_code"], Value::Null);
+    if cfg!(unix) {
+        assert_eq!(processes[0]["liveness"], "exited");
+    } else {
+        assert_eq!(processes[0]["liveness"], "unknown");
+    }
+}
+
+#[test]
 fn independent_review_run_detail_projects_crew_and_exact_head_lineage() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let scheduled_at = Utc::now();

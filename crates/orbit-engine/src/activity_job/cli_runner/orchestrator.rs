@@ -10,6 +10,7 @@ use orbit_agent::{
 };
 use orbit_common::types::activity_job::{AgentLoopSpec, V2AuditEventKind};
 use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, prepend_reminder_block};
+use orbit_common::utility::process_identity::process_start_identity_token;
 use orbit_common::utility::redaction::{PatternRedactor, redact_sensitive_env_text};
 use serde_json::Value;
 
@@ -208,6 +209,20 @@ pub fn run_cli_backend(
         agent_model: model.as_deref(),
         agent_task_id: task_id,
     });
+    // [ORB-10496] Record the provider child's PID the moment it exists. Emitted
+    // through the same writer, so it is persisted (and therefore readable by
+    // `orbit run show` / the run-status API) while the invocation is still
+    // running — the only in-flight signal for a ship-pipeline agent step.
+    let pid_audit = Arc::clone(&audit);
+    let pid_provider = provider.clone();
+    let on_spawn = move |pid: u32| {
+        pid_audit.emit_lossy(V2AuditEventKind::CliInvocationProcess {
+            provider: pid_provider.clone(),
+            pid,
+            pid_start_time: process_start_identity_token(pid),
+        });
+    };
+
     let spawn_result = spawn_with_timeout(SpawnWithTimeoutRequest {
         program: &resolved_program,
         args: &subprocess_args,
@@ -223,6 +238,7 @@ pub fn run_cli_backend(
             cwd: subprocess_cwd_string.as_deref(),
         },
         output_capture_limit: None,
+        on_spawn: Some(&on_spawn),
     });
 
     let (stdout, stderr, exit_code, duration, timed_out) = match spawn_result {

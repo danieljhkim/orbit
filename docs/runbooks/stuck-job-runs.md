@@ -2,9 +2,9 @@
 type: runbook
 summary: Diagnose, cancel, resume, or replay pending and running Orbit job runs.
 tags: [operations, jobs, runs, recovery, debugging]
-paths: ["crates/orbit-core/src/command/job/**", "crates/orbit-cli/src/command/run/**"]
-related_features: [activity-job]
-related_artifacts: [ORB-10070]
+paths: ["crates/orbit-core/src/command/job/**", "crates/orbit-cli/src/command/run/**", "crates/orbit-core/src/runtime/run_audit.rs"]
+related_features: [activity-job, auditability]
+related_artifacts: [ORB-10070, ORB-10496]
 ---
 
 # Recover Stuck Job Runs
@@ -27,6 +27,39 @@ orbit run trace  <run_id>           # parent/child event tree
 
 Before changing run state, confirm the recorded owner PID and whether that exact process
 is still alive. A long-running run is not necessarily stuck.
+
+## Check the agent subprocess before cancelling
+
+Two separate execution channels spawn agents, and they do not share a run store:
+
+| Channel | Spawned by | Observable through |
+| --- | --- | --- |
+| `agent_invoke` | the Worker daemon | bridge `agent_run_list` / `agent_run_status` |
+| ship pipeline (`workflow_ship`) `agent_implement` | the pipeline worker process | this runbook's surfaces below |
+
+**Bridge `agent_run_list` does not cover the ship pipeline.** A `workflow_ship` implementation
+agent is a direct child of the pipeline worker, so `agent_run_list` reports no matching run and
+`busy=false` for a perfectly healthy one. Do not read that as a lost child [ORB-10496].
+
+Ask the pipeline instead. `orbit run show` prints one `Agent:` line per provider subprocess that
+has not reported an exit, and the same records come back as `provider_processes` from
+`GET /api/runs/:id` — which is what bridge `workflow_run_status` returns:
+
+```text
+$ orbit run show jrun-20260727-0241-2
+Agent: provider=codex pid=154953 step=agent_implement liveness=alive started_at=2026-07-27T02:41:02+00:00
+```
+
+- `liveness=alive` — the child is still there and is the same process that was recorded.
+  A step that has been running a long time with a live agent is working, not stuck.
+- `liveness=exited` — the child is gone (or its PID was recycled by an unrelated process)
+  while the step never recorded an exit. This is the lost-child case worth acting on.
+- `liveness=unknown` — the host cannot probe liveness. Never read this as dead.
+
+Liveness is probed when you ask, against the local process table, so it is only meaningful on
+the host that ran the child; a historical run inspected elsewhere reports `exited`. Use
+`orbit run show --json` for the full records (`pid`, `pid_start_time`, `step_id`, `finished`),
+or `orbit run events <run_id> --type cli.invocation.process` for the raw audit events.
 
 ## Interpret run states
 

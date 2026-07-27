@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use orbit_common::types::OrbitError;
 use orbit_common::utility::blob_store::BlobStore;
+use orbit_common::utility::process_identity::{ProcessLiveness, probe_process_liveness};
 use serde_json::Value;
 
 use crate::{OrbitRuntime, V2AuditEventFilter};
@@ -60,7 +61,142 @@ pub struct RunCliInvocationRecord {
     pub duration_ms: Option<u64>,
 }
 
+/// [ORB-10496] One provider subprocess spawned by a CLI-backed agent step.
+///
+/// Reconstructed from the run's audit trail by pairing each
+/// `cli.invocation.process` event with the `cli.invocation.finished` event that
+/// closes it. A record with `finished == false` is a child that had not exited
+/// when the trail was last written; `liveness` says whether it is still there.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RunProviderProcess {
+    pub run_id: String,
+    pub event_id: String,
+    pub ts: Option<DateTime<Utc>>,
+    pub step_id: Option<String>,
+    pub step_index: Option<u32>,
+    pub provider: Option<String>,
+    pub pid: u32,
+    pub pid_start_time: Option<String>,
+    pub finished: bool,
+    pub exit_code: Option<i64>,
+    pub timed_out: bool,
+    pub duration_ms: Option<u64>,
+    pub liveness: ProcessLiveness,
+}
+
 impl OrbitRuntime {
+    /// Provider subprocesses recorded for a run, oldest first, each with a
+    /// liveness verdict for the ones that have not reported an exit.
+    ///
+    /// This is the only observability channel for ship-pipeline
+    /// (`workflow_ship`) implementation agents: they are children of the
+    /// pipeline worker, not of the Worker daemon, so they never appear in the
+    /// Worker run store that `agent_run_list` reads.
+    pub fn collect_run_provider_processes(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<RunProviderProcess>, OrbitError> {
+        self.collect_run_provider_processes_with(run_id, probe_process_liveness)
+    }
+
+    /// Inner, testable form of [`Self::collect_run_provider_processes`] with the
+    /// liveness probe injected, so pairing and projection can be asserted
+    /// without depending on real live PIDs.
+    pub(crate) fn collect_run_provider_processes_with<P>(
+        &self,
+        run_id: &str,
+        probe: P,
+    ) -> Result<Vec<RunProviderProcess>, OrbitError>
+    where
+        P: Fn(u32, Option<&str>) -> ProcessLiveness,
+    {
+        let events = self.collect_run_audit_events(run_id)?;
+        let step_index_by_id = self
+            .collect_run_audit_steps(run_id)?
+            .into_iter()
+            .map(|step| (step.step_id, step.step_index))
+            .collect::<HashMap<_, _>>();
+        let mut records: Vec<RunProviderProcess> = Vec::new();
+
+        for event in events {
+            match event.body_kind.as_deref() {
+                Some("cli_invocation_process") => {
+                    let Some(pid) = event
+                        .raw
+                        .get("pid")
+                        .and_then(Value::as_u64)
+                        .and_then(|pid| u32::try_from(pid).ok())
+                    else {
+                        continue;
+                    };
+                    let step_index = event
+                        .step_id
+                        .as_ref()
+                        .and_then(|step_id| step_index_by_id.get(step_id).copied());
+                    records.push(RunProviderProcess {
+                        run_id: event
+                            .raw
+                            .get("run_id")
+                            .and_then(Value::as_str)
+                            .unwrap_or(run_id)
+                            .to_string(),
+                        event_id: event.event_id,
+                        ts: event.timestamp,
+                        step_index,
+                        step_id: event.step_id,
+                        provider: event
+                            .raw
+                            .get("provider")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        pid,
+                        pid_start_time: event
+                            .raw
+                            .get("pid_start_time")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        finished: false,
+                        exit_code: None,
+                        timed_out: false,
+                        duration_ms: None,
+                        // Overwritten below; only unfinished records are probed.
+                        liveness: ProcessLiveness::Exited,
+                    });
+                }
+                // Events arrive oldest-first, so the newest still-open record in
+                // the same step is the one this exit closes. Retries within a
+                // step therefore pair up in order rather than all collapsing
+                // onto the first spawn.
+                Some("cli_invocation_finished") => {
+                    let Some(record) = records
+                        .iter_mut()
+                        .rev()
+                        .find(|record| !record.finished && record.step_id == event.step_id)
+                    else {
+                        continue;
+                    };
+                    record.finished = true;
+                    record.exit_code = event.raw.get("exit_code").and_then(Value::as_i64);
+                    record.timed_out = event
+                        .raw
+                        .get("timed_out")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    record.duration_ms = event.raw.get("duration_ms").and_then(Value::as_u64);
+                }
+                _ => {}
+            }
+        }
+
+        for record in &mut records {
+            if !record.finished {
+                record.liveness = probe(record.pid, record.pid_start_time.as_deref());
+            }
+        }
+
+        Ok(records)
+    }
+
     pub fn collect_run_audit_events(&self, run_id: &str) -> Result<Vec<RunAuditEvent>, OrbitError> {
         let rows = self.list_v2_audit_events(V2AuditEventFilter {
             workspace_id: String::new(),
