@@ -11,15 +11,19 @@ stability = "internal"
 [lints]
 workspace = true
 
+[features]
+companion = ["dep:clap", "dep:fastembed"]
+
 [[bin]]
 name = "orbit-search-companion"
 path = "src/bin/orbit-search-companion.rs"
+required-features = ["companion"]
 
 [dependencies]
 blake3.workspace = true
 chrono.workspace = true
-clap.workspace = true
-fastembed.workspace = true
+clap = { workspace = true, optional = true }
+fastembed = { workspace = true, optional = true }
 libc.workspace = true
 orbit-common = { path = "../orbit-common", features = ["sqlite"] }
 reqwest.workspace = true

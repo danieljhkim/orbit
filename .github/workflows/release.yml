@@ -97,7 +97,7 @@ jobs:
             "./target/${{ matrix.target }}/release/orbit" --version
           fi
           if [ "${{ matrix.companion }}" = "true" ]; then
-            cargo build -p orbit-search --bin orbit-search-companion --release --locked --target "${{ matrix.target }}"
+            cargo build -p orbit-search --features companion --bin orbit-search-companion --release --locked --target "${{ matrix.target }}"
             "./target/${{ matrix.target }}/release/orbit-search-companion" --version-info
           fi
 
