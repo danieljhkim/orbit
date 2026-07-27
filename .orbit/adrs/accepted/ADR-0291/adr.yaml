@@ -5,12 +5,13 @@ status: accepted
 owner: codex
 created_at: 2026-07-27T00:25:06.875084552Z
 accepted_at: 2026-07-27T00:25:15.600223017Z
-last_updated: 2026-07-27T00:26:26.716130446Z
+last_updated: 2026-07-27T00:53:31.283930280Z
 related_features:
 - orbit-graph
 related_tasks:
 - ORB-10357
 - ORB-10473
+- ORB-10491
 tags:
 - architecture
 - orbit-graph
@@ -23,12 +24,18 @@ paths:
 - crates/orbit-cmd/src/doctor.rs
 - crates/orbit-cli/src/command/doctor.rs
 - crates/orbit-dashboard/src/health.rs
+- benchmarks/graph/**
+- benchmarks/graph-latency/**
+- docs/design/orbit-graph/**
 - docs/runbooks/**
 - docs/CONFIG.md
 supersedes:
 - ADR-0198
 - ADR-0241
 - ADR-0285
+- ADR-0190
+- ADR-0195
+- ADR-0197
 legacy_ids: []
 validation_warnings: []
 legacy_validation: none
