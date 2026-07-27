@@ -11,9 +11,9 @@ pub(super) fn git_commit_with_identity(
     message: &str,
     resolved_model: Option<&str>,
 ) -> Result<(), OrbitError> {
-    // ADR-0249: one persisted value drives both the ambient author
-    // and prepare-commit-msg Agent-Model trailer. The generic fallback remains
-    // commit-capable when a run has no resolved model.
+    // ADR-0299: the persisted model identifies the author while the
+    // process-scoped Orbit identity remains the sole workflow committer. The
+    // generic fallback remains commit-capable when a run has no resolved model.
     let author = resolved_model
         .map(GitAuthor::resolved_model)
         .unwrap_or_else(GitAuthor::orbit);
@@ -22,7 +22,7 @@ pub(super) fn git_commit_with_identity(
     args.push("--author".to_string());
     args.push(author.spec());
     args.extend(["-m".to_string(), message.to_string()]);
-    git_success_dynamic_with_identity(workspace_path, &args, &author, &committer, resolved_model)
+    git_success_dynamic_with_identity(workspace_path, &args, &author, &committer)
 }
 
 pub(super) fn stage_paths(workspace_path: &Path, files: &[String]) -> Result<(), OrbitError> {
@@ -52,7 +52,6 @@ fn git_success_dynamic_with_identity(
     args: &[String],
     author: &GitAuthor,
     committer: &GitAuthor,
-    resolved_model: Option<&str>,
 ) -> Result<(), OrbitError> {
     let env_overrides = [
         ("GIT_AUTHOR_NAME", author.name()),
@@ -73,10 +72,6 @@ fn git_success_dynamic_with_identity(
             .iter()
             .map(|(key, value)| ((*key).to_string(), (*value).to_string())),
     );
-    if let Some(model) = resolved_model {
-        environment.push(("AGENT_MODEL".to_string(), model.to_string()));
-    }
-
     let result = run_process(
         &ExecRequest {
             program: "git".to_string(),

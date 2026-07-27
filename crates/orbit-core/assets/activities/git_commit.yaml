@@ -24,7 +24,7 @@ spec:
         description: Worktree setup start-point ref name. Diagnostic context only; this step never resolves it.
       base_sha:
         type: string
-        description: Full commit id pinned by worktree_setup, used to identify commits authored during implementation.
+        description: Full commit id pinned by worktree_setup; HEAD must still equal it when this step begins.
   output_schema_json:
     type: object
     properties:
@@ -34,16 +34,10 @@ spec:
         type: string
       committed:
         type: boolean
-      adopted_commits:
-        type: boolean
       base_sha:
         type: string
       commit_sha:
         type: string
-      commit_shas:
-        type: array
-        items:
-          type: string
       job_run_id:
         type: string
       skipped_no_diff_expected:

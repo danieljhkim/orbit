@@ -1,13 +1,12 @@
-//! ORB-10380: the commit step reconciles the task branch against the commit
+//! ORB-10380: the commit step compares the task branch HEAD with the commit
 //! `worktree_setup` pinned, never against a ref name.
 //!
 //! `refs/remotes/origin/<base>` is shared by every worktree hanging off one
 //! `.git`. A sibling run's setup fetch, a rescue fetch, or a merge moves it
 //! while other runs are still in flight, so a commit step that re-resolved the
-//! name failed every older run by construction. These tests pin the pinned-base
-//! contract, fail-closed history reconciliation, the ADR-0219 carve-out
-//! reachability, and the rule that no failure path mutates the worktree on its
-//! way out.
+//! name failed every older run by construction. These tests pin the immutable
+//! base contract, the ADR-0219 carve-out reachability, and the rule that no
+//! failure path mutates the worktree on its way out.
 
 use std::fs;
 use std::path::Path;
@@ -63,18 +62,13 @@ fn commit_survives_the_shared_base_ref_moving_after_worktree_setup() {
     move_shared_base_ref(workspace, &base_sha);
     git_success(workspace, &["checkout", "-b", "orbit/T1"]).expect("create task branch");
 
-    fs::write(workspace.join("task.txt"), "task work\n").unwrap();
-    let task_head = commit_all(
-        workspace,
-        "auto-commit\n\nAgent-Run: batch-1\nAgent-Task: T1",
-    );
-
     // A sibling run's `worktree_setup` fetch lands a newer base.
     git_success(workspace, &["checkout", "--detach", &base_sha]).expect("detach at base");
     fs::write(workspace.join("sibling.txt"), "sibling run work\n").unwrap();
     let advanced_base = commit_all(workspace, "sibling run merged first");
     move_shared_base_ref(workspace, &advanced_base);
     git_success(workspace, &["checkout", "orbit/T1"]).expect("return to the task branch");
+    fs::write(workspace.join("task.txt"), "task work\n").unwrap();
     assert_ne!(
         git_output(workspace, &["rev-parse", MOVING_BASE_REF]).expect("read moved base"),
         base_sha,
@@ -87,13 +81,13 @@ fn commit_survives_the_shared_base_ref_moving_after_worktree_setup() {
     let result = git_commit(&host, &batch_input(workspace, &base_sha))
         .expect("a moved shared base ref must not fail the commit step");
 
-    assert_eq!(result["decision"], "adopted_existing_commits");
+    assert_eq!(result["decision"], "performed");
     assert_eq!(result["base_sha"], base_sha);
-    assert_eq!(result["commit_shas"], json!([task_head]));
+    let task_head = result["commit_sha"].as_str().expect("workflow commit SHA");
     assert_eq!(
         git_output(workspace, &["rev-parse", "HEAD"]).expect("read final head"),
         task_head,
-        "the pipeline must not rewrite the adopted commit"
+        "the pipeline returns the commit it created"
     );
 }
 
@@ -122,7 +116,7 @@ fn commit_rejects_a_base_sha_input_that_is_a_ref_name() {
 }
 
 #[test]
-fn commit_fails_with_observed_state_when_the_pinned_base_shares_no_history() {
+fn commit_rejects_any_head_change_from_the_pinned_base() {
     let temp = initialized_git_repo();
     let workspace = temp.path();
     let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read checkpoint");
@@ -136,11 +130,11 @@ fn commit_fails_with_observed_state_when_the_pinned_base_shares_no_history() {
     let task = task_with_file("T1", "Unrelated history", "unrelated.txt", "claude");
     let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
 
-    let error = git_commit(&host, &batch_input(workspace, &base_sha))
-        .expect_err("unrelated histories remain a hard failure");
+    let error =
+        git_commit(&host, &batch_input(workspace, &base_sha)).expect_err("changed HEAD fails");
 
     let message = error.to_string();
-    assert!(message.contains("shares no history"), "{message}");
+    assert!(message.contains("worktree_head_changed"), "{message}");
     assert!(
         message.contains(&base_sha),
         "names the pinned base: {message}"
@@ -148,7 +142,7 @@ fn commit_fails_with_observed_state_when_the_pinned_base_shares_no_history() {
     assert!(message.contains(&unrelated_head), "names HEAD: {message}");
     assert!(
         !message.contains("nothing to commit"),
-        "the ancestry failure must not reuse the empty-stage wording: {message}"
+        "the immutable-base failure must not reuse the empty-stage wording: {message}"
     );
 }
 
@@ -244,9 +238,8 @@ fn empty_stage_failure_leaves_the_index_as_found() {
 
 #[test]
 fn no_diff_expected_task_skips_the_phase_even_when_its_base_is_unreachable() {
-    // ADR-0219's carve-out used to live only on the empty-stage branch, so a
-    // side-effect-only task whose history could not be reconciled hard-failed
-    // instead of skipping. The carve-out is now evaluated on both branches.
+    // ADR-0219's carve-out applies before a changed-HEAD failure so a
+    // side-effect-only task remains skippable without Git reconciliation.
     let temp = initialized_git_repo();
     let workspace = temp.path();
     let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read checkpoint");

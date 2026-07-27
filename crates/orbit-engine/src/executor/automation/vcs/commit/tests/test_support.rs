@@ -185,14 +185,9 @@ impl DeterministicActionHost for CommitTestHost {
 
 /// Detach a fixture repo from any machine-global `core.hooksPath`.
 ///
-/// A developer box can install a global hooks directory — dk-server-1 ships the
-/// shared `prepare-commit-msg` telemetry-trailer injector (ORB-10340), which
-/// appends `Agent-Run`/`Agent-Model`/`Agent-Task` to every commit made while
-/// `AGENT_*` is exported. A fixture repo inherits that config and its commit
-/// bodies stop matching exact assertions, for reasons that have nothing to do
-/// with the code under test. CI has no global hook, so this only ever reddened
-/// developer runs (ORB-10350). Nothing in the VCS automation depends on hooks
-/// firing, so an empty hooks dir is the faithful fixture.
+/// A developer box may configure arbitrary global Git hooks. A fixture repo
+/// must not inherit host-specific commit mutation, so its empty hooks directory
+/// makes the no-hook production contract explicit and deterministic.
 fn detach_global_git_hooks(repo: &Path) {
     let hooks = repo.join(".git").join("orbit-test-empty-hooks");
     fs::create_dir_all(&hooks).expect("create empty hooks dir");

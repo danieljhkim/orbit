@@ -3,7 +3,6 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
-use orbit_common::utility::selector::anchor_path;
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -384,7 +383,6 @@ pub(crate) struct WorktreeBoundaryGuard {
     provider: String,
     requested_workspace_path: String,
     requested_repo_root: Option<String>,
-    task_context_files: Vec<String>,
     assigned_root: PathBuf,
     primary_root: PathBuf,
     assigned_before: GitWorktreeFingerprint,
@@ -572,7 +570,6 @@ impl WorktreeBoundaryGuard {
         let requested_workspace_path = pair.requested_workspace_path.clone();
         let requested_repo_root = Some(pair.requested_repo_root.clone());
         let task_id = task_id(input, task_ctx);
-        let task_context_files = task_context_files(input, task_ctx);
 
         Ok(Some(Self {
             task_id,
@@ -580,7 +577,6 @@ impl WorktreeBoundaryGuard {
             provider: provider.to_string(),
             requested_workspace_path,
             requested_repo_root,
-            task_context_files,
             assigned_before: git_fingerprint(&assigned_root)?,
             primary_before: git_fingerprint(&primary_root)?,
             assigned_root,
@@ -619,29 +615,18 @@ impl WorktreeBoundaryGuard {
             .collect::<Vec<_>>();
 
         if assigned_history_changed {
-            match self.admitted_task_fast_forward(&assigned_after)? {
-                Ok(commit_sha) => {
-                    tracing::warn!(
-                        target: "orbit.engine.cli_runner",
-                        task_id = %self.task_id,
-                        run_id = %self.run_id,
-                        commit_sha,
-                        "accepted one clean task-attributed Stop-hook commit; the commit phase owns its single adoption"
-                    );
-                }
-                Err(reason) => {
-                    return Err(self.integrity_error(
-                        "worktree_content_conflict",
-                        &assigned_after,
-                        &primary_after,
-                        &run_changed_paths,
-                        &primary_changed_paths,
-                        &primary_dirt_paths,
-                        &conflicting_paths,
-                        &reason,
-                    ));
-                }
-            }
+            // ADR-0299: provider execution may change files, never Git history.
+            return Err(self.integrity_error(
+                "worktree_content_conflict",
+                &assigned_after,
+                &primary_after,
+                &run_changed_paths,
+                &primary_changed_paths,
+                &primary_dirt_paths,
+                &conflicting_paths,
+                "the provider changed the assigned worktree HEAD or branch; providers may edit \
+                 files but must not create commits or move HEAD",
+            ));
         }
 
         if primary_after == self.primary_before {
@@ -695,121 +680,11 @@ impl WorktreeBoundaryGuard {
         ))
     }
 
-    /// A provider-side commit is admissible only in the exact known Stop-hook
-    /// shape: one clean first-parent fast-forward on the assigned branch,
-    /// attributed to this run/task, with every changed path inside the task's
-    /// declared context. The commit step rechecks the same durable facts before
-    /// adopting the SHA, so this boundary never needs a second mutation.
-    fn admitted_task_fast_forward(
-        &self,
-        assigned_after: &GitWorktreeFingerprint,
-    ) -> Result<Result<String, String>, DispatchError> {
-        if assigned_after.branch != self.assigned_before.branch {
-            return Ok(Err(
-                "the assigned worktree branch changed during implementation".to_string(),
-            ));
-        }
-        if !assigned_after.dirty_paths.is_empty() {
-            return Ok(Err(format!(
-                "the assigned worktree history changed while dirty content remained at paths: {}",
-                assigned_after.dirty_paths.join(", ")
-            )));
-        }
-        if !git_output_raw(
-            &self.assigned_root,
-            &[
-                "merge-base",
-                "--is-ancestor",
-                &self.assigned_before.head,
-                &assigned_after.head,
-            ],
-        )?
-        .status
-        .success()
-        {
-            return Ok(Err(
-                "the assigned worktree history was rewritten during implementation".to_string(),
-            ));
-        }
-
-        let commits = git_stdout(
-            &self.assigned_root,
-            &[
-                "rev-list",
-                "--reverse",
-                &format!("{}..{}", self.assigned_before.head, assigned_after.head),
-            ],
-        )?;
-        let commits = commits
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .collect::<Vec<_>>();
-        let [commit_sha] = commits.as_slice() else {
-            return Ok(Err(format!(
-                "the assigned worktree advanced by {} commits; only one task-attributed Stop-hook commit is admissible",
-                commits.len()
-            )));
-        };
-
-        let parent_line = git_stdout(
-            &self.assigned_root,
-            &["rev-list", "--parents", "-n", "1", commit_sha],
-        )?;
-        let parents = parent_line.split_whitespace().collect::<Vec<_>>();
-        if parents.as_slice() != [*commit_sha, self.assigned_before.head.as_str()] {
-            return Ok(Err(
-                "the assigned worktree commit is not a single-parent fast-forward from the captured HEAD"
-                    .to_string(),
-            ));
-        }
-
-        let message = git_stdout(
-            &self.assigned_root,
-            &["show", "-s", "--format=%B", commit_sha],
-        )?;
-        if !has_commit_trailer(&message, "Agent-Run", &self.run_id)
-            || !has_commit_trailer(&message, "Agent-Task", &self.task_id)
-        {
-            return Ok(Err(format!(
-                "the assigned worktree commit is not attributed to run '{}' and task '{}'",
-                self.run_id, self.task_id
-            )));
-        }
-
-        let changed_paths = nul_paths(&git_stdout_bytes(
-            &self.assigned_root,
-            &[
-                "diff-tree",
-                "--no-commit-id",
-                "--name-only",
-                "-r",
-                "-z",
-                commit_sha,
-                "--",
-            ],
-        )?);
-        let scopes = normalized_task_scopes(&self.task_context_files, &self.assigned_root);
-        let off_scope = changed_paths
-            .iter()
-            .filter(|path| !scopes.iter().any(|scope| path_matches_scope(path, scope)))
-            .cloned()
-            .collect::<Vec<_>>();
-        if changed_paths.is_empty() || scopes.is_empty() || !off_scope.is_empty() {
-            return Ok(Err(format!(
-                "the assigned worktree commit is not confined to the admitted task scope; changed paths: {}; off-scope paths: {}",
-                changed_paths.join(", "),
-                off_scope.join(", ")
-            )));
-        }
-
-        Ok(Ok((*commit_sha).to_string()))
-    }
-
     fn preserve_dirty_assigned_worktree(
         &self,
         assigned_after: &GitWorktreeFingerprint,
     ) -> Result<Option<WorktreeRecoveryArtifact>, DispatchError> {
-        // ADR-0294: content-bearing evidence must outlive forced removal of
+        // ADR-0299: content-bearing evidence must outlive forced removal of
         // the linked checkout, so it lives under the shared Git common dir.
         if assigned_after.dirty_paths.is_empty() {
             return Ok(None);
@@ -1075,20 +950,6 @@ fn declared_workspace_path(input: &Value, task_ctx: Option<&Value>) -> Option<St
         .map(ToOwned::to_owned)
 }
 
-fn task_context_files(input: &Value, task_ctx: Option<&Value>) -> Vec<String> {
-    task_ctx
-        .and_then(|task| task.get("context_files"))
-        .or_else(|| input.get("context_files"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::trim)
-        .filter(|scope| !scope.is_empty())
-        .map(ToOwned::to_owned)
-        .collect()
-}
-
 fn task_id(input: &Value, task_ctx: Option<&Value>) -> String {
     input
         .get("task_id")
@@ -1100,48 +961,6 @@ fn task_id(input: &Value, task_ctx: Option<&Value>) -> String {
         })
         .unwrap_or("unknown")
         .to_string()
-}
-
-fn has_commit_trailer(message: &str, key: &str, expected: &str) -> bool {
-    message.lines().any(|line| {
-        line.split_once(':')
-            .is_some_and(|(candidate, value)| candidate.trim() == key && value.trim() == expected)
-    })
-}
-
-fn normalized_task_scopes(raw_scopes: &[String], workspace_root: &Path) -> Vec<String> {
-    raw_scopes
-        .iter()
-        .filter_map(|raw| {
-            let anchor = anchor_path(raw).ok()?;
-            let relative = if anchor.is_absolute() {
-                anchor.strip_prefix(workspace_root).ok()?.to_path_buf()
-            } else {
-                anchor
-            };
-            let mut normalized = PathBuf::new();
-            for component in relative.components() {
-                match component {
-                    Component::CurDir => {}
-                    Component::Normal(part) => normalized.push(part),
-                    Component::ParentDir => {
-                        normalized.pop();
-                    }
-                    Component::RootDir | Component::Prefix(_) => return None,
-                }
-            }
-            let scope = normalized.to_string_lossy().replace('\\', "/");
-            (!scope.is_empty()).then_some(scope)
-        })
-        .collect()
-}
-
-fn path_matches_scope(path: &str, scope: &str) -> bool {
-    path == scope
-        || scope == "."
-        || path
-            .strip_prefix(scope)
-            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 fn safe_relative_path(path: &str) -> Result<PathBuf, DispatchError> {

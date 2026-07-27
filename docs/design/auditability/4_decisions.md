@@ -3,7 +3,7 @@ summary: "Auditability — Decisions"
 type: design
 title: "Auditability — Decisions"
 owner: codex
-last_updated: 2026-07-26
+last_updated: 2026-07-27
 last_validated: 2026-07-27
 status: Draft
 feature: auditability
@@ -282,7 +282,7 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ## ADR-0279 — Automated git commits carry implementer authorship
 
-**Status:** Superseded by [ADR-0249] · 2026-07 · [ORB-10369] · legacy_id: `auditability/ADR-022`
+**Status:** Accepted · 2026-07 · [ORB-10458] · legacy_id: `auditability/ADR-022`
 
 Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0279"}'`.
 
@@ -290,7 +290,7 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ## ADR-0280 — Workflow git commit identity is process-scoped
 
-**Status:** Superseded by [ADR-0249] · 2026-07 · [ORB-10369] · legacy_id: `auditability/ADR-023`
+**Status:** Accepted · 2026-07 · [ORB-10458] · legacy_id: `auditability/ADR-023`
 
 Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0280"}'`.
 
@@ -347,7 +347,7 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ## ADR-0249 — Workflow commit authors use the persisted crew model
 
-**Status:** Accepted · 2026-07 · [ORB-10369]
+**Status:** Superseded by [ADR-0299] · 2026-07 · [ORB-10519]
 
 **Context.** Pipeline-created commits exposed only a generic or family author even though the job run already persisted the exact resolved crew model used as `AGENT_MODEL` for provider subprocess commit trailers. Deriving attribution again from `task.implemented_by` or crew aliases, or letting the author and trailer read different process state, would permit the ambient author to disagree with durable model telemetry.
 
@@ -358,6 +358,14 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - Existing `Agent-Run`, `Agent-Task`, and `Co-Authored-By` trailers remain additive and unchanged.
 - ORB-10365 retains a host committer because its already-created commit was adopted forward-only, while ORB-10348 was created by pipeline automation with a scoped Orbit committer.
 - Cost: a bare `[crews.*].model` value remains bare in the author because configured model strings stay opaque and Orbit ships no release-coupled alias table.
+
+---
+
+## ADR-0299 — Workflow alone creates shipment commits while dirty failures remain recoverable
+
+**Status:** Accepted · 2026-07 · [ORB-10519]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0299"}'`.
 
 ---
 
@@ -420,7 +428,8 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - **[ORB-10202]** — Remove the retired friction task status and consolidate task mutation attribution and record-parameter construction.
 - **[ORB-10338]** — Add the versioned model price table and query-time `derived_cost_usd`, plus a persisted `provider_cost_usd` column for reconciliation.
 - **[ORB-10370]** — Fill provider model/cost trace fields from CLI result JSON and prefer reported model identity at invocation ingest.
-- **[ORB-10369]** — Set pipeline-created commit authors from the persisted resolved crew model without changing aliases or rewriting existing commits.
+- **[ORB-10519]** — Keep the persisted crew-model author and process-scoped Orbit committer while removing hook-specific trailer input and provider-commit adoption ([ADR-0299], superseding [ADR-0249] and [ADR-0294]).
+- **[ORB-10369]** — Introduce the persisted resolved crew model as the pipeline commit author with generic fallback and no alias resolver ([ADR-0249], superseded by [ADR-0299]).
 - **[ORB-10496]** — Record the spawned provider subprocess PID as its own audit event and expose read-time liveness through run status and `orbit run show`.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
