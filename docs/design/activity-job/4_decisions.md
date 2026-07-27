@@ -817,6 +817,11 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ---
 
+## ADR-0295 — Re-dispatched implement attempts self-cancel on a write-gated task
+
+**Status:** Proposed · 2026-07 · [ORB-10499]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0295"}'`.
 ## ADR-0294 — Preserve failed worktree state before cleanup and admit only proven task commits
 
 **Status:** Accepted · 2026-07 · [ORB-10468]
@@ -827,6 +832,7 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ## Task References
 
+- **[ORB-10499]** — Confirm the duplicate implement invocation as the executor's bounded post-recovery attempt, and let the re-dispatched attempt exit on a write-gated task ([ADR-0295], resolving [F2026-07-174]).
 - **[ORB-10468]** — Preserve dirty integrity failures as run-keyed restorable artifacts and narrow assigned-history adoption to one task/run-attributed on-scope commit ([ADR-0294], amending [ADR-0251]).
 - **[ORB-10471]** — Scope the worktree boundary guard's primary dirt check to paths the run touched, so unrelated primary dirt no longer defeats a benign fast-forward ([ADR-0292]).
 - **[ORB-10470]** — Make resume submit a detached run that starts at the failed checkpoint, and reconcile blocked/re-stamped tasks against the run's retry lineage ([ADR-0289]).
