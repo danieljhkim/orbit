@@ -563,10 +563,11 @@ impl WorktreeBoundaryGuard {
 
     /// Compare both monitored checkouts after the provider reaches any
     /// terminal outcome. An externally advanced primary branch is benign when
-    /// it is a clean fast-forward: linked worktrees keep their own HEAD, and
-    /// the shipment rebase checkpoint owns reconciliation with the new base.
-    /// Primary rewrites/content mutation and history changes in the assigned
-    /// worktree remain typed, fail-closed violations.
+    /// it is a proven same-branch fast-forward that did not disturb any path
+    /// this run touched: linked worktrees keep their own HEAD, and the
+    /// shipment rebase checkpoint owns reconciliation with the new base.
+    /// Primary rewrites, primary dirt overlapping the run, and history changes
+    /// in the assigned worktree remain typed, fail-closed violations.
     pub(crate) fn verify(self) -> Result<(), DispatchError> {
         let assigned_after = git_fingerprint(&self.assigned_root)?;
         let primary_after = git_fingerprint(&self.primary_root)?;
@@ -576,9 +577,15 @@ impl WorktreeBoundaryGuard {
             changed_paths(&self.assigned_root, &self.assigned_before, &assigned_after);
         let primary_changed_paths =
             changed_paths(&self.primary_root, &self.primary_before, &primary_after);
-        let conflicting_paths = run_changed_paths
+        // Interference is judged against the primary's *dirt*, not against the
+        // commits a fast-forward brought in: a merged sibling PR that touched
+        // the same file the run touched is base advance, which the shipment
+        // rebase checkpoint reconciles, not a boundary violation.
+        let primary_dirt_paths = primary_dirt_mutations(&self.primary_before, &primary_after);
+        let run_path_index = run_changed_paths.iter().collect::<BTreeSet<_>>();
+        let conflicting_paths = primary_dirt_paths
             .iter()
-            .filter(|path| primary_changed_paths.contains(path))
+            .filter(|path| run_path_index.contains(path))
             .cloned()
             .collect::<Vec<_>>();
 
@@ -589,6 +596,7 @@ impl WorktreeBoundaryGuard {
                 &primary_after,
                 &run_changed_paths,
                 &primary_changed_paths,
+                &primary_dirt_paths,
                 &conflicting_paths,
                 "the assigned worktree history or branch changed during implementation",
             ));
@@ -598,15 +606,19 @@ impl WorktreeBoundaryGuard {
             return Ok(());
         }
 
-        if primary_fast_forward_is_benign(&self.primary_root, &self.primary_before, &primary_after)?
-        {
+        if primary_fast_forward_is_benign(
+            &self.primary_root,
+            &self.primary_before,
+            &primary_after,
+            &conflicting_paths,
+        )? {
             tracing::info!(
                 target: "orbit.engine.cli_runner",
                 task_id = %self.task_id,
                 run_id = %self.run_id,
                 primary_before = %self.primary_before.head,
                 primary_after = %primary_after.head,
-                conflicting_paths = ?conflicting_paths,
+                ignored_primary_paths = ?primary_dirt_paths,
                 "accepted concurrent primary fast-forward; shipment base synchronization owns reconciliation"
             );
             return Ok(());
@@ -618,6 +630,7 @@ impl WorktreeBoundaryGuard {
             &primary_after,
             &primary_changed_paths,
             &primary_changed_paths,
+            &primary_dirt_paths,
             &conflicting_paths,
             "the registered primary checkout changed without a clean same-branch fast-forward",
         ))
@@ -631,6 +644,7 @@ impl WorktreeBoundaryGuard {
         primary_after: &GitWorktreeFingerprint,
         reported_paths: &[String],
         primary_changed_paths: &[String],
+        primary_dirt_paths: &[String],
         conflicting_paths: &[String],
         reason: &str,
     ) -> DispatchError {
@@ -647,6 +661,7 @@ impl WorktreeBoundaryGuard {
             "changed_paths": reported_paths,
             "run_changed_paths": changed_paths(&self.assigned_root, &self.assigned_before, assigned_after),
             "primary_changed_paths": primary_changed_paths,
+            "primary_dirt_paths": primary_dirt_paths,
             "conflicting_paths": conflicting_paths,
             "assigned_changed": assigned_after != &self.assigned_before,
             "assigned_before": self.assigned_before,
@@ -666,16 +681,15 @@ fn primary_fast_forward_is_benign(
     root: &Path,
     before: &GitWorktreeFingerprint,
     after: &GitWorktreeFingerprint,
+    conflicting_paths: &[String],
 ) -> Result<bool, DispatchError> {
-    // Linked-worktree shipment owns clean base fast-forwards; the
-    // provider boundary still rejects primary content/history drift.
-    if before.head == after.head
-        || before.branch != after.branch
-        || before.dirty_paths != after.dirty_paths
-        || before.path_states != after.path_states
-        || before.tracked_patch_sha256 != after.tracked_patch_sha256
-        || before.untracked_content != after.untracked_content
-    {
+    // Linked-worktree shipment owns clean base fast-forwards; the provider
+    // boundary still rejects primary rewrites and any primary dirt that lands
+    // on a path this run touched. Primary dirt disjoint from the run — a
+    // concurrent Orbit process dropping an unrelated file, for instance — is
+    // not interference and must not convert a benign base advance into
+    // primary_checkout_drift (F2026-07-139).
+    if before.head == after.head || before.branch != after.branch || !conflicting_paths.is_empty() {
         return Ok(false);
     }
     Ok(git_output_raw(
@@ -684,6 +698,42 @@ fn primary_fast_forward_is_benign(
     )?
     .status
     .success())
+}
+
+/// Paths whose working-state identity in a checkout actually changed, judged
+/// independently of HEAD movement.
+///
+/// `staged_patch_sha256` is deliberately excluded: it is a diff against HEAD,
+/// so a concurrent fast-forward alone rewrites it for every already-dirty path
+/// even though nobody touched the file. `index_entry_sha256` carries the same
+/// staged content identity without that dependency.
+fn primary_dirt_mutations(
+    before: &GitWorktreeFingerprint,
+    after: &GitWorktreeFingerprint,
+) -> Vec<String> {
+    fn dirt_identity(
+        state: &GitPathState,
+    ) -> (&Option<String>, &Option<String>, bool, &Option<String>) {
+        (
+            &state.index_entry_sha256,
+            &state.worktree_patch_sha256,
+            state.worktree_present,
+            &state.untracked_content_sha256,
+        )
+    }
+
+    before
+        .path_states
+        .keys()
+        .chain(after.path_states.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|path| {
+            before.path_states.get(*path).map(dirt_identity)
+                != after.path_states.get(*path).map(dirt_identity)
+        })
+        .cloned()
+        .collect()
 }
 
 fn declared_workspace_path(input: &Value, task_ctx: Option<&Value>) -> Option<String> {
