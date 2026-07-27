@@ -562,12 +562,14 @@ impl WorktreeBoundaryGuard {
     }
 
     /// Compare both monitored checkouts after the provider reaches any
-    /// terminal outcome. An externally advanced primary branch is benign when
-    /// it is a proven same-branch fast-forward that did not disturb any path
-    /// this run touched: linked worktrees keep their own HEAD, and the
-    /// shipment rebase checkpoint owns reconciliation with the new base.
-    /// Primary rewrites, primary dirt overlapping the run, and history changes
-    /// in the assigned worktree remain typed, fail-closed violations.
+    /// terminal outcome. A primary delta is benign in exactly two shapes: a
+    /// proven same-branch fast-forward, or a stationary HEAD whose only
+    /// movement is Orbit record-store dirt. Both require that the delta left
+    /// every path this run touched alone: linked worktrees keep their own
+    /// HEAD, and the shipment rebase checkpoint owns reconciliation with a new
+    /// base. Primary rewrites, primary branch switches, primary source edits,
+    /// primary dirt overlapping the run, and history changes in the assigned
+    /// worktree remain typed, fail-closed violations.
     pub(crate) fn verify(self) -> Result<(), DispatchError> {
         let assigned_after = git_fingerprint(&self.assigned_root)?;
         let primary_after = git_fingerprint(&self.primary_root)?;
@@ -603,6 +605,23 @@ impl WorktreeBoundaryGuard {
         }
 
         if primary_after == self.primary_before {
+            return Ok(());
+        }
+
+        if primary_dirt_only_delta_is_benign(
+            &self.primary_before,
+            &primary_after,
+            &primary_dirt_paths,
+            &conflicting_paths,
+        ) {
+            tracing::info!(
+                target: "orbit.engine.cli_runner",
+                task_id = %self.task_id,
+                run_id = %self.run_id,
+                primary_head = %primary_after.head,
+                ignored_primary_paths = ?primary_dirt_paths,
+                "accepted concurrent primary record-store dirt disjoint from the run; primary HEAD and branch never moved"
+            );
             return Ok(());
         }
 
@@ -675,6 +694,46 @@ impl WorktreeBoundaryGuard {
             diagnostic: diagnostic.to_string(),
         }
     }
+}
+
+/// Orbit's own record store inside a checkout. Tasks, ADRs, learnings,
+/// frictions, and routines under this prefix are rewritten continuously by the
+/// engine that drives the pipeline and by out-of-run curation passes; they are
+/// never part of a run's code candidate, so the primary's copy moving under a
+/// stationary HEAD carries no data-loss signal.
+const ORBIT_RECORD_STORE_PREFIX: &str = ".orbit/";
+
+/// Accept a primary checkout that never moved but merely gained or lost record
+/// store dirt away from the run.
+///
+/// `primary_fast_forward_is_benign` covers the case where the primary branch
+/// advanced; it rejects `before.head == after.head` on its first clause, which
+/// left a stationary primary with *any* unrelated dirt delta reported as
+/// `primary_checkout_drift` (F2026-07-166: an out-of-run curation pass
+/// re-serializing tracked `.orbit/learnings/*/learning.yaml` files killed a
+/// complete, validated implementation).
+///
+/// Unlike a fast-forward, a stationary HEAD offers no positive proof that Git
+/// itself produced the delta, so acceptance is deliberately narrower than
+/// "disjoint from the run" alone (ADR-0293): every mutated path must live in
+/// the record store. A provider that escapes its worktree to edit source in
+/// the primary — the ORB-10134 data-loss hazard — keeps failing closed even
+/// when the file it touched is one this run never looked at. The delta must
+/// also be fully explained by dirt-path movement; an otherwise unattributable
+/// fingerprint change is not something this branch understands.
+fn primary_dirt_only_delta_is_benign(
+    before: &GitWorktreeFingerprint,
+    after: &GitWorktreeFingerprint,
+    primary_dirt_paths: &[String],
+    conflicting_paths: &[String],
+) -> bool {
+    before.head == after.head
+        && before.branch == after.branch
+        && !primary_dirt_paths.is_empty()
+        && conflicting_paths.is_empty()
+        && primary_dirt_paths
+            .iter()
+            .all(|path| path.starts_with(ORBIT_RECORD_STORE_PREFIX))
 }
 
 fn primary_fast_forward_is_benign(
