@@ -1,3 +1,9 @@
+---
+type: context
+summary: Orbit Configuration
+last_validated: 2026-07-27
+---
+
 # Orbit Configuration
 
 Reference for Orbit's runtime config — the `config.toml` consumed by `orbit run ship`, `duel-plan`, and the activity-job dispatcher. The defaults shipped with the binary live in [`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml).

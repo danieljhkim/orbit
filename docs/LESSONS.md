@@ -1,3 +1,9 @@
+---
+type: context
+summary: Lessons Learned While Building Orbit
+last_validated: 2026-07-27
+---
+
 # Lessons Learned While Building Orbit
 
 **Status:** Draft
@@ -31,9 +37,9 @@ In short, v3 results suggest MCP tools win the matchup against a generic `exec_c
 
 ## 2. The May 2026 Artifact Loss Incident
 
-On 2026-05-11, hundreds of task artifacts were wiped out due to our reckless workspace cleanup. These artifacts are now gone for good, and can never be recovered. The only way to prevent this from happening again is to implement a backup and recovery system for task artifacts [[ADR-0149](.orbit/adrs/proposed/ADR-0149)].
+On 2026-05-11, hundreds of task artifacts were wiped out due to our reckless workspace cleanup. These artifacts are now gone for good, and can never be recovered. The only way to prevent this from happening again is to implement a backup and recovery system for task artifacts ADR-0149.
 
-This was catastraphic, but also gave us a chance to amend for the sins of our bad design decisions that have been plaguing us for a while now. [[docs/design/task-artifacts/4_decisions](task-artifacts/4_decisions.md)]
+This was catastrophic, but also gave us a chance to amend for the sins of our bad design decisions that have been plaguing us for a while now. [docs/design/task-artifacts/4_decisions](design/task-artifacts/4_decisions.md)
 
 **Lesson**: Backup and recovery are not optional for long-lived artifacts.
 
