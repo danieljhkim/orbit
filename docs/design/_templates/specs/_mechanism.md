@@ -1,3 +1,9 @@
+---
+type: design
+summary: "Spec: <Mechanism>"
+last_validated: 2026-07-27
+---
+
 # Spec: <Mechanism>
 
 <!-- One-paragraph contract statement: the guarantee this mechanism provides. -->

@@ -1,3 +1,9 @@
+---
+type: design
+summary: "Glossary: <Feature>"
+last_validated: 2026-07-27
+---
+
 # Glossary: <Feature>
 
 <!-- One paragraph: what vocabulary is in scope, and what is deliberately
