@@ -1,6 +1,8 @@
 mod resolution {
     use std::collections::BTreeMap;
 
+    use crate::test_fixtures::{TEST_CLAUDE_WEAK_MODEL, TEST_CODEX_MODEL};
+
     use super::super::super::OrbitError;
     use super::super::super::agent_pair::*;
 
@@ -18,18 +20,18 @@ mod resolution {
             "codex".to_string(),
             Crew {
                 name: "codex".to_string(),
-                planner: assignment("gpt-5.5", "codex"),
-                implementer: assignment("gpt-5.5", "codex"),
-                reviewer: assignment("gpt-5.5", "codex"),
+                assignment: assignment(TEST_CODEX_MODEL, "codex"),
+                description: None,
+                tags: Vec::new(),
             },
         );
         registry.insert(
             "claude".to_string(),
             Crew {
                 name: "claude".to_string(),
-                planner: assignment("claude-opus-4-7", "claude"),
-                implementer: assignment("claude-sonnet-4-6", "claude"),
-                reviewer: assignment("claude-opus-4-7", "claude"),
+                assignment: assignment(TEST_CLAUDE_WEAK_MODEL, "claude"),
+                description: None,
+                tags: Vec::new(),
             },
         );
         registry
@@ -40,9 +42,12 @@ mod resolution {
         let crew = resolve_crew("codex", &registry()).expect("crew resolves");
 
         assert_eq!(crew.name, "codex");
-        assert_eq!(crew.planner.model, "gpt-5.5");
-        assert_eq!(crew.implementer.provider, "codex");
-        assert_eq!(crew.reviewer.backend, "cli");
+        assert_eq!(crew.assignment.model, TEST_CODEX_MODEL);
+        assert_eq!(crew.assignment.provider, "codex");
+        assert_eq!(crew.assignment.backend, "cli");
+        assert_eq!(crew.role("planner"), Some(&crew.assignment));
+        assert_eq!(crew.role("reviewer"), Some(&crew.assignment));
+        assert_eq!(crew.role("unknown"), None);
     }
 
     #[test]

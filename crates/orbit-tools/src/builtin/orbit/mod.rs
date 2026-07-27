@@ -1,25 +1,23 @@
 pub mod adr;
+pub mod auto_task;
 pub mod docs;
 pub mod duel;
 pub mod friction;
-pub mod groundhog;
 pub mod learning;
+pub mod operation;
 pub mod pipeline;
-pub mod review_thread;
 pub mod search;
 pub mod semantic;
 pub mod state;
 pub mod task;
 
 use orbit_common::types::{
-    OrbitError, ToolParam, normalize_agent_family_for_model, normalize_optional_attribution_label,
+    McpToolPlacement, McpToolPolicy, OrbitError, ToolParam, normalize_agent_family_for_model,
+    normalize_optional_attribution_label,
 };
-use serde::Serialize;
 use serde_json::Value;
 
-use crate::{
-    GroundhogBuiltinAction, OrbitBuiltinAction, OrbitTaskScope, ToolContext, ToolRegistry,
-};
+use crate::{OrbitBuiltinAction, OrbitTaskScope, ToolContext, ToolRegistry};
 
 pub(super) use orbit_common::types::{optional_string_alias, required_string};
 
@@ -31,34 +29,67 @@ pub(super) struct OrbitIdentity {
 }
 
 pub fn register(registry: &mut ToolRegistry) {
-    registry.register(adr::add::OrbitAdrAddTool);
+    registry.register_mcp(
+        adr::add::OrbitAdrAddTool,
+        agent_operator(McpToolPlacement::Composite),
+    );
     // ORB-00289: agents query ADR metadata via `orbit search --kind adr`;
     // `orbit.adr.list` stays available on the CLI / dashboard `runtime.run_tool`
     // path for admin workflows.
     registry.register_inactive(adr::list::OrbitAdrListTool);
-    registry.register(adr::show::OrbitAdrShowTool);
-    registry.register(adr::supersede::OrbitAdrSupersedeTool);
-    registry.register(adr::update::OrbitAdrUpdateTool);
+    registry.register_mcp(
+        adr::show::OrbitAdrShowTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
+    registry.register_mcp(
+        adr::supersede::OrbitAdrSupersedeTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
+    registry.register_mcp(
+        adr::update::OrbitAdrUpdateTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
+    // Auto-task definitions [ORB-10149]: agents can define/retune/disable
+    // recurring chores. `list` stays CLI/admin only (mirrors learning::list).
+    registry.register_mcp(
+        auto_task::add::OrbitAutoTaskAddTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
+    registry.register_inactive(auto_task::list::OrbitAutoTaskListTool);
+    registry.register_mcp(
+        auto_task::show::OrbitAutoTaskShowTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
+    registry.register_mcp(
+        auto_task::update::OrbitAutoTaskUpdateTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
+    registry.register_mcp(
+        auto_task::toggle::OrbitAutoTaskToggleTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
     registry.register_inactive(docs::OrbitDocsListTool);
     registry.register_inactive(docs::OrbitDocsShowTool);
     registry.register_inactive(docs::OrbitDocsAddTool);
     registry.register_inactive(docs::OrbitDocsIndexTool);
     registry.register_inactive(docs::OrbitDocsMigrateTool);
-    registry.register(groundhog::checkpoint_success::OrbitGroundhogCheckpointSuccessTool);
-    registry.register(groundhog::checkpoint_failure::OrbitGroundhogCheckpointFailureTool);
-    registry.register(groundhog::side_effect::OrbitGroundhogSideEffectTool);
-    registry.register(friction::add::OrbitFrictionAddTool);
-    // Triage surface: CLI / dashboard only. Agents file friction via `add`;
-    // listing / inspection / resolution belong to operators.
-    registry.register_inactive(friction::list::OrbitFrictionListTool);
-    registry.register_inactive(friction::resolve::OrbitFrictionResolveTool);
-    registry.register_inactive(friction::show::OrbitFrictionShowTool);
-    registry.register_inactive(friction::stats::OrbitFrictionStatsTool);
-    registry.register(friction::tags::OrbitFrictionTagsTool);
-    registry.register(friction::update::OrbitFrictionUpdateTool);
-    registry.register(task::add::OrbitTaskAddTool);
-    registry.register(task::artifact_put::OrbitTaskArtifactPutTool);
-    registry.register(task::approve::OrbitTaskApproveTool);
+    // ADR-0209 bearing 1 [ORB-10358]: every friction verb — its schema, its
+    // placement, and whether MCP advertises it at all — is declared once in
+    // `orbit_common::friction::operations` and registered from there. Adding a
+    // friction verb needs no edit in this function.
+    friction::register(registry);
+    registry.register_mcp(
+        task::add::OrbitTaskAddTool,
+        agent_operator(McpToolPlacement::Hub),
+    );
+    registry.register_mcp(
+        task::artifact_put::OrbitTaskArtifactPutTool,
+        agent_operator(McpToolPlacement::Hub),
+    );
+    registry.register_mcp(
+        task::approve::OrbitTaskApproveTool,
+        agent_operator(McpToolPlacement::Hub),
+    );
     // ORB-00289: destructive / admin-only — CLI subcommands still reach
     // them via `runtime.run_tool`; the agent MCP surface should not.
     registry.register_inactive(task::delete::OrbitTaskDeleteTool);
@@ -66,41 +97,58 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register_inactive(task::locks::OrbitTaskLocksTool);
     registry.register_inactive(task::locks_reserve::OrbitTaskLocksReserveTool);
     registry.register_inactive(task::locks_release::OrbitTaskLocksReleaseTool);
-    registry.register(task::start::OrbitTaskStartTool);
+    registry.register_mcp(
+        task::start::OrbitTaskStartTool,
+        agent_operator(McpToolPlacement::Hub),
+    );
     // Task rejection is a human/operator decision — CLI / dashboard only.
     registry.register_inactive(task::reject::OrbitTaskRejectTool);
-    registry.register(task::show::OrbitTaskShowTool);
-    registry.register(task::list::OrbitTaskListTool);
-    registry.register(task::update::OrbitTaskUpdateTool);
+    registry.register_mcp(
+        task::show::OrbitTaskShowTool,
+        agent_operator(McpToolPlacement::Hub),
+    );
+    registry.register_mcp(
+        task::list::OrbitTaskListTool,
+        agent_operator(McpToolPlacement::Hub),
+    );
+    registry.register_mcp(
+        task::update::OrbitTaskUpdateTool,
+        agent_operator(McpToolPlacement::Hub),
+    );
     registry.register(duel::plan_add::OrbitDuelPlanAddTool);
     registry.register(duel::plan_winner::OrbitDuelPlanWinnerTool);
-    // ORB-00391: the v1 orbit-knowledge graph builtins (callers/deps/
-    // implementors/overview/pack/refs/search/show) and the graph.history
-    // compatibility stub were decommissioned. The agent graph surface is now
-    // served by the in-process orbit-graph (v2) adapter in orbit-mcp.
-    registry.register(learning::add::OrbitLearningAddTool);
-    registry.register(learning::comment_add::OrbitLearningCommentAddTool);
-    // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
-    registry.register_inactive(learning::comment_delete::OrbitLearningCommentDeleteTool);
-    // Agents discover learnings via `orbit.search`; comment listing is a
-    // review-time / operator concern — CLI / dashboard only.
-    registry.register_inactive(learning::comment_list::OrbitLearningCommentListTool);
+    registry.register_mcp(
+        learning::add::OrbitLearningAddTool,
+        agent_operator(McpToolPlacement::Composite),
+    );
     registry.register_inactive(learning::list::OrbitLearningListTool);
     // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
     registry.register_inactive(learning::prune::OrbitLearningPruneTool);
     registry.register_inactive(learning::sync::OrbitLearningSyncTool);
-    registry.register(learning::show::OrbitLearningShowTool);
-    registry.register(learning::supersede::OrbitLearningSupersedeTool);
-    registry.register(learning::update::OrbitLearningUpdateTool);
-    // Upvote telemetry is an operator concern — CLI / dashboard only.
-    registry.register_inactive(learning::upvote::OrbitLearningUpvoteTool);
+    registry.register_mcp(
+        learning::show::OrbitLearningShowTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
+    registry.register_mcp(
+        learning::supersede::OrbitLearningSupersedeTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
+    // ORB-10469: named single-learning retirement without a replacement,
+    // gated the same as add/update/supersede (ADR-0250).
+    registry.register_mcp(
+        learning::archive::OrbitLearningArchiveTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
+    registry.register_mcp(
+        learning::update::OrbitLearningUpdateTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
     registry.register(pipeline::invoke::OrbitPipelineInvokeTool);
     registry.register(pipeline::wait::OrbitPipelineWaitTool);
-    registry.register(review_thread::add::OrbitReviewThreadAddTool);
-    registry.register(review_thread::list::OrbitReviewThreadListTool);
-    registry.register(review_thread::reply::OrbitReviewThreadReplyTool);
-    registry.register(review_thread::resolve::OrbitReviewThreadResolveTool);
-    registry.register(search::OrbitSearchTool);
+    registry.register_mcp(
+        search::OrbitSearchTool,
+        agent_operator(McpToolPlacement::Composite),
+    );
     registry.register_inactive(semantic::install::OrbitSemanticInstallTool);
     // ORB-00289: destructive teardown of the local semantic index —
     // admin-only, retained on the CLI surface (`orbit semantic uninstall`).
@@ -109,6 +157,10 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register_inactive(semantic::index::OrbitSemanticIndexTool);
     registry.register(state::get::OrbitStateGetTool);
     registry.register(state::set::OrbitStateSetTool);
+}
+
+fn agent_operator(placement: McpToolPlacement) -> McpToolPolicy {
+    McpToolPolicy::agent_and_operator(placement)
 }
 
 fn build_actor_label(agent: Option<&str>, model: Option<&str>) -> Option<String> {
@@ -224,15 +276,6 @@ pub(super) fn scored_identity_params() -> Vec<ToolParam> {
     ]
 }
 
-pub(super) fn graph_ref_param() -> ToolParam {
-    ToolParam {
-        name: "ref".to_string(),
-        description: "Ref.".to_string(),
-        param_type: "string".to_string(),
-        required: false,
-    }
-}
-
 pub(super) fn execute_host_action(
     ctx: &ToolContext,
     input: Value,
@@ -253,7 +296,7 @@ pub(super) fn resolve_workspace_argument(
     input: &mut Value,
     tool_name: &str,
 ) -> Result<String, OrbitError> {
-    // ADR-0181: MCP workspace defaults come from explicit session context, never process cwd.
+    // MCP workspace defaults come from explicit session context, never process cwd.
     let explicit = optional_string_alias(input, &["workspace"])?;
     let session = ctx
         .session_context
@@ -286,7 +329,10 @@ pub(super) fn resolve_workspace_argument(
             Ok(workspace)
         }
         (None, None) => Err(OrbitError::InvalidInput(
-            "missing `workspace`; provide it explicitly or initialize the MCP session with `_meta.orbit.workspace`"
+            "missing `workspace`; it must be a filesystem path to an existing directory inside \
+             the repository (e.g. the repository root), never a logical workspace id such as a \
+             bridge `ws_*` id — provide that path explicitly or initialize the MCP session with \
+             `_meta.orbit.workspace` set to the same path"
                 .to_string(),
         )),
     }
@@ -318,59 +364,6 @@ fn require_orbit_host(ctx: &ToolContext) -> Result<&dyn crate::OrbitToolHost, Or
             "orbit builtin requires an Orbit runtime host in ToolContext".to_string(),
         )
     })
-}
-
-fn require_groundhog_host(ctx: &ToolContext) -> Result<&dyn crate::GroundhogToolHost, OrbitError> {
-    ctx.groundhog_host.as_deref().ok_or_else(|| {
-        OrbitError::Execution(
-            "groundhog verb tools require an active groundhog runner context".to_string(),
-        )
-    })
-}
-
-pub(super) fn execute_groundhog_action<T: Serialize>(
-    ctx: &ToolContext,
-    action: GroundhogBuiltinAction,
-    label: &str,
-    input: &T,
-) -> Result<Value, OrbitError> {
-    let host = require_groundhog_host(ctx)?;
-    let scope = host.scope();
-    if !scope.active_day {
-        return Err(OrbitError::Execution(format!(
-            "groundhog {label} requires an active groundhog day context"
-        )));
-    }
-
-    let input = serde_json::to_value(input)
-        .map_err(|error| OrbitError::Execution(format!("groundhog {label} serialize: {error}")))?;
-    host.execute(action, input)
-}
-
-pub(super) fn require_groundhog_fields(
-    input: &Value,
-    label: &str,
-    fields: &[&str],
-) -> Result<(), OrbitError> {
-    let missing = input
-        .as_object()
-        .map(|obj| {
-            fields
-                .iter()
-                .filter(|field| !obj.contains_key(**field))
-                .copied()
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_else(|| fields.to_vec());
-
-    if missing.is_empty() {
-        return Ok(());
-    }
-
-    Err(OrbitError::InvalidInput(format!(
-        "groundhog {label} input validation failed: missing required fields: {}",
-        missing.join(", ")
-    )))
 }
 
 /// Extract an optional string from the first matching key in `keys`.

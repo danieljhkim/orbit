@@ -1,13 +1,5 @@
 {
   "mcpServers": {
-    "codegraph": {
-      "args": [
-        "serve",
-        "--mcp"
-      ],
-      "command": "codegraph",
-      "type": "stdio"
-    },
     "orbit": {
       "args": [
         "mcp",

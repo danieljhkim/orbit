@@ -3,6 +3,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 
 use crate::command::Execute;
 
+use super::cancel::RunCancelArgs;
 use super::duel;
 use super::events::RunEventsArgs;
 use super::history::RunHistoryArgs;
@@ -10,11 +11,15 @@ use super::job::JobRunArgs;
 use super::logs::RunLogsArgs;
 use super::ship;
 use super::show::RunShowArgs;
+use super::sweep;
 use super::trace::RunTraceArgs;
+use super::triage;
 
 const RUN_AFTER_HELP: &str = "\
 Workflow entrypoints:
   orbit run ship [task_id ...]
+  orbit run ship-sweep [--dry-run] [--json]
+  orbit run triage [task_id ...]
   orbit run duel-plan <task_id>
   orbit run job <job_id> [--input key=value] [--json] [--debug]
 
@@ -25,6 +30,9 @@ Run history:
   orbit run logs [run_id] [-s step_id] [--json]
   orbit run events [run_id] [-s step_id] [--type event_type] [--json]
   orbit run trace [run_id] [--json]
+
+Maintenance:
+  orbit run cancel <run_id>
 ";
 
 #[derive(Args)]
@@ -40,9 +48,11 @@ Run history:
 {usage-heading} {usage}
 
 Workflows:
-  ship       Ship backlog or explicitly selected tasks through the gated task pipeline
-  duel-plan  Run a planning duel for one task
-  job        Run an arbitrary job by ID
+  ship        Ship backlog or explicitly selected tasks through the gated task pipeline
+  ship-sweep  Dispatch ship runs in every registered workspace with ready backlog tasks
+  triage      Triage tasks blocked by failed runs; re-backlog environmental failures
+  duel-plan   Run a planning duel for one task
+  job         Run an arbitrary job by ID
 
 Audits:
   history    Show recent job runs, optionally filtered to one job
@@ -50,6 +60,9 @@ Audits:
   logs       Print raw stdout/stderr captured for a job run
   events     Show audit events recorded for a job run
   trace      Show audit event parent/child trace for a job run
+
+Maintenance:
+  cancel     Cancel a pending or running job run
 
 Options:
 {options}
@@ -73,6 +86,11 @@ pub enum RunSubcommand {
     /// Deprecated alias for `orbit run ship --mode local`
     #[command(name = "ship-local", hide = true)]
     ShipLocal(ship::LegacyShipLocalCommand),
+    /// Dispatch ship runs in every registered workspace with ready backlog tasks
+    #[command(name = "ship-sweep")]
+    ShipSweep(sweep::ShipSweepCommand),
+    /// Triage tasks blocked by failed runs; re-backlog environmental failures
+    Triage(triage::TriageCommand),
     /// Run a planning duel for one task
     #[command(name = "duel-plan")]
     DuelPlan(duel::DuelPlanCommand),
@@ -86,6 +104,8 @@ pub enum RunSubcommand {
     Events(RunEventsArgs),
     /// Show audit event parent/child trace for a job run
     Trace(RunTraceArgs),
+    /// Cancel a pending or running job run
+    Cancel(RunCancelArgs),
     /// Run an arbitrary job by ID
     Job(JobRunArgs),
 }
@@ -95,12 +115,17 @@ impl Execute for RunSubcommand {
         match self {
             RunSubcommand::Ship(command) => command.execute(runtime),
             RunSubcommand::ShipLocal(command) => command.execute(runtime),
+            // Normally dispatched before runtime init (see main.rs); the
+            // registry-driven sweep never uses the cwd-derived runtime.
+            RunSubcommand::ShipSweep(command) => command.execute_without_runtime(),
+            RunSubcommand::Triage(command) => command.execute(runtime),
             RunSubcommand::DuelPlan(command) => command.execute(runtime),
             RunSubcommand::History(command) => command.execute(runtime),
             RunSubcommand::Show(command) => command.execute(runtime),
             RunSubcommand::Logs(command) => command.execute(runtime),
             RunSubcommand::Events(command) => command.execute(runtime),
             RunSubcommand::Trace(command) => command.execute(runtime),
+            RunSubcommand::Cancel(command) => command.execute(runtime),
             RunSubcommand::Job(command) => command.execute(runtime),
         }
     }

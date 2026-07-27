@@ -3,7 +3,7 @@ summary: "Policy & Sandboxing — Design"
 type: design
 title: "Policy & Sandboxing — Design"
 owner: claude
-last_updated: 2026-05-17
+last_updated: 2026-07-20
 status: Draft
 feature: policy-sandbox
 doc_role: design
@@ -93,7 +93,7 @@ The `fsProfile:` field on an activity flows through `crates/orbit-engine/src/act
 
 - `dispatcher.rs` carries `fs_profile: Option<&str>` on `DispatchInput` and threads it into `run_activity_job_dispatch`, `run_loop_step_dispatch`, and `run_agent_loop_via_driver`.
 - `job_executor.rs` reads `t.fs_profile.as_deref()` from the activity spec at the call site of every step type.
-- `agent_loop_driver.rs` and `groundhog.rs` invoke `host.tool_context_for_activity(fs_profile, audit_logger)` to construct the `ToolContext` that fs builtins read from.
+- `agent_loop_driver.rs` invokes `host.tool_context_for_activity(fs_profile, audit_logger)` to construct the `ToolContext` that fs builtins read from.
 
 `crates/orbit-core/src/runtime/v2_host/mod.rs::tool_context_for_activity` is the single materialization point:
 
@@ -103,7 +103,7 @@ fs_profile: Some(fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE).to_string())
 
 This is the implicit-`unrestricted` rule from §2.2 in code form. Every v2 dispatcher path that constructs a `ToolContext` reaches this line, so omitting `fsProfile:` means "unrestricted within policy," not "no policy."
 
-Legacy pipeline contexts are different. `crates/orbit-core/src/runtime/pipeline.rs` fills a missing profile from `ORBIT_ACTIVITY_FS_PROFILE`; if the variable is unset, `ctx.fs_profile` stays `None` and `enforce_fs_policy` returns `Ok(None)`. That unguarded path is a real gap, not another spelling of `unrestricted` (see §9).
+Legacy pipeline contexts are different. `crates/orbit-core/src/runtime/tool_exec.rs` fills a missing profile from `ORBIT_ACTIVITY_FS_PROFILE`; if the variable is unset, `ctx.fs_profile` stays `None` and `enforce_fs_policy` returns `Ok(None)`. That unguarded path is a real gap, not another spelling of `unrestricted` (see §9).
 
 ---
 
@@ -176,7 +176,7 @@ Risk-weighted regression tests sit beside the implementations they guard
   equivalents are rejected as `OrbitError::InvalidInput` for both read and
   modify checks ([T20260509-27]).
 - `crates/orbit-exec/src/macos_sandbox/compile.rs#tests` and
-  `crates/orbit-exec/src/macos_sandbox/provider_dirs/tests.rs` — trusted wrapper
+  `crates/orbit-exec/src/macos_sandbox/tests/provider_dirs.rs` — trusted wrapper
   resolution ignores `PATH`, including a macOS runtime test that places a fake
   `sandbox-exec` earlier on `PATH` and verifies the fake wrapper is not
   executed ([T20260509-30]). SBPL compilation tests
@@ -187,7 +187,7 @@ Risk-weighted regression tests sit beside the implementations they guard
   `compiled_profile_for_realistic_agent_loop_profile_allows_repo_writes_denies_dotenv`)
   exercise an `agent_loop`-shaped profile end-to-end against the kernel
   sandbox.
-- `crates/orbit-store/src/file/policy_def_store.rs#tests` — policy resource
+- `crates/orbit-store/src/file/policy_def_store/` — policy resource
   name tests reject traversal-shaped names such as `../x` before path
   construction and assert no file is written outside the policy store
   ([T20260509-28]).

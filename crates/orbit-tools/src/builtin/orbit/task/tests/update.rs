@@ -124,6 +124,44 @@ fn schema_exposes_source_task_id() {
 }
 
 #[test]
+fn schema_exposes_complexity() {
+    let schema = OrbitTaskUpdateTool.schema();
+
+    let param = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "complexity")
+        .expect("complexity param");
+
+    assert_eq!(param.param_type, "string");
+    assert!(!param.required);
+    assert!(param.description.contains("low, medium, or hard"));
+}
+
+#[test]
+fn schema_and_handler_exclude_inline_artifacts() {
+    let schema = OrbitTaskUpdateTool.schema();
+    assert!(
+        schema
+            .parameters
+            .iter()
+            .all(|parameter| parameter.name != "artifacts")
+    );
+
+    let error = OrbitTaskUpdateTool
+        .execute(
+            &update_tool_context(Arc::new(FakeTaskHost::seeded(None))),
+            json!({
+                "id": "ORB-00001",
+                "model": "codex",
+                "artifacts": [{"path": "report.txt", "content": [111, 107]}],
+            }),
+        )
+        .expect_err("inline artifacts must use the bounded artifact.put surface");
+    assert!(error.to_string().contains("orbit.task.artifact.put"));
+}
+
+#[test]
 fn update_handler_persists_source_task_id() {
     let host = Arc::new(FakeTaskHost::seeded(None));
     let output = OrbitTaskUpdateTool

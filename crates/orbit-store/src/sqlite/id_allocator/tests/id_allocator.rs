@@ -127,6 +127,84 @@ fn abandoned_learning_allocation_advances_sequence_but_is_hidden() {
     assert_eq!(visible, vec!["L-0002"]);
 }
 
+/// [ORB-10501] A worktree reaped after allocation leaves rows nothing can ever
+/// resolve. The guarded abandon retires both a `reserved` row and a `merged`
+/// row whose recorded `body_path` died with the worktree, and the ids stay
+/// consumed so no future allocation reuses them.
+#[test]
+fn abandons_allocations_whose_pinned_worktree_was_reaped() {
+    let temp = TempDir::new().expect("tempdir");
+    let ghost = temp.path().join("ghost-worktree");
+    std::fs::create_dir_all(&ghost).expect("ghost worktree");
+    let mut config = allocator_config(temp.path());
+    config.worktree_root = ghost.clone();
+    let allocator = IdAllocator::open(config).expect("allocator");
+
+    let learning = allocator.allocate_learning().expect("learning");
+    let adr = allocator.allocate_adr().expect("adr");
+    allocator
+        .record_learning_body_path(&learning.id, &ghost.join("learning.yaml"))
+        .expect("record body path");
+
+    std::fs::remove_dir_all(&ghost).expect("reap worktree");
+
+    assert!(
+        allocator
+            .abandon_orphaned_learning(&learning.id)
+            .expect("abandon learning")
+    );
+    assert!(
+        allocator
+            .abandon_orphaned_adr(&adr.id)
+            .expect("abandon adr")
+    );
+
+    assert!(
+        allocator
+            .learning_allocation(&learning.id)
+            .expect("learning row")
+            .is_none()
+    );
+    assert!(
+        allocator
+            .adr_allocation(&adr.id)
+            .expect("adr row")
+            .is_none()
+    );
+    // Repeat repair is a no-op rather than an error, and the retired ids are
+    // never handed out again.
+    assert!(
+        !allocator
+            .abandon_orphaned_learning(&learning.id)
+            .expect("repeat abandon")
+    );
+    assert_eq!(allocator.allocate_learning().expect("next").id, "L-0002");
+    assert_eq!(allocator.allocate_adr().expect("next adr").id, "ADR-0002");
+}
+
+/// [ORB-10501] The guard is what separates a live sibling worktree from a
+/// reaped one: an allocation whose worktree still exists is refused, so a
+/// caller working from a stale scan cannot retire a recoverable id.
+#[test]
+fn refuses_to_abandon_an_allocation_whose_worktree_still_exists() {
+    let temp = TempDir::new().expect("tempdir");
+    let allocator = IdAllocator::open(allocator_config(temp.path())).expect("allocator");
+    let learning = allocator.allocate_learning().expect("learning");
+
+    let error = allocator
+        .abandon_orphaned_learning(&learning.id)
+        .expect_err("a live worktree must be refused");
+
+    assert!(error.to_string().contains("still exists"), "{error}");
+    assert!(
+        allocator
+            .learning_allocation(&learning.id)
+            .expect("learning row")
+            .is_some(),
+        "a refused repair must leave the row untouched"
+    );
+}
+
 #[test]
 fn backfills_existing_adrs_idempotently_and_allocates_after_max() {
     let temp = TempDir::new().expect("tempdir");

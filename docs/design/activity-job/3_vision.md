@@ -3,7 +3,8 @@ summary: "Activity / Job — Vision"
 type: design
 title: "Activity / Job — Vision"
 owner: codex
-last_updated: 2026-04-30
+last_updated: 2026-07-20
+last_validated: 2026-07-26
 status: Draft
 feature: activity-job
 doc_role: vision
@@ -36,7 +37,7 @@ The gap from [T20260419-0104] is significant: HTTP enforces, CLI advises. Does `
 
 ### 1.5 Which limits should stay structural literals?
 
-`task_auto_pipeline` and `task_epic_pipeline` rely on literal `max_workers` and `max_iterations`. Should those stay static, or do we need templated numerics?
+`task_auto_pipeline` relies on literal `max_workers` and `max_iterations`. Should those stay static, or do we need templated numerics?
 
 ### 1.6 What is the right audit landing zone?
 
@@ -44,11 +45,11 @@ The v2 envelope from [T20260419-0002] makes runs traversable, but the full HTTP 
 
 ### 1.7 How much more special-casing belongs in ActivityV2?
 
-Groundhog's dedicated kind from [T20260420-0510-2] is justified today. If more modes arrive, do we keep adding variants, or is that a sign the abstraction is stale?
+Groundhog once had a dedicated kind ([T20260420-0510-2]) but was removed as unused in [ORB-10332], leaving only `agent_loop` and `deterministic`. If more modes arrive, do we add variants again, or is churn like that a sign the abstraction should stay minimal?
 
 ### 1.8 What should become the canonical reference corpus?
 
-Seeded assets added in [T20260419-2347] and extended in [T20260419-0622-3], [T20260419-0623], and [T20260419-0623-2] already act as executable docs. Should they become the main reference set, or do we need smaller spec-only exemplars?
+Seeded assets added in [T20260419-2347] and extended in [T20260419-0622-3] and [T20260419-0623] already act as executable docs. Should they become the main reference set, or do we need smaller spec-only exemplars?
 
 ---
 
@@ -93,7 +94,7 @@ Soft claims only:
 - **Load-time normalization as a public contract.** Target-ref resolution, backend concretization, and loop/session rejection are part of what a job *is*, not just hidden parser details.
 - **Backend choice separated from provider choice.** Orbit treats `backend: http|cli|auto` and `provider: ...` as orthogonal schema fields, then makes mismatches explicit instead of silently recovering.
 - **A two-layer audit tree tied to repo provenance.** The v2 envelope from [T20260419-0002] gives runs, steps, activities, and workspace origin a stable skeleton while still preserving the underlying loop transcript and blobs.
-- **Seeded workflows as load-bearing contracts.** The shipped jobs from [T20260419-0622-3], [T20260419-0623], and [T20260419-0623-2] are not toy examples; they are how the control-flow substrate proves itself against real Orbit work.
+- **Seeded workflows as load-bearing contracts.** The shipped jobs from [T20260419-0622-3] and [T20260419-0623] are not toy examples; they are how the control-flow substrate proves itself against real Orbit work.
 
 None of these are research contributions. Activity / Job earns its keep only if it stays understandable, local, and inspectable while the product evolves.
 
@@ -108,8 +109,7 @@ None of these are research contributions. Activity / Job earns its keep only if 
 - [4_decisions.md](./4_decisions.md) — ADR log
 - [specs/backend-resolution.md](./specs/backend-resolution.md) — backend concretization and HTTP-only session rule
 - [specs/audit-envelope.md](./specs/audit-envelope.md) — v2 audit event tree and persistence layout
-- [../groundhog/1_overview.md](../groundhog/1_overview.md) — sibling activity kind built on this substrate
-- [../knowledge-graph/1_overview.md](../knowledge-graph/1_overview.md) — graph substrate that sits beside this execution substrate
+- [../knowledge-graph/1_overview.md](../_archive/knowledge-graph/1_overview.md) — graph substrate that sits beside this execution substrate
 
 ### External
 
@@ -131,10 +131,9 @@ None of these are research contributions. Activity / Job earns its keep only if 
 - **[T20260419-0104]** — Add `backend: cli` dispatch for v2 `agent_loop`.
 - **[T20260419-0622-3]** — Add `task_gate_pipeline`.
 - **[T20260419-0623]** — Add `task_auto_pipeline`.
-- **[T20260419-0623-2]** — Add `task_epic_pipeline`.
 - **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
 - **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
-- **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
 - **[T20260430-19]** — Shorten the Activity / Job design docs while preserving required structure.
+- **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

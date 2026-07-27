@@ -10,10 +10,11 @@ use crate::command::activity::seed_default_activities;
 use crate::command::executor::seed_default_executors;
 use crate::command::job::seed_default_jobs;
 use crate::command::policy::seed_default_policies;
+use crate::command::routine::seed_default_routines;
 use crate::command::skill::{
     default_skill_ids, is_default_skill_file_for_root, seed_default_skills,
 };
-use orbit_common::utility::fs::{atomic_write_text, create_dir_symlink, remove_path_if_exists};
+use orbit_common::utility::fs::{create_dir_symlink, remove_path_if_exists};
 
 use crate::config::{
     RawAgentRoleConfig, RuntimeConfig,
@@ -33,6 +34,7 @@ pub struct InitResult {
     pub refreshed_default_jobs: usize,
     pub refreshed_default_executors: usize,
     pub refreshed_default_policies: usize,
+    pub refreshed_default_routines: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -47,11 +49,14 @@ pub struct InitOptions {
     pub global_only: bool,
     /// Explicit global root to seed when preparing a workspace root.
     pub global_root_override: Option<PathBuf>,
+    /// Host id to pin into newly seeded workspace routines. Higher-level
+    /// composition owns host identity and supplies this value explicitly.
+    pub routine_host_id: Option<String>,
     /// When true, create/update user-level skill symlinks for global skills.
     pub link_global_skills: bool,
-    /// Per-role agent settings to embed in the freshly seeded `config.toml`
-    /// as a `[crews.custom]` table. Keyed by role name (`reviewer`,
-    /// `implementer`, `planner`). `None` and an empty map both mean "use
+    /// Agent settings collected by the legacy init prompt. The implementer
+    /// assignment is embedded as the flat `[crews.custom]` table. `None` and
+    /// an empty map both mean "use
     /// the default crew template". Ignored when config.toml already exists
     /// — init remains idempotent.
     pub role_settings: Option<BTreeMap<String, RawAgentRoleConfig>>,
@@ -61,10 +66,6 @@ pub struct InitOptions {
 }
 
 impl OrbitRuntime {
-    pub fn init_workspace(&self) -> Result<InitResult, OrbitError> {
-        self.init_workspace_with_options(InitOptions::default())
-    }
-
     pub fn init_workspace_with_options(
         &self,
         options: InitOptions,
@@ -102,28 +103,13 @@ pub fn init_global(
 ) -> Result<InitResult, OrbitError> {
     let global_root = match root_override {
         Some(root) => root.to_path_buf(),
-        None => crate::workspace_registry::global_orbit_dir()?,
+        None => resolve_global_root()?,
     };
     init_workspace_at_root(
         &global_root,
         InitOptions {
             global_only: true,
             link_global_skills: true,
-            ..options
-        },
-    )
-}
-
-pub fn init_workspace_from_root_override(
-    root_override: Option<&Path>,
-    options: InitOptions,
-) -> Result<InitResult, OrbitError> {
-    let cwd = std::env::current_dir().map_err(|e| OrbitError::Io(e.to_string()))?;
-    let roots = OrbitRuntime::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
-    init_workspace_at_root(
-        &roots.shared_root,
-        InitOptions {
-            global_root_override: Some(roots.global_root),
             ..options
         },
     )
@@ -176,6 +162,7 @@ pub fn init_workspace_at_root(
         }
     }
 
+    let mut refreshed_default_routines = 0usize;
     let (
         refreshed_default_activities,
         refreshed_default_jobs,
@@ -216,6 +203,22 @@ pub fn init_workspace_at_root(
         )?;
         refreshed_skill_files = global_result.refreshed_skill_files;
         created_skills_symlink = global_result.created_skills_symlink;
+        // Routines are workspace-authored (`.orbit/routines/`, no global
+        // directory), so defaults seed here rather than in the global branch.
+        // Host identity is owned by higher-level composition and injected;
+        // Core never opens host.toml or falls back to an OS hostname.
+        if let Some(host_id) = options.routine_host_id.as_deref() {
+            refreshed_default_routines = seed_default_routines(
+                &orbit_root.join("routines"),
+                host_id,
+                workspace_slug_from_orbit_root(&orbit_root).as_deref(),
+                // Routine definitions become workspace-authored after
+                // seeding. Refresh global defaults without overwriting
+                // cadence, host pins, policy, or enabled choices here;
+                // destructive `force` already recreated the root.
+                options.force,
+            )?;
+        }
         (
             global_result.refreshed_default_activities,
             global_result.refreshed_default_jobs,
@@ -240,47 +243,17 @@ pub fn init_workspace_at_root(
         refreshed_default_jobs,
         refreshed_default_executors,
         refreshed_default_policies,
+        refreshed_default_routines,
     })
 }
 
-/// Default `.orbitignore` patterns seeded into a freshly initialized
-/// workspace. Kept in sync with the orbit-graph (v2) scanner baseline in
-/// `orbit_graph::sync::scanner` so the seeded file matches what the indexer
-/// applies by default. Relocated here from the decommissioned orbit-knowledge
-/// crate in ORB-00391.
-const DEFAULT_ORBITIGNORE_PATTERNS: &[&str] = &[
-    ".orbit/",
-    "node_modules/",
-    "target/",
-    "dist/",
-    "build/",
-    ".venv/",
-    "venv/",
-    "__pycache__/",
-    "*.egg-info/",
-];
-
-/// Render the default `.orbitignore` file content for `orbit workspace init`.
-pub fn default_orbitignore_template() -> String {
-    let mut content = String::from(
-        "# Common generated/artifact directories that should stay out of the orbit graph.\n",
-    );
-    for pattern in DEFAULT_ORBITIGNORE_PATTERNS {
-        content.push_str(pattern);
-        content.push('\n');
-    }
-    content
-}
-
-pub fn seed_default_orbitignore(workspace_root: &Path) -> Result<bool, OrbitError> {
-    let orbitignore_path = workspace_root.join(".orbitignore");
-    if orbitignore_path.exists() {
-        return Ok(false);
-    }
-    let template = default_orbitignore_template();
-    atomic_write_text(&orbitignore_path, &template)
-        .map_err(|error| OrbitError::Io(error.to_string()))?;
-    Ok(true)
+/// Derive the routine-name suffix for seeded default routines from the
+/// workspace directory containing `.orbit/`.
+fn workspace_slug_from_orbit_root(orbit_root: &Path) -> Option<String> {
+    orbit_root
+        .parent()
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
 }
 
 pub(crate) fn global_skills_dir(global_root: &Path) -> PathBuf {
@@ -631,6 +604,80 @@ mod tests {
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
+    fn fresh_workspace_init_seeds_disabled_worktree_gc_routine() {
+        let temp = tempdir().expect("tempdir");
+        let global_root = temp.path().join("global");
+        let orbit_root = temp.path().join("repo/.orbit");
+        let result = init_workspace_at_root(
+            &orbit_root,
+            InitOptions {
+                global_root_override: Some(global_root.clone()),
+                refresh_defaults: true,
+                routine_host_id: Some("host-a".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("initialize fresh workspace");
+
+        assert_eq!(
+            result.refreshed_default_routines,
+            super::super::routine::DEFAULT_ROUTINE_FILES.len()
+        );
+        let yaml = fs::read_to_string(orbit_root.join("routines/worktree_gc.yaml"))
+            .expect("read seeded worktree GC routine");
+        assert!(!yaml.contains("__ORBIT_"));
+        let routine = orbit_common::types::parse_routine_yaml(&yaml)
+            .expect("seeded worktree GC routine parses");
+        assert!(!routine.enabled);
+        assert_eq!(routine.hosts, vec!["host-a".to_string()]);
+        assert_eq!(
+            routine.target,
+            orbit_common::types::RoutineTarget::Job("worktree_gc_pipeline".to_string())
+        );
+        assert_eq!(
+            routine.policy.overlap,
+            orbit_common::types::OverlapPolicy::Forbid
+        );
+
+        let routine_path = orbit_root.join("routines/worktree_gc.yaml");
+        fs::write(&routine_path, "operator edited").expect("hand edit routine");
+        init_workspace_at_root(
+            &orbit_root,
+            InitOptions {
+                global_root_override: Some(global_root.clone()),
+                refresh_defaults: true,
+                routine_host_id: Some("host-a".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("plain re-init");
+        assert_eq!(
+            fs::read_to_string(&routine_path).expect("read preserved routine"),
+            "operator edited",
+            "plain re-init preserves a hand-edited routine"
+        );
+
+        init_workspace_at_root(
+            &orbit_root,
+            InitOptions {
+                global_root_override: Some(global_root),
+                force: true,
+                refresh_defaults: true,
+                routine_host_id: Some("host-b".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("forced re-init");
+        let forced =
+            fs::read_to_string(&routine_path).expect("read force-overwritten worktree GC routine");
+        assert!(!forced.contains("operator edited"));
+        let forced = orbit_common::types::parse_routine_yaml(&forced)
+            .expect("force-overwritten routine parses");
+        assert_eq!(forced.hosts, vec!["host-b".to_string()]);
+        assert!(!forced.enabled);
+    }
+
+    #[test]
     fn global_init_seeds_skills_and_home_level_links() {
         let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
@@ -665,9 +712,9 @@ mod tests {
             home.path()
                 .join(".orbit")
                 .join("skills")
-                .join("orbit-debug-job-failure")
+                .join("orbit-workflow")
                 .join("references")
-                .join("common_failures.md")
+                .join("debug-job-failure.md")
                 .exists()
         );
         assert!(
@@ -771,7 +818,7 @@ mod tests {
             RawAgentRoleConfig {
                 provider: Some("claude".into()),
                 backend: Some("cli".into()),
-                model: Some("claude-opus-4-7".into()),
+                model: Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL.into()),
             },
         );
         roles.insert(
@@ -779,7 +826,7 @@ mod tests {
             RawAgentRoleConfig {
                 provider: Some("codex".into()),
                 backend: Some("cli".into()),
-                model: Some("gpt-5.5".into()),
+                model: Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.into()),
             },
         );
         roles.insert(
@@ -787,7 +834,7 @@ mod tests {
             RawAgentRoleConfig {
                 provider: Some("gemini".into()),
                 backend: Some("http".into()),
-                model: Some("gemini-3.1-pro".into()),
+                model: Some(orbit_common::test_fixtures::TEST_GEMINI_MODEL.into()),
             },
         );
 
@@ -811,9 +858,12 @@ mod tests {
         assert!(!contents.contains("[agent.reviewer]"));
         assert!(contents.contains("default_crew = \"custom\""));
         assert!(contents.contains("provider = \"codex\""));
-        assert!(contents.contains("model = \"claude-opus-4-7\""));
+        assert!(contents.contains(&format!(
+            "model = \"{}\"",
+            orbit_common::test_fixtures::TEST_CODEX_MODEL
+        )));
 
-        // Round-trips through toml: custom crew contains all three roles.
+        // Round-trips through toml: custom crew is one flat assignment.
         let parsed: toml::Value = toml::from_str(&contents).expect("parse");
         let custom = parsed
             .get("crews")
@@ -822,21 +872,13 @@ mod tests {
             .and_then(|v| v.as_table())
             .expect("custom crew table");
         assert_eq!(custom.len(), 3);
-        let reviewer = custom
-            .get("reviewer")
-            .and_then(|v| v.as_table())
-            .expect("reviewer table");
         assert_eq!(
-            reviewer.get("provider").and_then(|v| v.as_str()),
-            Some("claude")
+            custom.get("provider").and_then(|v| v.as_str()),
+            Some("codex")
         );
-        let planner = custom
-            .get("planner")
-            .and_then(|v| v.as_table())
-            .expect("planner table");
         assert_eq!(
-            planner.get("model").and_then(|v| v.as_str()),
-            Some("gemini-3.1-pro")
+            custom.get("model").and_then(|v| v.as_str()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL)
         );
     }
 
@@ -915,11 +957,8 @@ mod tests {
                 "unexpected uncommented agent section: {line}",
             );
         }
-        assert!(contents.contains("[crews.claude]"));
-        assert!(contents.contains("[crews.codex]"));
-        assert!(contents.contains("[crews.gemini]"));
-        assert!(contents.contains("[crews.grok]"));
-        assert!(contents.contains("default_crew = \"codex\""));
+        assert!(!contents.contains("[crews."));
+        assert!(!contents.contains("default_crew"));
     }
 
     fn assert_skill_link_exists(path: PathBuf) {

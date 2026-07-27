@@ -98,9 +98,8 @@ impl Tool for OrbitAdrUpdateTool {
         parameters.extend(super::super::model_identity_params());
         ToolSchema {
             name: "orbit.adr.update".to_string(),
-            description:
-                "Partial update of an ADR's mutable fields and/or status. Status transitions follow the lifecycle rules in adr-artifact/2_design.md §5."
-                    .to_string(),
+            description: "Partial update of an ADR's mutable fields and/or status. Status transitions follow the ADR lifecycle rules."
+                .to_string(),
             parameters,
             builtin: true,
         }

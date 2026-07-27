@@ -36,7 +36,7 @@ orbit task lint "$TASK_ID"
 If the task entered a proposal state, approve it before execution:
 
 ```bash
-orbit task approve "$TASK_ID"
+orbit task update "$TASK_ID" --status backlog
 ```
 
 ## Ship It
@@ -58,5 +58,5 @@ orbit run ship --mode local "$TASK_ID"
 When you already know the work set, pin task IDs explicitly:
 
 ```bash
-orbit run ship T123 T456 --base main
+orbit run ship "$TASK_ID" "$SECOND_TASK_ID" --base main
 ```

@@ -10,7 +10,7 @@ use serde_json::json;
 
 use crate::OrbitRuntime;
 
-use super::orbit_tool_host::{
+use super::task_locks::{
     emit_expired_reservation_events, emit_task_lock_release_event, workspace_orbit_dir,
     workspace_task_reservation_id,
 };
@@ -24,12 +24,33 @@ impl OrbitRuntime {
         duration_ms: Option<u64>,
         release_reason: TaskReservationReleaseReason,
     ) -> Result<bool, OrbitError> {
-        let changed = self
-            .stores()
-            .jobs()
-            .finalize_run(run_id, state, finished_at, duration_ms)?;
+        // Capture whether the run was already terminal *before* finalizing:
+        // `finalize_run` reports `changed == true` even when re-finalizing an
+        // already-terminal run, so it can't distinguish the terminalizing write
+        // from a replay. The coupling-out block must fire only on the actual
+        // transition into a terminal failure state.
+        let was_terminal_before = self
+            .get_job_run_backend(run_id)?
+            .map(|run| run.state.is_terminal())
+            .unwrap_or(false);
+        let changed =
+            self.stores()
+                .jobs()
+                .finalize_job_run(run_id, state, finished_at, duration_ms)?;
         if state.is_terminal() {
             self.best_effort_release_task_reservations_for_owner_run_id(run_id, release_reason);
+            // Coupling-out: block the run's coupled tasks only on the first
+            // terminalization into a failure state. Gating on
+            // `!was_terminal_before` keeps this idempotent — a replayed
+            // terminalization is a no-op and never clobbers a task a human
+            // already moved on. Blocking is best-effort so a status-write
+            // failure never blocks the run from terminalizing or its
+            // reservations/file locks from being released.
+            if !was_terminal_before
+                && super::task_block_on_run_failure::is_workflow_failure_state(state)
+            {
+                self.best_effort_block_tasks_for_failed_run(run_id, state);
+            }
         }
         Ok(changed)
     }
@@ -39,8 +60,10 @@ impl OrbitRuntime {
         owner_run_id: &str,
         release_reason: TaskReservationReleaseReason,
     ) -> Result<Vec<ReleasedTaskReservation>, OrbitError> {
-        let result = self.stores().task_reservations().release_by_owner_run_id(
-            TaskReservationReleaseByOwnerParams {
+        let result = self
+            .stores()
+            .task_reservations()
+            .release_task_reservations_by_owner_run_id(TaskReservationReleaseByOwnerParams {
                 workspace_orbit_dir: workspace_orbit_dir(self),
                 workspace_id: workspace_task_reservation_id(self)?,
                 owner_run_id: owner_run_id.to_string(),
@@ -52,8 +75,7 @@ impl OrbitRuntime {
                     })
                     .to_string(),
                 ),
-            },
-        )?;
+            })?;
         emit_expired_reservation_events(self, &result.expired_reservations)?;
         for reservation in &result.released_reservations {
             emit_task_lock_release_event(self, reservation, release_reason)?;
@@ -82,14 +104,15 @@ impl OrbitRuntime {
         requested_files: &[String],
         limit: usize,
     ) -> Result<Vec<ReleasedTaskReservation>, OrbitError> {
-        let candidates = self.stores().task_reservations().list_owned_conflicts(
-            TaskReservationOwnedConflictsParams {
+        let candidates = self
+            .stores()
+            .task_reservations()
+            .list_owned_task_reservation_conflicts(TaskReservationOwnedConflictsParams {
                 workspace_orbit_dir: workspace_orbit_dir(self),
                 workspace_id: workspace_task_reservation_id(self)?,
                 requested_files: requested_files.to_vec(),
                 limit,
-            },
-        )?;
+            })?;
         emit_expired_reservation_events(self, &candidates.expired_reservations)?;
 
         let mut released = Vec::new();

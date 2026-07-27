@@ -1,6 +1,9 @@
 // Migrated from sqlite/audit_event_store.rs per ORB-00231
 use super::super::*;
 use crate::Store;
+use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
+use orbit_common::types::{McpCapability, McpTransport};
+use std::collections::BTreeSet;
 
 fn sample_params() -> AuditEventInsertParams {
     AuditEventInsertParams {
@@ -10,7 +13,7 @@ fn sample_params() -> AuditEventInsertParams {
         tool_name: Some("orbit.task.show".to_string()),
         target_type: Some("tool".to_string()),
         target_id: Some("orbit.task.show".to_string()),
-        role: "claude-opus-4-7".to_string(),
+        role: TEST_CLAUDE_MODEL.to_string(),
         status: AuditEventStatus::Success,
         exit_code: 0,
         duration_ms: 42,
@@ -22,6 +25,16 @@ fn sample_params() -> AuditEventInsertParams {
         host: Some("test-host".to_string()),
         pid: 1234,
         session_id: Some("session-abc".to_string()),
+        workspace_id: Some("ws_orbit".to_string()),
+        caller_machine_id: Some("hm_caller".to_string()),
+        caller_host_id: Some("caller-host".to_string()),
+        process_machine_id: Some("hm_process".to_string()),
+        process_host_id: Some("process-host".to_string()),
+        transport: Some(McpTransport::SshMcp),
+        effective_capabilities: BTreeSet::from([McpCapability::Agent, McpCapability::Runner]),
+        origin_session_id: Some("mcp-session-abc".to_string()),
+        mcp_call_id: Some("mcall-abc".to_string()),
+        lease_id: Some("lease-abc".to_string()),
         task_id: Some("T20260428-7".to_string()),
         job_run_id: Some("jrun-xyz".to_string()),
         activity_id: Some("agent_implement".to_string()),
@@ -59,6 +72,17 @@ fn insert_then_read_round_trips_correlation_fields() {
     assert_eq!(event.job_run_id.as_deref(), Some("jrun-xyz"));
     assert_eq!(event.activity_id.as_deref(), Some("agent_implement"));
     assert_eq!(event.step_index, Some(2));
+    assert_eq!(event.workspace_id.as_deref(), Some("ws_orbit"));
+    assert_eq!(event.caller_machine_id.as_deref(), Some("hm_caller"));
+    assert_eq!(event.process_machine_id.as_deref(), Some("hm_process"));
+    assert_eq!(event.transport, Some(McpTransport::SshMcp));
+    assert_eq!(
+        event.effective_capabilities,
+        BTreeSet::from([McpCapability::Agent, McpCapability::Runner])
+    );
+    assert_eq!(event.origin_session_id.as_deref(), Some("mcp-session-abc"));
+    assert_eq!(event.mcp_call_id.as_deref(), Some("mcall-abc"));
+    assert_eq!(event.lease_id.as_deref(), Some("lease-abc"));
 
     let by_id = store
         .get_audit_event(event.id)
@@ -68,6 +92,72 @@ fn insert_then_read_round_trips_correlation_fields() {
     assert_eq!(by_id.job_run_id.as_deref(), Some("jrun-xyz"));
     assert_eq!(by_id.activity_id.as_deref(), Some("agent_implement"));
     assert_eq!(by_id.step_index, Some(2));
+    assert_eq!(by_id.workspace_id.as_deref(), Some("ws_orbit"));
+    assert_eq!(by_id.mcp_call_id.as_deref(), Some("mcall-abc"));
+}
+
+#[test]
+fn list_audit_events_filters_trusted_provenance_and_capability_membership() {
+    let store = Store::open_in_memory().expect("open store");
+    store
+        .insert_audit_event_record(&sample_params())
+        .expect("insert audit event");
+
+    let filters = [
+        AuditEventFilter {
+            workspace_id: Some("ws_orbit".to_string()),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            caller_machine_id: Some("hm_caller".to_string()),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            process_machine_id: Some("hm_process".to_string()),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            transport: Some(McpTransport::SshMcp),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            capability: Some(McpCapability::Runner),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            origin_session_id: Some("mcp-session-abc".to_string()),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            mcp_call_id: Some("mcall-abc".to_string()),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            job_run_id: Some("jrun-xyz".to_string()),
+            ..AuditEventFilter::default()
+        },
+        AuditEventFilter {
+            lease_id: Some("lease-abc".to_string()),
+            ..AuditEventFilter::default()
+        },
+    ];
+    for filter in filters {
+        assert_eq!(
+            store
+                .list_audit_events(&filter)
+                .expect("filter audit events")
+                .len(),
+            1
+        );
+    }
+
+    let absent = store
+        .list_audit_events(&AuditEventFilter {
+            capability: Some(McpCapability::Operator),
+            ..AuditEventFilter::default()
+        })
+        .expect("filter absent capability");
+    assert!(absent.is_empty());
 }
 
 #[test]
@@ -95,6 +185,93 @@ fn list_audit_events_filters_by_target_type_kind() {
         .expect("list audit events");
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].execution_id, "exec-hook");
+}
+
+fn learning_injected_params(execution_id: &str, learning_ids: &[&str]) -> AuditEventInsertParams {
+    AuditEventInsertParams {
+        execution_id: execution_id.to_string(),
+        command: "hook".to_string(),
+        subcommand: Some("pretooluse".to_string()),
+        target_type: Some(LEARNING_INJECTED_TARGET_TYPE.to_string()),
+        target_id: Some("src/lib.rs".to_string()),
+        arguments_json: Some(serde_json::json!({ "learning_ids": learning_ids }).to_string()),
+        ..sample_params()
+    }
+}
+
+fn learning_shown_params(execution_id: &str, learning_id: &str) -> AuditEventInsertParams {
+    AuditEventInsertParams {
+        execution_id: execution_id.to_string(),
+        command: "learning".to_string(),
+        subcommand: Some("show".to_string()),
+        target_type: Some(LEARNING_SHOWN_TARGET_TYPE.to_string()),
+        target_id: Some(learning_id.to_string()),
+        arguments_json: None,
+        ..sample_params()
+    }
+}
+
+#[test]
+fn learning_usage_stats_fold_injections_and_shows_per_learning() {
+    let store = Store::open_in_memory().expect("open store");
+    for (execution_id, ids) in [
+        ("exec-inject-1", vec!["L-0001", "L-0002"]),
+        ("exec-inject-2", vec!["L-0001"]),
+        ("exec-inject-3", vec!["L-0001"]),
+    ] {
+        store
+            .insert_audit_event_record(&learning_injected_params(execution_id, &ids))
+            .expect("insert injection event");
+    }
+    store
+        .insert_audit_event_record(&learning_shown_params("exec-show-1", "L-0001"))
+        .expect("insert show event");
+
+    let stats = store
+        .get_learning_usage_stats(None)
+        .expect("learning usage stats");
+    assert_eq!(stats.len(), 2);
+
+    // Sorted by injected_count DESC: L-0001 (3) before L-0002 (1).
+    let first = &stats[0];
+    assert_eq!(first.learning_id, "L-0001");
+    assert_eq!(first.injected_count, 3);
+    assert_eq!(first.shown_count, 1);
+    assert_eq!(first.shown_ratio(), Some(1.0 / 3.0));
+    assert!(first.last_injected_at.is_some());
+    assert!(first.last_shown_at.is_some());
+
+    let second = &stats[1];
+    assert_eq!(second.learning_id, "L-0002");
+    assert_eq!(second.injected_count, 1);
+    assert_eq!(second.shown_count, 0);
+    assert_eq!(second.shown_ratio(), Some(0.0));
+    assert!(second.last_shown_at.is_none());
+}
+
+#[test]
+fn learning_usage_stats_skip_malformed_arguments_and_respect_since() {
+    let store = Store::open_in_memory().expect("open store");
+    let mut malformed = learning_injected_params("exec-malformed", &["L-0001"]);
+    malformed.arguments_json = Some("not-json".to_string());
+    store
+        .insert_audit_event_record(&malformed)
+        .expect("insert malformed event");
+    store
+        .insert_audit_event_record(&learning_injected_params("exec-ok", &["L-0002"]))
+        .expect("insert valid event");
+
+    let stats = store
+        .get_learning_usage_stats(None)
+        .expect("learning usage stats");
+    assert_eq!(stats.len(), 1);
+    assert_eq!(stats[0].learning_id, "L-0002");
+
+    let future = chrono::Utc::now() + chrono::Duration::days(1);
+    let stats = store
+        .get_learning_usage_stats(Some(&future))
+        .expect("learning usage stats since future");
+    assert!(stats.is_empty());
 }
 
 #[test]
@@ -147,7 +324,22 @@ fn migration_adds_correlation_columns_to_legacy_table() {
         .expect("query pragma")
         .collect::<Result<_, _>>()
         .expect("collect pragma rows");
-    for expected in ["task_id", "job_run_id", "activity_id", "step_index"] {
+    for expected in [
+        "task_id",
+        "job_run_id",
+        "activity_id",
+        "step_index",
+        "workspace_id",
+        "caller_machine_id",
+        "caller_host_id",
+        "process_machine_id",
+        "process_host_id",
+        "transport",
+        "capabilities_json",
+        "origin_session_id",
+        "mcp_call_id",
+        "lease_id",
+    ] {
         assert!(
             columns.iter().any(|c| c == expected),
             "expected column `{expected}` in {columns:?}"
@@ -164,6 +356,8 @@ fn migration_adds_correlation_columns_to_legacy_table() {
         .expect("collect index rows");
     assert!(indexes.iter().any(|i| i == "idx_audit_events_task_id"));
     assert!(indexes.iter().any(|i| i == "idx_audit_events_job_run_id"));
+    assert!(indexes.iter().any(|i| i == "idx_audit_events_workspace_id"));
+    assert!(indexes.iter().any(|i| i == "idx_audit_events_mcp_call_id"));
 
     let preserved: i64 = conn
         .query_row(
@@ -185,6 +379,15 @@ fn migration_adds_correlation_columns_to_legacy_table() {
         task_id.is_none(),
         "legacy row should have NULL task_id post-migration",
     );
+    let new_fields: (Option<String>, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT workspace_id, capabilities_json, mcp_call_id FROM audit_events \
+             WHERE execution_id = 'exec-legacy'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("read legacy row additions");
+    assert_eq!(new_fields, (None, None, None));
 }
 
 #[test]
@@ -225,38 +428,42 @@ fn tool_call_counts_by_role_include_failed_and_denied_runs() {
 fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
     let store = Store::open_in_memory().expect("open store");
 
-    let mut graph_search = sample_params_with(
-        "exec-graph-search-1",
-        "claude-opus-4-7",
+    let mut adr_show = sample_params_with(
+        "exec-adr-show-1",
+        TEST_CLAUDE_MODEL,
         AuditEventStatus::Success,
     );
-    graph_search.tool_name = Some("orbit.graph.search".to_string());
-    graph_search.target_id = Some("orbit.graph.search".to_string());
-    store
-        .insert_audit_event_record(&graph_search)
-        .expect("insert");
+    adr_show.tool_name = Some("orbit.adr.show".to_string());
+    adr_show.target_id = Some("orbit.adr.show".to_string());
+    store.insert_audit_event_record(&adr_show).expect("insert");
 
-    let mut graph_search_failed = sample_params_with(
-        "exec-graph-search-2",
-        "claude-opus-4-7",
+    let mut adr_show_failed = sample_params_with(
+        "exec-adr-show-2",
+        TEST_CLAUDE_MODEL,
         AuditEventStatus::Failure,
     );
-    graph_search_failed.tool_name = Some("orbit.graph.search".to_string());
-    graph_search_failed.target_id = Some("orbit.graph.search".to_string());
+    adr_show_failed.tool_name = Some("orbit.adr.show".to_string());
+    adr_show_failed.target_id = Some("orbit.adr.show".to_string());
     store
-        .insert_audit_event_record(&graph_search_failed)
+        .insert_audit_event_record(&adr_show_failed)
         .expect("insert");
 
-    let mut graph_show =
-        sample_params_with("exec-graph-show", "gpt-5.5", AuditEventStatus::Success);
-    graph_show.tool_name = Some("orbit.graph.show".to_string());
-    graph_show.target_id = Some("orbit.graph.show".to_string());
+    let mut learning_show = sample_params_with(
+        "exec-learning-show",
+        TEST_CODEX_MODEL,
+        AuditEventStatus::Success,
+    );
+    learning_show.tool_name = Some("orbit.learning.show".to_string());
+    learning_show.target_id = Some("orbit.learning.show".to_string());
     store
-        .insert_audit_event_record(&graph_show)
+        .insert_audit_event_record(&learning_show)
         .expect("insert");
 
-    let mut task_update =
-        sample_params_with("exec-task-update", "gpt-5.5", AuditEventStatus::Success);
+    let mut task_update = sample_params_with(
+        "exec-task-update",
+        TEST_CODEX_MODEL,
+        AuditEventStatus::Success,
+    );
     task_update.tool_name = Some("orbit.task.update".to_string());
     task_update.target_id = Some("orbit.task.update".to_string());
     store
@@ -266,7 +473,7 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
     // Non-orbit tool name must be excluded.
     let mut external = sample_params_with(
         "exec-external",
-        "claude-opus-4-7",
+        TEST_CLAUDE_MODEL,
         AuditEventStatus::Success,
     );
     external.tool_name = Some("github.create_pr".to_string());
@@ -276,12 +483,12 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
     // Non-`run`/`run-mcp` subcommand must be excluded even on an orbit name.
     let mut non_run = sample_params_with(
         "exec-show-noise",
-        "claude-opus-4-7",
+        TEST_CLAUDE_MODEL,
         AuditEventStatus::Success,
     );
     non_run.subcommand = Some("show".to_string());
-    non_run.tool_name = Some("orbit.graph.search".to_string());
-    non_run.target_id = Some("orbit.graph.search".to_string());
+    non_run.tool_name = Some("orbit.adr.show".to_string());
+    non_run.target_id = Some("orbit.adr.show".to_string());
     store.insert_audit_event_record(&non_run).expect("insert");
 
     let rows = store
@@ -292,20 +499,20 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
         rows,
         vec![
             AuditToolCallCountsBySurfaceAndRole {
-                surface: "graph".to_string(),
-                role: "claude-opus-4-7".to_string(),
+                surface: "adr".to_string(),
+                role: TEST_CLAUDE_MODEL.to_string(),
                 total: 2,
                 failed: 1,
             },
             AuditToolCallCountsBySurfaceAndRole {
-                surface: "graph".to_string(),
-                role: "gpt-5.5".to_string(),
+                surface: "learning".to_string(),
+                role: TEST_CODEX_MODEL.to_string(),
                 total: 1,
                 failed: 0,
             },
             AuditToolCallCountsBySurfaceAndRole {
                 surface: "task".to_string(),
-                role: "gpt-5.5".to_string(),
+                role: TEST_CODEX_MODEL.to_string(),
                 total: 1,
                 failed: 0,
             },
@@ -317,33 +524,37 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
 fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
     let store = Store::open_in_memory().expect("open store");
 
-    // gpt-5.5: 3× orbit.graph.show
+    // gpt-5.5: 3x orbit.task.show
     for i in 0..3 {
         let mut p = sample_params_with(
             &format!("exec-show-{i}"),
-            "gpt-5.5",
+            TEST_CODEX_MODEL,
             AuditEventStatus::Success,
         );
-        p.tool_name = Some("orbit.graph.show".to_string());
-        p.target_id = Some("orbit.graph.show".to_string());
+        p.tool_name = Some("orbit.task.show".to_string());
+        p.target_id = Some("orbit.task.show".to_string());
         store.insert_audit_event_record(&p).expect("insert");
     }
 
-    // claude-opus-4-7: 2× orbit.graph.search
+    // claude-opus-4-7: 2x orbit.search
     for i in 0..2 {
         let mut p = sample_params_with(
             &format!("exec-claude-search-{i}"),
-            "claude-opus-4-7",
+            TEST_CLAUDE_MODEL,
             AuditEventStatus::Success,
         );
-        p.tool_name = Some("orbit.graph.search".to_string());
-        p.target_id = Some("orbit.graph.search".to_string());
+        p.tool_name = Some("orbit.search".to_string());
+        p.target_id = Some("orbit.search".to_string());
         store.insert_audit_event_record(&p).expect("insert");
     }
 
     // gpt-5.5: 1× orbit.task.update
     {
-        let mut p = sample_params_with("exec-task-update", "gpt-5.5", AuditEventStatus::Success);
+        let mut p = sample_params_with(
+            "exec-task-update",
+            TEST_CODEX_MODEL,
+            AuditEventStatus::Success,
+        );
         p.tool_name = Some("orbit.task.update".to_string());
         p.target_id = Some("orbit.task.update".to_string());
         store.insert_audit_event_record(&p).expect("insert");
@@ -351,7 +562,11 @@ fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
 
     // Non-orbit tool — must be excluded.
     {
-        let mut p = sample_params_with("exec-non-orbit", "gpt-5.5", AuditEventStatus::Success);
+        let mut p = sample_params_with(
+            "exec-non-orbit",
+            TEST_CODEX_MODEL,
+            AuditEventStatus::Success,
+        );
         p.tool_name = Some("github.create_pr".to_string());
         p.target_id = Some("github.create_pr".to_string());
         store.insert_audit_event_record(&p).expect("insert");
@@ -359,10 +574,14 @@ fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
 
     // Non-`run`/`run-mcp` subcommand on an orbit name — must be excluded.
     {
-        let mut p = sample_params_with("exec-show-noise", "gpt-5.5", AuditEventStatus::Success);
+        let mut p = sample_params_with(
+            "exec-show-noise",
+            TEST_CODEX_MODEL,
+            AuditEventStatus::Success,
+        );
         p.subcommand = Some("show".to_string());
-        p.tool_name = Some("orbit.graph.show".to_string());
-        p.target_id = Some("orbit.graph.show".to_string());
+        p.tool_name = Some("orbit.task.show".to_string());
+        p.target_id = Some("orbit.task.show".to_string());
         store.insert_audit_event_record(&p).expect("insert");
     }
 
@@ -373,18 +592,18 @@ fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
         rows,
         vec![
             AuditTopToolCall {
-                tool_name: "orbit.graph.show".to_string(),
-                role: "gpt-5.5".to_string(),
+                tool_name: "orbit.task.show".to_string(),
+                role: TEST_CODEX_MODEL.to_string(),
                 total: 3,
             },
             AuditTopToolCall {
-                tool_name: "orbit.graph.search".to_string(),
-                role: "claude-opus-4-7".to_string(),
+                tool_name: "orbit.search".to_string(),
+                role: TEST_CLAUDE_MODEL.to_string(),
                 total: 2,
             },
             AuditTopToolCall {
                 tool_name: "orbit.task.update".to_string(),
-                role: "gpt-5.5".to_string(),
+                role: TEST_CODEX_MODEL.to_string(),
                 total: 1,
             },
         ]
@@ -395,8 +614,8 @@ fn top_tool_calls_groups_by_tool_name_and_role_with_limit() {
         .get_audit_top_tool_calls(None, 2)
         .expect("top tool calls limited");
     assert_eq!(limited.len(), 2);
-    assert_eq!(limited[0].tool_name, "orbit.graph.show");
-    assert_eq!(limited[1].tool_name, "orbit.graph.search");
+    assert_eq!(limited[0].tool_name, "orbit.task.show");
+    assert_eq!(limited[1].tool_name, "orbit.search");
 }
 
 #[test]
@@ -406,19 +625,19 @@ fn audit_event_aggregates_by_tool_splits_failures_by_surface() {
 
     let mut cli_ok = sample_params_with("exec-cli-ok", "codex", AuditEventStatus::Success);
     cli_ok.subcommand = Some("run".to_string());
-    cli_ok.tool_name = Some("orbit.graph.search".to_string());
+    cli_ok.tool_name = Some("orbit.search".to_string());
     cli_ok.duration_ms = 50;
     store.insert_audit_event_record(&cli_ok).expect("insert");
 
     let mut cli_fail = sample_params_with("exec-cli-fail", "codex", AuditEventStatus::Failure);
     cli_fail.subcommand = Some("run".to_string());
-    cli_fail.tool_name = Some("orbit.graph.search".to_string());
+    cli_fail.tool_name = Some("orbit.search".to_string());
     cli_fail.duration_ms = 150;
     store.insert_audit_event_record(&cli_fail).expect("insert");
 
     let mut mcp_fail = sample_params_with("exec-mcp-fail", "codex", AuditEventStatus::Failure);
     mcp_fail.subcommand = Some("run-mcp".to_string());
-    mcp_fail.tool_name = Some("orbit.graph.search".to_string());
+    mcp_fail.tool_name = Some("orbit.search".to_string());
     mcp_fail.duration_ms = 250;
     store.insert_audit_event_record(&mcp_fail).expect("insert");
 
@@ -435,8 +654,8 @@ fn audit_event_aggregates_by_tool_splits_failures_by_surface() {
 
     let search = rows
         .iter()
-        .find(|r| r.tool_name == "orbit.graph.search")
-        .expect("orbit.graph.search row");
+        .find(|r| r.tool_name == "orbit.search")
+        .expect("orbit.search row");
     assert_eq!(search.total, 3);
     assert_eq!(search.failures, 2);
     assert_eq!(search.mcp_total, 1);

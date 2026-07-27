@@ -31,3 +31,27 @@ fn task_update_accepts_context_files_alias() {
     );
     assert!(args.json);
 }
+
+#[test]
+fn task_update_complexity_uses_add_spellings() {
+    for complexity in ["low", "medium", "hard"] {
+        let cli = Cli::try_parse_from([
+            "orbit",
+            "task",
+            "update",
+            "ORB-00001",
+            "--complexity",
+            complexity,
+        ])
+        .expect("parse task update complexity");
+
+        let Commands::Task(task) = cli.command else {
+            panic!("expected task command");
+        };
+        let TaskSubcommand::Update(args) = task.command else {
+            panic!("expected task update command");
+        };
+
+        assert_eq!(args.complexity.expect("complexity").to_string(), complexity);
+    }
+}

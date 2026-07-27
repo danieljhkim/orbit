@@ -1,8 +1,8 @@
 ## Context
-The seeded task workflows added many small ADRs as shipment behavior grew: run aliases, deterministic auto-dispatch, remote base selection, recovery hooks, backlog exclusions, operator status, friction admission, and lock cleanup. They are one decision family: task shipment is an explicit durable workflow, not an advisory agent step or hidden side effect.
+The seeded task workflows added many small ADRs as shipment behavior grew: run aliases, deterministic auto-dispatch, remote base selection, recovery hooks, backlog exclusions, operator status, and lock cleanup. They are one decision family: task shipment is an explicit durable workflow, not an advisory agent step or hidden side effect.
 
 ## Decision
-Keep `orbit run` workflow aliases focused on execution, make automatic task shipment deterministic from backlog listing through gate fan-out, default shipping worktrees to fetched remote base refs, admit tasks through status-aware workflow gates, and protect overlapping work with durable task-lock reservations whose seeded TTL covers the child wait budget. Recovery is bounded, step-scoped on direct shipment workflows, and assigned through the configured reviewer role; child pipeline joins are followed by deterministic success guards after required cleanup, operator status is derived from persisted pipeline state, accepted friction reports enter auto-backlog by `status: backlog`, and run-owned reservations clean up when their owner run reaches a terminal state.
+Keep `orbit run` workflow aliases focused on execution, make automatic task shipment deterministic from backlog listing through gate fan-out, default shipping worktrees to fetched remote base refs, admit tasks through status-aware workflow gates, and protect overlapping work with durable task-lock reservations whose seeded TTL covers the child wait budget. Recovery is bounded, step-scoped on direct shipment workflows, and assigned through the configured reviewer role; child pipeline joins are followed by deterministic success guards after required cleanup, operator status is derived from persisted pipeline state, and run-owned reservations clean up when their owner run reaches a terminal state.
 
 Folded instances:
 
@@ -16,7 +16,7 @@ Folded instances:
 | ADR-033 | Auto-backlog lock exclusions are structured output. |
 | ADR-034 | `ship-auto` reports operator workflow status from durable pipeline state. |
 | ADR-035 | Gate reservations release after terminal child waits. |
-| ADR-037 | Accepted friction reports enter auto-backlog by status. |
+| ADR-037 | Historical friction-task admission rule; retired by [ORB-10202]. |
 | ADR-039 | Run-owned task-lock reservations clean up at owner terminal. |
 
 ## Consequences
@@ -36,5 +36,4 @@ Folded instances:
 - Cost: `task_gate_pipeline` now relies on the dynamic `task_{{ input.mode }}_pipeline` job-name convention, so future gate modes must either follow that naming convention or refactor the dispatch selector.
 - Cost: child dispatch status remains data until explicit guard steps run, so seeded workflow authors must preserve guard placement after cleanup when they fork task-shipment YAML.
 - Cost: longer default gate reservations can block overlapping work for up to two hours if both explicit release and run-owned cleanup fail.
-- Cost: reviewers must read friction eligibility as a status rule, not a task-type rule.
 - Cost: job-run finalization and reservation reserve paths are more coupled, so new terminal run paths must route through the cleanup helper rather than writing directly to the job-run store.

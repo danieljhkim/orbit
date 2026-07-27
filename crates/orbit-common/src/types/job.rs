@@ -95,6 +95,11 @@ pub enum JobRunState {
     Retrying,
     /// Run was explicitly cancelled by the user before it completed.
     Cancelled,
+    /// Run was orphaned: its owner process died (crash, SIGKILL, host reboot)
+    /// without finalizing the run. Terminal for finalization purposes, but the
+    /// run's persisted step checkpoints can seed a resumed follow-up run
+    /// (ORB-10002).
+    Interrupted,
 }
 
 /// Events that drive job run state transitions.
@@ -106,6 +111,8 @@ pub enum RunEvent {
     Timeout,
     Cancel,
     Abandon,
+    /// Owner process died without finalizing the run (orphan reconciliation).
+    Interrupt,
 }
 
 impl Display for RunEvent {
@@ -117,6 +124,7 @@ impl Display for RunEvent {
             RunEvent::Timeout => write!(f, "timeout"),
             RunEvent::Cancel => write!(f, "cancel"),
             RunEvent::Abandon => write!(f, "abandon"),
+            RunEvent::Interrupt => write!(f, "interrupt"),
         }
     }
 }
@@ -126,7 +134,7 @@ impl JobRunState {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::Success | Self::Failed | Self::Timeout | Self::Cancelled
+            Self::Success | Self::Failed | Self::Timeout | Self::Cancelled | Self::Interrupted
         )
     }
 
@@ -143,11 +151,16 @@ impl JobRunState {
         match (self, event) {
             (Self::Pending, RunEvent::Start) => Ok(Self::Running),
             (Self::Pending, RunEvent::Cancel) => Ok(Self::Cancelled),
+            // [ORB-10070] A queued run whose worker process died (or was never
+            // claimed after a host reboot) is orphaned exactly like a running
+            // run with a dead owner; reconcile finalizes both as interrupted.
+            (Self::Pending, RunEvent::Interrupt) => Ok(Self::Interrupted),
             (Self::Running, RunEvent::Complete) => Ok(Self::Success),
             (Self::Running, RunEvent::Fail) => Ok(Self::Failed),
             (Self::Running, RunEvent::Timeout) => Ok(Self::Timeout),
             (Self::Running, RunEvent::Cancel) => Ok(Self::Cancelled),
             (Self::Running, RunEvent::Abandon) => Ok(Self::Failed),
+            (Self::Running, RunEvent::Interrupt) => Ok(Self::Interrupted),
             _ => Err(format!(
                 "invalid job run state transition: {} + {:?}",
                 self, event
@@ -158,11 +171,14 @@ impl JobRunState {
     /// Validates that a step result state is one of the allowed write-once values.
     pub fn validate_step_state(self) -> Result<(), String> {
         match self {
-            Self::Success | Self::Failed | Self::Timeout | Self::Skipped | Self::Cancelled => {
-                Ok(())
-            }
+            Self::Success
+            | Self::Failed
+            | Self::Timeout
+            | Self::Skipped
+            | Self::Cancelled
+            | Self::Interrupted => Ok(()),
             other => Err(format!(
-                "invalid step result state: {} (must be success, failed, timeout, skipped, or cancelled)",
+                "invalid step result state: {} (must be success, failed, timeout, skipped, cancelled, or interrupted)",
                 other
             )),
         }
@@ -180,6 +196,7 @@ impl Display for JobRunState {
             JobRunState::Skipped => write!(f, "skipped"),
             JobRunState::Retrying => write!(f, "retrying"),
             JobRunState::Cancelled => write!(f, "cancelled"),
+            JobRunState::Interrupted => write!(f, "interrupted"),
         }
     }
 }
@@ -197,6 +214,7 @@ impl FromStr for JobRunState {
             "skipped" => Ok(JobRunState::Skipped),
             "retrying" => Ok(JobRunState::Retrying),
             "cancelled" => Ok(JobRunState::Cancelled),
+            "interrupted" => Ok(JobRunState::Interrupted),
             other => Err(format!("unknown job run state: {other}")),
         }
     }
@@ -429,12 +447,12 @@ pub struct JobRun {
     pub knowledge_metrics: Option<KnowledgeRunMetrics>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_crew: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub planner_model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub implementer_model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reviewer_model: Option<String>,
+    #[serde(
+        default,
+        alias = "implementer_model",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub crew_model: Option<String>,
     /// Step execution results; populated in-memory from step files, not stored in jrun.yaml.
     #[serde(skip)]
     pub steps: Vec<JobRunStep>,

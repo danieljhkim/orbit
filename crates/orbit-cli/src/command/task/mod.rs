@@ -2,21 +2,30 @@ mod add;
 pub(crate) mod artifact;
 pub mod artifacts;
 mod command;
+mod export;
+mod import;
 mod lifecycle;
 mod lint;
 mod list;
 pub(crate) mod output;
-mod prune;
-mod review;
+mod reindex;
 mod show;
-mod templates;
 mod update;
 
 pub use command::{TaskCommand, TaskSubcommand};
-// Re-export retained after ORB-00146 (web dashboard moved); the symbol was
-// consumed by the dashboard API and is now unused in CLI proper.
-#[allow(unused_imports)]
-pub(crate) use list::task_locks_json;
+
+fn mutation_identity(model: Option<String>) -> (Option<String>, Option<String>) {
+    if model.is_some() {
+        return (None, model);
+    }
+    let agent = std::env::var("ORBIT_AGENT_NAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let model = std::env::var("ORBIT_AGENT_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    (agent, model)
+}
 
 #[cfg(test)]
 mod tests;

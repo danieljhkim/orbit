@@ -2,6 +2,7 @@
 name = "orbit-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 
 [package.metadata.orbit]
@@ -12,11 +13,16 @@ workspace = true
 
 [features]
 clap = ["orbit-common/clap"]
+# [ORB-10434] Opt-in scripted replay for orbit-core's own agent-loop tests.
+# Forwards to orbit-engine's default-off `replay` feature ([ORB-10414]);
+# without it `replay_active()` is compiled to `false` and the HTTP agent loop
+# demands a live provider credential.
+replay = ["orbit-engine/replay"]
 
 [dependencies]
 chrono.workspace = true
+croner.workspace = true
 fs2.workspace = true
-jsonschema.workspace = true
 orbit-common = { path = "../orbit-common" }
 orbit-search = { path = "../orbit-search" }
 orbit-engine = { path = "../orbit-engine" }
@@ -31,9 +37,11 @@ sha2.workspace = true
 tempfile = "3"
 tiktoken-rs.workspace = true
 toml.workspace = true
+toml_edit.workspace = true
 tracing.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
 [dev-dependencies]
+orbit-common = { path = "../orbit-common", features = ["test-util"] }

@@ -442,6 +442,10 @@ struct InstallFixture {
 impl InstallFixture {
     fn new() -> Self {
         let temp = tempdir().expect("tempdir");
+        // `source_path` is used as an `ORBIT_SEARCH_COMPANION` override, whose
+        // validator rejects a group/world-writable parent — pin the root so the
+        // fixture doesn't depend on the ambient umask (ORB-10350).
+        orbit_common::test_env::harden_dir(temp.path());
         let home = temp.path().join("home");
         let source_path = temp.path().join("source-companion");
         std::fs::create_dir_all(&home).expect("create home");

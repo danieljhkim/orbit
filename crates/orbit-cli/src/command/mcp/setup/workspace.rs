@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use orbit_core::OrbitError;
-use orbit_core::workspace_registry;
+use orbit_remote::workspace_registry;
 
 #[derive(Debug, Clone)]
 pub(super) struct WorkspaceLayout {

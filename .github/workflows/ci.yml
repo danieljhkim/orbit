@@ -10,14 +10,204 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # [ORB-10126] ENOSPC controls on ubuntu-latest (~14 GB free). Incremental
+  # artifacts roughly double target/ and are useless on ephemeral runners;
+  # full test debuginfo is the single biggest target-size lever. Coverage
+  # only needs line tables, so trim the whole workspace test profile to
+  # line-tables-only (deps included) — 50–70% smaller target/.
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
   NEXTEST_VERSION: 0.9.136
   NEXTEST_LINUX_SHA256: a098eed56f2dd88c7fdca1e554a6b99fa1ffbd2a7a1c41b865700112981f6f52
+  CARGO_DENY_VERSION: 0.19.9
+  CARGO_DENY_LINUX_SHA256: f1f8eedc2a3ac297c540873f93785d4104b102c0079506b2a6b3221b7ec956af
+  LLVM_COV_VERSION: 0.8.7
+  LLVM_COV_LINUX_SHA256: 9a75fe29538d3800b3da57f6f6efb64cba5c720a257bf0cb8b51f39d495a9168
+  # Keep in sync with [workspace.package] rust-version in Cargo.toml.
+  MSRV: "1.89"
 
 jobs:
+  # [ORB-10009] Linux counterpart of ci-macos.yml's enforcement leg. The main
+  # `ci` job already compiles and runs these crates inside the workspace-wide
+  # nextest pass, but this job makes the sandbox/policy enforcement suite an
+  # explicit, named gate on Linux: orbit-policy's evaluation matrix
+  # (incl. the ORB-00418 symlink-resolution tests), orbit-tools'
+  # runtime fs-enforcement integration tests (the only enforcement layer on
+  # Linux — there is no kernel sandbox), and orbit-exec's Linux fail-closed
+  # contract tests. Tests that need host capabilities self-skip at runtime
+  # (skip-with-message) rather than relying on compile-time cfg alone, so the
+  # suite stays honest on any ubuntu runner.
+  linux-sandbox:
+    name: Linux Sandbox & Policy Enforcement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable (2026-05-07)
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-linux-sandbox-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-linux-sandbox-
+            ${{ runner.os }}-cargo-
+
+      - name: Run Linux sandbox/policy enforcement tests
+        run: cargo test -p orbit-exec -p orbit-policy -p orbit-tools --locked
+
+  # [ORB-10010] MSRV floor: `rust-version` in [workspace.package] (Cargo.toml).
+  # Evidence for 1.89: edition 2024 requires >= 1.85, the highest
+  # `rust-version` declared by any dependency in the locked graph is 1.88
+  # (time, cookie_store, ort), and workspace code uses the file-locking API
+  # (`File::unlock`, stabilized 1.89). This job pins that floor so a future
+  # dep bump or new language-feature use that raises the true MSRV fails
+  # loudly here instead of silently breaking builds on older toolchains.
+  msrv:
+    name: MSRV (cargo check on pinned minimum)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable (2026-05-07)
+        with:
+          toolchain: "1.89"
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-msrv-
+
+      - name: Check workspace on MSRV toolchain
+        run: |
+          set -euo pipefail
+          rustc --version | grep -F "${MSRV}"
+          cargo check --workspace --locked
+
+  # [ORB-10010] Coverage visibility — informational, NOT a merge gate. This
+  # job is intentionally excluded from any required-status-check wiring
+  # (agent-main's branch protection sets required_status_checks: null, see
+  # RELEASING.md §10c; keep it that way for this job if checks are ever made
+  # required). Per-crate coverage targets (goals, not gates) are documented in
+  # CONTRIBUTING.md "Testing & Coverage".
+  coverage:
+    name: Coverage (informational)
+    runs-on: ubuntu-latest
+    steps:
+      # [ORB-10126] Reclaim ~25-30 GB of preinstalled runner bloat before the
+      # instrumented build. No maintained free-disk action is pinned in this
+      # repo, so an explicit rm list keeps the repo's pinned-action convention
+      # intact (nothing new to pin/audit). df -h brackets it for diagnosis.
+      - name: Free up runner disk space
+        run: |
+          set -euo pipefail
+          echo "Disk before cleanup:"
+          df -h /
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc /usr/local/.ghcup
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/swift
+          echo "Disk after cleanup:"
+          df -h /
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable (2026-05-07)
+        with:
+          components: llvm-tools-preview
+
+      # [ORB-10126] Deps-only cache: the instrumented target/ is dropped from
+      # the cache path (it churns near actions/cache's ~10 GB cap and its
+      # restore competes with fresh instrumented artifacts + profraw for disk).
+      # Only the immutable registry/git deps are cached here.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-coverage-deps-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-coverage-deps-
+
+      # Same pinned-tarball convention as the nextest install in the ci job.
+      - name: Install cargo-llvm-cov
+        run: |
+          set -euo pipefail
+          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+          archive="$(mktemp)"
+          mkdir -p "$cargo_bin"
+          curl -LsSf "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${LLVM_COV_VERSION}/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz" -o "$archive"
+          echo "${LLVM_COV_LINUX_SHA256}  ${archive}" | sha256sum -c -
+          tar zxf "$archive" -C "$cargo_bin"
+          rm -f "$archive"
+          cargo llvm-cov --version
+
+      # --no-report runs the instrumented tests once; the two `report` calls
+      # below render lcov + a human-readable summary from the same profdata.
+      - name: Collect workspace coverage
+        run: cargo llvm-cov --workspace --locked --no-report
+
+      - name: Render lcov report
+        run: cargo llvm-cov report --lcov --output-path lcov.info
+
+      - name: Print coverage summary
+        run: cargo llvm-cov report --summary-only
+
+      - name: Upload lcov report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-lcov
+          path: lcov.info
+          if-no-files-found: error
+
+      # [ORB-10126] Confirm headroom survived the instrumented build (runs even
+      # if a prior step failed, so an ENOSPC crash still surfaces disk state).
+      - name: Report disk usage
+        if: always()
+        run: df -h /
+
   ci:
     name: Check / Clippy / Test
     runs-on: ubuntu-latest
     steps:
+      # [ORB-10126] Same runner-bloat reclaim as the coverage job; the ci job
+      # compiles the whole workspace from the same target/ and sits close to
+      # the ubuntu-latest disk limit. Runs ahead of the build.
+      - name: Free up runner disk space
+        run: |
+          set -euo pipefail
+          echo "Disk before cleanup:"
+          df -h /
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc /usr/local/.ghcup
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/swift
+          echo "Disk after cleanup:"
+          df -h /
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
@@ -49,8 +239,35 @@ jobs:
           rm -f "$archive"
           cargo nextest --version
 
+      - name: Install cargo-deny
+        run: |
+          set -euo pipefail
+          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+          archive="$(mktemp)"
+          mkdir -p "$cargo_bin"
+          curl -LsSf "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz" -o "$archive"
+          echo "${CARGO_DENY_LINUX_SHA256}  ${archive}" | sha256sum -c -
+          tar zxf "$archive" --strip-components=1 -C "$cargo_bin" "cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl/cargo-deny"
+          rm -f "$archive"
+          cargo deny --version | grep -F "${CARGO_DENY_VERSION}"
+
+      # The guardrail scripts shell out to ripgrep; the ubuntu-latest runner
+      # image no longer ships it, and a missing `rg` makes
+      # check-error-translation.sh read empty search results as "translator
+      # missing" (false failures on every crate). [ORB-10021]
+      - name: Install ripgrep
+        run: |
+          set -euo pipefail
+          command -v rg >/dev/null 2>&1 || sudo apt-get install -y --no-install-recommends ripgrep
+          rg --version | head -1
+
       - name: Run CI guardrails
         run: ./scripts/ci-guardrails.sh
+
+      # [ORB-10126] Confirm disk headroom survived the workspace build/test.
+      - name: Report disk usage
+        if: always()
+        run: df -h /
 
       - name: Create orbit task on CI failure
         if: failure() && github.event_name == 'pull_request'

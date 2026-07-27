@@ -5,7 +5,7 @@ metadata:
 spec:
   type: agent_loop
   description: >
-    Phase T20260419-0104 reference for the `backend: cli` dispatch path. This
+    Reference for the `backend: cli` dispatch path. This
     activity is executed through `orbit-agent`'s retained `claude_cli.rs`
     runtime (or a substitutable CLI in smoke runs) with Orbit emitting §7.6
     `cli.invocation.*` envelope events and the §6

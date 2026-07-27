@@ -1,52 +1,23 @@
 use clap::Parser;
 use orbit_common::types::AuditEvent;
 use serde_json::{Value, json};
-use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use crate::command::Cli;
 
 use super::super::audit_middleware::*;
+use orbit_common::test_env::{self, AGENT_IDENTITY_ENV};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::AuditEventStatus;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::context::ActorKind;
+use orbit_core::{ActorIdentity, OrbitError, OrbitRuntime};
 
 fn meta_for(args: &[&str]) -> CommandMeta {
     let cli = Cli::parse_from(args);
     extract_command_meta(&cli.command)
 }
 
-struct OrbitRunEnvGuard {
-    _lock: MutexGuard<'static, ()>,
-    saved: Option<String>,
-}
-
-fn unset_orbit_run_id() -> OrbitRunEnvGuard {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    let lock = LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let saved = std::env::var("ORBIT_RUN_ID").ok();
-    // SAFETY: the guard serializes this test env mutation and restores the value on drop.
-    unsafe {
-        std::env::remove_var("ORBIT_RUN_ID");
-    }
-    OrbitRunEnvGuard { _lock: lock, saved }
-}
-
-impl Drop for OrbitRunEnvGuard {
-    fn drop(&mut self) {
-        // SAFETY: the guard holds the serialization lock for the full mutation window.
-        unsafe {
-            match &self.saved {
-                Some(value) => std::env::set_var("ORBIT_RUN_ID", value),
-                None => std::env::remove_var("ORBIT_RUN_ID"),
-            }
-        }
-    }
-}
-
 fn audit_event_for_meta_without_orbit_run_id(meta: CommandMeta) -> AuditEvent {
-    let _env = unset_orbit_run_id();
+    let _env = test_env::unset(["ORBIT_RUN_ID"]);
     let runtime = OrbitRuntime::in_memory().expect("build in-memory runtime");
     {
         let mut guard = AuditGuard::new(&runtime, meta);
@@ -58,6 +29,53 @@ fn audit_event_for_meta_without_orbit_run_id(meta: CommandMeta) -> AuditEvent {
         .expect("list audit events");
     assert_eq!(events.len(), 1);
     events.into_iter().next().expect("single audit event")
+}
+
+fn audit_event_for_actor(actor: ActorIdentity) -> AuditEvent {
+    let runtime = OrbitRuntime::in_memory()
+        .expect("build in-memory runtime")
+        .with_actor(actor.clone());
+    let meta = Cli::parse_from(["orbit", "search", "actor"])
+        .command
+        .operation()
+        .attribute_to(&actor)
+        .audit_meta
+        .expect("search is audited");
+    {
+        let mut guard = AuditGuard::new(&runtime, meta);
+        guard.mark_success();
+    }
+
+    runtime
+        .list_audit_events(None, None, Some(AuditEventStatus::Success), None, 8)
+        .expect("list audit events")
+        .into_iter()
+        .next()
+        .expect("single audit event")
+}
+
+#[test]
+fn cli_agent_envelope_records_canonical_actor_family() {
+    let _env = test_env::unset(AGENT_IDENTITY_ENV.iter().copied());
+    // SAFETY: the shared test-env guard serializes and restores this mutation.
+    unsafe {
+        std::env::set_var("ORBIT_AGENT_MODEL", "gpt-5.6-sol");
+    }
+
+    let actor = ActorIdentity::from_env();
+    assert_eq!(actor.kind, ActorKind::Agent);
+    assert_eq!(actor.label, "codex");
+    assert_eq!(audit_event_for_actor(actor).role, "codex");
+}
+
+#[test]
+fn cli_without_agent_envelope_records_unknown_actor() {
+    let _env = test_env::unset(AGENT_IDENTITY_ENV.iter().copied());
+
+    let actor = ActorIdentity::from_env();
+    assert_eq!(actor.kind, ActorKind::Unknown);
+    assert_eq!(actor.label, "unknown");
+    assert_eq!(audit_event_for_actor(actor).role, "unknown");
 }
 
 #[test]
@@ -98,17 +116,17 @@ fn tool_run_audit_meta_uses_agent_flags_for_role() {
         "orbit",
         "tool",
         "run",
-        "orbit.graph.search",
+        "orbit.search",
         "--agent",
         "codex",
         "--model",
-        "gpt-5.5",
+        TEST_CODEX_MODEL,
     ]);
 
     assert_eq!(meta.command, "tool");
     assert_eq!(meta.subcommand.as_deref(), Some("run"));
-    assert_eq!(meta.tool_name.as_deref(), Some("orbit.graph.search"));
-    assert_eq!(meta.role, "gpt-5.5");
+    assert_eq!(meta.tool_name.as_deref(), Some("orbit.search"));
+    assert_eq!(meta.role, TEST_CODEX_MODEL);
 }
 
 #[test]
@@ -117,12 +135,12 @@ fn tool_run_audit_meta_uses_input_identity_for_role() {
         "orbit",
         "tool",
         "run",
-        "orbit.graph.search",
+        "orbit.search",
         "--input",
         r#"{"query":"actor","agent":"codex","model":"gpt-5.5"}"#,
     ]);
 
-    assert_eq!(meta.role, "gpt-5.5");
+    assert_eq!(meta.role, TEST_CODEX_MODEL);
 }
 
 #[test]
@@ -131,12 +149,12 @@ fn tool_run_audit_meta_uses_model_only_input_for_role() {
         "orbit",
         "tool",
         "run",
-        "orbit.graph.search",
+        "orbit.search",
         "--input",
         r#"{"query":"actor","model":"gpt-5.5"}"#,
     ]);
 
-    assert_eq!(meta.role, "gpt-5.5");
+    assert_eq!(meta.role, TEST_CODEX_MODEL);
 }
 
 #[test]
@@ -145,11 +163,11 @@ fn tool_run_audit_meta_prefers_input_identity_over_flags() {
         "orbit",
         "tool",
         "run",
-        "orbit.graph.search",
+        "orbit.search",
         "--agent",
         "codex",
         "--model",
-        "gpt-5.5",
+        TEST_CODEX_MODEL,
         "--input",
         r#"{"query":"actor","agent":"claude","model":"opus-4.6"}"#,
     ]);
@@ -159,7 +177,10 @@ fn tool_run_audit_meta_prefers_input_identity_over_flags() {
 
 #[test]
 fn tool_run_audit_meta_uses_agent_role_without_identity() {
-    let meta = meta_for(&["orbit", "tool", "run", "orbit.graph.search"]);
+    // Without flag/input identity the role falls back to the process env, so
+    // the assertion is only meaningful with that env cleared (ORB-10350).
+    let _env = test_env::unset(AGENT_IDENTITY_ENV.iter().copied());
+    let meta = meta_for(&["orbit", "tool", "run", "orbit.search"]);
 
     assert_eq!(meta.role, "agent");
 }
@@ -276,7 +297,7 @@ fn snapshot_meta() -> CommandMeta {
         tool_name: Some("orbit.task.update".to_string()),
         target_type: Some("tool".to_string()),
         target_id: Some("orbit.task.update".to_string()),
-        role: "gpt-5.5".to_string(),
+        role: TEST_CODEX_MODEL.to_string(),
         arguments_json: Some(r#"{"id":"ORB-00002","model":"gpt-5.5"}"#.to_string()),
         job_run_id: None,
     }

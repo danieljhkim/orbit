@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Verify the release-version invariant for the /plugin install orbit chain.
+# Verify the release-version invariant for the agent plugin install chain.
 #
-# The npm package version, the plugin manifest version, and the latest
-# GitHub Release tag must all agree. Drift here means `npx -y
-# @orbit-tools/cli@latest mcp serve` downloads a binary tagged at a
-# different release than the plugin manifest pins.
+# The npm package version, the Claude/Codex plugin manifest versions, and the
+# latest GitHub Release tag must all agree. Drift here means `npx -y
+# @orbit-tools/cli@latest mcp serve` downloads a binary tagged at a different
+# release than the installed plugin manifest advertises.
 #
 # Exits 0 when every source agrees, 1 on drift, 2 on missing prerequisites.
 # Documented entry point: `make release-check`.
@@ -14,7 +14,8 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
 NPM_PKG="@orbit-tools/cli"
-PLUGIN_MANIFEST="plugin/.claude-plugin/plugin.json"
+CLAUDE_PLUGIN_MANIFEST="plugin/.claude-plugin/plugin.json"
+CODEX_PLUGIN_MANIFEST="plugin/.codex-plugin/plugin.json"
 NPM_PACKAGE_JSON="plugin/npm/package.json"
 
 require_bin() {
@@ -27,18 +28,29 @@ require_bin() {
 
 require_bin jq
 
-for f in "$PLUGIN_MANIFEST" "$NPM_PACKAGE_JSON"; do
+for f in "$CLAUDE_PLUGIN_MANIFEST" "$CODEX_PLUGIN_MANIFEST" "$NPM_PACKAGE_JSON"; do
   if [[ ! -f "$f" ]]; then
     echo "release-check: $f not found (run from repo root)" >&2
     exit 2
   fi
 done
 
-plugin_version="$(jq -r .version "$PLUGIN_MANIFEST")"
+if [[ ! -x "scripts/validate-codex-plugin.sh" ]]; then
+  echo "release-check: scripts/validate-codex-plugin.sh is missing or not executable" >&2
+  exit 2
+fi
+"$repo_root/scripts/validate-codex-plugin.sh" "$repo_root" >/dev/null
+
+claude_plugin_version="$(jq -r .version "$CLAUDE_PLUGIN_MANIFEST")"
+codex_plugin_version="$(jq -r .version "$CODEX_PLUGIN_MANIFEST")"
 npm_package_version="$(jq -r .version "$NPM_PACKAGE_JSON")"
 
-if [[ -z "$plugin_version" || "$plugin_version" == "null" ]]; then
-  echo "release-check: $PLUGIN_MANIFEST has no .version field" >&2
+if [[ -z "$claude_plugin_version" || "$claude_plugin_version" == "null" ]]; then
+  echo "release-check: $CLAUDE_PLUGIN_MANIFEST has no .version field" >&2
+  exit 2
+fi
+if [[ -z "$codex_plugin_version" || "$codex_plugin_version" == "null" ]]; then
+  echo "release-check: $CODEX_PLUGIN_MANIFEST has no .version field" >&2
   exit 2
 fi
 if [[ -z "$npm_package_version" || "$npm_package_version" == "null" ]]; then
@@ -68,37 +80,54 @@ else
   echo "release-check: gh not on PATH; skipping GitHub Release check" >&2
 fi
 
-printf '%-32s %s\n' "$PLUGIN_MANIFEST"           "$plugin_version"
+printf '%-32s %s\n' "$CLAUDE_PLUGIN_MANIFEST"    "$claude_plugin_version"
+printf '%-32s %s\n' "$CODEX_PLUGIN_MANIFEST"     "$codex_plugin_version"
 printf '%-32s %s\n' "$NPM_PACKAGE_JSON"          "$npm_package_version"
 printf '%-32s %s\n' "npm view $NPM_PKG"          "${npm_registry_version:-<skipped>}"
 printf '%-32s %s\n' "gh release list -L 1"       "${gh_tag_version:-<skipped>}"
 
 drift=0
-if [[ "$plugin_version" != "$npm_package_version" ]]; then
-  echo "DRIFT: $PLUGIN_MANIFEST ($plugin_version) != $NPM_PACKAGE_JSON ($npm_package_version)" >&2
+if [[ "$claude_plugin_version" != "$codex_plugin_version" ]]; then
+  echo "DRIFT: $CLAUDE_PLUGIN_MANIFEST ($claude_plugin_version) != $CODEX_PLUGIN_MANIFEST ($codex_plugin_version)" >&2
   drift=1
 fi
-if [[ -n "$npm_registry_version" && "$plugin_version" != "$npm_registry_version" ]]; then
-  echo "DRIFT: $PLUGIN_MANIFEST ($plugin_version) != npm view $NPM_PKG ($npm_registry_version)" >&2
+if [[ "$claude_plugin_version" != "$npm_package_version" ]]; then
+  echo "DRIFT: $CLAUDE_PLUGIN_MANIFEST ($claude_plugin_version) != $NPM_PACKAGE_JSON ($npm_package_version)" >&2
   drift=1
 fi
-if [[ -n "$gh_tag_version" && "$plugin_version" != "$gh_tag_version" ]]; then
-  echo "DRIFT: $PLUGIN_MANIFEST ($plugin_version) != latest gh release tag ($gh_tag_version)" >&2
+if [[ "$codex_plugin_version" != "$npm_package_version" ]]; then
+  echo "DRIFT: $CODEX_PLUGIN_MANIFEST ($codex_plugin_version) != $NPM_PACKAGE_JSON ($npm_package_version)" >&2
+  drift=1
+fi
+if [[ -n "$npm_registry_version" && "$claude_plugin_version" != "$npm_registry_version" ]]; then
+  echo "DRIFT: $CLAUDE_PLUGIN_MANIFEST ($claude_plugin_version) != npm view $NPM_PKG ($npm_registry_version)" >&2
+  drift=1
+fi
+if [[ -n "$npm_registry_version" && "$codex_plugin_version" != "$npm_registry_version" ]]; then
+  echo "DRIFT: $CODEX_PLUGIN_MANIFEST ($codex_plugin_version) != npm view $NPM_PKG ($npm_registry_version)" >&2
+  drift=1
+fi
+if [[ -n "$gh_tag_version" && "$claude_plugin_version" != "$gh_tag_version" ]]; then
+  echo "DRIFT: $CLAUDE_PLUGIN_MANIFEST ($claude_plugin_version) != latest gh release tag ($gh_tag_version)" >&2
+  drift=1
+fi
+if [[ -n "$gh_tag_version" && "$codex_plugin_version" != "$gh_tag_version" ]]; then
+  echo "DRIFT: $CODEX_PLUGIN_MANIFEST ($codex_plugin_version) != latest gh release tag ($gh_tag_version)" >&2
   drift=1
 fi
 
 if [[ "$drift" -ne 0 ]]; then
   cat >&2 <<EOF
 
-release-check failed. See docs/RELEASE.md for the procedure.
-The /plugin install orbit chain assumes all four sources agree.
+release-check failed. See docs/runbooks/release.md for the procedure.
+The agent plugin install chain assumes all manifest, npm, and release sources agree.
 EOF
   exit 1
 fi
 
 if [[ -z "$npm_registry_version" || -z "$gh_tag_version" ]]; then
-  echo "release-check: local sources agree on $plugin_version; remote checks were skipped." >&2
+  echo "release-check: local sources agree on $claude_plugin_version; remote checks were skipped." >&2
   exit 0
 fi
 
-echo "release-check: all sources agree on $plugin_version"
+echo "release-check: all sources agree on $claude_plugin_version"

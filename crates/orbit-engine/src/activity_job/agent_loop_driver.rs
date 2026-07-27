@@ -7,13 +7,12 @@
 //! `DispatchError` so the DAG retry wrapper can classify denials as
 //! non-retryable.
 //!
-//! Offline replay: `ORBIT_V2_REPLAY=tool_denial` replays a single canned
-//! tool_use on turn 1 (Phase 2 denial smoke). `ORBIT_V2_REPLAY_FIXTURE=<path>`
-//! reads a JSON array of `ReplayTurn`-shaped objects and scripts an arbitrary
-//! multi-turn sequence — used by the Phase 3 loop sample to drive convergence
-//! across iterations without credentials.
+//! With the `replay` cargo feature enabled, `ORBIT_V2_REPLAY=tool_denial`
+//! replays a single canned tool_use on turn 1 (Phase 2 denial smoke), while
+//! `ORBIT_V2_REPLAY_FIXTURE=<path>` scripts an arbitrary multi-turn sequence
+//! from a JSON fixture. Default builds ignore both variables.
 
-// ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
+// Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
 use std::path::Path;
@@ -25,6 +24,7 @@ use orbit_agent::loop_engine::{
     ReplayTransport, ReplayTurn, Session, StopReason,
 };
 use orbit_agent::providers::anthropic::AnthropicMessagesTransport;
+use orbit_common::model_defaults::ANTHROPIC_HTTP_DEFAULT_MODEL;
 use orbit_common::types::activity_job::AgentLoopSpec;
 use orbit_common::types::{
     LearningInjectionCaps, LearningReminder, RoleSlot, prepend_reminder_block,
@@ -35,8 +35,6 @@ use serde_json::Value;
 use super::audit_writer::V2AuditWriter;
 use super::dispatcher::{DispatchError, V2RuntimeHost, v2_fs_audit_logger};
 use super::tool_enforcement::EnforcedAuditSink;
-
-const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-5";
 
 /// Drive a v2 agent_loop activity end-to-end with a fresh `Session`.
 ///
@@ -121,40 +119,6 @@ fn role_slot_from_input(input: &Value) -> Option<RoleSlot> {
         .or_else(|| input.get("slot"))
         .and_then(Value::as_str)
         .and_then(|value| value.parse().ok())
-}
-
-/// Drive a v2 agent_loop activity with a caller-supplied ToolContext.
-///
-/// Groundhog uses this entry to attach an in-memory Groundhog verb host to the
-/// per-attempt tool context while reusing the shared HTTP loop driver.
-pub fn drive_agent_loop_with_tool_context(
-    spec: &AgentLoopSpec,
-    api_key: Option<&str>,
-    run_id: &str,
-    audit: Arc<V2AuditWriter>,
-    input: &Value,
-    tool_ctx: ToolContext,
-) -> Result<LoopOutcome, DispatchError> {
-    let model = resolve_model(spec);
-    let provider = spec.provider.as_str();
-    let mut session = Session::new(provider, model.clone(), &spec.instruction, None);
-    let mut tool_ctx = tool_ctx;
-    if tool_ctx.agent_name.is_none() {
-        tool_ctx.agent_name = Some(provider.to_string());
-    }
-    if tool_ctx.model_name.is_none() {
-        tool_ctx.model_name = Some(model);
-    }
-    drive_inner(
-        spec,
-        api_key,
-        run_id,
-        audit,
-        &mut session,
-        input,
-        tool_ctx,
-        None,
-    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -272,10 +236,13 @@ fn prompt_text(value: &Value) -> Result<String, DispatchError> {
 fn resolve_model(spec: &AgentLoopSpec) -> String {
     spec.model
         .clone()
-        .unwrap_or_else(|| DEFAULT_ANTHROPIC_MODEL.to_string())
+        .unwrap_or_else(|| ANTHROPIC_HTTP_DEFAULT_MODEL.to_string())
 }
 
-fn replay_active() -> bool {
+pub(crate) fn replay_active() -> bool {
+    if !cfg!(feature = "replay") {
+        return false;
+    }
     std::env::var("ORBIT_V2_REPLAY").is_ok() || std::env::var("ORBIT_V2_REPLAY_FIXTURE").is_ok()
 }
 
@@ -285,7 +252,7 @@ fn replay_active() -> bool {
 /// fixtures). Cleared by `reset_replay_transport` in tests.
 static REPLAY_TRANSPORT: OnceLock<Mutex<Option<Arc<ReplayTransport>>>> = OnceLock::new();
 
-#[cfg(test)]
+#[cfg(all(test, feature = "replay"))]
 pub(crate) static REPLAY_TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn acquire_replay_transport(model: &str) -> Result<Arc<ReplayTransport>, DispatchError> {

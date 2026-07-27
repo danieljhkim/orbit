@@ -17,13 +17,16 @@
 //
 // Also exports parseHashRoute for symmetry (used only internally today).
 
-import { el } from './common.js';
+import { el, isAggregateView, renderPanelPlaceholder } from './common.js';
 import { renderRuns } from './runs.js';
 
 const $ = (id) => document.getElementById(id);
 
-const TABS = ["tasks", "scoreboard", "threads", "audit", "diagnostics", "knowledge", "run-detail"];
-const DIAG_SUBTABS = ["runs", "metrics", "errors"];
+// ORB-10444: the top-level nav is exactly these four tabs plus the hash-only
+// `run-detail` route. A deprecated tab was retired outright and `scoreboard`,
+// being diagnostics-shaped, now routes as `#diagnostics/scoreboard`.
+const TABS = ["tasks", "audit", "diagnostics", "knowledge", "run-detail"];
+const DIAG_SUBTABS = ["runs", "metrics", "errors", "scoreboard"];
 const RUN_DETAIL_SUBTABS = ["steps", "events"];
 const KNOWLEDGE_SUBTABS = ["learnings", "adrs", "frictions"];
 
@@ -71,14 +74,47 @@ function setDiagSubtabImpl(ctx, name) {
     subIndicator.style.left = `${activeBtn.offsetLeft}px`;
   }
 
+  // ORB-10444: Scoreboard is a diagnostics subtab. It renders into its own
+  // full-width <main>, so the two-column diagnostics layout (list + summary
+  // side card) is swapped out for it while the subtab nav stays reachable.
+  const scoreboardActive = name === "scoreboard";
+  const scoreboardMain = $("diagnostics-scoreboard-main");
+  const sideCol = $("diagnostics-side-col");
+  const diagMain = $("diagnostics-main");
+  if (scoreboardMain) scoreboardMain.style.display = scoreboardActive ? "grid" : "none";
+  if (sideCol) sideCol.style.display = scoreboardActive ? "none" : "flex";
+  if (diagMain) {
+    diagMain.style.gridTemplateColumns = scoreboardActive
+      ? "minmax(0, 1fr)"
+      : "minmax(0, 2fr) minmax(280px, 1.15fr)";
+  }
+  if (scoreboardActive) {
+    $("diag-body").style.display = "none";
+    $("runs-body").style.display = "none";
+    if (isAggregateView()) renderPanelPlaceholder("scoreboard-body");
+    return;
+  }
+
+  // ORB-00044: in the aggregate "All workspaces" view the diagnostics fetches
+  // are skipped (activeRefreshJobs), so a subtab switch must not repaint the
+  // previous workspace's stale rows over the placeholder — render the
+  // placeholder for the now-visible body instead.
   if (name === "runs") {
     $("diag-body").style.display = "none";
     $("runs-body").style.display = "block";
-    renderRuns(ctx.getLastRuns ? ctx.getLastRuns() : []);
+    if (isAggregateView()) {
+      renderPanelPlaceholder("runs-body");
+    } else {
+      renderRuns(ctx.getLastRuns ? ctx.getLastRuns() : []);
+    }
   } else {
     $("diag-body").style.display = "block";
     $("runs-body").style.display = "none";
-    ctx.renderDiagnostics();
+    if (isAggregateView()) {
+      renderPanelPlaceholder("diag-body");
+    } else {
+      ctx.renderDiagnostics();
+    }
   }
 }
 

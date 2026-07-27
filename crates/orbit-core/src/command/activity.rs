@@ -1,7 +1,9 @@
+use std::borrow::Cow;
 use std::path::Path;
 
 use orbit_common::types::OrbitError;
-use orbit_common::utility::fs::write_text_with_parent;
+
+use super::seed_embedded_assets;
 
 /// Shippable default activity assets, seeded under
 /// `<orbit_root>/resources/activities/<name>.yaml` on `orbit init`. Keep this
@@ -13,6 +15,10 @@ use orbit_common::utility::fs::write_text_with_parent;
 /// runtime defaults.
 pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
+        "arbitrate_duel_plan",
+        include_str!("../../assets/activities/arbitrate_duel_plan.yaml"),
+    ),
+    (
         "agent_implement",
         include_str!("../../assets/activities/agent_implement.yaml"),
     ),
@@ -21,12 +27,16 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/agent_review.yaml"),
     ),
     (
-        "dispatch_agent",
-        include_str!("../../assets/activities/dispatch_agent.yaml"),
+        "apply_triage_dispositions",
+        include_str!("../../assets/activities/apply_triage_dispositions.yaml"),
     ),
     (
-        "epic_orchestrator",
-        include_str!("../../assets/activities/epic_orchestrator.yaml"),
+        "apply_task_pilot_results",
+        include_str!("../../assets/activities/apply_task_pilot_results.yaml"),
+    ),
+    (
+        "dispatch_agent",
+        include_str!("../../assets/activities/dispatch_agent.yaml"),
     ),
     (
         "gate_starvation_fail",
@@ -45,12 +55,16 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/git_push.yaml"),
     ),
     (
+        "git_rebase",
+        include_str!("../../assets/activities/git_rebase.yaml"),
+    ),
+    (
         "invoke_and_wait",
         include_str!("../../assets/activities/invoke_and_wait.yaml"),
     ),
     (
-        "pipeline_wait",
-        include_str!("../../assets/activities/pipeline_wait.yaml"),
+        "independent_review_guard",
+        include_str!("../../assets/activities/independent_review_guard.yaml"),
     ),
     (
         "pipeline_success_guard",
@@ -61,6 +75,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/list_backlog_tasks.yaml"),
     ),
     (
+        "list_triage_candidates",
+        include_str!("../../assets/activities/list_triage_candidates.yaml"),
+    ),
+    (
         "load_epic",
         include_str!("../../assets/activities/load_epic.yaml"),
     ),
@@ -69,12 +87,40 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/pr_open.yaml"),
     ),
     (
+        "pr_failure_handoff",
+        include_str!("../../assets/activities/pr_failure_handoff.yaml"),
+    ),
+    (
+        "pr_prepare",
+        include_str!("../../assets/activities/pr_prepare.yaml"),
+    ),
+    (
+        "pr_promote",
+        include_str!("../../assets/activities/pr_promote.yaml"),
+    ),
+    (
+        "prepare_task_pilot",
+        include_str!("../../assets/activities/prepare_task_pilot.yaml"),
+    ),
+    (
+        "propose_duel_plan",
+        include_str!("../../assets/activities/propose_duel_plan.yaml"),
+    ),
+    (
         "reserve_locks",
         include_str!("../../assets/activities/reserve_locks.yaml"),
     ),
     (
         "release_locks",
         include_str!("../../assets/activities/release_locks.yaml"),
+    ),
+    (
+        "resolve_workspace_ship_input",
+        include_str!("../../assets/activities/resolve_workspace_ship_input.yaml"),
+    ),
+    (
+        "run_auto_task_scheduler",
+        include_str!("../../assets/activities/run_auto_task_scheduler.yaml"),
     ),
     (
         "run_planning_duel",
@@ -90,6 +136,14 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/summarize_epic.yaml"),
     ),
     (
+        "task_pilot",
+        include_str!("../../assets/activities/task_pilot.yaml"),
+    ),
+    (
+        "triage_failed_runs",
+        include_str!("../../assets/activities/triage_failed_runs.yaml"),
+    ),
+    (
         "update_task",
         include_str!("../../assets/activities/update_task.yaml"),
     ),
@@ -100,6 +154,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "worktree_setup",
         include_str!("../../assets/activities/worktree_setup.yaml"),
+    ),
+    (
+        "worktree_gc",
+        include_str!("../../assets/activities/worktree_gc.yaml"),
     ),
 ];
 
@@ -115,21 +173,19 @@ pub(crate) fn seed_default_activities(
     activities_dir: &Path,
     overwrite: bool,
 ) -> Result<usize, OrbitError> {
-    let mut count = 0usize;
-    for (name, content) in DEFAULT_ACTIVITY_FILES {
-        let path = activities_dir.join(format!("{name}.yaml"));
-        if !overwrite && path.exists() {
-            continue;
-        }
-        write_text_with_parent(&path, content)?;
-        count += 1;
-    }
-    Ok(count)
+    seed_embedded_assets(
+        activities_dir,
+        DEFAULT_ACTIVITY_FILES,
+        overwrite,
+        |_, content| Ok(Cow::Borrowed(content)),
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use orbit_common::types::activity_job::AgentRole;
+    use orbit_common::types::activity_job::{
+        AgentRole, OnDenial, tool_allowed, validate_tool_allowlist,
+    };
     use orbit_common::types::{ActivityV2Spec, load_activity_asset};
     use tempfile::tempdir;
 
@@ -144,8 +200,15 @@ mod tests {
         for (name, action) in [
             ("run_planning_duel", "run_planning_duel"),
             ("git_commit", "git_commit"),
+            ("git_rebase", "git_rebase"),
+            ("pr_prepare", "pr_prepare"),
+            ("pr_failure_handoff", "pr_failure_handoff"),
+            ("pr_promote", "pr_promote"),
             ("release_locks", "release_locks"),
-            ("pipeline_wait", "pipeline_wait"),
+            ("independent_review_guard", "independent_review_guard"),
+            ("list_triage_candidates", "list_triage_candidates"),
+            ("apply_triage_dispositions", "apply_triage_dispositions"),
+            ("worktree_gc", "worktree_gc"),
         ] {
             let yaml = std::fs::read_to_string(activities_dir.join(format!("{name}.yaml")))
                 .unwrap_or_else(|error| panic!("read {name} activity: {error}"));
@@ -157,6 +220,36 @@ mod tests {
                     assert_eq!(spec.action, action);
                 }
                 other => panic!("expected deterministic {name} activity, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn seeded_planning_duel_agent_activities_preserve_v1_contracts() {
+        let root = tempdir().expect("create tempdir");
+        let activities_dir = root.path().join("resources/activities");
+        seed_default_activities(&activities_dir, true).expect("seed default activities");
+
+        for (name, timeout, required_tool) in [
+            ("propose_duel_plan", 1_800, "orbit.duel.plan.add"),
+            ("arbitrate_duel_plan", 900, "orbit.duel.plan.winner"),
+        ] {
+            let yaml = std::fs::read_to_string(activities_dir.join(format!("{name}.yaml")))
+                .expect("read seeded planning-duel activity");
+            let asset = load_activity_asset(&yaml).expect("parse planning-duel activity");
+            match asset.spec.spec {
+                ActivityV2Spec::AgentLoop(spec) => {
+                    assert_eq!(
+                        spec.backend,
+                        orbit_common::types::activity_job::Backend::Cli
+                    );
+                    assert_eq!(spec.wall_clock_timeout_seconds, timeout);
+                    assert!(spec.tools.iter().any(|tool| tool == required_tool));
+                    assert!(spec.tools.iter().any(|tool| tool == "orbit.task.show"));
+                    assert!(spec.tools.iter().any(|tool| tool == "orbit.search"));
+                    assert!(spec.tools.iter().any(|tool| tool == "fs.read"));
+                }
+                other => panic!("expected agent_loop activity, got {other:?}"),
             }
         }
     }
@@ -179,6 +272,237 @@ mod tests {
                 assert!(instruction.contains("not as a perfect inventory"));
                 assert!(instruction.contains("make the smallest compatible change"));
                 assert!(instruction.contains("Stop after commenting"));
+                assert!(instruction.contains("Before the first write"));
+                assert!(instruction.contains("git rev-parse --show-toplevel"));
+                assert!(instruction.contains("worktree_mismatch"));
+            }
+            other => panic!("expected agent_loop activity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_implement_grants_allocate_then_update_adr() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "agent_implement")
+            .expect("agent implement activity is seeded");
+        let asset = load_activity_asset(yaml).expect("parse agent implement activity");
+        match asset.spec.spec {
+            ActivityV2Spec::AgentLoop(spec) => {
+                for tool in ["orbit.adr.add", "orbit.adr.update"] {
+                    assert!(
+                        spec.tools.iter().any(|granted| granted == tool),
+                        "implementers must be able to {tool} ADR artifacts"
+                    );
+                    assert!(tool_allowed(tool, &spec.tools));
+                }
+                validate_tool_allowlist(&spec.tools)
+                    .expect("agent implement allowlist must remain valid");
+            }
+            other => panic!("expected agent_loop activity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_response_contract_matches_durable_handoff_shape() {
+        for (name, required) in [
+            ("agent_implement", false),
+            ("agent_review", true),
+            ("triage_failed_runs", true),
+        ] {
+            let (_, yaml) = DEFAULT_ACTIVITY_FILES
+                .iter()
+                .find(|(candidate, _)| *candidate == name)
+                .unwrap_or_else(|| panic!("{name} activity is seeded"));
+            let asset = load_activity_asset(yaml)
+                .unwrap_or_else(|error| panic!("parse {name} activity: {error}"));
+            match asset.spec.spec {
+                ActivityV2Spec::AgentLoop(spec) => assert_eq!(
+                    spec.require_response_envelope, required,
+                    "{name} response contract drifted"
+                ),
+                other => panic!("expected agent_loop {name} activity, got {other:?}"),
+            }
+        }
+    }
+
+    /// [ORB-10449] The step-completion protocol contract, asserted across every
+    /// shipped `agent_loop` activity so an exception has to be *declared*.
+    ///
+    /// The flag defaults to `true`, so a new activity inherits the check by
+    /// omitting it; this test exists to make the opt-out list explicit and to
+    /// force a deliberate edit here when one is added. `dispatch_agent` is the
+    /// sole entry: its notes are advisory and nothing consumes them, so its
+    /// non-completion is harmless. Everything else does work whose absence must
+    /// stop the pipeline.
+    #[test]
+    fn agent_step_completion_contract_is_required_except_where_declared() {
+        const DECLARED_OPT_OUTS: &[&str] = &["dispatch_agent"];
+
+        let mut checked = 0;
+        for (name, yaml) in DEFAULT_ACTIVITY_FILES {
+            let asset = load_activity_asset(yaml)
+                .unwrap_or_else(|error| panic!("parse {name} activity: {error}"));
+            let ActivityV2Spec::AgentLoop(spec) = asset.spec.spec else {
+                continue;
+            };
+            checked += 1;
+            let expected = !DECLARED_OPT_OUTS.contains(name);
+            assert_eq!(
+                spec.require_completion_envelope, expected,
+                "{name} step-completion contract drifted; add it to DECLARED_OPT_OUTS \
+                 only if the activity not running at all is harmless"
+            );
+            // Opting into the content contract without the completion contract
+            // is incoherent: an absent envelope fails content validation too,
+            // so the pair would disagree about the same invocation.
+            assert!(
+                !spec.require_response_envelope || spec.require_completion_envelope,
+                "{name} requires response content but not step completion"
+            );
+        }
+        assert!(checked > 1, "expected several agent_loop activities");
+    }
+
+    #[test]
+    fn agent_review_is_read_only_and_requires_an_exact_head_verdict() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "agent_review")
+            .expect("agent review activity is seeded");
+        let asset = load_activity_asset(yaml).expect("parse agent review activity");
+        assert_eq!(
+            asset.spec.output_schema_json["required"],
+            serde_json::json!(["verdict", "reviewed_head_sha"])
+        );
+        match asset.spec.spec {
+            ActivityV2Spec::AgentLoop(spec) => {
+                assert!(spec.require_response_envelope);
+                assert_eq!(
+                    spec.role, None,
+                    "flat review crew must not need a role field"
+                );
+                assert!(!spec.tools.iter().any(|tool| tool == "fs.delete"));
+                assert!(spec.instruction.contains("candidate_head_sha"));
+                assert!(spec.instruction.contains("Do not edit"));
+            }
+            other => panic!("expected agent_loop agent_review, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn task_pilot_is_read_only_bounded_and_uses_advisory_output() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "task_pilot")
+            .expect("task pilot activity is seeded");
+        let asset = load_activity_asset(yaml).expect("parse task pilot activity");
+        assert!(
+            asset.spec.output_schema_json.get("required").is_none(),
+            "agent-returned task-pilot fields stay advisory until deterministic apply"
+        );
+        assert_eq!(
+            asset.spec.input_schema_json["properties"]["task_ids"]["maxItems"],
+            serde_json::json!(5)
+        );
+        match asset.spec.spec {
+            ActivityV2Spec::AgentLoop(spec) => {
+                assert!(spec.require_response_envelope);
+                assert_eq!(spec.role, None, "task-pilot is not a new crew role");
+                assert_eq!(spec.on_denial, OnDenial::Terminate);
+                assert!(!spec.tools.iter().any(|tool| tool == "orbit.task.update"));
+                assert!(!spec.tools.iter().any(|tool| tool == "orbit.task.*"));
+                assert!(!spec.tools.iter().any(|tool| {
+                    matches!(
+                        tool.as_str(),
+                        "fs.write" | "fs.patch" | "fs.delete" | "orbit.pipeline.invoke"
+                    )
+                }));
+                assert!(
+                    spec.proc_allowed_programs
+                        .as_deref()
+                        .unwrap_or_default()
+                        .iter()
+                        .all(|program| matches!(program.as_str(), "git" | "rg"))
+                );
+                assert!(
+                    !spec
+                        .proc_allowed_programs
+                        .as_deref()
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|program| program == "orbit"),
+                    "proc.spawn must not bypass the scoped Orbit tool allowlist"
+                );
+                assert!(spec.instruction.contains("Never update a task"));
+                assert!(spec.instruction.contains("one to five"));
+            }
+            other => panic!("expected agent_loop task_pilot activity, got {other:?}"),
+        }
+    }
+
+    /// [ORB-10129] The triage agent's hard bounds are structural: its tool
+    /// allowlist must exclude every write/dispatch surface (code edits,
+    /// commits/pushes/merges, PR approval, pipeline invocation, task
+    /// lifecycle writes), `proc_allowed_programs` must not include `git`,
+    /// and `on_denial: terminate` must be set so a denied tool kills the
+    /// run (termination semantics proven by
+    /// `replay_denial_terminate_surfaces_structural_tool_denied` in
+    /// orbit-engine).
+    #[test]
+    fn triage_agent_allowlist_makes_write_surfaces_structurally_impossible() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "triage_failed_runs")
+            .expect("triage agent activity is seeded");
+        let asset = load_activity_asset(yaml).expect("parse triage agent activity");
+        match asset.spec.spec {
+            ActivityV2Spec::AgentLoop(spec) => {
+                assert_eq!(spec.role, Some(AgentRole::Reviewer));
+                assert_eq!(spec.on_denial, OnDenial::Terminate);
+                for denied in [
+                    // code edits
+                    "fs.write",
+                    "fs.patch",
+                    "fs.create",
+                    "fs.move",
+                    "fs.copy",
+                    // pipeline / job dispatch
+                    "orbit.pipeline.invoke",
+                    "orbit.pipeline.wait",
+                    // task lifecycle writes other than the activity's one
+                    // evidence-gated blocked -> done reconciliation
+                    "orbit.task.start",
+                    "orbit.task.approve",
+                    "orbit.task.reject",
+                    "orbit.task.add",
+                    "orbit.task.delete",
+                    "orbit.task.locks.reserve",
+                    "orbit.task.locks.release",
+                ] {
+                    assert!(
+                        !tool_allowed(denied, &spec.tools),
+                        "triage agent must not be able to call `{denied}`"
+                    );
+                }
+                for allowed in [
+                    "orbit.task.show",
+                    "orbit.task.update",
+                    "orbit.friction.add",
+                    "fs.read",
+                    "fs.delete",
+                ] {
+                    assert!(
+                        tool_allowed(allowed, &spec.tools),
+                        "triage agent should be able to call `{allowed}`"
+                    );
+                }
+                // No `git` subprocess: commits/pushes/merges stay impossible
+                // even through proc.spawn.
+                assert_eq!(
+                    spec.proc_allowed_programs.as_deref(),
+                    Some(&["rg".to_string()][..])
+                );
             }
             other => panic!("expected agent_loop activity, got {other:?}"),
         }

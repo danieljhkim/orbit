@@ -1,6 +1,7 @@
-// ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
+// Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Child;
@@ -9,22 +10,132 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::super::dispatcher::ResolvedSandbox;
-use super::spawn::{SpawnedChild, spawn_child_with_optional_sandbox};
-use orbit_common::utility::output_capture::{BoundedOutputCapture, capture_limit_from_env};
+use super::spawn::{SpawnError, SpawnedChild, spawn_child_with_optional_sandbox};
+use orbit_common::utility::output_capture::capture_limit_from_env;
 
 /// Default wall-clock timeout when `AgentLoopSpec::wall_clock_timeout_seconds`
 /// is zero. Matches §7.6 guidance: CLI subprocesses must have a mandatory
 /// wall-clock guard.
 pub(super) const DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS: u64 = 300;
 
-pub(super) type SpawnOutput = (Vec<u8>, Vec<u8>, Option<i32>, Duration, bool);
+pub(super) type SpawnOutput = (CapturedOutput, CapturedOutput, Option<i32>, Duration, bool);
 
 const OUTPUT_READER_JOIN_TIMEOUT: Duration = Duration::from_millis(500);
 const CLI_RUNNER_OUTPUT_CAPTURE_LIMIT_ENV: &str = "ORBIT_CLI_RUNNER_OUTPUT_CAPTURE_LIMIT_BYTES";
 const DEFAULT_CLI_RUNNER_OUTPUT_CAPTURE_LIMIT_BYTES: usize = 1024 * 1024;
 const OUTPUT_LINE_EVENT_LIMIT_BYTES: usize = 64 * 1024;
 
-type SharedOutputCapture = Arc<Mutex<BoundedOutputCapture>>;
+type SharedOutputCapture = Arc<Mutex<RollingOutputCapture>>;
+
+#[derive(Debug)]
+pub(super) struct CapturedOutput {
+    bytes: Vec<u8>,
+    protocol_offset: usize,
+    observed_bytes: usize,
+    capture_limit_bytes: usize,
+    truncated: bool,
+}
+
+impl CapturedOutput {
+    pub(super) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub(super) fn protocol_bytes(&self) -> &[u8] {
+        &self.bytes[self.protocol_offset..]
+    }
+
+    pub(super) fn observed_bytes(&self) -> usize {
+        self.observed_bytes
+    }
+
+    pub(super) fn capture_limit_bytes(&self) -> usize {
+        self.capture_limit_bytes
+    }
+
+    pub(super) fn truncated(&self) -> bool {
+        self.truncated
+    }
+}
+
+#[derive(Debug)]
+struct RollingOutputCapture {
+    prefix: Vec<u8>,
+    tail: VecDeque<u8>,
+    observed_bytes: usize,
+    limit: usize,
+    truncated: bool,
+}
+
+impl RollingOutputCapture {
+    fn new(limit: usize) -> Self {
+        Self {
+            prefix: Vec::new(),
+            tail: VecDeque::new(),
+            observed_bytes: 0,
+            limit,
+            truncated: false,
+        }
+    }
+
+    fn push(&mut self, chunk: &[u8]) {
+        self.observed_bytes = self.observed_bytes.saturating_add(chunk.len());
+        if !self.truncated && self.prefix.len().saturating_add(chunk.len()) <= self.limit {
+            self.prefix.extend_from_slice(chunk);
+            return;
+        }
+
+        let prefix_limit = self.limit / 2;
+        let tail_limit = self.limit.saturating_sub(prefix_limit);
+        if !self.truncated {
+            let displaced = self.prefix.split_off(prefix_limit.min(self.prefix.len()));
+            self.tail.extend(displaced);
+            self.truncated = true;
+        }
+        self.tail.extend(chunk);
+        while self.tail.len() > tail_limit {
+            self.tail.pop_front();
+        }
+    }
+
+    fn finish(&self) -> CapturedOutput {
+        if !self.truncated {
+            return CapturedOutput {
+                bytes: self.prefix.clone(),
+                protocol_offset: 0,
+                observed_bytes: self.observed_bytes,
+                capture_limit_bytes: self.limit,
+                truncated: false,
+            };
+        }
+
+        // The tail may start in the middle of a structured JSONL event. Drop
+        // that partial line so protocol consumers can still parse the final
+        // complete provider events (including the Orbit response envelope).
+        let tail: Vec<u8> = self.tail.iter().copied().collect();
+        let complete_tail = tail
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(&[][..], |idx| &tail[idx + 1..]);
+        let marker = format!(
+            "\n[orbit: output capture truncated; observed_bytes={}; capture_limit_bytes={}]\n",
+            self.observed_bytes, self.limit
+        );
+        let protocol_offset = self.prefix.len() + marker.len();
+        let mut bytes = Vec::with_capacity(protocol_offset + complete_tail.len());
+        bytes.extend_from_slice(&self.prefix);
+        bytes.extend_from_slice(marker.as_bytes());
+        bytes.extend_from_slice(complete_tail);
+
+        CapturedOutput {
+            bytes,
+            protocol_offset,
+            observed_bytes: self.observed_bytes,
+            capture_limit_bytes: self.limit,
+            truncated: true,
+        }
+    }
+}
 
 pub(super) struct SpawnTraceContext<'a> {
     pub(super) provider: &'a str,
@@ -42,8 +153,12 @@ pub(super) struct SpawnWithTimeoutRequest<'a> {
     pub(super) timeout: Duration,
     pub(super) sandbox: Option<&'a ResolvedSandbox>,
     pub(super) trace: SpawnTraceContext<'a>,
-    #[cfg(test)]
     pub(super) output_capture_limit: Option<usize>,
+    /// [ORB-10496] Invoked once with the spawned child's PID, immediately after
+    /// spawn and before the supervision loop. The PID is otherwise visible only
+    /// inside this module (process-group cleanup), so a long-running provider
+    /// child has no observable identity while it runs.
+    pub(super) on_spawn: Option<&'a dyn Fn(u32)>,
 }
 
 struct OutputReaderContext {
@@ -53,7 +168,6 @@ struct OutputReaderContext {
     task_id: Option<String>,
     cwd: Option<String>,
     dispatch: tracing::Dispatch,
-    limit_tx: mpsc::Sender<&'static str>,
 }
 
 struct OutputReaderHandle {
@@ -63,7 +177,7 @@ struct OutputReaderHandle {
 
 pub(super) fn spawn_with_timeout(
     request: SpawnWithTimeoutRequest<'_>,
-) -> Result<SpawnOutput, String> {
+) -> Result<SpawnOutput, SpawnError> {
     let SpawnWithTimeoutRequest {
         program,
         args,
@@ -73,8 +187,8 @@ pub(super) fn spawn_with_timeout(
         timeout,
         sandbox,
         trace,
-        #[cfg(test)]
         output_capture_limit,
+        on_spawn,
     } = request;
 
     let started = Instant::now();
@@ -82,8 +196,18 @@ pub(super) fn spawn_with_timeout(
         mut child,
         // The temp profile must outlive the child — drop it after wait.
         _profile_temp,
-    } = spawn_child_with_optional_sandbox(program, args, env, cwd, sandbox)
-        .map_err(|err| format!("spawn {program}: {err}"))?;
+    } = spawn_child_with_optional_sandbox(program, args, env, cwd, sandbox).map_err(|err| {
+        SpawnError {
+            permanent: err.permanent,
+            message: format!("spawn {program}: {}", err.message),
+        }
+    })?;
+
+    // Report the PID before any blocking work: the whole point is to be
+    // observable during a long invocation, and the child is already running.
+    if let Some(on_spawn) = on_spawn {
+        on_spawn(child.id());
+    }
 
     if let Some(mut stdin) = child.stdin.take() {
         let bytes = stdin_bytes.to_vec();
@@ -92,13 +216,9 @@ pub(super) fn spawn_with_timeout(
         });
     }
 
-    #[cfg(test)]
     let output_limit = output_capture_limit.unwrap_or_else(default_output_capture_limit);
-    #[cfg(not(test))]
-    let output_limit = default_output_capture_limit();
-    let stdout_buf = Arc::new(Mutex::new(BoundedOutputCapture::new(output_limit)));
-    let stderr_buf = Arc::new(Mutex::new(BoundedOutputCapture::new(output_limit)));
-    let (output_limit_tx, output_limit_rx) = mpsc::channel();
+    let stdout_buf = Arc::new(Mutex::new(RollingOutputCapture::new(output_limit)));
+    let stderr_buf = Arc::new(Mutex::new(RollingOutputCapture::new(output_limit)));
     let dispatch = tracing::dispatcher::get_default(Clone::clone);
 
     let stdout_reader = child.stdout.take().map(|handle| {
@@ -112,7 +232,6 @@ pub(super) fn spawn_with_timeout(
                 task_id: trace.task_id.map(ToString::to_string),
                 cwd: trace.cwd.map(ToString::to_string),
                 dispatch: dispatch.clone(),
-                limit_tx: output_limit_tx.clone(),
             },
         )
     });
@@ -127,7 +246,6 @@ pub(super) fn spawn_with_timeout(
                 task_id: trace.task_id.map(ToString::to_string),
                 cwd: trace.cwd.map(ToString::to_string),
                 dispatch,
-                limit_tx: output_limit_tx,
             },
         )
     });
@@ -136,12 +254,6 @@ pub(super) fn spawn_with_timeout(
     let deadline = started + timeout;
     let exit_status;
     loop {
-        if output_limit_rx.try_recv().is_ok() {
-            kill_child_process_tree(&mut child);
-            exit_status = None;
-            break;
-        }
-
         match child.try_wait() {
             Ok(Some(status)) => {
                 cleanup_child_process_group(child.id());
@@ -157,7 +269,11 @@ pub(super) fn spawn_with_timeout(
                 }
                 thread::sleep(Duration::from_millis(25));
             }
-            Err(err) => return Err(format!("wait {program}: {err}")),
+            Err(err) => {
+                // `wait` failures are host-side and not clearly deterministic
+                // — leave them retryable.
+                return Err(SpawnError::transient(format!("wait {program}: {err}")));
+            }
         }
     }
 
@@ -171,12 +287,24 @@ pub(super) fn spawn_with_timeout(
 
     let stdout = stdout_buf
         .lock()
-        .map(|buf| buf.as_bytes().to_vec())
-        .unwrap_or_default();
+        .map(|buf| buf.finish())
+        .unwrap_or_else(|_| CapturedOutput {
+            bytes: Vec::new(),
+            protocol_offset: 0,
+            observed_bytes: 0,
+            capture_limit_bytes: output_limit,
+            truncated: false,
+        });
     let stderr = stderr_buf
         .lock()
-        .map(|buf| buf.as_bytes().to_vec())
-        .unwrap_or_default();
+        .map(|buf| buf.finish())
+        .unwrap_or_else(|_| CapturedOutput {
+            bytes: Vec::new(),
+            protocol_offset: 0,
+            observed_bytes: 0,
+            capture_limit_bytes: output_limit,
+            truncated: false,
+        });
     let exit_code = exit_status.as_ref().and_then(|s| s.code());
     let duration = started.elapsed();
     Ok((stdout, stderr, exit_code, duration, timed_out))
@@ -204,7 +332,6 @@ where
         task_id,
         cwd,
         dispatch,
-        limit_tx,
     } = context;
 
     let (finished_tx, finished) = mpsc::channel();
@@ -218,8 +345,7 @@ where
                     Ok(0) => break,
                     Ok(n) => {
                         let raw = &chunk[..n];
-                        let exceeded = buf
-                            .lock()
+                        buf.lock()
                             .expect("subprocess output buf poisoned")
                             .push(raw);
                         emit_output_chunk(
@@ -231,10 +357,6 @@ where
                             raw,
                             &mut line_buf,
                         );
-                        if exceeded {
-                            let _ = limit_tx.send(stream);
-                            break;
-                        }
                     }
                     Err(_) => break,
                 }

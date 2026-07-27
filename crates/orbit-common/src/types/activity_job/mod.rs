@@ -10,8 +10,10 @@ pub mod schema_header;
 pub mod tool_allowlist;
 
 pub use activity_v2::{
-    ActivityV2, ActivityV2Spec, AgentLoopSpec, AgentRole, Backend, DeterministicSpec,
-    GroundhogSpec, OnDenial, Provider,
+    ActivityV2, ActivityV2Spec, AgentLoopSpec, AgentRole, Backend, DeterministicSpec, OnDenial,
+    Provider, ProviderAlias, ProviderDeprecation, ProviderDiagnostic, ProviderEntryPoint,
+    ProviderIdentity, ProviderParseError, ProviderResolution, ProviderResolveRequest,
+    ProviderSource,
 };
 pub use asset_loader::{
     ActivityAsset, AssetLoadError, JobAsset, load_activity_asset, load_job_asset,
@@ -26,7 +28,8 @@ pub use backend::{
     validate_job_loop_session_backends,
 };
 pub use catalog::{
-    ACTIVITY_REF_PREFIX, CatalogError, ResolveError, V2ActivityCatalog, resolve_job_target_refs,
+    ACTIVITY_REF_PREFIX, CatalogDirectory, CatalogDirectoryList, CatalogError, ResolveError,
+    V2ActivityCatalog, V2JobCatalog, catalog_error_to_orbit, resolve_job_target_refs,
 };
 pub use job_v2::{
     BackoffStrategy, FanInSpec, FanOutBlock, JobKind, JobV2, JobV2Step, JobV2StepBody, JoinMode,
@@ -34,8 +37,8 @@ pub use job_v2::{
 };
 pub use schema_header::SchemaHeader;
 pub use tool_allowlist::{
-    ToolAllowlistError, V2_GRAPH_ADAPTER_TOOL_NAMES, V2_INTENTIONALLY_EMPTY_TOOL_WILDCARD_ROOTS,
-    V2_TOOL_WILDCARD_ROOTS, tool_allowed, validate_activity_tool_allowlist,
+    ToolAllowlistError, V2_INTENTIONALLY_EMPTY_TOOL_WILDCARD_ROOTS, V2_TOOL_WILDCARD_ROOTS,
+    tool_allowed, validate_activity_tool_allowlist,
     validate_activity_tool_allowlist_against_registered_tools, validate_tool_allowlist,
     validate_tool_allowlist_against_registered_tools,
 };

@@ -10,23 +10,22 @@ allowed_internal_deps() {
     orbit-common)
       echo ""
       ;;
-    orbit-registry)
+    orbit-remote)
+      # ADR-0240: vertical Remote feature composes neutral Core kernels over
+      # Store persistence and generic MCP/tool definitions; none of those
+      # lower layers may depend back on Remote.
+      # orbit-cmd is test-only: the shared learning-state canary crosses the
+      # Remote MCP host and the CLI hook command layer.
+      echo "orbit-cmd orbit-common orbit-core orbit-mcp orbit-store orbit-tools"
+      ;;
+    orbit-policy | orbit-exec | orbit-store)
       echo "orbit-common"
       ;;
-    orbit-policy | orbit-exec | orbit-store | orbit-search)
+    orbit-search)
+      # ORB-10357 folded the former orbit-search-companion crate in as an
+      # additional [[bin]] target; fastembed is a workspace dependency, not
+      # an internal crate edge.
       echo "orbit-common"
-      ;;
-    orbit-search-companion)
-      echo "orbit-common orbit-search"
-      ;;
-    orbit-graph-extract)
-      echo ""
-      ;;
-    orbit-graph)
-      echo "orbit-graph-extract"
-      ;;
-    orbit-graph-cli)
-      echo "orbit-graph orbit-graph-extract"
       ;;
     orbit-tools)
       echo "orbit-common orbit-exec orbit-policy"
@@ -40,14 +39,19 @@ allowed_internal_deps() {
     orbit-core)
       echo "orbit-common orbit-search orbit-engine orbit-policy orbit-store orbit-tools"
       ;;
+    orbit-cmd)
+      # ORB-10016: CLI-facing command layer extracted from orbit-core.
+      # Depends on orbit-core (runtime/context) — never the other way around.
+      echo "orbit-common orbit-core orbit-engine orbit-store"
+      ;;
     orbit-mcp)
-      echo "orbit-common orbit-graph orbit-graph-extract orbit-tools"
+      echo "orbit-common"
       ;;
     orbit-dashboard)
-      echo "orbit-common orbit-core"
+      echo "orbit-common orbit-cmd orbit-core orbit-remote"
       ;;
     orbit-cli)
-      echo "orbit-common orbit-core orbit-graph-cli orbit-mcp orbit-dashboard"
+      echo "orbit-common orbit-cmd orbit-core orbit-remote orbit-dashboard"
       ;;
     *)
       return 1

@@ -2,7 +2,7 @@ use clap::{Args, Subcommand};
 use orbit_core::{OrbitError, OrbitRuntime};
 
 use crate::command::Execute;
-use crate::command::run::{JobReplayArgs, JobRunArgs, JobRunPipelineWorkerArgs};
+use crate::command::run::{JobReplayArgs, JobResumeArgs, JobRunArgs, JobRunPipelineWorkerArgs};
 
 use super::list::JobListArgs;
 use super::show::JobShowArgs;
@@ -30,6 +30,9 @@ pub enum JobSubcommand {
     Run(JobRunArgs),
     /// Replay a previous job run from step 0 using the current job definition
     Replay(JobReplayArgs),
+    /// Resume an interrupted job run from its persisted step checkpoints,
+    /// skipping steps that already completed
+    Resume(JobResumeArgs),
     /// Internal worker entrypoint for persisted pipeline runs
     #[command(name = "run-pipeline-worker", hide = true)]
     RunPipelineWorker(JobRunPipelineWorkerArgs),
@@ -42,6 +45,7 @@ impl Execute for JobSubcommand {
             JobSubcommand::Show(args) => args.execute(runtime),
             JobSubcommand::Run(args) => args.execute(runtime),
             JobSubcommand::Replay(args) => args.execute(runtime),
+            JobSubcommand::Resume(args) => args.execute(runtime),
             JobSubcommand::RunPipelineWorker(args) => args.execute(runtime),
         }
     }

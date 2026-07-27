@@ -59,6 +59,71 @@ fn create_task_allocates_globally_monotonic_orb_ids() {
 }
 
 #[test]
+fn unrelated_reads_and_creates_survive_a_corrupt_bundle() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    let task_a = store
+        .create_task(create_params("Readable A", TaskStatus::Backlog))
+        .expect("create task A");
+    let task_c = store
+        .create_task(create_params("Corrupt C", TaskStatus::Backlog))
+        .expect("create task C");
+    let corrupt_dir = store
+        .bundle_store
+        .bundle_path(&task_c.id)
+        .expect("corrupt bundle path");
+
+    // Review-thread sidecars were retired in ORB-10332. Their absence is a
+    // supported legacy/recovery state and reads must not "repair" it by
+    // mutating or quarantining the otherwise-valid bundle.
+    let retired_review_dir = corrupt_dir.join("review-threads");
+    assert!(!retired_review_dir.exists());
+    assert_eq!(
+        store
+            .get_task(&task_a.id)
+            .expect("read unrelated task A")
+            .expect("task A exists")
+            .id,
+        task_a.id
+    );
+    assert!(
+        !retired_review_dir.exists(),
+        "reading another task must leave the legacy missing sidecar untouched"
+    );
+
+    let missing_path = corrupt_dir.join("description.md");
+    fs::remove_file(&missing_path).expect("malform task C");
+    let task_b = store
+        .create_task(create_params("New B", TaskStatus::Backlog))
+        .expect("create task B despite unrelated corrupt task C");
+    assert_eq!(task_b.id, "ORB-00002");
+
+    for error in [
+        store
+            .list_tasks()
+            .expect_err("list must surface corruption"),
+        store
+            .search_tasks("anything")
+            .expect_err("search must surface corruption"),
+    ] {
+        assert!(matches!(
+            error,
+            OrbitError::TaskBundleCorrupt {
+                task_id,
+                path,
+                reason,
+            } if task_id == task_c.id
+                && path == corrupt_dir.to_string_lossy()
+                && reason.contains("description.md")
+        ));
+    }
+    assert!(
+        corrupt_dir.is_dir() && !missing_path.exists(),
+        "diagnostics must not delete, move, or silently repair the corrupt bundle"
+    );
+}
+
+#[test]
 fn delete_task_removes_v2_bundle_and_index_rows() {
     let temp = TempDir::new().expect("tempdir");
     let store = store(&temp);
@@ -167,35 +232,12 @@ fn filters_and_searches_v2_tasks() {
 }
 
 #[test]
-fn search_tasks_matches_review_threads_and_text_artifacts() {
+fn search_tasks_matches_text_artifacts() {
     let temp = TempDir::new().expect("tempdir");
     let store = store(&temp);
     store
         .create_task(create_params("Searchable", TaskStatus::Backlog))
         .expect("create task");
-    let at = Utc.with_ymd_and_hms(2026, 5, 11, 14, 0, 0).unwrap();
-    store
-        .update_task_reviews(
-            "ORB-00000",
-            &TaskReviewUpdateParams {
-                append_review_threads: vec![ReviewThread {
-                    thread_id: "rt-search".to_string(),
-                    path: Some("src/lib.rs".to_string()),
-                    line: Some(7),
-                    status: ReviewThreadStatus::Open,
-                    messages: vec![ReviewMessage {
-                        message_id: "rm-search".to_string(),
-                        at,
-                        by: "reviewer".to_string(),
-                        body: "needle-review-body".to_string(),
-                        github_comment_id: None,
-                    }],
-                    github_thread_id: None,
-                }],
-                replace_review_threads: None,
-            },
-        )
-        .expect("add review thread");
     store
         .upsert_task_artifacts(
             "ORB-00000",
@@ -209,14 +251,7 @@ fn search_tasks_matches_review_threads_and_text_artifacts() {
         )
         .expect("upsert artifact");
 
-    for query in [
-        "needle-review-body",
-        "needle-artifact-body",
-        "reports/search.md",
-        "src/lib.rs",
-        "reviewer",
-        "linear",
-    ] {
+    for query in ["needle-artifact-body", "reports/search.md"] {
         assert_eq!(
             store
                 .search_tasks(query)

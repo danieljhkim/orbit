@@ -8,6 +8,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use axum::response::Response;
 use chrono::{Duration, SecondsFormat};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::{InvocationTrace, KnowledgeRunMetrics, TokenUsage, ToolCallTrace};
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::metrics::{KnowledgeStatsSummary, aggregate as aggregate_knowledge_stats};
@@ -28,11 +29,30 @@ const TASK_ID: &str = "ORB-METRICS-1";
 async fn request_metrics(runtime: OrbitRuntime, uri: &str) -> Response {
     Router::new()
         .nest("/api", router())
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .uri(format!("/api{uri}"))
                 .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response")
+}
+
+async fn ingest_metrics(runtime: OrbitRuntime, params: &InvocationInsertParams) -> Response {
+    Router::new()
+        .nest("/api", router())
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/metrics/invocations")
+                .header("content-type", "application/json")
+                .header("origin", "http://localhost")
+                .body(Body::from(
+                    serde_json::to_vec(params).expect("serialize invocation params"),
+                ))
                 .expect("request"),
         )
         .await
@@ -80,7 +100,7 @@ fn seed_metrics_runtime() -> OrbitRuntime {
             job_run_id: RUN_ID,
             activity_id: "implement_one",
             agent: "codex",
-            model: Some("gpt-5.5"),
+            model: Some(TEST_CODEX_MODEL),
             duration_ms: 1_234,
             input_tokens: 100,
             cache_read_tokens: 25,
@@ -142,6 +162,7 @@ fn seed_invocation(runtime: &OrbitRuntime, seed: SeedInvocation<'_>) {
                     input: seed.input_tokens,
                     cache_read: seed.cache_read_tokens,
                     cache_create: seed.cache_create_tokens,
+                    cache_create_1h: 0,
                     output: seed.output_tokens,
                 },
                 tool_calls: seed
@@ -156,6 +177,8 @@ fn seed_invocation(runtime: &OrbitRuntime, seed: SeedInvocation<'_>) {
                     })
                     .collect(),
                 duration_ms: seed.duration_ms,
+                provider_model: None,
+                provider_cost_usd: None,
             },
         })
         .expect("insert invocation");
@@ -273,7 +296,7 @@ async fn metrics_invocations_accepts_full_filter_set() {
     assert_eq!(rows[0]["job_run_id"], RUN_ID);
     assert_eq!(rows[0]["activity_id"], "implement_one");
     assert_eq!(rows[0]["agent"], "codex");
-    assert_eq!(rows[0]["model"], "gpt-5.5");
+    assert_eq!(rows[0]["model"], TEST_CODEX_MODEL);
     assert_eq!(rows[0]["task_ids"][0], TASK_ID);
     assert_eq!(rows[0]["tool_calls"][0]["tool_name"], "fs.read");
 }
@@ -288,4 +311,119 @@ async fn metrics_invocations_reports_invalid_rfc3339_field() {
     let payload = body_json(response).await;
     let message = payload["error"].as_str().expect("error message");
     assert!(message.contains("invalid since:"));
+}
+
+#[tokio::test]
+async fn metrics_invocation_ingestion_preserves_worker_runs_and_aggregates() {
+    const WORKER_TASK_ID: &str = "ORB-WORKER-COUPLED";
+    const SECONDARY_TASK_ID: &str = "ORB-WORKER-SECONDARY";
+    const MODEL: &str = "openai/gpt-5.6-sol-2026-07-20";
+
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let worker_runs = [
+        InvocationInsertParams {
+            job_run_id: "worker-run-001".to_string(),
+            activity_id: "worker.invoke".to_string(),
+            agent: "codex".to_string(),
+            model: Some(MODEL.to_string()),
+            slot: None,
+            task_ids: vec![WORKER_TASK_ID.to_string(), SECONDARY_TASK_ID.to_string()],
+            trace: InvocationTrace {
+                usage: TokenUsage {
+                    input: 120,
+                    cache_read: 80,
+                    cache_create: 3,
+                    cache_create_1h: 0,
+                    output: 14,
+                },
+                tool_calls: Vec::new(),
+                duration_ms: 1_500,
+                provider_model: None,
+                provider_cost_usd: Some(0.42),
+            },
+        },
+        InvocationInsertParams {
+            job_run_id: "worker-run-002".to_string(),
+            activity_id: "worker.invoke".to_string(),
+            agent: "codex".to_string(),
+            model: Some(MODEL.to_string()),
+            slot: None,
+            task_ids: vec![WORKER_TASK_ID.to_string()],
+            trace: InvocationTrace {
+                usage: TokenUsage {
+                    input: 70,
+                    cache_read: 5,
+                    cache_create: 1,
+                    cache_create_1h: 0,
+                    output: 9,
+                },
+                tool_calls: Vec::new(),
+                duration_ms: 900,
+                provider_model: None,
+                provider_cost_usd: None,
+            },
+        },
+    ];
+
+    for params in &worker_runs {
+        let response = ingest_metrics(runtime.clone(), params).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert!(body_bytes(response).await.is_empty());
+    }
+
+    for expected in &worker_runs {
+        let records = runtime
+            .invocation_records(InvocationQuery {
+                job_run_id: Some(expected.job_run_id.clone()),
+                limit: 10,
+                ..InvocationQuery::default()
+            })
+            .expect("query worker invocation");
+        assert_eq!(records.len(), 1);
+        let record = &records[0];
+        assert_eq!(record.job_run_id, expected.job_run_id);
+        assert_eq!(record.activity_id, expected.activity_id);
+        assert_eq!(record.agent, expected.agent);
+        assert_eq!(record.model, expected.model);
+        assert_eq!(record.task_ids, expected.task_ids);
+        assert_eq!(record.input_tokens, expected.trace.usage.input);
+        assert_eq!(record.cache_read_tokens, expected.trace.usage.cache_read);
+        assert_eq!(
+            record.cache_create_tokens,
+            expected.trace.usage.cache_create
+        );
+        assert_eq!(record.output_tokens, expected.trace.usage.output);
+        assert_eq!(record.provider_cost_usd, expected.trace.provider_cost_usd);
+    }
+
+    let task_records = runtime
+        .invocation_records(InvocationQuery {
+            task_id: Some(WORKER_TASK_ID.to_string()),
+            limit: 10,
+            ..InvocationQuery::default()
+        })
+        .expect("query task invocations");
+    assert_eq!(task_records.len(), 2, "all worker runs remain queryable");
+
+    let task_metrics: TaskInvocationMetrics = runtime
+        .task_invocation_metrics(WORKER_TASK_ID)
+        .expect("task invocation metrics");
+    assert_eq!(task_metrics.invocation_count, 2);
+    assert_eq!(task_metrics.total_input_tokens, 190);
+    assert_eq!(task_metrics.total_cache_read_tokens, 85);
+    assert_eq!(task_metrics.total_cache_create_tokens, 4);
+    assert_eq!(task_metrics.total_output_tokens, 23);
+
+    let agent_metrics = runtime
+        .agent_invocation_metrics()
+        .expect("agent invocation metrics");
+    let worker_metrics = agent_metrics
+        .iter()
+        .find(|row| row.agent == "codex" && row.model.as_deref() == Some(MODEL))
+        .expect("worker agent metrics");
+    assert_eq!(worker_metrics.invocation_count, 2);
+    assert_eq!(worker_metrics.total_input_tokens, 190);
+    assert_eq!(worker_metrics.total_cache_read_tokens, 85);
+    assert_eq!(worker_metrics.total_cache_create_tokens, 4);
+    assert_eq!(worker_metrics.total_output_tokens, 23);
 }

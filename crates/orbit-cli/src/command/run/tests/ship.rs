@@ -1,23 +1,31 @@
 use serde_json::json;
 
 use crate::command::Execute;
-use orbit_core::OrbitRuntime;
+use orbit_core::{OrbitError, OrbitRuntime};
 
 use super::super::ship::*;
 
 fn ship_args(task_ids: &[&str], mode: ShipMode, base: Option<&str>) -> ShipCommand {
     ShipCommand {
         task_ids: task_ids.iter().map(|value| value.to_string()).collect(),
-        mode,
+        mode: Some(mode),
         base: base.map(str::to_string),
+        review: false,
+        review_crew: None,
         json: false,
     }
 }
 
+/// Build a ship plan from test args, threading the args' explicit mode through
+/// the resolved-mode parameter (production resolves this from the registry).
+fn build_plan(args: &ShipCommand, config_base_branch: &str) -> Result<WorkflowRunPlan, OrbitError> {
+    let mode = args.mode.expect("test args set an explicit mode").to_core();
+    build_ship_run_plan(args, config_base_branch, mode)
+}
+
 #[test]
 fn ship_auto_mode_omits_task_ids_and_uses_pr_mode_by_default() {
-    let plan =
-        build_ship_run_plan(&ship_args(&[], ShipMode::Pr, None), "agent-main").expect("build plan");
+    let plan = build_plan(&ship_args(&[], ShipMode::Pr, None), "agent-main").expect("build plan");
 
     assert_eq!(plan.workflow_alias, SHIP_WORKFLOW);
     assert_eq!(
@@ -31,7 +39,7 @@ fn ship_auto_mode_omits_task_ids_and_uses_pr_mode_by_default() {
 
 #[test]
 fn ship_auto_mode_preserves_local_mode_and_base_override() {
-    let plan = build_ship_run_plan(&ship_args(&[], ShipMode::Local, Some("main")), "agent-main")
+    let plan = build_plan(&ship_args(&[], ShipMode::Local, Some("main")), "agent-main")
         .expect("build plan");
 
     assert_eq!(plan.workflow_alias, SHIP_WORKFLOW);
@@ -46,7 +54,7 @@ fn ship_auto_mode_preserves_local_mode_and_base_override() {
 
 #[test]
 fn explicit_ship_uses_unified_gated_workflow_with_pr_mode() {
-    let plan = build_ship_run_plan(
+    let plan = build_plan(
         &ship_args(&["T20260425-2010", "T20260425-2011"], ShipMode::Pr, None),
         "agent-main",
     )
@@ -65,7 +73,7 @@ fn explicit_ship_uses_unified_gated_workflow_with_pr_mode() {
 
 #[test]
 fn explicit_ship_preserves_local_mode_and_base_override() {
-    let plan = build_ship_run_plan(
+    let plan = build_plan(
         &ship_args(&["T20260425-2010"], ShipMode::Local, Some("main")),
         "agent-main",
     )
@@ -79,6 +87,30 @@ fn explicit_ship_preserves_local_mode_and_base_override() {
             "base_branch": "main",
             "task_ids": ["T20260425-2010"],
         })
+    );
+}
+
+#[test]
+fn ship_threads_explicit_review_controls() {
+    let mut args = ship_args(&["T20260425-2010"], ShipMode::Pr, None);
+    args.review = true;
+    args.review_crew = Some("opus-review".to_string());
+
+    let plan = build_plan(&args, "agent-main").expect("build review plan");
+
+    assert_eq!(plan.input["review"], true);
+    assert_eq!(plan.input["review_crew"], "opus-review");
+}
+
+#[test]
+fn ship_rejects_enabled_review_without_explicit_crew() {
+    let mut args = ship_args(&["T20260425-2010"], ShipMode::Pr, None);
+    args.review = true;
+
+    let error = build_plan(&args, "agent-main").expect_err("review crew is required");
+    assert!(
+        error.to_string().contains("non-blank explicit review crew"),
+        "unexpected error: {error}"
     );
 }
 
@@ -100,14 +132,14 @@ fn ship_local_deprecation_returns_legacy_error() {
 
 #[test]
 fn ship_rejects_removed_history_forms() {
-    let err = build_ship_run_plan(&ship_args(&["list"], ShipMode::Pr, None), "agent-main")
+    let err = build_plan(&ship_args(&["list"], ShipMode::Pr, None), "agent-main")
         .expect_err("legacy history form should fail");
     assert!(
         err.to_string().contains("orbit run history"),
         "unexpected error: {err}"
     );
 
-    let err = build_ship_run_plan(&ship_args(&["show"], ShipMode::Pr, None), "agent-main")
+    let err = build_plan(&ship_args(&["show"], ShipMode::Pr, None), "agent-main")
         .expect_err("legacy history form should fail");
     assert!(
         err.to_string().contains("orbit run history"),
@@ -117,7 +149,7 @@ fn ship_rejects_removed_history_forms() {
 
 #[test]
 fn ship_rejects_removed_local_subcommand_form() {
-    let err = build_ship_run_plan(&ship_args(&["local"], ShipMode::Pr, None), "agent-main")
+    let err = build_plan(&ship_args(&["local"], ShipMode::Pr, None), "agent-main")
         .expect_err("legacy local form should fail");
     assert!(
         err.to_string().contains("--mode local"),
@@ -127,7 +159,7 @@ fn ship_rejects_removed_local_subcommand_form() {
 
 #[test]
 fn ship_rejects_removed_auto_positional_form() {
-    let err = build_ship_run_plan(&ship_args(&["auto"], ShipMode::Pr, None), "agent-main")
+    let err = build_plan(&ship_args(&["auto"], ShipMode::Pr, None), "agent-main")
         .expect_err("legacy auto form should fail");
     assert!(
         err.to_string().contains("orbit run ship"),
@@ -137,7 +169,7 @@ fn ship_rejects_removed_auto_positional_form() {
 
 #[test]
 fn ship_rejects_duplicate_task_ids() {
-    let err = build_ship_run_plan(
+    let err = build_plan(
         &ship_args(&["T20260425-2010", "T20260425-2010"], ShipMode::Pr, None),
         "agent-main",
     )

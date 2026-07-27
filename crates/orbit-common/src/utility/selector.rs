@@ -1,3 +1,9 @@
+//! Canonical selector parsing and filesystem-anchor helpers.
+//!
+//! This is the single implementation of the stable selector grammar
+//! (`dir:` / `file:` / `symbol:` / `module:` / `command:`) shared by task
+//! scopes and context-file selectors.
+
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -5,29 +11,65 @@ use std::str::FromStr;
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::types::OrbitError;
+
+/// Error returned when a selector or legacy path-like scope cannot be parsed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Error)]
 #[error("invalid selector `{input}`: {reason}")]
 pub struct SelectorParseError {
+    /// The original selector input.
     pub input: String,
+    /// Human-readable parse failure reason.
     pub reason: String,
 }
 
+/// Translate a [`SelectorParseError`] into the workspace-public [`OrbitError`]
+/// surface at crate boundaries.
+///
+/// A parse failure is always caller input, so it maps to
+/// [`OrbitError::InvalidInput`]. Callers translate with
+/// `.map_err(selector_error_to_orbit)?` per
+/// `docs/design-patterns/error_translation.md` [ORB-10013].
+pub fn selector_error_to_orbit(error: SelectorParseError) -> OrbitError {
+    OrbitError::InvalidInput(format!("invalid selector: {error}"))
+}
+
+/// Canonical selector.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selector {
+    /// Directory selector anchored at a workspace-relative or absolute path.
     Dir {
+        /// Directory anchor path.
         path: String,
     },
+    /// File selector anchored at a workspace-relative or absolute path.
     File {
+        /// File anchor path.
         path: String,
     },
+    /// Symbol selector anchored at a source path and symbol identity.
     Symbol {
+        /// File anchor path.
         path: String,
+        /// Opaque symbol name or qualified symbol path.
         symbol: String,
+        /// Symbol kind, such as `function`, `method`, or `trait`.
         kind: String,
+    },
+    /// Module selector addressed by qualified module name.
+    Module {
+        /// Qualified module name.
+        qualified: String,
+    },
+    /// Command selector addressed by CLI command name.
+    Command {
+        /// Command name.
+        name: String,
     },
 }
 
 impl Selector {
+    /// Parse a list of selector strings.
     pub fn parse_many(raw_selectors: &[String]) -> Result<Vec<Self>, SelectorParseError> {
         raw_selectors
             .iter()
@@ -35,9 +77,17 @@ impl Selector {
             .collect()
     }
 
+    /// Return the filesystem anchor path for this selector, or an empty string
+    /// for selector forms that do not carry filesystem anchors.
     pub fn path(&self) -> &str {
+        self.anchor_path().unwrap_or("")
+    }
+
+    /// Return the filesystem anchor path for this selector when it has one.
+    pub fn anchor_path(&self) -> Option<&str> {
         match self {
-            Self::Dir { path } | Self::File { path } | Self::Symbol { path, .. } => path,
+            Self::Dir { path } | Self::File { path } | Self::Symbol { path, .. } => Some(path),
+            Self::Module { .. } | Self::Command { .. } => None,
         }
     }
 
@@ -50,6 +100,10 @@ impl Selector {
                 symbol: symbol.clone(),
                 kind: kind.clone(),
             },
+            Self::Module { qualified } => Self::Module {
+                qualified: qualified.clone(),
+            },
+            Self::Command { name } => Self::Command { name: name.clone() },
         }
     }
 
@@ -58,9 +112,12 @@ impl Selector {
             Self::Dir { .. } => ParsedScopeKind::Dir,
             Self::File { .. } => ParsedScopeKind::File,
             Self::Symbol { .. } => ParsedScopeKind::Symbol,
+            Self::Module { .. } => ParsedScopeKind::Module,
+            Self::Command { .. } => ParsedScopeKind::Command,
         }
     }
 
+    /// Return the lookup key used by graph selector indexes.
     pub fn lookup_key(&self) -> SelectorLookupKey {
         match self {
             Self::Dir { path } => SelectorLookupKey::Dir(path.clone()),
@@ -68,6 +125,8 @@ impl Selector {
             Self::Symbol { path, symbol, kind } => {
                 SelectorLookupKey::Symbol(format!("{path}#{symbol}"), kind.clone())
             }
+            Self::Module { qualified } => SelectorLookupKey::Module(qualified.clone()),
+            Self::Command { name } => SelectorLookupKey::Command(name.clone()),
         }
     }
 }
@@ -78,6 +137,8 @@ impl Display for Selector {
             Self::Dir { path } => write!(f, "dir:{path}"),
             Self::File { path } => write!(f, "file:{path}"),
             Self::Symbol { path, symbol, kind } => write!(f, "symbol:{path}#{symbol}:{kind}"),
+            Self::Module { qualified } => write!(f, "module:{qualified}"),
+            Self::Command { name } => write!(f, "command:{name}"),
         }
     }
 }
@@ -135,37 +196,76 @@ impl FromStr for Selector {
             });
         }
 
+        if let Some(qualified) = trimmed.strip_prefix("module:") {
+            let qualified = qualified.trim();
+            if qualified.is_empty() {
+                return Err(SelectorParseError {
+                    input: selector.to_string(),
+                    reason: "module selectors must include a qualified module".to_string(),
+                });
+            }
+            return Ok(Self::Module {
+                qualified: qualified.to_string(),
+            });
+        }
+
+        if let Some(name) = trimmed.strip_prefix("command:") {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(SelectorParseError {
+                    input: selector.to_string(),
+                    reason: "command selectors must include a command name".to_string(),
+                });
+            }
+            return Ok(Self::Command {
+                name: name.to_string(),
+            });
+        }
+
         Err(SelectorParseError {
             input: selector.to_string(),
-            reason: "selectors must start with `dir:`, `file:`, or `symbol:`".to_string(),
+            reason:
+                "selectors must start with `dir:`, `file:`, `symbol:`, `module:`, or `command:`"
+                    .to_string(),
         })
     }
 }
 
+/// Normalized selector index key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SelectorLookupKey {
+    /// Directory key.
     Dir(String),
+    /// File key.
     File(String),
     /// Symbol(location, kind) where location = "path#symbol".
     Symbol(String, String),
+    /// Module qualified-name key.
+    Module(String),
+    /// Command name key.
+    Command(String),
 }
 
 impl SelectorLookupKey {
+    /// Render this lookup key as a canonical selector string.
     pub fn to_selector_string(&self) -> String {
         match self {
             Self::Dir(path) => format!("dir:{path}"),
             Self::File(path) => format!("file:{path}"),
             Self::Symbol(location, kind) => format!("symbol:{location}:{kind}"),
+            Self::Module(qualified) => format!("module:{qualified}"),
+            Self::Command(name) => format!("command:{name}"),
         }
     }
 }
 
 /// Convert a selector or legacy path-like input into canonical selector form.
 ///
-/// Accepted inputs are canonical selectors (`file:`, `dir:`, `symbol:`), raw
-/// paths, and raw `path:line` / `path:start-end` references. Legacy path
-/// references canonicalize to `file:<path>` unless they end with `/` or point
-/// at `.` / `..`, in which case they canonicalize to `dir:<path>`.
+/// Accepted inputs are canonical selectors (`file:`, `dir:`, `symbol:`,
+/// `module:`, `command:`), raw paths, and raw `path:line` / `path:start-end`
+/// references. Legacy path references canonicalize to `file:<path>` unless
+/// they end with `/` or point at `.` / `..`, in which case they canonicalize
+/// to `dir:<path>`.
 pub fn canonical_selector(input: &str) -> Result<String, SelectorParseError> {
     Ok(match ParsedScope::parse(input)? {
         ParsedScope::Selector(selector) => selector.to_string(),
@@ -191,8 +291,12 @@ pub fn canonical_selector_in_workspace(
     let parsed = ParsedScope::parse(input)?;
     match parsed {
         ParsedScope::Selector(selector) => {
-            let path = normalize_workspace_anchor(selector.path(), workspace)?;
-            Ok(selector.with_path(path).to_string())
+            if let Some(anchor) = selector.anchor_path() {
+                let path = normalize_workspace_anchor(anchor, workspace)?;
+                Ok(selector.with_path(path).to_string())
+            } else {
+                Ok(selector.to_string())
+            }
         }
         ParsedScope::LegacyPath { path, is_dir_hint } => {
             let path = normalize_workspace_anchor(path.as_str(), workspace)?;
@@ -210,20 +314,35 @@ pub fn canonical_selector_in_workspace(
 ///
 /// For `symbol:` selectors this strips the symbol metadata and returns only the
 /// backing file path. Legacy `path:line` references are reduced to their file
-/// path anchor.
+/// path anchor. `module:` / `command:` selectors have no filesystem anchor and
+/// return an error.
 pub fn anchor_path(selector: &str) -> Result<PathBuf, SelectorParseError> {
-    Ok(PathBuf::from(ParsedScope::parse(selector)?.anchor_path()))
+    let parsed = ParsedScope::parse(selector)?;
+    parsed
+        .anchor_path()
+        .map(PathBuf::from)
+        .ok_or_else(|| SelectorParseError {
+            input: selector.to_string(),
+            reason: "selector has no filesystem anchor".to_string(),
+        })
 }
 
 /// Return whether a selector's filesystem anchor exists in the given workspace.
 ///
 /// Relative anchors are resolved against `workspace`; absolute anchors are
-/// checked as-is. Invalid selector strings return `false`.
+/// checked as-is. Invalid selector strings and anchor-less selectors return
+/// `false`.
 pub fn exists_in_workspace(selector: &str, workspace: &Path) -> bool {
     let Ok(anchor) = anchor_path(selector) else {
         return false;
     };
-    resolve_workspace_path(workspace, anchor.as_path()).exists()
+    let Ok(workspace) = workspace.canonicalize() else {
+        return false;
+    };
+    let Ok(resolved) = resolve_workspace_path(&workspace, anchor.as_path()).canonicalize() else {
+        return false;
+    };
+    resolved.starts_with(workspace)
 }
 
 /// Return whether two selector/path scopes overlap on the same filesystem
@@ -232,6 +351,8 @@ pub fn exists_in_workspace(selector: &str, workspace: &Path) -> bool {
 /// `symbol:file.rs#one:function` overlaps `symbol:file.rs#two:function` and
 /// `file:file.rs`. `dir:src` overlaps any selector anchored under `src/`.
 /// Legacy raw paths are treated conservatively and may overlap descendants.
+/// Anchor-less selectors (`module:` / `command:`) overlap only on exact
+/// textual equality.
 pub fn overlaps(a: &str, b: &str) -> bool {
     let Ok(left) = ParsedScope::parse(a) else {
         return false;
@@ -240,8 +361,9 @@ pub fn overlaps(a: &str, b: &str) -> bool {
         return false;
     };
 
-    let left_anchor = left.anchor_path();
-    let right_anchor = right.anchor_path();
+    let (Some(left_anchor), Some(right_anchor)) = (left.anchor_path(), right.anchor_path()) else {
+        return a.trim() == b.trim();
+    };
     if left_anchor == right_anchor {
         return true;
     }
@@ -250,6 +372,7 @@ pub fn overlaps(a: &str, b: &str) -> bool {
         || (is_path_ancestor(right_anchor, left_anchor) && right.can_contain_descendants())
 }
 
+/// Return the number of shared path segments between two selector anchors.
 pub fn shared_anchor_prefix_depth(left: &str, right: &str) -> usize {
     let Ok(left) = anchor_path(left) else {
         return 0;
@@ -286,6 +409,8 @@ enum ParsedScopeKind {
     Dir,
     File,
     Symbol,
+    Module,
+    Command,
     Legacy,
 }
 
@@ -308,6 +433,8 @@ impl ParsedScope {
         if trimmed.starts_with("dir:")
             || trimmed.starts_with("file:")
             || trimmed.starts_with("symbol:")
+            || trimmed.starts_with("module:")
+            || trimmed.starts_with("command:")
         {
             return Ok(Self::Selector(trimmed.parse()?));
         }
@@ -321,10 +448,10 @@ impl ParsedScope {
         Ok(Self::LegacyPath { path, is_dir_hint })
     }
 
-    fn anchor_path(&self) -> &str {
+    fn anchor_path(&self) -> Option<&str> {
         match self {
-            Self::Selector(selector) => selector.path(),
-            Self::LegacyPath { path, .. } => path,
+            Self::Selector(selector) => selector.anchor_path(),
+            Self::LegacyPath { path, .. } => Some(path),
         }
     }
 
@@ -355,15 +482,55 @@ fn normalize_workspace_anchor(path: &str, workspace: &Path) -> Result<String, Se
         input: path.to_string(),
         reason,
     })?;
-    let resolved = PathBuf::from(&normalized);
-    if resolved.is_absolute() {
-        let stripped = resolved
-            .strip_prefix(workspace)
-            .ok()
-            .map(|path| path.to_string_lossy().replace('\\', "/"));
-        return Ok(stripped.unwrap_or(normalized));
+    let workspace = workspace
+        .canonicalize()
+        .map_err(|error| SelectorParseError {
+            input: path.to_string(),
+            reason: format!(
+                "workspace root `{}` cannot be canonicalized: {error}",
+                workspace.display()
+            ),
+        })?;
+    let anchor = PathBuf::from(&normalized);
+    if anchor
+        .components()
+        .any(|component| component == std::path::Component::ParentDir)
+    {
+        return Err(SelectorParseError {
+            input: path.to_string(),
+            reason: format!(
+                "selector anchor `{normalized}` must remain inside workspace `{}`",
+                workspace.display()
+            ),
+        });
     }
-    Ok(normalized)
+    let resolved = if anchor.is_absolute() {
+        anchor
+    } else {
+        workspace.join(&anchor)
+    };
+    let contained = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
+    if !contained.starts_with(&workspace) {
+        return Err(SelectorParseError {
+            input: path.to_string(),
+            reason: format!(
+                "selector anchor `{}` must remain inside workspace `{}`",
+                resolved.display(),
+                workspace.display()
+            ),
+        });
+    }
+    resolved
+        .strip_prefix(&workspace)
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .map_err(|_| SelectorParseError {
+            input: path.to_string(),
+            reason: format!(
+                "selector anchor `{}` must remain inside workspace `{}`",
+                resolved.display(),
+                workspace.display()
+            ),
+        })
 }
 
 fn normalize_path_text(raw: &str) -> Result<String, String> {

@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
-use orbit_common::types::{AdrStatus, OrbitError};
-use orbit_store::JobRunQuery;
+use orbit_common::types::OrbitError;
 use orbit_store::scoreboard_summary::{ScoreboardInputs, ScoreboardWindow};
+use orbit_store::{AdrListFilter, JobRunQuery};
 
 use crate::OrbitRuntime;
 
@@ -39,23 +39,12 @@ impl OrbitRuntime {
         let job_runs = self
             .stores()
             .jobs()
-            .list_runs_filtered(&JobRunQuery::default())?;
+            .list_job_runs_filtered(&JobRunQuery::default())?;
         let learnings = self.list_learnings(None)?;
-        let mut learning_vote_counts = Vec::with_capacity(learnings.len());
-        for learning in &learnings {
-            let vote_count = self.learning_vote_summary(&learning.id)?.vote_count as u64;
-            learning_vote_counts.push((learning.id.clone(), vote_count));
-        }
-        let adrs = self.stores().adrs().list_filtered(
-            None::<AdrStatus>,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )?;
+        let adrs = self
+            .stores()
+            .adrs()
+            .list_adrs_filtered(AdrListFilter::default())?;
         let frictions = orbit_store::friction_store::list_frictions(
             &self.data_root().join("frictions"),
             &orbit_store::friction_store::FrictionListFilter::default(),
@@ -71,7 +60,6 @@ impl OrbitRuntime {
                 job_runs: &job_runs,
                 top_tool_calls: &top_tool_calls,
                 learnings: &learnings,
-                learning_vote_counts: &learning_vote_counts,
                 adrs: &adrs,
                 frictions: &frictions,
                 now: Some(now),
@@ -81,18 +69,5 @@ impl OrbitRuntime {
         let _ =
             orbit_store::scoreboard_summary::write_summary(&self.paths().scoreboard_dir, &summary)?;
         Ok(summary)
-    }
-
-    pub fn scoreboard_summary_path(&self) -> std::path::PathBuf {
-        orbit_store::scoreboard_summary::summary_path(&self.paths().scoreboard_dir)
-    }
-
-    /// Read the append-only duel scoreboard log. The CLI's
-    /// `orbit duel scoreboard` command aggregates the returned runs in
-    /// memory via `orbit_store::duel_scoreboard::aggregate`. Returns an
-    /// empty vector when the file does not yet exist — an unrun
-    /// scoreboard is not an error condition.
-    pub fn load_duel_runs(&self) -> Result<Vec<orbit_common::types::DuelRun>, OrbitError> {
-        orbit_store::duel_scoreboard::load_runs(&self.paths().scoreboard_dir)
     }
 }

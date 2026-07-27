@@ -1,9 +1,10 @@
-// ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
+// Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
 use super::*;
 
-pub(super) const DEFAULT_MODEL_FOR_SESSION: &str = "claude-sonnet-4-5";
+pub(super) const DEFAULT_MODEL_FOR_SESSION: &str =
+    orbit_common::model_defaults::ANTHROPIC_HTTP_DEFAULT_MODEL;
 
 pub(super) struct ExecCtx<'a> {
     pub(super) run_id: String,
@@ -13,6 +14,7 @@ pub(super) struct ExecCtx<'a> {
     pub(super) pipeline: Arc<Mutex<HashMap<String, Value>>>,
     pub(super) sessions: Arc<Mutex<HashMap<String, Session>>>,
     pub(super) recovery_activity: Option<ResolvedRecoveryActivity>,
+    pub(super) failure_activity: Option<ResolvedRecoveryActivity>,
     /// `Some(value)` inside a fan-out worker. Rendered into template context
     /// as `{{ item }}`.
     pub(super) item: Option<Value>,
@@ -69,11 +71,6 @@ pub(super) struct StepOutcome {
     pub(super) success: bool,
     pub(super) output: Value,
     pub(super) message: Option<String>,
-    /// `true` when `when:` returned false and the step did not run. Kept for
-    /// future callers that need to distinguish a skipped-but-successful step
-    /// from one that actually executed.
-    #[allow(dead_code)]
-    pub(super) skipped: bool,
 }
 
 pub(super) fn record_pipeline(ctx: &ExecCtx<'_>, key: &str, v: Value) {

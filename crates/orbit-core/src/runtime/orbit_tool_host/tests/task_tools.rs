@@ -6,7 +6,9 @@ use orbit_common::types::{TaskStatus, ToolSessionContext};
 use orbit_store::sqlite::task_registry::read_workspace_config;
 use serde_json::{Value, json};
 
-use super::super::test_support::{create_task, invalid_input_message, test_runtime};
+use super::super::test_support::{
+    create_task, invalid_input_message, run_tool_as_operator, test_runtime,
+};
 use crate::command::tool::ToolEntryPoint;
 
 struct CurrentDirGuard {
@@ -122,7 +124,7 @@ fn task_add_tool_creates_proposed_tasks_for_agents() {
                 "workspace": ".",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
 
@@ -155,7 +157,7 @@ fn mcp_task_add_uses_session_workspace_from_worktree_cwd() {
                 "description": "Session workspace must beat process cwd."
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             ToolEntryPoint::Mcp,
             ToolSessionContext::with_workspace(repo_root_string.clone()),
         )
@@ -198,7 +200,7 @@ fn duel_plan_add_persists_gemini_planner_artifact() {
                 "content": content,
             }),
             Some("gemini".to_string()),
-            Some("gemini-3.1-pro".to_string()),
+            Some(orbit_common::test_fixtures::TEST_GEMINI_MODEL.to_string()),
         )
         .expect("gemini duel plan add succeeds");
 
@@ -240,7 +242,7 @@ fn duel_plan_winner_persists_gemini_arbiter_artifact() {
                 "arbiter_rationale": "Tighter scope and clearer staged plan.",
             }),
             Some("gemini".to_string()),
-            Some("gemini-3.1-pro".to_string()),
+            Some(orbit_common::test_fixtures::TEST_GEMINI_MODEL.to_string()),
         )
         .expect("gemini duel plan winner succeeds");
 
@@ -278,7 +280,7 @@ fn task_add_tool_rejects_dropped_task_types_and_ignores_retired_status() {
                 "type": dropped_type,
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         ));
         assert!(message.contains(dropped_type), "{message}");
         assert!(
@@ -293,13 +295,13 @@ fn task_add_tool_rejects_dropped_task_types_and_ignores_retired_status() {
         .execute_tool_command(
             "orbit.task.add",
             json!({
-                "title": "Legacy friction status",
+                "title": "Retired task-add status",
                 "description": "Should ignore retired task-add status.",
                 "workspace": ".",
-                "status": "friction",
+                "status": "done",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("retired status field is ignored");
     assert_eq!(
@@ -320,7 +322,7 @@ fn friction_add_writes_markdown_record_and_validates_tags() {
                 "tags": ["tooling", "skill-guidance"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("friction add succeeds");
 
@@ -339,7 +341,7 @@ fn friction_add_writes_markdown_record_and_validates_tags() {
             "tags": ["not-a-real-tag"],
         }),
         Some("codex".to_string()),
-        Some("gpt-5.5".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
     ));
     assert!(message.contains("valid tags"), "{message}");
 }
@@ -391,14 +393,16 @@ fn task_delete_tool_rejects_unforced_protected_statuses() {
     // which bypasses the agent gate, matching the CLI path
     // (`runtime.delete_task_guarded`) that admin workflows use in
     // production.
-    let message = invalid_input_message(
-        runtime.run_tool("orbit.task.delete", json!({ "id": task.id.clone() })),
-    );
+    let message = invalid_input_message(run_tool_as_operator(
+        &runtime,
+        "orbit.task.delete",
+        json!({ "id": task.id.clone() }),
+    ));
 
     assert_eq!(
         message,
         format!(
-            "task '{}' is in status 'backlog'; use --force to delete tasks not in proposed, friction, or rejected status",
+            "task '{}' is in status 'backlog'; use --force to delete tasks not in proposed or rejected status",
             task.id
         )
     );
@@ -408,14 +412,10 @@ fn task_delete_tool_rejects_unforced_protected_statuses() {
 }
 
 #[test]
-fn task_delete_tool_allows_unforced_proposed_friction_and_rejected_tasks() {
+fn task_delete_tool_allows_unforced_proposed_and_rejected_tasks() {
     let (_root, runtime, repo_root) = test_runtime();
 
-    for status in [
-        TaskStatus::Proposed,
-        TaskStatus::Friction,
-        TaskStatus::Rejected,
-    ] {
+    for status in [TaskStatus::Proposed, TaskStatus::Rejected] {
         let task = create_task(
             &runtime,
             &repo_root,
@@ -427,9 +427,12 @@ fn task_delete_tool_allows_unforced_proposed_friction_and_rejected_tasks() {
 
         // ORB-00289: see note above — `run_tool` exercises the tool
         // dispatch business logic without the agent-surface gate.
-        let output = runtime
-            .run_tool("orbit.task.delete", json!({ "id": task.id.clone() }))
-            .expect("unprotected delete succeeds");
+        let output = run_tool_as_operator(
+            &runtime,
+            "orbit.task.delete",
+            json!({ "id": task.id.clone() }),
+        )
+        .expect("unprotected delete succeeds");
 
         assert_eq!(output, json!({ "id": task.id, "deleted": true }));
     }
@@ -449,12 +452,12 @@ fn task_delete_tool_allows_forced_protected_statuses() {
 
     // ORB-00289: see note above — `run_tool` exercises the tool dispatch
     // business logic without the agent-surface gate.
-    let output = runtime
-        .run_tool(
-            "orbit.task.delete",
-            json!({ "id": task.id.clone(), "force": true }),
-        )
-        .expect("forced protected delete succeeds");
+    let output = run_tool_as_operator(
+        &runtime,
+        "orbit.task.delete",
+        json!({ "id": task.id.clone(), "force": true }),
+    )
+    .expect("forced protected delete succeeds");
 
     assert_eq!(output, json!({ "id": task.id.clone(), "deleted": true }));
     assert!(runtime.get_task(&task.id).is_err(), "task was deleted");
@@ -484,7 +487,7 @@ fn task_add_tool_ignores_retired_dependencies() {
                 "dependencies": [dependency.id.clone()],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
 
@@ -505,7 +508,7 @@ fn task_add_and_show_tools_roundtrip_tags() {
                 "tags": ["perf", "bench"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
     let task_id = added["id"].as_str().expect("task id");
@@ -515,11 +518,146 @@ fn task_add_and_show_tools_roundtrip_tags() {
             "orbit.task.show",
             json!({ "id": task_id }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task show tool succeeds");
 
     assert_eq!(shown.get("tags"), Some(&json!(["perf", "bench"])));
+}
+
+#[test]
+fn task_add_and_show_tools_roundtrip_crew() {
+    // ORB-10123: `crew` is no longer a retired/stripped field on orbit.task.add.
+    // The tool reads it from input, validates it, and persists it onto the
+    // created task (pre-un-retire it was silently dropped before host execution).
+    let (_root, runtime, _repo_root) = test_runtime();
+
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Crew task",
+                "description": "Exercise crew input on the agent-facing create path.",
+                "workspace": ".",
+                "crew": "sol",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task add tool succeeds with a valid crew");
+    let task_id = added["id"].as_str().expect("task id");
+    assert_eq!(added.get("crew"), Some(&json!("sol")));
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task_id }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task show tool succeeds");
+    assert_eq!(shown.get("crew"), Some(&json!("sol")));
+}
+
+#[test]
+fn task_update_tool_persists_complexity_without_adding_history() {
+    let (_root, runtime, _repo_root) = test_runtime();
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Complexity update task",
+                "description": "Starts without complexity and receives one on update.",
+                "workspace": ".",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task add tool succeeds");
+    let task_id = added["id"].as_str().expect("task id");
+    assert_eq!(added.get("complexity"), Some(&Value::Null));
+    let history_before = runtime.get_task_history(task_id).expect("initial history");
+
+    runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({ "id": task_id, "crew": "sol" }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("crew update succeeds");
+    let history_after_crew = runtime
+        .get_task_history(task_id)
+        .expect("history after crew update");
+    assert_eq!(
+        history_after_crew, history_before,
+        "crew update adds no history"
+    );
+
+    let updated = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({ "id": task_id, "complexity": "medium" }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("complexity update succeeds");
+    assert_eq!(updated.get("complexity"), Some(&json!("medium")));
+    assert_eq!(
+        runtime
+            .get_task_history(task_id)
+            .expect("history after complexity update"),
+        history_after_crew,
+        "complexity update must match crew's no-history behavior"
+    );
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task_id }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task show succeeds");
+    assert_eq!(shown.get("complexity"), Some(&json!("medium")));
+
+    let omitted = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({ "id": task_id, "title": "Complexity remains set" }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("update omitting complexity succeeds");
+    assert_eq!(omitted.get("complexity"), Some(&json!("medium")));
+}
+
+#[test]
+fn task_add_tool_rejects_unknown_crew() {
+    // Un-retiring crew also means it is validated: an unknown crew is now
+    // rejected rather than silently ignored.
+    let (_root, runtime, _repo_root) = test_runtime();
+
+    let result = runtime.execute_tool_command(
+        "orbit.task.add",
+        json!({
+            "title": "Bad crew task",
+            "description": "Unknown crew must be rejected on the create path.",
+            "workspace": ".",
+            "crew": "does-not-exist",
+        }),
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    );
+
+    let message = match result {
+        Err(error) => format!("{error:?}"),
+        Ok(value) => panic!("expected unknown crew to be rejected, got {value}"),
+    };
+    assert!(
+        message.contains("crew 'does-not-exist' is not defined"),
+        "error should explain the crew is undefined: {message}"
+    );
 }
 
 #[test]
@@ -539,7 +677,7 @@ fn task_show_tool_includes_empty_tags_array() {
             "orbit.task.show",
             json!({ "id": task.id }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task show tool succeeds");
 
@@ -569,7 +707,7 @@ fn task_show_tool_with_context_includes_related_docs() {
             "orbit.task.show",
             json!({ "id": task.id, "with_context": true, "max_docs": 1 }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task show tool succeeds");
 
@@ -601,7 +739,7 @@ fn task_add_tool_normalizes_tags_at_write_time() {
                 "tags": ["  Perf ", "BENCH"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
 
@@ -627,7 +765,7 @@ fn task_add_tool_ignores_retired_external_refs() {
                 ],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
 
@@ -652,7 +790,7 @@ fn task_add_tool_recovers_mcp_encoded_acceptance_and_context_arrays() {
                 "context_files": ["[\"file:src/lib.rs\"]"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
 
@@ -668,6 +806,8 @@ fn task_add_tool_recovers_mcp_encoded_acceptance_and_context_arrays() {
 
 #[test]
 fn task_add_tool_infers_agent_from_model_only_input() {
+    let _env =
+        orbit_common::test_env::unset(orbit_common::test_env::AGENT_IDENTITY_ENV.iter().copied());
     let (_root, runtime, _repo_root) = test_runtime();
 
     let output = runtime
@@ -677,7 +817,7 @@ fn task_add_tool_infers_agent_from_model_only_input() {
                 "title": "Propose model-only task",
                 "description": "Exercise model-first provenance.",
                 "workspace": ".",
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
             None,
             None,
@@ -690,7 +830,7 @@ fn task_add_tool_infers_agent_from_model_only_input() {
     assert!(output.get("model").is_none_or(serde_json::Value::is_null));
     assert_eq!(
         output.get("created_by").and_then(Value::as_str),
-        Some("gpt-5.5")
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL)
     );
 }
 
@@ -725,6 +865,102 @@ fn task_update_tool_infers_agent_from_model_only_input() {
 }
 
 #[test]
+fn task_update_tool_persists_and_clears_pr_status() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Review-ready task",
+        "A task updated through the agent tool surface.",
+        TaskStatus::InProgress,
+        &[],
+    );
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task.id,
+                "pr_status": "approved",
+                "execution_summary": "Implemented and verified.",
+                "status": "review",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("combined update succeeds");
+
+    assert_eq!(
+        output.get("pr_status").and_then(Value::as_str),
+        Some("approved")
+    );
+    assert_eq!(
+        output.get("execution_summary").and_then(Value::as_str),
+        Some("Implemented and verified.")
+    );
+    assert_eq!(output.get("status").and_then(Value::as_str), Some("review"));
+
+    let persisted = runtime.get_task(&task.id).expect("read updated task");
+    assert_eq!(persisted.pr_status.as_deref(), Some("approved"));
+    assert_eq!(persisted.execution_summary, "Implemented and verified.");
+    assert_eq!(persisted.status, TaskStatus::Review);
+
+    let cleared = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task.id,
+                "pr_status": "",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("empty pr status clears the field");
+    assert_eq!(cleared.get("pr_status"), Some(&Value::Null));
+
+    let persisted = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task.id }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task show tool succeeds after clearing pr status");
+    assert_eq!(persisted.get("pr_status"), Some(&Value::Null));
+}
+
+#[test]
+fn task_update_tool_leaves_all_fields_unchanged_when_composite_update_is_invalid() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Backlog task",
+        "A task whose invalid status transition must not partially apply.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let message = invalid_input_message(runtime.execute_tool_command(
+        "orbit.task.update",
+        json!({
+            "id": task.id,
+            "pr_status": "approved",
+            "execution_summary": "This must not persist.",
+            "status": "archived",
+        }),
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    ));
+    assert!(message.contains("archive"), "{message}");
+
+    let persisted = runtime.get_task(&task.id).expect("read unchanged task");
+    assert_eq!(persisted.pr_status, None);
+    assert!(persisted.execution_summary.is_empty());
+    assert_eq!(persisted.status, TaskStatus::Backlog);
+}
+
+#[test]
 fn task_update_tool_rejects_dropped_task_types() {
     let (_root, runtime, repo_root) = test_runtime();
     let task = create_task(
@@ -744,7 +980,7 @@ fn task_update_tool_rejects_dropped_task_types() {
                 "type": dropped_type,
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         ));
         assert!(message.contains(dropped_type), "{message}");
         assert!(
@@ -790,7 +1026,7 @@ fn task_update_tool_replaces_dependencies() {
                 "dependencies": [first_dependency.id.clone()],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool sets dependency");
 
@@ -807,7 +1043,7 @@ fn task_update_tool_replaces_dependencies() {
                 "dependencies": [second_dependency.id.clone()],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool replaces dependency");
 
@@ -838,7 +1074,7 @@ fn task_update_tool_persists_source_task_id_and_history() {
                 "type": "bug",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
     let task_id = added["id"].as_str().expect("task id").to_string();
@@ -889,7 +1125,7 @@ fn task_update_tool_persists_source_task_id_and_history() {
             "orbit.task.show",
             json!({ "id": output["id"].as_str().expect("task id") }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task show tool succeeds");
     assert_eq!(
@@ -921,7 +1157,7 @@ fn task_update_tool_clears_source_task_id_with_empty_string() {
                 "type": "bug",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
     let seeded = runtime
@@ -932,7 +1168,7 @@ fn task_update_tool_clears_source_task_id_with_empty_string() {
                 "source_task_id": source.id.clone(),
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool sets source task");
     assert_eq!(
@@ -948,7 +1184,7 @@ fn task_update_tool_clears_source_task_id_with_empty_string() {
                 "source_task_id": "",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool succeeds");
 
@@ -969,7 +1205,7 @@ fn task_update_tool_clears_source_task_id_with_empty_string() {
 }
 
 #[test]
-fn task_update_tool_stores_unresolved_source_task_id() {
+fn task_update_tool_rejects_unresolved_source_task_id_atomically() {
     // ORB-00255 retired `source_task_id` from the `orbit.task.add` schema,
     // so an unresolved ID must travel via `orbit.task.update`.
     let (_root, runtime, _repo_root) = test_runtime();
@@ -986,7 +1222,7 @@ fn task_update_tool_stores_unresolved_source_task_id() {
                 "source_task_id": "ORB-99998",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
     assert_eq!(
@@ -994,7 +1230,7 @@ fn task_update_tool_stores_unresolved_source_task_id() {
         Some(&Value::Null),
         "retired add-side source_task_id must be ignored"
     );
-    let output = runtime
+    let error = runtime
         .execute_tool_command(
             "orbit.task.update",
             json!({
@@ -1002,14 +1238,16 @@ fn task_update_tool_stores_unresolved_source_task_id() {
                 "source_task_id": unresolved_from_update,
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
-        .expect("update stores a loose source reference");
+        .expect_err("global task relation target must resolve");
 
-    assert_eq!(
-        output.get("source_task_id").and_then(Value::as_str),
-        Some(unresolved_from_update)
-    );
+    assert!(error.to_string().contains(unresolved_from_update));
+    assert!(error.to_string().contains("coordination registry"));
+    let unchanged = runtime
+        .get_task(update_target["id"].as_str().expect("task id"))
+        .expect("read unchanged task");
+    assert_eq!(unchanged.source_task_id(), None);
 }
 
 #[test]
@@ -1026,7 +1264,7 @@ fn task_update_tool_replaces_tags() {
                 "tags": ["perf", "bench"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
     let task_id = added["id"].as_str().expect("task id").to_string();
@@ -1039,7 +1277,7 @@ fn task_update_tool_replaces_tags() {
                 "tags": ["docs"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool replaces tags");
 
@@ -1064,7 +1302,7 @@ fn task_update_tool_replaces_context_files_and_keeps_future_paths() {
                 "context_files": ["file:src/lib.rs"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task add tool succeeds");
     let task_id = added["id"].as_str().expect("task id").to_string();
@@ -1081,7 +1319,7 @@ fn task_update_tool_replaces_context_files_and_keeps_future_paths() {
                 "context_files": ["[\"file:src/main.rs\", \"file:src/future.rs\"]"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool replaces context_files");
 
@@ -1099,7 +1337,7 @@ fn task_update_tool_replaces_context_files_and_keeps_future_paths() {
             "orbit.task.show",
             json!({ "id": output["id"].as_str().expect("task id") }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task show tool succeeds");
     assert_eq!(
@@ -1139,7 +1377,7 @@ fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
                     "tags": tags,
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("create tagged task");
     }
@@ -1149,7 +1387,7 @@ fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
             "orbit.task.list",
             json!({ "tag": ["perf"] }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("list by tag");
     assert_task_titles(&perf_list, &["Perf task", "Perf bench task"]);
@@ -1159,7 +1397,7 @@ fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
             "orbit.task.list",
             json!({ "tag": ["perf", "bench"] }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("list by both tags");
     assert_task_titles(&both_list, &["Perf bench task"]);
@@ -1172,7 +1410,7 @@ fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
             "orbit.search",
             json!({ "query": "tag-search", "kind": "task", "tag": ["bench"] }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("search by tag");
     assert_task_titles(&bench_search["results"], &["Bench task", "Perf bench task"]);
@@ -1182,10 +1420,264 @@ fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
             "orbit.search",
             json!({ "query": "tag-search", "kind": "task", "tag": ["perf", "bench"] }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("search by both tags");
     assert_task_titles(&both_search["results"], &["Perf bench task"]);
+}
+
+#[test]
+fn task_list_tool_is_status_neutral_recent_first_and_bounded() {
+    // ORB-10310: `orbit.task.list` must return every lifecycle status by
+    // default (no hidden `backlog,in-progress` subset), newest-first.
+    let (_root, runtime, repo_root) = test_runtime();
+    let statuses = [
+        TaskStatus::Proposed,
+        TaskStatus::Backlog,
+        TaskStatus::InProgress,
+        TaskStatus::Review,
+        TaskStatus::Done,
+    ];
+    let mut created = Vec::new();
+    for (index, status) in statuses.iter().enumerate() {
+        created.push(create_task(
+            &runtime,
+            &repo_root,
+            &format!("Task {index} in {status}"),
+            "status-neutral listing fixture",
+            *status,
+            &[],
+        ));
+    }
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({}),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task list tool succeeds");
+    let listed = output.as_array().expect("task array");
+    assert_eq!(
+        listed.len(),
+        created.len(),
+        "every status must be listed by default: {listed:?}"
+    );
+    for task in &created {
+        assert!(
+            listed.iter().any(|value| value["id"] == json!(task.id)),
+            "task {} ({}) missing from status-neutral list",
+            task.id,
+            task.status
+        );
+    }
+    let created_ats = listed
+        .iter()
+        .map(|value| {
+            value["created_at"]
+                .as_str()
+                .expect("created_at")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    for pair in created_ats.windows(2) {
+        assert!(
+            pair[0] >= pair[1],
+            "list must be newest-first by created_at: {created_ats:?}"
+        );
+    }
+}
+
+#[test]
+fn task_list_tool_default_limit_returns_newest_fifty() {
+    // ORB-10310: the status-neutral default is bounded to the 50 newest tasks.
+    let (_root, runtime, repo_root) = test_runtime();
+    let mut created = Vec::new();
+    for index in 0..55 {
+        created.push(create_task(
+            &runtime,
+            &repo_root,
+            &format!("Bounded task {index:02}"),
+            "default-limit fixture",
+            TaskStatus::Backlog,
+            &[],
+        ));
+    }
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({}),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task list tool succeeds");
+    let listed = output.as_array().expect("task array");
+    assert_eq!(
+        listed.len(),
+        50,
+        "default limit must bound the response to 50"
+    );
+    // The 50 returned are the newest; the five oldest are excluded.
+    let listed_ids = listed
+        .iter()
+        .map(|value| value["id"].as_str().expect("id").to_string())
+        .collect::<std::collections::HashSet<_>>();
+    for oldest in &created[..5] {
+        assert!(
+            !listed_ids.contains(&oldest.id),
+            "oldest task {} must fall outside the newest 50",
+            oldest.id
+        );
+    }
+}
+
+#[test]
+fn task_list_tool_limit_override_and_zero_rejection() {
+    let (_root, runtime, repo_root) = test_runtime();
+    for index in 0..3 {
+        create_task(
+            &runtime,
+            &repo_root,
+            &format!("Override task {index}"),
+            "limit-override fixture",
+            TaskStatus::Backlog,
+            &[],
+        );
+    }
+
+    let limited = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({ "limit": 2 }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task list tool succeeds");
+    assert_eq!(limited.as_array().expect("task array").len(), 2);
+
+    let message = invalid_input_message(runtime.execute_tool_command(
+        "orbit.task.list",
+        json!({ "limit": 0 }),
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    ));
+    assert!(message.contains("at least 1"), "{message}");
+}
+
+#[test]
+fn task_list_tool_applies_status_filter_before_limit() {
+    // ORB-10310: an explicit filter must be applied before ordering + limiting,
+    // so a `limit: 1` on a status filter returns the newest *matching* task,
+    // never a newer non-matching one.
+    let (_root, runtime, repo_root) = test_runtime();
+    create_task(
+        &runtime,
+        &repo_root,
+        "Older review task",
+        "filter-before-limit fixture",
+        TaskStatus::Review,
+        &[],
+    );
+    let newer_review = create_task(
+        &runtime,
+        &repo_root,
+        "Newer review task",
+        "filter-before-limit fixture",
+        TaskStatus::Review,
+        &[],
+    );
+    // Created last, so newest overall — but not a review, so the status filter
+    // must exclude it even though the limit is 1.
+    create_task(
+        &runtime,
+        &repo_root,
+        "Newest backlog task",
+        "filter-before-limit fixture",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({ "status": "review", "limit": 1 }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task list tool succeeds");
+    let listed = output.as_array().expect("task array");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["id"], json!(newer_review.id));
+    assert_eq!(listed[0]["status"], json!("review"));
+}
+
+#[test]
+fn task_list_tool_accepts_comma_delimited_and_array_status_filters() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let backlog = create_task(
+        &runtime,
+        &repo_root,
+        "Backlog status task",
+        "multi-status fixture",
+        TaskStatus::Backlog,
+        &[],
+    );
+    let in_progress = create_task(
+        &runtime,
+        &repo_root,
+        "In-progress status task",
+        "multi-status fixture",
+        TaskStatus::InProgress,
+        &[],
+    );
+    let review = create_task(
+        &runtime,
+        &repo_root,
+        "Review status task",
+        "multi-status fixture",
+        TaskStatus::Review,
+        &[],
+    );
+    create_task(
+        &runtime,
+        &repo_root,
+        "Done status task",
+        "multi-status fixture",
+        TaskStatus::Done,
+        &[],
+    );
+
+    let comma_delimited = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({ "status": "backlog,in-progress,review" }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("comma-delimited statuses succeed");
+    let array = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({ "status": ["backlog", "in-progress", "review"] }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("status array succeeds");
+
+    for output in [&comma_delimited, &array] {
+        let ids = output
+            .as_array()
+            .expect("task array")
+            .iter()
+            .map(|task| task["id"].as_str().expect("task id"))
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains(backlog.id.as_str()));
+        assert!(ids.contains(in_progress.id.as_str()));
+        assert!(ids.contains(review.id.as_str()));
+    }
 }
 
 #[test]
@@ -1208,7 +1700,7 @@ fn task_update_tool_recovers_mcp_encoded_acceptance_array() {
                 "acceptance_criteria": ["[\"Criterion A\", \"Criterion B\"]"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool succeeds");
 
@@ -1238,7 +1730,7 @@ fn task_show_tool_recovers_mcp_encoded_fields_array() {
                 "fields": ["[\"description\", \"context_files\"]"],
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task show tool succeeds");
 
@@ -1272,7 +1764,7 @@ fn task_update_tool_allows_explicit_attribution_updates() {
                 "implemented_by": "manual-implementer",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool succeeds");
 
@@ -1294,7 +1786,7 @@ fn task_update_tool_allows_explicit_attribution_updates() {
                 "implemented_by": "",
             }),
             Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
         )
         .expect("task update tool clears attribution");
 
@@ -1348,7 +1840,7 @@ fn task_tool_rejects_mismatched_agent_and_model() {
                 "description": "Exercise explicit mismatch validation.",
                 "workspace": ".",
                 "agent": "claude",
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
             None,
             None,

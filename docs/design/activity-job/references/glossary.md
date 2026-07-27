@@ -1,3 +1,9 @@
+---
+type: design
+summary: "Glossary: Activity / Job"
+last_validated: 2026-07-27
+---
+
 # Glossary: Activity / Job
 
 This glossary covers Orbit-specific execution-substrate vocabulary used by the Activity / Job docs. It deliberately excludes generic workflow terms such as "retry," "quorum," and "timeout" unless Orbit gives them a more specific meaning.

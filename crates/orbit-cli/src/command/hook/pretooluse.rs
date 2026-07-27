@@ -13,8 +13,7 @@ pub struct PretooluseArgs {
 
 impl Execute for PretooluseArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        if let Some(output) =
-            orbit_core::command::learning_hook::run_pretooluse(runtime, self.format.into())
+        if let Some(output) = orbit_cmd::learning_hook::run_pretooluse(runtime, self.format.into())
         {
             println!("{output}");
         }

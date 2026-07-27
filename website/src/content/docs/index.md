@@ -6,17 +6,16 @@ tableOfContents: false
 
 <section class="orbit-hero">
   <div class="orbit-hero-copy">
-    <div class="orbit-hero-eyebrow">v0.3 · early access</div>
+    <div class="orbit-hero-eyebrow">v0.9.2 · early access</div>
     <h1 class="orbit-hero-headline">The audit log for your AI coding agents.</h1>
-    <p class="orbit-hero-lede">Durable task lifecycle. Every commit attributed to a task; every agent action recorded as a structured audit event. Local-first, bring your own model provider.</p>
+    <p class="orbit-hero-lede">Durable task lifecycle, task-attributed workflow commits, and structured audit records for agent workflows. Local-first, bring your own model provider.</p>
     <div class="orbit-hero-install">
       <span class="orbit-hero-install-prompt">$</span>
-      <code>curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | sh</code>
-      <button class="orbit-hero-install-copy" type="button" data-copy="curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | sh">Copy</button>
+      <code>npm install -g @orbit-tools/cli</code>
+      <button class="orbit-hero-install-copy" type="button" data-copy="npm install -g @orbit-tools/cli">Copy</button>
     </div>
     <div class="orbit-hero-actions">
       <a class="orbit-button primary" href="./getting-started/install/">Install Orbit →</a>
-      <a class="orbit-button" href="https://github.com/danieljhkim/orbit">GitHub</a>
     </div>
   </div>
   <div class="orbit-hero-diagram" aria-hidden="true">
@@ -32,7 +31,7 @@ tableOfContents: false
   <a class="orbit-card" data-tag="01" href="./getting-started/install/">
     <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></div>
     <h3>Install Orbit</h3>
-    <p>One binary, zero config. Bring your own model provider.</p>
+    <p>One binary, local config. Bring your own model provider.</p>
   </a>
   <a class="orbit-card" data-tag="02" href="./getting-started/first-task/">
     <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></div>
@@ -44,17 +43,12 @@ tableOfContents: false
     <h3>Activities &amp; jobs</h3>
     <p>The atomic unit of work. Composable, replayable, scoped by filesystem policy.</p>
   </a>
-  <a class="orbit-card" data-tag="04" href="./concepts/knowledge-graph/">
-    <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="3"/><path d="M5 9v6"/><circle cx="5" cy="18" r="3"/><path d="M12 3v18"/><circle cx="19" cy="6" r="3"/></svg></div>
-    <h3>Knowledge graph</h3>
-    <p>Tasks accrete context. Every run sharpens the next.</p>
-  </a>
-  <a class="orbit-card" data-tag="05" href="./reference/cli/">
+  <a class="orbit-card" data-tag="04" href="./reference/cli/">
     <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
     <h3>CLI reference</h3>
-    <p>Every command, flag, and exit code. Cross-linked.</p>
+    <p>A compact map of common commands and workflows.</p>
   </a>
-  <a class="orbit-card" data-tag="06" href="./reference/scoping/">
+  <a class="orbit-card" data-tag="05" href="./reference/scoping/">
     <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg></div>
     <h3>Policies</h3>
     <p>Declarative scoping rules for what an agent can touch.</p>
@@ -66,15 +60,15 @@ tableOfContents: false
 <div class="orbit-card-grid">
   <div class="orbit-card">
     <h3>Auditable</h3>
-    <p>Every tool call, prompt, and task transition is a structured event with agent identity attached. Append-only, exportable.</p>
+    <p>Task mutations, workflow events, provider turns, and tool calls emit joined audit records. Captured payloads use write-time redaction.</p>
   </div>
   <div class="orbit-card">
     <h3>Intent-attributed</h3>
-    <p>Every commit carries a <code>task_id</code>. <code>git log --grep</code> reaches the prompt, plan, and review threads months later.</p>
+    <p>Workflow commits carry the allocated task ID, so <code>git log --grep</code> links code history back to the task record.</p>
   </div>
   <div class="orbit-card">
     <h3>Local-first</h3>
-    <p>Source never leaves your infrastructure. Bring your own model provider; no phone-home.</p>
+    <p>Task and run state stay in your Orbit roots. Provider CLIs handle model traffic using your own provider accounts.</p>
   </div>
   <div class="orbit-card">
     <h3>Safe parallel</h3>

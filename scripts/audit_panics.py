@@ -42,14 +42,16 @@ CFG_TEST_ATTR = re.compile(r"^\s*#\[\s*cfg\(\s*[^)]*\btest\b[^)]*\)\s*\]")
 ALL_CRATES = [
     "orbit-agent",
     "orbit-cli",
+    "orbit-cmd",
     "orbit-common",
     "orbit-core",
+    "orbit-dashboard",
     "orbit-engine",
     "orbit-exec",
-    "orbit-knowledge",
     "orbit-mcp",
     "orbit-policy",
-    "orbit-registry",
+    "orbit-remote",
+    "orbit-search",
     "orbit-store",
     "orbit-tools",
 ]

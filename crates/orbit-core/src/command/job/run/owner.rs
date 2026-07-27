@@ -4,6 +4,13 @@
 
 use orbit_common::types::OrbitError;
 use orbit_common::types::{JobRun, JobRunState};
+#[cfg(target_os = "linux")]
+use orbit_common::utility::process_identity::linux_process_state;
+/// Re-exported so the historical `owner::process_is_alive` path keeps working
+/// for this module's callers and sibling tests; the probe itself now lives in
+/// `orbit-common` so other run surfaces can share it [ORB-10496].
+#[cfg(unix)]
+pub(super) use orbit_common::utility::process_identity::process_is_alive;
 #[cfg(unix)]
 use orbit_common::utility::process_identity::{
     ProbeOutcome, STABLE_TOKEN_PREFIX, legacy_lstart_matches, probe_process_start_identity,
@@ -28,6 +35,9 @@ pub(super) fn signal_run_owner_process(run: &JobRun) -> Result<String, OrbitErro
     if pid == std::process::id() {
         return Ok("self_not_signalled".to_string());
     }
+    if !process_is_alive(pid) {
+        return Ok("already_exited".to_string());
+    }
     if !matches!(classify_run_owner(run), OwnerIdentity::Verified) {
         return Ok("owner_identity_mismatch".to_string());
     }
@@ -42,7 +52,8 @@ pub(super) fn signal_run_owner_process(run: &JobRun) -> Result<String, OrbitErro
         match send_signal_to_process_group(pgid, libc::SIGTERM) {
             Ok(()) => {}
             Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {
-                return Ok("already_exited".to_string());
+                return verify_owner_termination(pid, Some(pgid), true, false)
+                    .map(|()| "already_exited".to_string());
             }
             Err(error) => {
                 return Err(OrbitError::Execution(format!(
@@ -51,14 +62,17 @@ pub(super) fn signal_run_owner_process(run: &JobRun) -> Result<String, OrbitErro
             }
         }
 
-        if wait_for_process_group_exit(pgid, RUN_OWNER_TERMINATION_GRACE) {
+        if wait_for_process_group_exit(pgid, RUN_OWNER_TERMINATION_GRACE)
+            && verify_owner_termination(pid, Some(pgid), true, false).is_ok()
+        {
             return Ok("terminated_process_group".to_string());
         }
 
         match send_signal_to_process_group(pgid, libc::SIGKILL) {
             Ok(()) => {}
             Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {
-                return Ok("terminated_process_group".to_string());
+                return verify_owner_termination(pid, Some(pgid), true, true)
+                    .map(|()| "killed_process_group".to_string());
             }
             Err(error) => {
                 return Err(OrbitError::Execution(format!(
@@ -66,20 +80,23 @@ pub(super) fn signal_run_owner_process(run: &JobRun) -> Result<String, OrbitErro
                 )));
             }
         }
-        let _ = wait_for_process_group_exit(pgid, RUN_OWNER_TERMINATION_GRACE);
-        return Ok("killed_process_group".to_string());
+        wait_for_process_group_exit(pgid, RUN_OWNER_TERMINATION_GRACE);
+        return verify_owner_termination(pid, Some(pgid), true, true)
+            .map(|()| "killed_process_group".to_string());
     }
 
     // Fallback for platforms/configurations where the owner process group
     // cannot be resolved. The PID identity guard above still protects against
     // killing a reused PID.
     send_signal_to_pid(pid, libc::SIGTERM)?;
-    if wait_for_owner_exit(pid, RUN_OWNER_TERMINATION_GRACE) {
+    if wait_for_owner_exit(pid, RUN_OWNER_TERMINATION_GRACE)
+        && verify_owner_termination(pid, None, true, false).is_ok()
+    {
         Ok("terminated_owner".to_string())
     } else {
         send_signal_to_pid(pid, libc::SIGKILL)?;
-        let _ = wait_for_owner_exit(pid, RUN_OWNER_TERMINATION_GRACE);
-        Ok("killed_owner".to_string())
+        wait_for_owner_exit(pid, RUN_OWNER_TERMINATION_GRACE);
+        verify_owner_termination(pid, None, true, true).map(|()| "killed_owner".to_string())
     }
 }
 
@@ -151,6 +168,10 @@ fn process_group_is_alive(pgid: libc::pid_t) -> bool {
     if pgid <= 1 {
         return false;
     }
+    #[cfg(target_os = "linux")]
+    if let Some(alive) = linux_process_group_is_alive(pgid) {
+        return alive;
+    }
     let rc = unsafe { libc::kill(-pgid, 0) };
     if rc == 0 {
         return true;
@@ -158,11 +179,148 @@ fn process_group_is_alive(pgid: libc::pid_t) -> bool {
     std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
+/// Linux keeps unreaped processes visible to `kill(..., 0)`, even though they
+/// can no longer run or receive signals. Treat a group consisting solely of
+/// zombies as terminated so a parent which reaps after cancellation does not
+/// make a successful cancellation look incomplete.
+#[cfg(target_os = "linux")]
+fn linux_process_group_is_alive(pgid: libc::pid_t) -> Option<bool> {
+    let entries = std::fs::read_dir("/proc").ok()?;
+    let mut found_group_member = false;
+    for entry in entries.flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let Some((state, member_pgid)) = linux_process_state(pid) else {
+            continue;
+        };
+        if member_pgid != pgid {
+            continue;
+        }
+        found_group_member = true;
+        if state != 'Z' {
+            return Some(true);
+        }
+    }
+    found_group_member.then_some(false)
+}
+
+#[cfg(unix)]
+pub(super) fn verify_owner_termination(
+    pid: u32,
+    pgid: Option<libc::pid_t>,
+    term_sent: bool,
+    kill_sent: bool,
+) -> Result<(), OrbitError> {
+    let leader_alive = process_is_alive(pid);
+    let group_alive = pgid.is_some_and(process_group_is_alive);
+    if !leader_alive && !group_alive {
+        return Ok(());
+    }
+    Err(OrbitError::RunCancellationIncomplete {
+        pid,
+        pgid,
+        term_sent,
+        kill_sent,
+        leader_alive,
+        group_alive,
+    })
+}
+
 /// Returns true only for Running runs whose owner is conclusively stale
 /// (Mismatch or Missing). Other classifications keep the run live.
 #[cfg(unix)]
 pub(super) fn running_run_owner_is_stale(run: &JobRun) -> bool {
     running_run_owner_stale_reason(run).is_some()
+}
+
+/// [ORB-10070] Grace window before an unclaimed `pending` run (no recorded
+/// owner pid) may be treated as orphaned. Pipeline workers claim their queued
+/// run within seconds of spawn, so the window only shields (a) a reconcile
+/// racing that claim and (b) still-live queued runs submitted by binaries
+/// predating the pending-owner claim. A claimed pending run needs no grace:
+/// its owner liveness is probed exactly like a running run's.
+pub(super) const PENDING_RUN_UNCLAIMED_GRACE_MINUTES: i64 = 30;
+
+/// Why a `pending` run is conclusively orphaned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PendingStaleReason {
+    /// A worker claimed the run and that owner process is conclusively gone.
+    #[cfg(unix)]
+    Owner(OwnerIdentity),
+    /// No worker ever claimed the run and the claim window has long passed
+    /// (e.g. the spawned worker died before claiming, or a host reboot killed
+    /// queued workers left by an older binary that never recorded owners).
+    NeverClaimed,
+}
+
+/// Returns `Some(reason)` only when a `pending` run is conclusively orphaned:
+/// its claimed owner process is gone (Mismatch/Missing), or it was never
+/// claimed and is older than [`PENDING_RUN_UNCLAIMED_GRACE_MINUTES`].
+/// Inconclusive owner probes keep the run pending, mirroring the running-run
+/// policy.
+#[cfg(unix)]
+pub(super) fn pending_run_stale_reason(run: &JobRun) -> Option<PendingStaleReason> {
+    if run.state != JobRunState::Pending {
+        return None;
+    }
+    if run.pid.is_some() {
+        return match classify_run_owner(run) {
+            identity @ (OwnerIdentity::Mismatch | OwnerIdentity::Missing) => {
+                Some(PendingStaleReason::Owner(identity))
+            }
+            OwnerIdentity::Verified
+            | OwnerIdentity::LegacyLiveUnverified
+            | OwnerIdentity::ProbeUnavailable => None,
+        };
+    }
+    pending_run_unclaimed_past_grace(run).then_some(PendingStaleReason::NeverClaimed)
+}
+
+/// Non-Unix: owner liveness cannot be probed, so a claimed pending run is
+/// always presumed live; only the never-claimed grace window applies.
+#[cfg(not(unix))]
+pub(super) fn pending_run_stale_reason(run: &JobRun) -> Option<PendingStaleReason> {
+    if run.state != JobRunState::Pending || run.pid.is_some() {
+        return None;
+    }
+    pending_run_unclaimed_past_grace(run).then_some(PendingStaleReason::NeverClaimed)
+}
+
+fn pending_run_unclaimed_past_grace(run: &JobRun) -> bool {
+    chrono::Utc::now().signed_duration_since(run.created_at)
+        > chrono::Duration::minutes(PENDING_RUN_UNCLAIMED_GRACE_MINUTES)
+}
+
+/// Builds the diagnostic message recorded in the interrupted step when an
+/// orphaned `pending` run is reconciled.
+pub(super) fn stale_pending_run_message(run: &JobRun, reason: PendingStaleReason) -> String {
+    let reason_str = match reason {
+        #[cfg(unix)]
+        PendingStaleReason::Owner(OwnerIdentity::Mismatch) => "token_mismatch",
+        #[cfg(unix)]
+        PendingStaleReason::Owner(OwnerIdentity::Missing) => "process_not_found",
+        // Verified / LegacyLiveUnverified / ProbeUnavailable never reach the
+        // stale path; keep them tagged so a future caller is never silently
+        // wrong (mirrors `stale_job_run_message`).
+        #[cfg(unix)]
+        PendingStaleReason::Owner(OwnerIdentity::Verified) => "verified",
+        #[cfg(unix)]
+        PendingStaleReason::Owner(OwnerIdentity::LegacyLiveUnverified) => "legacy_live_unverified",
+        #[cfg(unix)]
+        PendingStaleReason::Owner(OwnerIdentity::ProbeUnavailable) => "probe_unavailable",
+        PendingStaleReason::NeverClaimed => "never_claimed",
+    };
+    format!(
+        "queued job run marked interrupted because no live worker process owns it (reason={}, pid={}, pid_start_time={}, created_at={}, unclaimed_grace_minutes={})",
+        reason_str,
+        run.pid
+            .map(|pid| pid.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        run.pid_start_time.as_deref().unwrap_or("-"),
+        run.created_at.to_rfc3339(),
+        PENDING_RUN_UNCLAIMED_GRACE_MINUTES,
+    )
 }
 
 #[cfg(not(unix))]
@@ -289,19 +447,6 @@ where
     }
 }
 
-#[cfg(unix)]
-pub(super) fn process_is_alive(pid: u32) -> bool {
-    if pid == 0 || pid > i32::MAX as u32 {
-        return false;
-    }
-    // Safety: signal 0 performs existence/permission checking only.
-    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    if rc == 0 {
-        return true;
-    }
-    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
 /// Builds the diagnostic message recorded in the failure step when a stale
 /// owner causes a Running run to be reconciled to Failed.
 #[cfg(unix)]
@@ -318,7 +463,7 @@ pub(super) fn stale_job_run_message(run: &JobRun, reason: Option<OwnerIdentity>)
         None => "unknown",
     };
     format!(
-        "job run marked failed because recorded worker process is no longer alive (reason={}, pid={}, pid_start_time={})",
+        "job run marked interrupted because recorded worker process is no longer alive (reason={}, pid={}, pid_start_time={})",
         reason_str,
         run.pid
             .map(|pid| pid.to_string())
@@ -330,7 +475,7 @@ pub(super) fn stale_job_run_message(run: &JobRun, reason: Option<OwnerIdentity>)
 #[cfg(not(unix))]
 pub(super) fn stale_job_run_message(run: &JobRun, _reason: Option<()>) -> String {
     format!(
-        "job run marked failed because recorded worker process is no longer alive (reason=unknown, pid={}, pid_start_time={})",
+        "job run marked interrupted because recorded worker process is no longer alive (reason=unknown, pid={}, pid_start_time={})",
         run.pid
             .map(|pid| pid.to_string())
             .unwrap_or_else(|| "-".to_string()),

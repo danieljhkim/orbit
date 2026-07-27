@@ -7,6 +7,11 @@ use serde::Serialize;
 pub struct JobRunListParams {
     pub job_id: Option<String>,
     pub state: Option<JobRunState>,
+    /// Restrict results to every state considered terminal by `JobRunState`.
+    ///
+    /// This is independent from `state` so existing callers can continue to
+    /// request one concrete state without changing their query semantics.
+    pub terminal_only: bool,
     pub since: Option<DateTime<Utc>>,
     pub limit: Option<usize>,
 }

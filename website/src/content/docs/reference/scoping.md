@@ -20,11 +20,16 @@ sidebar:
 
 ```text
 .orbit/
-  diagnostics/
-  jobs/
-  knowledge/
-  scoreboard/
+  adrs/
+  auto_tasks/
+  frictions/
+  learnings/
+  resources/
+  routines/
+  state/
   tasks/
+  config.toml
+  config.yaml
 ```
 
 ## Rule of Thumb

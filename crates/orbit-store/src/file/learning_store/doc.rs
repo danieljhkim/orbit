@@ -81,9 +81,3 @@ fn default_schema_version() -> u8 {
 fn default_status() -> LearningStatus {
     LearningStatus::Active
 }
-
-pub(super) fn serialize_learning_doc_yaml(
-    doc: &LearningFileDocument,
-) -> Result<String, orbit_common::types::OrbitError> {
-    serde_yaml::to_string(doc).map_err(|e| orbit_common::types::OrbitError::Store(e.to_string()))
-}

@@ -1,19 +1,151 @@
 mod cleanup;
+mod dependency_delivery;
+mod gc;
 mod merge;
 mod setup;
 
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::OrbitError;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 
-use super::git::{git_output, git_success};
+use crate::executor::automation::input::{input_string_field, required_input_string};
 
-pub(in crate::executor::automation) use cleanup::cleanup_worktree;
+pub use gc::{WorktreeGcOptions, WorktreeGcResult, collect_worktrees};
 pub(in crate::executor::automation) use merge::merge_batch_worktree_into_base;
 pub(in crate::executor::automation) use setup::setup_worktree;
 
 const SHARED_WORKTREE_NAME_PREFIX: &str = "parallel-batch";
-const SHARED_WORKTREE_BRANCH_PREFIX: &str = "orbit/parallel-batch";
+const DEFAULT_BRANCH_PREFIX: &str = "orbit";
+
+/// What a run's worktree is: the tasks it serves, the branch prefix that
+/// names it, and the run token that makes its directory unique.
+///
+/// `setup_worktree` creates a worktree from this identity; the garbage
+/// collector re-derives the same identity from the stored run record to
+/// recognise the directory on disk. The two sites used to spell the rule out
+/// independently and silently drifted — gc probed a singular `task_id` while
+/// `task_pr_pipeline` emits a `task_ids` array — so gc matched no real
+/// directory, classified every worktree `skipped:unrecognized`, and reclaimed
+/// nothing (ORB-10427). This type is the single derivation; add new inputs
+/// here rather than at either call site.
+pub(in crate::executor::automation) struct WorktreeIdentity {
+    /// Every task the worktree serves, in input order. Non-empty.
+    pub(in crate::executor::automation) task_ids: Vec<String>,
+    /// The branch (and directory) prefix, `orbit` unless overridden.
+    pub(in crate::executor::automation) branch_prefix: String,
+    /// The token that names the directory alongside the prefix.
+    pub(in crate::executor::automation) run_id: String,
+}
+
+impl WorktreeIdentity {
+    /// Derive the identity from a `setup_worktree`-shaped input.
+    ///
+    /// `engine_run_id` is the id the engine knows the run by, consulted when
+    /// the input itself carries no `run_id`. `setup_worktree` passes `None`:
+    /// it only ever sees its own input, and falls back to a task-derived
+    /// token. gc passes the run record's id, because a stored `initial_input`
+    /// does not carry the `run_id` the engine injected at dispatch.
+    ///
+    /// Fails when the input names no task at all — such a run never went
+    /// through `setup_worktree`.
+    pub(in crate::executor::automation) fn from_input(
+        input: &Value,
+        engine_run_id: Option<&str>,
+    ) -> Result<Self, OrbitError> {
+        let task_ids = task_ids_from_input(input)?;
+        let run_id = input_string_field(input, "run_id")
+            .or_else(|| {
+                engine_run_id
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+            })
+            .unwrap_or_else(|| fallback_run_id_for_tasks(&task_ids));
+        let branch_prefix = input_string_field(input, "branch_prefix")
+            .unwrap_or_else(|| DEFAULT_BRANCH_PREFIX.to_string());
+        Ok(Self {
+            task_ids,
+            branch_prefix,
+            run_id,
+        })
+    }
+
+    /// The worktree directory this identity resolves to.
+    pub(in crate::executor::automation) fn path(
+        &self,
+        repo_root: &Path,
+    ) -> Result<PathBuf, OrbitError> {
+        resolve_worktree_path_from_prefix(repo_root, &self.branch_prefix, &self.run_id)
+    }
+
+    /// The directory setup would have chosen had no `run_id` reached it, when
+    /// that differs from [`Self::path`].
+    ///
+    /// gc consults this as a second candidate so a worktree created under the
+    /// task-derived fallback token is still recognised: setup prefers
+    /// `input.run_id` and falls back to `task-<id>` / `bundle-<hash>`, and gc
+    /// cannot tell after the fact which branch setup took.
+    pub(in crate::executor::automation) fn fallback_path(
+        &self,
+        repo_root: &Path,
+    ) -> Result<Option<PathBuf>, OrbitError> {
+        let fallback = fallback_run_id_for_tasks(&self.task_ids);
+        if fallback == self.run_id {
+            return Ok(None);
+        }
+        resolve_worktree_path_from_prefix(repo_root, &self.branch_prefix, &fallback).map(Some)
+    }
+}
+
+fn task_ids_from_input(input: &Value) -> Result<Vec<String>, OrbitError> {
+    if let Some(items) = input.get("task_ids").and_then(Value::as_array) {
+        let task_ids = items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+                    .ok_or_else(|| {
+                        OrbitError::InvalidInput(
+                            "setup_worktree input.task_ids entries must be non-empty strings"
+                                .to_string(),
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if !task_ids.is_empty() {
+            return Ok(task_ids);
+        }
+    }
+
+    Ok(vec![required_input_string(input, "task_id")?.to_string()])
+}
+
+fn fallback_run_id_for_tasks(task_ids: &[String]) -> String {
+    if task_ids.len() == 1 {
+        return format!("task-{}", task_ids[0]);
+    }
+
+    let mut sorted_ids = task_ids.to_vec();
+    sorted_ids.sort();
+    let digest = Sha256::digest(sorted_ids.join(","));
+    format!("bundle-{}", &format!("{digest:x}")[..8])
+}
+
+/// Extract the `run_id` from an activity input value, returning a trimmed
+/// non-empty string. Used by activities that need to resolve the shared
+/// worktree for a run.
+fn require_run_id<'a>(input: &'a Value, activity: &str) -> Result<&'a str, OrbitError> {
+    input
+        .get("run_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| OrbitError::InvalidInput(format!("{activity} requires input.run_id")))
+}
 
 pub(in crate::executor::automation) fn sanitize_worktree_token(
     value: &str,
@@ -40,7 +172,7 @@ pub(in crate::executor::automation) fn sanitize_worktree_token(
     Ok(trimmed)
 }
 
-pub(in crate::executor::automation) fn resolve_worktree_path_from_prefix(
+pub fn resolve_worktree_path_from_prefix(
     repo_root: &Path,
     prefix: &str,
     run_id: &str,
@@ -57,10 +189,7 @@ pub(in crate::executor::automation) fn resolve_worktree_path_from_prefix(
     }
 }
 
-pub(in crate::executor::automation) fn resolve_shared_worktree_path(
-    repo_root: &Path,
-    run_id: &str,
-) -> Result<PathBuf, OrbitError> {
+pub fn resolve_shared_worktree_path(repo_root: &Path, run_id: &str) -> Result<PathBuf, OrbitError> {
     let dir_name = shared_worktree_dir_name(run_id)?;
     match worktree_root() {
         Some(root) => Ok(root.join(repo_name(repo_root)?).join(dir_name)),
@@ -70,47 +199,6 @@ pub(in crate::executor::automation) fn resolve_shared_worktree_path(
             .join("worktrees")
             .join(dir_name)),
     }
-}
-
-pub(in crate::executor::automation) fn ensure_shared_worktree(
-    repo_root: &Path,
-    worktree_path: &Path,
-    start_point: &str,
-    run_id: &str,
-) -> Result<(), OrbitError> {
-    let worktree_branch = shared_worktree_branch_name(run_id)?;
-    let worktree_branch = worktree_branch.as_str();
-
-    if worktree_path.exists() {
-        let target = git_output(repo_root, &["rev-parse", start_point])?;
-        git_success(
-            worktree_path,
-            &["checkout", "-B", worktree_branch, target.trim()],
-        )?;
-        git_success(worktree_path, &["clean", "-fd"])?;
-        return Ok(());
-    }
-
-    if let Some(parent) = worktree_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| {
-            OrbitError::Execution(format!(
-                "failed to create shared worktree directory '{}': {error}",
-                parent.display()
-            ))
-        })?;
-    }
-
-    git_success(
-        repo_root,
-        &[
-            "worktree",
-            "add",
-            "-b",
-            worktree_branch,
-            &worktree_path.to_string_lossy(),
-            start_point,
-        ],
-    )
 }
 
 fn worktree_root() -> Option<PathBuf> {
@@ -137,15 +225,6 @@ fn repo_name(repo_root: &Path) -> Result<&str, OrbitError> {
 fn shared_worktree_dir_name(run_id: &str) -> Result<String, OrbitError> {
     Ok(format!(
         "{SHARED_WORKTREE_NAME_PREFIX}-{}",
-        sanitize_worktree_token(run_id)?
-    ))
-}
-
-fn shared_worktree_branch_name(run_id: &str) -> Result<String, OrbitError> {
-    // Use a dash separator so the branch does not nest under the legacy
-    // `orbit/parallel-batch` ref name.
-    Ok(format!(
-        "{SHARED_WORKTREE_BRANCH_PREFIX}-{}",
         sanitize_worktree_token(run_id)?
     ))
 }

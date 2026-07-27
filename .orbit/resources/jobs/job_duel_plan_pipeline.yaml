@@ -1,0 +1,30 @@
+# Planning duel pipeline.
+#
+# Runs the retained planning-duel automation for one task. The automation
+# selects planner/arbiter roles, invokes the agent activities, writes the
+# winning plan back to the task, and records the planning-duel scoreboard row.
+
+schemaVersion: 2
+kind: Job
+metadata:
+  name: job_duel_plan_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  max_active_runs: 3
+  default_input:
+    task_id: null
+    base_branch: main
+    planner_a_family: null
+    planner_b_family: null
+    arbiter_family: null
+
+  steps:
+    - id: run_planning_duel
+      target: activity:run_planning_duel
+      default_input:
+        task_id: "{{ input.task_id }}"
+        base_branch: "{{ input.base_branch }}"
+        planner_a_family: "{{ input.planner_a_family }}"
+        planner_b_family: "{{ input.planner_b_family }}"
+        arbiter_family: "{{ input.arbiter_family }}"

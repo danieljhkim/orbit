@@ -14,19 +14,12 @@ pass = [
 ]
 
 [execution.codex]
-sandbox = "workspace-write"
+sandbox = "danger-full-access"
 # Optional: enable escalation requests for workflows that legitimately need approval.
 # approval_policy = "on-request"
 
-[task.approval]
-required_for_agent = true
-delegate_approval = true
-
 [scoring]
 enabled = true
-
-[graph]
-editing = false
 
 [workflow]
 # Default base branch for `orbit run ship` and `duel-plan`.
@@ -35,3 +28,15 @@ editing = false
 # `agent-main` is the dev integration branch where task PRs land — set
 # `base_branch = "agent-main"` for the same layout in your own repo.
 base_branch = "main"
+
+[runtime]
+# `backend` selects the v2 `agent_loop` execution backend: "cli" | "http" | "auto".
+# backend = "cli"
+#
+# Rotation + retention for the global JSONL log (~/.orbit/state/logs/orbit.jsonl).
+# [ORB-00415] Applied opportunistically at process start. All optional; the
+# conservative defaults below are used when a key is omitted. Invalid values
+# (0, or log_max_file_mb > log_max_total_mb) are rejected at config load.
+# log_retention_days = 7    # delete archives older than N days (>= 1)
+# log_max_total_mb   = 500  # total MiB budget across archives; oldest pruned first (>= 1)
+# log_max_file_mb    = 100  # roll the active log once it exceeds N MiB (>= 1, <= log_max_total_mb)

@@ -20,6 +20,10 @@ impl GitAuthor {
         Self::new("orbit", "orbit@orbit.local")
     }
 
+    pub(super) fn resolved_model(model: &str) -> Self {
+        Self::new(format!("orbit[{model}]"), "agent@orbit.invalid")
+    }
+
     pub(super) fn name(&self) -> &str {
         &self.name
     }

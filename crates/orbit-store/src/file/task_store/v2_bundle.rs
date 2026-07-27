@@ -1,7 +1,6 @@
 //! Task bundle v2 persistence is split into focused submodules while this root keeps store orchestration and re-exports.
 //! The `task_bundle_types` submodule owns bundle value types and document filename mapping.
 //! The `bundle_io` submodule owns bundle assembly, validation, JSONL repair, artifact manifest checks, and partial-bundle cleanup.
-//! The `review_threads` submodule owns review-thread sidecar files and tombstone recovery for interrupted rewrites.
 //! The `lock` submodule owns bundle create/delete lock ordering, sentinel cleanup, and projection-entry crash recovery checks.
 
 use std::fs;
@@ -14,25 +13,22 @@ use orbit_common::types::{
 };
 use orbit_common::utility::fs::{atomic_write_text, sync_parent_dir, with_exclusive_file_lock};
 
+use crate::file::yaml_doc::write_yaml_atomic_with;
 use crate::sqlite::task_registry::{ProjectionRebuildResult, TaskRegistryStore};
 
 pub(crate) mod bundle_io;
 pub(crate) mod lock;
-pub(crate) mod review_threads;
 pub(crate) mod task_bundle_types;
 
 pub(crate) use bundle_io::{
     append_jsonl_row, cleanup_partial_bundle_best_effort, read_bundle_at, write_bundle_at,
-    write_yaml_file,
+    write_bundle_with_artifacts_at,
 };
 pub(crate) use lock::{
     ensure_projection_entry_removable, remove_projection_entry, remove_task_bundle_lock_sentinel,
     task_bundle_lock_sentinel_path,
 };
-pub(crate) use review_threads::rewrite_review_threads;
-pub(crate) use task_bundle_types::{
-    TaskBundleCreateResult, TaskBundleV2, TaskDocumentV2, TaskReviewThreadV2,
-};
+pub(crate) use task_bundle_types::{TaskBundleCreateResult, TaskBundleV2, TaskDocumentV2};
 
 pub(crate) struct TaskBundleStoreV2 {
     // pub(crate) fields widened to allow sibling `tests/v2_bundle.rs` (and promoted
@@ -41,7 +37,7 @@ pub(crate) struct TaskBundleStoreV2 {
     // deliberately rather than keep nested anti-pattern).
     pub(crate) registry: TaskRegistryStore,
     pub(crate) workspace_id: String,
-    pub(crate) workspace_orbit_dir: PathBuf,
+    pub(crate) workspace_orbit_dir: Option<PathBuf>,
 }
 
 impl TaskBundleStoreV2 {
@@ -53,7 +49,15 @@ impl TaskBundleStoreV2 {
         Self {
             registry,
             workspace_id,
-            workspace_orbit_dir,
+            workspace_orbit_dir: Some(workspace_orbit_dir),
+        }
+    }
+
+    pub(crate) fn new_checkoutless(registry: TaskRegistryStore, workspace_id: String) -> Self {
+        Self {
+            registry,
+            workspace_id,
+            workspace_orbit_dir: None,
         }
     }
 
@@ -133,27 +137,34 @@ impl TaskBundleStoreV2 {
                     return Err(err);
                 }
             };
-        let projection = match self
-            .registry
-            .rebuild_projection(&self.workspace_orbit_dir, &self.workspace_id)
-        {
-            Ok(projection) => projection,
-            Err(err) => {
-                orbit_common::tracing::warn!(
-                    target: "orbit.store.task_bundle_v2",
-                    task_id,
-                    workspace_id = %self.workspace_id,
-                    error = %err,
-                    "task bundle created, but projection rebuild failed; continuing in degraded mode",
-                );
-                ProjectionRebuildResult {
-                    projected: 0,
-                    repaired: 0,
-                    degraded_reason: Some(format!(
-                        "projection rebuild failed after bundle creation: {err}"
-                    )),
+        let projection = match self.workspace_orbit_dir.as_deref() {
+            None => ProjectionRebuildResult {
+                projected: 0,
+                repaired: 0,
+                degraded_reason: None,
+            },
+            Some(workspace_orbit_dir) => match self
+                .registry
+                .rebuild_projection(workspace_orbit_dir, &self.workspace_id)
+            {
+                Ok(projection) => projection,
+                Err(err) => {
+                    orbit_common::tracing::warn!(
+                        target: "orbit.store.task_bundle_v2",
+                        task_id,
+                        workspace_id = %self.workspace_id,
+                        error = %err,
+                        "task bundle created, but projection rebuild failed; continuing in degraded mode",
+                    );
+                    ProjectionRebuildResult {
+                        projected: 0,
+                        repaired: 0,
+                        degraded_reason: Some(format!(
+                            "projection rebuild failed after bundle creation: {err}"
+                        )),
+                    }
                 }
-            }
+            },
         };
 
         Ok(TaskBundleCreateResult {
@@ -171,7 +182,9 @@ impl TaskBundleStoreV2 {
         orbit_common::types::validate_orb_task_id(task_id)?;
         let bundle_dir = self.bundle_path(task_id)?;
 
-        ensure_projection_entry_removable(&self.workspace_orbit_dir, task_id)?;
+        if let Some(workspace_orbit_dir) = self.workspace_orbit_dir.as_deref() {
+            ensure_projection_entry_removable(workspace_orbit_dir, task_id)?;
+        }
         let unregistered = self
             .registry
             .unregister_task_bundle(task_id, &self.workspace_id)?;
@@ -180,7 +193,10 @@ impl TaskBundleStoreV2 {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
             Err(err) => return Err(OrbitError::Io(err.to_string())),
         };
-        let removed_projection = remove_projection_entry(&self.workspace_orbit_dir, task_id)?;
+        let removed_projection = match self.workspace_orbit_dir.as_deref() {
+            Some(workspace_orbit_dir) => remove_projection_entry(workspace_orbit_dir, task_id)?,
+            None => false,
+        };
         Ok(unregistered || removed_bundle || removed_projection)
     }
 
@@ -218,19 +234,11 @@ impl TaskBundleStoreV2 {
             )));
         }
         envelope.validate()?;
-        write_yaml_file(
+        write_yaml_atomic_with(
             &self.bundle_path(task_id)?.join(TASK_ENVELOPE_FILE_NAME),
             envelope,
+            |err| OrbitError::Store(err.to_string()),
         )
-    }
-
-    pub(crate) fn rewrite_review_threads(
-        &self,
-        task_id: &str,
-        threads: &[TaskReviewThreadV2],
-    ) -> Result<(), OrbitError> {
-        let bundle_dir = self.bundle_path(task_id)?;
-        rewrite_review_threads(&bundle_dir, threads)
     }
 
     pub(crate) fn rewrite_artifact_manifest(
@@ -239,12 +247,13 @@ impl TaskBundleStoreV2 {
         manifest: &ArtifactManifestV2,
     ) -> Result<(), OrbitError> {
         manifest.validate()?;
-        write_yaml_file(
+        write_yaml_atomic_with(
             &self
                 .bundle_path(task_id)?
                 .join(TASK_ARTIFACTS_DIR_NAME)
                 .join(TASK_ARTIFACT_MANIFEST_FILE_NAME),
             manifest,
+            |err| OrbitError::Store(err.to_string()),
         )
     }
 

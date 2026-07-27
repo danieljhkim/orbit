@@ -17,8 +17,6 @@ You receive a precise edit specification from the parent (which files, which sym
 - `Edit` — exact-string replacement inside an existing file.
 - `Write` — full file write (creates or overwrites). Use sparingly; prefer `Edit`.
 
-The knowledge graph is read-only from this agent's perspective — use `Read`/`Grep`/`Glob` (or codegraph/orbit graph *query* tools if available) to orient, but apply all changes through native `Edit`/`Write`. The graph re-syncs on its own indexing pass; do not attempt to mutate it directly.
-
 ## When to use which
 
 - Targeted change inside an existing file → **`Edit`** (exact-string replace).

@@ -9,7 +9,7 @@ use orbit_common::utility::process_identity::process_start_identity_token;
 use rusqlite::TransactionBehavior;
 
 use crate::backend::{JobRunQuery, JobRunStepParams, JobRunStoreBackend};
-use crate::file::layout::validate_path_stem;
+use crate::file::path_safety::validate_path_stem;
 use crate::{Store, parse_timestamp};
 
 #[derive(Clone)]
@@ -126,9 +126,7 @@ impl JobRunStoreBackend for SqliteJobRunStore {
             retry_source_run_id,
             knowledge_metrics: None,
             resolved_crew: None,
-            planner_model: None,
-            implementer_model: None,
-            reviewer_model: None,
+            crew_model: None,
             steps: Vec::new(),
         };
         self.store
@@ -154,52 +152,18 @@ impl JobRunStoreBackend for SqliteJobRunStore {
         })
     }
 
-    fn take_over_running_job_run(
-        &self,
-        run_id: &str,
-        expected_pid: Option<u32>,
-        expected_pid_start_time: Option<String>,
-        started_at: DateTime<Utc>,
-        pid: u32,
-    ) -> Result<bool, OrbitError> {
-        self.update_run(run_id, |run| {
-            if run.state != JobRunState::Running
-                || run.pid != expected_pid
-                || run.pid_start_time != expected_pid_start_time
-            {
-                return Err(OrbitError::InvalidInput(
-                    "job run takeover mismatch".to_string(),
-                ));
-            }
-            run.started_at = run.started_at.or(Some(started_at));
-            run.pid = Some(pid);
-            run.pid_start_time = process_start_identity_token(pid);
-            Ok(())
-        })
-        .or_else(|err| match err {
-            OrbitError::InvalidInput(message) if message == "job run takeover mismatch" => {
-                Ok(false)
-            }
-            other => Err(other),
-        })
-    }
-
-    fn abandon_job_run(
-        &self,
-        run_id: &str,
-        finished_at: DateTime<Utc>,
-    ) -> Result<bool, OrbitError> {
-        self.update_run(run_id, |run| {
-            if run.state.is_terminal() {
+    fn claim_pending_job_run_owner(&self, run_id: &str, pid: u32) -> Result<bool, OrbitError> {
+        let mut claimed = false;
+        let found = self.update_run(run_id, |run| {
+            if run.state != JobRunState::Pending {
                 return Ok(());
             }
-            run.state = run
-                .state
-                .try_transition(RunEvent::Abandon)
-                .map_err(OrbitError::JobRunStateTransition)?;
-            run.finished_at = Some(finished_at);
+            run.pid = Some(pid);
+            run.pid_start_time = process_start_identity_token(pid);
+            claimed = true;
             Ok(())
-        })
+        })?;
+        Ok(found && claimed)
     }
 
     fn complete_job_run_step(
@@ -246,9 +210,7 @@ impl JobRunStoreBackend for SqliteJobRunStore {
     fn record_job_run_crew(&self, run_id: &str, crew: &Crew) -> Result<bool, OrbitError> {
         self.update_run(run_id, |run| {
             run.resolved_crew = Some(crew.name.clone());
-            run.planner_model = Some(crew.planner.model.clone());
-            run.implementer_model = Some(crew.implementer.model.clone());
-            run.reviewer_model = Some(crew.reviewer.model.clone());
+            run.crew_model = Some(crew.assignment.model.clone());
             Ok(())
         })
     }
@@ -269,6 +231,7 @@ impl JobRunStoreBackend for SqliteJobRunStore {
                 JobRunState::Failed => RunEvent::Fail,
                 JobRunState::Timeout => RunEvent::Timeout,
                 JobRunState::Cancelled => RunEvent::Cancel,
+                JobRunState::Interrupted => RunEvent::Interrupt,
                 other => {
                     return Err(OrbitError::JobRunStateTransition(format!(
                         "cannot finalize to non-terminal state: {other}"
@@ -417,10 +380,7 @@ impl Store {
         workspace_id: &str,
         run_id: &str,
     ) -> Result<Option<JobRun>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         get_job_run_for_workspace_conn(&conn, workspace_id, run_id)
     }
 
@@ -440,6 +400,11 @@ impl Store {
             conditions.push(format!("state = ?{}", params.len() + 1));
             params.push(Box::new(state.to_string()));
         }
+        if query.terminal_only {
+            conditions.push(
+                "state IN ('success', 'failed', 'timeout', 'cancelled', 'interrupted')".to_string(),
+            );
+        }
         if let Some(created_since) = query.created_since {
             conditions.push(format!("created_at >= ?{}", params.len() + 1));
             params.push(Box::new(created_since.to_rfc3339()));
@@ -447,7 +412,7 @@ impl Store {
         let mut sql = format!(
             "SELECT run_id, job_id, attempt, state, scheduled_at, started_at, finished_at, \
              duration_ms, created_at, pid, pid_start_time, input_json, retry_source_run_id, \
-             knowledge_metrics_json, resolved_crew, planner_model, implementer_model, reviewer_model \
+             knowledge_metrics_json, resolved_crew, COALESCE(crew_model, implementer_model) \
              FROM job_runs WHERE {} ORDER BY created_at DESC, run_id ASC",
             conditions.join(" AND ")
         );
@@ -457,10 +422,7 @@ impl Store {
         }
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|b| b.as_ref()).collect();
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         let mut stmt = conn
             .prepare(&sql)
             .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -481,10 +443,7 @@ impl Store {
         workspace_id: &str,
         run_id: &str,
     ) -> Result<Option<PipelineState>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         let raw = match conn.query_row(
             "SELECT pipeline_state_json FROM job_runs WHERE workspace_id = ?1 AND run_id = ?2",
             rusqlite::params![workspace_id, run_id],
@@ -561,8 +520,8 @@ fn upsert_job_run_for_workspace_conn(
             run_id, workspace_id, job_id, attempt, state, scheduled_at,
             started_at, finished_at, duration_ms, created_at, pid, pid_start_time,
             input_json, retry_source_run_id, knowledge_metrics_json, resolved_crew,
-            planner_model, implementer_model, reviewer_model, pipeline_state_json
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+            crew_model, pipeline_state_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
         ON CONFLICT(workspace_id, run_id) DO UPDATE SET
             job_id = excluded.job_id,
             attempt = excluded.attempt,
@@ -578,9 +537,7 @@ fn upsert_job_run_for_workspace_conn(
             retry_source_run_id = excluded.retry_source_run_id,
             knowledge_metrics_json = excluded.knowledge_metrics_json,
             resolved_crew = excluded.resolved_crew,
-            planner_model = excluded.planner_model,
-            implementer_model = excluded.implementer_model,
-            reviewer_model = excluded.reviewer_model,
+            crew_model = excluded.crew_model,
             pipeline_state_json = COALESCE(excluded.pipeline_state_json, job_runs.pipeline_state_json)"#,
         rusqlite::params![
             run.run_id,
@@ -599,9 +556,7 @@ fn upsert_job_run_for_workspace_conn(
             run.retry_source_run_id,
             knowledge_metrics_json,
             run.resolved_crew,
-            run.planner_model,
-            run.implementer_model,
-            run.reviewer_model,
+            run.crew_model,
             pipeline_state_json,
         ],
     )
@@ -618,7 +573,7 @@ fn get_job_run_for_workspace_conn(
         .prepare(
             "SELECT run_id, job_id, attempt, state, scheduled_at, started_at, finished_at, \
              duration_ms, created_at, pid, pid_start_time, input_json, retry_source_run_id, \
-             knowledge_metrics_json, resolved_crew, planner_model, implementer_model, reviewer_model \
+             knowledge_metrics_json, resolved_crew, COALESCE(crew_model, implementer_model) \
              FROM job_runs WHERE workspace_id = ?1 AND run_id = ?2",
         )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -658,9 +613,7 @@ fn row_to_job_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRun> {
         retry_source_run_id: row.get(12)?,
         knowledge_metrics: parse_optional_json(knowledge_metrics_json, "knowledge_metrics_json")?,
         resolved_crew: row.get(14)?,
-        planner_model: row.get(15)?,
-        implementer_model: row.get(16)?,
-        reviewer_model: row.get(17)?,
+        crew_model: row.get(15)?,
         steps: Vec::new(),
     })
 }
@@ -818,6 +771,155 @@ mod tests {
             .expect("some");
         assert_eq!(loaded.state, JobRunState::Success);
         assert_eq!(loaded.steps.len(), 1);
+    }
+
+    /// [ORB-10070] A pending run accepts an owner claim (pid recorded); once
+    /// the run leaves `pending` the claim is refused without writing.
+    #[test]
+    fn claim_pending_job_run_owner_only_claims_pending_runs() {
+        let backend = SqliteJobRunStore::new(Store::open_in_memory().expect("store"), "ws_a");
+        let scheduled_at = Utc::now();
+        let run = backend
+            .insert_job_run("job-claim", 1, scheduled_at, None, None)
+            .expect("insert");
+        assert!(run.pid.is_none());
+
+        assert!(
+            backend
+                .claim_pending_job_run_owner(&run.run_id, 4242)
+                .expect("claim pending")
+        );
+        let claimed = backend
+            .get_job_run(&run.run_id)
+            .expect("get")
+            .expect("some");
+        assert_eq!(claimed.state, JobRunState::Pending);
+        assert_eq!(claimed.pid, Some(4242));
+
+        assert!(
+            backend
+                .mark_job_run_running(&run.run_id, scheduled_at, 4242)
+                .expect("running")
+        );
+        assert!(
+            !backend
+                .claim_pending_job_run_owner(&run.run_id, 9999)
+                .expect("claim running is refused")
+        );
+        let running = backend
+            .get_job_run(&run.run_id)
+            .expect("get")
+            .expect("some");
+        assert_eq!(running.pid, Some(4242));
+
+        assert!(
+            !backend
+                .claim_pending_job_run_owner("jrun-missing", 4242)
+                .expect("claim missing run is refused")
+        );
+    }
+
+    #[test]
+    fn legacy_role_model_row_loads_as_flat_crew_model() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("orbit.db");
+        drop(Store::open(&db_path).expect("create current schema"));
+
+        let conn = rusqlite::Connection::open(&db_path).expect("open raw db");
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO job_runs(
+                run_id, workspace_id, job_id, attempt, state, scheduled_at, created_at,
+                resolved_crew, implementer_model
+             ) VALUES (?1, ?2, ?3, 1, 'success', ?4, ?4, ?5, ?6)",
+            rusqlite::params![
+                "legacy-run",
+                "ws_a",
+                "legacy-job",
+                now,
+                "legacy-crew",
+                "legacy-implementer-model"
+            ],
+        )
+        .expect("insert legacy-shaped row");
+        drop(conn);
+
+        let loaded = SqliteJobRunStore::new(
+            Store::open(&db_path).expect("reopen migrated store"),
+            "ws_a",
+        )
+        .get_job_run("legacy-run")
+        .expect("read legacy run")
+        .expect("legacy run exists");
+
+        assert_eq!(loaded.resolved_crew.as_deref(), Some("legacy-crew"));
+        assert_eq!(
+            loaded.crew_model.as_deref(),
+            Some("legacy-implementer-model")
+        );
+    }
+
+    /// [ORB-10002] Checkpoint storage round-trip: per-step recovery metadata
+    /// written into `pipeline_state_json` survives reload, and finalizing to
+    /// `interrupted` is a valid transition out of `running`.
+    #[test]
+    fn pipeline_state_checkpoints_round_trip_and_interrupted_finalize() {
+        let backend = SqliteJobRunStore::new(Store::open_in_memory().expect("store"), "ws_a");
+        let scheduled_at = Utc::now();
+        let run = backend
+            .insert_job_run("job-ckpt", 1, scheduled_at, None, None)
+            .expect("insert");
+        assert!(
+            backend
+                .mark_job_run_running(&run.run_id, scheduled_at, 42)
+                .expect("running")
+        );
+
+        let mut state = PipelineState::new(
+            run.run_id.clone(),
+            run.job_id.clone(),
+            serde_json::json!({"seconds": 0}),
+        );
+        state.record_step(
+            0,
+            JobRunState::Success,
+            Some(serde_json::json!({"ok": true})),
+            None,
+        );
+        state.sync_pipeline(serde_json::json!({"s0": {"ok": true}}));
+        backend
+            .write_run_state(&run.run_id, &state)
+            .expect("write checkpoint state");
+
+        let loaded = backend
+            .read_run_state(&run.run_id)
+            .expect("read state")
+            .expect("state exists");
+        assert_eq!(loaded.step_states.get(&0), Some(&JobRunState::Success));
+        assert_eq!(
+            loaded.step_outputs.get(&0),
+            Some(&serde_json::json!({"ok": true}))
+        );
+        assert_eq!(loaded.next_step_index, 1);
+        assert_eq!(loaded.pipeline, serde_json::json!({"s0": {"ok": true}}));
+
+        assert!(
+            backend
+                .finalize_job_run(&run.run_id, JobRunState::Interrupted, Utc::now(), Some(1))
+                .expect("finalize interrupted")
+        );
+        let interrupted = backend
+            .get_job_run(&run.run_id)
+            .expect("get")
+            .expect("some");
+        assert_eq!(interrupted.state, JobRunState::Interrupted);
+        // Checkpoint state survives finalization for a later resume.
+        assert!(
+            backend
+                .read_run_state(&run.run_id)
+                .expect("read state after finalize")
+                .is_some()
+        );
     }
 
     #[test]

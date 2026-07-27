@@ -1,7 +1,7 @@
 #![deny(clippy::print_stderr, clippy::print_stdout)]
 // ORB-00004: legacy policy surfaces still need a focused documentation pass.
 #![allow(missing_docs)]
-// ORB-00013: Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
+// Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 #![allow(
     rustdoc::broken_intra_doc_links,
@@ -17,6 +17,8 @@
 //! # Key exports
 //! - [`PolicyEngine`] — wraps a validated [`orbit_common::types::PolicyDef`]
 //! - [`FsPolicyEvaluation`] — structured allow/deny outcome with matched rule
+//! - [`resolve_symlinks`] — symlink-safe path resolution (dangling links
+//!   included) shared by policy evaluation and the tools-layer boundary check
 //!
 //! # Dependency direction
 //! `orbit-types` → `orbit-policy` → orbit-core
@@ -29,4 +31,4 @@ mod evaluator;
 mod tests;
 
 pub use decision::PolicyDecision;
-pub use engine::{FsPolicyEvaluation, PolicyEngine};
+pub use engine::{FsPolicyEvaluation, PolicyEngine, resolve_symlinks};

@@ -9,19 +9,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::{
-    EvidenceKind, Learning, LearningComment, LearningStatus, NotFoundKind, OrbitError,
-};
-use orbit_common::types::{
-    LearningVoteSummary, all_agent_families, normalize_agent_family_for_model,
+    AuditEventStatus, EvidenceKind, Learning, LearningStatus, NotFoundKind, OrbitError,
+    audit_execution_id,
 };
 use orbit_store::{
-    LearningCommentAddParams, LearningCommentDeleteParams, LearningCreateParams, LearningListEntry,
-    LearningSearchParams, LearningSearchResult, LearningUpdateParams, LearningUpvoteParams,
+    AuditEventInsertParams, LEARNING_SHOWN_TARGET_TYPE, LearningCreateParams, LearningListEntry,
+    LearningSearchParams, LearningSearchResult, LearningUpdateParams, LearningUsageStat,
     RemoteArtifactStub, learning_layout::LearningLayoutMigrationReport,
 };
 use serde::Deserialize;
 
 use crate::OrbitRuntime;
+use crate::command::learning_authoring::{LearningWriteAttempt, ensure_learning_write_allowed};
 
 #[derive(Debug, Deserialize)]
 struct LearningConfigFile {
@@ -52,17 +51,118 @@ struct LearningSearchConfigSection {
 }
 
 impl OrbitRuntime {
+    /// [ORB-10364] Role-gated `learning add` authoring surface — the entry
+    /// point for `orbit learning add` and the `orbit.learning.add` tool.
+    ///
+    /// Executor-context callers are refused and redirected to `friction add`;
+    /// see [`crate::command::learning_authoring`] for the policy and the
+    /// orchestrator opt-in. Non-authoring writers (the dashboard's
+    /// request-attributed API, the multi-host owner-finalize path, fixtures)
+    /// keep calling [`Self::create_learning`], which stays ungated.
+    pub fn author_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
+        ensure_learning_write_allowed(LearningWriteAttempt::Add {
+            summary: &params.summary,
+            body: &params.body,
+        })?;
+        self.create_learning(params)
+    }
+
+    /// [ORB-10364] Role-gated `learning update` authoring surface. See
+    /// [`Self::author_learning`].
+    pub fn author_learning_update(
+        &self,
+        id: &str,
+        params: LearningUpdateParams,
+    ) -> Result<Learning, OrbitError> {
+        ensure_learning_write_allowed(LearningWriteAttempt::Update {
+            id,
+            summary: params.summary.as_deref(),
+            body: params.body.as_deref(),
+        })?;
+        self.update_learning(id, params)
+    }
+
+    /// [ORB-10364] Role-gated `learning supersede` authoring surface. See
+    /// [`Self::author_learning`].
+    pub fn author_learning_supersede(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
+        ensure_learning_write_allowed(LearningWriteAttempt::Supersede {
+            id: old_id,
+            with: new_id,
+        })?;
+        // Keep lifecycle writes consistent with `learning show`: an allocated
+        // record whose body belongs to an unreadable sibling worktree is a
+        // remote stub, not an unallocated id. Perform this after the role gate
+        // so executor callers still cannot probe learning existence.
+        self.get_learning(old_id)?;
+        self.get_learning(new_id)?;
+        self.supersede_learning(old_id, new_id)
+    }
+
+    /// [ORB-10469] Role-gated `learning archive` authoring surface: retires
+    /// `id` without a replacement. See [`Self::author_learning`] for the gate
+    /// and [`Self::archive_learning`] for the ungated store-level write this
+    /// wraps.
+    pub fn author_learning_archive(&self, id: &str) -> Result<Learning, OrbitError> {
+        ensure_learning_write_allowed(LearningWriteAttempt::Archive { id })?;
+        if !self.archive_learning(id)? {
+            return Err(OrbitError::not_found(
+                NotFoundKind::Learning,
+                id.to_string(),
+            ));
+        }
+        self.get_learning(id)
+    }
+
+    /// Ungated store-level create. Authoring surfaces must go through
+    /// [`Self::author_learning`] so the [ORB-10364] caller-role gate applies.
     pub fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
-        let learning = self.stores().learnings().add(params)?;
+        let learning = self.stores().learnings().create_learning(params)?;
         self.record_id_allocation_audit("learning", &learning.id)?;
         Ok(learning)
     }
 
+    /// [ORB-10330] Finalize a hub-preallocated learning at the caller-supplied
+    /// canonical `id` in this checkout-bound runtime.
+    ///
+    /// The multi-host broker calls this once ORB-10272's hub sequence has
+    /// allocated the id: it never allocates, abandons, retries, or renumbers.
+    /// Unlike [`Self::create_learning`], no local id-allocation audit is written
+    /// here — the hub records the canonical allocation audit transactionally and
+    /// the broker writes the correlated owner-finalization audit with trusted
+    /// provenance.
+    ///
+    /// [ORB-10364] Deliberately ungated: by the time a caller reaches finalize
+    /// the global id is already consumed and cannot be released, so a refusal
+    /// here would burn an id. When public `orbit.learning.add` traverses the
+    /// broker, the caller-role gate belongs in the preflight *before*
+    /// `compose_preallocated_knowledge_add` allocates —
+    /// see [`crate::command::learning_authoring::ensure_learning_write_allowed`].
+    pub fn finalize_preallocated_learning(
+        &self,
+        id: &str,
+        params: LearningCreateParams,
+    ) -> Result<Learning, OrbitError> {
+        self.stores()
+            .learnings()
+            .finalize_preallocated_learning(id, params)
+    }
+
+    /// [ORB-10330] Finalize a hub-preallocated ADR at the caller-supplied
+    /// canonical `id` in this checkout-bound runtime. See
+    /// [`Self::finalize_preallocated_learning`] for the invariants.
+    pub fn finalize_preallocated_adr(
+        &self,
+        id: &str,
+        params: orbit_store::AdrCreateParams,
+    ) -> Result<orbit_common::types::Adr, OrbitError> {
+        self.stores().adrs().finalize_preallocated_adr(id, params)
+    }
+
     pub fn get_learning(&self, id: &str) -> Result<Learning, OrbitError> {
-        match self.stores().learnings().get_federated(id)? {
+        match self.stores().learnings().get_learning_federated(id)? {
             Some(learning) => Ok(learning),
             None => {
-                if let Some(stub) = self.stores().learnings().remote_stub(id)? {
+                if let Some(stub) = self.stores().learnings().get_learning_remote_stub(id)? {
                     return Err(remote_artifact_error("learning", &stub));
                 }
                 Err(OrbitError::not_found(
@@ -77,7 +177,7 @@ impl OrbitRuntime {
         &self,
         status: Option<LearningStatus>,
     ) -> Result<Vec<Learning>, OrbitError> {
-        self.stores().learnings().list(status)
+        self.stores().learnings().list_learnings(status)
     }
 
     pub fn list_learning_entries(
@@ -87,7 +187,7 @@ impl OrbitRuntime {
     ) -> Result<Vec<LearningListEntry>, OrbitError> {
         self.stores()
             .learnings()
-            .list_entries(status, include_remote)
+            .list_learning_entries(status, include_remote)
     }
 
     pub fn search_learnings(
@@ -95,98 +195,149 @@ impl OrbitRuntime {
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
         let params = normalize_learning_search_params(&self.paths().repo_root, params)?;
-        self.stores().learnings().search(params)
+        self.stores().learnings().search_learnings(params)
     }
 
     pub fn learning_search_config(&self) -> Result<LearningSearchConfig, OrbitError> {
         read_learning_search_config_from_config_path(&self.config_path())
     }
 
-    pub fn upvote_learning(
-        &self,
-        params: LearningUpvoteParams,
-    ) -> Result<LearningVoteSummary, OrbitError> {
-        let voter_model = normalize_learning_voter_model(&params.voter_model)?;
-        self.stores().learnings().upvote(LearningUpvoteParams {
-            voter_model,
-            ..params
-        })
-    }
-
-    pub fn learning_vote_summary(&self, id: &str) -> Result<LearningVoteSummary, OrbitError> {
-        self.stores().learnings().vote_summary(id)
-    }
-
-    pub fn add_learning_comment(
-        &self,
-        learning_id: String,
-        body: String,
-        model: String,
-    ) -> Result<LearningComment, OrbitError> {
-        let author_model = normalize_learning_agent_model(&model)?;
-        self.stores()
-            .learnings()
-            .add_comment(LearningCommentAddParams {
-                learning_id,
-                body,
-                author_model,
-            })
-    }
-
-    pub fn list_learning_comments(
-        &self,
-        learning_id: &str,
-        include_deleted: bool,
-    ) -> Result<Vec<LearningComment>, OrbitError> {
-        self.stores()
-            .learnings()
-            .list_comments(learning_id, include_deleted)
-    }
-
-    pub fn delete_learning_comment(
-        &self,
-        comment_id: String,
-        deleted_by: Option<String>,
-    ) -> Result<(), OrbitError> {
-        let deleted_by = match deleted_by {
-            Some(model) => normalize_learning_agent_model(&model)?,
-            None => "unknown".to_string(),
+    /// Record a `learning_shown` audit event — the passive, ungameable usage
+    /// signal emitted when an agent opens a learning's full body via
+    /// `orbit learning show` (CLI or MCP). Keyed by learning ID + session.
+    ///
+    /// Fails open: an unavailable audit backend logs a warning and returns
+    /// `Ok(())` so the show surface keeps working. The session id resolves
+    /// from `ORBIT_SESSION_ID` (the injecting session exports it); an absent
+    /// session records a `None`, which the rollup still counts per learning.
+    pub fn record_learning_shown(&self, learning_id: &str) -> Result<(), OrbitError> {
+        let session_id = std::env::var("ORBIT_SESSION_ID")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let working_directory = std::env::current_dir()
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string());
+        let params = AuditEventInsertParams {
+            execution_id: audit_execution_id("learning"),
+            command: "learning".to_string(),
+            subcommand: Some("show".to_string()),
+            tool_name: None,
+            target_type: Some(LEARNING_SHOWN_TARGET_TYPE.to_string()),
+            target_id: Some(learning_id.to_string()),
+            role: "agent".to_string(),
+            status: AuditEventStatus::Success,
+            exit_code: 0,
+            duration_ms: 0,
+            working_directory,
+            arguments_json: None,
+            stdout_truncated: None,
+            stderr_truncated: None,
+            error_message: None,
+            host: std::env::var("HOSTNAME").ok(),
+            pid: std::process::id(),
+            session_id,
+            workspace_id: None,
+            caller_machine_id: None,
+            caller_host_id: None,
+            process_machine_id: None,
+            process_host_id: None,
+            transport: None,
+            effective_capabilities: Default::default(),
+            origin_session_id: None,
+            mcp_call_id: None,
+            lease_id: None,
+            task_id: std::env::var("ORBIT_TASK_ID")
+                .ok()
+                .filter(|value| !value.is_empty()),
+            job_run_id: std::env::var("ORBIT_RUN_ID")
+                .ok()
+                .filter(|value| !value.is_empty()),
+            activity_id: std::env::var("ORBIT_ACTIVITY_ID")
+                .ok()
+                .filter(|value| !value.is_empty()),
+            step_index: std::env::var("ORBIT_STEP_INDEX")
+                .ok()
+                .and_then(|value| value.parse().ok()),
         };
-        self.stores()
-            .learnings()
-            .delete_comment(LearningCommentDeleteParams {
-                comment_id,
-                deleted_by,
-            })
+        if let Err(error) = self.record_audit_event(&params) {
+            tracing::warn!(
+                learning_id,
+                error = %error,
+                "learning_shown audit emit failed open"
+            );
+        }
+        Ok(())
     }
 
+    /// Per-learning usage rollup over the global audit store: injection
+    /// counts from `learning_injected` events, show counts from
+    /// `learning_shown` events. Input for the deprecation sweep (ORB-10318).
+    pub fn learning_usage_stats(
+        &self,
+        since: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Vec<LearningUsageStat>, OrbitError> {
+        self.stores()
+            .audit_events()
+            .get_learning_usage_stats(since.as_ref())
+    }
+
+    /// [ORB-10364] Apply an `orbit.learning.update`-shaped payload *without*
+    /// the caller-role gate, returning the same JSON the tool returns.
+    ///
+    /// The dashboard's `PATCH /api/learnings/:id` route uses this instead of
+    /// dispatching `orbit.learning.update`. The gate reads the process
+    /// environment, and a dashboard server can legitimately run inside a
+    /// managed Orbit run with `ORBIT_AGENT_MODEL` set — which is why
+    /// [ORB-10352] moved dashboard write attribution off server env and onto
+    /// the request. Routing the dashboard through the gate would refuse a
+    /// human's edit because of how the server process happened to be launched.
+    pub fn update_learning_from_request(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<serde_json::Value, OrbitError> {
+        crate::runtime::orbit_tool_host::update_learning_without_role_gate(self, input)
+    }
+
+    /// Ungated store-level update. Authoring surfaces must go through
+    /// [`Self::author_learning_update`] so the [ORB-10364] gate applies.
     pub fn update_learning(
         &self,
         id: &str,
         params: LearningUpdateParams,
     ) -> Result<Learning, OrbitError> {
-        self.stores().learnings().update(id, params)
+        self.stores().learnings().update_learning(id, params)
     }
 
+    /// Ungated store-level supersede. Authoring surfaces must go through
+    /// [`Self::author_learning_supersede`] so the [ORB-10364] gate applies.
     pub fn supersede_learning(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
         if old_id == new_id {
             return Err(OrbitError::InvalidInput(format!(
                 "learning '{old_id}' cannot supersede itself"
             )));
         }
-        self.stores().learnings().supersede(old_id, new_id)
+        self.stores().learnings().supersede_learning(old_id, new_id)
     }
 
+    /// Ungated store-level archive. The `prune --delete` sweep calls this
+    /// directly (bulk staleness archival is not an authoring decision).
+    /// Authoring surfaces must go through [`Self::author_learning_archive`]
+    /// so the [ORB-10364] gate applies.
     pub fn archive_learning(&self, id: &str) -> Result<bool, OrbitError> {
-        self.stores().learnings().archive(id)
+        self.stores().learnings().archive_learning(id)
     }
 
     pub fn sync_learnings(&self) -> Result<(), OrbitError> {
-        self.stores().learnings().sync()
+        self.stores().learnings().sync_learnings()
     }
 
     pub fn migrate_learning_layout(&self) -> Result<LearningLayoutMigrationReport, OrbitError> {
         migrate_learning_layout_at(&self.paths().orbit_dir)
+    }
+
+    /// Report the legacy learning-layout migration without changing files.
+    pub fn inspect_learning_layout(&self) -> Result<LearningLayoutMigrationReport, OrbitError> {
+        inspect_learning_layout_at(&self.paths().orbit_dir)
     }
 
     /// Returns the IDs of every active learning that the §7.3 staleness
@@ -269,6 +420,14 @@ pub fn migrate_learning_layout_at(
     )
 }
 
+/// Report the legacy learning-layout migration for an explicit workspace root
+/// without changing files.
+pub fn inspect_learning_layout_at(
+    workspace_orbit_dir: &Path,
+) -> Result<LearningLayoutMigrationReport, OrbitError> {
+    orbit_store::learning_layout::inspect_learning_layout(&workspace_orbit_dir.join("learnings"))
+}
+
 fn is_learning_stale(runtime: &OrbitRuntime, learning: &Learning, repo_root: &Path) -> bool {
     if learning.scope.paths.is_empty() && learning.evidence.is_empty() {
         return false;
@@ -286,7 +445,7 @@ fn is_learning_stale(runtime: &OrbitRuntime, learning: &Learning, repo_root: &Pa
             EvidenceKind::Task => runtime
                 .stores()
                 .tasks()
-                .get(&ev.reference)
+                .get_task(&ev.reference)
                 .ok()
                 .flatten()
                 .is_some(),
@@ -352,7 +511,8 @@ fn normalize_learning_search_path(repo_root: &Path, path: &str) -> Result<String
     }
 }
 
-pub(crate) fn learning_search_path_matches_workspace(
+/// `pub` for the learning PreToolUse hook in `orbit-cmd` [ORB-10016].
+pub fn learning_search_path_matches_workspace(
     repo_root: &Path,
     path: &str,
 ) -> Result<bool, OrbitError> {
@@ -393,31 +553,6 @@ fn classify_learning_search_path(
     }
 
     Ok(LearningSearchPathScope::OutsideWorkspace)
-}
-
-fn normalize_learning_voter_model(raw: &str) -> Result<String, OrbitError> {
-    normalize_learning_agent_model(raw)
-}
-
-fn normalize_learning_agent_model(raw: &str) -> Result<String, OrbitError> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "learning action requires a non-empty model".to_string(),
-        ));
-    }
-    if let Some(family) = normalize_agent_family_for_model(None, Some(trimmed))? {
-        return Ok(family);
-    }
-    let family = normalize_agent_family_for_model(Some(trimmed), None)?;
-    if let Some(family) = family
-        && all_agent_families().contains(&family.as_str())
-    {
-        return Ok(family);
-    }
-    Err(OrbitError::InvalidInput(format!(
-        "unknown agent model `{trimmed}`; use a canonical family (codex, claude, gemini, grok) or a recognized model name"
-    )))
 }
 
 fn workspace_relative_path_string(relative: &Path) -> String {

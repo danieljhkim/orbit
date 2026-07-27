@@ -2,6 +2,49 @@
 
 use super::*;
 
+/// [ORB-00414] A failing envelope sink must not crash the run, but the loss
+/// must be observable: the run completes, a `tracing::error!` naming the run is
+/// emitted, and the outcome carries a nonzero audit-failure count + degraded
+/// flag.
+#[test]
+fn failing_envelope_sink_is_nonfatal_and_recorded() {
+    let host = ScriptedHost::new([("act", vec![Action::Ok(json!({"ok": true}))])]);
+    let job = job_with_steps(vec![target_step("s1", "act")]);
+    let run_id = "run-audit-degraded";
+    let writer = std::sync::Arc::new(failing_sink_writer(run_id));
+
+    let assert_writer = writer.clone();
+    let trace = capture(|| {
+        let outcome = execute_job(&job, Value::Null, run_id, writer.clone(), &host)
+            .expect("job completes despite audit sink failures");
+        assert!(outcome.success, "job should still succeed");
+        assert!(outcome.degraded_audit, "degraded_audit must be set");
+        assert!(
+            outcome.audit_failures > 0,
+            "audit_failures must be nonzero, got {}",
+            outcome.audit_failures
+        );
+    });
+
+    // The shared writer sees the same recorded failures.
+    assert!(assert_writer.degraded_audit());
+    assert!(assert_writer.audit_failure_count() > 0);
+
+    // A tracing error naming the run was emitted on the audit target.
+    let has_error = trace.events.iter().any(|event| {
+        event.target == "orbit.engine.audit"
+            && event.level == Level::ERROR
+            && event
+                .field("run_id")
+                .is_some_and(|value| value.contains(run_id))
+    });
+    assert!(
+        has_error,
+        "expected an audit-failure tracing error naming the run; captured targets={:?}",
+        trace.targets()
+    );
+}
+
 #[test]
 fn merges_object_defaults_with_explicit_object_input() {
     let defaults = json!({

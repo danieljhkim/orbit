@@ -20,7 +20,6 @@
 //!                         orbit-store, orbit-agent, orbit-engine,
 //!                         orbit-core, orbit-cli
 
-pub mod activity;
 pub mod activity_job;
 pub mod actor;
 pub mod adr;
@@ -29,22 +28,30 @@ pub mod agent_pair;
 pub mod artifact_ids;
 pub mod audit;
 pub mod audit_event;
+pub mod auto_task;
 pub mod duel;
 pub mod error;
 pub mod event;
+pub mod execution_profile;
 pub mod executor_def;
 pub mod friction;
+pub mod host;
 pub mod id;
 pub mod invocation;
 pub mod job;
+pub mod knowledge_allocation;
 pub mod learning;
 pub mod metrics;
 pub mod policy_decision;
 pub mod policy_def;
+pub mod pricing;
+pub mod registry_snapshot;
 pub mod resource;
 pub mod role;
+pub mod routine;
 pub mod run_state;
 pub mod skill;
+pub mod spoke_registration;
 pub mod task;
 pub mod task_artifacts;
 pub mod task_plan;
@@ -52,7 +59,6 @@ pub mod tool;
 pub mod tool_input;
 pub mod workspace;
 
-pub use activity::Activity;
 pub use activity_job::{
     AUDIT_ENVELOPE_SCHEMA_VERSION, ActivityAsset, ActivityV2, ActivityV2Spec, AgentLoopSpec,
     AssetLoadError, BackoffStrategy, BranchOutcome, DeterministicSpec, FanInSpec, FanOutBlock,
@@ -79,18 +85,36 @@ pub use artifact_ids::{
 };
 pub use audit::Audit;
 pub use audit_event::{AuditEvent, AuditEventStatus, AuditStats, audit_execution_id};
+pub use auto_task::{
+    AUTO_TASK_SCHEMA_VERSION, AUTO_TASK_TAG_PREFIX, AutoTaskDefinition, AutoTaskSchedule,
+    AutoTaskTemplate, DedupePolicy, auto_task_tag, is_valid_auto_task_name, parse_auto_task_yaml,
+};
 pub use duel::{
     Ambiguity, ArbiterVerdict, Cost, Decision, DuelRun, EfficiencyMetrics, ImplementerStats,
     Outcome, PerCommentVerdict, PlannerSlot, PlanningDuelRun, PlanningEfficiency, PlanningOutcome,
     PlanningRoleAssignment, PlanningRoles, ReviewerStats, RoleAssignment, RoleSlot, Roles, Scores,
     Severity, TaskClass, TaskScope, ValidIssuesBySeverity, Verdict,
 };
-pub use error::{NotFoundKind, OrbitError};
+pub use error::{
+    ArtifactOrigin, ArtifactOriginMode, DependencyNotDelivered, NotFoundKind, OrbitError,
+};
 pub use event::OrbitEvent;
+pub use execution_profile::{
+    CREW_DISCOVERY_SCHEMA_VERSION, CrewDiscoveryV1, EXECUTION_CONFIG_DIGEST_DOMAIN,
+    EXECUTION_PROFILE_SCHEMA_VERSION, ExecutionProfileCrewV1, ExecutionProfileShipV1,
+    ExecutionProfileV1, HostWorkspacePresence, ProjectionFreshness, SanitizedExecutionProfile,
+    SanitizedWorkspacePresence, StoredExecutionProfile, ValidatedCrewProfile, WorkspaceOwnership,
+    WorkspacePresenceDeclaration,
+};
 pub use executor_def::{
     ExecutorDef, ExecutorSandboxKind, ExecutorType, ModelPairOverride, StdoutFormat,
 };
 pub use friction::{FrictionEntry, FrictionFrontmatter, FrictionRecord, FrictionStatus};
+pub use host::{
+    HostAlias, HostNameResolution, HostRecord, HostRegistration, HostStatus,
+    REGISTRY_IDENTIFIER_MAX_BYTES, validate_host_id, validate_machine_id,
+    validate_registry_identifier,
+};
 pub use id::OrbitId;
 pub use invocation::{InvocationTrace, TokenUsage, ToolCallTrace};
 pub use job::{
@@ -98,13 +122,15 @@ pub use job::{
     JobScheduleState, JobStep, JobTargetType, KnowledgeRunMetrics, RunEvent, StepCondition,
     default_job_max_active_runs, default_max_iterations, default_retry_backoff_seconds,
 };
+pub use knowledge_allocation::{
+    HUB_KNOWLEDGE_ALLOCATION_METHOD_V1, HUB_KNOWLEDGE_ALLOCATION_SCHEMA_VERSION,
+    HubKnowledgeAllocationRequestV1, HubKnowledgeAllocationV1, KnowledgeIdKind,
+};
 pub use learning::{
-    DEFAULT_LEARNING_COMMENT_RENDER_CAP, DEFAULT_LEARNING_REMINDER_PER_CALL_CAP,
-    DEFAULT_LEARNING_REMINDER_SESSION_CAP, EvidenceKind, Learning, LearningComment,
-    LearningCommentEvent, LearningCommentTombstone, LearningEvidence, LearningInjectionCaps,
-    LearningInjectionState, LearningReminder, LearningScope, LearningStatus, LearningVoteRow,
-    LearningVoteSummary, decayed_vote_score, normalize_learning_paths, normalize_learning_tags,
-    prepend_reminder_block, read_comment_render_cap_env, render_reminder_block,
+    DEFAULT_LEARNING_REMINDER_PER_CALL_CAP, DEFAULT_LEARNING_REMINDER_SESSION_CAP, EvidenceKind,
+    Learning, LearningEvidence, LearningInjectionCaps, LearningInjectionState, LearningReminder,
+    LearningScope, LearningStatus, normalize_learning_paths, normalize_learning_tags,
+    prepend_reminder_block, render_reminder_block,
 };
 pub use metrics::MetricsEntry;
 pub use policy_decision::PolicyDecision;
@@ -112,18 +138,33 @@ pub use policy_def::{
     DEFAULT_POLICY_NAME, FsCheckResult, FsOperation, FsProfile, PolicyDef, ResolvedFsProfile,
     UNRESTRICTED_FS_PROFILE,
 };
+pub use pricing::{PriceRow, derive_cost_usd};
+pub use registry_snapshot::{
+    REGISTRY_CACHE_SCHEMA_VERSION, REGISTRY_SNAPSHOT_SCHEMA_VERSION, RegistryAliasV1,
+    RegistryCacheV1, RegistryHostV1, RegistryPresenceV1, RegistryProfileV1, RegistrySnapshotV1,
+    RegistryWorkspaceV1,
+};
 pub use resource::{
     EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorResource, ExecutorResourceSpec,
     POLICY_RESOURCE_SCHEMA_VERSION, PolicyResource, PolicyResourceSpec, ResourceEnvelope,
     ResourceHeader, ResourceKind, ResourceMetadata, parse_policy_resource, validate_resource_name,
 };
 pub use role::Role;
+pub use routine::{
+    MissedRunPolicy, OverlapPolicy, ROUTINE_SCHEMA_VERSION, RoutineDefinition, RoutinePolicy,
+    RoutineRetries, RoutineTarget, RoutineTrigger, parse_local_routine_yaml, parse_routine_yaml,
+};
 pub use run_state::PipelineState;
 pub use skill::Skill;
+pub use spoke_registration::{
+    SPOKE_REGISTRATION_METHOD_V1, SPOKE_REGISTRATION_SCHEMA_VERSION,
+    SpokeExecutionProfilePublicationV1, SpokeRegistrationFailureV1, SpokeRegistrationRequestV1,
+    SpokeRegistrationResultV1, SpokeRegistrationStageV1,
+};
 pub use task::{
-    ExternalRef, GITHUB_PR_EXTERNAL_REF_SYSTEM, ResolvedTaskDependency, ReviewMessage,
-    ReviewThread, ReviewThreadAnchor, ReviewThreadStatus, Task, TaskArtifact, TaskComment,
-    TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType, build_task_status_index,
+    DEFAULT_TASK_LIST_LIMIT, ExternalRef, GITHUB_PR_EXTERNAL_REF_SYSTEM, NO_DIFF_EXPECTED_TAG,
+    ResolvedTaskDependency, Task, TaskArtifact, TaskComment, TaskComplexity, TaskCreateStatus,
+    TaskHistoryEntry, TaskPriority, TaskStatus, TaskType, build_task_status_index,
     media_type_for_artifact_path, normalize_task_dependencies, normalize_task_tags,
     prune_missing_context_files, push_external_ref_if_missing, resolve_task_dependencies,
     task_dependencies_ready, task_matches_tags, unmet_task_dependencies,
@@ -131,23 +172,30 @@ pub use task::{
 };
 pub use task_artifacts::{
     ArtifactManifestFileV2, ArtifactManifestV2, ORB_TASK_ID_MAX, ORB_TASK_ID_PREFIX,
-    ORB_TASK_ID_WIDTH, ReviewThreadMessageMetadataV2, ReviewThreadMetadataV2,
-    TASK_ACCEPTANCE_FILE_NAME, TASK_ARTIFACT_FILES_DIR_NAME, TASK_ARTIFACT_MANIFEST_FILE_NAME,
-    TASK_ARTIFACT_SCHEMA_VERSION, TASK_ARTIFACTS_DIR_NAME, TASK_COMMENTS_FILE_NAME,
-    TASK_DESCRIPTION_FILE_NAME, TASK_ENVELOPE_FILE_NAME, TASK_EVENTS_FILE_NAME,
-    TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME, TASK_REVIEW_THREADS_DIR_NAME,
-    TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2, TaskRelation, TaskRelationEdge,
-    TaskRelationType, format_orb_task_id, is_valid_orb_task_id, validate_orb_task_id,
+    ORB_TASK_ID_WIDTH, TASK_ACCEPTANCE_FILE_NAME, TASK_ARTIFACT_FILES_DIR_NAME,
+    TASK_ARTIFACT_MANIFEST_FILE_NAME, TASK_ARTIFACT_SCHEMA_VERSION, TASK_ARTIFACTS_DIR_NAME,
+    TASK_COMMENTS_FILE_NAME, TASK_DESCRIPTION_FILE_NAME, TASK_ENVELOPE_FILE_NAME,
+    TASK_EVENTS_FILE_NAME, TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME, TaskCommentRowV2,
+    TaskEnvelopeV2, TaskEventRowV2, TaskRelation, TaskRelationEdge, TaskRelationType,
+    format_orb_task_id, is_valid_orb_task_id, validate_orb_task_id,
     validate_relative_artifact_path, validate_task_relations_for_source,
 };
 pub use task_plan::{TaskPlan, TaskPlanCheckpoint, TaskPlanSuccessCriterion, parse_task_plan};
-pub use tool::{ExecutionResult, StoredTool, ToolParam, ToolSchema, ToolSessionContext};
+pub use tool::{
+    ExecutionResult, McpCapability, McpCapabilityPlacementMatrix, McpLeasedRun, McpToolDefinition,
+    McpToolPlacement, McpToolPolicy, McpToolPolicyError, McpToolScope, McpTransport, StoredTool,
+    ToolParam, ToolSchema, ToolSessionContext, mcp_advertised_tool_name,
+    mcp_capability_placement_matrix, validate_mcp_tool_definitions,
+};
 pub use tool_input::{
     RETIRED_TASK_ADD_INPUT_FIELDS, optional_csv_or_string_list_alias, optional_raw_string,
     optional_string, optional_string_alias, optional_string_list_alias, optional_u32_alias,
     required_string, split_csv, strip_retired_task_add_input_fields,
 };
-pub use workspace::{Workspace, WorkspacePaths, WorkspaceRegistry, WorkspaceStatus};
+pub use workspace::{
+    WORKSPACE_REGISTRY_SCHEMA_VERSION, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
+    WorkspacePaths, WorkspaceRegistry, WorkspaceStatus,
+};
 
 #[cfg(test)]
 mod tests;

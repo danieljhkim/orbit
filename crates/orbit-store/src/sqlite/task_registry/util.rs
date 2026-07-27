@@ -2,7 +2,6 @@ use std::path::{Component, Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{TaskRelationType, TaskStatus};
-use rusqlite::Connection;
 
 pub(super) fn normalize_path(path: &Path) -> PathBuf {
     if let Ok(canonical) = path.canonicalize() {
@@ -51,14 +50,16 @@ pub(super) fn relation_type_name(relation_type: TaskRelationType) -> &'static st
     }
 }
 
-pub(super) fn enable_best_effort_wal_mode(conn: &Connection) {
-    if let Err(err) =
-        conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))
-    {
-        orbit_common::tracing::warn!(
-            target: "orbit.store.task_registry",
-            error = %err,
-            "could not set WAL mode on the task registry database; continuing with the default journal mode",
-        );
+pub(super) fn parse_relation_type_name(raw: &str) -> Result<TaskRelationType, String> {
+    match raw {
+        "blocked_by" => Ok(TaskRelationType::BlockedBy),
+        "child_of" => Ok(TaskRelationType::ChildOf),
+        "spawned_from" => Ok(TaskRelationType::SpawnedFrom),
+        "regression_from" => Ok(TaskRelationType::RegressionFrom),
+        "supersedes" => Ok(TaskRelationType::Supersedes),
+        "related_to" => Ok(TaskRelationType::RelatedTo),
+        "produces" => Ok(TaskRelationType::Produces),
+        "resolves" => Ok(TaskRelationType::Resolves),
+        other => Err(format!("unknown task relation type '{other}'")),
     }
 }

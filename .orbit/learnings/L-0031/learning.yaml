@@ -3,8 +3,8 @@ id: L-0031
 status: active
 scope:
   paths:
-  - crates/orbit-core/src/command/docs.rs
-  - crates/orbit-search/src/vector/store/**
+  - crates/orbit-core/src/command/docs/**/*.rs
+  - crates/orbit-search/src/vector/store/**/*.rs
   tags:
   - adr
   - embeddings
@@ -15,6 +15,6 @@ evidence:
 - kind: task
   reference: ORB-00216
 created_at: 2026-05-21T04:24:02.663307Z
-updated_at: 2026-05-21T04:24:02.663307Z
+updated_at: 2026-06-21T20:07:08.086576Z
 created_by: codex
 priority: 120

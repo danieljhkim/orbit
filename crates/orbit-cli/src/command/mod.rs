@@ -1,22 +1,31 @@
 pub mod activity;
 pub mod adr;
 pub mod audit;
+pub mod auto_task;
 pub mod config;
 pub mod docs;
+pub mod doctor;
 pub mod executor;
 pub mod friction;
-pub mod graph;
+pub mod gc;
 pub mod hook;
+pub mod host;
 pub mod init;
 pub mod job;
 pub mod learning;
+pub mod locks;
 pub mod log;
 pub mod mcp;
+pub mod migrate;
+pub mod operation;
+pub mod operation_args;
 pub mod policy;
+pub mod routine;
 pub mod run;
 pub mod search;
 pub mod semantic;
 pub mod skill;
+pub mod sweep;
 pub mod task;
 pub mod tool;
 pub mod web;
@@ -29,6 +38,17 @@ use orbit_core::{OrbitError, OrbitRuntime};
 
 pub trait Execute {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError>;
+}
+
+/// Require the standard non-interactive confirmation flag before an
+/// irreversible CLI operation proceeds.
+pub(crate) fn require_confirmation(confirm: bool, action: &str) -> Result<(), OrbitError> {
+    if confirm {
+        return Ok(());
+    }
+    Err(OrbitError::InvalidInput(format!(
+        "{action} is irreversible; pass --confirm to proceed"
+    )))
 }
 
 // Clap derive does not support per-variant subcommand `help_heading`
@@ -50,11 +70,14 @@ pub trait Execute {
 Environment:
   init        Initialize the global Orbit root (~/.orbit)
   workspace   Manage workspaces
+  host        Register and manage hub hosts
   config      Show or update Orbit configuration
   semantic    Manage local orbit-search indexing
+  migrate     Apply or inspect pending .orbit layout/schema migrations
 
 Operate:
   run         Run a workflow (ship, duel-plan, job)
+  gc          Inspect and explicitly reap Orbit-managed garbage
   task        Create, update, and manage tasks
   docs        Search and manage the indexed docs corpus
   adr         List and inspect Architecture Decision Records
@@ -63,9 +86,9 @@ Operate:
 
 Observe:
   search      Search tasks, docs, learnings, and ADRs
-  graph       Query and sync the code graph (symbols, refs, impact)
   audit       Query the audit event log
   log         Tail the unified Orbit log feed
+  doctor      Diagnose workspace health (config, database, disk, indexes)
 
 Definitions:
   activity    View activity definitions
@@ -73,6 +96,11 @@ Definitions:
   tool        View tool registry
   policy      View filesystem policies
   executor    View executors
+
+Scheduler:
+  sweep       Fire due routines on this host (the scheduler pass)
+  routine     Inspect and control scheduled routines on this host
+  auto-task   Define recurring auto-task templates (the scheduler primitive)
 
 Services:
   mcp         Register MCP client integrations and run the MCP server
@@ -96,22 +124,25 @@ pub enum Commands {
     // ── Environment ──
     Init(init::InitCommand),
     Workspace(workspace::WorkspaceCommand),
+    Host(host::HostCommand),
     Config(config::ConfigCommand),
     Semantic(semantic::SemanticCommand),
+    Migrate(migrate::MigrateCommand),
 
     // ── Operate ──
     Run(run::RunCommand),
+    Gc(gc::GcCommand),
     Task(Box<task::TaskCommand>),
-    Search(search::SearchCommand),
     Docs(docs::DocsCommand),
     Adr(adr::AdrCommand),
     Friction(friction::FrictionCommand),
     Learning(learning::LearningCommand),
 
     // ── Observe ──
-    Graph(graph::GraphCommand),
+    Search(search::SearchCommand),
     Audit(audit::AuditCommand),
     Log(log::LogCommand),
+    Doctor(doctor::DoctorCommand),
 
     // ── Definitions ──
     Activity(activity::ActivityCommand),
@@ -119,6 +150,12 @@ pub enum Commands {
     Tool(tool::ToolCommand),
     Policy(policy::PolicyCommand),
     Executor(executor::ExecutorCommand),
+
+    // ── Scheduler ──
+    Sweep(sweep::SweepCommand),
+    Routine(routine::RoutineCommand),
+    #[command(name = "auto-task")]
+    AutoTask(auto_task::AutoTaskCommand),
 
     // ── Services ──
     Mcp(mcp::McpCommand),
@@ -132,38 +169,6 @@ pub enum Commands {
     Logs(run::legacy_logs::LogsCommand),
     #[command(hide = true)]
     Artifacts(task::artifacts::ArtifactsCommand),
-}
-
-impl Execute for Commands {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        match self {
-            Commands::Init(cmd) => cmd.execute(runtime),
-            Commands::Workspace(cmd) => cmd.execute(runtime),
-            Commands::Config(cmd) => cmd.execute(runtime),
-            Commands::Semantic(cmd) => cmd.execute(runtime),
-            Commands::Run(cmd) => cmd.execute(runtime),
-            Commands::Task(cmd) => (*cmd).execute(runtime),
-            Commands::Search(cmd) => cmd.execute(runtime),
-            Commands::Docs(cmd) => cmd.execute(runtime),
-            Commands::Adr(cmd) => cmd.execute(runtime),
-            Commands::Friction(cmd) => cmd.execute(runtime),
-            Commands::Learning(cmd) => cmd.execute(runtime),
-            Commands::Graph(cmd) => cmd.execute(runtime),
-            Commands::Audit(cmd) => cmd.execute(runtime),
-            Commands::Log(cmd) => cmd.execute(runtime),
-            Commands::Activity(cmd) => cmd.execute(runtime),
-            Commands::Job(cmd) => cmd.execute(runtime),
-            Commands::Tool(cmd) => cmd.execute(runtime),
-            Commands::Policy(cmd) => cmd.execute(runtime),
-            Commands::Executor(cmd) => cmd.execute(runtime),
-            Commands::Mcp(cmd) => cmd.execute(runtime),
-            Commands::Hook(cmd) => cmd.execute(runtime),
-            Commands::Web(cmd) => cmd.execute(runtime),
-            Commands::Skill(cmd) => cmd.execute(runtime),
-            Commands::Logs(cmd) => cmd.execute(runtime),
-            Commands::Artifacts(cmd) => cmd.execute(runtime),
-        }
-    }
 }
 
 #[cfg(test)]

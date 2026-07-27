@@ -1,3 +1,4 @@
+use orbit_common::types::mcp_advertised_tool_name;
 use orbit_core::OrbitError;
 use serde_json::{Map as JsonMap, Value as JsonValue};
 
@@ -90,7 +91,7 @@ pub(super) fn claude_mcp_server_value() -> JsonValue {
 fn claude_safe_permissions() -> Vec<String> {
     safe_mcp_tool_names()
         .into_iter()
-        .map(claude_permission_name)
+        .map(|name| claude_permission_name(&name))
         .collect()
 }
 
@@ -111,7 +112,7 @@ pub(super) fn claude_permission_name(tool_name: &str) -> String {
     format!(
         "mcp__{}__{}",
         ORBIT_MCP_SERVER_ID,
-        tool_name.replace('.', "_")
+        mcp_advertised_tool_name(tool_name)
     )
 }
 
@@ -127,6 +128,11 @@ fn claude_legacy_safe_permissions() -> Vec<String> {
     // this migration.
     safe_mcp_tool_names()
         .into_iter()
-        .map(|name| format!("mcp__plugin_orbit_orbit__{}", name.replace('.', "_")))
+        .map(|name| {
+            format!(
+                "mcp__plugin_orbit_orbit__{}",
+                mcp_advertised_tool_name(&name)
+            )
+        })
         .collect()
 }

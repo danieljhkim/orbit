@@ -1,7 +1,7 @@
 ---
 title: "Orbit Docs — Overview"
 owner: claude
-last_updated: 2026-05-21
+last_updated: 2026-07-18
 status: Draft
 feature: orbit-docs
 doc_role: overview
@@ -9,12 +9,12 @@ type: design
 summary: "Orbit Docs — what the human-authored docs corpus is, why it exists alongside learnings and ADRs, and how agents retrieve from it."
 tags: [orbit-docs]
 related_features: [orbit-docs]
-related_artifacts: [ORB-00163, ORB-00206, ADR-0169, ADR-0170, ADR-0171, ADR-0180]
+related_artifacts: [ORB-00163, ORB-00206, ORB-10319, ADR-0169, ADR-0170, ADR-0171, ADR-0180]
 ---
 
 # Orbit Docs — Overview
 
-Orbit Docs is the human-authored knowledge corpus for an Orbit workspace. It indexes the Markdown a team writes for itself — design narratives, reusable code patterns, runbooks, glossaries — and exposes a single retrieval surface (`orbit.docs.*`) that agents can query at task time, at hook time, or interactively. It deliberately does not own the corpus's storage shape: docs are PR-reviewed files under a configurable `docs/` root, and Orbit's only on-disk artifact is the `[docs].roots` entry in `.orbit/config.toml`.
+Orbit Docs is the human-authored knowledge corpus for an Orbit workspace. It indexes the Markdown a team writes for itself — design narratives, reusable code patterns, runbooks, glossaries — and exposes CLI/admin verbs under `orbit docs` plus agent retrieval through the unified `orbit.search` MCP tool. It deliberately does not own the corpus's storage shape: docs are PR-reviewed files under a configurable `docs/` root, and Orbit's only on-disk artifact is the `[docs].roots` entry in `.orbit/config.toml`.
 
 The system is **pull-first**: agents call `orbit search --kind doc` (or `--kind all` for federated doc+ADR) or `orbit docs show` when they need context. Push-style injection (PreToolUse hook surfaces, `task show --with-context`) is a downstream feature, designed but not yet wired ([ORB-00166], [ORB-00167]).
 
@@ -78,7 +78,7 @@ Strict parsing still applies if you opt in via the `migrate` verb or by writing 
 | `orbit docs index` | Walk configured roots, embed doc fields into `.orbit/state/semantic.db`, and sweep stale doc rows. |
 | `orbit docs migrate [--dry-run]` | One-shot frontmatter backfill for legacy `docs/design/<feature>/*.md` and `docs/design-patterns/*.md`. Idempotent. Never touches `.orbit/`. |
 
-Each verb has an MCP twin (`orbit.docs.list`, etc.) registered in the safe MCP surface. CLI and MCP shapes are identical.
+The five domain tool definitions (`orbit.docs.list`, `show`, `add`, `index`, and `migrate`) remain available to CLI/admin runtime dispatch but are intentionally inactive on the agent MCP safe surface. Agents retrieve docs through `orbit.search` with `kind: "doc"`; Remote owns that safe-surface policy, while `orbit-tools` owns the generic schemas and Core owns the runtime implementations. [ORB-10319]
 
 ### 2.5 The `.orbit/` exclusion
 
@@ -99,17 +99,18 @@ If you find yourself wanting to write "rule: do X because Y" in a doc, that's a 
 
 | Concern | File / surface | Task |
 |---------|----------------|------|
-| Frontmatter parsing, tolerant fallback, walker | [crates/orbit-core/src/command/docs.rs](../../../crates/orbit-core/src/command/docs.rs) | [ORB-00163] |
-| CLI verbs (`orbit docs list/show/search/add/reindex/migrate`) | [crates/orbit-cli/src/command/docs.rs](../../../crates/orbit-cli/src/command/docs.rs) | [ORB-00163] |
-| MCP tool registry exposure | [crates/orbit-cli/src/command/mcp/mod.rs](../../../crates/orbit-cli/src/command/mcp/mod.rs) | [ORB-00163] |
+| Frontmatter parsing, tolerant fallback, walker | [crates/orbit-core/src/command/docs/](../../../crates/orbit-core/src/command/docs/) | [ORB-00163] |
+| CLI verbs (`orbit docs list/show/add/index/migrate`) | [crates/orbit-cli/src/command/docs.rs](../../../crates/orbit-cli/src/command/docs.rs) | [ORB-00163] |
+| Generic doc tool schemas + inactive agent policy | [crates/orbit-tools/src/builtin/orbit/docs.rs](../../../crates/orbit-tools/src/builtin/orbit/docs.rs), [crates/orbit-tools/src/builtin/orbit/mod.rs](../../../crates/orbit-tools/src/builtin/orbit/mod.rs) | [ORB-00163], [ORB-10319] |
+| Agent MCP exposure and routing (`orbit.search`, `kind: "doc"`) | [crates/orbit-remote/src/mcp/host.rs](../../../crates/orbit-remote/src/mcp/host.rs) | [ORB-00202], [ORB-10319] |
 | Tool host dispatch | [crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs](../../../crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs) | [ORB-00163] |
-| Skill (agent-facing entry point) | [crates/orbit-core/assets/skills/orbit-docs/SKILL.md](../../../crates/orbit-core/assets/skills/orbit-docs/SKILL.md) | [ORB-00163] |
+| Skill (agent-facing entry point) | [crates/orbit-core/assets/skills/orbit-search/SKILL.md](../../../crates/orbit-core/assets/skills/orbit-search/SKILL.md) | [ORB-00163] |
 | Config root | `[docs].roots` in [.orbit/config.toml](../../../.orbit/config.toml) | [ORB-00163] |
 | Backfill migrator | `orbit docs migrate` | [ORB-00163] |
-| Internal hardening (real diff, robust YAML edit, batched gitignore) | [crates/orbit-core/src/command/docs.rs](../../../crates/orbit-core/src/command/docs.rs) | [ORB-00164] |
+| Internal hardening (real diff, robust YAML edit, batched gitignore) | [crates/orbit-core/src/command/docs/](../../../crates/orbit-core/src/command/docs/) | [ORB-00164] |
 | Retire `orbit-design` skill | [crates/orbit-core/assets/skills/orbit-design/](../../../crates/orbit-core/assets/skills/orbit-design/) | [ORB-00165] |
 | Inject into `task show --with-context` | [crates/orbit-cli/src/command/task/](../../../crates/orbit-cli/src/command/task/) | [ORB-00166] |
-| Extend PreToolUse hook to surface docs | [crates/orbit-core/src/command/learning_hook.rs](../../../crates/orbit-core/src/command/learning_hook.rs) | [ORB-00167] |
+| Extend PreToolUse hook to surface docs | [crates/orbit-cmd/src/learning_hook.rs](../../../crates/orbit-cmd/src/learning_hook.rs) | [ORB-00167] |
 | Semantic embeddings ranker (v2) | [crates/orbit-core/src/command/semantic.rs](../../../crates/orbit-core/src/command/semantic.rs) | [ORB-00168] |
 | Fold `.orbit/adrs/` into corpus (v2 design) | [.orbit/adrs/](../../../.orbit/adrs/) | [ORB-00169] |
 
@@ -124,5 +125,6 @@ If you find yourself wanting to write "rule: do X because Y" in a doc, that's a 
 - [ORB-00167] — Extend PreToolUse hook to surface relevant docs alongside learnings
 - [ORB-00168] — Add semantic embeddings index for orbit-docs corpus (v2)
 - [ORB-00169] — Design: fold `.orbit/adrs/` into the orbit-docs corpus (v2)
+- [ORB-10319] — Consolidate MCP exposure policy in `orbit-remote`; the `orbit.docs.*` admin tools stay inactive while unified `orbit.search` remains agent-facing.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

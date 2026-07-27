@@ -1,16 +1,19 @@
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
-use fs2::FileExt;
 use orbit_common::types::OrbitError;
 use orbit_common::utility::fs::atomic_write_text;
 use orbit_common::utility::git::{CurrentBranchStatus, current_branch};
-use rusqlite::{Connection, Transaction, TransactionBehavior, params, types::Type};
+use rusqlite::{
+    Connection, OptionalExtension, Transaction, TransactionBehavior, params, types::Type,
+};
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
+
+use crate::file::yaml_doc::{parse_yaml_with, serialize_yaml_with};
 
 const KIND_ADR: &str = "adr";
 const KIND_LEARNING: &str = "learning";
@@ -61,6 +64,18 @@ impl IdAllocationRecord {
                 self.worktree_root.join(body_path)
             }
         })
+    }
+
+    /// [ORB-10501] Whether the worktree this id was allocated in is gone from
+    /// disk.
+    ///
+    /// This is what separates a transient "remote stub" — the body lives in a
+    /// sibling checkout that simply is not this one — from a permanent orphan:
+    /// once the pinned worktree is reaped, a `body_path` recorded relative to
+    /// it can never resolve again, so the row is dead weight the index carries
+    /// forever.
+    pub fn worktree_is_missing(&self) -> bool {
+        !self.worktree_root.exists()
     }
 }
 
@@ -139,9 +154,7 @@ impl IdAllocator {
         }
         let conn = Connection::open(&config.semantic_db_path)
             .map_err(|e| OrbitError::Store(e.to_string()))?;
-        enable_best_effort_wal_mode(&conn);
-        conn.pragma_update(None, "busy_timeout", "5000")
-            .map_err(|e| OrbitError::Store(format!("failed to set busy_timeout: {e}")))?;
+        orbit_common::utility::sqlite::apply_default_pragmas(&conn)?;
         ensure_id_allocation_schema(&conn)?;
 
         let allocator = Self {
@@ -183,6 +196,10 @@ impl IdAllocator {
         self.allocate(IdAllocationKind::Adr)
     }
 
+    pub fn worktree_root(&self) -> &Path {
+        &self.inner.worktree_root
+    }
+
     pub fn allocate_learning(&self) -> Result<IdAllocation, OrbitError> {
         self.allocate(IdAllocationKind::Learning)
     }
@@ -195,8 +212,51 @@ impl IdAllocator {
         self.record_body_path(IdAllocationKind::Learning, id, body_path)
     }
 
+    /// [ORB-10330] Install a non-authoritative owner-local projection for a
+    /// hub-preallocated ADR id and its body path.
+    ///
+    /// Unlike [`Self::allocate_adr`], this never selects an id or advances the
+    /// local sequence: ORB-10272's hub sequence is the sole allocation
+    /// authority, and the id here is the already-allocated canonical value. The
+    /// projection exists only so local list/show/lifecycle resolve the
+    /// finalized body; it is inserted (never upserted), so a colliding id fails
+    /// loudly rather than adopting or overwriting an existing row.
+    pub fn project_preallocated_adr(&self, id: &str, body_path: &Path) -> Result<(), OrbitError> {
+        self.project_preallocated(IdAllocationKind::Adr, id, body_path)
+    }
+
+    /// [ORB-10330] Install a non-authoritative owner-local projection for a
+    /// hub-preallocated learning id and its body path. See
+    /// [`Self::project_preallocated_adr`] for the invariants.
+    pub fn project_preallocated_learning(
+        &self,
+        id: &str,
+        body_path: &Path,
+    ) -> Result<(), OrbitError> {
+        self.project_preallocated(IdAllocationKind::Learning, id, body_path)
+    }
+
     pub fn abandon_learning(&self, id: &str) -> Result<(), OrbitError> {
         self.abandon(IdAllocationKind::Learning, id)
+    }
+
+    /// [ORB-00413] Abandon a reserved-but-unfinalized ADR allocation so a
+    /// partial ADR create does not leak a half-visible ID.
+    pub fn abandon_adr(&self, id: &str) -> Result<(), OrbitError> {
+        self.abandon(IdAllocationKind::Adr, id)
+    }
+
+    /// [ORB-10501] Abandon a learning allocation whose pinned worktree is gone.
+    /// See [`Self::abandon_orphaned`] for the guard and how this differs from
+    /// [`Self::abandon_learning`].
+    pub fn abandon_orphaned_learning(&self, id: &str) -> Result<bool, OrbitError> {
+        self.abandon_orphaned(IdAllocationKind::Learning, id)
+    }
+
+    /// [ORB-10501] Abandon an ADR allocation whose pinned worktree is gone.
+    /// See [`Self::abandon_orphaned`].
+    pub fn abandon_orphaned_adr(&self, id: &str) -> Result<bool, OrbitError> {
+        self.abandon_orphaned(IdAllocationKind::Adr, id)
     }
 
     pub fn adr_allocation(&self, id: &str) -> Result<Option<IdAllocationRecord>, OrbitError> {
@@ -404,8 +464,8 @@ impl IdAllocator {
 
             let mut value = read_yaml_value(yaml_path)?;
             rewrite_learning_yaml(&mut value, old_id, &rename.new_id, &rename_map)?;
-            let rendered = serde_yaml::to_string(&value)
-                .map_err(|error| OrbitError::Migration(error.to_string()))?;
+            let rendered =
+                serialize_yaml_with(&value, |error| OrbitError::Migration(error.to_string()))?;
             atomic_write_text(yaml_path, &rendered).map_err(|error| {
                 OrbitError::Io(format!("write {}: {error}", yaml_path.display()))
             })?;
@@ -473,6 +533,40 @@ impl IdAllocator {
         Ok(())
     }
 
+    /// [ORB-10330] Insert a merged body-path projection for a caller-supplied
+    /// (hub-preallocated) id. Deliberately does not compute `next_id`, so it
+    /// never advances the local sequence; the hub owns the sequence. A plain
+    /// `INSERT` means a pre-existing row for `id` fails the finalization instead
+    /// of being silently adopted.
+    fn project_preallocated(
+        &self,
+        kind: IdAllocationKind,
+        id: &str,
+        body_path: &Path,
+    ) -> Result<(), OrbitError> {
+        let relative_body_path = relative_to(body_path, &self.inner.worktree_root);
+        let branch = best_effort_branch(&self.inner.worktree_root);
+        let _lock = self.acquire_lock()?;
+        let mut conn = self.lock_conn()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        insert_allocation(
+            &tx,
+            kind,
+            id,
+            Utc::now().timestamp(),
+            &self.inner.worktree_root,
+            branch,
+            STATUS_MERGED,
+            Some(&relative_body_path),
+            false,
+        )?;
+        tx.commit()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(())
+    }
+
     fn abandon(&self, kind: IdAllocationKind, id: &str) -> Result<(), OrbitError> {
         let _lock = self.acquire_lock()?;
         let mut conn = self.lock_conn()?;
@@ -499,6 +593,59 @@ impl IdAllocator {
         tx.commit()
             .map_err(|error| OrbitError::Store(error.to_string()))?;
         Ok(())
+    }
+
+    /// [ORB-10501] Abandon an allocation whose pinned worktree no longer
+    /// exists, so the index stops carrying a row nothing can ever resolve.
+    ///
+    /// Two things separate this from [`Self::abandon`], which exists for
+    /// create-rollback: it accepts a `merged` row that already recorded a
+    /// `body_path` (that path died with its worktree), and it is guarded on
+    /// the worktree being gone rather than on the row never having been
+    /// finalized. The guard is re-checked inside the write transaction — the
+    /// caller's classifying scan and this repair are separate steps, and a
+    /// worktree can be re-created in between.
+    ///
+    /// Returns `false` when `id` has no live allocation row (already
+    /// abandoned, or never allocated). The row keeps its recorded worktree,
+    /// branch, and `body_path` for forensics; only `status` moves. Sequence
+    /// density is unaffected: [`max_sequence`] counts abandoned rows too, so
+    /// an abandoned id is never handed out again.
+    fn abandon_orphaned(&self, kind: IdAllocationKind, id: &str) -> Result<bool, OrbitError> {
+        let _lock = self.acquire_lock()?;
+        let mut conn = self.lock_conn()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let worktree_root = tx
+            .query_row(
+                "SELECT worktree_root
+                 FROM id_allocations
+                 WHERE kind = ?1 AND id = ?2 AND status != ?3",
+                params![kind.as_str(), id, STATUS_ABANDONED],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let Some(worktree_root) = worktree_root else {
+            return Ok(false);
+        };
+        if Path::new(&worktree_root).exists() {
+            return Err(OrbitError::InvalidInput(format!(
+                "refusing to abandon {} {id}: its recorded worktree '{worktree_root}' still exists",
+                kind.as_str()
+            )));
+        }
+        tx.execute(
+            "UPDATE id_allocations
+             SET status = ?3
+             WHERE kind = ?1 AND id = ?2",
+            params![kind.as_str(), id, STATUS_ABANDONED],
+        )
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+        tx.commit()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(true)
     }
 
     fn allocation(
@@ -551,28 +698,11 @@ impl IdAllocator {
         Ok(records)
     }
 
-    fn acquire_lock(&self) -> Result<File, OrbitError> {
-        let parent = self.inner.lock_path.parent().ok_or_else(|| {
-            OrbitError::Store(format!(
-                "cannot determine id allocation lock parent for '{}'",
-                self.inner.lock_path.display()
-            ))
-        })?;
-        fs::create_dir_all(parent).map_err(|error| OrbitError::Io(error.to_string()))?;
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&self.inner.lock_path)
-            .map_err(|error| OrbitError::Io(error.to_string()))?;
-        file.lock_exclusive().map_err(|error| {
-            OrbitError::Store(format!(
-                "failed to acquire id allocation lock '{}': {error}",
-                self.inner.lock_path.display()
-            ))
-        })?;
-        Ok(file)
+    /// Acquire the process-wide ID-allocation lock. [ORB-00412] Bounded by a
+    /// deadline with holder diagnostics via [`crate::file_lock`] — a hung
+    /// holder no longer stalls every other allocator forever.
+    fn acquire_lock(&self) -> Result<crate::file_lock::FileLockGuard, OrbitError> {
+        crate::file_lock::acquire_exclusive(&self.inner.lock_path, "id allocation")
     }
 
     fn lock_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>, OrbitError> {
@@ -827,8 +957,9 @@ fn yaml_epoch(path: &Path) -> Result<i64, OrbitError> {
 fn read_yaml_value(path: &Path) -> Result<Value, OrbitError> {
     let raw = fs::read_to_string(path)
         .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
-    serde_yaml::from_str(&raw)
-        .map_err(|error| OrbitError::Migration(format!("parse {}: {error}", path.display())))
+    parse_yaml_with(&raw, path, |_, error| {
+        OrbitError::Migration(format!("parse {}: {error}", path.display()))
+    })
 }
 
 fn rewrite_learning_yaml(
@@ -923,26 +1054,6 @@ fn relative_to(path: &Path, root: &Path) -> PathBuf {
     path.strip_prefix(&root)
         .map(Path::to_path_buf)
         .unwrap_or(path)
-}
-
-fn enable_best_effort_wal_mode(conn: &Connection) {
-    match conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0)) {
-        Ok(mode) if mode.eq_ignore_ascii_case("wal") => {}
-        Ok(mode) => {
-            orbit_common::tracing::warn!(
-                target: "orbit.store.id_allocator",
-                journal_mode = mode.as_str(),
-                "requested WAL mode on semantic database, but SQLite kept the active journal mode",
-            );
-        }
-        Err(error) => {
-            orbit_common::tracing::warn!(
-                target: "orbit.store.id_allocator",
-                error = %error,
-                "could not set WAL mode on semantic database; continuing with default journal mode",
-            );
-        }
-    }
 }
 
 #[cfg(test)]

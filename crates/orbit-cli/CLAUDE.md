@@ -20,8 +20,8 @@ forces a directory.
 
 - [`hook/`](src/command/hook) — three subcommands, one `.rs` per body, shared
   enum types in `render.rs`.
-- [`learning/`](src/command/learning) — ten subcommands, a `comment` parent
-  with its own nested subcommands, shared formatting in `output.rs`.
+- [`learning/`](src/command/learning) — eight subcommands, one `.rs` per body,
+  shared formatting in `output.rs`.
 - [`task/`](src/command/task) — large surface with `artifact` nested parent
   and a `tests/` subdir mirroring source files.
 
@@ -64,24 +64,51 @@ When you add a new top-level command:
    that matches its template section. The variant order also determines
    where a missing-from-template command would appear by default.
 2. Add the row to the matching section in the `help_template` string.
-3. Add the dispatch arm to `impl Execute for Commands`.
+3. Add exactly one exhaustive operation arm in
+   [`command/operation.rs`](src/command/operation.rs). That arm declares the
+   command's dispatch, runtime need, audit metadata, JSON error preference,
+   and hook error policy together; do not add a default arm or recreate any
+   of those policy matches in `main.rs` or `audit_middleware.rs`.
 
 The source tree stays flat — never create a grouping subdirectory under
 `command/` to mirror the visual grouping. Past attempts (`definitions/`,
 `environment/`, `observe/`) made it impossible to tell from `ls` whether a
 directory was a parent command or a folder, and were removed in ORB-00279.
 
+## Registry-derived commands
+
+Some parent commands are **not** hand-written clap structs. `friction` is
+derived from an operation registry declared once in `orbit-common`
+(ADR-0209 bearing 1, ORB-10358): `command/operation_args.rs` builds the
+subcommand tree, the args, and the tool input from that registry, and
+`command/friction.rs` holds only the trait glue and the response renderers.
+Adding a friction verb is a registry entry plus a handler — no edit under
+`command/`, including no new arm in `command/operation.rs`, whose friction arm
+reads the invocation instead of matching verb by verb.
+
+`command/operation_args.rs` is generic over the noun's verb type, so the next
+noun to migrate reuses it unchanged. Before migrating one, read
+[docs/design/operations-as-data/references/cookbook.md](../../docs/design/operations-as-data/references/cookbook.md)
+— in particular Step 0, which freezes the current `--help` output as fixtures
+before any code moves. That is the only thing that makes "argv is unchanged"
+checkable rather than hopeful.
+
+Two idioms therefore coexist under `command/`, and that is expected (ADR-0209's
+adoption model). Hand-written clap is still correct for a command that has not
+been migrated; do not half-migrate one.
+
 ## Crate boundary
 
-`orbit-cli` is a clap entry point. Domain logic lives in `orbit-core`. CLI
+`orbit-cli` is a clap entry point. Domain logic lives in `orbit-core` and
+vertical feature crates such as `orbit-remote`. CLI
 subcommand files hold only:
 
 - Clap `Args` / `Subcommand` definitions.
-- One `impl Execute` that calls into `orbit-core`.
+- One `impl Execute` that calls into the owning domain crate.
 - Optional `println!` / `eprintln!` for stdout/stderr formatting.
 - Output projection helpers (JSON shaping, table rendering) — these are
   presentation concerns, not domain logic.
 
 Anything beyond that — registry lookups, file I/O, audit decisions, state
-mutation — belongs in `orbit-core`. See [`ARCHITECTURE.md`](../../ARCHITECTURE.md)
+mutation — belongs in the owning domain crate. See [`ARCHITECTURE.md`](../../ARCHITECTURE.md)
 for the full crate-layer rules.

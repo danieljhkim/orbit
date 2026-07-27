@@ -1,29 +1,32 @@
-use std::collections::BTreeSet;
-
-use clap::{ArgAction, Args, Subcommand};
+use clap::{ArgAction, Args};
 use orbit_core::{
-    ExternalRef, OrbitError, OrbitRuntime, TaskPriority, TaskStatus, TaskType,
-    build_task_status_index, task_dependencies_ready, task_selectors_contain_path,
+    DEFAULT_TASK_LIST_LIMIT, ExternalRef, OrbitError, OrbitRuntime, TaskPriority, TaskStatus,
+    TaskType, task_dependencies_ready, task_selectors_contain_path,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::command::Execute;
 
-use super::output::{
-    print_task_locks, print_task_table, task_lock_to_json, task_to_json, task_to_signal_json,
-};
+use super::output::{print_task_table, task_to_json, task_to_signal_json};
 
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit task list\n  orbit task list --all\n  orbit task list --status backlog\n  orbit task list --status friction\n  orbit task list --status in-progress,review\n  orbit task list --type feature\n  orbit task list --priority high\n  orbit task list --parent T12345678-123456\n  orbit task list --ref jira:ENG-1234\n  orbit task list --has-ref jira\n  orbit task list --tag perf --tag bench\n  orbit task list --path src/auth/login.rs\n  orbit task list --json"
+    after_help = "Examples:\n  orbit task list\n  orbit task list --limit 100\n  orbit task list --status backlog\n  orbit task list --status in-progress,review\n  orbit task list --type feature\n  orbit task list --priority high\n  orbit task list --parent T12345678-123456\n  orbit task list --ref jira:ENG-1234\n  orbit task list --has-ref jira\n  orbit task list --tag perf --tag bench\n  orbit task list --path src/auth/login.rs\n  orbit task list --json"
 )]
 pub struct TaskListArgs {
-    /// Filter by one or more statuses (comma-separated). Defaults to backlog,in-progress.
+    /// Filter by one or more statuses (comma-separated). Opt-in: with no
+    /// `--status`, tasks of every lifecycle status are listed.
     #[arg(long, value_enum, value_delimiter = ',')]
     pub status: Vec<TaskStatus>,
-    /// Show all tasks regardless of status
-    #[arg(long, conflicts_with = "status")]
+    /// Deprecated no-op: task listing is status-neutral by default, so `--all`
+    /// is no longer required to see every lifecycle status. Accepted for
+    /// backward compatibility and ignored.
+    #[arg(long)]
     pub all: bool,
+    /// Maximum number of tasks to return, newest first (default 50). Must be at
+    /// least 1.
+    #[arg(long, default_value_t = DEFAULT_TASK_LIST_LIMIT, value_parser = parse_task_list_limit)]
+    pub limit: usize,
     /// Filter by priority level (low, medium, high)
     #[arg(long, value_enum)]
     pub priority: Option<TaskPriority>,
@@ -67,8 +70,8 @@ pub struct TaskListArgs {
 
 impl Execute for TaskListArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let all = self.all;
         let status = self.status;
+        let limit = self.limit;
         let priority = self.priority;
         let task_type = self.task_type;
         let parent_id = self.parent_id;
@@ -86,15 +89,16 @@ impl Execute for TaskListArgs {
             .transpose()?;
         let ready = self.ready;
 
+        // `list_tasks_by_tags` returns tasks already ordered newest-first
+        // (`created_at DESC`, task ID ascending for ties); the filters below
+        // preserve that order, so a trailing `take(limit)` yields the newest
+        // matching tasks (ORB-10310).
         let tasks_matching_tags = runtime.list_tasks_by_tags(&tags)?;
-        let status_by_id = build_task_status_index(&runtime.list_tasks()?);
-        let active_statuses = [TaskStatus::Backlog, TaskStatus::InProgress];
-        let status_filter =
-            default_task_list_status_filter(all, &status, job_run_id.as_deref(), &active_statuses);
+        let status_by_id = runtime.task_status_index()?;
 
         let tasks: Vec<_> = tasks_matching_tags
             .into_iter()
-            .filter(|t| status_filter.is_empty() || status_filter.contains(&t.status))
+            .filter(|t| status.is_empty() || status.contains(&t.status))
             .filter(|t| priority.is_none_or(|p| t.priority == p))
             .filter(|t| task_type.is_none_or(|kind| t.task_type == kind))
             .filter(|t| {
@@ -126,6 +130,7 @@ impl Execute for TaskListArgs {
                 path.as_deref()
                     .is_none_or(|p| task_selectors_contain_path(&t.context_files, p))
             })
+            .take(limit)
             .collect();
 
         if self.ops {
@@ -148,133 +153,14 @@ fn validate_external_ref_system(system: &str) -> Result<String, OrbitError> {
     ExternalRef::validate_system(system)
 }
 
-fn default_task_list_status_filter<'a>(
-    all: bool,
-    status: &'a [TaskStatus],
-    job_run_id: Option<&str>,
-    active_statuses: &'a [TaskStatus],
-) -> &'a [TaskStatus] {
-    if all {
-        &[]
-    } else if !status.is_empty() {
-        status
-    } else if job_run_id.is_some() {
-        &[]
-    } else {
-        active_statuses
+/// Parse the `--limit` value, rejecting a zero limit (which would return no
+/// tasks) with a clear input error (ORB-10310).
+fn parse_task_list_limit(raw: &str) -> Result<usize, String> {
+    let value: usize = raw
+        .parse()
+        .map_err(|_| format!("`{raw}` is not a valid limit (expected a positive integer)"))?;
+    if value == 0 {
+        return Err("limit must be at least 1".to_string());
     }
-}
-
-#[derive(Args)]
-pub struct TaskLocksArgs {
-    #[command(subcommand)]
-    pub command: Option<TaskLocksSubcommand>,
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Subcommand)]
-pub enum TaskLocksSubcommand {
-    /// Release an active reservation by id
-    Release(TaskLocksReleaseArgs),
-}
-
-#[derive(Args)]
-pub struct TaskLocksReleaseArgs {
-    /// Reservation id to release
-    pub reservation_id: String,
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-}
-
-impl Execute for TaskLocksArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        if let Some(command) = self.command {
-            return command.execute(runtime);
-        }
-        if self.json {
-            crate::output::json::print_pretty(&task_locks_json(runtime)?)
-        } else {
-            let (tasks, locked_files) = task_locks(runtime)?;
-            print_task_locks(&tasks, &locked_files);
-            Ok(())
-        }
-    }
-}
-
-impl Execute for TaskLocksSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        match self {
-            Self::Release(args) => args.execute(runtime),
-        }
-    }
-}
-
-impl Execute for TaskLocksReleaseArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let value = runtime.run_tool(
-            "orbit.task.locks.release",
-            json!({ "reservation_id": self.reservation_id }),
-        )?;
-        if self.json {
-            crate::output::json::print_pretty(&value)
-        } else {
-            let released = value
-                .get("released")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            if released {
-                println!("Released reservation {}", self.reservation_id);
-            } else {
-                println!("No active reservation found for {}", self.reservation_id);
-            }
-            Ok(())
-        }
-    }
-}
-
-pub(crate) fn task_locks_json(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
-    let (tasks, locked_files) = task_locks(runtime)?;
-    let json_by_task: Vec<Value> = tasks.iter().map(task_lock_to_json).collect();
-    Ok(json!({
-        "locked_files": locked_files.iter().cloned().collect::<Vec<_>>(),
-        "by_task": json_by_task,
-        "total_locked": locked_files.len(),
-        "total_tasks": tasks.len(),
-    }))
-}
-
-fn task_locks(
-    runtime: &OrbitRuntime,
-) -> Result<(Vec<orbit_core::Task>, BTreeSet<String>), OrbitError> {
-    let mut tasks: Vec<_> = runtime
-        .list_tasks()?
-        .into_iter()
-        .filter(|task| matches!(task.status, TaskStatus::InProgress | TaskStatus::Review))
-        .collect();
-
-    tasks.sort_by_key(|task| {
-        (
-            task_lock_status_rank(task.status),
-            task.created_at,
-            task.id.clone(),
-        )
-    });
-
-    let locked_files: BTreeSet<String> = tasks
-        .iter()
-        .flat_map(|task| task.context_files.iter().cloned())
-        .collect();
-
-    Ok((tasks, locked_files))
-}
-
-fn task_lock_status_rank(status: TaskStatus) -> u8 {
-    match status {
-        TaskStatus::InProgress => 0,
-        TaskStatus::Review => 1,
-        _ => 2,
-    }
+    Ok(value)
 }

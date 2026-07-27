@@ -1,7 +1,7 @@
 ---
 title: "Orbit Docs — Vision"
 owner: claude
-last_updated: 2026-05-21
+last_updated: 2026-07-20
 status: Draft
 feature: orbit-docs
 doc_role: vision
@@ -59,7 +59,7 @@ The right answer is probably (a) share the walk between learning and doc lookup,
 
 ### 1.5 Should there be doc IDs?
 
-Currently docs are referenced by repo-relative path. That works for human authors and survives renames if `git log --follow` is run, but it's brittle as a stable cross-reference: when `docs/design/groundhog/2_design.md` becomes `docs/design/groundhog/architecture.md`, every `related_artifacts` entry pointing at the old path needs updating.
+Currently docs are referenced by repo-relative path. That works for human authors and survives renames if `git log --follow` is run, but it's brittle as a stable cross-reference: when `docs/design/host-registry/2_design.md` becomes `docs/design/host-registry/architecture.md`, every `related_artifacts` entry pointing at the old path needs updating.
 
 The alternative is to mint allocation IDs (`D<YYYYMMDD>-N` analogous to learnings, or a UUID stamped into frontmatter). This adds an `orbit.docs.add` allocation step, makes deletion a status flip rather than a file remove, and turns docs into a tool-managed artifact — at which point they belong under `.orbit/`, not `docs/`.
 
@@ -86,15 +86,18 @@ The boundary (rule-with-failure-mode vs. explanatory-context) is the load-bearin
 
 ### 2.2 Orbit ADRs
 
-[docs/design/adr-artifact/](../adr-artifact/) covers the ADR system. ADRs share with docs the "PR-reviewed Markdown" property but differ on lifecycle: ADRs have `proposed → accepted → superseded` and are tool-managed via `orbit.adr.add`. The locating principle ([ADR-0170]) puts them under `.orbit/adrs/`. Whether to fold them into orbit-docs is [ORB-00169].
+[.orbit/adrs/](../../../.orbit/adrs/) is the ADR artifact store. ADRs share with docs the "PR-reviewed Markdown" property but differ on lifecycle: ADRs have `proposed → accepted → superseded` and are tool-managed via `orbit.adr.add`. The locating principle ([ADR-0170]) puts them under `.orbit/adrs/`. Whether to fold them into orbit-docs is [ORB-00169].
 
 ### 2.3 Semantic search
 
 [docs/design/orbit-search/](../orbit-search/) covers the embeddings infrastructure that orbit-search uses for tasks. [ORB-00168] extends that infrastructure to cover docs. The model and vector store stay the same; the index is a sibling of the task index.
 
-### 2.4 Knowledge graph
+### 2.4 Retired graph design
 
-[docs/design/knowledge-graph/](../knowledge-graph/) covers the code-symbol graph orbit-graph indexes. Orbit-docs is *not* a knowledge graph: it has no edges between docs except via `related_artifacts`. Cross-doc linking is plain Markdown relative paths. This is intentional — the knowledge graph is for code identifiers, not narrative content.
+[docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) preserves
+the retired code-index history. Orbit-docs has no dependency on that removed
+subsystem: relationships between docs use `related_artifacts`, and cross-doc
+links are ordinary Markdown relative paths.
 
 ### 2.5 External: docs.rs, devdocs.io
 
@@ -142,7 +145,7 @@ The strict / tolerant split lets the corpus be queryable on day one (tolerant in
 - [2_design.md](./2_design.md) — schema, walker, search, the six verbs
 - [4_decisions.md](./4_decisions.md) — accepted ADRs
 - [docs/design/project-learnings/](../project-learnings/) — sibling knowledge surface; rule-with-failure-mode shape
-- [docs/design/adr-artifact/](../adr-artifact/) — ADR surface; tool-managed lifecycle
+- [.orbit/adrs/](../../../.orbit/adrs/) — ADR artifact store; tool-managed lifecycle
 - [docs/design/orbit-search/](../orbit-search/) — embeddings infrastructure; v2 target for [ORB-00168]
 
 ### 4.2 External

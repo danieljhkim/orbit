@@ -19,10 +19,10 @@
 //! - [`load_runs`] — reads all run entries back.
 //! - [`aggregate`] — pure function over `&[DuelRun]` returning a report.
 //! - [`derive_task_scope`] — classifies a diff into `TaskScope`; lives here
-//!   because `record_duel_scores` builds the `TaskClass` from git at record
-//!   time and the CLI never needs to touch git.
+//!   because scores are recorded with the `TaskClass` built from git at
+//!   record time and the CLI never needs to touch git.
 
-// ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
+// Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -30,34 +30,13 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use orbit_common::types::{
-    Ambiguity, Decision, DuelRun, OrbitError, TaskScope, Verdict, all_agent_families,
-};
-use serde::{Deserialize, Serialize};
+use orbit_common::types::{Ambiguity, DuelRun, OrbitError, TaskScope, Verdict, all_agent_families};
+use serde::Serialize;
 
-use orbit_common::utility::fs::{
-    atomic_write_text_volatile as write_atomic, with_exclusive_file_lock,
-};
+use super::common;
 
 const SCOREBOARD_FILENAME: &str = "duel.json";
-const CURRENT_SCHEMA_VERSION: u32 = 1;
-
-/// On-disk envelope for the scoreboard file.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-struct DuelScoreboardFile {
-    schema_version: u32,
-    #[serde(default)]
-    runs: Vec<DuelRun>,
-}
-
-impl Default for DuelScoreboardFile {
-    fn default() -> Self {
-        Self {
-            schema_version: CURRENT_SCHEMA_VERSION,
-            runs: Vec::new(),
-        }
-    }
-}
+const LOCK_LABEL: &str = "duel scoreboard";
 
 // ============================================================================
 // Append + load
@@ -67,34 +46,13 @@ impl Default for DuelScoreboardFile {
 /// file on first use. Uses the shared atomic-write helper so a crash during
 /// the rewrite cannot corrupt earlier entries.
 pub fn append_run(scoreboard_dir: &Path, run: &DuelRun) -> Result<(), OrbitError> {
-    let path = scoreboard_dir.join(SCOREBOARD_FILENAME);
-    with_exclusive_file_lock(&path, "duel scoreboard", || {
-        let mut file = load_scoreboard_file(&path)?;
-        file.runs.push(run.clone());
-
-        let json = serde_json::to_string_pretty(&file)
-            .map_err(|e| OrbitError::Io(format!("serialize duel.json: {e}")))?;
-        write_atomic(&path, &format!("{json}\n")).map_err(Into::into)
-    })
+    common::append_run_entry(scoreboard_dir, SCOREBOARD_FILENAME, LOCK_LABEL, run)
 }
 
 /// Load every run entry from `scoreboard_dir/duel.json`. Returns an empty
 /// vector if the file does not yet exist.
 pub fn load_runs(scoreboard_dir: &Path) -> Result<Vec<DuelRun>, OrbitError> {
-    let path = scoreboard_dir.join(SCOREBOARD_FILENAME);
-    Ok(load_scoreboard_file(&path)?.runs)
-}
-
-fn load_scoreboard_file(path: &Path) -> Result<DuelScoreboardFile, OrbitError> {
-    if !path.exists() {
-        return Ok(DuelScoreboardFile::default());
-    }
-    let content =
-        fs::read_to_string(path).map_err(|e| OrbitError::Io(format!("read duel.json: {e}")))?;
-    if content.trim().is_empty() {
-        return Ok(DuelScoreboardFile::default());
-    }
-    serde_json::from_str(&content).map_err(|e| OrbitError::Io(format!("parse duel.json: {e}")))
+    common::load_run_entries(scoreboard_dir, SCOREBOARD_FILENAME)
 }
 
 // ============================================================================
@@ -473,15 +431,9 @@ pub struct ReviewerTally {
 // ============================================================================
 pub use orbit_common::types::all_agent_families as known_agent_families;
 
-// Silence an unused-import lint when the module is consumed by callers that
-// do not need the Decision re-export directly.
-#[allow(dead_code)]
-fn _ensure_decision_in_scope(_: Decision) {}
-
 // ============================================================================
 // Tests
 // ============================================================================
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests;

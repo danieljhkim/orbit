@@ -1,4 +1,5 @@
 use orbit_common::types::ExecutorType;
+use orbit_common::types::activity_job::{Provider, ProviderEntryPoint};
 use orbit_engine::{DispatchError, ResolvedCliExecutor};
 
 use crate::OrbitRuntime;
@@ -57,37 +58,30 @@ pub(super) fn resolve_cli_executor(
         });
     }
 
-    match provider {
-        "claude" | "codex" | "gemini" | "grok" | "ollama" => Ok(ResolvedCliExecutor {
-            command: provider.to_string(),
-            args: Vec::new(),
-        }),
-        "openai_compat" => Err(DispatchError::CliInvocationFailed(
-            "provider openai_compat has no CLI runtime (HTTP-only)".to_string(),
+    // Canonical provider identity + capability live on the orbit-common
+    // `Provider` surface (ORB-10091). Selecting a provider that parses but has
+    // no CLI runtime (`openai_compat`, HTTP-only) or does not parse at all
+    // fails with a stable diagnostic and never silently falls back to a
+    // different runtime.
+    match Provider::parse(provider) {
+        Ok(parsed)
+            if Provider::capabilities(ProviderEntryPoint::Orbit).contains(&parsed)
+                && parsed.has_cli_runtime() =>
+        {
+            Ok(ResolvedCliExecutor {
+                command: parsed.as_str().to_string(),
+                args: Vec::new(),
+            })
+        }
+        Ok(Provider::OpenaiCompat) => Err(DispatchError::CliInvocationFailed(
+            "provider openai_compat is unsupported by the Orbit CLI entry point (HTTP-only)"
+                .to_string(),
         )),
-        other => Err(DispatchError::CliInvocationFailed(format!(
-            "unknown provider `{other}` — no CLI runtime registered"
+        Ok(parsed) => Err(DispatchError::CliInvocationFailed(format!(
+            "provider {parsed} is unsupported by the Orbit CLI entry point"
         ))),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use orbit_engine::V2RuntimeHost;
-
-    use crate::OrbitRuntime;
-    use crate::runtime::v2_host::test_support::seed_executor;
-
-    #[test]
-    fn cli_executor_resolution_preserves_registered_static_args() {
-        let runtime = OrbitRuntime::in_memory().expect("build runtime");
-        seed_executor(&runtime, "codex", None);
-
-        let resolved = runtime
-            .resolve_cli_executor("codex")
-            .expect("resolve codex executor");
-
-        assert_eq!(resolved.command, "codex");
-        assert_eq!(resolved.args, ["exec", "--json"]);
+        Err(err) => Err(DispatchError::CliInvocationFailed(format!(
+            "{err} — no CLI runtime registered"
+        ))),
     }
 }

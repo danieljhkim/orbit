@@ -14,6 +14,10 @@ on:
   pull_request:
     paths:
       - "crates/orbit-exec/**"
+      # [ORB-10009] SBPL profiles are compiled from resolved policy rules, so
+      # policy-evaluation changes can alter what the macOS sandbox enforces.
+      - "crates/orbit-policy/**"
+      - "crates/orbit-common/src/types/policy_def.rs"
       - "crates/orbit-common/src/utility/glob.rs"
       - "Cargo.lock"
       - ".github/workflows/ci-macos.yml"

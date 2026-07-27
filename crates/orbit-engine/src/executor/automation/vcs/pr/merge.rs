@@ -1,11 +1,11 @@
 use std::path::Path;
 
-use orbit_common::types::{ExternalRef, OrbitError, ReviewThreadStatus, Role, Task, TaskStatus};
+use orbit_common::types::{ExternalRef, OrbitError, Role, Task, TaskStatus};
 use orbit_store::pr_scoreboard;
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
-use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
+use crate::context::{DeterministicActionHost, TaskAutomationUpdate, TaskHost};
 
 use super::super::super::input::{
     canonicalize_existing_dir, input_string_field, required_job_run_id,
@@ -14,7 +14,9 @@ use super::super::freshness::ensure_branch_fresh_against_base;
 use super::super::git::{base_sync_mode_from_input, git_command_success, git_output};
 use super::attribution::ship_done_attribution;
 
-pub(in crate::executor::automation) fn git_merge<H: RuntimeHost + TaskHost + Sync + ?Sized>(
+pub(in crate::executor::automation) fn git_merge<
+    H: DeterministicActionHost + TaskHost + Sync + ?Sized,
+>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -39,7 +41,7 @@ pub(in crate::executor::automation) fn git_merge<H: RuntimeHost + TaskHost + Syn
     }
 }
 
-pub(super) fn merge_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
+pub(super) fn merge_batch_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -161,7 +163,7 @@ pub(super) fn merge_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
     Ok(json!({ "merged": true }))
 }
 
-fn resolve_batch_workspace_path<H: RuntimeHost + ?Sized>(
+fn resolve_batch_workspace_path<H: DeterministicActionHost + ?Sized>(
     host: &H,
     input: &Value,
     batch_id: &str,
@@ -177,7 +179,6 @@ fn resolve_batch_workspace_path<H: RuntimeHost + ?Sized>(
 
 fn task_required_revision<H: TaskHost + ?Sized>(host: &H, task: &Task) -> Result<bool, OrbitError> {
     let history = host.get_task_history(&task.id)?;
-    let review_threads = host.get_task_review_threads(&task.id)?;
     Ok(history.iter().any(|entry| {
         entry.event == "status_changed"
             && entry.from_status == Some(TaskStatus::Review)
@@ -185,7 +186,5 @@ fn task_required_revision<H: TaskHost + ?Sized>(host: &H, task: &Task) -> Result
                 entry.to_status,
                 Some(TaskStatus::Backlog | TaskStatus::InProgress | TaskStatus::Rejected)
             )
-    }) || review_threads
-        .iter()
-        .any(|thread| thread.status == ReviewThreadStatus::Resolved))
+    }))
 }

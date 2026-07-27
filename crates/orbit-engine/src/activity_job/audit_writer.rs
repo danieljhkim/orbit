@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
 use chrono::Utc;
 use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
+use orbit_common::types::OrbitError;
 use orbit_common::types::activity_job::{
     AUDIT_ENVELOPE_SCHEMA_VERSION, V2AuditEnvelope, V2AuditEvent, V2AuditEventKind,
 };
@@ -13,6 +15,21 @@ use thiserror::Error;
 use orbit_store::Store;
 
 use super::sqlite_sink::V2SqliteSink;
+
+/// Persistence sink for §7 audit envelopes. Abstracted behind a trait
+/// ([ORB-00414]) so the writer can be exercised with an injected failing sink
+/// and so envelope persistence failures can be surfaced rather than swallowed.
+pub trait EnvelopeSink: Send + Sync {
+    /// Persist one envelope event. An `Err` is recorded by the writer as a
+    /// non-fatal audit failure rather than crashing the run.
+    fn write_envelope(&self, event: &V2AuditEvent) -> Result<(), OrbitError>;
+}
+
+impl EnvelopeSink for V2SqliteSink {
+    fn write_envelope(&self, event: &V2AuditEvent) -> Result<(), OrbitError> {
+        V2SqliteSink::write_envelope(self, event)
+    }
+}
 
 /// Writes §7 v2 audit envelope events. Nests the existing loop-engine events
 /// underneath an Activity event via `parent_event_id` so the whole tree
@@ -27,10 +44,17 @@ pub struct V2AuditWriter {
     agent_identity: String,
     workspace_path: Option<String>,
     inner: Arc<dyn AuditSink>,
-    envelope_sink: Option<Arc<V2SqliteSink>>,
+    envelope_sink: Option<Arc<dyn EnvelopeSink>>,
     events: Mutex<Vec<V2AuditEvent>>,
     event_counter: Mutex<u64>,
     parent_stacks: Mutex<HashMap<ThreadId, Vec<String>>>,
+    /// [ORB-00414] Count of audit-write failures observed this run. Non-fatal
+    /// to the run, but recorded so consumers know the trail is incomplete.
+    audit_failures: AtomicU64,
+    /// [ORB-10367] Count of telemetry-persistence failures observed this run
+    /// (invocation traces). Non-fatal to the run — its success is decided by
+    /// its work — but recorded so the telemetry gap is visible.
+    telemetry_failures: AtomicU64,
 }
 
 /// Restores the calling thread's previous parent stack on drop.
@@ -61,12 +85,14 @@ impl V2AuditWriter {
             events: Mutex::new(Vec::new()),
             event_counter: Mutex::new(0),
             parent_stacks: Mutex::new(HashMap::new()),
+            audit_failures: AtomicU64::new(0),
+            telemetry_failures: AtomicU64::new(0),
         }
     }
 
     /// Attach a SQLite sink for §7 envelope events. When set, every emitted
     /// envelope event is persisted alongside the in-memory snapshot.
-    pub fn with_envelope_sink(mut self, sink: Arc<V2SqliteSink>) -> Self {
+    pub fn with_envelope_sink(mut self, sink: Arc<dyn EnvelopeSink>) -> Self {
         self.envelope_sink = Some(sink);
         self
     }
@@ -144,17 +170,115 @@ impl V2AuditWriter {
             workspace_path: self.workspace_path.clone(),
         };
         let event = V2AuditEvent { envelope, kind };
-        if let Some(sink) = &self.envelope_sink {
-            // SQLite persistence failures should not crash the run. Emitting
-            // the event to the in-memory snapshot is the load-bearing path;
-            // the run-level result owns the user-visible failure state.
-            let _ = sink.write_envelope(&event);
+        if let Some(sink) = &self.envelope_sink
+            && let Err(error) = sink.write_envelope(&event)
+        {
+            // [ORB-00414] SQLite persistence failures should not crash the run,
+            // but must be observable: record the failure (counter + tracing
+            // error) instead of swallowing it. Emitting the event to the
+            // in-memory snapshot below is still the load-bearing path.
+            self.note_audit_failure(event.envelope.event_type.as_str(), &error);
         }
         self.events
             .lock()
             .map_err(|_| WriteError::Poisoned)?
             .push(event);
         Ok(event_id)
+    }
+
+    /// [ORB-00414] Record a non-fatal audit-write failure: bump the per-run
+    /// failure counter and emit a `tracing::error!` naming the run and event
+    /// kind so a degraded audit trail is observable to log/JSONL consumers.
+    pub(crate) fn note_audit_failure(&self, event_kind: &str, error: &dyn std::fmt::Display) {
+        self.audit_failures.fetch_add(1, Ordering::Relaxed);
+        tracing::error!(
+            target: "orbit.engine.audit",
+            run_id = %self.run_id,
+            event_kind,
+            error = %error,
+            "audit write failed; run continuing with degraded audit trail",
+        );
+    }
+
+    /// Number of audit-write failures observed this run.
+    pub fn audit_failure_count(&self) -> u64 {
+        self.audit_failures.load(Ordering::Relaxed)
+    }
+
+    /// True when at least one audit write failed — the trail is incomplete.
+    pub fn degraded_audit(&self) -> bool {
+        self.audit_failure_count() > 0
+    }
+
+    /// [ORB-10367] Record a non-fatal telemetry-persistence failure: bump the
+    /// per-run counter, emit a `tracing::error!`, and put a
+    /// `telemetry.persist_failed` event on the run record so the gap is
+    /// visible to run-history consumers. The run's own success is never
+    /// decided by this — completed agent work must not be discarded because a
+    /// telemetry row could not be written.
+    pub fn note_telemetry_failure(
+        &self,
+        component: &str,
+        step_id: Option<&str>,
+        error: &dyn std::fmt::Display,
+    ) {
+        self.telemetry_failures.fetch_add(1, Ordering::Relaxed);
+        let error = error.to_string();
+        tracing::error!(
+            target: "orbit.engine.telemetry",
+            run_id = %self.run_id,
+            component,
+            step_id = step_id.unwrap_or_default(),
+            error = %error,
+            "telemetry persist failed; run continuing with degraded telemetry",
+        );
+        self.emit_lossy(V2AuditEventKind::TelemetryPersistFailed {
+            component: component.to_string(),
+            step_id: step_id.map(ToOwned::to_owned),
+            error,
+        });
+    }
+
+    /// Number of telemetry-persistence failures observed this run.
+    pub fn telemetry_failure_count(&self) -> u64 {
+        self.telemetry_failures.load(Ordering::Relaxed)
+    }
+
+    /// True when at least one telemetry write failed — invocation traces for
+    /// this run are incomplete.
+    pub fn degraded_telemetry(&self) -> bool {
+        self.telemetry_failure_count() > 0
+    }
+
+    /// [ORB-00414] Emit an envelope event, recording (not discarding) a write
+    /// failure. Non-fatal: returns the event_id on success, `None` on failure.
+    /// Used at emission sites whose event id is not load-bearing for parent
+    /// nesting.
+    pub(crate) fn emit_lossy(&self, kind: V2AuditEventKind) -> Option<String> {
+        let event_kind = kind.event_type();
+        match self.emit(kind) {
+            Ok(event_id) => Some(event_id),
+            Err(error) => {
+                self.note_audit_failure(event_kind, &error);
+                None
+            }
+        }
+    }
+
+    /// [ORB-00414] Push a parent context, recording a failure instead of
+    /// discarding it. Non-fatal.
+    pub(crate) fn push_parent_lossy(&self, event_id: String) {
+        if let Err(error) = self.push_parent(event_id) {
+            self.note_audit_failure("push_parent", &error);
+        }
+    }
+
+    /// [ORB-00414] Pop the most recent parent context, recording a failure
+    /// instead of discarding it. Non-fatal.
+    pub(crate) fn pop_parent_lossy(&self) {
+        if let Err(error) = self.pop_parent() {
+            self.note_audit_failure("pop_parent", &error);
+        }
     }
 
     /// Push a parent context so subsequent events nest beneath it.

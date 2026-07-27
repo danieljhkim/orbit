@@ -28,8 +28,6 @@ const SUMMARY_FILENAME: &str = "summary.json";
 // windows because we lack a timestamped snapshot log to filter against.
 // Older readers ignore unknown fields.
 const CURRENT_SCHEMA_VERSION: u32 = 6;
-const TASK_REVIEW_THREADS_METRIC: &str = "task-review-threads";
-const LEGACY_TASK_REVIEW_MESSAGES_METRIC: &str = "task-review-messages";
 const RECENT_WINDOW_DAYS: i64 = 7;
 
 type FamilyScoreboard = BTreeMap<String, BTreeMap<String, u64>>;
@@ -129,15 +127,8 @@ pub struct PrSummary {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TaskReviewSummary {
-    #[serde(default, alias = "messages")]
-    pub threads: u64,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KnowledgeSummary {
     pub learnings_created: u64,
-    pub learning_votes_received: u64,
     pub adrs_created: u64,
     pub adrs_accepted: u64,
     pub adrs_proposed_open: u64,
@@ -162,8 +153,6 @@ pub struct AgentSummary {
     pub tokens: TokenSummary,
     pub duels: DuelSummary,
     pub pr: PrSummary,
-    #[serde(default)]
-    pub task_review: TaskReviewSummary,
     #[serde(default)]
     pub knowledge: KnowledgeSummary,
     #[serde(default)]
@@ -294,8 +283,6 @@ pub struct ScoreboardInputs<'a> {
     pub top_tool_calls: &'a [AuditTopToolCall],
     /// Workspace learning records, used for knowledge-stewardship counters.
     pub learnings: &'a [Learning],
-    /// Per-learning vote counts keyed by learning ID.
-    pub learning_vote_counts: &'a [(String, u64)],
     /// Workspace ADR records, used for knowledge-stewardship counters.
     pub adrs: &'a [Adr],
     /// Append-only friction records from `.orbit/frictions/`. Used to populate
@@ -319,7 +306,6 @@ impl<'a> Default for ScoreboardInputs<'a> {
         static EMPTY_JOB: [JobRun; 0] = [];
         static EMPTY_TOP: [AuditTopToolCall; 0] = [];
         static EMPTY_LEARNING: [Learning; 0] = [];
-        static EMPTY_VOTES: [(String, u64); 0] = [];
         static EMPTY_ADR: [Adr; 0] = [];
         Self {
             audit_tool_calls: &EMPTY_AUDIT,
@@ -328,7 +314,6 @@ impl<'a> Default for ScoreboardInputs<'a> {
             job_runs: &EMPTY_JOB,
             top_tool_calls: &EMPTY_TOP,
             learnings: &EMPTY_LEARNING,
-            learning_vote_counts: &EMPTY_VOTES,
             adrs: &EMPTY_ADR,
             frictions: &[],
             now: None,
@@ -401,16 +386,6 @@ pub fn generate_summary_with_inputs(
             |summary, value| {
                 summary.pr.merged_with_revision =
                     summary.pr.merged_with_revision.saturating_add(value);
-            },
-        );
-
-        let task_review = read_model_scoreboard(scoreboard_dir, "task_review.json")?;
-        overlay_nested_metric(
-            &mut agents,
-            &task_review,
-            TASK_REVIEW_THREADS_METRIC,
-            |summary, value| {
-                summary.task_review.threads = summary.task_review.threads.saturating_add(value);
             },
         );
 
@@ -501,7 +476,7 @@ pub fn generate_summary_with_inputs(
         }
 
         // Created/Planned count *all* statuses — see [T20260508-16]: rejected
-        // and friction tasks still represent real work the agent produced.
+        // tasks still represent real work the agent produced.
         // Windowed views filter by `created_at` so an old task created
         // outside the window doesn't get re-counted today.
         if in_window(Some(task.created_at), since) {
@@ -766,13 +741,6 @@ fn overlay_knowledge_counters(
         };
         let summary = agents.entry(family_key(&created_by)).or_default();
         summary.knowledge.learnings_created = summary.knowledge.learnings_created.saturating_add(1);
-        summary.knowledge.learning_votes_received = summary
-            .knowledge
-            .learning_votes_received
-            .saturating_add(learning_vote_count(
-                inputs.learning_vote_counts,
-                &learning.id,
-            ));
     }
 
     for adr in inputs.adrs {
@@ -818,13 +786,6 @@ fn overlay_friction_reported(
     }
 }
 
-fn learning_vote_count(counts: &[(String, u64)], id: &str) -> u64 {
-    counts
-        .iter()
-        .find_map(|(learning_id, count)| (learning_id == id).then_some(*count))
-        .unwrap_or(0)
-}
-
 fn family_key(label: &str) -> String {
     let normalized = normalize_attribution_label(label, None);
     infer_agent_family_from_model(&normalized).unwrap_or(normalized)
@@ -848,9 +809,7 @@ fn normalize_model_scoreboard(parsed: Value) -> Result<FamilyScoreboard, OrbitEr
         let Value::Object(entries) = metric_value else {
             continue;
         };
-        let family_entries = normalized
-            .entry(canonical_scoreboard_metric(&metric).to_string())
-            .or_default();
+        let family_entries = normalized.entry(metric).or_default();
         for (first_key, first_value) in entries {
             match first_value {
                 Value::Number(number) => {
@@ -878,13 +837,5 @@ fn normalize_model_scoreboard(parsed: Value) -> Result<FamilyScoreboard, OrbitEr
     Ok(normalized)
 }
 
-fn canonical_scoreboard_metric(metric: &str) -> &str {
-    match metric {
-        LEGACY_TASK_REVIEW_MESSAGES_METRIC => TASK_REVIEW_THREADS_METRIC,
-        _ => metric,
-    }
-}
-
-#[cfg(test)]
 #[cfg(test)]
 mod tests;

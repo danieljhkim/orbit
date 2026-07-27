@@ -2,11 +2,45 @@
 
 use super::*;
 
+use orbit_common::test_fixtures::TEST_GEMINI_MODEL;
 use orbit_common::types::activity_job::{AgentLoopSpec, AgentRole, Backend, OnDenial, Provider};
 
 use crate::AgentRoleConfig;
 
 use super::role_overridden_recovery_spec;
+
+/// [ORB-00414] Audit-write failures on the recovery path are recorded (counter
+/// + degraded flag) but never fatal: recovery still runs and the job succeeds.
+#[test]
+fn recovery_path_audit_failures_are_recorded_not_fatal() {
+    let original_error = retryable_error("flaky", "dirty checkout");
+    let host = RecoveryHost::new([
+        (
+            "flaky",
+            vec![
+                Err(original_error.clone()),
+                Err(original_error.clone()),
+                Ok(json!({"fixed": true})),
+            ],
+        ),
+        ("recover", vec![Ok(json!({"recovered": true}))]),
+    ]);
+    let job = recovery_job(Some("recover"), Some("wide"), "flaky", Some("narrow"), 2);
+    let run_id = "run-recovery-degraded-audit";
+    let writer = std::sync::Arc::new(failing_sink_writer(run_id));
+
+    let outcome = execute_job(&job, Value::Null, run_id, writer.clone(), &host)
+        .expect("job should recover despite audit sink failures");
+
+    assert!(outcome.success, "recovery should still succeed");
+    assert_eq!(host.action_count("recover"), 1, "recovery must have run");
+    assert!(
+        outcome.degraded_audit,
+        "audit trail must be marked degraded after recovery-path sink failures"
+    );
+    assert!(outcome.audit_failures > 0);
+    assert!(writer.degraded_audit());
+}
 
 #[test]
 fn recovery_success_runs_one_post_recovery_attempt_with_exact_input_and_fs_profile() {
@@ -180,7 +214,7 @@ fn recovery_agent_loop_uses_reviewer_role_config() {
         AgentRole::Reviewer,
         AgentRoleConfig {
             provider: Some(Provider::Gemini),
-            model: Some("gemini-3.1-pro".to_string()),
+            model: Some(TEST_GEMINI_MODEL.to_string()),
             backend: Some(Backend::Cli),
         },
     );
@@ -200,7 +234,7 @@ fn recovery_agent_loop_uses_reviewer_role_config() {
         panic!("expected agent_loop recovery spec");
     };
     assert_eq!(spec.provider, Provider::Gemini);
-    assert_eq!(spec.model.as_deref(), Some("gemini-3.1-pro"));
+    assert_eq!(spec.model.as_deref(), Some(TEST_GEMINI_MODEL));
     assert_eq!(spec.backend, Backend::Cli);
     assert_eq!(host.observed_role_lookups(), vec![AgentRole::Reviewer]);
 }
@@ -287,6 +321,177 @@ fn non_retryable_failure_skips_recovery_and_audit_event() {
 }
 
 #[test]
+fn worktree_integrity_failure_bypasses_retry_then_recovers_once() {
+    let integrity_error = worktree_integrity_error("run-integrity-recovered");
+    let host = RecoveryHost::new([
+        (
+            "flaky",
+            vec![Err(integrity_error.clone()), Ok(json!({"fixed": true}))],
+        ),
+        ("recover", vec![Ok(json!({"recovered": true}))]),
+    ]);
+    let job = recovery_job(Some("recover"), None, "flaky", None, 3);
+    let writer = std::sync::Arc::new(test_writer("run-integrity-recovered"));
+
+    let outcome = execute_job(
+        &job,
+        Value::Null,
+        "run-integrity-recovered",
+        writer.clone(),
+        &host,
+    )
+    .expect("configured recovery should get one chance to repair integrity state");
+
+    assert!(outcome.success);
+    assert_eq!(
+        host.actions(),
+        vec!["flaky", "recover", "flaky"],
+        "ordinary retry must be skipped before the single recovery attempt"
+    );
+    assert_eq!(host.action_count("recover"), 1);
+    assert_eq!(
+        host.input_for_action("recover"),
+        Some(json!({
+            "failed_step_id": "build",
+            "activity_name": "flaky",
+            "error_message": integrity_error.to_string(),
+            "attempt": 1,
+            "max_attempts": 3
+        }))
+    );
+
+    let events = writer.events_snapshot().expect("audit snapshot");
+    let recovery_events = recovery_events(&events);
+    assert_eq!(recovery_events.len(), 1);
+    assert!(matches!(
+        recovery_events[0].kind,
+        V2AuditEventKind::StepRecoveryAttempted {
+            ref step_id,
+            ref recovery_activity,
+            recovery_succeeded: true,
+        } if step_id == "build" && recovery_activity == "recover"
+    ));
+}
+
+#[test]
+fn worktree_integrity_without_retry_block_uses_step_recovery_once() {
+    let integrity_error = worktree_integrity_error("run-integrity-step-recovery");
+    let host = RecoveryHost::new([
+        (
+            "flaky",
+            vec![Err(integrity_error), Ok(json!({"fixed": true}))],
+        ),
+        ("recover_step", vec![Ok(json!({"recovered": true}))]),
+    ]);
+    let mut job = recovery_job(None, None, "flaky", None, 1);
+    job.steps[0].retry = None;
+    job.steps[0].recovery_activity = Some("recover_step".to_string());
+    job.steps[0].resolved_recovery_activity = Some(deterministic_activity("recover_step", None));
+    let writer = std::sync::Arc::new(test_writer("run-integrity-step-recovery"));
+
+    let outcome = execute_job(
+        &job,
+        Value::Null,
+        "run-integrity-step-recovery",
+        writer.clone(),
+        &host,
+    )
+    .expect("step-level recovery should run without a retry block");
+
+    assert!(outcome.success);
+    assert_eq!(host.actions(), vec!["flaky", "recover_step", "flaky"]);
+    assert_eq!(host.action_count("recover_step"), 1);
+    assert_eq!(recovery_events(&writer.events_snapshot().unwrap()).len(), 1);
+}
+
+#[test]
+fn worktree_integrity_without_recovery_returns_original_without_retry() {
+    let integrity_error = worktree_integrity_error("run-integrity-no-recovery");
+    let host = RecoveryHost::new([("flaky", vec![Err(integrity_error.clone())])]);
+    let job = recovery_job(None, None, "flaky", None, 3);
+    let writer = std::sync::Arc::new(test_writer("run-integrity-no-recovery"));
+
+    let err = execute_job(
+        &job,
+        Value::Null,
+        "run-integrity-no-recovery",
+        writer.clone(),
+        &host,
+    )
+    .expect_err("integrity failure without configured recovery must fail closed");
+
+    assert_eq!(err.to_string(), integrity_error.to_string());
+    assert_eq!(host.actions(), vec!["flaky"]);
+    assert!(recovery_events(&writer.events_snapshot().unwrap()).is_empty());
+}
+
+#[test]
+fn worktree_integrity_unsuccessful_recovery_returns_original() {
+    let integrity_error = worktree_integrity_error("run-integrity-recovery-failed");
+    let host = RecoveryHost::new([
+        ("flaky", vec![Err(integrity_error.clone())]),
+        (
+            "recover",
+            vec![Err(retryable_error("recover", "unsafe to reconcile"))],
+        ),
+    ]);
+    let job = recovery_job(Some("recover"), None, "flaky", None, 3);
+    let writer = std::sync::Arc::new(test_writer("run-integrity-recovery-failed"));
+
+    let err = execute_job(
+        &job,
+        Value::Null,
+        "run-integrity-recovery-failed",
+        writer.clone(),
+        &host,
+    )
+    .expect_err("unsuccessful recovery must preserve the integrity failure");
+
+    assert_eq!(err.to_string(), integrity_error.to_string());
+    assert_eq!(host.actions(), vec!["flaky", "recover"]);
+    let events = writer.events_snapshot().expect("audit snapshot");
+    let recovery_events = recovery_events(&events);
+    assert_eq!(recovery_events.len(), 1);
+    assert!(matches!(
+        recovery_events[0].kind,
+        V2AuditEventKind::StepRecoveryAttempted {
+            recovery_succeeded: false,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn worktree_integrity_post_recovery_failure_returns_original() {
+    let integrity_error = worktree_integrity_error("run-integrity-post-failed");
+    let host = RecoveryHost::new([
+        (
+            "flaky",
+            vec![
+                Err(integrity_error.clone()),
+                Err(retryable_error("flaky", "still unsafe")),
+            ],
+        ),
+        ("recover", vec![Ok(json!({"recovered": true}))]),
+    ]);
+    let job = recovery_job(Some("recover"), None, "flaky", None, 3);
+    let writer = std::sync::Arc::new(test_writer("run-integrity-post-failed"));
+
+    let err = execute_job(
+        &job,
+        Value::Null,
+        "run-integrity-post-failed",
+        writer.clone(),
+        &host,
+    )
+    .expect_err("failed post-recovery attempt must preserve the integrity failure");
+
+    assert_eq!(err.to_string(), integrity_error.to_string());
+    assert_eq!(host.actions(), vec!["flaky", "recover", "flaky"]);
+    assert_eq!(recovery_events(&writer.events_snapshot().unwrap()).len(), 1);
+}
+
+#[test]
 fn no_recovery_activity_preserves_success_and_failure_paths() {
     let original_error = retryable_error("flaky", "still failing");
     let failing_host = RecoveryHost::new([("flaky", vec![Err(original_error.clone())])]);
@@ -320,6 +525,39 @@ fn no_recovery_activity_preserves_success_and_failure_paths() {
 
     assert!(outcome.success);
     assert!(recovery_events(&success_writer.events_snapshot().unwrap()).is_empty());
+}
+
+#[test]
+fn terminal_failure_activity_runs_once_and_preserves_original_error() {
+    let host = ScriptedHost::new([
+        (
+            "build",
+            vec![Action::Err(retryable_error("build", "compile failed"))],
+        ),
+        (
+            "publish_failure",
+            vec![Action::Ok(json!({"published": true}))],
+        ),
+    ]);
+    let mut job = recovery_job(None, None, "build", None, 1);
+    job.failure_activity = Some("publish_failure".to_string());
+    job.resolved_failure_activity = Some(deterministic_activity("publish_failure", None));
+
+    let error = execute_job(
+        &job,
+        json!({"task_id": "ORB-FAILURE-HOOK"}),
+        "run-failure-hook",
+        Arc::new(test_writer("run-failure-hook")),
+        &host,
+    )
+    .expect_err("the failure hook must not replace the original step failure");
+
+    assert!(
+        error.to_string().contains("compile failed"),
+        "original error remains authoritative: {error}"
+    );
+    assert_eq!(host.call_count("build"), 1);
+    assert_eq!(host.call_count("publish_failure"), 1);
 }
 
 #[test]
@@ -364,6 +602,8 @@ fn recovery_job(
         recovery_activity: recovery_name.map(str::to_string),
         resolved_recovery_activity: recovery_name
             .map(|name| deterministic_activity(name, recovery_fs_profile)),
+        failure_activity: None,
+        resolved_failure_activity: None,
         max_active_runs: 1,
         kind: JobKind::Workflow,
         steps: vec![JobV2Step {
@@ -371,8 +611,8 @@ fn recovery_job(
             when: None,
             retry: Some(RetrySpec {
                 max_attempts,
-                initial_backoff_ms: 0,
-                backoff_cap_ms: 0,
+                initial_backoff_ms: 1,
+                backoff_cap_ms: 1,
                 backoff_strategy: BackoffStrategy::Linear,
             }),
             recovery_activity: None,
@@ -425,6 +665,8 @@ fn recovery_agent_loop_spec(
         backend,
         provider,
         wall_clock_timeout_seconds: 30,
+        require_response_envelope: false,
+        require_completion_envelope: true,
         role,
         proc_allowed_programs: None,
     }
@@ -439,6 +681,7 @@ fn recovery_exec_ctx<'a>(host: &'a dyn V2RuntimeHost) -> ExecCtx<'a> {
         pipeline: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         sessions: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         recovery_activity: None,
+        failure_activity: None,
         item: None,
         iteration: None,
     }
@@ -448,6 +691,15 @@ fn retryable_error(action: &str, message: &str) -> DispatchError {
     DispatchError::DeterministicActionFailed {
         action: action.to_string(),
         message: message.to_string(),
+    }
+}
+
+fn worktree_integrity_error(run_id: &str) -> DispatchError {
+    DispatchError::WorktreeIntegrity {
+        code: "worktree_integrity_ambiguous",
+        diagnostic: format!(
+            r#"{{"task_id":"ORB-10306","run_id":"{run_id}","primary_changed":true,"assigned_changed":true}}"#
+        ),
     }
 }
 

@@ -23,6 +23,7 @@ use orbit_common::types::{
 use orbit_store::{LearningCreateParams, LearningSearchParams};
 use orbit_tools::ToolRegistry;
 use serde_json::{Value, json};
+use tempfile::tempdir;
 
 use super::super::test_support::test_runtime;
 use crate::OrbitRuntime;
@@ -31,6 +32,22 @@ fn registry_with_builtins() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register_builtins();
     registry
+}
+
+/// Declare a human caller context for a test that reaches a learning *write*
+/// tool.
+///
+/// [ORB-10364] gates `add`/`update`/`supersede` on the `ORBIT_AGENT_*` pair,
+/// which a child of a managed Orbit run inherits (the ORB-10350 hazard). The
+/// returned guard also holds the process-wide env lock, so it serializes these
+/// tests against the executor-context ones below.
+fn human_context_env() -> orbit_common::test_env::ScopedEnv {
+    orbit_common::test_env::unset(
+        orbit_common::test_env::AGENT_IDENTITY_ENV
+            .iter()
+            .copied()
+            .chain(std::iter::once("ORBIT_LEARNING_AUTHOR")),
+    )
 }
 
 fn create_minimal(
@@ -68,16 +85,13 @@ fn registry_exposes_learning_tools_with_documented_schema_fields() {
         .collect();
     for expected in [
         "orbit.learning.add",
-        "orbit.learning.comment.add",
-        "orbit.learning.comment.delete",
-        "orbit.learning.comment.list",
+        "orbit.learning.archive",
         "orbit.learning.list",
         "orbit.learning.prune",
         "orbit.learning.sync",
         "orbit.learning.show",
         "orbit.learning.supersede",
         "orbit.learning.update",
-        "orbit.learning.upvote",
     ] {
         assert!(
             names.contains(&expected),
@@ -106,38 +120,6 @@ fn registry_exposes_learning_tools_with_documented_schema_fields() {
         assert!(
             add_field_names.contains(&required),
             "orbit.learning.add missing field: {required}",
-        );
-    }
-
-    let upvote_schema = schemas
-        .iter()
-        .find(|s| s.name == "orbit.learning.upvote")
-        .expect("upvote schema");
-    let upvote_field_names: Vec<&str> = upvote_schema
-        .parameters
-        .iter()
-        .map(|p| p.name.as_str())
-        .collect();
-    for required in ["id", "model", "task"] {
-        assert!(
-            upvote_field_names.contains(&required),
-            "orbit.learning.upvote missing field: {required}"
-        );
-    }
-
-    let comment_add_schema = schemas
-        .iter()
-        .find(|s| s.name == "orbit.learning.comment.add")
-        .expect("comment add schema");
-    let comment_add_field_names: Vec<&str> = comment_add_schema
-        .parameters
-        .iter()
-        .map(|p| p.name.as_str())
-        .collect();
-    for required in ["learning_id", "body", "model"] {
-        assert!(
-            comment_add_field_names.contains(&required),
-            "orbit.learning.comment.add missing field: {required}"
         );
     }
 }
@@ -177,92 +159,6 @@ fn round_trip_add_show_preserves_every_field() {
     assert_eq!(response["created_by"], "claude");
     assert_eq!(response["priority"], 7);
     assert_eq!(response["status"], "active");
-    assert_eq!(response["vote_count"], 0);
-    assert!(response["last_voted_at"].is_null());
-}
-
-#[test]
-fn upvote_records_vote_stats_on_show_but_not_list() {
-    let (_guard, runtime, _repo_root) = test_runtime();
-    let learning = create_minimal(&runtime, "vote target", &["foo/**"], &[]);
-
-    let response = super::super::learning_tools::upvote(
-        &runtime,
-        json!({"id": learning.id, "model": "claude", "task": "ORB-00095"}),
-        None,
-        None,
-    )
-    .expect("upvote");
-    assert_eq!(response["vote_count"], 1);
-    assert!(response["last_voted_at"].as_str().is_some());
-
-    let duplicate = super::super::learning_tools::upvote(
-        &runtime,
-        json!({"id": learning.id, "model": "claude", "task_id": "ORB-00095"}),
-        None,
-        None,
-    )
-    .expect("duplicate");
-    assert_eq!(duplicate["vote_count"], 1);
-
-    let shown =
-        super::super::learning_tools::show(&runtime, json!({"id": learning.id})).expect("show");
-    assert_eq!(shown["vote_count"], 1);
-    assert!(shown["last_voted_at"].as_str().is_some());
-
-    let listed =
-        super::super::learning_tools::list(&runtime, json!({"status": "active"})).expect("list");
-    let row = find_id(&listed, &learning.id).expect("listed row");
-    assert!(row.get("vote_count").is_none());
-    assert!(row.get("last_voted_at").is_none());
-}
-
-#[test]
-fn comment_tools_add_list_and_delete() {
-    let (_guard, runtime, _repo_root) = test_runtime();
-    let learning = create_minimal(&runtime, "comment target", &["foo/**"], &[]);
-
-    let added = super::super::learning_tools::comment_add(
-        &runtime,
-        json!({
-            "learning_id": learning.id.clone(),
-            "body": "  note from tool  ",
-            "model": "codex",
-        }),
-        None,
-        None,
-    )
-    .expect("comment add");
-    let comment_id = added["id"].as_str().expect("comment id").to_string();
-
-    let listed = super::super::learning_tools::comment_list(
-        &runtime,
-        json!({"learning_id": learning.id.clone()}),
-    )
-    .expect("comment list");
-    assert_eq!(listed.as_array().expect("array").len(), 1);
-    assert_eq!(listed[0]["id"], comment_id);
-    assert_eq!(listed[0]["body"], "note from tool");
-
-    super::super::learning_tools::comment_delete(
-        &runtime,
-        json!({"id": comment_id}),
-        None,
-        Some("codex".to_string()),
-    )
-    .expect("comment delete");
-    let active = super::super::learning_tools::comment_list(
-        &runtime,
-        json!({"learning_id": learning.id.clone()}),
-    )
-    .expect("active comments");
-    assert!(active.as_array().expect("array").is_empty());
-    let deleted = super::super::learning_tools::comment_list(
-        &runtime,
-        json!({"learning_id": learning.id.clone(), "include_deleted": true}),
-    )
-    .expect("deleted comments");
-    assert_eq!(deleted.as_array().expect("array").len(), 1);
 }
 
 // --- ORB-00202: orbit.learning.list path filter uses glob-containment
@@ -304,6 +200,7 @@ fn list_tag_filter_uses_case_insensitive_equality() {
 #[test]
 fn supersede_excludes_from_default_list_but_surfaces_under_status_superseded() {
     let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
     let old = create_minimal(&runtime, "old", &["foo/**"], &[]);
     let new = create_minimal(&runtime, "new", &["foo/**"], &[]);
 
@@ -325,6 +222,69 @@ fn supersede_excludes_from_default_list_but_surfaces_under_status_superseded() {
         .expect("list");
     let ids = ids_from_array(&superseded);
     assert!(ids.contains(&old.id));
+}
+
+// --- ORB-10469: named single-learning archive (retire without a replacement)
+
+#[test]
+fn archive_retires_a_single_active_learning_without_a_replacement() {
+    let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
+    let learning = create_minimal(&runtime, "obsolete rule", &[], &[]);
+
+    let response =
+        super::super::learning_tools::archive(&runtime, json!({"id": learning.id}), None, None)
+            .expect("archive");
+    assert_eq!(response["id"], learning.id);
+    assert_eq!(response["status"], "superseded");
+    assert!(response["superseded_by"].is_null());
+
+    let active = super::super::learning_tools::list(&runtime, json!({"status": "active"}))
+        .expect("active list");
+    assert!(!ids_from_array(&active).contains(&learning.id));
+}
+
+#[test]
+fn archive_is_idempotent_on_an_already_archived_learning() {
+    let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
+    let learning = create_minimal(&runtime, "obsolete rule", &[], &[]);
+
+    super::super::learning_tools::archive(&runtime, json!({"id": learning.id}), None, None)
+        .expect("first archive");
+    let second =
+        super::super::learning_tools::archive(&runtime, json!({"id": learning.id}), None, None)
+            .expect("second archive is a no-op success");
+    assert_eq!(second["status"], "superseded");
+}
+
+#[test]
+fn archive_is_a_no_op_on_a_record_already_superseded_with_a_replacement() {
+    let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
+    let old = create_minimal(&runtime, "old", &[], &[]);
+    let new = create_minimal(&runtime, "new", &[], &[]);
+    runtime
+        .supersede_learning(&old.id, &new.id)
+        .expect("supersede");
+
+    let response =
+        super::super::learning_tools::archive(&runtime, json!({"id": old.id}), None, None)
+            .expect("archive on already-superseded record is a no-op");
+    assert_eq!(response["status"], "superseded");
+    // The existing replacement pointer is preserved, not clobbered to null.
+    assert_eq!(response["superseded_by"], new.id);
+}
+
+#[test]
+fn archive_rejects_a_missing_id() {
+    let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
+
+    let err =
+        super::super::learning_tools::archive(&runtime, json!({"id": "L-9999999"}), None, None)
+            .expect_err("missing id is rejected");
+    assert!(matches!(err, OrbitError::NotFound { .. }));
 }
 
 // --- AC #11: sync rebuilds the index from YAML -----------------------
@@ -349,6 +309,7 @@ fn sync_rebuilds_index_after_truncation() {
 #[test]
 fn add_rejects_summary_longer_than_280_chars() {
     let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
     let long = "a".repeat(281);
     let err = super::super::learning_tools::add(
         &runtime,
@@ -369,6 +330,7 @@ fn add_rejects_summary_longer_than_280_chars() {
 #[test]
 fn supersede_rejects_id_equal_to_with() {
     let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
     let learning = create_minimal(&runtime, "x", &[], &[]);
     let err = super::super::learning_tools::supersede(
         &runtime,
@@ -381,8 +343,52 @@ fn supersede_rejects_id_equal_to_with() {
 }
 
 #[test]
+fn supersede_reports_an_unreadable_remote_stub_like_show() {
+    let root = tempdir().expect("tempdir");
+    let global_root = root.path().join("global");
+    let shared_root = root.path().join("repo/.orbit");
+    let remote_root = root.path().join("remote/.orbit");
+    let local_root = root.path().join("local/.orbit");
+    for path in [&global_root, &shared_root, &remote_root, &local_root] {
+        std::fs::create_dir_all(path).expect("create runtime root");
+    }
+
+    let remote = OrbitRuntime::from_resolved_roots(&global_root, &shared_root, &remote_root)
+        .expect("remote runtime");
+    let remote_learning = create_minimal(&remote, "remote", &[], &[]);
+    std::fs::remove_file(
+        remote_root
+            .join("learnings")
+            .join(&remote_learning.id)
+            .join("learning.yaml"),
+    )
+    .expect("remove remote learning body");
+
+    let local = OrbitRuntime::from_resolved_roots(&global_root, &shared_root, &local_root)
+        .expect("local runtime");
+    let replacement = create_minimal(&local, "replacement", &[], &[]);
+    let _env = human_context_env();
+
+    let err = super::super::learning_tools::supersede(
+        &local,
+        json!({"id": remote_learning.id, "with": replacement.id}),
+        None,
+        None,
+    )
+    .expect_err("remote stub is not locally mutable");
+
+    let OrbitError::Store(message) = err else {
+        panic!("expected remote-stub store error");
+    };
+    assert!(message.contains("is recorded in another worktree"));
+    assert!(message.contains("body is not locally readable"));
+    assert!(message.contains("worktree_root="));
+}
+
+#[test]
 fn update_rejects_on_superseded_record() {
     let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
     let old = create_minimal(&runtime, "old", &[], &[]);
     let new = create_minimal(&runtime, "new", &[], &[]);
     runtime
@@ -560,9 +566,172 @@ fn ids_from_array(value: &Value) -> Vec<String> {
         .collect()
 }
 
-fn find_id<'a>(value: &'a Value, id: &str) -> Option<&'a Value> {
-    value
-        .as_array()?
-        .iter()
-        .find(|item| item["id"].as_str() == Some(id))
+// --- [ORB-10330] runtime preallocated finalizers -------------------------
+
+#[test]
+fn finalize_preallocated_learning_lands_supplied_id_and_lists() {
+    let (_guard, runtime, _repo) = test_runtime();
+    // A non-sequential id proves the runtime path never selects a local id.
+    let learning = runtime
+        .finalize_preallocated_learning(
+            "L-0055",
+            LearningCreateParams {
+                summary: "hub preallocated learning".to_string(),
+                scope: LearningScope::default(),
+                body: "body".to_string(),
+                evidence: Vec::new(),
+                created_by: Some("test".to_string()),
+                priority: None,
+            },
+        )
+        .expect("finalize preallocated learning");
+    assert_eq!(learning.id, "L-0055");
+
+    // Lifecycle read/list work through the owner-local projection.
+    let fetched = runtime.get_learning("L-0055").expect("get learning");
+    assert_eq!(fetched.summary, "hub preallocated learning");
+    let ids: Vec<String> = runtime
+        .list_learnings(Some(LearningStatus::Active))
+        .expect("list learnings")
+        .into_iter()
+        .map(|learning| learning.id)
+        .collect();
+    assert!(ids.contains(&"L-0055".to_string()));
+}
+
+#[test]
+fn finalize_preallocated_adr_lands_supplied_id() {
+    let (_guard, runtime, _repo) = test_runtime();
+    let adr = runtime
+        .finalize_preallocated_adr(
+            "ADR-0055",
+            orbit_store::AdrCreateParams {
+                title: "Hub preallocated ADR".to_string(),
+                owner: "test".to_string(),
+                related_features: Vec::new(),
+                related_tasks: Vec::new(),
+                tags: Vec::new(),
+                paths: Vec::new(),
+                body: "decision body".to_string(),
+            },
+        )
+        .expect("finalize preallocated ADR");
+    assert_eq!(adr.id, "ADR-0055");
+    assert_eq!(adr.status, orbit_common::types::AdrStatus::Proposed);
+}
+
+// --- ORB-10364: caller-role gate on the tool write surfaces ---------------
+
+/// Clear the identity pair and the authoring opt-in, then declare an executor
+/// context. The returned guard holds the process-wide env lock and restores
+/// everything on drop; every caller below is synchronous.
+fn executor_context_env() -> orbit_common::test_env::ScopedEnv {
+    let guard = human_context_env();
+    // SAFETY: the guard holds the process-wide env lock for its lifetime and
+    // restores `ORBIT_AGENT_MODEL` (as unset) when it drops.
+    unsafe {
+        std::env::set_var("ORBIT_AGENT_MODEL", "claude-opus-5");
+    }
+    guard
+}
+
+fn policy_denied_message<T>(result: Result<T, OrbitError>) -> String {
+    match result {
+        Err(OrbitError::PolicyDenied(message)) => message,
+        Err(error) => panic!("expected a policy denial, got {error:?}"),
+        Ok(_) => panic!("expected a policy denial, got success"),
+    }
+}
+
+#[test]
+fn learning_write_tools_refuse_executor_context_and_redirect_to_friction_add() {
+    let (_temp, runtime, _repo_root) = test_runtime();
+    let old = create_minimal(&runtime, "old", &[], &[]);
+    let new = create_minimal(&runtime, "new", &[], &[]);
+    let _env = executor_context_env();
+
+    for (label, result) in [
+        (
+            "add",
+            super::super::learning_tools::add(
+                &runtime,
+                json!({ "summary": "executor rule", "body": "executor body" }),
+                None,
+                None,
+            ),
+        ),
+        (
+            "update",
+            super::super::learning_tools::update(
+                &runtime,
+                json!({ "id": old.id, "summary": "rewrite" }),
+                None,
+                None,
+            ),
+        ),
+        (
+            "supersede",
+            super::super::learning_tools::supersede(
+                &runtime,
+                json!({ "id": old.id, "with": new.id }),
+                None,
+                None,
+            ),
+        ),
+        (
+            "archive",
+            super::super::learning_tools::archive(&runtime, json!({ "id": old.id }), None, None),
+        ),
+    ] {
+        let message = policy_denied_message(result);
+        assert!(
+            message.contains("orbit friction add"),
+            "{label} redirects to friction: {message}"
+        );
+        assert!(
+            message.contains("ORBIT_LEARNING_AUTHOR"),
+            "{label} names the opt-in: {message}"
+        );
+    }
+
+    // Nothing was written: both fixtures are still active and unmodified.
+    let active = runtime
+        .list_learnings(Some(LearningStatus::Active))
+        .expect("list active");
+    assert_eq!(active.len(), 2);
+    assert!(active.iter().any(|l| l.id == old.id && l.summary == "old"));
+}
+
+/// Reads stay open in an executor context — the gate is on authoring only.
+#[test]
+fn learning_read_tools_are_unaffected_in_an_executor_context() {
+    let (_temp, runtime, _repo_root) = test_runtime();
+    let learning = create_minimal(&runtime, "readable", &["foo/**"], &["perf"]);
+    let _env = executor_context_env();
+
+    let shown = super::super::learning_tools::show(&runtime, json!({ "id": learning.id }))
+        .expect("show is not gated");
+    assert_eq!(shown["summary"], "readable");
+
+    let listed =
+        super::super::learning_tools::list(&runtime, json!({})).expect("list is not gated");
+    assert_eq!(ids_from_array(&listed), vec![learning.id]);
+}
+
+/// The dashboard's `PATCH /api/learnings/:id` entry point deliberately skips
+/// the gate: a dashboard server can run inside a managed Orbit run with
+/// `ORBIT_AGENT_MODEL` set, and its writes carry request-derived attribution
+/// (ORB-10352). Gating it would refuse a human's edit over how the *server*
+/// was launched.
+#[test]
+fn the_dashboard_update_entry_point_is_not_gated_by_the_server_process_env() {
+    let (_temp, runtime, _repo_root) = test_runtime();
+    let learning = create_minimal(&runtime, "dashboard original", &[], &[]);
+    let _env = executor_context_env();
+
+    let updated = runtime
+        .update_learning_from_request(json!({ "id": learning.id, "summary": "dashboard revised" }))
+        .expect("dashboard update is not gated");
+
+    assert_eq!(updated["summary"], "dashboard revised");
 }

@@ -38,6 +38,58 @@ pub fn peek_response_status(stdout: &str) -> Option<String> {
     Some(envelope.status)
 }
 
+/// Content-blind check that a provider's stdout *terminated with* a well-formed
+/// Orbit response envelope.
+///
+/// This is the step-completion protocol signal ([ADR-0258] / [ORB-10449]), not a
+/// judgement about the work: it reads only the envelope frame — that stdout
+/// parsed as JSON, that a recognizable envelope is present, that its
+/// `schemaVersion` is supported, and that its `status` is one of the three
+/// protocol tokens. It never reads `result` or `error`, and it does not care
+/// *which* status was declared. An agent that reports `status: "failed"`
+/// completed its invocation contract exactly as much as one that reports
+/// success; an agent that yielded mid-turn emitted no envelope at all.
+///
+/// Deliberately excludes [`validate_exit_alignment`]. Exit agreement is a
+/// separate classification the CLI runner already performs, and folding it in
+/// here would make a `status: "failed"` envelope indistinguishable from a
+/// missing one — which is precisely the distinction this predicate exists to
+/// draw.
+pub fn response_envelope_protocol_check(stdout: &str) -> Result<(), OrbitError> {
+    // A provider may interleave non-protocol chatter with its output — a
+    // wrapped tool writing to the same stdout, a warning line — which makes the
+    // stream unparseable as a whole even though the agent did terminate
+    // properly. Fall back to scanning the raw text so this gate tests for the
+    // termination signal, not for the tidiness of the stream around it. Failing
+    // a completed step over stray stdout would be a worse defect than the one
+    // this check exists to catch.
+    let envelope = match parse_json_documents(stdout) {
+        Ok(documents) => documents
+            .iter()
+            .rev()
+            .find_map(find_agent_response_envelope),
+        Err(_) => find_agent_response_envelope_in_string(stdout),
+    };
+    let envelope = envelope.ok_or_else(|| {
+        OrbitError::AgentProtocolViolation(
+            "stdout does not contain an Orbit response envelope".to_string(),
+        )
+    })?;
+    if envelope.schema_version != 1 {
+        return Err(OrbitError::AgentProtocolViolation(format!(
+            "unsupported schemaVersion: {}",
+            envelope.schema_version
+        )));
+    }
+    if !matches!(envelope.status.as_str(), "success" | "failed" | "timeout") {
+        return Err(OrbitError::AgentProtocolViolation(format!(
+            "unknown status: {}",
+            envelope.status
+        )));
+    }
+    Ok(())
+}
+
 fn parse_json_documents(stdout: &str) -> Result<Vec<Value>, OrbitError> {
     let mut documents = Vec::new();
     for item in Deserializer::from_str(stdout).into_iter::<Value>() {

@@ -1,16 +1,17 @@
 ---
 title: Executors — Decisions
 owner: claude
-last_updated: 2026-06-13
+last_updated: 2026-07-26
+last_validated: 2026-07-27
 status: Draft
 feature: executors
 doc_role: decisions
 type: design
-summary: ADR log for executor registration and the External Executor Protocol.
+summary: ADR log for executor registration and the (now retired) External Executor Protocol.
 tags: [executors]
-paths: ["crates/orbit-engine/src/executor/**", "crates/orbit-common/src/types/executor_def.rs"]
+paths: ["crates/orbit-common/src/types/executor_def.rs"]
 related_features: [executors]
-related_artifacts: [ORB-00384, ADR-0196]
+related_artifacts: [ORB-00384, ORB-00400, ORB-10395, ADR-0196]
 ---
 
 # Executors — Decisions
@@ -21,11 +22,21 @@ global ID allocated through `orbit.adr.add`; the ADR store is the source of trut
 for status, owner, `related_features`, and `related_tasks`. Resolve any global ID
 with `orbit tool run orbit.adr.show --input '{"id":"ADR-0196"}'`.
 
+Layout note: as of [ORB-00400], this folder is intentionally decisions+specs-only.
+[ADR-0196] and [specs/external-executor-protocol.md](./specs/external-executor-protocol.md)
+are the load-bearing docs for the shipped External Executor Protocol; placeholder
+`1_overview.md`, `2_design.md`, and `3_vision.md` docs would imply a broader
+executor feature narrative that this work has not established. Add numbered docs
+only when a future executor-architecture task owns that narrative, and retire
+this exception in the same PR.
+
 ---
 
 ## ADR-0196 — External Executor Protocol for dynamic out-of-process executor registration
 
-**Status:** Accepted · 2026-06 · [ORB-00384] (Tier 1: defined the protocol, added the `external` executor type, shipped a conformance test)
+**Status:** Accepted · 2026-06 · [ORB-00384] (Tier 1: defined the protocol, added the `external` executor type, shipped a conformance test) — **RETIRED 2026-07 · [ORB-10395]**
+
+> **Retirement note ([ORB-10395], 2026-07-26).** The External Executor Protocol is not a supported Orbit surface. Retiring the v1 executor stack removed everything this decision stood up: `ExternalExecutor`, the shared `direct_agent` subprocess transport, `ActivityExecutorRegistry`, the `ActivityExecutor` trait, the v1 `ExecutionContext`, the `external.example.yaml` template, and the conformance fixture. v2 dispatch (`orbit-engine::activity_job`) is the only execution path and consults no executor registry, so an `executor_type: external` def is now inert — it deserializes and stores, but nothing spawns it. `ExecutorType::External` survives in the wire enum only so pre-existing defs keep parsing; dropping the variant is a separate release decision, tracked alongside the same call for `ExecutorType::AgentCli`. The consequences below are recorded as history, not as live obligations — in particular, the wire protocol is **no longer** a backward-compatibility obligation. Any future out-of-process extension point must be decided afresh against the v2 dispatch path. See [specs/external-executor-protocol.md](./specs/external-executor-protocol.md) for the retired contract.
 
 **Context.** Orbit's `ExecutorType` is a sealed enum and `load_from_defs` is a closed `match`, so a homegrown executor can only be added by forking orbit-engine — an `internal`-tier crate with no downstream guarantees. Yet `DirectAgentExecutor` already implements an out-of-process transport (spawn `command`, write a request envelope to stdin, map the process exit code / stderr to an outcome): the capability exists but is undocumented and coupled to the agent-family `direct_agent` path.
 
@@ -43,5 +54,7 @@ with `orbit tool run orbit.adr.show --input '{"id":"ADR-0196"}'`.
 ## Task References
 
 - **[ORB-00384]** — External Executor Protocol v1: define the contract, add `ExecutorType::External`, register a generic external-process executor, document the spec, ship a conformance test.
+- **[ORB-00400]** — recorded the `executors` folder as a decisions+specs-only layout exception while refreshing design-doc ownership conventions.
+- **[ORB-10395]** — retired the External Executor Protocol with the rest of the v1 executor stack: deleted `ExternalExecutor`, the shared subprocess transport, the executor registry, the example def template, and the conformance fixture.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

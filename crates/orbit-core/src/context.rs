@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use orbit_common::types::{Crew, WorkspacePaths};
+use orbit_common::types::{Crew, WorkspacePaths, normalize_agent_family_for_model};
 use orbit_engine::PrConfig;
 use orbit_policy::PolicyEngine;
 use orbit_search::{EmbedWorker, VectorStore};
@@ -9,7 +9,7 @@ use orbit_store::{
     AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend,
     LearningStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
     TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReservationStoreBackend,
-    TaskReviewStoreBackend, TaskStoreBackend, ToolStoreBackend,
+    TaskStoreBackend, ToolStoreBackend,
 };
 use orbit_tools::ToolRegistry;
 
@@ -21,6 +21,7 @@ const ORBIT_AGENT_MODEL: &str = "ORBIT_AGENT_MODEL";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActorKind {
+    Unknown,
     Human,
     Agent,
 }
@@ -32,6 +33,13 @@ pub struct ActorIdentity {
 }
 
 impl ActorIdentity {
+    pub fn unknown() -> Self {
+        Self {
+            kind: ActorKind::Unknown,
+            label: "unknown".to_string(),
+        }
+    }
+
     pub fn human(label: impl Into<String>) -> Self {
         Self {
             kind: ActorKind::Human,
@@ -46,20 +54,32 @@ impl ActorIdentity {
         }
     }
 
-    pub(crate) fn from_env() -> Self {
-        let actor_label = std::env::var(ORBIT_AGENT_MODEL)
+    /// Resolve the self-reported process identity used by CLI and dashboard
+    /// entry points.
+    ///
+    /// The environment is not an authentication boundary. Agent values are
+    /// therefore reduced to the same canonical family used by tool dispatch,
+    /// and an absent or inconsistent envelope is recorded as `unknown` rather
+    /// than claiming that a human was present.
+    pub fn from_env() -> Self {
+        let agent = std::env::var(ORBIT_AGENT_NAME)
             .ok()
-            .or_else(|| std::env::var(ORBIT_AGENT_NAME).ok())
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
+            .filter(|value| !value.trim().is_empty());
+        let model = std::env::var(ORBIT_AGENT_MODEL)
+            .ok()
+            .filter(|value| !value.trim().is_empty());
 
-        actor_label.map(Self::agent).unwrap_or_default()
+        normalize_agent_family_for_model(agent.as_deref(), model.as_deref())
+            .ok()
+            .flatten()
+            .map(Self::agent)
+            .unwrap_or_default()
     }
 }
 
 impl Default for ActorIdentity {
     fn default() -> Self {
-        Self::human("human")
+        Self::unknown()
     }
 }
 
@@ -77,7 +97,6 @@ pub(crate) struct OrbitStores {
     pub(crate) task: Arc<dyn TaskStoreBackend>,
     pub(crate) task_document: Arc<dyn TaskDocumentStoreBackend>,
     pub(crate) task_history: Arc<dyn TaskHistoryStoreBackend>,
-    pub(crate) task_review: Arc<dyn TaskReviewStoreBackend>,
     pub(crate) task_artifact: Arc<dyn TaskArtifactStoreBackend>,
     pub(crate) adr: Arc<dyn AdrStoreBackend>,
     pub(crate) learning: Arc<dyn LearningStoreBackend>,
@@ -97,7 +116,6 @@ impl OrbitStores {
         task: Arc<dyn TaskStoreBackend>,
         task_document: Arc<dyn TaskDocumentStoreBackend>,
         task_history: Arc<dyn TaskHistoryStoreBackend>,
-        task_review: Arc<dyn TaskReviewStoreBackend>,
         task_artifact: Arc<dyn TaskArtifactStoreBackend>,
         adr: Arc<dyn AdrStoreBackend>,
         learning: Arc<dyn LearningStoreBackend>,
@@ -114,7 +132,6 @@ impl OrbitStores {
             task,
             task_document,
             task_history,
-            task_review,
             task_artifact,
             adr,
             learning,
@@ -127,6 +144,62 @@ impl OrbitStores {
             executor_def,
             policy_def,
         }
+    }
+
+    pub(crate) fn tasks(&self) -> &dyn TaskStoreBackend {
+        self.task.as_ref()
+    }
+
+    pub(crate) fn task_documents(&self) -> &dyn TaskDocumentStoreBackend {
+        self.task_document.as_ref()
+    }
+
+    pub(crate) fn task_history(&self) -> &dyn TaskHistoryStoreBackend {
+        self.task_history.as_ref()
+    }
+
+    pub(crate) fn task_artifacts(&self) -> &dyn TaskArtifactStoreBackend {
+        self.task_artifact.as_ref()
+    }
+
+    pub(crate) fn adrs(&self) -> &dyn AdrStoreBackend {
+        self.adr.as_ref()
+    }
+
+    pub(crate) fn learnings(&self) -> &dyn LearningStoreBackend {
+        self.learning.as_ref()
+    }
+
+    pub(crate) fn semantic_vector(&self) -> &VectorStore {
+        self.semantic_vector.as_ref()
+    }
+
+    pub(crate) fn semantic_worker(&self) -> &EmbedWorker {
+        self.semantic_worker.as_ref()
+    }
+
+    pub(crate) fn task_reservations(&self) -> &dyn TaskReservationStoreBackend {
+        self.task_reservation.as_ref()
+    }
+
+    pub(crate) fn jobs(&self) -> &dyn JobRunStoreBackend {
+        self.job_run.as_ref()
+    }
+
+    pub(crate) fn tools(&self) -> &dyn ToolStoreBackend {
+        self.tool.as_ref()
+    }
+
+    pub(crate) fn audit_events(&self) -> &dyn AuditEventStoreBackend {
+        self.audit_event.as_ref()
+    }
+
+    pub(crate) fn executors(&self) -> &dyn ExecutorDefStoreBackend {
+        self.executor_def.as_ref()
+    }
+
+    pub(crate) fn policies(&self) -> &dyn PolicyDefStoreBackend {
+        self.policy_def.as_ref()
     }
 }
 
@@ -170,16 +243,19 @@ impl OrbitPolicyContext {
 pub(crate) struct OrbitRuntimeSettings {
     persistence: PersistenceConfig,
     actor: ActorIdentity,
-    task_approval_required_for_agent: bool,
-    task_delegate_approval: bool,
     scoring_enabled: bool,
-    graph_editing: bool,
     pr_config: PrConfig,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     v2_backend: Option<String>,
     /// Default base branch for ship/duel-plan workflows
     /// (`[workflow] base_branch` in `config.toml`, default `"main"`).
     workflow_base_branch: String,
+    /// Opt-in for unattended ship dispatch
+    /// (`[workflow] auto_ship` in `config.toml`, default `false`).
+    workflow_auto_ship: bool,
+    /// Whether this workspace is a routine source
+    /// (`[routines] role = "source"` in `config.toml`, default `false`).
+    routines_source: bool,
     crews: std::collections::BTreeMap<String, Crew>,
     default_crew: Option<String>,
     duel: DuelConfig,
@@ -190,13 +266,12 @@ impl OrbitRuntimeSettings {
     pub(crate) fn new(
         persistence: PersistenceConfig,
         actor: ActorIdentity,
-        task_approval_required_for_agent: bool,
-        task_delegate_approval: bool,
         scoring_enabled: bool,
-        graph_editing: bool,
         pr_config: PrConfig,
         v2_backend: Option<String>,
         workflow_base_branch: String,
+        workflow_auto_ship: bool,
+        routines_source: bool,
         crews: std::collections::BTreeMap<String, Crew>,
         default_crew: Option<String>,
         duel: DuelConfig,
@@ -204,13 +279,12 @@ impl OrbitRuntimeSettings {
         Self {
             persistence,
             actor,
-            task_approval_required_for_agent,
-            task_delegate_approval,
             scoring_enabled,
-            graph_editing,
             pr_config,
             v2_backend,
             workflow_base_branch,
+            workflow_auto_ship,
+            routines_source,
             crews,
             default_crew,
             duel,
@@ -227,6 +301,14 @@ impl OrbitRuntimeSettings {
 
     pub(crate) fn workflow_base_branch(&self) -> &str {
         &self.workflow_base_branch
+    }
+
+    pub(crate) fn workflow_auto_ship(&self) -> bool {
+        self.workflow_auto_ship
+    }
+
+    pub(crate) fn routines_source(&self) -> bool {
+        self.routines_source
     }
 
     pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {
@@ -290,10 +372,6 @@ impl OrbitContext {
         &self.policy.policy
     }
 
-    pub(crate) fn set_policy(&mut self, policy: PolicyEngine) {
-        self.policy.policy = policy;
-    }
-
     pub(crate) fn registry(&self) -> &ToolRegistry {
         self.execution.registry.as_ref()
     }
@@ -322,49 +400,12 @@ impl OrbitContext {
         self.runtime.actor = actor;
     }
 
-    pub(crate) fn task_approval_required_for_agent(&self) -> bool {
-        self.runtime.task_approval_required_for_agent
-    }
-
-    pub(crate) fn task_delegate_approval(&self) -> bool {
-        self.runtime.task_delegate_approval
-    }
-
     pub(crate) fn scoring_enabled(&self) -> bool {
         self.runtime.scoring_enabled
     }
 
-    pub(crate) fn graph_editing(&self) -> bool {
-        self.runtime.graph_editing
-    }
-
-    pub(crate) fn pr_config(&self) -> &PrConfig {
-        self.runtime.pr_config()
-    }
-
-    /// Persisted default for the v2 `agent_loop` execution backend (§3.1
-    /// resolution precedence step 3). `None` means "not configured".
-    pub(crate) fn v2_backend(&self) -> Option<&str> {
-        self.runtime.v2_backend()
-    }
-
-    /// Default base branch for ship/duel-plan workflows. Sourced
-    /// from `[workflow] base_branch` in `config.toml`; falls back to
-    /// `"main"` when the key is absent.
-    pub(crate) fn workflow_base_branch(&self) -> &str {
-        self.runtime.workflow_base_branch()
-    }
-
-    pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {
-        self.runtime.crews()
-    }
-
-    pub(crate) fn default_crew(&self) -> Option<&str> {
-        self.runtime.default_crew()
-    }
-
-    pub(crate) fn duel_config(&self) -> &DuelConfig {
-        self.runtime.duel_config()
+    pub(crate) fn settings(&self) -> &OrbitRuntimeSettings {
+        &self.runtime
     }
 }
 

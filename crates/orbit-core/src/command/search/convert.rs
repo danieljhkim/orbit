@@ -12,6 +12,7 @@ pub(super) fn lexical_task_hit(task: &orbit_common::types::Task) -> GlobalSearch
         best_field: None,
         snippet: None,
         score: None,
+        score_breakdown: None,
         matched_by: None,
     }
 }
@@ -28,6 +29,7 @@ pub(super) fn semantic_hit_to_global(hit: orbit_search::SemanticHit) -> GlobalSe
         best_field: Some(hit.best_field),
         snippet: Some(hit.snippet),
         score: Some(hit.score),
+        score_breakdown: Some(hit.score_breakdown),
         matched_by: None,
     }
 }
@@ -48,6 +50,7 @@ pub(super) fn doc_result_to_global(
         best_field: None,
         snippet: None,
         score,
+        score_breakdown: None,
         matched_by: Some(result.matched_by),
     }
 }
@@ -67,6 +70,7 @@ pub(super) fn adr_result_to_global(
         best_field: None,
         snippet: None,
         score: Some(result.score as f32),
+        score_breakdown: None,
         matched_by: Some(result.matched_by),
     }
 }
@@ -99,6 +103,7 @@ pub(super) fn adr_to_global_hit_with_source(
         best_field: None,
         snippet: None,
         score: None,
+        score_breakdown: None,
         matched_by,
     }
 }

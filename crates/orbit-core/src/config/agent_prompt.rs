@@ -95,6 +95,48 @@ pub fn collect_role_settings(
     Ok(settings)
 }
 
+/// Choose the provider/model behind the seeded `[crews.qa]` entry. QA uses a
+/// deliberately economical default: Sonnet for Claude or Terra for Codex.
+/// Choices are limited to the two families actually detected on this host.
+pub fn collect_qa_crew_setting(
+    detected: &DetectedAgents,
+    prompter: &mut dyn Prompter,
+) -> io::Result<Option<RawAgentRoleConfig>> {
+    let mut options = Vec::new();
+    if detected.codex_cli {
+        options.push(RawAgentRoleConfig {
+            provider: Some("codex".to_string()),
+            backend: Some("cli".to_string()),
+            model: Some(orbit_common::model_defaults::CODEX_DEFAULT_MODEL.to_string()),
+        });
+    }
+    if detected.claude_cli {
+        options.push(RawAgentRoleConfig {
+            provider: Some("claude".to_string()),
+            backend: Some("cli".to_string()),
+            model: Some(orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK.to_string()),
+        });
+    }
+
+    if options.is_empty() {
+        return Ok(None);
+    }
+    if options.len() == 1 {
+        return Ok(Some(options.remove(0)));
+    }
+
+    prompter.message(
+        "Choose the detected agent for the QA crew:\n\n  1. Codex  terra\n  2. Claude sonnet",
+    )?;
+    loop {
+        match prompter.prompt("QA crew [1]: ")?.trim() {
+            "" | "1" => return Ok(Some(options.remove(0))),
+            "2" => return Ok(Some(options.remove(1))),
+            _ => prompter.message("Please enter 1 or 2.")?,
+        }
+    }
+}
+
 fn collect_one_role(
     role: &str,
     detected: &DetectedAgents,

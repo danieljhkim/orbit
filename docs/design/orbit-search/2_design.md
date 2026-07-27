@@ -3,7 +3,7 @@ summary: "Semantic Search — Design"
 type: design
 title: "Semantic Search — Design"
 owner: claude
-last_updated: 2026-05-21
+last_updated: 2026-07-26
 status: Accepted
 feature: orbit-search
 doc_role: design
@@ -309,7 +309,7 @@ The score breakdown is deliberately exposed: agents can use it to decide whether
 
 ### 7.3 Deletion
 
-`task.delete` cascades to `DELETE FROM embeddings WHERE source_kind = 'task' AND source_id = ?`. Tombstoned tasks (in the v2 task-sync sense, see [docs/design/task-sync/](../task-sync/)) are not embedded.
+`task.delete` cascades to `DELETE FROM embeddings WHERE source_kind = 'task' AND source_id = ?`. Tombstoned tasks (in the v2 task-sync sense, see [docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md)) are not embedded.
 
 ---
 
@@ -341,17 +341,20 @@ All embeddings stay local. Task content never leaves the workspace. This is stru
 
 ---
 
-## 9. Phase-2 Graph Corpus (Designed, Deferred)
+## 9. Historical Phase-2 Graph Corpus Proposal (Retired)
 
-**Status: Designed; deferred until [adr-artifact](../adr-artifact/) v2 ships and bandwidth is available.**
+**Status: Retired by ADR-0291 / ORB-10491.** Orbit's code-graph subsystem was
+deleted, so this section is retained only as design history and is not an
+implementation plan. Any future code-corpus work requires a new design that
+does not assume the removed graph types, indexer, or synchronization stream.
 
-Phase 2 extends the existing `embeddings` table to a second `source_kind` covering both code symbols and design-doc sections, with ADRs joining as a third `source_kind` once adr-artifact v2 lands ([adr-artifact §4.6](../adr-artifact/2_design.md)). No schema migration; the phase-1 `source_kind` discriminator is the seam this section commits against.
+Phase 2 extends the existing `embeddings` table to a second `source_kind` covering both code symbols and design-doc sections, with ADRs joining later as a third `source_kind` once ADR vector indexing has its own accepted design. No schema migration; the phase-1 `source_kind` discriminator is the seam this section commits against.
 
 The audience this corpus serves is the **task-creating / task-executing agent**. The five concrete use cases it enables — "find code that does X", duplicate / near-duplicate detection, task-creation grounding, "have we decided this before?", and glossary resolution — all collapse to one primitive: `orbit.search` filtered by `--kind`.
 
 ### 9.1 Corpus: knowledge-graph leaves
 
-The corpus is **`LeafKind`-filtered leaves of the knowledge graph**. The graph already represents code symbols *and* markdown sections as `LeafKind` variants in [graph/nodes.rs:12](../../../crates/orbit-knowledge/src/graph/nodes.rs), so one indexer covers both code and design docs uniformly.
+The corpus is **filtered leaves of the knowledge graph**. The graph is intended to represent code symbols *and* markdown sections as typed leaves, so one indexer can cover both code and design docs uniformly.
 
 Allowlist for the first cut:
 
@@ -362,7 +365,7 @@ Allowlist for the first cut:
 
 Excluded as low-signal pending recall evidence: `Field`, `Property`, `Constant`, `ConfigKey`, `Column`, `Macro`, `Delegate`, `Event`, `Global`, `Namespace`, `Package`, `Object`, `CompanionObject`, `SingletonClass`, `SingletonMethod`, `FunctionDeclaration`, `Record`, `Interface`, `TypeAlias`, `Impl`.
 
-**ADR markdown (`docs/design/*/4_decisions.md`) is explicitly excluded** from the doc-section path. Those files are migrating into the ADR artifact store per [adr-artifact §1](../adr-artifact/1_overview.md) and will be retired as hand-maintained docs. Indexing them ahead of the migration would force a re-index pass to remove them.
+**ADR markdown (`docs/design/*/4_decisions.md`) is explicitly excluded** from the doc-section path. ADR bodies are lifecycle-owned under [.orbit/adrs/](../../../.orbit/adrs/), not docs-owned design sections. Indexing local `4_decisions.md` prose as docs would force a re-index pass if ADRs later join as `source_kind = "adr"`.
 
 ### 9.2 Schema reuse
 
@@ -381,9 +384,9 @@ Per-leaf field tuning beyond this sketch is left for the implementing task; the 
 
 ### 9.4 Indexer placement: `orbit-embed::graph_indexer`
 
-A new module under `orbit-embed`, consistent with [ADR-007](./4_decisions.md#adr-007--orbit-search-ownership-relocated-to-orbit-embed)'s "semantic ownership lives in `orbit-embed`" rule. The indexer consumes a leaf-diff stream emitted by [`orbit-knowledge::pipeline::ensure_fresh`](../../../crates/orbit-knowledge/src/pipeline/mod.rs) after each *clean* rebuild, batches `EmbedJob`s through the same channel pattern the task path uses ([§7.1](#71-on-mutation-indexing)), and writes to the existing `VectorStore`.
+A new module under `orbit-embed`, consistent with [ADR-0276](./4_decisions.md#adr-0276--semantic-search-ownership-relocated-to-orbit-embed)'s "semantic ownership lives in `orbit-embed`" rule. The indexer consumes a leaf-diff stream from graph synchronization after each *clean* rebuild, batches `EmbedJob`s through the same channel pattern the task path uses ([§7.1](#71-on-mutation-indexing)), and writes to the existing `VectorStore`.
 
-Async by design: graph rebuild commits first, embedding lags behind in a background worker. `orbit-knowledge` does not gain a dependency on `orbit-embed` — the indexer pulls the diff via a public API on the pipeline. The exact diff-stream contract (push channel vs. pull-after-rebuild, `LeafDiff` shape) is deferred to the implementing task; both shapes are viable.
+Async by design: graph rebuild commits first, embedding lags behind in a background worker. The graph implementation does not gain a dependency on `orbit-embed` — the indexer pulls the diff via a graph synchronization API. The exact diff-stream contract (push channel vs. pull-after-rebuild, `LeafDiff` shape) is deferred to the implementing task; both shapes are viable.
 
 ### 9.5 Freshness and stale-row removal
 
@@ -408,15 +411,15 @@ Three loops at increasing scope:
 
 This section deliberately does not commit to:
 
-- **Symbol → ADR back-link as a precomputed edge.** Falls out of a future vector-ranked ADR search path once ADRs are vector-indexed. Precomputing top-k matches per symbol is a phase-3 optimization tied to the task-lineage feature, not a v1 requirement.
-- **Code-aware embedding model.** CodeBERT, voyage-code, and similar outperform general-text models on code retrieval but are larger and weaker on English. v1 ships with the BGE-small default ([ADR-001](./4_decisions.md#adr-001--fastembed-rs-onnx-backend-over-candle-llamacpp-or-external-ollama)) and revisits if recall on code queries underperforms.
-- **HNSW upgrade.** The graph corpus may cross the brute-force ceiling. Schema is already forward-compatible with `sqlite-vec` per [ADR-002](./4_decisions.md#adr-002--brute-force-cosine-over-sqlite-blobs-sqlite-vec-reserved-as-phase-2-upgrade); the decision to switch is a separate ADR at the point of operational evidence — see [3_vision.md §1.3](./3_vision.md).
+- **Symbol → ADR back-link as a precomputed edge.** Falls out of a future vector-ranked ADR search path once ADRs are vector-indexed. Precomputing top-k matches per symbol is a phase-3 optimization, not a v1 requirement.
+- **Code-aware embedding model.** CodeBERT, voyage-code, and similar outperform general-text models on code retrieval but are larger and weaker on English. v1 ships with the BGE-small default ([ADR-0270](./4_decisions.md#adr-0270--fastembed-rs-onnx-backend-over-candle-llamacpp-or-external-ollama)) and revisits if recall on code queries underperforms.
+- **HNSW upgrade.** The graph corpus may cross the brute-force ceiling. Schema is already forward-compatible with `sqlite-vec` per [ADR-0271](./4_decisions.md#adr-0271--brute-force-cosine-over-sqlite-blobs-sqlite-vec-reserved-as-phase-2-upgrade); the decision to switch is a separate ADR at the point of operational evidence — see [3_vision.md §1.3](./3_vision.md).
 - **Free-floating file-scope comments.** Comments not attached to any leaf's source span (e.g. section dividers between two `fn`s) are not embedded. The project convention is "default to no comments" so this gap is small and low-signal.
-- **Multi-workspace ADR scoping.** ADRs flow in via the adr-artifact feature, which itself defers cross-workspace scoping ([adr-artifact §8.5](../adr-artifact/2_design.md)).
+- **Multi-workspace ADR scoping.** ADRs would flow in through the ADR store; cross-workspace ADR scoping remains a separate design question.
 
 ### 9.7 Sequencing
 
-Phase 2 is gated on adr-artifact v2 shipping. Implementing the doc-section indexer ahead of that migration would index every `4_decisions.md` and then re-index them out, churning the corpus and the doc-citation graph. Once ADRs are first-class artifacts, the doc-section indexer cleanly excludes `4_decisions.md` and ADRs join as `source_kind = "adr"` through `orbit-embed::vector` per [adr-artifact §4.6](../adr-artifact/2_design.md).
+Phase 2 no longer depends on the removed ADR artifact v2 proposal. Implementing the doc-section indexer should still exclude every `4_decisions.md` so local narrative ADR logs do not churn the doc corpus; ADRs can join as `source_kind = "adr"` through `orbit-embed::vector` when a fresh ADR-vector indexing design exists.
 
 ---
 

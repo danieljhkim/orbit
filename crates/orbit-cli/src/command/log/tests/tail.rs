@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -59,7 +60,7 @@ fn fixture_lines() -> Vec<String> {
             "fields": {
                 "task_id": "ORB-1011",
                 "agent": "codex",
-                "model": "gpt-5.5",
+                "model": TEST_CODEX_MODEL,
                 "summary": "tool docs missing",
                 "message": "friction reported"
             }
@@ -379,7 +380,7 @@ fn format_message_renders_each_high_value_target() {
         &json!({
             "task_id": "ORB-1011",
             "agent": "codex",
-            "model": "gpt-5.5",
+            "model": TEST_CODEX_MODEL,
             "summary": "missing"
         }),
     );

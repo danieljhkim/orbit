@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-// ORB-00013: Tests use unwrap/expect to keep fixture setup readable.
+// Tests use unwrap/expect to keep fixture setup readable.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::BTreeSet;
@@ -19,8 +19,6 @@ const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.semantic.index",
     "orbit.semantic.install",
     "orbit.semantic.stats",
-    // ORB-00391: the orbit.graph.history compatibility stub was removed entirely
-    // (not merely deactivated), so it is no longer in the full registry surface.
     "orbit.learning.sync",
     "orbit.learning.list",
     "orbit.friction.stats",
@@ -30,7 +28,6 @@ const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.semantic.uninstall",
     "orbit.task.delete",
     "orbit.task.lint",
-    "orbit.learning.comment.delete",
     "orbit.learning.prune",
 ];
 
@@ -52,10 +49,8 @@ fn unused_tools_are_not_registered_in_public_surface() {
         "github.pr.checkout",
         "github.pr.checks",
         "github.pr.close",
-        "github.pr.list",
         "github.repo.view",
         "net.http",
-        "orbit.groundhog.checkpoint_deviate",
         "proc.which",
         "time.now",
         "time.sleep",
@@ -83,6 +78,23 @@ fn unused_tools_are_not_registered_in_public_surface() {
 }
 
 #[test]
+fn remote_discovery_is_not_registered_in_the_generic_tool_surface() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+    let all_names = registry
+        .all_schemas()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect::<BTreeSet<_>>();
+
+    let remote_owned = "orbit.workspace.list";
+    assert!(
+        !all_names.contains(remote_owned),
+        "Remote-owned discovery leaked into generic ToolRegistry: {remote_owned}"
+    );
+}
+
+#[test]
 fn workflow_critical_tools_remain_registered() {
     let names = registered_tool_names();
 
@@ -94,17 +106,11 @@ fn workflow_critical_tools_remain_registered() {
         "github.pr.comment.reply",
         "github.pr.comments",
         "github.pr.create",
+        "github.pr.list",
         "github.pr.merge",
         "github.pr.review",
         "github.pr.review.comment",
         "github.pr.view",
-        // ORB-00391: the v1 orbit.graph.* builtins (callers/deps/implementors/
-        // overview/pack/refs/search/show) were decommissioned from this registry;
-        // the agent graph surface is now served by the orbit-graph (v2) adapter in
-        // orbit-mcp. See crates/orbit-tools/src/builtin/orbit/mod.rs.
-        "orbit.groundhog.checkpoint_failure",
-        "orbit.groundhog.checkpoint_success",
-        "orbit.groundhog.side_effect",
         "orbit.pipeline.invoke",
         "orbit.pipeline.wait",
         "orbit.search",
@@ -190,6 +196,8 @@ fn friction_surface_supports_artifact_triage() {
 
     for retained in [
         "orbit.friction.add",
+        "orbit.friction.list",
+        "orbit.friction.show",
         "orbit.friction.tags",
         "orbit.friction.update",
     ] {
@@ -206,15 +214,8 @@ fn friction_surface_supports_artifact_triage() {
         );
     }
 
-    // Triage surface (list/show/resolve) and stats are CLI / dashboard only:
-    // registered for `runtime.run_tool` but hidden from the default agent
-    // surface.
-    for cli_only in [
-        "orbit.friction.list",
-        "orbit.friction.resolve",
-        "orbit.friction.show",
-        "orbit.friction.stats",
-    ] {
+    // Destructive resolution and aggregate stats remain CLI / dashboard only.
+    for cli_only in ["orbit.friction.resolve", "orbit.friction.stats"] {
         assert!(
             !active.contains(cli_only),
             "{cli_only} must stay hidden from the default registry surface"
@@ -253,6 +254,7 @@ fn task_add_schema_uses_trimmed_authoring_surface() {
             "complexity",
             "type",
             "relations",
+            "crew",
             "model",
         ]
     );
@@ -287,11 +289,16 @@ fn task_update_dependency_params_remain_in_agent_tool_schema() {
 }
 
 #[test]
-fn task_add_update_schemas_use_model_only_identity() {
+fn task_mutation_schemas_use_model_only_identity() {
     let mut registry = ToolRegistry::new();
     registry.register_builtins();
 
-    for tool_name in ["orbit.task.add", "orbit.task.update"] {
+    for tool_name in [
+        "orbit.task.add",
+        "orbit.task.update",
+        "orbit.task.start",
+        "orbit.task.artifact.put",
+    ] {
         let schema = registry
             .get_schema(tool_name)
             .unwrap_or_else(|| panic!("{tool_name} schema"));

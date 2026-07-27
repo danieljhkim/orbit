@@ -1,4 +1,4 @@
-// ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
+// Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -36,6 +36,12 @@ pub struct JobV2 {
     pub recovery_activity: Option<String>,
     #[serde(skip)]
     pub resolved_recovery_activity: Option<ActivityV2>,
+    /// Best-effort terminal hook invoked once after a step failure. Unlike
+    /// `recovery_activity`, it does not retry or replace the failed step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_activity: Option<String>,
+    #[serde(skip)]
+    pub resolved_failure_activity: Option<ActivityV2>,
     #[serde(default = "default_max_active_runs")]
     pub max_active_runs: u32,
     #[serde(default)]
@@ -204,7 +210,7 @@ pub struct TargetStep {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
     /// Step-level role tag (ADR-029). Wins over the activity-level role on
-    /// `AgentLoopSpec`/`GroundhogSpec` when both are present. The dispatcher
+    /// `AgentLoopSpec` when present. The dispatcher
     /// resolves the effective role to a `(provider, model, backend)` triple
     /// from `[agent.<role>]` in `config.toml` and overrides the inline values
     /// on the cloned spec before invoking the runner.

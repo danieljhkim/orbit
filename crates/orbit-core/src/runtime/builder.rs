@@ -21,15 +21,15 @@ use orbit_common::types::{
 use orbit_tools::ToolRegistry;
 use orbit_tools::external::ExternalTool;
 
-use crate::OrbitContext;
 use crate::command::init::global_skills_dir;
 use crate::command::policy::seed_default_policies;
 use crate::config::RuntimeConfig;
+use crate::context::OrbitContext;
 use crate::context::{
     ActorIdentity, OrbitExecutionAssets, OrbitPolicyContext, OrbitRuntimeSettings, OrbitStores,
 };
+use crate::runtime::WorkspaceRuntimeBinding;
 use crate::skill_catalog::SkillCatalog;
-use crate::workspace_registry;
 
 /// Runtime builder. Global root provides activities, jobs, executors, policies,
 /// config, global skills, and SQLite. Shared root provides existing workspace
@@ -38,20 +38,28 @@ pub(crate) fn build_context_from_roots(
     global_root: &Path,
     workspace_root: &Path,
     local_root: &Path,
+    binding: Option<&WorkspaceRuntimeBinding>,
 ) -> Result<OrbitContext, OrbitError> {
     let runtime_config = RuntimeConfig::load_layered(global_root, workspace_root)?;
+    // Apply a configured `[tasks] id_start` floor before any task ids are
+    // allocated. Forward-only, so it is a no-op once the counter has advanced.
+    if let Some(start) = runtime_config.tasks_id_start() {
+        crate::command::task_migration::apply_configured_id_start(global_root, start)?;
+    }
     let persistence = &runtime_config.persistence;
 
     let store = Store::open(&persistence.audit_db)?;
 
     // workspace_root IS the .orbit dir. For custom roots outside the repo,
     // prefer the registry's workspace root over the parent-directory fallback.
-    let repo_root = registered_repo_root(global_root, workspace_root).unwrap_or_else(|| {
-        workspace_root
-            .parent()
-            .unwrap_or(workspace_root)
-            .to_path_buf()
-    });
+    let repo_root = binding
+        .map(|binding| binding.repo_root.clone())
+        .unwrap_or_else(|| {
+            workspace_root
+                .parent()
+                .unwrap_or(workspace_root)
+                .to_path_buf()
+        });
     let paths = WorkspacePaths::new_with_local(
         repo_root,
         workspace_root.to_path_buf(),
@@ -59,7 +67,11 @@ pub(crate) fn build_context_from_roots(
         global_root.to_path_buf(),
     );
 
-    let task_backends = build_v2_task_backends(global_root, &paths)?;
+    let task_backends = build_v2_task_backends(
+        global_root,
+        &paths,
+        binding.map(|binding| binding.workspace_id.as_str()),
+    )?;
     let workspace_id = workspace_id_for_orbit_dir(&paths.orbit_dir)?;
     let import_report = store.ensure_legacy_v2_state_imported(&paths.orbit_dir, &workspace_id)?;
     if import_report.skipped_records() {
@@ -84,8 +96,16 @@ pub(crate) fn build_context_from_roots(
     let local_adr_dir = paths.local_dir.join("adrs");
     let local_learning_dir = paths.local_dir.join("learnings");
     let adr_store = workspace_adr_backends(local_adr_dir, store.clone(), id_allocator.clone());
-    let learning_store =
-        workspace_learning_backend(local_learning_dir, store.clone(), id_allocator)?;
+    // Scope the shared learning envelope index to this workspace's stable
+    // registered id (the same id used for job runs / v2 audit), so a
+    // multi-workspace sweep over the host-global database can't read, truncate,
+    // or overwrite another workspace's learning rows (ORB-10113).
+    let learning_store = workspace_learning_backend(
+        local_learning_dir,
+        store.clone(),
+        id_allocator,
+        workspace_id.clone(),
+    )?;
     let semantic_vector_store = Arc::new(VectorStore::open(&persistence.semantic_db)?);
     let semantic_worker = Arc::new(EmbedWorker::start((*semantic_vector_store).clone()));
     let job_run_store = workspace_job_run_store(store.clone(), workspace_id);
@@ -122,13 +142,12 @@ pub(crate) fn build_context_from_roots(
     let codex_execution_policy = runtime_config.codex_execution.clone();
     let persistence = runtime_config.persistence.clone();
     let actor = ActorIdentity::from_env();
-    let task_approval_required_for_agent = runtime_config.task_approval.required_for_agent;
-    let task_delegate_approval = runtime_config.task_approval.delegate_approval;
     let scoring_enabled = runtime_config.scoring_enabled;
-    let graph_editing = runtime_config.graph_editing;
     let pr_config = runtime_config.pr_config().clone();
     let v2_backend = runtime_config.v2_backend().map(ToString::to_string);
     let workflow_base_branch = runtime_config.workflow_base_branch().to_string();
+    let workflow_auto_ship = runtime_config.workflow_auto_ship();
+    let routines_source = runtime_config.routines_source();
     let crews = runtime_config.crews.clone();
     let default_crew = runtime_config.default_crew.clone();
     let duel = runtime_config.duel_config().clone();
@@ -139,7 +158,6 @@ pub(crate) fn build_context_from_roots(
             task_backends.task,
             task_backends.document,
             task_backends.history,
-            task_backends.review,
             task_backends.artifact,
             adr_store,
             learning_store,
@@ -161,30 +179,17 @@ pub(crate) fn build_context_from_roots(
         OrbitRuntimeSettings::new(
             persistence,
             actor,
-            task_approval_required_for_agent,
-            task_delegate_approval,
             scoring_enabled,
-            graph_editing,
             pr_config,
             v2_backend,
             workflow_base_branch,
+            workflow_auto_ship,
+            routines_source,
             crews,
             default_crew,
             duel,
         ),
     ))
-}
-
-fn registered_repo_root(global_root: &Path, workspace_root: &Path) -> Option<PathBuf> {
-    let registry_path = workspace_registry::registry_path_for(global_root);
-    let registry = workspace_registry::load_registry_from(&registry_path).ok()?;
-    let workspace_root_canonical =
-        std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
-    registry.workspaces.iter().find_map(|workspace| {
-        let orbit_dir_canonical = std::fs::canonicalize(&workspace.orbit_dir)
-            .unwrap_or_else(|_| workspace.orbit_dir.clone());
-        (orbit_dir_canonical == workspace_root_canonical).then(|| workspace.root.clone())
-    })
 }
 
 fn worktree_root_from_local_root(local_root: &Path) -> PathBuf {
@@ -225,6 +230,16 @@ fn record_learning_id_migration_audit(
         host: std::env::var("HOSTNAME").ok(),
         pid: std::process::id(),
         session_id: None,
+        workspace_id: None,
+        caller_machine_id: None,
+        caller_host_id: None,
+        process_machine_id: None,
+        process_host_id: None,
+        transport: None,
+        effective_capabilities: Default::default(),
+        origin_session_id: None,
+        mcp_call_id: None,
+        lease_id: None,
         task_id: None,
         job_run_id: std::env::var("ORBIT_RUN_ID").ok().filter(|s| !s.is_empty()),
         activity_id: std::env::var("ORBIT_ACTIVITY_ID")
@@ -239,11 +254,22 @@ fn record_learning_id_migration_audit(
 fn build_v2_task_backends(
     global_root: &Path,
     paths: &WorkspacePaths,
+    workspace_id_hint: Option<&str>,
 ) -> Result<orbit_store::WorkspaceTaskBackends, OrbitError> {
     let registry = TaskRegistryStore::open(&task_registry_path(global_root))?;
     let config = read_workspace_config_optional(&paths.orbit_dir)?;
     let workspace_id = if let Some(config) = &config {
+        if let Some(hint) = workspace_id_hint
+            && config.workspace_id != hint
+        {
+            return Err(OrbitError::WorkspaceError(format!(
+                "workspace binding id '{}' does not match configured workspace id '{}'",
+                hint, config.workspace_id
+            )));
+        }
         Some(config.workspace_id.clone())
+    } else if let Some(hint) = workspace_id_hint {
+        Some(hint.to_string())
     } else {
         rebind_candidate_workspace_id(&registry, paths)?
     };
@@ -312,7 +338,7 @@ pub(super) fn build_context_in_memory() -> Result<(OrbitContext, TempDir), Orbit
         .map_err(|e| OrbitError::Io(e.to_string()))?;
     let data_root = guard.path().to_path_buf();
 
-    let context = build_context_from_roots(&data_root, &data_root, &data_root)?;
+    let context = build_context_from_roots(&data_root, &data_root, &data_root, None)?;
     Ok((context, guard))
 }
 

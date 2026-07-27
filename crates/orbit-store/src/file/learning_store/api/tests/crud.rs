@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Barrier};
 
 use chrono::{TimeZone as _, Utc};
+use orbit_common::test_fixtures::TEST_CLAUDE_MODEL;
 use orbit_common::types::{EvidenceKind, LearningEvidence, LearningScope, LearningStatus};
 use tempfile::tempdir;
 
@@ -33,13 +34,12 @@ fn round_trip_persistence_preserves_all_fields_including_phase_two_reservations(
                 kind: EvidenceKind::Task,
                 reference: "T20260510-1".to_string(),
             }],
-            created_by: Some("claude-opus-4-7".to_string()),
+            created_by: Some(TEST_CLAUDE_MODEL.to_string()),
             priority: None,
         };
         let learning = store.create_learning(params).expect("create");
         let learning_dir = path_root.join(&learning.id);
-        assert!(learning_dir.join("votes.jsonl").is_file());
-        assert!(learning_dir.join("comments.jsonl").is_file());
+        assert!(learning_dir.exists());
         let allocation = store
             .id_allocator
             .learning_allocation(&learning.id)
@@ -386,6 +386,7 @@ fn learning_store_for_worktree(
         worktree_root.join(".orbit/learnings"),
         Store::open_in_memory().expect("index"),
         allocator,
+        super::super::store::TEST_WORKSPACE_ID.to_string(),
     )
 }
 
@@ -418,7 +419,7 @@ fn index_reflects_create_update_and_supersede() {
         .index
         .as_ref()
         .expect("index")
-        .get_learning_index_row(&learning.id)
+        .get_learning_index_row(super::super::store::TEST_WORKSPACE_ID, &learning.id)
         .expect("query")
         .expect("present");
     assert_eq!(row.status, LearningStatus::Active);
@@ -444,7 +445,7 @@ fn index_reflects_create_update_and_supersede() {
         .index
         .as_ref()
         .expect("index")
-        .get_learning_index_row(&learning.id)
+        .get_learning_index_row(super::super::store::TEST_WORKSPACE_ID, &learning.id)
         .expect("query")
         .expect("present");
     assert_eq!(row.summary, "Revised");
@@ -462,7 +463,7 @@ fn index_reflects_create_update_and_supersede() {
         .index
         .as_ref()
         .expect("index")
-        .get_learning_index_row(&learning.id)
+        .get_learning_index_row(super::super::store::TEST_WORKSPACE_ID, &learning.id)
         .expect("query old")
         .expect("present");
     assert_eq!(old_row.status, LearningStatus::Superseded);
@@ -471,7 +472,7 @@ fn index_reflects_create_update_and_supersede() {
         .index
         .as_ref()
         .expect("index")
-        .get_learning_index_row(&new_learning.id)
+        .get_learning_index_row(super::super::store::TEST_WORKSPACE_ID, &new_learning.id)
         .expect("query new")
         .expect("present");
     assert_eq!(new_row.status, LearningStatus::Active);
@@ -638,5 +639,266 @@ fn layout_places_files_at_expected_paths_and_gitignore_is_respected() {
     assert!(
         ignores_state,
         ".gitignore must ignore .orbit/state/ (or the wider .orbit/) so the rebuildable index is not checked in",
+    );
+}
+
+// [ORB-00413] Atomic learning creation: rollback on partial write + reconcile.
+
+#[test]
+fn partial_create_rolls_back_reservation_and_body() {
+    let (dir, store) = store_with_index();
+    let root = dir.path().to_path_buf();
+
+    // Inject a failure at the body-write step: pre-create the `learning.yaml`
+    // path (for the id the fresh allocator will hand out first) as a *directory*,
+    // so `create_learning_file_exclusive` fails when it tries to open the target
+    // as a file. The first id in a fresh store is L-0001.
+    let expected_id = "L-0001";
+    std::fs::create_dir_all(root.join(expected_id).join("learning.yaml"))
+        .expect("seed body collision");
+
+    let result = store.create_learning(create_params("rolled back", vec!["a/**"], vec!["t"]));
+    assert!(
+        result.is_err(),
+        "create must fail on the seeded body collision"
+    );
+
+    // No orphaned state: not indexed, body removed, reservation abandoned —
+    // the learning either fully exists or not at all.
+    assert!(
+        store.get_learning(expected_id).expect("get").is_none(),
+        "no learning should be visible after rollback"
+    );
+    assert!(
+        store
+            .id_allocator
+            .learning_allocation(expected_id)
+            .expect("alloc lookup")
+            .is_none(),
+        "reserved id must be abandoned (not left half-visible) after rollback"
+    );
+    // (The seeded collision directory at `L-0001/learning.yaml` intentionally
+    // persists — the rollback path can't remove a directory it never wrote.)
+
+    // The workspace is still usable: a subsequent create succeeds (the burned
+    // id is not reissued, per abandon semantics).
+    let next = store
+        .create_learning(create_params("after rollback", vec!["a/**"], vec!["t"]))
+        .expect("create after rollback succeeds");
+    assert_ne!(next.id, expected_id);
+}
+
+#[test]
+fn reconcile_detects_body_with_no_allocator_row() {
+    let (dir, store) = store_with_index();
+    let root = dir.path().to_path_buf();
+
+    let learning = store
+        .create_learning(create_params("keep", vec!["a/**"], vec!["t"]))
+        .expect("create");
+    assert_eq!(learning.id, "L-0001");
+
+    // Simulate the legacy partial-create residue: a body dir the allocator has
+    // no record of. Renaming to a fresh id the allocator never allocated yields
+    // exactly that shape (body present on disk, allocation absent).
+    let orphan_id = "L-0009";
+    std::fs::rename(root.join("L-0001"), root.join(orphan_id)).expect("rename to orphan id");
+
+    let orphans = store.reconcile_learning_orphans().expect("reconcile");
+    assert_eq!(
+        orphans.len(),
+        1,
+        "expected exactly one orphan; got {orphans:?}"
+    );
+    let orphan = &orphans[0];
+    assert_eq!(orphan.id, orphan_id);
+    assert_eq!(orphan.body_path, root.join(orphan_id).join("learning.yaml"));
+    assert!(
+        orphan.body_path.is_file(),
+        "orphan body path should point at the real file"
+    );
+    assert!(
+        orphan.remedy.contains("allocator"),
+        "remedy should name the allocator and a fix: {}",
+        orphan.remedy
+    );
+}
+
+#[test]
+fn concurrent_creation_yields_two_distinct_records() {
+    let dir = tempdir().expect("tempdir");
+    let root = dir.path().to_path_buf();
+
+    // Two stores over the same workspace (shared allocator db + lock file),
+    // mirroring concurrent multi-process creation. The file lock + Immediate
+    // transaction serialize id allocation.
+    let store_a = LearningFileStore::new(root.clone());
+    let store_b = LearningFileStore::new(root.clone());
+    let barrier = Arc::new(Barrier::new(2));
+
+    let barrier_a = Arc::clone(&barrier);
+    let handle_a = std::thread::spawn(move || {
+        barrier_a.wait();
+        store_a
+            .create_learning(create_params("thread a", vec!["a/**"], vec!["t"]))
+            .expect("thread a create")
+            .id
+    });
+    let barrier_b = barrier;
+    let handle_b = std::thread::spawn(move || {
+        barrier_b.wait();
+        store_b
+            .create_learning(create_params("thread b", vec!["b/**"], vec!["t"]))
+            .expect("thread b create")
+            .id
+    });
+
+    let id_a = handle_a.join().expect("join a");
+    let id_b = handle_b.join().expect("join b");
+    assert_ne!(id_a, id_b, "concurrent creates must yield distinct ids");
+
+    // Both records are well-formed and readable from a fresh store.
+    let reader = LearningFileStore::new(root.clone());
+    for id in [&id_a, &id_b] {
+        let learning = reader.get_learning(id).expect("get").expect("present");
+        assert_eq!(&learning.id, id);
+        assert!(root.join(id).join("learning.yaml").is_file());
+    }
+    let ids: BTreeSet<String> = [id_a, id_b].into_iter().collect();
+    assert_eq!(ids.len(), 2);
+}
+
+// [ORB-10330] Preallocated owner-finalizer tests: the id is chosen upstream by
+// the hub sequence, so the finalizer never allocates, abandons, retries, or
+// selects a second id after a collision.
+
+#[test]
+fn finalize_preallocated_learning_writes_supplied_id_without_allocating() {
+    let (dir, store) = store_with_index();
+    // A non-sequential id: a local allocation would have produced L-0001.
+    let learning = store
+        .finalize_preallocated_learning("L-0043", create_params("hub-preallocated", vec![], vec![]))
+        .expect("finalize preallocated learning");
+    assert_eq!(learning.id, "L-0043");
+    assert_eq!(learning.status, LearningStatus::Active);
+
+    // Body landed under the requested owner root.
+    assert!(dir.path().join("L-0043/learning.yaml").is_file());
+
+    // Exactly the supplied id is projected — no stray L-0001 from a hidden
+    // allocation.
+    let allocations = store
+        .id_allocator
+        .learning_allocations()
+        .expect("allocations");
+    assert_eq!(allocations.len(), 1, "no extra allocation was selected");
+    assert_eq!(allocations[0].id, "L-0043");
+    assert_eq!(
+        allocations[0].body_path.as_deref(),
+        Some(std::path::Path::new("L-0043/learning.yaml"))
+    );
+
+    // Lifecycle read works through the projection.
+    let listed = store
+        .list_learnings(Some(LearningStatus::Active))
+        .expect("list");
+    assert_eq!(
+        listed.iter().map(|l| l.id.clone()).collect::<Vec<_>>(),
+        vec!["L-0043".to_string()]
+    );
+}
+
+#[test]
+fn finalize_preallocated_learning_rejects_existing_artifact_without_adopting() {
+    let (dir, store) = store_with_index();
+    let original = store
+        .finalize_preallocated_learning("L-0007", create_params("original", vec![], vec![]))
+        .expect("seed original");
+    let original_bytes =
+        std::fs::read(dir.path().join("L-0007/learning.yaml")).expect("original yaml");
+
+    let err = store
+        .finalize_preallocated_learning("L-0007", create_params("intruder", vec![], vec![]))
+        .expect_err("collision must fail");
+    assert!(
+        matches!(err, orbit_common::types::OrbitError::InvalidInput(_)),
+        "got {err:?}"
+    );
+
+    // Original artifact + allocation stay inspectable and byte-identical.
+    assert_eq!(
+        std::fs::read(dir.path().join("L-0007/learning.yaml")).expect("still there"),
+        original_bytes
+    );
+    let reread = store.get_learning("L-0007").expect("get").expect("exists");
+    assert_eq!(reread.summary, original.summary);
+    let allocations = store
+        .id_allocator
+        .learning_allocations()
+        .expect("allocations");
+    assert_eq!(allocations.len(), 1);
+    assert_eq!(allocations[0].id, "L-0007");
+}
+
+#[test]
+fn finalize_preallocated_learning_cleans_up_partial_body_on_projection_failure() {
+    let (dir, store) = store_with_index();
+    // Pre-seed a conflicting projection so the projection insert fails *after*
+    // the body is written; the partial body must be removed.
+    store
+        .id_allocator
+        .project_preallocated_learning("L-0099", std::path::Path::new("L-0099/learning.yaml"))
+        .expect("seed conflicting projection");
+
+    let err = store
+        .finalize_preallocated_learning("L-0099", create_params("doomed", vec![], vec![]))
+        .expect_err("projection conflict must fail");
+    assert!(
+        matches!(err, orbit_common::types::OrbitError::Store(_)),
+        "got {err:?}"
+    );
+
+    // No partial body/dir remains; the pre-existing projection is untouched.
+    assert!(!dir.path().join("L-0099").exists());
+    let allocations = store
+        .id_allocator
+        .learning_allocations()
+        .expect("allocations");
+    assert_eq!(allocations.len(), 1);
+    assert_eq!(allocations[0].id, "L-0099");
+}
+
+#[test]
+fn finalize_preallocated_learning_targets_only_the_selected_worktree() {
+    let shared = tempdir().expect("shared orbit");
+    let shared_orbit = shared.path().join("hub/.orbit");
+    std::fs::create_dir_all(&shared_orbit).expect("shared orbit dir");
+    let local = tempdir().expect("local worktree");
+    let sibling = tempdir().expect("sibling worktree");
+
+    let local_store = learning_store_for_worktree(&shared_orbit, local.path());
+    let sibling_store = learning_store_for_worktree(&shared_orbit, sibling.path());
+
+    let learning = local_store
+        .finalize_preallocated_learning("L-0100", create_params("owner local", vec![], vec![]))
+        .expect("finalize in local checkout");
+    assert_eq!(learning.id, "L-0100");
+
+    // Body materialized only under the local worktree learning root.
+    assert!(
+        local
+            .path()
+            .join(".orbit/learnings/L-0100/learning.yaml")
+            .is_file()
+    );
+    // The sibling checkout filesystem is untouched.
+    assert!(!sibling.path().join(".orbit/learnings/L-0100").exists());
+    // The shared allocator sees the row but the sibling store treats it as
+    // non-local (body under the local worktree, not the sibling).
+    assert!(
+        sibling_store
+            .get_learning("L-0100")
+            .expect("sibling get")
+            .is_none()
     );
 }

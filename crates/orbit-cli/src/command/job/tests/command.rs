@@ -33,3 +33,8 @@ fn rejects_removed_job_run_inspection_aliases() {
 fn parses_job_replay_subcommand() {
     assert!(Cli::try_parse_from(["orbit", "job", "replay", "jrun-1", "--json"]).is_ok());
 }
+
+#[test]
+fn parses_job_resume_subcommand() {
+    assert!(Cli::try_parse_from(["orbit", "job", "resume", "jrun-1", "--json"]).is_ok());
+}

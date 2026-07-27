@@ -35,7 +35,7 @@ impl AgentModelPair {
     }
 }
 
-/// One role assignment inside a named crew.
+/// The provider-model-backend assignment selected by a named crew.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CrewRoleAssignment {
     pub model: String,
@@ -43,21 +43,27 @@ pub struct CrewRoleAssignment {
     pub backend: String,
 }
 
-/// A named planner/implementer/reviewer lineup.
+/// A named provider-model assignment used for every activity role.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Crew {
     pub name: String,
-    pub planner: CrewRoleAssignment,
-    pub implementer: CrewRoleAssignment,
-    pub reviewer: CrewRoleAssignment,
+    pub assignment: CrewRoleAssignment,
+    /// Optional human-facing summary carried through every canonical crew
+    /// projection. Execution-profile publication normalizes blank values to
+    /// `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Search/discovery labels. Runtime config loading canonicalizes these to
+    /// a sorted, deduplicated list of non-empty strings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 impl Crew {
     pub fn role(&self, role: &str) -> Option<&CrewRoleAssignment> {
+        // ADR-0213: roles remain labels; a crew selects exactly one assignment.
         match role {
-            "planner" => Some(&self.planner),
-            "implementer" => Some(&self.implementer),
-            "reviewer" => Some(&self.reviewer),
+            "planner" | "implementer" | "reviewer" => Some(&self.assignment),
             _ => None,
         }
     }
@@ -115,8 +121,8 @@ pub fn agent_family_from_cli(agent_cli: &str) -> String {
 ///
 /// Orbit stores model-only attribution on tasks, but some execution paths still
 /// need to recover the agent family for provider dispatch. This helper accepts
-/// both the new exact model strings (for example `claude-opus-4.6`) and the
-/// older shorthand values that may still appear in legacy artifacts.
+/// both the new exact model strings (for example a `claude-opus` build id) and
+/// the older shorthand values that may still appear in legacy artifacts.
 pub fn infer_agent_family_from_model(model: &str) -> Option<String> {
     let model = model.trim().to_ascii_lowercase();
     if model.is_empty() {

@@ -3,7 +3,8 @@ summary: "Activity / Job — Decisions"
 type: design
 title: "Activity / Job — Decisions"
 owner: codex
-last_updated: 2026-06-12
+last_updated: 2026-07-27
+last_validated: 2026-07-26
 status: Draft
 feature: activity-job
 doc_role: decisions
@@ -15,6 +16,8 @@ tags: ["activity-job"]
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede or fold them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
 The log now keeps four load-bearing rollup ADR bodies. Folded entries remain at their original numbers with `Status: Superseded by ADR-NNN (folded)` and a one-line pointer, per [CONVENTIONS §4a](../CONVENTIONS.md#4a-rollup-adrs).
+
+Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `activity-job/ADR-0252` → ADR-0282, `activity-job/ADR-052` → ADR-0281.
 
 ---
 
@@ -54,11 +57,18 @@ Folded instances:
 
 ## ADR-002 — Host boundaries and agent dispatch stay explicit
 
-**Status:** Accepted · 2026-05 · [T20260419-2014], [T20260418-2210], [T20260419-0104], [T20260423-0114], [T20260427-48], [T20260430-15], [T20260418-2018], [T20260419-0623-2], [T20260420-0510-2], [T20260428-9], [T20260428-12], [T20260506-16], [T20260506-17], [T20260505-22], [T20260506-18]
+**Status:** Accepted · 2026-05 · [T20260419-2014], [T20260418-2210], [T20260419-0104], [T20260423-0114], [T20260427-48], [T20260430-15], [T20260418-2018], [T20260419-0623-2], [T20260420-0510-2], [T20260428-9], [T20260428-12], [T20260506-16], [T20260506-17], [T20260505-22], [T20260506-18], [ORB-10393]
 
 **Context.** The agent-loop path is where activity/job can most easily leak provider implementation details, mutable sessions, or role configuration across crate boundaries. The split ADRs all defended the same shape: shared types live low, orbit-core hosts primitive services, the engine dispatches concrete activity specs, and provider/backends remain explicit choices.
 
-**Decision.** Keep activity/job types in `orbit-common`, keep orbit-core free of `orbit-agent` transport types, and route `backend: cli` through retained provider runtimes behind a host-resolved executor contract. Scope stateful agent features narrowly: loop `session:` is HTTP-only, Groundhog is its own activity kind, role config from `[agent.<role>]` overrides inline settings field-by-field, task-aware CLI envelopes carry durable run context, and provider static-arg fixups run before sandbox dispatch.
+**Decision.** Keep activity/job types in `orbit-common`, keep orbit-core free of `orbit-agent` transport types, and route `backend: cli` through retained provider runtimes behind a host-resolved executor contract. Scope stateful agent features narrowly: loop `session:` is HTTP-only, the Groundhog activity kind was its own kind rather than an `agent_loop` mode bit (later removed as unused in [ORB-10332]), role config from `[agent.<role>]` overrides inline settings field-by-field, task-aware CLI envelopes carry durable run context, and provider static-arg fixups run before sandbox dispatch.
+
+**Planning-duel agent legs become v2 assets.** [ORB-10393] makes the planner
+and arbiter prompts seeded `agent_loop` assets and applies their selected
+provider/model as immutable per-dispatch overrides. The deterministic duel
+runner may coordinate concurrent legs, but it does not regain a private v1
+`ActivityExecutor::execute` bridge — [ORB-10395] deleted that trait and its
+registry outright, so v2 dispatch is now the only execution path.
 
 Folded instances:
 
@@ -79,6 +89,8 @@ Folded instances:
 - Parsing, validation, dispatch, and CLI display share one Rust type family without making orbit-core depend on provider transport objects.
 - CLI and HTTP agent-loop paths remain intentionally different where their capabilities differ, especially around sessions and tool enforcement.
 - First-run and per-role agent choices live in user config while YAML stays reusable across workspaces.
+- Planning-duel legs now share the same CLI envelope, audit, timeout, tool
+  allowlist, and invocation-telemetry path as other v2 agent activities.
 - Costs retained from folded entries:
 - Cost: `orbit-common` now owns a wider slice of runtime vocabulary and has to stay disciplined about not accreting behavior.
 - Cost: session reuse becomes a narrowly scoped feature instead of a general-purpose memory layer.
@@ -92,6 +104,9 @@ Folded instances:
 - Cost: CLI stdin blobs now contain more task prose, so audit blob readers should continue treating those blobs as diagnostic artifacts rather than small control messages.
 - Cost: provider static-arg fixups mean executor YAML values such as Claude's `--debug-file` path are no longer honored verbatim; maintainers must read dispatcher behavior alongside assets.
 - Cost: prompt collection now owns display formatting and a small choice loop, so tests must cover interaction flow in addition to config values.
+- Cost: the dispatcher has a second clone-and-mutate path for explicit
+  provider/model overrides, and planning-duel prompt placeholders must remain
+  covered by parity tests rather than the retired v1 renderer.
 
 ## ADR-003 — Resolve `backend: auto` once, before dispatch
 
@@ -168,6 +183,8 @@ Folded into ADR-001's rollup for canonical v2 asset normalization.
 **Status:** Superseded by ADR-002 (folded) · 2026-04 · [T20260420-0510-2]
 
 Folded into ADR-002's rollup for explicit agent dispatch boundaries.
+
+**Superseded by ORB-10332:** the Groundhog activity kind was removed as unused; activity specs are now only `agent_loop` and `deterministic`. Retained for history.
 
 ## ADR-010 — Historical workflow inspection must not depend on live seeded job assets
 
@@ -251,9 +268,9 @@ Folded into ADR-007's rollup for durable run state and operator inspection.
 
 **Status:** Accepted · 2026-05 · [T20260427-33], [T20260425-2010], [T20260427-45], [T20260430-9], [T20260430-12], [T20260430-14], [T20260421-0542-2], [T20260430-27], [T20260430-30], [T20260430-26], [T20260427-34], [T20260427-36], [T20260505-2], [T20260505-10], [T20260506-18], [T20260509-14]
 
-**Context.** The seeded task workflows added many small ADRs as shipment behavior grew: run aliases, deterministic auto-dispatch, remote base selection, recovery hooks, backlog exclusions, operator status, friction admission, and lock cleanup. They are one decision family: task shipment is an explicit durable workflow, not an advisory agent step or hidden side effect.
+**Context.** The seeded task workflows added many small ADRs as shipment behavior grew: run aliases, deterministic auto-dispatch, remote base selection, recovery hooks, backlog exclusions, operator status, and lock cleanup. They are one decision family: task shipment is an explicit durable workflow, not an advisory agent step or hidden side effect.
 
-**Decision.** Keep `orbit run` workflow aliases focused on execution, make automatic task shipment deterministic from backlog listing through gate fan-out, default shipping worktrees to fetched remote base refs, admit tasks through status-aware workflow gates, and protect overlapping work with durable task-lock reservations whose seeded TTL covers the child wait budget. Recovery is bounded, step-scoped on direct shipment workflows, and assigned through the configured reviewer role; child pipeline joins are followed by deterministic success guards after required cleanup, operator status is derived from persisted pipeline state, accepted friction reports enter auto-backlog by `status: backlog`, and run-owned reservations clean up when their owner run reaches a terminal state.
+**Decision.** Keep `orbit run` workflow aliases focused on execution, make automatic task shipment deterministic from backlog listing through gate fan-out, default shipping worktrees to fetched remote base refs, admit tasks through status-aware workflow gates, and protect overlapping work with durable task-lock reservations whose seeded TTL covers the child wait budget. Recovery is bounded, step-scoped on direct shipment workflows, and assigned through the configured reviewer role; child pipeline joins are followed by deterministic success guards after required cleanup, operator status is derived from persisted pipeline state, and run-owned reservations clean up when their owner run reaches a terminal state.
 
 Folded instances:
 
@@ -267,7 +284,7 @@ Folded instances:
 | ADR-033 | Auto-backlog lock exclusions are structured output. |
 | ADR-034 | Auto shipment reports operator workflow status from durable pipeline state. |
 | ADR-035 | Gate reservations release after terminal child waits. |
-| ADR-037 | Accepted friction reports enter auto-backlog by status. |
+| ADR-037 | Historical friction-task admission rule; retired by [ORB-10202]. |
 | ADR-039 | Run-owned task-lock reservations clean up at owner terminal. |
 
 **Consequences.**
@@ -287,7 +304,6 @@ Folded instances:
 - Cost: `task_gate_pipeline` now relies on the dynamic `task_{{ input.mode }}_pipeline` job-name convention, so future gate modes must either follow that naming convention or refactor the dispatch selector.
 - Cost: child dispatch status remains data until explicit guard steps run, so seeded workflow authors must preserve guard placement after cleanup when they fork task-shipment YAML.
 - Cost: longer default gate reservations can block overlapping work for up to two hours if both explicit release and run-owned cleanup fail.
-- Cost: reviewers must read friction eligibility as a status rule, not a task-type rule.
 - Cost: job-run finalization and reservation reserve paths are more coupled, so new terminal run paths must route through the cleanup helper rather than writing directly to the job-run store.
 
 ## ADR-024 — Shipping worktrees default to fetched remote base refs
@@ -370,9 +386,9 @@ Folded into ADR-007's rollup for durable run state and operator inspection.
 
 ## ADR-037 — Accepted friction reports enter auto-backlog by status
 
-**Status:** Superseded by ADR-023 (folded) · 2026-05 · [T20260505-2]
+**Status:** Superseded by ADR-023 (folded; rule retired by [ORB-10202]) · 2026-05 · [T20260505-2]
 
-Folded into ADR-023's rollup for seeded task-shipment workflow automation.
+The historical rule was folded into ADR-023, then retired when [ORB-10202] removed `friction` from the task status taxonomy.
 
 ## ADR-038 — Dashboard cancellation is a durable job-run transition
 
@@ -410,6 +426,8 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 
 **Status:** Accepted · 2026-05 · [T20260427-38]
 
+**Superseded by ORB-10332:** the epic pipeline surface (`task_epic_pipeline` and its `epic_orchestrator` / `pipeline_wait` steps) was removed as unused. Retained for history.
+
 **Context.** `task_epic_pipeline` exits from deterministic `load_epic` snapshots, while normal child shipment workflows stop successful subtasks in `review` for human handoff. Treating `review` as open work made a clean epic cycle redispatch already-shipped subtasks or run until its iteration ceiling.
 
 **Decision.** For epic orchestration only, treat `review` as a shipped stop state: `load_epic` omits review subtasks from the open workset, allows them to satisfy `all_terminal`, and maps their epic summary state to `done` while preserving the raw task status.
@@ -422,6 +440,8 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 ## ADR-044 — Epic orchestrator does not block on child runs
 
 **Status:** Accepted · 2026-05 · [T20260427-40]
+
+**Superseded by ORB-10332:** the `epic_orchestrator` and `pipeline_wait` activities and the `task_epic_pipeline` job were removed as unused. Retained for history.
 
 **Context.** The `epic_orchestrator` activity exists to make one judgment cycle: read the deterministic epic snapshot, choose ready bundles, and dispatch child `task_gate_pipeline` runs. Its previous instruction also made the HTTP agent call `orbit.pipeline.wait`, but a normal gate-and-ship envelope can exceed the orchestrator's wall-clock by hours: gate admission can wait, child dispatch can wait, and implementer activities have their own long timeout.
 
@@ -442,7 +462,7 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 
 **Consequences.**
 - The runtime, not the prompt, controls where relative paths in provider CLIs resolve.
-- Groundhog and CLI dispatch share one workspace resolver, reducing future drift between orchestration and implementation attempts.
+- CLI dispatch uses one runtime-owned workspace resolver across task execution paths, reducing future drift.
 - Cost: stale declared worktrees now fail before spawn instead of silently running from the parent process directory.
 
 ## ADR-046 — Job executor internals split by execution responsibility
@@ -457,6 +477,19 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 - Reviewers can inspect retry/recovery, target dispatch, fan-out, loop, validation, and audit behavior in smaller files without changing runtime semantics.
 - The split preserves the existing engine/core and CLI-runner boundaries; no new crate edge or provider type crosses the activity/job layer.
 - Cost: private helper movement now requires maintaining intra-module visibility and imports across several files instead of one lexical scope.
+
+## ADR-047 — Each new executor block ships with a sibling test module
+
+**Status:** Accepted · 2026-05 · [T20260509-7]
+
+**Context.** The v2 job executor sub-modules (`step.rs`, `parallel.rs`, `fan_out.rs`, `loop_block.rs`, `target.rs`, `recovery.rs`) own non-trivial concurrency, ordering, and audit invariants. Without test coverage co-located with each block, regressions to those invariants surface only as production failures or as audit-trace anomalies that are hard to reproduce.
+
+**Decision.** Every executor-block module under `crates/orbit-engine/src/activity_job/job_executor/` gets a matching test module under `tests/` whose test function names name the specific invariant or failure mode each test guards. The block-specific layout includes `step.rs`, `parallel.rs`, `fanout.rs`, `loop.rs`, and `pipeline_durability.rs`, alongside focused modules for `audit.rs`, `recovery.rs`, `resume.rs`, `target.rs`, `templating.rs`, and `validate.rs`. Shared scaffolding (`ScriptedHost`, `Action`, job/step builders) lives in `tests/mod.rs` so block modules stay focused on their own invariants and don't fork the host shape. Sandbox and policy boundary coverage lives next to the implementations they guard: `crates/orbit-exec/src/macos_sandbox/` (read-deny enforcement and a realistic agent_loop profile boundary) and `crates/orbit-policy/src/engine.rs#tests` (global denyRead/denyModify last-match-wins, unknown-profile error, matched_rule observability).
+
+**Consequences.**
+- Future refactors of an executor block must keep the matching invariant test alive in its corresponding test module or update it to reflect the new contract.
+- New blocks (e.g. a future `dag` or `gate` construct) must land with a matching test module covering at least the invariants enumerated in the seed surface.
+- Shared scaffolding in `tests/mod.rs` is the consolidation seam — broaden it (agent_loop or shell hosts, additional builders) there rather than re-deriving in each block module.
 
 ## ADR-048 — Auto-populate `task.context_files` from the winning duel plan
 
@@ -480,19 +513,6 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 - Section-recognition heuristics drift between writers is bounded by the strict rule above; future planner agents that emit non-conforming shapes simply fall back to the preserve-existing branch instead of triggering best-effort guesses.
 - A new `TaskAutomationUpdate.context_files` field touches every existing automation call site, but the `..Default::default()` pattern keeps each site at the "leave untouched" default. A regression test in `task_host` guards that contract.
 - Operators get a `PlanningDuelContextFileSkipped` event channel for debugging stale or malformed plan markdown, instead of silently-dropped entries.
-
-## ADR-047 — Each new executor block ships with a sibling test module
-
-**Status:** Accepted · 2026-05 · [T20260509-7]
-
-**Context.** The v2 job executor sub-modules (`step.rs`, `parallel.rs`, `fan_out.rs`, `loop_block.rs`, `target.rs`, `recovery.rs`) own non-trivial concurrency, ordering, and audit invariants. Without test coverage co-located with each block, regressions to those invariants surface only as production failures or as audit-trace anomalies that are hard to reproduce.
-
-**Decision.** Every executor-block module under `crates/orbit-engine/src/activity_job/job_executor/` gets a sibling `*_tests.rs` in `tests/` whose test function names name the specific invariant or failure mode each test guards. The current layout is `step_tests.rs`, `parallel_tests.rs`, `fanout_tests.rs`, `loop_tests.rs`, and `pipeline_durability_tests.rs`, alongside the pre-existing `audit_tests.rs`, `recovery_tests.rs`, and `target_tests.rs`. Shared scaffolding (`ScriptedHost`, `Action`, job/step builders) lives in `tests/mod.rs` so block modules stay focused on their own invariants and don't fork the host shape. Sandbox and policy boundary coverage lives next to the implementations they guard: `crates/orbit-exec/src/macos_sandbox.rs#tests` (read-deny enforcement and a realistic agent_loop profile boundary) and `crates/orbit-policy/src/engine.rs#tests` (global denyRead/denyModify last-match-wins, unknown-profile error, matched_rule observability).
-
-**Consequences.**
-- Future refactors of an executor block must keep the matching invariant test alive in the same-named test file or update it to reflect the new contract.
-- New blocks (e.g. a future `dag` or `gate` construct) must land with a sibling test module covering at least the invariants enumerated in the seed surface.
-- Shared scaffolding in `tests/mod.rs` is the consolidation seam — broaden it (agent_loop or shell hosts, additional builders) there rather than re-deriving in each block module.
 
 ## ADR-049 — Condition guards stay equality-only
 
@@ -524,6 +544,8 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 
 **Status:** Accepted · 2026-05 · [T20260509-38]
 
+**Superseded by ORB-10332:** the legacy parallel-batch executor (`run_parallel_task_pipeline`) was removed as unused. Retained for history.
+
 **Context.** The retained `run_parallel_task_pipeline` automation path used scoped threads to call `run_job_now_with_input_debug`, then marked active workers failed after a long receive timeout. Rust scoped threads still join before the scope exits, so a never-returning worker could keep the parent dispatcher hung even after timeout failure recording.
 
 **Decision.** Launch each legacy parallel-batch worker through the durable pipeline surface (`orbit.pipeline.invoke`) and poll active run IDs through `orbit.pipeline.wait` instead of owning scoped worker threads. When the configured worker timeout elapses, the dispatcher cancels every active child run before writing `WORKER_TIMEOUT` task failure state and returning the batch failure.
@@ -533,19 +555,11 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 - Timed-out child work gets the same run-cancellation path operators use elsewhere, including bounded process-group signaling for running pipeline workers.
 - Cost: the retained legacy path now depends on the v2 pipeline tool surface and polls active workers, so completion can lag by the polling interval rather than waking on an in-process channel send.
 
-## ADR-052 — Unified async ship dispatch
+## ADR-0281 — Unified async ship dispatch
 
-**Status:** Proposed · 2026-05 · [ORB-00075]
+**Status:** Proposed · 2026-05 · [ORB-00075] · legacy_id: `activity-job/ADR-052`
 
-**Context.** Orbit had three shipment aliases: `ship`, `ship-local`, and `ship-auto`. Operators used the auto path because it already queued behind dependency and lock gates, while explicit shipment still failed fast before the waiting-reason surfaces could explain parked work.
-
-**Decision.** Use `orbit run ship` as the only public shipment command. Omitted task IDs run backlog auto mode, provided task IDs seed explicit singleton bundles, and both forms submit `task_auto_pipeline`; mode still routes inside `task_gate_pipeline` to `task_{{ input.mode }}_pipeline`. The companion global ADR is ADR-0152.
-
-**Consequences.**
-- Explicit task selection now waits inside the gated job path instead of failing at CLI dispatch time.
-- `orbit run ship` returns after `submit_pipeline_run`, and operators inspect waiting or terminal state with `orbit run history -j task_auto_pipeline` and `orbit run show <RUN_ID>`.
-- The deprecated `ship-auto` CLI form errors toward `orbit run ship`, and `ship-local` is no longer a workflow alias.
-- Cost: dispatch output no longer contains the former synchronous auto-shipment summary because terminal pipeline state is unavailable at submit time.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0281"}'`.
 
 ## ADR-0194 — The v2 shell activity surface is removed, not sandboxed
 
@@ -562,10 +576,285 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 - Cost: the `Ok(success = false)` audit-message path lost its only coverage — the two shell-specific tests asserting it were removed rather than migrated, because `deterministic` actions cannot produce that outcome.
 - Cost: workspaces that legitimately used `type: shell` must migrate to a registered `deterministic` action or an `agent_loop`; there is no compatibility shim, and old YAML fails at load.
 
+## ADR-0214 — Pending job runs are owned and reconciled like running runs
+
+**Status:** Accepted · 2026-07 · [ORB-10070]
+
+**Context.** A parent pipeline run reaching terminal `interrupted` (crash, host reboot) could strand its queued child runs in `pending` forever: pending runs recorded no owner process, the workspace-open orphan scan and `orbit doctor` only covered orphaned `running` runs, and no CLI could terminalize a stuck run. Two four-day-old pending `task_gate_pipeline` runs were observed in `codebases/sextant`, demonstrating that stale queue state could persist indefinitely.
+
+**Decision.** Give queued runs the same owner-liveness contract as running runs. The pipeline worker claims its run at startup (`claim_pending_job_run_owner` records `pid` + start-time token while the run is still `pending`), and reconcile finalizes a pending run as `interrupted` (`Pending + Interrupt` becomes a legal transition) only in two conclusive cases: the claimed owner is Mismatch/Missing, or the run was never claimed and is older than a 30-minute grace window. Inconclusive probes and fresh unclaimed runs stay pending. `orbit doctor` reports both orphan classes, and `orbit run cancel <run_id>` is the manual terminalization path.
+
+Rejected alternatives: reconciling by parent linkage (no parent run id is persisted on child runs, and it misses stale pendings whose parent succeeded); an age-only heuristic for all pendings (queued runs legitimately wait hours behind `max_active_runs`); probing with the freshly built binary in the upgrade script (its workspace-open auto-migrations could run ahead of a swap that then defers).
+
+**Consequences.**
+- Orphaned pending runs self-heal at workspace open and lazily on run list/show; dead state can no longer block the daily upgrade.
+- A still-live queued run written by a pre-claim binary is shielded only by the grace window; past it, reconcile terminalizes it once (its worker observes the terminal state and exits cleanly; the run is resumable with `orbit job resume`). One-time upgrade-window cost, accepted.
+- `pid` on a `pending` run now means "claiming worker", not "executing worker"; `mark_job_run_running` overwrites it with the same process id at execution start.
+
+---
+
+## ADR-0216 — Triage dispositions are applied by a dedicated bounded deterministic action, not `update_task` or the agent
+
+**Status:** Accepted · 2026-07 · [ORB-10129]
+
+**Context.** The unattended triage agent in `task_triage_pipeline` ([ORB-10129]) must never free-hand task lifecycle transitions, yet its per-task verdicts have to reach task state somehow. Real alternatives: reuse the existing `update_task` deterministic activity fed from agent output (but it accepts arbitrary statuses, so a hallucinated `done` would be applied verbatim), or let the agent call `orbit.task.update` through its tool allowlist (no deterministic bound at all).
+
+**Decision.** A dedicated `apply_triage_dispositions` deterministic action is the only lifecycle writer in `task_triage_pipeline`. It cross-checks every disposition against the deterministic candidate list from `list_triage_candidates`, restricts the vocabulary to `rebacklog`/`stay_blocked`, honors `rebacklog` only for the `environmental` classification, enforces the durable re-backlog budget by counting `triage_rebacklogged` history events, and re-checks task status + run coupling before each write so overlapping runs skip instead of double-transitioning. The `steps.triage.output.dispositions` handoff is the allowlisted exception in `default_jobs_template_only_declared_agent_loop_handoffs`.
+
+**Consequences.**
+- The agent's output is advisory data: it cannot move a task anywhere but `backlog`, cannot touch a task outside the candidate list, and cannot exceed the budget — misclassification degrades to a wasted bounded retry, never a corrupted lifecycle.
+- Loop-guard state lives in task history events rather than a new task field, so exhaustion survives restarts and is human-auditable.
+- Cost: a second bespoke deterministic action (and its activity asset) to maintain instead of reusing `update_task`, and the disposition vocabulary must be extended in Rust when triage learns new outcomes.
+
+---
+
+## ADR-0224 — CLI response envelopes are optional for artifact-backed activities
+
+**Status:** Accepted · 2026-07 · [ORB-10231]
+
+**Context.** CLI providers can exit successfully after persisting authoritative task, review, and git artifacts while emitting prose or provider wrapper JSON that lacks an Orbit response envelope. Treating every missing or malformed envelope as fatal strands completed work; treating every response as advisory would break activities whose downstream templates consume structured fields.
+
+**Decision.** CLI agent-loop activities treat response envelopes as best-effort by default. Exit status and timeout determine transport success, valid envelopes still project result fields, and parse failures become bounded redacted diagnostics. An activity sets `require_response_envelope: true` only when downstream workflow steps consume its structured response.
+
+**Consequences.**
+- Artifact-backed implementation and review runs no longer fail solely because final agent prose is malformed or missing an envelope.
+- Structured-output activities remain fail-closed through an explicit per-activity contract.
+- Cost: activity authors must classify the handoff correctly, and response-consuming activities need a regression that pins strict mode.
+
+**Amended by [ORB-10449].** This ADR's flag answers *"do downstream templates
+consume the response?"* — but it was also, silently, the only thing asking *"did
+the invocation finish at all?"*, and for artifact-backed activities the answer was
+"nobody is asking". A separate content-blind `require_completion_envelope`
+(default `true`) now carries the second question: it checks the envelope frame
+only — presence, `schemaVersion`, status token — never `result`/`error`, so an
+agent declaring `status: "failed"` satisfies it and agent-loop output stays
+advisory. The two flags are orthogonal and the completion check is deliberately
+more permissive about stream shape. Narrative, failure/recovery semantics, and
+the single declared exception (`dispatch_agent`) are in
+[§7.6a of `2_design.md`](./2_design.md). The split is recorded on its own terms
+as [ADR-0258] (allocated by [ORB-10454]); this ADR is amended by it, not
+superseded, and its own flag keeps its meaning.
+
+---
+
+## ADR-0225 — PR handoff recovery follows job checkpoints and exact remote leases
+
+**Status:** Accepted · 2026-07 · [ORB-10232]
+
+**Context.** A recovered rebase previously retried the composite `pr_open` action, replaying commit and remote side effects. The alternatives were to make that composite infer prior work from commit subjects and generic divergence, or to expose each handoff phase as durable job state with explicit rewrite provenance.
+
+**Decision.** Model commit, pre-rewrite branch preparation, exact-base rebase, push, PR create-or-reuse, and task promotion as separate `task_pr_pipeline` activity steps. A divergent push is authorized only when a persisted preparation checkpoint names the exact remote SHA observed before the rewrite, the rebase phase confirms that a rewrite occurred, and the push uses a branch-scoped `--force-with-lease=<ref>:<sha>`; all ambiguous or changed remote state fails closed.
+
+**Consequences.**
+- Recovery resumes at the first incomplete job step, while step output records whether each phase was performed, skipped, or reused.
+- Remote-only commits are never treated as implicit authorization to force-push, and PR retries discover the branch PR before creating one.
+- Cost: the shipped workflow and deterministic activity catalog gain three focused activities plus explicit data plumbing between their output schemas.
+- Cost: push performs remote inspection/fetch work before classifying non-current refs, and operators must reconcile ambiguous divergence manually.
+
+---
+
+## ADR-0233 — Materialize independent review as a post-publication child Run
+
+**Status:** Accepted · 2026-07 · [ORB-10266]
+
+**Context.** An inline `agent_review` step ran before the PR candidate was committed, pushed, or published and left no independently addressable review Run. Orbit could keep that inline activity and add more output checks, or materialize review only after publication as its own durable child bound to the pushed SHA.
+
+**Decision.** For explicit-task PR shipment with review enabled, dispatch exactly one `task_review_pipeline` child after push, PR publication, and task promotion. Snapshot the parent run, task IDs, workspace, explicit review crew, candidate branch, pushed SHA, and PR identity in the child input; require a structured verdict whose reviewed SHA exactly matches that snapshot. Preflight the selected crew and deployed job/activity contract before inserting the implementation run, and reject review outside PR mode.
+
+**Consequences.**
+- Independent review is observable and resumable through normal job-run records and cannot silently inherit the implementation crew.
+- `review=false` keeps the implementation-only shipment path, while review-enabled no-diff and local shipments do not invent an unpublished candidate to review.
+- Cost: review-enabled shipment adds a child Run and wait boundary after PR publication, increasing latency and requiring source/shipped workflow assets to stay synchronized.
+
+---
+
+## ADR-0236 — Fail delivery before Git mutation when execution outcome is not success
+
+**Status:** Accepted · 2026-07 · [ORB-10313]
+
+**Context.** During ORB-10262, `task_pr_pipeline` advanced a task to review and published a PR even though the durable execution summary began `Outcome: failed`. `commit_batch_changes` mutated Git without checking the durable outcome, and `load_handoff_context` treated every nonempty, non-placeholder summary as promotable, so a nonempty summary reporting failure still delivered (friction F2026-07-091). The alternatives were to make the advisory agent response envelope authoritative or to teach `pipeline_success_guard` to parse task prose; both move the source of truth away from the durable task record.
+
+**Decision.** Keep one shared durable predicate (`reject_failed_delivery`) in the VCS handoff seam that reads the persisted task execution summary and blocks delivery when its first nonblank line is exactly `Outcome: failed`. Empty and placeholder summaries remain rejected by the existing meaningful-summary guard; other meaningful summary shapes remain deliverable. Enforce the predicate in `commit_batch_changes` before the checkout is resolved, files staged, the index changed, or a commit created, and again in `load_handoff_context` so every fresh or resumed `pr_prepare`, rebase, push, `pr_open`, `pr_promote`, and no-diff promotion revalidates durable state. The durable task record stays the delivery authority; the response envelope is not made authoritative and `pipeline_success_guard` is unchanged.
+
+**Consequences.**
+- Delivery fails closed against the durable record: an empty or placeholder summary, or an explicit `Outcome: failed` line, cannot commit, push, open a PR, or promote a task, on both fresh and replayed pipelines.
+- Agents should write `Outcome: success` as the first nonblank execution-summary line to make the durable outcome explicit; other meaningful non-empty prose remains deliverable.
+- Cost: the delivery contract now depends on a summary-line convention; a genuinely successful task whose summary omits or misformats the outcome line is blocked until the durable summary is corrected.
+
+---
+
+## ADR-0246 — Terminal PR shipment uses a job-level failure handoff
+
+**Status:** Accepted · 2026-07 · [ORB-10363]
+
+**Context.** A task shipment can fail after an agent has produced coherent work but before the normal commit, rebase, push, and PR checkpoints finish. The real alternatives are to overload per-step recovery so it replays or impersonates later checkpoints, or give the workflow one explicit terminal failure hook that preserves the original failure while publishing any recoverable candidate.
+
+**Decision.** Add an optional job-level failure activity that runs once after a terminal step failure with the job input, completed pipeline checkpoints, failing step, and structured error. `task_pr_pipeline` binds it to a deterministic PR failure handoff which restores the pre-rebase candidate, commits dirty work, pushes without rewriting unknown remote history, opens or reuses a blocked/manual-resolution PR, and blocks the task while the original run still terminalizes as failed.
+
+**Consequences.**
+- Normal success and retry checkpoints remain unchanged; the failure handoff is an explicit, auditable last-chance side effect.
+- A conflict-blocked run is distinguishable through its task status event, PR body, and failure-activity audit even though the original step failure remains authoritative.
+- Cost: JobV2 gains another lifecycle hook and task shipment maintains a dedicated deterministic recovery action with conservative Git/remote rules.
+- Cost: External push or PR service outages can still prevent publication, but dirty work is committed locally before those fallible operations so terminal runs do not strand uncommitted changes.
+
+---
+
+## ADR-0251 — Pipeline steps consume a base commit pinned at worktree setup, never a moving ref name
+
+**Status:** Accepted · 2026-07 · [ORB-10380] · commit-adoption clauses superseded by [ADR-0299]
+
+**Context.** `worktree_setup` published only the *name* of its start point (`origin/<base>`), and the `commit` step re-resolved that name to decide whether HEAD descended from the base. `refs/remotes/origin/<base>` is shared by every worktree hanging off one `.git`, and any sibling run's setup fetch, any rescue fetch, and every merge moves it. Once it moved, `merge-base --is-ancestor <new tip> HEAD` was false by construction and the commit step failed — so each new run's fetch retroactively invalidated every older in-flight run, making concurrent dispatch unsafe (five failures on 2026-07-25, verified 7/7 against the reflog and reproduced end-to-end). The alternatives were to make `commit` tolerate a moved base by inspecting divergence at commit time — which leaves the step reading state that keeps changing underneath it — or to move base reconciliation earlier, which only relocates the same race.
+
+**Decision.** `worktree_setup` resolves its start point exactly once (`rev-parse --verify <start_point>^{commit}`), creates the worktree at that commit, and emits `base_sha` beside `base_ref`. Both task pipelines pass `base_sha` into `commit`, which reconciles history only against that pinned id; `input.base_sha` must be a full object id, and a ref name is rejected as invalid input so the moving-base failure cannot be reintroduced by wiring. `base_ref` keeps flowing as the moving name to the steps that legitimately want live base state (`sync_base`, `pr_open`), and `sync_base` remains the sole pipeline-owned reconciliation with a base that moved.
+
+Three related repairs land with it. A non-descendant HEAD falls back to `merge-base(base_sha, HEAD)` for commit counting instead of failing; only genuinely unrelated histories are a hard failure. The empty-stage and ancestry diagnostics no longer share one string: each reports observed state (staged/unstaged/untracked counts, HEAD, resolved base, merge-base result) and asserts no cause it did not measure. ADR-0219's `no-diff-expected` carve-out is evaluated before both failure branches rather than only the empty-stage one, and no failure path mutates the checkout on its way out (the `git reset HEAD` on the empty path is gone).
+
+Commits found above the pinned base are adopted with a loud `warn` naming the shas. Under the pinned base and the pipeline-owned-git-context rule, no sanctioned actor commits during implementation; the known live source is an external editor `Stop` hook that auto-commits inside the worktree. Adoption preserves the work and its authorship, which beats discarding or rewriting it. **Revisit trigger:** once implementing agents and their host hooks are provably non-committing (the activity contract is [ORB-10381]'s), this becomes a hard failure instead of a warning.
+
+**Amendment ([ORB-10519] / [ADR-0299]).** The revisit trigger fired: the provider boundary now rejects every assigned HEAD or branch movement, and `git_commit` compares HEAD directly with the pinned SHA before creating the sole workflow-owned commit. The history counting, merge-base fallback, and commit-adoption clauses above are superseded; the pinned-object-id and moving-ref decisions remain active.
+
+**Consequences.**
+- Concurrent dispatch is safe again: a sibling run's fetch, a rescue fetch, or a merge landing mid-run cannot fail an older run's commit step.
+- A failure in this step now names what was observed, so triage stops inferring a cause from a shared string — the previous message cost three diagnosis cycles, two of which reached confidently wrong conclusions.
+- A side-effect-only task no longer hard-fails when its history cannot be reconciled; it skips the phase as ADR-0219 intended.
+- Cost: `git_commit`'s contract is stricter — a caller that passes only `base_ref` gets no immutable-HEAD check, rather than silently resolving a name. Direct/leaf invocations must pass a pinned `base_sha` to enforce the setup checkpoint.
+- Cost: after [ADR-0299], unsanctioned commits inside an assigned worktree are rejected even when their content could be proven task-local.
+
+---
+
+## ADR-0282 — The runtime reports its deterministic-action registry, and job validation gates on it
+
+**Status:** Accepted · 2026-07 · [ORB-10385] · legacy_id: `activity-job/ADR-0252`
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0282"}'`.
+
+---
+
+## ADR-0253 — A worktree's identity is derived once, and a bundle is only collectable when every member has settled
+
+**Status:** Accepted · 2026-07 · [ORB-10427]
+
+**Context.** `orbit gc worktrees` had never reclaimed a byte. `setup_worktree` derived the worktree directory from `task_ids_from_input` (array-first, singular fallback) and named it `orbit-<run_id>`; the collector spelled the same rule out a second time, probing only the singular `task_id` that `task_pr_pipeline` does not emit, missing, and deriving the shared `parallel-batch-<run_id>` path instead. No entry in the collector's known-path map ever matched a real directory, so every worktree fell through to the on-disk sweep and was reported `skipped:unrecognized` — a terminal classification no flag can act on, which reads as "nothing to do" rather than "the collector is broken". Measured on dk-server-1 (binary `0.9.2`, gc source current): 6/6 worktrees in `codebases/orbit`, 4/4 in `knowledgebase/polaris`, 3/3 in `constellation`, `total_bytes_reclaimed=0` in each. The same singular probe attributed the worktree to a task, so repairing only the path derivation would have moved every worktree from `skipped:unrecognized` to `skipped:unattributed` and still reclaimed nothing. Two independent spellings of one rule is the defect; fixing the key probe at both sites would have left the shape intact, and a third site would drift the same way.
+
+**Decision.** One derivation, `WorktreeIdentity::from_input`, owns the task ids, the branch prefix, and the run token; `setup_worktree` creates from it and gc re-derives from it. The token resolves as `input.run_id`, then the engine's run id, then the task-derived fallback (`task-<id>` / `bundle-<hash>`) — setup passes no engine id because it only sees its own input, gc passes the run record's id because a stored `initial_input` never carries the one the engine injected at dispatch. That precedence closes the first divergence; gc also probes the fallback-token path as a second candidate, closing the second (a worktree setup named `task-<id>` was previously invisible to gc). Attribution reads the whole `task_ids` array, and the **bundle rule is unanimity**: a worktree serving several tasks is eligible only when *every* member resolves and is settled to `rejected`/`archived`/`done`, so a bundle is never easier to discard than its least-settled member. The first member that blocks becomes the reported `task_id`/`task_status`; an eligible bundle names all of them.
+
+Recognition is the entire change: no safety gate moved. Non-terminal run, `--older-than-hours`, symlink-or-not-a-directory, unregistered-with-Git, unresolvable task, ineligible status, dirty-rescue, and unknown-branch each still return their own `skipped:*` action, each now pinned by a test that fails if the gate is deleted, and `remove_worktree` is still called without `--force` so a last-moment dirtying makes Git fail closed. `skipped:unrecognized` is preserved for the case it was meant for — a directory matching no run record at all — and is still never deleted.
+
+**Consequences.**
+- gc works. Same three repos, dry run, branch build: zero `skipped:unrecognized`, every worktree attributed with a real `run_id`/`run_state`/`task_id`/`task_status`, `would_remove` on 10 of 12 with the other two correctly held by the non-terminal gate — 3.29 GB in `codebases/orbit` alone.
+- A dry run now reports the byte estimate per report and in the total, so `--dry-run` answers "how much would this reclaim" instead of always `0`. The envelope's `dry_run: true` remains the statement that nothing was freed.
+- Regression fixtures use the shape `task_pr_pipeline` actually emits (`task_ids` array, no `branch_prefix`, no `run_id`), captured from run `jrun-20260726-0305-2`. A fixture hand-built with a singular `task_id` passes against the broken code and proves nothing.
+- Cost: gc considers up to two candidate paths per run, so two runs over the same task both claiming the fallback name collide into `skipped:ambiguous_run_path` rather than either being collected. That is the fail-closed direction.
+- Out of scope, deliberately: no `--force`/`--include-unrecognized` reap flag for genuinely orphaned directories. Widening what gc will delete is a separate decision from making it see.
+
+---
+
+## ADR-0258 — Step completion is a separate contract from response content
+
+**Status:** Accepted · 2026-07 · [ORB-10449], [ORB-10454]
+
+**Context.** [ADR-0224] made CLI response envelopes best-effort for artifact-backed activities, leaving `require_response_envelope` as the only flag that reads an agent-loop invocation's stdout. That flag answers *"do downstream templates consume the response?"* — but it was silently also the only thing answering *"did the invocation finish at all?"*, and for artifact-backed activities (`require_response_envelope: false`) nobody was asking. Every `backend: cli` invocation is prompted with the response-envelope contract, so a provider that yields mid-turn still exits 0: `implement_one` in `task_pr_pipeline` checkpointed as success on work that stopped halfway, and the failure surfaced several steps later at whatever deterministic gate noticed first, attributed to the wrong step. Two real alternatives were rejected. Flipping `require_response_envelope: true` everywhere conflates the content question with the completion question and forces full content validation — exit alignment, `status: success`, object `result` — onto activities whose responses nothing reads, re-breaking exactly what ADR-0224 fixed. Classifying the violation as a retryable `DispatchError` so `step_failure_recovery` fires inverts the fix: that hook exists to repair the delivery path for *completed* work, so it would publish a stalled implementer's partial candidate.
+
+**Decision.** Split the two questions into two orthogonal flags. `require_completion_envelope` (new, default `true`) is the step-completion protocol contract: under `backend: cli` it reads the envelope *frame* only — presence, supported `schemaVersion`, one of the three protocol status tokens — and never `result` or `error`, so an agent declaring `status: "failed"` satisfies it. `require_response_envelope` (default `false`) keeps its ADR-0224 meaning as the content contract. The doctrine is therefore intact: agent-loop output stays advisory, because "did the contract complete" is a property of the invocation, not a claim the agent makes about its work. A violation fails the step where it happened (`DispatchOutcome { success: false }`, message naming step and violation), is not retried, does not invoke `recovery_activity`, and still lets the job-level `failure_activity` ([ADR-0246]) preserve recoverable work. `backend: http` is out of scope — the engine's own loop has its own termination accounting. `dispatch_agent` is the single declared opt-out. This **amends [ADR-0224] rather than superseding it**; that flag keeps its meaning and its accepted status. The flag table, doctrine argument, and full failure/recovery semantics live in [§7.6a of `2_design.md`](./2_design.md) and are not restated here.
+
+**Consequences.**
+- A stalled CLI agent fails its own step, so triage reads the failure at the site where it happened instead of inferring it from a downstream gate's symptom.
+- The default is `true`, so every new `agent_loop` activity inherits the check; opting out is a deliberate, test-pinned edit with a recorded justification in the asset rather than an omission.
+- Cost: the completion check is deliberately *more* permissive about stdout stream shape than the content parser — when the JSON document stream will not parse (a wrapped tool sharing stdout, a stray warning line) it falls back to scanning raw text for an embedded envelope, which the content parser does not do. The two gates can therefore return different verdicts on the same invocation: an activity with both flags set can pass completion and fail content. The asymmetry is intentional — failing a step that genuinely completed, over stdout tidiness, is a worse defect than the one this check exists to catch — but nothing in the decision statement implies it, and a reader debugging a mismatched pair has to know it is by design.
+- Cost: activity authors now classify two independent questions per activity instead of one, and a miscarried classification is silent in the direction that matters least (an over-strict completion flag fails loudly; an over-permissive one restores the original blind spot).
+
+---
+
+## ADR-0259 — Provider launchers resolve at the shared CLI spawn boundary
+
+**Status:** Proposed · 2026-07 · [ORB-10456]
+
+**Context.** Dashboard shipment reproduced the same provider-launcher ENOENT previously seen in routine sweeps: independent process entry points inherited different `PATH` values even though every `backend: cli` provider invocation converges on one engine spawn boundary. The alternatives were to keep pinning `PATH` in each service/entry point or resolve configured launcher names once at that shared boundary.
+
+**Decision.** Resolve every bare provider launcher at the orbit-engine CLI spawn boundary. Search the process `PATH` first, then portable per-user fallback directories derived from `HOME`; preserve explicitly pathed commands unchanged. Missing-launcher failures remain permanent and name the provider plus every searched path.
+
+**Consequences.**
+- Dashboard, routine, CLI ship, and direct job dispatch share one provider-launcher resolution mechanism rather than depending on each parent environment being curated.
+- Explicit command paths and `PATH` precedence remain authoritative, while common user-local installations work from scrubbed service environments.
+- Cost: Orbit now recognizes a small ordered set of conventional user-local bin directories outside `PATH`, so moving a launcher into a new convention requires extending and testing that list.
+
+---
+
+## ADR-0289 — Resume is a durable submission scoped by explicit retry lineage
+
+**Status:** Proposed · 2026-07 · [ORB-10470]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0289"}'`.
+## ADR-0288 — Independent review approves from durable per-criterion records, not a scalar response
+
+**Status:** Proposed · 2026-07 · [ORB-10467]
+
+**Context.** The independent-review child Run bound its verdict to the published candidate SHA and nothing else: `agent_review` loaded a task's description, criteria, plan, and context files and returned one `approve`/`request_changes` string, and the guard checked only that the reported SHA matched. Later task comments — where a scope correction actually lands — were never required reading, and an approval said nothing per acceptance criterion, so an unassessed criterion looked exactly like a met one. A published candidate was approved while violating a final scope deferral, and only a later manual patch audit caught it. The alternatives were to enrich the reviewer's response with per-criterion fields and gate on them, to parse the reviewer's prose for coverage, or to require a machine-readable record persisted on the task and gate on that. The first makes an advisory agent response load-bearing, and the second converts scalar prose into an unverified approval.
+
+**Decision.** The reviewer persists one `[independent-review]` record per participating task as a task comment before returning — candidate SHA, verdict, `reconciled_through`, `late_corrections`, and one `met`/`not_met` entry per acceptance criterion indexed from 1 — under an instruction that states the authority ordering: the newest comment or history entry that narrows, defers, or corrects the work outranks the acceptance criteria, which outrank the description and plan. `independent_review_guard` becomes runtime-backed, takes the bundle from the run's own input, reloads each task's criteria and comments, and recovers the newest record for the published SHA. The response verdict is cross-checked and disagreement fails the step; approval further requires full criterion coverage, every criterion `met`, and `reconciled_through` no older than the newest comment that is not itself a review record. Blocking verdicts are recorded without the coverage gate, and ship preflight rejects a deployed guard step that is not handed `task_ids` and `candidate_head_sha`.
+
+**Consequences.**
+- An approval carries durable, re-readable evidence of which criteria were assessed, on what candidate, and how current the reviewer's reading of task authority was.
+- Approving against an older reading of the task fails the review run instead of reaching the parent success gate, so a late correction cannot be silently outrun.
+- The reviewer's structured response stays advisory and is only cross-checked, so a missing response no longer decides anything by itself.
+- Cost: the review activity now writes task comments, so it is no longer read-only with respect to Orbit state, and an unpersisted or malformed record fails the run even when the review itself was sound.
+- Cost: a deployed `task_review_pipeline` predating this change fails closed at run time; asset and binary must be upgraded together (preflight names the missing field for ship submissions).
+- Cost: approval requires every criterion to be reported `met`, so criteria that no longer describe the agreed scope must be corrected before review can approve.
+
+---
+
+## ADR-0290 — Workflow admission verifies dependency delivery into the pinned base, not just lifecycle completion
+
+**Status:** Proposed · 2026-07 · [ORB-10464]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0290"}'`.
+
+---
+
+## ADR-0292 — Primary fast-forward acceptance is decided by interference with the run, not primary dirty-state byte-identity
+
+**Status:** Proposed · 2026-07 · [ORB-10471]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0292"}'`.
+
+---
+
+## ADR-0295 — Re-dispatched implement attempts self-cancel on a write-gated task
+
+**Status:** Proposed · 2026-07 · [ORB-10499]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0295"}'`.
+## ADR-0294 — Preserve failed worktree state before cleanup and admit only proven task commits
+
+**Status:** Superseded by [ADR-0299] · 2026-07 · [ORB-10519]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0294"}'`.
+
+---
+
+## ADR-0299 — Workflow alone creates shipment commits while dirty failures remain recoverable
+
+**Status:** Accepted · 2026-07 · [ORB-10519]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0299"}'`.
+
 ---
 
 ## Task References
 
+- **[ORB-10519]** — Restore one workflow-owned shipment commit, reject every provider-side HEAD change, and preserve dirty-work recovery plus process-scoped attribution ([ADR-0299], superseding [ADR-0294] and [ADR-0249]).
+- **[ORB-10499]** — Confirm the duplicate implement invocation as the executor's bounded post-recovery attempt, and let the re-dispatched attempt exit on a write-gated task ([ADR-0295], resolving [F2026-07-174]).
+- **[ORB-10468]** — Introduce run-keyed dirty integrity recovery plus the now-superseded provider-commit admission policy ([ADR-0294], superseded by [ADR-0299]).
+- **[ORB-10471]** — Scope the worktree boundary guard's primary dirt check to paths the run touched, so unrelated primary dirt no longer defeats a benign fast-forward ([ADR-0292]).
+- **[ORB-10470]** — Make resume submit a detached run that starts at the failed checkpoint, and reconcile blocked/re-stamped tasks against the run's retry lineage ([ADR-0289]).
+- **[ORB-10467]** — Require independent review to reconcile late task authority and every acceptance criterion ([ADR-0288]).
+- **[ORB-10456]** — Resolve provider launchers at the shared CLI spawn boundary and add provider-aware missing-launcher diagnostics ([ADR-0259]).
+- **[ORB-10454]** — Allocate [ADR-0258] for the step-completion / response-content split and retire the IOU in ADR-0224's amendment block.
+- **[ORB-10427]** — Share one worktree-path derivation between `setup_worktree` and gc; collect bundles only when every member has settled.
+- **[ORB-10393]** — Port planning-duel planner and arbiter legs to seeded v2
+  assets with per-slot model overrides and retire `DeterministicActionHost::invoke_activity`.
+- **[ORB-10385]** — Gate job admission on the runtime's deterministic-action registry; register `pr_failure_handoff` and `worktree_gc`.
+- **[ORB-10380]** — Pin `base_sha` from `worktree_setup` through `git_commit`; split the commit step's failure diagnostics.
 - **[T20260418-2018]** — Add `JobV2` DAG constructs (`parallel`, `fan_out`, `loop`, `retry`, `when`).
 - **[T20260418-2019]** — Add v2 activity name resolution and pipeline skeleton assets.
 - **[T20260418-2143]** — Wire `V2RuntimeHost` in orbit-core and add `orbit activity run-v2`.
@@ -574,11 +863,11 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 - **[T20260419-0104]** — Add `backend: cli` dispatch for v2 `agent_loop`.
 - **[T20260419-0622-3]** — Add `task_gate_pipeline`.
 - **[T20260419-0623]** — Add `task_auto_pipeline`.
-- **[T20260419-0623-2]** — Add `task_epic_pipeline`.
+- **[T20260419-0623-2]** — Add `task_epic_pipeline` (surface later removed in [ORB-10332]).
 - **[T20260419-2014]** — Merge `orbit-types` into `orbit-common`.
 - **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
 - **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
-- **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
+- **[T20260420-0510-2]** — Add the Groundhog v1 activity runner (kind later removed in [ORB-10332]).
 - **[T20260421-0542-2]** — Add structured `list_backlog_tasks` output for context-lock exclusions.
 - **[T20260423-0114]** — Expose the `backend: cli` executor-args gap during a local task ship run.
 - **[T20260423-0445]** — Merge object-valued job defaults over explicit run input and persist synthetic failed job steps for early v2 pipeline failures.
@@ -632,5 +921,13 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 - **[T20260509-40]** — Run CLI subprocesses in killable process groups and bound timeout-path output reader joins.
 - **[ORB-00363]** — Security bug: `run_shell` spawned unsandboxed subprocesses behind a tautological allowlist.
 - **[ORB-00374]** — Remove the `shell` activity variant and `run_shell` dispatch (fail-closed resolution of [ORB-00363]).
+- **[ORB-10202]** — Remove the retired friction task status while preserving workflow admission and triage behavior.
+- **[ORB-10232]** — Model recoverable PR handoff as checkpointed job activities with exact-SHA force-push provenance.
+- **[ORB-10266]** — Materialize independent review as a durable exact-head child Run or fail before implementation.
+- **[ORB-10313]** — Fail delivery before Git mutation when the durable execution outcome is not `Outcome: success`.
+- **[ORB-10363]** — Rebase task candidates after concurrent base advances and publish blocked PRs instead of stranding failed work.
+- **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer (`task_epic_pipeline`, `epic_orchestrator`, `pipeline_wait`, legacy parallel-batch executor).
+- **[ORB-10449]** — Split step-completion protocol from response content so a stalled agent-loop step fails where it happened ([ADR-0258], amending [ADR-0224]; see [§7.6a of `2_design.md`](./2_design.md)).
+- **[ORB-10464]** — Refuse workflow admission when a done dependency's work is not in the base the worktree would be cut from ([ADR-0290], resolving [F2026-07-038]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

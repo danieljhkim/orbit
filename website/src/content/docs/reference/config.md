@@ -14,40 +14,34 @@ sidebar:
 
 The workspace config **replaces** the global config when present — it does not merge. Move settings into the workspace file or rely on the global file alone.
 
-`orbit init` seeds the global config and prompts for per-role agent settings interactively. Re-run `orbit init --force` for a fresh prompt; edit the file directly to tweak values without re-prompting.
+`orbit init` seeds the global config with crews for detected provider CLIs.
+Re-run `orbit init --force` to reset the global root before initialization.
 
 ## Shape
 
 ```toml
 [execution.env]
-inherit = false
 pass = ["HOME", "PATH", "CODEX_HOME", "TMPDIR", "USER"]
 
-[task.approval]
-required_for_agent = true
-delegate_approval = true
+[execution.codex]
+sandbox = "danger-full-access"
 
-[graph]
-editing = false
-
-# Per-role agent settings (provider: claude | codex | gemini)
-[agent.reviewer]
-provider = "claude"
-backend = "cli"
-model = "claude-opus-4-7"
-
-[agent.implementer]
+[crews.terra]
 provider = "codex"
 backend = "cli"
-model = "gpt-5.5"
+model = "gpt-5.6-terra"
 
-[agent.planner]
-provider = "claude"
+[workflow]
+base_branch = "main"
+default_crew = "terra"
+
+[runtime]
 backend = "cli"
-model = "claude-opus-4-7"
 ```
 
-The three roles — `reviewer`, `implementer`, and `planner` — are referenced by the seeded workflows. `backend = "cli"` is the only release-supported value in v1.
+Each crew is one provider/model/backend assignment. Supported CLI-executable
+provider families are `claude`, `codex`, `gemini`, and `grok`. Tasks may select
+a named crew, otherwise `[workflow].default_crew` is used.
 
 ## Root Override
 
@@ -64,29 +58,15 @@ For `agent_loop` execution, backend selection resolves once before dispatch.
 1. command flag (`--backend`)
 2. `ORBIT_BACKEND`
 3. `[runtime] backend`
-4. hard-coded fallback: **`http`**
-
-**v1 release scope.** v1 supports `backend: cli` only, but the hard-coded fallback is `http` — so omitting all four tiers will silently land on the preview HTTP transport. Pin `cli` explicitly:
-
-```toml
-# config.toml
-[runtime]
-backend = "cli"
-```
-
-…or via environment for one-off invocations:
-
-```bash
-ORBIT_BACKEND=cli orbit run job task_auto_pipeline
-```
+4. hard-coded fallback: **`cli`**
 
 Accepted backend values:
 
-| Value | v1 status |
-|-------|-----------|
-| `cli` | Supported. The v1 release path. |
-| `http` | Preview / not in v1 release surface. Wired in code for v2; do not depend on its behavior in v1. |
-| `auto` | Resolves to a concrete backend at load time. Always pin `cli` explicitly in v1 instead of relying on `auto`. |
+| Value | Behavior |
+|-------|----------|
+| `cli` | Supervised provider CLI subprocess. This is the default. |
+| `http` | Programmatic loop transport for providers that support it. |
+| `auto` | Resolves to a concrete backend at load time. |
 
 ## Workspace State
 

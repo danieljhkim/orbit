@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use orbit_common::types::activity_job::V2AuditEventKind;
 use orbit_common::types::activity_job::{
-    ActivityV2Spec, AgentLoopSpec, AgentRole, Backend, DeterministicSpec,
+    ActivityV2Spec, AgentLoopSpec, AgentRole, Backend, DeterministicSpec, Provider,
 };
 
 use crate::context::AgentRoleConfig;
@@ -20,7 +20,6 @@ use thiserror::Error;
 use super::agent_loop_driver::drive_agent_loop;
 use super::audit_writer::V2AuditWriter;
 use super::cli_runner::run_cli_backend;
-use super::groundhog::run_groundhog_activity;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedCliExecutor {
@@ -64,6 +63,24 @@ pub trait V2RuntimeHost: Send + Sync {
         input: &Value,
         tool_context: ToolContext,
     ) -> Result<Value, DispatchError>;
+
+    /// Report whether `action` names a deterministic action this host's
+    /// registry can actually dispatch.
+    ///
+    /// [ORB-10385] Catalog assets and the installed binary are separate
+    /// artifacts: a workspace can load an activity whose `action:` the running
+    /// runtime does not implement. Job validation consults this before the
+    /// first step runs, so that skew fails admission instead of being
+    /// discovered by a terminal failure hook after a task was admitted and
+    /// implemented. The default is `true`: hosts that cannot enumerate their
+    /// registry (tests, smoke examples) keep the pre-ORB-10385 behavior of
+    /// surfacing the miss at dispatch as
+    /// [`DispatchError::DeterministicActionNotRegistered`]. Reporting `true`
+    /// for an unknown action is therefore safe; reporting `false` for a
+    /// dispatchable one would reject a healthy job.
+    fn has_deterministic_action(&self, _action: &str) -> bool {
+        true
+    }
 
     /// Source the API key for a given provider (e.g. `"anthropic"`). Returns
     /// the raw key as a `String` so nothing orbit-agent-shaped bleeds across
@@ -136,6 +153,27 @@ pub trait V2RuntimeHost: Send + Sync {
         Ok(())
     }
 
+    /// Persist a durable checkpoint after a completed top-level job step
+    /// (ORB-10002). `pipeline_snapshot` is the executor's accumulated
+    /// step-output map (step id → raw output) at the moment the step
+    /// finished; `output` is the completing step's own raw output.
+    ///
+    /// Hosts with run persistence (orbit-core) record this into the run's
+    /// `PipelineState` so an interrupted run can be resumed without
+    /// re-executing completed steps. The default is a no-op for hosts
+    /// without run storage (tests, smoke examples). Checkpoint failures are
+    /// non-fatal to the run: the executor logs and continues.
+    fn checkpoint_step(
+        &self,
+        _run_id: &str,
+        _step_index: u32,
+        _step_id: &str,
+        _output: &Value,
+        _pipeline_snapshot: &Value,
+    ) -> Result<(), DispatchError> {
+        Ok(())
+    }
+
     fn tool_context_for_activity(
         &self,
         run_id: Option<&str>,
@@ -175,6 +213,27 @@ pub trait V2RuntimeHost: Send + Sync {
     ) -> Option<AgentRoleConfig> {
         self.agent_role_config(role)
     }
+
+    /// Resolve a flat crew selected explicitly by the rendered activity
+    /// input. This is separate from role-tag lookup: modern crews have one
+    /// assignment, so an activity carrying `crew` does not need a synthetic
+    /// reviewer/implementer/planner role merely to select that assignment.
+    fn explicit_agent_crew_config_for_input(
+        &self,
+        input: &Value,
+    ) -> Result<Option<AgentRoleConfig>, DispatchError> {
+        if let Some(crew) = input
+            .get("crew")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Err(DispatchError::JobValidation(format!(
+                "explicit activity crew '{crew}' cannot be resolved by this runtime host"
+            )));
+        }
+        Ok(None)
+    }
 }
 
 /// Input bundle for a single v2 activity dispatch.
@@ -185,14 +244,23 @@ pub struct V2DispatchInput<'a> {
     pub input: Value,
     pub audit: Arc<V2AuditWriter>,
     pub run_id: &'a str,
+    /// Optional caller-selected provider/model for this invocation. This is
+    /// applied to a cloned agent-loop spec, so catalog assets remain immutable
+    /// and concurrent dispatches can select different duel roles safely.
+    pub agent_override: Option<V2AgentDispatchOverride<'a>>,
     /// Runtime host for agent_loop + deterministic paths. A `None` host is only
     /// valid for callers that never dispatch a host-backed activity; host-backed
     /// specs return `DispatchError::HostRequired` when it is absent.
     pub host: Option<&'a dyn V2RuntimeHost>,
 }
 
-/// Outcome of a v2 dispatch attempt. Kept separate from v1's AttemptOutcome
-/// to avoid coupling v2 callers to the v1 engine context.
+#[derive(Debug, Clone, Copy)]
+pub struct V2AgentDispatchOverride<'a> {
+    pub provider: &'a str,
+    pub model: Option<&'a str>,
+}
+
+/// Outcome of a v2 dispatch attempt.
 #[derive(Debug, Clone)]
 pub struct DispatchOutcome {
     pub success: bool,
@@ -216,14 +284,21 @@ pub enum DispatchError {
     #[error("deterministic action not registered: {0}")]
     DeterministicActionNotRegistered(String),
 
+    /// [ORB-10385] A resolved catalog activity names a deterministic action
+    /// the executing runtime does not implement — the job/activity assets and
+    /// the installed binary are out of sync. Raised by
+    /// [`crate::validate_job_deterministic_actions`] before any step runs, so
+    /// the run never admits a task or creates a worktree it cannot finish.
+    #[error(
+        "activity `{activity}` references deterministic action `{action}`, which is not registered in the executing runtime — the loaded catalog asset and the installed orbit binary are out of sync; reinstall or rebuild orbit, or remove the activity from the job"
+    )]
+    DeterministicActionUnavailable { activity: String, action: String },
+
     #[error("deterministic action `{action}` failed: {message}")]
     DeterministicActionFailed { action: String, message: String },
 
     #[error("agent_loop run failed: {0}")]
     AgentLoopFailed(String),
-
-    #[error("groundhog run failed: {0}")]
-    GroundhogFailed(String),
 
     /// §3.1 no-silent-fallback: `backend: http` requested a provider whose
     /// HTTP transport is not wired. Must surface as a structured error rather
@@ -241,8 +316,26 @@ pub enum DispatchError {
 
     /// CLI subprocess invocation failed at the host layer (e.g. failed to
     /// spawn, or provider key unknown). Wraps the host's error text verbatim.
+    /// Treated as transient: the step retry wrapper may re-attempt it.
     #[error("cli invocation failed: {0}")]
     CliInvocationFailed(String),
+
+    /// CLI subprocess invocation failed in a way retrying cannot fix —
+    /// agent config rejected, executable missing, or permission denied
+    /// (ORB-10006). Non-retryable: the step retry wrapper fails fast
+    /// instead of burning attempts on a deterministic failure.
+    #[error("cli invocation failed (permanent): {0}")]
+    CliInvocationPermanent(String),
+
+    /// A linked-worktree provider invocation changed the registered primary
+    /// checkout. Ordinary retries must not compound or misattribute the delta.
+    /// An explicitly configured recovery activity may inspect the diagnostic
+    /// once before the executor's single post-recovery attempt (ORB-10306).
+    #[error("worktree integrity violation `{code}`: {diagnostic}")]
+    WorktreeIntegrity {
+        code: &'static str,
+        diagnostic: String,
+    },
 
     /// Tool-allowlist denial (§6). Non-retryable — the retry wrapper must not
     /// re-attempt a denied call. Phase 2 formerly translated this to
@@ -255,6 +348,17 @@ pub enum DispatchError {
     #[error("job validation failed: {0}")]
     JobValidation(String),
 
+    /// A step's `retry:` block violates a config invariant (ORB-10006).
+    /// Caught by `validate_job` before any step executes; the message names
+    /// the offending values.
+    #[error("step `{step_id}`: invalid retry config: {field} = {value} violates `{invariant}`")]
+    RetryConfigInvalid {
+        step_id: String,
+        field: &'static str,
+        value: u64,
+        invariant: String,
+    },
+
     /// Generic job-executor error — distinct from per-activity failures.
     #[error("job executor: {0}")]
     JobExecution(String),
@@ -265,19 +369,53 @@ pub enum DispatchError {
 
 impl DispatchError {
     /// Whether this error should bypass the retry wrapper. Tool denials,
-    /// unknown deterministic actions, and validation errors are non-retryable
-    /// (§4.3: "Non-retryable errors — schema violations, allowlist denials,
-    /// cancellation — skip retry").
+    /// unknown deterministic actions, validation errors, and permanent CLI
+    /// invocation failures are non-retryable (§4.3: "Non-retryable errors —
+    /// schema violations, allowlist denials, cancellation — skip retry").
     pub fn is_non_retryable(&self) -> bool {
         matches!(
             self,
             DispatchError::ToolDenied { .. }
                 | DispatchError::DeterministicActionNotRegistered(_)
+                | DispatchError::DeterministicActionUnavailable { .. }
                 | DispatchError::JobValidation(_)
+                | DispatchError::RetryConfigInvalid { .. }
                 | DispatchError::HostRequired(_)
                 | DispatchError::UnwiredHttpTransport { .. }
                 | DispatchError::UnresolvedAutoBackend { .. }
+                | DispatchError::CliInvocationPermanent(_)
+                | DispatchError::WorktreeIntegrity { .. }
         )
+    }
+
+    /// Whether an error that bypasses normal retry may still reach an
+    /// explicitly configured recovery activity.
+    ///
+    /// Worktree integrity failures carry the structured checkout diagnostic a
+    /// recovery agent needs to establish whether reconciliation is safe. All
+    /// other non-retryable classes retain their fail-fast behavior.
+    pub fn allows_recovery(&self) -> bool {
+        matches!(self, DispatchError::WorktreeIntegrity { .. })
+    }
+}
+
+/// Translate a [`DispatchError`] into the workspace-public [`OrbitError`]
+/// surface at crate boundaries.
+///
+/// Validation failures keep their dedicated [`OrbitError::JobValidation`]
+/// variant — including [`DispatchError::DeterministicActionUnavailable`],
+/// which is raised by the same pre-execution validation pass [ORB-10385].
+/// Everything else collapses into [`OrbitError::InvalidInput`] with the
+/// dispatch error's rendered message. Callers translate with
+/// `.map_err(dispatch_error_to_orbit)?` per
+/// `docs/design-patterns/error_translation.md` [ORB-10013].
+pub fn dispatch_error_to_orbit(error: DispatchError) -> OrbitError {
+    match error {
+        DispatchError::JobValidation(message) => OrbitError::JobValidation(message),
+        unavailable @ DispatchError::DeterministicActionUnavailable { .. } => {
+            OrbitError::JobValidation(unavailable.to_string())
+        }
+        other => OrbitError::InvalidInput(format!("{other}")),
     }
 }
 
@@ -302,9 +440,10 @@ fn dispatch_v2_activity_inner(
     } else {
         input.input.clone()
     };
-    let activity_type = match input.spec {
+    let overridden_spec = overridden_agent_spec(input.spec, input.agent_override)?;
+    let spec = overridden_spec.as_ref().unwrap_or(input.spec);
+    let activity_type = match spec {
         ActivityV2Spec::AgentLoop(_) => "agent_loop",
-        ActivityV2Spec::Groundhog(_) => "groundhog",
         ActivityV2Spec::Deterministic(_) => "deterministic",
     };
 
@@ -317,9 +456,9 @@ fn dispatch_v2_activity_inner(
             },
         )
         .map_err(|err| DispatchError::AuditFailed(format!("{err:?}")))?;
-    let _ = input.audit.push_parent(activity_event_id);
+    input.audit.push_parent_lossy(activity_event_id);
 
-    let result = match input.spec {
+    let result = match spec {
         ActivityV2Spec::AgentLoop(spec) => match input.host {
             Some(host) => run_agent_loop_activity(
                 host,
@@ -331,25 +470,6 @@ fn dispatch_v2_activity_inner(
                 input.fs_profile,
             ),
             None => Err(DispatchError::HostRequired("agent_loop")),
-        },
-        ActivityV2Spec::Groundhog(spec) => match input.host {
-            Some(host) => {
-                if !spec.provider.has_http_transport() {
-                    return Err(DispatchError::UnwiredHttpTransport {
-                        provider: spec.provider.as_str().to_string(),
-                    });
-                }
-                run_groundhog_activity(
-                    host,
-                    input.activity_name,
-                    spec,
-                    input.run_id,
-                    input.audit.clone(),
-                    &activity_input,
-                    input.fs_profile,
-                )
-            }
-            None => Err(DispatchError::HostRequired("groundhog")),
         },
         ActivityV2Spec::Deterministic(spec) => match input.host {
             Some(host) => run_deterministic(
@@ -364,13 +484,13 @@ fn dispatch_v2_activity_inner(
         },
     };
 
-    let _ = input.audit.pop_parent();
+    input.audit.pop_parent_lossy();
     let outcome_str = match &result {
         Ok(o) if o.success => "success",
         Ok(_) => "failed",
         Err(_) => "error",
     };
-    let _ = input.audit.emit(
+    input.audit.emit_lossy(
         orbit_common::types::activity_job::V2AuditEventKind::ActivityFinished {
             activity_name: input.activity_name.to_string(),
             outcome: outcome_str.to_string(),
@@ -378,6 +498,29 @@ fn dispatch_v2_activity_inner(
     );
 
     result
+}
+
+pub(crate) fn overridden_agent_spec(
+    spec: &ActivityV2Spec,
+    agent_override: Option<V2AgentDispatchOverride<'_>>,
+) -> Result<Option<ActivityV2Spec>, DispatchError> {
+    let Some(agent_override) = agent_override else {
+        return Ok(None);
+    };
+    let ActivityV2Spec::AgentLoop(agent_spec) = spec else {
+        return Err(DispatchError::JobValidation(
+            "agent override requires an agent_loop activity".to_string(),
+        ));
+    };
+    let provider = Provider::parse(agent_override.provider)
+        .map_err(|error| DispatchError::JobValidation(error.to_string()))?;
+    let mut overridden = agent_spec.clone();
+    overridden.provider = provider;
+    overridden.model = agent_override.model.map(ToOwned::to_owned);
+    overridden.instruction = overridden
+        .instruction
+        .replace("{{agent_family}}", provider.as_str());
+    Ok(Some(ActivityV2Spec::AgentLoop(overridden)))
 }
 
 fn inject_run_id(input: &Value, run_id: &str) -> Value {
@@ -437,11 +580,30 @@ fn run_agent_loop_activity(
             }
             run_agent_loop_via_driver(host, spec, run_id, audit, input, fs_profile)
         }
-        Backend::Cli => run_cli_backend(host, spec, run_id, audit, input, fs_profile),
+        Backend::Cli => run_cli_backend(host, spec, run_id, audit, input, fs_profile)
+            .map(|outcome| label_failure_with_step(activity_name, outcome)),
     }
 }
 
-#[allow(dead_code)]
+/// [ORB-10449] Prefix a failing CLI agent-loop message with the step that
+/// produced it.
+///
+/// A run surfaces only its terminal message, and the executor's fallback
+/// (`step `<id>` completed with success=false`) is used only when the step
+/// reports no message at all. So a step that *does* report one was previously
+/// anonymous in the run record — an operator saw the symptom without the
+/// origin. Naming the step here keeps that fix in one place for every CLI
+/// agent-loop failure mode (timeout, nonzero exit, protocol violation,
+/// invalid envelope).
+fn label_failure_with_step(activity_name: &str, mut outcome: DispatchOutcome) -> DispatchOutcome {
+    if !outcome.success
+        && let Some(message) = outcome.message.take()
+    {
+        outcome.message = Some(format!("step `{activity_name}`: {message}"));
+    }
+    outcome
+}
+
 fn run_agent_loop_via_driver(
     host: &dyn V2RuntimeHost,
     spec: &AgentLoopSpec,
@@ -452,9 +614,10 @@ fn run_agent_loop_via_driver(
 ) -> Result<DispatchOutcome, DispatchError> {
     // Sourcing only: orbit-core pulls the provider credential from wherever
     // makes sense (env var, config, secrets manager). We treat a sourcing
-    // failure as `None` so `drive_agent_loop` can still honor the offline
-    // replay path (ORBIT_V2_REPLAY) without credentials. When the driver
-    // actually needs a key and none is present, it errors structurally.
+    // failure as `None` so a `replay`-enabled `drive_agent_loop` can still
+    // honor ORBIT_V2_REPLAY without credentials. Default builds ignore replay
+    // variables; when the driver needs a key and none is present, it errors
+    // structurally.
     let api_key = host.api_key_for("anthropic").ok();
     let started = Instant::now();
     let outcome = drive_agent_loop(
@@ -520,10 +683,16 @@ pub(crate) fn loop_outcome_trace(
             input: outcome.usage.input_tokens,
             cache_read: outcome.usage.cache_read_input_tokens,
             cache_create: outcome.usage.cache_creation_input_tokens,
+            // The agent loop reports a single cache-creation counter; the 1h/5m
+            // TTL split isn't surfaced here yet, so all cache-creation tokens
+            // are treated as the standard (5m) rate (ORB-10338 follow-up).
+            cache_create_1h: 0,
             output: outcome.usage.output_tokens,
         },
         tool_calls,
         duration_ms,
+        provider_model: None,
+        provider_cost_usd: None,
     }
 }
 

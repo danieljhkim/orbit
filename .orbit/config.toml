@@ -10,7 +10,7 @@ pass = [
 ]
 
 [execution.codex]
-sandbox = "workspace-write"
+sandbox = "danger-full-access"
 
 [task.approval]
 delegate_approval = true
@@ -19,32 +19,58 @@ required_for_agent = true
 [scoring]
 enabled = true
 
-[graph]
-editing = false
-
 [workflow]
+auto_ship = true
 base_branch = "agent-main"
-default_crew = "codex"
+default_crew = "opus"
 
-[crews.claude]
-planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-implementer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+[routines]
+role = "source"
 
-[crews.codex]
-planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+[crews.opus]
+model = "claude-opus-5"
+provider = "claude"
+backend = "cli"
+
+[crews.sonnet]
+model = "claude-sonnet-5"
+provider = "claude"
+backend = "cli"
+
+[crews.fable]
+model = "fable"
+provider = "claude"
+backend = "cli"
+
+[crews.sol]
+model = "gpt-5.6-sol"
+provider = "codex"
+backend = "cli"
+
+[crews.terra]
+model = "gpt-5.6-terra"
+provider = "codex"
+backend = "cli"
+
+[crews.luna]
+model = "gpt-5.6-luna"
+provider = "codex"
+backend = "cli"
 
 [crews.gemini]
-planner = { model = "pro", provider = "gemini", backend = "cli" }
-implementer = { model = "pro", provider = "gemini", backend = "cli" }
-reviewer = { model = "pro", provider = "gemini", backend = "cli" }
+model = "pro"
+provider = "gemini"
+backend = "cli"
 
 [crews.grok]
-planner = { model = "grok-build", provider = "grok", backend = "cli" }
-implementer = { model = "grok-build", provider = "grok", backend = "cli" }
-reviewer = { model = "grok-build", provider = "grok", backend = "cli" }
+model = "grok-build"
+provider = "grok"
+backend = "cli"
+
+[crews.qa]
+model = "gpt-5.6-terra"
+provider = "codex"
+backend = "cli"
 
 
 [pr]
@@ -53,9 +79,9 @@ task_url_template = "https://orbit-cli.com/tasks/{task_id}"
 [duel]
 candidates = ["codex", "claude", "grok"]
 
-[duel.models]                             
-codex  = "gpt-5.5"
-claude = "claude-opus-4-7"
+[duel.models]
+codex  = "gpt-5.6-terra"
+claude = "opus"
 grok = "grok-build"
 
 [docs]

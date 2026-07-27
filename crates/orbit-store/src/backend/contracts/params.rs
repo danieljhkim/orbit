@@ -1,0 +1,341 @@
+use chrono::{DateTime, Utc};
+use orbit_common::types::{
+    Adr, AdrStatus, ArtifactOrigin, ExternalRef, JobRunState, Learning, LegacyValidation, OrbitId,
+    TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskRelation,
+    TaskStatus, TaskType,
+};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+#[derive(Debug, Clone)]
+pub struct AdrCreateParams {
+    pub title: String,
+    pub owner: String,
+    pub related_features: Vec<String>,
+    pub related_tasks: Vec<String>,
+    pub tags: Vec<String>,
+    pub paths: Vec<String>,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdrArtifact {
+    pub adr: Adr,
+    pub body: String,
+    pub artifact_origin: ArtifactOrigin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdrArtifactResolution {
+    Local(AdrArtifact),
+    Federated(AdrArtifact),
+    RemoteArtifactUnavailable(ArtifactOrigin),
+    NotFound,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteArtifactStub {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub worktree_root: PathBuf,
+    pub branch: Option<String>,
+    pub body_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdrListEntry {
+    Local(Adr),
+    Remote(RemoteArtifactStub),
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AdrListFilter<'a> {
+    pub status: Option<AdrStatus>,
+    pub owner: Option<&'a str>,
+    pub feature: Option<&'a str>,
+    pub task_id: Option<&'a str>,
+    pub legacy_id: Option<&'a str>,
+    pub tag: Option<&'a str>,
+    pub path: Option<&'a str>,
+    pub validation_warned: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LearningListEntry {
+    Local(Learning),
+    Remote(RemoteArtifactStub),
+}
+
+/// Parameters for a partial update to an existing ADR document.
+///
+/// Fields that are `None` are left unchanged. `superseded_by` follows the
+/// double-`Option` convention to distinguish "leave unchanged" (`None`) from
+/// "clear this field" (`Some(None)`).
+#[derive(Debug, Clone, Default)]
+pub struct AdrDocumentUpdateParams {
+    pub title: Option<String>,
+    pub owner: Option<String>,
+    pub body: Option<String>,
+    pub related_features: Option<Vec<String>>,
+    pub related_tasks: Option<Vec<String>>,
+    pub tags: Option<Vec<String>>,
+    pub paths: Option<Vec<String>>,
+    pub supersedes: Option<Vec<String>>,
+    pub superseded_by: Option<Option<String>>,
+    pub legacy_ids: Option<Vec<String>>,
+    pub validation_warnings: Option<Vec<String>>,
+    pub legacy_validation: Option<LegacyValidation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskCreateParams {
+    pub actor: String,
+    pub parent_id: Option<OrbitId>,
+    pub title: String,
+    pub description: String,
+    pub acceptance_criteria: Vec<String>,
+    pub dependencies: Vec<OrbitId>,
+    pub relations: Vec<TaskRelation>,
+    pub tags: Vec<String>,
+    pub plan: String,
+    pub execution_summary: String,
+    pub context_files: Vec<String>,
+    /// The working directory the agent should use when executing this task.
+    /// Typically the root of the repository being modified. Used to set `cwd`
+    /// for tool calls and to resolve relative `context_files` paths.
+    pub workspace_path: Option<String>,
+    /// The git repository root for this task, when it differs from
+    /// `workspace_path`. Most tasks leave this `None` (the repo root is the
+    /// same as the workspace). Set explicitly when the task targets a
+    /// sub-directory of a monorepo and git operations must run from the root.
+    pub repo_root: Option<String>,
+    pub created_by: Option<String>,
+    pub planned_by: Option<String>,
+    pub implemented_by: Option<String>,
+    pub status: TaskStatus,
+    pub priority: TaskPriority,
+    pub complexity: Option<TaskComplexity>,
+    pub task_type: TaskType,
+    pub external_refs: Vec<ExternalRef>,
+    pub source_task_id: Option<String>,
+    pub crew: Option<String>,
+    pub comments: Vec<TaskComment>,
+}
+
+/// Parameters for a partial update to an existing task.
+///
+/// Fields that are `None` are left unchanged. Fields of type `Option<Option<T>>`
+/// follow the "outer = whether to update, inner = new value" convention:
+/// - `None`           → leave the field untouched
+/// - `Some(Some(v))`  → set the field to `v`
+/// - `Some(None)`     → explicitly clear the field (set it to null/absent)
+#[derive(Debug, Default, Clone)]
+pub struct TaskDocumentUpdateParams {
+    pub actor: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub acceptance_criteria: Option<Vec<String>>,
+    pub dependencies: Option<Vec<OrbitId>>,
+    pub relations: Option<Vec<TaskRelation>>,
+    pub tags: Option<Vec<String>>,
+    pub plan: Option<String>,
+    pub execution_summary: Option<String>,
+    pub context_files: Option<Vec<String>>,
+    pub created_by: Option<Option<String>>,
+    pub planned_by: Option<Option<String>>,
+    pub implemented_by: Option<Option<String>>,
+    pub priority: Option<TaskPriority>,
+    pub complexity: Option<TaskComplexity>,
+    pub task_type: Option<TaskType>,
+    pub external_refs: Option<Vec<ExternalRef>>,
+    pub pr_status: Option<Option<String>>,
+    pub source_task_id: Option<Option<String>>,
+    pub job_run_id: Option<Option<String>>,
+    pub crew: Option<Option<String>>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct TaskHistoryUpdateParams {
+    pub actor: String,
+    pub status: Option<TaskStatus>,
+    pub status_event: Option<String>,
+    pub status_note: Option<String>,
+    pub append_history: Vec<TaskHistoryEntry>,
+    pub append_comments: Vec<TaskComment>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct TaskArtifactUpdateParams {
+    pub actor: String,
+    /// Artifact files to write under the task bundle `artifacts/` directory.
+    /// Existing files at the same relative path are overwritten.
+    pub upsert_artifacts: Vec<TaskArtifact>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskLockHolder {
+    Task,
+    Reservation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskLockConflict {
+    pub file: String,
+    pub held_by: TaskLockHolder,
+    pub held_by_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExpiredTaskReservation {
+    pub reservation_id: String,
+    pub expired_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskReservationReleaseReason {
+    Explicit,
+    RunTerminal,
+    StaleRunReconciled,
+    TtlExpired,
+}
+
+impl TaskReservationReleaseReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Explicit => "explicit",
+            Self::RunTerminal => "run_terminal",
+            Self::StaleRunReconciled => "stale_run_reconciled",
+            Self::TtlExpired => "ttl_expired",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskReservationCheckParams {
+    pub workspace_orbit_dir: String,
+    pub workspace_id: Option<String>,
+    pub requested_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReservationCheckResult {
+    pub conflicts: Vec<TaskLockConflict>,
+    pub expired_reservations: Vec<ExpiredTaskReservation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskReservationReserveParams {
+    pub workspace_orbit_dir: String,
+    pub workspace_id: Option<String>,
+    pub task_ids: Vec<String>,
+    pub requested_files: Vec<String>,
+    pub actor: String,
+    pub ttl_seconds: u32,
+    pub owner_run_id: Option<String>,
+    pub owner_metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReservationReserveResult {
+    pub reserved: bool,
+    pub reservation_id: Option<String>,
+    pub expires_at: Option<String>,
+    pub reserved_files: Vec<String>,
+    pub conflicts: Vec<TaskLockConflict>,
+    pub expired_reservations: Vec<ExpiredTaskReservation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskReservationReleaseParams {
+    pub workspace_orbit_dir: String,
+    pub workspace_id: Option<String>,
+    pub reservation_id: String,
+    pub release_reason: TaskReservationReleaseReason,
+    pub release_metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReservationReleaseResult {
+    pub released: bool,
+    pub released_at: Option<String>,
+    pub reservation: Option<ReleasedTaskReservation>,
+    pub expired_reservations: Vec<ExpiredTaskReservation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveTaskReservation {
+    pub reservation_id: String,
+    pub workspace_id: Option<String>,
+    pub task_ids: Vec<String>,
+    pub files: Vec<String>,
+    pub actor: String,
+    pub created_at: String,
+    pub expires_at: String,
+    pub owner_run_id: Option<String>,
+    pub owner_metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleasedTaskReservation {
+    pub reservation_id: String,
+    pub workspace_id: Option<String>,
+    pub task_ids: Vec<String>,
+    pub files: Vec<String>,
+    pub actor: String,
+    pub created_at: String,
+    pub expires_at: String,
+    pub released_at: String,
+    pub owner_run_id: Option<String>,
+    pub owner_metadata_json: Option<String>,
+    pub release_reason: TaskReservationReleaseReason,
+    pub release_metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReservationListResult {
+    pub reservations: Vec<ActiveTaskReservation>,
+    pub expired_reservations: Vec<ExpiredTaskReservation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskReservationReleaseByOwnerParams {
+    pub workspace_orbit_dir: String,
+    pub workspace_id: Option<String>,
+    pub owner_run_id: String,
+    pub release_reason: TaskReservationReleaseReason,
+    pub release_metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReservationReleaseByOwnerResult {
+    pub released_reservations: Vec<ReleasedTaskReservation>,
+    pub expired_reservations: Vec<ExpiredTaskReservation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskReservationOwnedConflictsParams {
+    pub workspace_orbit_dir: String,
+    pub workspace_id: Option<String>,
+    pub requested_files: Vec<String>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReservationOwnedConflictsResult {
+    pub reservations: Vec<ActiveTaskReservation>,
+    pub expired_reservations: Vec<ExpiredTaskReservation>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct JobRunQuery {
+    pub job_id: Option<String>,
+    pub state: Option<JobRunState>,
+    /// Whether to include only states for which `JobRunState::is_terminal()`
+    /// returns true. Applied before ordering and limiting.
+    pub terminal_only: bool,
+    pub created_since: Option<DateTime<Utc>>,
+    pub limit: Option<usize>,
+}

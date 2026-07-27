@@ -1,12 +1,13 @@
 //! Scoreboard endpoint: per-agent stats joined with metrics extras and denials.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use crate::state::Ws;
+use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{Duration, Utc};
+use orbit_cmd::DiagnosticsCommands;
 use orbit_core::OrbitRuntime;
 use orbit_core::scoreboard_summary::ScoreboardWindow;
 use serde::Deserialize;
@@ -24,10 +25,7 @@ pub(super) struct ScoreboardQuery {
     pub(super) window: Option<String>,
 }
 
-pub(super) async fn scoreboard(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Query(query): Query<ScoreboardQuery>,
-) -> Response {
+pub(super) async fn scoreboard(Ws(runtime): Ws, Query(query): Query<ScoreboardQuery>) -> Response {
     let window = match query.window.as_deref() {
         None => ScoreboardWindow::All,
         Some(raw) => match raw.parse::<ScoreboardWindow>() {

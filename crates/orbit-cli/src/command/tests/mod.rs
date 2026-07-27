@@ -1,16 +1,20 @@
 // Content moved from inline #[cfg(test)] mod tests in command/mod.rs per ORB-00221.
 // tests/mod.rs can directly contain tests for the declaring parent module (exempt from orphan rules).
 
+mod friction;
+mod gc;
 mod init;
+mod operation;
+mod operation_args;
+mod sweep;
 
 use clap::{Parser, error::ErrorKind};
 
-use orbit_graph_cli::Command as GraphSubcommand;
+use orbit_common::types::McpCapability;
 
 use super::{
     Cli, Commands,
     docs::DocsSubcommand,
-    friction::FrictionSubcommand,
     hook::HookSubcommand,
     mcp::McpSubcommand,
     search::{SearchKindArg, SearchSubcommand},
@@ -26,6 +30,40 @@ fn assert_cli_rejects(args: &[&str], kind: ErrorKind, expected: &str) {
     assert_eq!(error.kind(), kind, "{error}");
     let message = error.to_string();
     assert!(message.contains(expected), "{message}");
+}
+
+#[test]
+fn cli_parses_doctor_stale_lock_cleanup() {
+    let cli = Cli::parse_from([
+        "orbit",
+        "doctor",
+        "--fix-stale-locks",
+        "--remove-graph",
+        "--json",
+    ]);
+    match cli.command {
+        Commands::Doctor(command) => {
+            assert!(command.fix_stale_locks);
+            assert!(command.remove_graph);
+            assert!(command.json);
+            // [ORB-10501] Repairs are opt-in: an unflagged run only diagnoses.
+            assert!(!command.fix_orphaned_allocations);
+        }
+        _ => panic!("expected top-level doctor command"),
+    }
+}
+
+/// [ORB-10501] The guarded repair for allocations pinned to a reaped worktree.
+#[test]
+fn cli_parses_doctor_orphaned_allocation_repair() {
+    let cli = Cli::parse_from(["orbit", "doctor", "--fix-orphaned-allocations"]);
+    match cli.command {
+        Commands::Doctor(command) => {
+            assert!(command.fix_orphaned_allocations);
+            assert!(!command.fix_stale_locks);
+        }
+        _ => panic!("expected top-level doctor command"),
+    }
 }
 
 #[test]
@@ -53,34 +91,39 @@ fn cli_parses_mcp_serve() {
 }
 
 #[test]
-fn cli_parses_graph_search() {
+fn cli_parses_hub_mcp_serve_with_one_exact_capability() {
     let cli = Cli::parse_from([
         "orbit",
-        "graph",
-        "search",
-        "GraphCommand",
-        "--kind",
-        "symbol",
+        "mcp",
+        "serve",
+        "--hub",
+        "--capabilities",
+        "operator",
     ]);
     match cli.command {
-        Commands::Graph(command) => match command.command {
-            GraphSubcommand::Search(_) => {}
-            _ => panic!("expected graph search"),
+        Commands::Mcp(command) => match command.command {
+            McpSubcommand::Serve(args) => {
+                assert!(args.hub);
+                assert_eq!(args.capabilities, Some(McpCapability::Operator));
+            }
+            _ => panic!("expected mcp serve"),
         },
-        _ => panic!("expected top-level graph command"),
+        _ => panic!("expected top-level mcp command"),
     }
 }
 
 #[test]
-fn cli_parses_graph_impact() {
-    let cli = Cli::parse_from(["orbit", "graph", "impact", "symbol:src/lib.rs#run:function"]);
-    match cli.command {
-        Commands::Graph(command) => match command.command {
-            GraphSubcommand::Impact(_) => {}
-            _ => panic!("expected graph impact"),
-        },
-        _ => panic!("expected top-level graph command"),
-    }
+fn cli_rejects_mcp_capability_without_hub_and_unknown_values() {
+    assert_cli_rejects(
+        &["orbit", "mcp", "serve", "--capabilities", "agent"],
+        ErrorKind::MissingRequiredArgument,
+        "--hub",
+    );
+    assert_cli_rejects(
+        &["orbit", "mcp", "serve", "--hub", "--capabilities", "admin"],
+        ErrorKind::ValueValidation,
+        "admin",
+    );
 }
 
 #[test]
@@ -89,6 +132,37 @@ fn cli_parses_web_serve() {
     match cli.command {
         Commands::Web(command) => match command.command {
             WebSubcommand::Serve(_) => {}
+            WebSubcommand::Connect(_) => panic!("expected serve"),
+        },
+        _ => panic!("expected top-level web command"),
+    }
+}
+
+#[test]
+fn cli_parses_web_serve_global_as_deprecated_noop() {
+    // `--global` is a deprecated no-op (ORB-10029): `orbit web serve` always
+    // serves in global mode now, but the flag must keep parsing since `orbit
+    // web connect` forwards it to remote hosts that may run an older binary.
+    let cli = Cli::parse_from(["orbit", "web", "serve", "--global"]);
+    match cli.command {
+        Commands::Web(command) => match command.command {
+            WebSubcommand::Serve(args) => assert!(args.global),
+            WebSubcommand::Connect(_) => panic!("expected serve"),
+        },
+        _ => panic!("expected top-level web command"),
+    }
+}
+
+#[test]
+fn cli_parses_web_connect() {
+    let cli = Cli::parse_from(["orbit", "web", "connect", "my-host", "--no-open"]);
+    match cli.command {
+        Commands::Web(command) => match command.command {
+            WebSubcommand::Connect(args) => {
+                assert_eq!(args.ssh_host, "my-host");
+                assert!(args.no_open);
+            }
+            WebSubcommand::Serve(_) => panic!("expected connect"),
         },
         _ => panic!("expected top-level web command"),
     }
@@ -271,45 +345,6 @@ fn cli_rejects_learning_reindex() {
         ErrorKind::InvalidSubcommand,
         "unrecognized subcommand 'reindex'",
     );
-}
-
-#[test]
-fn cli_parses_friction_list() {
-    let cli = Cli::parse_from(["orbit", "friction", "list", "--status", "open"]);
-    match cli.command {
-        Commands::Friction(command) => match command.command {
-            FrictionSubcommand::List(args) => {
-                assert_eq!(args.status.as_deref(), Some("open"));
-            }
-            _ => panic!("expected friction list"),
-        },
-        _ => panic!("expected top-level friction command"),
-    }
-}
-
-#[test]
-fn cli_parses_friction_update() {
-    let cli = Cli::parse_from([
-        "orbit",
-        "friction",
-        "update",
-        "F2026-05-001",
-        "--status",
-        "triaged",
-        "--tag",
-        "tooling,docs",
-    ]);
-    match cli.command {
-        Commands::Friction(command) => match command.command {
-            FrictionSubcommand::Update(args) => {
-                assert_eq!(args.id, "F2026-05-001");
-                assert_eq!(args.status.as_deref(), Some("triaged"));
-                assert_eq!(args.tags, vec!["tooling", "docs"]);
-            }
-            _ => panic!("expected friction update"),
-        },
-        _ => panic!("expected top-level friction command"),
-    }
 }
 
 #[test]

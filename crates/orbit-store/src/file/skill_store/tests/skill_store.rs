@@ -9,7 +9,7 @@ fn layered_catalog_uses_merge_by_key_precedence() {
     let global = tempdir().expect("global tempdir");
 
     write_skill(global.path(), "orbit", "global skill");
-    write_skill(global.path(), "orbit-graph", "global graph");
+    write_skill(global.path(), "orbit-search", "global search");
     write_skill(workspace.path(), "orbit", "workspace override");
 
     let catalog =
@@ -26,11 +26,11 @@ fn layered_catalog_uses_merge_by_key_precedence() {
     );
     assert_eq!(
         catalog
-            .load("orbit-graph")
+            .load("orbit-search")
             .expect("load global fallback")
             .sections
             .purpose,
-        "global graph"
+        "global search"
     );
 
     let ids = catalog
@@ -39,7 +39,7 @@ fn layered_catalog_uses_merge_by_key_precedence() {
         .into_iter()
         .map(|skill| skill.id)
         .collect::<Vec<_>>();
-    assert_eq!(ids, vec!["orbit", "orbit-graph"]);
+    assert_eq!(ids, vec!["orbit", "orbit-search"]);
 }
 
 fn write_skill(root: &Path, id: &str, purpose: &str) {

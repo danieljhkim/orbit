@@ -23,6 +23,9 @@ pub fn render(value: &Value, pretty: bool) -> Result<String, OrbitError> {
 }
 
 pub fn error_payload(error: &OrbitError) -> Value {
+    if let OrbitError::RemoteTool { payload, .. } = error {
+        return payload.clone();
+    }
     let mut payload = json!({
         "error": error.to_string(),
         "code": error_code(error),
@@ -32,10 +35,22 @@ pub fn error_payload(error: &OrbitError) -> Value {
     {
         object.insert("did_you_mean".to_string(), json!(did_you_mean));
     }
+    if let Some(artifact_origin) = error.artifact_origin()
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert("artifact_origin".to_string(), json!(artifact_origin));
+    }
+    if let Some((task_id, path, reason)) = error.task_bundle_corruption()
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert("task_id".to_string(), json!(task_id));
+        object.insert("path".to_string(), json!(path));
+        object.insert("reason".to_string(), json!(reason));
+    }
     payload
 }
 
-fn error_code(error: &OrbitError) -> &'static str {
+fn error_code(error: &OrbitError) -> &str {
     match error {
         OrbitError::PolicyDenied(_) => "policy_denied",
         OrbitError::NotFound { kind, .. } => match kind {
@@ -48,11 +63,10 @@ fn error_code(error: &OrbitError) -> &'static str {
             NotFoundKind::Adr => "adr_not_found",
             NotFoundKind::DesignFeature => "design_feature_not_found",
             NotFoundKind::Learning => "learning_not_found",
-            NotFoundKind::LearningComment => "learning_comment_not_found",
             NotFoundKind::AgentSession => "agent_session_not_found",
             NotFoundKind::Workspace => "workspace_not_found",
         },
-        OrbitError::TaskApprovalRequired(_) => "task_approval_required",
+        OrbitError::CapabilityDenied(_) => "capability_denied",
         OrbitError::CompanionNotInstalled(_) => "companion_not_installed",
         OrbitError::InvalidInput(_) | OrbitError::InvalidInputDiagnostic { .. } => "invalid_input",
         OrbitError::SensitiveInput { .. } => "sensitive_input",
@@ -60,13 +74,23 @@ fn error_code(error: &OrbitError) -> &'static str {
         OrbitError::JobValidation(_) => "job_validation_failed",
         OrbitError::AgentProtocolViolation(_) => "agent_protocol_violation",
         OrbitError::UnsupportedAgentProvider(_) => "unsupported_agent_provider",
+        OrbitError::HubUnavailable(_) => "hub_unavailable",
+        OrbitError::HubNegotiation(_) => "hub_negotiation",
+        OrbitError::OutcomeUnknown { .. } => "outcome_unknown",
+        OrbitError::RemoteTool { code, .. } => code.as_str(),
         OrbitError::Execution(_) => "execution_failed",
+        OrbitError::TaskBundleCorrupt { .. } => "task_bundle_corrupt",
         OrbitError::Store(_) => "store_error",
         OrbitError::TaskStatusTransition(_) => "task_status_transition",
         OrbitError::JobRunStateTransition(_) => "job_run_state_transition",
         OrbitError::WorkspaceError(_) => "workspace_error",
         OrbitError::Io(_) => "io_error",
         OrbitError::AdrInvalidTransition(_) => "adr_invalid_transition",
+        OrbitError::RemoteArtifactUnavailable { .. } => "remote_artifact_unavailable",
+        OrbitError::ArtifactNotLocal { .. } => "artifact_not_local",
         OrbitError::Migration(_) => "migration_failed",
+        // New OrbitError variants must remain JSON-serializable before this
+        // boundary assigns them a dedicated stable code.
+        _ => "internal_error",
     }
 }

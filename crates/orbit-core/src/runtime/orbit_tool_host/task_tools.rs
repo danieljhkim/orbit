@@ -1,9 +1,7 @@
-use std::collections::BTreeSet;
-
 use orbit_common::types::{
-    OrbitError, TaskPriority, build_task_status_index, optional_csv_or_string_list_alias,
-    optional_raw_string, optional_string, optional_string_alias, optional_string_list_alias,
-    required_string, strip_retired_task_add_input_fields, task_dependencies_ready,
+    OrbitError, TaskPriority, optional_csv_or_string_list_alias, optional_raw_string,
+    optional_string, optional_string_alias, optional_string_list_alias, required_string,
+    strip_retired_task_add_input_fields, task_dependencies_ready,
 };
 use serde_json::{Value, json};
 
@@ -71,7 +69,7 @@ pub(super) fn add(
             system_created: false,
             external_refs: Vec::new(),
             source_task_id: None,
-            crew: None,
+            crew: optional_string(&input, "crew")?,
         },
         agent,
         model,
@@ -116,8 +114,13 @@ pub(super) fn lint(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
 }
 
 pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    let status = optional_string(&input, "status")?
-        .map(|value| parse_task_status("status", &value))
+    let statuses = optional_csv_or_string_list_alias(&input, &["status"])?
+        .map(|values| {
+            values
+                .into_iter()
+                .map(|value| parse_task_status("status", &value))
+                .collect::<Result<Vec<_>, _>>()
+        })
         .transpose()?;
     let task_type = optional_string_alias(&input, &["type", "task_type", "taskType"])?
         .map(|value| parse_task_type("type", &value))
@@ -127,28 +130,35 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default();
     let ready = optional_bool_alias(&input, &["ready"])?;
     let path = optional_string(&input, "path")?;
+    let limit = super::input::task_list_limit(&input)?;
+    // `list_tasks_filtered` returns tasks newest-first (`created_at DESC`, task
+    // ID ascending for ties); the filters below preserve that order, so the
+    // trailing `take(limit)` yields the newest matching tasks (ORB-10310).
     let all_tasks = runtime.list_tasks_filtered(
-        status,
+        None,
         None,
         parent_id.as_deref(),
         job_run_id.as_deref(),
         None,
         None,
     )?;
-    let status_by_id = build_task_status_index(&runtime.list_tasks()?);
-    let tasks = all_tasks
-        .into_iter()
-        .filter(|task| orbit_common::types::task_matches_tags(task, &tags))
-        .filter(|task| ready != Some(true) || task_dependencies_ready(task, &status_by_id))
-        .filter(|task| {
-            path.as_deref()
-                .is_none_or(|p| crate::task_selectors_contain_path(&task.context_files, p))
-        })
-        .collect::<Vec<_>>();
+    let status_by_id = runtime.task_status_index()?;
     Ok(Value::Array(
-        tasks
+        all_tasks
             .into_iter()
+            .filter(|task| {
+                statuses
+                    .as_ref()
+                    .is_none_or(|values| values.contains(&task.status))
+            })
+            .filter(|task| orbit_common::types::task_matches_tags(task, &tags))
+            .filter(|task| ready != Some(true) || task_dependencies_ready(task, &status_by_id))
+            .filter(|task| {
+                path.as_deref()
+                    .is_none_or(|p| crate::task_selectors_contain_path(&task.context_files, p))
+            })
             .filter(|task| task_type.is_none_or(|kind| task.task_type == kind))
+            .take(limit)
             .map(|task| task_to_json(&task, &status_by_id))
             .collect::<Vec<_>>(),
     ))
@@ -292,6 +302,9 @@ pub(super) fn update(
             status: optional_string(&input, "status")?
                 .map(|value| parse_task_status("status", &value))
                 .transpose()?,
+            complexity: optional_string(&input, "complexity")?
+                .map(|value| parse_task_complexity("complexity", &value))
+                .transpose()?,
             task_type: optional_string_alias(&input, &["type", "task_type", "taskType"])?
                 .map(|value| parse_task_type("type", &value))
                 .transpose()?,
@@ -311,28 +324,11 @@ pub(super) fn update(
                 &["context_files", "context"],
             )?,
             upsert_artifacts: parse_artifacts(&input)?,
-            ..Default::default()
         },
         agent,
         model,
     )?;
     serialize_task(runtime, &task)
-}
-
-pub(crate) fn parse_task_ids(input: &Value) -> Result<Vec<String>, OrbitError> {
-    let task_ids = optional_string_list_alias(input, &["task_ids", "taskIds", "task-ids"])?
-        .ok_or_else(|| OrbitError::InvalidInput("missing `task_ids`".to_string()))?;
-    parse_task_id_list(task_ids)
-}
-
-fn parse_task_id_list(task_ids: Vec<String>) -> Result<Vec<String>, OrbitError> {
-    let deduped = task_ids.into_iter().collect::<BTreeSet<_>>();
-    if deduped.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "`task_ids` must contain at least one task ID".to_string(),
-        ));
-    }
-    Ok(deduped.into_iter().collect())
 }
 
 fn optional_raw_string_alias(input: &Value, keys: &[&str]) -> Result<Option<String>, OrbitError> {

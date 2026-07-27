@@ -1,11 +1,43 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use orbit_common::types::{OrbitError, Task, TaskPriority, TaskStatus, TaskType};
+use orbit_common::types::{
+    McpCapability, OrbitError, Role, Task, TaskPriority, TaskStatus, TaskType, ToolSessionContext,
+};
 use orbit_store::TaskCreateParams;
+use orbit_tools::ToolContext;
+use serde_json::Value;
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;
+
+/// Run a tool with an explicit operator session context.
+///
+/// `OrbitRuntime::run_tool` carries no session context, so the ORB-10453
+/// chokepoint resolves its caller from ambient process state and refuses a
+/// governed operation. A test that exercises a governed tool's *domain*
+/// behaviour rather than its authorization says which caller it is here,
+/// instead of depending on whatever environment the test runner happens to
+/// have.
+pub(crate) fn run_tool_as_operator(
+    runtime: &OrbitRuntime,
+    name: &str,
+    input: Value,
+) -> Result<Value, OrbitError> {
+    runtime.run_tool_with_context_and_role(
+        name,
+        input,
+        Role::Admin,
+        ToolContext {
+            session_context: ToolSessionContext {
+                effective_capabilities: BTreeSet::from([McpCapability::Operator]),
+                ..ToolSessionContext::default()
+            },
+            ..ToolContext::default()
+        },
+    )
+}
 
 pub(crate) fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf) {
     let root = tempdir().expect("create tempdir");
@@ -29,7 +61,7 @@ pub(super) fn create_task(
 ) -> Task {
     runtime
         .stores()
-        .tasks()
+        .task_records()
         .create(TaskCreateParams {
             actor: "test".to_string(),
             parent_id: None,
@@ -62,7 +94,7 @@ pub(super) fn create_task(
         .expect("create task")
 }
 
-pub(super) fn create_context_task(
+pub(crate) fn create_context_task(
     runtime: &OrbitRuntime,
     workspace_path: &Path,
     status: TaskStatus,
@@ -78,7 +110,7 @@ pub(super) fn create_context_task(
     )
 }
 
-pub(super) fn invalid_input_message<T>(result: Result<T, OrbitError>) -> String {
+pub(crate) fn invalid_input_message<T>(result: Result<T, OrbitError>) -> String {
     match result {
         Err(OrbitError::InvalidInput(message)) => message,
         Err(error) => panic!("expected invalid input, got {error:?}"),
@@ -86,12 +118,12 @@ pub(super) fn invalid_input_message<T>(result: Result<T, OrbitError>) -> String 
     }
 }
 
-pub(super) struct UnmanagedToolEnvGuard {
+pub(crate) struct UnmanagedToolEnvGuard {
     _lock: MutexGuard<'static, ()>,
     vars: Vec<(&'static str, Option<String>)>,
 }
 
-pub(super) fn unmanaged_tool_env_guard() -> UnmanagedToolEnvGuard {
+pub(crate) fn unmanaged_tool_env_guard() -> UnmanagedToolEnvGuard {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     let lock = LOCK
         .get_or_init(|| Mutex::new(()))

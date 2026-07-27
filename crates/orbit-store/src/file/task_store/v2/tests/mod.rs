@@ -1,14 +1,12 @@
 use chrono::{TimeZone, Utc};
 use orbit_common::types::{
-    ExternalRef, ReviewMessage, ReviewThread, ReviewThreadStatus, TaskArtifact, TaskComment,
-    TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
+    ExternalRef, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
 };
 use tempfile::TempDir;
 
 use super::*;
 use crate::backend::{
     TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentUpdateParams, TaskHistoryUpdateParams,
-    TaskReviewUpdateParams,
 };
 use crate::sqlite::task_registry::{BindWorkspaceParams, TaskRegistryStore, task_registry_path};
 
@@ -53,7 +51,7 @@ pub(super) fn create_params(title: &str, status: TaskStatus) -> TaskCreateParams
         tags: vec!["task-artifacts".to_string(), "v2".to_string()],
         plan: "1. Do the work".to_string(),
         execution_summary: String::new(),
-        context_files: vec!["docs/design/task-artifacts/_plan.md".to_string()],
+        context_files: vec!["docs/design/task-artifacts/1_overview.md".to_string()],
         workspace_path: None,
         repo_root: None,
         created_by: Some("codex:gpt-5.5".to_string()),

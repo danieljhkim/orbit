@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use chrono::{Duration, Utc};
 use orbit_core::command::task::TaskAddParams;
 use orbit_core::{JobRunState, OrbitRuntime, TaskStatus};
 use serde_json::json;
 use tower::ServiceExt;
 
 use super::super::*;
-use super::test_support::{body_json, seed_run};
+use super::test_support::{body_json, seed_run, write_seeded_run};
 
 async fn request_cancel(runtime: OrbitRuntime, run_id: &str, origin: Option<&str>) -> Response {
     let mut builder = Request::builder()
@@ -18,7 +19,7 @@ async fn request_cancel(runtime: OrbitRuntime, run_id: &str, origin: Option<&str
         builder = builder.header(header::ORIGIN, origin);
     }
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(builder.body(Body::empty()).expect("request"))
         .await
         .expect("response")
@@ -26,11 +27,25 @@ async fn request_cancel(runtime: OrbitRuntime, run_id: &str, origin: Option<&str
 
 async fn request_tasks(runtime: OrbitRuntime) -> Response {
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .method(Method::GET)
                 .uri("/tasks")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response")
+}
+
+async fn request_job_runs(runtime: OrbitRuntime, query: &str) -> Response {
+    router()
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/job-runs?{query}"))
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -44,7 +59,7 @@ async fn patch_task_crew(runtime: OrbitRuntime, task_id: &str, crew: &str) -> Re
 
 async fn patch_task_body(runtime: OrbitRuntime, task_id: &str, body: String) -> Response {
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .method(Method::PATCH)
@@ -60,7 +75,7 @@ async fn patch_task_body(runtime: OrbitRuntime, task_id: &str, body: String) -> 
 
 async fn request_crews(runtime: OrbitRuntime) -> Response {
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .method(Method::GET)
@@ -83,14 +98,14 @@ fn runtime_with_custom_crews() -> (tempfile::TempDir, OrbitRuntime) {
         workspace_root.join("config.toml"),
         r#"
 [crews.beta]
-planner = { model = "claude-beta-plan", provider = "claude", backend = "cli" }
-implementer = { model = "codex-beta-impl", provider = "codex", backend = "cli" }
-reviewer = { model = "codex-beta-review", provider = "codex", backend = "cli" }
+model = "codex-beta"
+provider = "codex"
+backend = "cli"
 
 [crews.alpha]
-planner = { model = "alpha-plan-model", provider = "claude", backend = "cli" }
-implementer = { model = "alpha-impl-model", provider = "codex", backend = "cli" }
-reviewer = { model = "alpha-review-model", provider = "codex", backend = "cli" }
+model = "alpha-model"
+provider = "codex"
+backend = "cli"
 
 [workflow]
 default_crew = "beta"
@@ -113,14 +128,14 @@ fn runtime_with_stale_task_crew() -> (tempfile::TempDir, OrbitRuntime, String) {
         workspace_root.join("config.toml"),
         r#"
 [crews.beta]
-planner = { model = "claude-beta-plan", provider = "claude", backend = "cli" }
-implementer = { model = "codex-beta-impl", provider = "codex", backend = "cli" }
-reviewer = { model = "codex-beta-review", provider = "codex", backend = "cli" }
+model = "codex-beta"
+provider = "codex"
+backend = "cli"
 
 [crews.all-codex]
-planner = { model = "legacy-plan-model", provider = "codex", backend = "cli" }
-implementer = { model = "legacy-impl-model", provider = "codex", backend = "cli" }
-reviewer = { model = "legacy-review-model", provider = "codex", backend = "cli" }
+model = "all-codex-model"
+provider = "codex"
+backend = "cli"
 
 [workflow]
 default_crew = "beta"
@@ -144,9 +159,9 @@ default_crew = "beta"
         workspace_root.join("config.toml"),
         r#"
 [crews.beta]
-planner = { model = "claude-beta-plan", provider = "claude", backend = "cli" }
-implementer = { model = "codex-beta-impl", provider = "codex", backend = "cli" }
-reviewer = { model = "codex-beta-review", provider = "codex", backend = "cli" }
+model = "codex-beta"
+provider = "codex"
+backend = "cli"
 
 [workflow]
 default_crew = "beta"
@@ -177,6 +192,92 @@ fn seed_task(
 }
 
 #[tokio::test]
+async fn job_run_filters_apply_before_limit_and_validate_state() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let since = Utc::now();
+    let mut running = seed_run(
+        &runtime,
+        "jrun-job-runs-running",
+        "job_runs_filter",
+        JobRunState::Running,
+    );
+    running.pid = Some(std::process::id());
+    write_seeded_run(&runtime, &running);
+    for state in [
+        JobRunState::Success,
+        JobRunState::Failed,
+        JobRunState::Cancelled,
+        JobRunState::Interrupted,
+        JobRunState::Timeout,
+    ] {
+        seed_run(
+            &runtime,
+            &format!("jrun-job-runs-terminal-{state}"),
+            "job_runs_filter",
+            state,
+        );
+    }
+    let mut old_terminal = seed_run(
+        &runtime,
+        "jrun-job-runs-terminal-old",
+        "job_runs_filter",
+        JobRunState::Success,
+    );
+    old_terminal.created_at = since - Duration::days(1);
+    write_seeded_run(&runtime, &old_terminal);
+    seed_run(
+        &runtime,
+        "jrun-job-runs-terminal-other-job",
+        "other_job",
+        JobRunState::Success,
+    );
+
+    let response = request_job_runs(runtime.clone(), "state=running&limit=1").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let rows = body_json(response).await;
+    assert_eq!(rows.as_array().expect("runs array").len(), 1);
+    assert_eq!(rows[0]["run_id"], json!(running.run_id));
+
+    let response = request_job_runs(runtime.clone(), "state=terminal&limit=10").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let rows = body_json(response).await;
+    let states = rows
+        .as_array()
+        .expect("runs array")
+        .iter()
+        .map(|run| run["state"].as_str().expect("state"))
+        .collect::<Vec<_>>();
+    for state in ["success", "failed", "cancelled", "interrupted", "timeout"] {
+        assert!(states.contains(&state), "missing terminal state {state}");
+    }
+
+    let since = since.to_rfc3339().replace('+', "%2B");
+    let response = request_job_runs(
+        runtime.clone(),
+        &format!("job_id=job_runs_filter&state=terminal&since={since}&limit=10"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let rows = body_json(response).await;
+    let run_ids = rows
+        .as_array()
+        .expect("runs array")
+        .iter()
+        .map(|run| run["run_id"].as_str().expect("run id"))
+        .collect::<Vec<_>>();
+    assert!(!run_ids.contains(&old_terminal.run_id.as_str()));
+    assert!(!run_ids.contains(&"jrun-job-runs-terminal-other-job"));
+
+    let response = request_job_runs(runtime, "state=unknown").await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error = body_json(response).await;
+    assert_eq!(
+        error["error"],
+        json!("invalid state; expected one of: pending, running, terminal")
+    );
+}
+
+#[tokio::test]
 async fn tasks_with_stale_explicit_crew_fall_back_to_default_projection() {
     let (_root, runtime, task_id) = runtime_with_stale_task_crew();
 
@@ -184,16 +285,15 @@ async fn tasks_with_stale_explicit_crew_fall_back_to_default_projection() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    let rows = body.as_array().expect("tasks response array");
+    // ORB-10400: GET /tasks answers `{ items, total, limit, truncated }`.
+    let rows = body["items"].as_array().expect("tasks response items");
     let task = rows
         .iter()
         .find(|task| task["id"].as_str() == Some(task_id.as_str()))
         .expect("stale crew task is listed");
     assert_eq!(task["crew"], json!("all-codex"));
     assert_eq!(task["resolved_crew"], json!("beta"));
-    assert_eq!(task["planner_model"], json!("claude-beta-plan"));
-    assert_eq!(task["implementer_model"], json!("codex-beta-impl"));
-    assert_eq!(task["reviewer_model"], json!("codex-beta-review"));
+    assert_eq!(task["crew_model"], json!("codex-beta"));
 
     let response = patch_task_crew(runtime, &task_id, "all-codex").await;
 
@@ -210,9 +310,7 @@ async fn patch_task_crew_null_clears_stale_explicit_crew_to_default() {
     let task = body_json(response).await;
     assert_eq!(task["crew"], json!(null));
     assert_eq!(task["resolved_crew"], json!("beta"));
-    assert_eq!(task["planner_model"], json!("claude-beta-plan"));
-    assert_eq!(task["implementer_model"], json!("codex-beta-impl"));
-    assert_eq!(task["reviewer_model"], json!("codex-beta-review"));
+    assert_eq!(task["crew_model"], json!("codex-beta"));
 }
 
 #[tokio::test]
@@ -228,14 +326,10 @@ async fn crews_endpoint_returns_sorted_runtime_registry() {
     assert_eq!(crews.len(), 2);
     assert_eq!(crews[0]["name"], json!("alpha"));
     assert_eq!(crews[0]["is_default"], json!(false));
-    assert_eq!(crews[0]["planner_model"], json!("alpha-plan-model"));
-    assert_eq!(crews[0]["implementer_model"], json!("alpha-impl-model"));
-    assert_eq!(crews[0]["reviewer_model"], json!("alpha-review-model"));
+    assert_eq!(crews[0]["model"], json!("alpha-model"));
     assert_eq!(crews[1]["name"], json!("beta"));
     assert_eq!(crews[1]["is_default"], json!(true));
-    assert_eq!(crews[1]["planner_model"], json!("claude-beta-plan"));
-    assert_eq!(crews[1]["implementer_model"], json!("codex-beta-impl"));
-    assert_eq!(crews[1]["reviewer_model"], json!("codex-beta-review"));
+    assert_eq!(crews[1]["model"], json!("codex-beta"));
 }
 
 #[tokio::test]
@@ -295,7 +389,8 @@ async fn tasks_resolve_dependency_statuses_from_all_tasks() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    let rows = body.as_array().expect("tasks response array");
+    // ORB-10400: GET /tasks answers `{ items, total, limit, truncated }`.
+    let rows = body["items"].as_array().expect("tasks response items");
     assert!(
         rows.iter()
             .any(|task| task["id"].as_str() == Some(&visible.id))
@@ -304,14 +399,15 @@ async fn tasks_resolve_dependency_statuses_from_all_tasks() {
         rows.iter()
             .any(|task| task["id"].as_str() == Some(&rejected.id))
     );
+    // ORB-10310: task listing is status-neutral, so `done` and `archived`
+    // dependency tasks now appear in the list too. Their status still resolves
+    // from the global index (asserted below), independent of list membership.
     assert!(
-        !rows
-            .iter()
+        rows.iter()
             .any(|task| task["id"].as_str() == Some(&done.id))
     );
     assert!(
-        !rows
-            .iter()
+        rows.iter()
             .any(|task| task["id"].as_str() == Some(&archived.id))
     );
 
@@ -380,7 +476,7 @@ async fn require_localhost_origin_blocks_cross_origin_get_with_attacker_origin()
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
 
     let response = router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .method(Method::GET)

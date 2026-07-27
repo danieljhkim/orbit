@@ -163,6 +163,55 @@ impl Execute for JobReplayArgs {
     }
 }
 
+#[derive(Args)]
+#[command(
+    after_help = "Examples:\n  orbit job resume jrun-20260704-0710\n\nResumes an interrupted (or failed / timed-out) run as a new linked run,\nskipping top-level steps whose checkpoints already recorded success."
+)]
+pub struct JobResumeArgs {
+    /// Source job run ID to resume from its persisted step checkpoints.
+    pub run_id: String,
+    /// Output resume result as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+impl Execute for JobResumeArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let source_run_id = self.run_id;
+        let result = runtime.resume_job_run(&source_run_id)?;
+        let backend_str = result.resolved_backend.as_str();
+        if self.json {
+            return crate::output::json::print_pretty(&json!({
+                "run_id": result.run_id,
+                "resumed_from": source_run_id,
+                "job_name": result.job_name,
+                "resolved_backend": backend_str,
+                "success": result.success,
+                "message": result.message,
+                "pipeline": result.pipeline,
+                "events_emitted": result.events_emitted,
+            }));
+        }
+        println!(
+            "run_id={};resumed_from={};job={};backend={};success={};events={}",
+            result.run_id,
+            source_run_id,
+            result.job_name,
+            backend_str,
+            result.success,
+            result.events_emitted,
+        );
+        if let Some(msg) = &result.message {
+            println!("message: {msg}");
+        }
+        println!(
+            "pipeline: {}",
+            serde_json::to_string_pretty(&result.pipeline).unwrap_or_default()
+        );
+        Ok(())
+    }
+}
+
 // Retained after ORB-00146 (dashboard callers moved to orbit-dashboard); the thin
 // wrapper is kept for any external re-exports or future CLI json paths.
 #[allow(dead_code)]
@@ -184,6 +233,10 @@ pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineSt
         "job_id": run.job_id,
         "attempt": run.attempt,
         "state": run.state.to_string(),
+        // Recorded owner process, when a worker claimed the run [ORB-10070].
+        // Lets operators and host automation probe whether an
+        // active run's worker is actually alive.
+        "pid": run.pid,
         "waiting_on_deps": waiting_on_deps,
         "waiting_on_locks": waiting_on_locks,
         "scheduled_at": run.scheduled_at.to_rfc3339(),
@@ -197,9 +250,7 @@ pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineSt
         "error_message": last.and_then(|s| s.error_message.as_deref()),
         "knowledge_metrics": run.knowledge_metrics,
         "resolved_crew": run.resolved_crew,
-        "planner_model": run.planner_model,
-        "implementer_model": run.implementer_model,
-        "reviewer_model": run.reviewer_model,
+        "crew_model": run.crew_model,
         "steps": run.steps.iter().map(|s| json!({
             "step_index": s.step_index,
             "target_type": s.target_type.to_string(),

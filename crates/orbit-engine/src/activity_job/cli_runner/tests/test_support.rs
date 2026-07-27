@@ -4,12 +4,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
 
 use crate::context::AgentRoleConfig;
 use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
@@ -27,6 +29,7 @@ use tracing_subscriber::{Registry, fmt as tracing_fmt, fmt::MakeWriter, layer::S
 use super::super::super::dispatcher::{
     DispatchError, ResolvedCliExecutor, ResolvedSandbox, V2RuntimeHost,
 };
+use super::super::spawn::SpawnError;
 use super::super::supervisor::SpawnOutput;
 
 pub(in crate::activity_job::cli_runner) fn sandbox_for_test() -> ResolvedSandbox {
@@ -45,11 +48,9 @@ pub(in crate::activity_job::cli_runner) fn sh_args(script: &str) -> Vec<String> 
     vec!["-c".to_string(), script.to_string()]
 }
 
-pub(in crate::activity_job::cli_runner) fn capture_events<F>(
-    f: F,
-) -> (Result<SpawnOutput, String>, Vec<CapturedEvent>)
+pub(in crate::activity_job::cli_runner) fn capture_events<F, T>(f: F) -> (T, Vec<CapturedEvent>)
 where
-    F: FnOnce() -> Result<SpawnOutput, String>,
+    F: FnOnce() -> T,
 {
     let events = Arc::new(Mutex::new(Vec::new()));
     let subscriber = CaptureSubscriber {
@@ -64,9 +65,9 @@ where
 
 pub(in crate::activity_job::cli_runner) fn capture_redacted_tracing_output<F>(
     f: F,
-) -> (Result<SpawnOutput, String>, String)
+) -> (Result<SpawnOutput, SpawnError>, String)
 where
-    F: FnOnce() -> Result<SpawnOutput, String>,
+    F: FnOnce() -> Result<SpawnOutput, SpawnError>,
 {
     let writer = BufferMakeWriter::default();
     let buffer = writer.buffer();
@@ -239,6 +240,7 @@ pub(in crate::activity_job::cli_runner) struct TestHost {
     pub(in crate::activity_job::cli_runner) provider_config: HashMap<String, String>,
     pub(in crate::activity_job::cli_runner) sandbox: Option<ResolvedSandbox>,
     pub(in crate::activity_job::cli_runner) task_context: Option<Value>,
+    pub(in crate::activity_job::cli_runner) workspace_root: Option<PathBuf>,
 }
 
 impl TestHost {
@@ -249,6 +251,7 @@ impl TestHost {
             provider_config: HashMap::new(),
             sandbox: None,
             task_context: None,
+            workspace_root: None,
         }
     }
 }
@@ -304,12 +307,12 @@ impl V2RuntimeHost for TestHost {
         match role {
             AgentRole::Planner => Some(AgentRoleConfig {
                 provider: Some(Provider::Claude),
-                model: Some("claude-opus-4-7".to_string()),
+                model: Some(TEST_CLAUDE_MODEL.to_string()),
                 backend: None,
             }),
             AgentRole::Implementer => Some(AgentRoleConfig {
                 provider: Some(Provider::Codex),
-                model: Some("gpt-5.5".to_string()),
+                model: Some(TEST_CODEX_MODEL.to_string()),
                 backend: None,
             }),
             _ => None,
@@ -323,7 +326,10 @@ impl V2RuntimeHost for TestHost {
         _fs_audit: Option<Arc<dyn FsAuditLogger>>,
         _proc_allowed_programs: Option<&[String]>,
     ) -> ToolContext {
-        ToolContext::default()
+        ToolContext {
+            workspace_root: self.workspace_root.clone(),
+            ..ToolContext::default()
+        }
     }
 }
 
@@ -339,6 +345,8 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec(
         backend: Backend::Cli,
         provider: Provider::Codex,
         wall_clock_timeout_seconds: timeout.as_secs(),
+        require_response_envelope: false,
+        require_completion_envelope: true,
         role: None,
         proc_allowed_programs: None,
     }
@@ -364,6 +372,8 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec_for(
         backend: Backend::Cli,
         provider,
         wall_clock_timeout_seconds: timeout.as_secs(),
+        require_response_envelope: false,
+        require_completion_envelope: true,
         role: None,
         proc_allowed_programs: None,
     }

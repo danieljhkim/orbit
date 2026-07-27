@@ -1,0 +1,248 @@
+//! `orbit run ship-sweep` — dispatch ship runs across every registered
+//! workspace that opted in (`[workflow] auto_ship = true`) and has ready
+//! backlog work. Designed for unattended schedulers (systemd timer, cron):
+//! it never bootstraps a workspace from the caller's cwd, isolates
+//! per-workspace failures, and exits non-zero only when a workspace errored.
+
+use std::path::Path;
+
+use clap::Args;
+use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceStatus};
+use orbit_core::{JobRunState, OrbitError, TaskStatus, task_dependencies_ready};
+use orbit_remote::runtime::RemoteRuntimeFactory;
+use orbit_remote::workspace_registry;
+use serde_json::{Value, json};
+
+use super::ship::ShipMode;
+use super::support::TASK_AUTO_PIPELINE_JOB;
+
+#[derive(Args)]
+#[command(
+    name = "ship-sweep",
+    about = "Dispatch ship runs in every registered workspace with ready backlog tasks",
+    after_help = "Only workspaces with `[workflow] auto_ship = true` in their config.toml are\n\
+                  swept; everything else is reported as skipped. Intended to run from a\n\
+                  scheduler (systemd timer / cron), e.g.:\n  orbit run ship-sweep --json\n\n\
+                  Inspect dispatched runs per workspace with `orbit run history -j task_auto_pipeline`."
+)]
+pub struct ShipSweepCommand {
+    /// Override the pipeline mode for every dispatched ship run. When omitted,
+    /// each workspace's mode is resolved from its registry entry
+    /// (explicit `ship_mode`, else defaults to `local`).
+    #[arg(short = 'm', long, value_enum)]
+    pub mode: Option<ShipMode>,
+    /// Report what would be dispatched without submitting any run.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Output as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+struct SweepReport {
+    workspace_id: String,
+    workspace_name: String,
+    action: &'static str,
+    reason: Option<String>,
+    ready_backlog: usize,
+    /// Resolved ship mode for this workspace (`pr` / `local`). Set for the
+    /// dispatch paths (`would_dispatch` / `dispatched`) so the operator can
+    /// confirm per-workspace mode resolution; `None` for skips/errors.
+    mode: Option<&'static str>,
+    run_id: Option<String>,
+    run_state: Option<&'static str>,
+}
+
+impl SweepReport {
+    fn skipped(ws: &Workspace, reason: &str, ready_backlog: usize) -> Self {
+        Self {
+            workspace_id: ws.id.clone(),
+            workspace_name: ws.name.clone(),
+            action: "skipped",
+            reason: Some(reason.to_string()),
+            ready_backlog,
+            mode: None,
+            run_id: None,
+            run_state: None,
+        }
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "workspace_id": self.workspace_id,
+            "workspace_name": self.workspace_name,
+            "action": self.action,
+            "reason": self.reason,
+            "ready_backlog": self.ready_backlog,
+            "mode": self.mode,
+            "run_id": self.run_id,
+            "run_state": self.run_state,
+        })
+    }
+
+    fn to_line(&self) -> String {
+        let mut line = format!(
+            "{}: {} (ready backlog: {})",
+            self.workspace_name, self.action, self.ready_backlog
+        );
+        if let Some(mode) = self.mode {
+            line.push_str(&format!(" [{mode}]"));
+        }
+        if let Some(reason) = &self.reason {
+            line.push_str(&format!(" — {reason}"));
+        }
+        if let Some(run_id) = &self.run_id {
+            line.push_str(&format!(" — run {run_id}"));
+            if let Some(state) = self.run_state {
+                line.push_str(&format!(" [{state}]"));
+            }
+        }
+        line
+    }
+}
+
+impl ShipSweepCommand {
+    /// Runs without a pre-initialized runtime: the sweep resolves every
+    /// workspace from the global registry and must never bootstrap a
+    /// `.orbit/` in the scheduler's working directory.
+    pub fn execute_without_runtime(self) -> Result<(), OrbitError> {
+        let global_root = workspace_registry::global_orbit_dir()?;
+        let registry_path = workspace_registry::registry_path_for(&global_root);
+        let mut registry = workspace_registry::load_registry_from(&registry_path)?;
+        workspace_registry::validate_workspaces(&mut registry);
+        workspace_registry::save_registry_to(&registry, &registry_path)?;
+
+        let mode_override = self.mode.map(ShipMode::to_core);
+        let reports: Vec<SweepReport> = workspace_registry::local_workspaces(&registry)
+            .map(|(workspace, checkout)| {
+                sweep_workspace(
+                    &global_root,
+                    workspace,
+                    checkout,
+                    mode_override,
+                    self.dry_run,
+                )
+            })
+            .collect();
+
+        let failed = reports.iter().filter(|r| r.action == "error").count();
+        if self.json {
+            crate::output::json::print_pretty(&json!({
+                "dry_run": self.dry_run,
+                "workspaces": reports.len(),
+                "dispatched": reports.iter().filter(|r| r.action == "dispatched").count(),
+                "would_dispatch": reports.iter().filter(|r| r.action == "would_dispatch").count(),
+                "skipped": reports.iter().filter(|r| r.action == "skipped").count(),
+                "failed": failed,
+                "reports": reports.iter().map(SweepReport::to_json).collect::<Vec<_>>(),
+            }))?;
+        } else if reports.is_empty() {
+            println!("no workspaces registered");
+        } else {
+            for report in &reports {
+                println!("{}", report.to_line());
+            }
+        }
+
+        if failed > 0 {
+            return Err(OrbitError::WorkspaceError(format!(
+                "ship-sweep: {failed} of {} workspace(s) failed",
+                reports.len()
+            )));
+        }
+        Ok(())
+    }
+}
+
+fn sweep_workspace(
+    global_root: &Path,
+    ws: &Workspace,
+    checkout: &WorkspaceCheckout,
+    mode_override: Option<orbit_core::ShipMode>,
+    dry_run: bool,
+) -> SweepReport {
+    if ws.status != WorkspaceStatus::Active || !checkout.orbit_dir.exists() {
+        return SweepReport::skipped(ws, "workspace_inactive", 0);
+    }
+    // An explicit `--mode` override wins for every workspace; otherwise resolve
+    // per-workspace from its registry entry (explicit `ship_mode`, else the
+    // `local` default). This keeps direct-commit workspaces on the `local`
+    // pipeline instead of failing `pr_open` — only workspaces that carry an
+    // explicit `ship_mode = "pr"` ship via PR.
+    let mode = mode_override.unwrap_or_else(|| orbit_core::resolved_ship_mode(ws));
+    sweep_active_workspace(global_root, ws, checkout, mode, dry_run).unwrap_or_else(|error| {
+        SweepReport {
+            workspace_id: ws.id.clone(),
+            workspace_name: ws.name.clone(),
+            action: "error",
+            reason: Some(error.to_string()),
+            ready_backlog: 0,
+            mode: None,
+            run_id: None,
+            run_state: None,
+        }
+    })
+}
+
+fn sweep_active_workspace(
+    global_root: &Path,
+    ws: &Workspace,
+    checkout: &WorkspaceCheckout,
+    mode: orbit_core::ShipMode,
+    dry_run: bool,
+) -> Result<SweepReport, OrbitError> {
+    let runtime = RemoteRuntimeFactory::open_registered_checkout(global_root, ws, checkout)?;
+    if !runtime.workflow_auto_ship() {
+        return Ok(SweepReport::skipped(ws, "auto_ship_disabled", 0));
+    }
+
+    let tasks = runtime.list_tasks()?;
+    let status_by_id = runtime.task_status_index()?;
+    let ready_backlog = tasks
+        .iter()
+        .filter(|task| {
+            task.status == TaskStatus::Backlog && task_dependencies_ready(task, &status_by_id)
+        })
+        .count();
+    if ready_backlog == 0 {
+        return Ok(SweepReport::skipped(ws, "no_ready_backlog", 0));
+    }
+
+    let in_flight = runtime
+        .job_history(TASK_AUTO_PIPELINE_JOB)?
+        .iter()
+        .any(|run| {
+            matches!(
+                run.state,
+                JobRunState::Pending | JobRunState::Running | JobRunState::Retrying
+            )
+        });
+    if in_flight {
+        return Ok(SweepReport::skipped(ws, "ship_in_flight", ready_backlog));
+    }
+
+    if dry_run {
+        return Ok(SweepReport {
+            workspace_id: ws.id.clone(),
+            workspace_name: ws.name.clone(),
+            action: "would_dispatch",
+            reason: None,
+            ready_backlog,
+            mode: Some(mode.as_input_value()),
+            run_id: None,
+            run_state: None,
+        });
+    }
+
+    let invoke = runtime.submit_ship_run(mode, None, &[], false, None, Some("ship-sweep"))?;
+    Ok(SweepReport {
+        workspace_id: ws.id.clone(),
+        workspace_name: ws.name.clone(),
+        action: "dispatched",
+        reason: None,
+        ready_backlog,
+        mode: Some(mode.as_input_value()),
+        run_id: Some(invoke.run_id),
+        run_state: Some(if invoke.queued { "queued" } else { "submitted" }),
+    })
+}

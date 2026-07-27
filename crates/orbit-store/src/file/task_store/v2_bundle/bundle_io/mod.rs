@@ -1,28 +1,62 @@
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use orbit_common::migration::Plan;
 use orbit_common::types::{
     ArtifactManifestV2, NotFoundKind, OrbitError, TASK_ACCEPTANCE_FILE_NAME,
     TASK_ARTIFACT_FILES_DIR_NAME, TASK_ARTIFACT_MANIFEST_FILE_NAME, TASK_ARTIFACTS_DIR_NAME,
     TASK_COMMENTS_FILE_NAME, TASK_DESCRIPTION_FILE_NAME, TASK_ENVELOPE_FILE_NAME,
-    TASK_EVENTS_FILE_NAME, TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME,
-    TASK_REVIEW_THREADS_DIR_NAME, TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2,
+    TASK_EVENTS_FILE_NAME, TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME, TaskCommentRowV2,
+    TaskEnvelopeV2, TaskEventRowV2,
 };
-use orbit_common::utility::fs::{atomic_write_text, with_exclusive_file_lock};
+use orbit_common::utility::fs::{
+    atomic_write_bytes, atomic_write_text, sync_parent_dir, with_exclusive_file_lock,
+};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
-use super::review_threads::{read_review_threads, write_review_threads};
 use super::task_bundle_types::TaskBundleV2;
 use crate::file::task_store::task_migrations;
+use crate::file::yaml_doc::{parse_yaml_with, write_yaml_atomic_with};
+
+static STAGING_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Write a new v2 bundle at `bundle_dir`.
 ///
-/// This is a creation-only primitive and refuses to write into an existing
-/// bundle directory. Use narrower update helpers for later mutations.
+/// The complete bundle is assembled in a unique sibling directory and renamed
+/// into place only after every required file and directory is durable. This is
+/// a creation-only primitive and refuses to write into an existing bundle
+/// directory. Use narrower update helpers for later mutations.
 pub(crate) fn write_bundle_at(bundle_dir: &Path, bundle: &TaskBundleV2) -> Result<(), OrbitError> {
+    write_bundle_atomically(bundle_dir, bundle, None, publish_staged_bundle)
+}
+
+/// Write a complete imported bundle, including every blob in its artifact
+/// manifest, before publishing the destination directory.
+pub(crate) fn write_bundle_with_artifacts_at(
+    bundle_dir: &Path,
+    bundle: &TaskBundleV2,
+    source_bundle_dir: &Path,
+) -> Result<(), OrbitError> {
+    write_bundle_atomically(
+        bundle_dir,
+        bundle,
+        Some(source_bundle_dir),
+        publish_staged_bundle,
+    )
+}
+
+fn write_bundle_atomically<F>(
+    bundle_dir: &Path,
+    bundle: &TaskBundleV2,
+    artifact_source: Option<&Path>,
+    publish: F,
+) -> Result<(), OrbitError>
+where
+    F: FnOnce(&Path, &Path) -> std::io::Result<()>,
+{
     if bundle_dir.exists() {
         return Err(OrbitError::Store(format!(
             "task bundle already exists at {}",
@@ -31,9 +65,38 @@ pub(crate) fn write_bundle_at(bundle_dir: &Path, bundle: &TaskBundleV2) -> Resul
     }
     validate_bundle_dir_matches_task_id(bundle_dir, &bundle.envelope.id)?;
     validate_bundle(bundle)?;
-    ensure_bundle_dirs(bundle_dir)?;
+    let staging_dir = create_staging_dir(bundle_dir)?;
+    let result = (|| {
+        write_bundle_contents(&staging_dir, bundle)?;
+        if let Some(manifest) = &bundle.artifact_manifest
+            && !manifest.files.is_empty()
+        {
+            let source = artifact_source.ok_or_else(|| {
+                OrbitError::Store(format!(
+                    "task bundle {} has artifact files but no artifact source was supplied",
+                    bundle.envelope.id
+                ))
+            })?;
+            copy_artifact_blobs(source, &staging_dir, manifest)?;
+        }
+        read_bundle_for_id(&staging_dir, &bundle.envelope.id)?;
+        sync_staged_bundle_dirs(&staging_dir)?;
+        publish(&staging_dir, bundle_dir).map_err(OrbitError::from)
+    })();
 
-    write_yaml_file(&bundle_dir.join(TASK_ENVELOPE_FILE_NAME), &bundle.envelope)?;
+    if let Err(error) = &result {
+        cleanup_partial_bundle_best_effort(&staging_dir, "atomic bundle staging", error);
+    }
+    result
+}
+
+fn write_bundle_contents(bundle_dir: &Path, bundle: &TaskBundleV2) -> Result<(), OrbitError> {
+    ensure_bundle_dirs(bundle_dir)?;
+    write_yaml_atomic_with(
+        &bundle_dir.join(TASK_ENVELOPE_FILE_NAME),
+        &bundle.envelope,
+        |err| OrbitError::Store(err.to_string()),
+    )?;
     atomic_write_text(
         &bundle_dir.join(TASK_DESCRIPTION_FILE_NAME),
         &bundle.description,
@@ -54,28 +117,104 @@ pub(crate) fn write_bundle_at(bundle_dir: &Path, bundle: &TaskBundleV2) -> Resul
 
     write_jsonl_file(&bundle_dir.join(TASK_EVENTS_FILE_NAME), &bundle.events)?;
     write_jsonl_file(&bundle_dir.join(TASK_COMMENTS_FILE_NAME), &bundle.comments)?;
-    write_review_threads(bundle_dir, &bundle.review_threads)?;
     if let Some(manifest) = &bundle.artifact_manifest {
-        write_yaml_file(
+        write_yaml_atomic_with(
             &bundle_dir
                 .join(TASK_ARTIFACTS_DIR_NAME)
                 .join(TASK_ARTIFACT_MANIFEST_FILE_NAME),
             manifest,
+            |err| OrbitError::Store(err.to_string()),
         )?;
     }
 
     Ok(())
 }
 
+fn create_staging_dir(bundle_dir: &Path) -> Result<PathBuf, OrbitError> {
+    let parent = bundle_dir.parent().ok_or_else(|| {
+        OrbitError::Store(format!(
+            "task bundle path has no parent: {}",
+            bundle_dir.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(OrbitError::from)?;
+    let bundle_name = bundle_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            OrbitError::Store(format!("invalid task bundle path {}", bundle_dir.display()))
+        })?;
+
+    for _ in 0..32 {
+        let sequence = STAGING_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(
+            ".{bundle_name}.{}.{}.staging",
+            std::process::id(),
+            sequence
+        ));
+        match fs::create_dir(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(OrbitError::from(error)),
+        }
+    }
+    Err(OrbitError::Store(format!(
+        "could not allocate a staging directory for task bundle {}",
+        bundle_dir.display()
+    )))
+}
+
+fn sync_staged_bundle_dirs(staging_dir: &Path) -> Result<(), OrbitError> {
+    let artifact_dir = staging_dir.join(TASK_ARTIFACTS_DIR_NAME);
+    let artifact_files_dir = artifact_dir.join(TASK_ARTIFACT_FILES_DIR_NAME);
+    sync_parent_dir(&artifact_files_dir).map_err(OrbitError::from)?;
+    sync_parent_dir(&artifact_dir).map_err(OrbitError::from)?;
+    sync_parent_dir(staging_dir).map_err(OrbitError::from)
+}
+
+fn publish_staged_bundle(staging_dir: &Path, bundle_dir: &Path) -> std::io::Result<()> {
+    fs::rename(staging_dir, bundle_dir)?;
+    sync_parent_dir(bundle_dir)
+}
+
 pub(crate) fn read_bundle_at(bundle_dir: &Path) -> Result<TaskBundleV2, OrbitError> {
     let expected_task_id = task_id_from_bundle_dir(bundle_dir)?;
+    read_bundle_for_id(bundle_dir, &expected_task_id).map_err(|error| match error {
+        OrbitError::NotFound {
+            kind: NotFoundKind::Task,
+            ..
+        }
+        | OrbitError::TaskBundleCorrupt { .. }
+        | OrbitError::Io(_) => error,
+        other => OrbitError::TaskBundleCorrupt {
+            task_id: expected_task_id,
+            path: bundle_dir.to_string_lossy().into_owned(),
+            reason: other.to_string(),
+        },
+    })
+}
+
+fn read_bundle_for_id(
+    bundle_dir: &Path,
+    expected_task_id: &str,
+) -> Result<TaskBundleV2, OrbitError> {
     let envelope_path = bundle_dir.join(TASK_ENVELOPE_FILE_NAME);
     if !envelope_path.is_file() {
-        return Err(OrbitError::not_found(NotFoundKind::Task, expected_task_id));
+        return Err(OrbitError::not_found(
+            NotFoundKind::Task,
+            expected_task_id.to_string(),
+        ));
     }
     let envelope: TaskEnvelopeV2 =
         read_migrated_yaml_file(&envelope_path, task_migrations::envelope_plan())?;
-    validate_bundle_dir_matches_task_id(bundle_dir, &envelope.id)?;
+    if envelope.id != expected_task_id {
+        return Err(OrbitError::Store(format!(
+            "task bundle directory {} represents task id {} but contains task id {}",
+            bundle_dir.display(),
+            expected_task_id,
+            envelope.id
+        )));
+    }
 
     let bundle = TaskBundleV2 {
         envelope,
@@ -85,7 +224,6 @@ pub(crate) fn read_bundle_at(bundle_dir: &Path) -> Result<TaskBundleV2, OrbitErr
         execution_summary: read_required_text(&bundle_dir.join(TASK_EXECUTION_SUMMARY_FILE_NAME))?,
         events: read_task_events(&bundle_dir.join(TASK_EVENTS_FILE_NAME))?,
         comments: read_task_comments(&bundle_dir.join(TASK_COMMENTS_FILE_NAME))?,
-        review_threads: read_review_threads(bundle_dir)?,
         artifact_manifest: read_artifact_manifest(bundle_dir)?,
     };
     validate_bundle(&bundle)?;
@@ -99,9 +237,6 @@ fn validate_bundle(bundle: &TaskBundleV2) -> Result<(), OrbitError> {
     }
     for comment in &bundle.comments {
         comment.validate()?;
-    }
-    for thread in &bundle.review_threads {
-        thread.metadata.validate()?;
     }
     if let Some(manifest) = &bundle.artifact_manifest {
         manifest.validate()?;
@@ -124,8 +259,6 @@ fn validate_bundle_consistency(bundle: &TaskBundleV2) -> Result<(), OrbitError> 
 
 fn ensure_bundle_dirs(bundle_dir: &Path) -> Result<(), OrbitError> {
     fs::create_dir_all(bundle_dir).map_err(|err| OrbitError::Io(err.to_string()))?;
-    fs::create_dir_all(bundle_dir.join(TASK_REVIEW_THREADS_DIR_NAME))
-        .map_err(|err| OrbitError::Io(err.to_string()))?;
     fs::create_dir_all(
         bundle_dir
             .join(TASK_ARTIFACTS_DIR_NAME)
@@ -157,30 +290,14 @@ fn task_id_from_bundle_dir(bundle_dir: &Path) -> Result<String, OrbitError> {
         })
 }
 
-pub(crate) fn write_yaml_file<T>(path: &Path, value: &T) -> Result<(), OrbitError>
-where
-    T: serde::Serialize,
-{
-    let yaml = serde_yaml::to_string(value).map_err(|err| OrbitError::Store(err.to_string()))?;
-    atomic_write_text(path, &yaml).map_err(|err| OrbitError::Io(err.to_string()))
-}
-
-pub(crate) fn read_yaml_file<T>(path: &Path) -> Result<T, OrbitError>
-where
-    T: DeserializeOwned,
-{
-    let raw = read_required_text(path)?;
-    serde_yaml::from_str(&raw)
-        .map_err(|err| OrbitError::Store(format!("invalid YAML at {}: {err}", path.display())))
-}
-
 fn read_migrated_yaml_file<T>(path: &Path, plan: &Plan) -> Result<T, OrbitError>
 where
     T: DeserializeOwned,
 {
     let raw = read_required_text(path)?;
-    let value: serde_yaml::Value = serde_yaml::from_str(&raw)
-        .map_err(|err| OrbitError::Store(format!("invalid YAML at {}: {err}", path.display())))?;
+    let value: serde_yaml::Value = parse_yaml_with(&raw, path, |_, err| {
+        OrbitError::Store(format!("invalid YAML at {}: {err}", path.display()))
+    })?;
     let migrated = plan.migrate(value).map_err(|err| match err {
         OrbitError::Migration(msg) => {
             OrbitError::Migration(format!("{} ({})", msg, path.display()))
@@ -353,7 +470,7 @@ fn read_artifact_manifest(bundle_dir: &Path) -> Result<Option<ArtifactManifestV2
     let manifest_path = artifact_dir.join(TASK_ARTIFACT_MANIFEST_FILE_NAME);
     match fs::read_to_string(&manifest_path) {
         Ok(raw) => {
-            let manifest: ArtifactManifestV2 = serde_yaml::from_str(&raw).map_err(|err| {
+            let manifest: ArtifactManifestV2 = parse_yaml_with(&raw, &manifest_path, |_, err| {
                 OrbitError::Store(format!(
                     "invalid artifact manifest {}: {err}",
                     manifest_path.display()
@@ -366,6 +483,60 @@ fn read_artifact_manifest(bundle_dir: &Path) -> Result<Option<ArtifactManifestV2
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(OrbitError::Io(err.to_string())),
     }
+}
+
+/// Copy every blob referenced by `manifest` from `source_bundle_dir` into
+/// `dest_bundle_dir`, validating source content against the manifest as it
+/// goes. Used by `orbit task import` to round-trip `artifacts/files/**`
+/// alongside the manifest — [`write_bundle_at`] intentionally writes only the
+/// manifest so callers can decide where blob bytes come from (a fresh
+/// `TaskBundleV2` has none; import staging supplies them from the extracted
+/// archive).
+///
+/// This is also the primitive to reach for when backfilling blobs onto an
+/// already-landed bundle whose files were lost (see the module-level docs on
+/// backfill in `task_migration::mod`).
+pub(crate) fn copy_artifact_blobs(
+    source_bundle_dir: &Path,
+    dest_bundle_dir: &Path,
+    manifest: &ArtifactManifestV2,
+) -> Result<(), OrbitError> {
+    if manifest.files.is_empty() {
+        return Ok(());
+    }
+    let source_artifact_dir = source_bundle_dir.join(TASK_ARTIFACTS_DIR_NAME);
+    let dest_artifact_dir = dest_bundle_dir.join(TASK_ARTIFACTS_DIR_NAME);
+    fs::create_dir_all(dest_artifact_dir.join(TASK_ARTIFACT_FILES_DIR_NAME))
+        .map_err(|err| OrbitError::Io(err.to_string()))?;
+    for file in &manifest.files {
+        let source = source_artifact_dir.join(&file.blob);
+        let bytes = fs::read(&source).map_err(|err| {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                OrbitError::Store(format!(
+                    "artifact source missing for blob {}",
+                    source.display()
+                ))
+            } else {
+                OrbitError::Io(err.to_string())
+            }
+        })?;
+        if bytes.len() as u64 != file.size_bytes {
+            return Err(OrbitError::Store(format!(
+                "artifact source size mismatch for {}",
+                source.display()
+            )));
+        }
+        let actual_sha256 = format!("{:x}", Sha256::digest(&bytes));
+        if actual_sha256 != file.sha256 {
+            return Err(OrbitError::Store(format!(
+                "artifact source sha256 mismatch for {}",
+                source.display()
+            )));
+        }
+        let dest = dest_artifact_dir.join(&file.blob);
+        atomic_write_bytes(&dest, &bytes).map_err(|err| OrbitError::Io(err.to_string()))?;
+    }
+    Ok(())
 }
 
 fn validate_artifact_manifest_files(

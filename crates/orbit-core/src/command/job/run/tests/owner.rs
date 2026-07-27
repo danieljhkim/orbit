@@ -78,7 +78,7 @@ fn live_owner_survives_tz_change_across_read_paths() {
         runtime
             .stores()
             .jobs()
-            .mark_run_running(&run.run_id, Utc::now() - Duration::seconds(1), sentinel_pid)
+            .mark_job_run_running(&run.run_id, Utc::now() - Duration::seconds(1), sentinel_pid)
             .expect("mark running under LA tz");
         runtime
             .show_job_run(&run.run_id)
@@ -186,7 +186,7 @@ fn legacy_unversioned_token_does_not_falsely_finalize_live_run() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, Utc::now() - Duration::seconds(1), sentinel_pid)
+        .mark_job_run_running(&run.run_id, Utc::now() - Duration::seconds(1), sentinel_pid)
         .expect("mark running");
 
     // Rewrite the stored token to look like a pre-fix unversioned value
@@ -307,9 +307,7 @@ fn running_run_owner_stale_reason_excludes_probe_unavailable() {
         steps: Vec::new(),
         knowledge_metrics: None,
         resolved_crew: None,
-        planner_model: None,
-        implementer_model: None,
-        reviewer_model: None,
+        crew_model: None,
     };
     // We can't override the probe at this seam (production wrapper), but
     // we can assert the lower-level helper agrees: ProbeUnavailable is
@@ -346,9 +344,7 @@ fn stale_failure_message_distinguishes_probe_outcomes() {
         steps: Vec::new(),
         knowledge_metrics: None,
         resolved_crew: None,
-        planner_model: None,
-        implementer_model: None,
-        reviewer_model: None,
+        crew_model: None,
     };
     let mismatch_message = stale_job_run_message(&run, Some(OwnerIdentity::Mismatch));
     let missing_message = stale_job_run_message(&run, Some(OwnerIdentity::Missing));
@@ -382,16 +378,16 @@ fn show_job_run_reconciles_dead_pid_with_probe_outcome_in_message() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, started_at, 999_999)
+        .mark_job_run_running(&run.run_id, started_at, 999_999)
         .expect("mark running with impossible pid");
 
     let shown = runtime.show_job_run(&run.run_id).expect("show run");
-    assert_eq!(shown.state, JobRunState::Failed);
+    assert_eq!(shown.state, JobRunState::Interrupted);
     let failure_step = shown
         .steps
         .iter()
-        .find(|step| step.state == JobRunState::Failed)
-        .expect("stale failure step");
+        .find(|step| step.state == JobRunState::Interrupted)
+        .expect("stale interrupted step");
     let message = failure_step
         .error_message
         .as_deref()

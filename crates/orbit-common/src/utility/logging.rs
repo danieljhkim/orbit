@@ -10,8 +10,8 @@
 //! workspace-local because logging starts before CLI argument parsing and
 //! runtime root resolution.
 //!
-//! JSONL retention is intentionally simple in v1: the file is append-only and
-//! has no rotation. Multiple Orbit processes may append to the same file at
+//! The JSONL file is size-rotated and pruned on startup (see `log_rotation`;
+//! ORB-00415). Multiple Orbit processes may append to the same file at
 //! the same time; readers should tolerate malformed lines because writes
 //! larger than `PIPE_BUF` can interleave across processes. JSONL timestamps are
 //! assigned when the formatter writes the event, which may lag event emission
@@ -359,7 +359,18 @@ pub fn init_default_subscriber(default_filter: &str) {
         .fmt_fields(RedactingFields::default());
     let log_layer = global_jsonl_log_path()
         .map_err(|err| err.to_string())
-        .and_then(|path| jsonl_layer_at_path(&path).map_err(|err| err.to_string()));
+        .and_then(|path| {
+            // [ORB-00415] Opportunistically roll the active feed if it has grown
+            // past the per-file budget and prune old archives, before reopening
+            // the (fixed-path) active file for appending. Config is read
+            // leniently from the global config here; orbit-core validates the
+            // same keys strictly at config load.
+            super::log_rotation::rotate_and_prune(
+                &path,
+                &super::log_rotation::LogRotationConfig::load_global_best_effort(),
+            );
+            jsonl_layer_at_path(&path).map_err(|err| err.to_string())
+        });
 
     match log_layer {
         Ok((file_layer, guard)) => {

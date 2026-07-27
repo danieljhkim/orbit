@@ -1,4 +1,5 @@
 use clap::Args;
+use orbit_core::runtime::run_audit::RunProviderProcess;
 use orbit_core::{NotFoundKind, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
@@ -12,7 +13,7 @@ use super::steps::{
 
 #[derive(Args)]
 #[command(
-    after_help = "JSON shape: {\"run\":<job-run>,\"pipeline_state\":<state|null>} or {\"run_id\":...,\"job_id\":...,\"step\":<step>,\"step_output\":<json|null>} with -s.\nExamples:\n  orbit run show\n  orbit run show jrun-20260426-0631\n  orbit run show jrun-20260426-0631 -s implement_one --json"
+    after_help = "JSON shape: {\"run\":<job-run>,\"pipeline_state\":<state|null>,\"provider_processes\":[{\"pid\":...,\"liveness\":\"alive|exited|unknown\",...}]} or {\"run_id\":...,\"job_id\":...,\"step\":<step>,\"step_output\":<json|null>} with -s.\nExamples:\n  orbit run show\n  orbit run show jrun-20260426-0631\n  orbit run show jrun-20260426-0631 -s implement_one --json"
 )]
 pub struct RunShowArgs {
     /// Run ID to inspect. Defaults to the most recently scheduled run globally.
@@ -56,10 +57,19 @@ pub(crate) fn print_run_show(
         return print_step_record(&run, &step, step_output, json_output);
     }
 
+    // [ORB-10496] Provider subprocesses spawned by this run's agent steps. A
+    // ship-pipeline implementation agent is a child of the pipeline worker, not
+    // of the Worker daemon, so this is the only place it is observable.
+    let provider_processes = runtime.collect_run_provider_processes(&run.run_id)?;
+
     if json_output {
         return crate::output::json::print_pretty(&json!({
             "run": job_run_to_json_with_state(&run, state.as_ref()),
             "pipeline_state": state,
+            "provider_processes": provider_processes
+                .iter()
+                .map(provider_process_to_json)
+                .collect::<Vec<_>>(),
         }));
     }
 
@@ -73,9 +83,49 @@ pub(crate) fn print_run_show(
             state.updated_at.to_rfc3339(),
         );
     }
+    print_live_provider_processes(&provider_processes);
     println!();
     let steps = run.steps.iter().collect::<Vec<_>>();
     print_step_summary_table(&steps)
+}
+
+/// Print one line per provider subprocess that has not reported an exit.
+///
+/// Finished children are omitted: their outcome is already in the step table,
+/// and the question this answers is "is the agent still running or is the child
+/// lost", which only applies to an open invocation.
+fn print_live_provider_processes(processes: &[RunProviderProcess]) {
+    for process in processes.iter().filter(|process| !process.finished) {
+        println!(
+            "{} provider={} pid={} step={} liveness={} started_at={}",
+            crate::output::color::bold("Agent:"),
+            process.provider.as_deref().unwrap_or("-"),
+            process.pid,
+            process.step_id.as_deref().unwrap_or("-"),
+            process.liveness.as_str(),
+            process
+                .ts
+                .map(|ts| ts.to_rfc3339())
+                .unwrap_or_else(|| "-".to_string()),
+        );
+    }
+}
+
+fn provider_process_to_json(process: &RunProviderProcess) -> Value {
+    json!({
+        "event_id": process.event_id,
+        "ts": process.ts.map(|ts| ts.to_rfc3339()),
+        "step_id": process.step_id,
+        "step_index": process.step_index,
+        "provider": process.provider,
+        "pid": process.pid,
+        "pid_start_time": process.pid_start_time,
+        "finished": process.finished,
+        "liveness": process.liveness.as_str(),
+        "exit_code": process.exit_code,
+        "timed_out": process.timed_out,
+        "duration_ms": process.duration_ms,
+    })
 }
 
 pub(crate) fn print_legacy_logs_summary(

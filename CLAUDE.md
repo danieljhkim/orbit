@@ -1,6 +1,6 @@
-# CLAUDE.md
+# Orbit — agent guide
 
-Project instructions for agents working on Orbit.
+Project instructions for agents working on Orbit (loaded as both `AGENTS.md` and `CLAUDE.md`).
 
 ## Rules
 
@@ -19,9 +19,6 @@ Project instructions for agents working on Orbit.
 
 `make ci-fast` (fmt-check + guardrail scripts; no compile) must pass before a task moves to `review`. The full `make ci` is the canonical merge gate via [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on every PR — don't run it per task locally.
 
-## Agent Read Exclusions
-
-Team-wide `Read()` exclusions (build artifacts, generated graph data, runtime state) live in [`.claude/settings.json`](.claude/settings.json) under `permissions.deny`. If you work on the excluded code itself (e.g. the graph builder under `.codegraph/`, or benchmark harness output), override locally in `.claude/settings.local.json` with a matching `allow` rule — don't relax the committed list.
 
 ## Architecture
 
@@ -29,21 +26,14 @@ Crate layering, per-crate responsibilities, and scoping rules live in [`ARCHITEC
 
 Reusable codebase-specific patterns (Command, RAII guard, newtype, crate-boundary error translation) live in [`docs/design-patterns/`](docs/design-patterns/). When you reach for one of those shapes, copy from the documented reference instead of inventing a new one.
 
-## Code Navigation
-
-This repo has two semantic graphs available (no live LSP). Use them in this order:
-
-- **Definition / signature lookup** → `codegraph_search` then `codegraph_node`. Returns file:line, signature, and leading doc comment without a `Read`. **Avoid `orbit_graph_search` for plain symbol lookups** — slow on large repos, and you can build orbit-graph selectors by template from the codegraph result: `symbol:<file>#<name>:<kind>`. Reach for `orbit_graph_search` only when you need a method-on-impl selector, a `source_regex` search, or `include_non_code` doc/config matches.
-- **Outbound calls (what does X call?)** → `codegraph_callees`. Expect duplicate edges per call site — dedupe mentally.
-- **Find references / callers (who uses X?)** → **`orbit_graph_refs`** with `include: "all"`, *not* `*_callers`. Both graphs' `callers` indexes miss cross-crate calls that go through `pub use` re-exports (e.g. a symbol defined in `orbit-common`, re-exported from `orbit-core`, called in another crate), so they routinely return empty for real public functions. `orbit_graph_refs` surfaces the actual call sites plus re-export points.
-- **Blast radius before edits** → `codegraph_impact`.
-- **Ground-truth fallback** → `rg --type rust 'symbol_name'`. Use when `refs` looks incomplete or you need to see exact textual context (macro call sites, doc references, etc.).
-- **From a plain shell (no MCP/codegraph)** → the same orbit-graph queries are bundled in the main `orbit` binary as `orbit graph <sub>` (`search`/`show`/`refs`/`callees`/`impact`/`deps`/`trace`/`overview`/`implementors`, plus `sync`). In-process the tools above are faster — reach for the CLI only when the graph tools aren't available.
-
 ## Design Docs
 
-- **Layout.** Feature design docs live under `docs/design/<feature>/`. Folder layout, required sections, ADR format, and glossary shape are documented in [`docs/design/CONVENTIONS.md`](docs/design/CONVENTIONS.md). Use the `orbit-docs` skill / `orbit docs` surface to retrieve indexed docs.
+- **Layout.** Feature design docs live under `docs/design/<feature>/`. Folder layout, required sections, ADR format, and glossary shape are documented in [`docs/design/CONVENTIONS.md`](docs/design/CONVENTIONS.md). Use the `orbit-search` skill / `orbit docs` surface to retrieve indexed docs.
 - **Same-PR updates.** Change the doc in the same PR as the code: flip affected ADR statuses (`Proposed → Accepted` with task ID), bump `**Last updated:**`, add a new ADR for any non-obvious decision the change embodies. Stale docs are a review blocker.
+
+## CHANGELOG entries
+
+Don't modify `CHANGELOG.md` during task execution — it is compiled at release time from merged work, not accumulated per-PR. The task ID is the record of what changed; cite it in your commit message and let the release drafter pull from `git log` and Orbit task history. `scripts/check-changelog-style.sh` still lints any entries that do exist (harmless under this convention, and useful at release time). Full rule: [`RELEASING.md`](RELEASING.md) step 2.
 
 ## Rust Practices
 
@@ -68,6 +58,4 @@ Conventions (not lint-enforced):
 
 ## Orbit Workflow
 
-For any Orbit lifecycle work (creating tasks, executing, reviewing, raising PRs), invoke the relevant `orbit-*` skill. The `orbit` skill is the entry point and router. Task authoring quality standards live in `orbit-create-task`.
-
-Scoreboards live at `.orbit/state/scoreboard/` (e.g. `duel_plan.json` — planning-duel run results).
+For any Orbit lifecycle work (creating tasks, executing, reviewing, raising PRs), invoke the relevant `orbit-*` skill. The `orbit` skill is the entry point and router. Task authoring quality standards live in `orbit-task`.

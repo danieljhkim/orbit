@@ -6,7 +6,7 @@ use orbit_common::types::JobRunState;
 use orbit_store::TaskReservationReleaseReason;
 use serde_json::json;
 
-use super::super::orbit_tool_host::{workspace_orbit_dir, workspace_task_reservation_id};
+use super::super::task_locks::{workspace_orbit_dir, workspace_task_reservation_id};
 
 use chrono::Duration;
 use orbit_common::types::{AuditEventStatus, Role, TaskPriority, TaskStatus, TaskType};
@@ -35,7 +35,7 @@ fn create_context_task(
 ) -> String {
     let task = runtime
         .stores()
-        .tasks()
+        .task_records()
         .create(TaskCreateParams {
             actor: "test".to_string(),
             parent_id: None,
@@ -74,17 +74,17 @@ fn insert_running_run(
     let run = runtime
         .stores()
         .jobs()
-        .insert_run(job_id, 1, Utc::now() - Duration::seconds(5), None, None)
+        .insert_job_run(job_id, 1, Utc::now() - Duration::seconds(5), None, None)
         .expect("insert run");
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, Utc::now() - Duration::seconds(3), pid)
+        .mark_job_run_running(&run.run_id, Utc::now() - Duration::seconds(3), pid)
         .expect("mark running");
     runtime
         .stores()
         .jobs()
-        .get_run(&run.run_id)
+        .get_job_run(&run.run_id)
         .expect("load run")
         .expect("run exists")
 }
@@ -96,7 +96,7 @@ fn reserve_via_tool_for_owner(runtime: &OrbitRuntime, owner_run_id: &str, task_i
             json!({
                 "task_ids": [task_id],
                 "ttl_seconds": 3600,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
                 "owner_run_id": "caller-controlled-value-is-ignored",
             }),
             Role::Admin,
@@ -120,7 +120,7 @@ fn active_reservation_count(runtime: &OrbitRuntime) -> usize {
     runtime
         .stores()
         .task_reservations()
-        .list_active(
+        .list_active_task_reservations(
             &workspace_orbit_dir(runtime),
             workspace_task_reservation_id(runtime)
                 .expect("workspace reservation id")
@@ -200,7 +200,7 @@ fn task_reservation_child_terminal_does_not_release_parent_owned_reservation() {
     let active = runtime
         .stores()
         .task_reservations()
-        .list_active(
+        .list_active_task_reservations(
             &workspace_orbit_dir(&runtime),
             workspace_task_reservation_id(&runtime)
                 .expect("workspace reservation id")
@@ -243,7 +243,7 @@ fn task_reservation_unowned_manual_reservation_survives_unrelated_finalization()
     runtime
         .stores()
         .task_reservations()
-        .reserve(TaskReservationReserveParams {
+        .reserve_task_reservation(TaskReservationReserveParams {
             workspace_orbit_dir: workspace_orbit_dir(&runtime),
             workspace_id: workspace_task_reservation_id(&runtime)
                 .expect("workspace reservation id"),
@@ -269,7 +269,7 @@ fn task_reservation_unowned_manual_reservation_survives_unrelated_finalization()
     let active = runtime
         .stores()
         .task_reservations()
-        .list_active(
+        .list_active_task_reservations(
             &workspace_orbit_dir(&runtime),
             workspace_task_reservation_id(&runtime)
                 .expect("workspace reservation id")
@@ -297,7 +297,7 @@ fn task_reservation_reserve_pressure_reconciles_stale_running_owner() {
             json!({
                 "task_ids": [waiter_task],
                 "ttl_seconds": 3600,
-                "model": "gpt-5.5",
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
         )
         .expect("reserve after pressure");

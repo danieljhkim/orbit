@@ -35,6 +35,16 @@ pub(crate) fn audit_event_to_json(event: &AuditEvent) -> Value {
         "host": event.host,
         "pid": event.pid,
         "session_id": event.session_id,
+        "workspace_id": event.workspace_id,
+        "caller_machine_id": event.caller_machine_id,
+        "caller_host_id": event.caller_host_id,
+        "process_machine_id": event.process_machine_id,
+        "process_host_id": event.process_host_id,
+        "transport": event.transport,
+        "effective_capabilities": event.effective_capabilities,
+        "origin_session_id": event.origin_session_id,
+        "mcp_call_id": event.mcp_call_id,
+        "lease_id": event.lease_id,
         "task_id": event.task_id,
         "job_run_id": event.job_run_id,
         "activity_id": event.activity_id,
@@ -149,9 +159,8 @@ pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineSt
         "error_message": last.and_then(|s| s.error_message.as_deref()),
         "knowledge_metrics": run.knowledge_metrics,
         "resolved_crew": run.resolved_crew,
-        "planner_model": run.planner_model,
-        "implementer_model": run.implementer_model,
-        "reviewer_model": run.reviewer_model,
+        "crew_model": run.crew_model,
+        "review_lineage": independent_review_lineage(run),
         "steps": run.steps.iter().map(|s| json!({
             "step_index": s.step_index,
             "target_type": s.target_type.to_string(),
@@ -167,6 +176,22 @@ pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineSt
         })).collect::<Vec<_>>(),
         "created_at": run.created_at.to_rfc3339(),
     })
+}
+
+fn independent_review_lineage(run: &JobRun) -> Option<Value> {
+    if run.job_id != "task_review_pipeline" {
+        return None;
+    }
+    let input = run.input.as_ref()?.as_object()?;
+    Some(json!({
+        "parent_run_id": input.get("parent_run_id"),
+        "task_ids": input.get("task_ids"),
+        "workspace_path": input.get("workspace_path"),
+        "candidate_head": input.get("candidate_head"),
+        "candidate_head_sha": input.get("candidate_head_sha"),
+        "pr_number": input.get("pr_number"),
+        "pr_url": input.get("pr_url"),
+    }))
 }
 
 pub(crate) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStatus>) -> Value {
@@ -220,28 +245,12 @@ pub(crate) fn task_to_json_with_sidecars(
             .map_err(|e| OrbitError::Io(e.to_string()))?,
     );
     object.insert(
-        "review_threads".to_string(),
-        serde_json::to_value(runtime.get_task_review_threads(&task.id)?)
-            .map_err(|e| OrbitError::Io(e.to_string()))?,
-    );
-    object.insert(
         "artifacts".to_string(),
         task_artifact_manifest_to_json(&runtime.get_task_artifact_manifest(&task.id)?),
     );
     if let Some(projection) = dashboard_resolved_crew_projection(runtime, task)? {
         object.insert("resolved_crew".to_string(), Value::String(projection.name));
-        object.insert(
-            "planner_model".to_string(),
-            Value::String(projection.planner_model),
-        );
-        object.insert(
-            "implementer_model".to_string(),
-            Value::String(projection.implementer_model),
-        );
-        object.insert(
-            "reviewer_model".to_string(),
-            Value::String(projection.reviewer_model),
-        );
+        object.insert("crew_model".to_string(), Value::String(projection.model));
     }
     Ok(value)
 }
@@ -254,9 +263,7 @@ fn dashboard_resolved_crew_projection(
         let crew = runtime.resolve_crew_for_task(None, None)?;
         return Ok(Some(ResolvedCrewProjection {
             name: crew.name,
-            planner_model: crew.planner.model,
-            implementer_model: crew.implementer.model,
-            reviewer_model: crew.reviewer.model,
+            model: crew.assignment.model,
         }));
     }
     runtime.resolved_crew_projection(task)

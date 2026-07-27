@@ -1,7 +1,7 @@
 // Orbit dashboard task-domain rendering and actions.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, statusPill, patchJson, syncNodes } from './common.js';
+import { el, statusPill, patchJson, postJson, syncNodes, withWorkspace } from './common.js';
 import { renderMarkdown, renderMarkdownInline } from './markdown.js';
 
 const $ = (id) => document.getElementById(id);
@@ -11,6 +11,12 @@ let expandedTaskIds = new Set();
 let taskActionNotice = null;
 let crewUpdateErrors = new Map();
 let pinnedExternalTask = null;
+// ORB-10444: task ids whose Ship dispatch this page has already issued. Ship is
+// a write against a live pipeline, so a second click must not launch a second
+// run: the id stays here for the life of the page once a dispatch succeeds (the
+// server rejects a duplicate with 409 regardless), and is released only when the
+// dispatch failed and retrying is the right move.
+let shipInFlightTaskIds = new Set();
 
 function taskList(context) {
   return context && typeof context.getTasks === "function" ? context.getTasks() : [];
@@ -64,9 +70,7 @@ export function normalizeCrewPayload(payload) {
       .filter((crew) => crew && crew.name)
       .map((crew) => ({
         name: String(crew.name),
-        planner_model: crew.planner_model == null ? "" : String(crew.planner_model),
-        implementer_model: crew.implementer_model == null ? "" : String(crew.implementer_model),
-        reviewer_model: crew.reviewer_model == null ? "" : String(crew.reviewer_model),
+        model: crew.model == null ? "" : String(crew.model),
         is_default: Boolean(crew.is_default),
       }))
     : [];
@@ -117,12 +121,7 @@ function defaultCrewOptionText(task) {
 }
 
 function crewOptionTitle(crew) {
-  const parts = [
-    `planner=${crew.planner_model || "-"}`,
-    `implementer=${crew.implementer_model || "-"}`,
-    `reviewer=${crew.reviewer_model || "-"}`,
-  ];
-  return parts.join(" · ");
+  return `model=${crew.model || "-"}`;
 }
 
 function applyUpdatedTask(updatedTask, context) {
@@ -330,36 +329,6 @@ function buildRelations(relations, context) {
   return wrap;
 }
 
-function reviewThreadStatus(thread) {
-  const status = String(thread.status || "open").toLowerCase();
-  return status === "resolved" ? "resolved" : "open";
-}
-
-function buildReviewThreads(threads, context) {
-  const wrap = el("div", { class: "review-threads" });
-  for (const thread of threads) {
-    const messages = Array.isArray(thread.messages) ? thread.messages : [];
-    const location = thread.path && thread.line != null
-      ? `${thread.path}:${thread.line}`
-      : "task-level";
-    const block = el("div", { class: "review-thread" });
-    block.appendChild(el("div", {
-      class: "review-thread-header",
-      text: `[${reviewThreadStatus(thread)}] ${location} · ${messages.length} messages`,
-    }));
-    for (const msg of messages) {
-      const line = el("div", { class: "comment-line" }, [
-        document.createTextNode(`[${fmtAbsTimeValue(context, msg.at)}] `),
-        el("span", { class: "author", text: msg.by || "?" }),
-        document.createTextNode(`: ${msg.body || ""}`),
-      ]);
-      block.appendChild(line);
-    }
-    wrap.appendChild(block);
-  }
-  return wrap;
-}
-
 function fmtSize(bytes) {
   const value = Number(bytes);
   if (!Number.isFinite(value) || value < 0) return "0 bytes";
@@ -523,10 +492,6 @@ function buildTaskDetail(task, context) {
     addField(leftCol, "execution summary", view, true, true);
   }
 
-  if (Array.isArray(task.review_threads) && task.review_threads.length > 0) {
-    addField(leftCol, "review threads", buildReviewThreads(task.review_threads, context), true, true);
-  }
-
   if (Array.isArray(task.artifacts) && task.artifacts.length > 0) {
     addField(leftCol, "artifacts", buildArtifacts(task), true, true);
   }
@@ -559,6 +524,14 @@ function buildTaskDetail(task, context) {
   }
   if (metaCount > 0) addField(rightCol, "details", meta);
 
+  // ORB-00037: in the aggregate ("All workspaces") view each task carries its
+  // owning workspace's filesystem location (home-abbreviated to ~ server-side);
+  // show it in full here since the row only has room for the short name badge.
+  if (task.workspace_root) {
+    const loc = el("span", { class: "ws-location mono", text: task.workspace_root, title: task.workspace_root });
+    addField(rightCol, "location", loc);
+  }
+
   if (Array.isArray(task.external_refs) && task.external_refs.length > 0) {
     addField(rightCol, "external refs", buildExternalRefs(task.external_refs));
   }
@@ -577,18 +550,24 @@ function buildTaskDetail(task, context) {
   }
 
   if (Array.isArray(task.history) && task.history.length > 0) {
-    const wrap = el("div");
-    const recent = task.history.slice(-5).reverse();
-    for (const h of recent) {
-      const note = h.note ? ` (${h.note})` : "";
-      const line = el("div", { class: "history-line" }, [
-        document.createTextNode(`[${fmtAbsTimeValue(context, h.at)}] `),
-        el("span", { class: "actor", text: h.by || "?" }),
-        document.createTextNode(`: ${h.event}${note}`),
-      ]);
-      wrap.appendChild(line);
+    // ORB-10311: drop legacy bare `commented` stubs *before* the recent-history
+    // limit so meaningful status/workflow events are not displaced by comment
+    // noise (comments render in their own panel below).
+    const meaningful = task.history.filter((h) => h && h.event !== "commented");
+    if (meaningful.length > 0) {
+      const wrap = el("div");
+      const recent = meaningful.slice(-5).reverse();
+      for (const h of recent) {
+        const note = h.note ? ` (${h.note})` : "";
+        const line = el("div", { class: "history-line" }, [
+          document.createTextNode(`[${fmtAbsTimeValue(context, h.at)}] `),
+          el("span", { class: "actor", text: h.by || "?" }),
+          document.createTextNode(`: ${h.event}${note}`),
+        ]);
+        wrap.appendChild(line);
+      }
+      addField(rightCol, "recent history", wrap);
     }
-    addField(rightCol, "recent history", wrap);
   }
 
   if (Array.isArray(task.comments) && task.comments.length > 0) {
@@ -613,9 +592,36 @@ function buildTaskDetail(task, context) {
 
 const APPROVE_STATUSES = new Set(["proposed", "review"]);
 const REJECT_STATUSES = new Set(["proposed", "review", "backlog"]);
+// Ship dispatches a task through the pipeline, which admits it out of backlog —
+// so backlog is the only status where the control means anything.
+const SHIP_STATUSES = new Set(["backlog"]);
 
 function buildActionsRow(task, detail, context) {
   const actions = el("div", { class: "actions" });
+  if (SHIP_STATUSES.has(task.status)) {
+    const shipped = shipInFlightTaskIds.has(task.id);
+    const btn = el("button", {
+      class: "action ship",
+      text: shipped ? "shipping" : "ship",
+      title: shipped
+        ? "A ship run is already in flight for this task"
+        : "Dispatch this task through the pipeline with its own crew",
+    });
+    btn.disabled = shipped;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      shipTask(task, detail, btn, context);
+    });
+    actions.appendChild(btn);
+  }
+  {
+    const btn = el("button", { class: "action comment", text: "comment" });
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showCommentForm(task, detail, actions, context);
+    });
+    actions.appendChild(btn);
+  }
   if (APPROVE_STATUSES.has(task.status)) {
     const btn = el("button", { class: "action approve", text: "approve" });
     btn.addEventListener("click", (e) => {
@@ -788,6 +794,86 @@ async function updateTaskCrew(task, select, context) {
   }
 }
 
+/* ORB-10444: one-click Ship. The dispatch carries only the task id — the
+   pipeline resolves the crew from the task's own record and the mode from the
+   workspace's configured default — so there is deliberately no crew picker and
+   no PR/local toggle here. The resulting run id (or the server's error) is
+   surfaced so the operator can see the click took effect. */
+async function shipTask(task, detail, btnNode, context) {
+  if (shipInFlightTaskIds.has(task.id)) return;
+  shipInFlightTaskIds.add(task.id);
+  const prior = detail.querySelector(".action-error");
+  if (prior) prior.remove();
+  for (const b of detail.querySelectorAll(".action")) b.disabled = true;
+  const oldText = btnNode.textContent;
+  btnNode.innerHTML = `<span class="spinner"></span>wait`;
+  try {
+    const result = await postJson("/api/workflows/ship", { task_ids: [task.id] });
+    const runId = result && result.run_id ? result.run_id : "(no run id)";
+    const state = result && result.state ? result.state : "submitted";
+    taskActionNotice = `${task.id}: ship run ${runId} ${state}`;
+    expandedTaskIds.delete(task.id);
+    await refreshTasks(context);
+  } catch (error) {
+    // Only a failed dispatch releases the guard; a succeeded one stays held so
+    // a second click cannot queue a duplicate run behind the first.
+    shipInFlightTaskIds.delete(task.id);
+    for (const b of detail.querySelectorAll(".action")) b.disabled = false;
+    btnNode.textContent = oldText;
+    detail.prepend(
+      el("div", { class: "action-error", text: `ship failed: ${error.message || String(error)}` }),
+    );
+  }
+}
+
+/* ORB-10444: human comments on a task. The write goes to the task's existing
+   review-thread structure via POST /api/tasks/<id>/comments, which records a
+   human author rather than the server process's ambient identity. */
+function showCommentForm(task, detail, actions, context) {
+  const form = el("div", { class: "comment-form" });
+  form.addEventListener("click", (e) => e.stopPropagation());
+  const ta = el("textarea");
+  ta.placeholder = "comment";
+  const buttons = el("div", { class: "actions" });
+  const submit = el("button", { class: "action comment", text: "post" });
+  const cancel = el("button", { class: "action cancel", text: "cancel" });
+  submit.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const message = ta.value.trim();
+    if (!message) {
+      ta.focus();
+      return;
+    }
+    const prior = detail.querySelector(".action-error");
+    if (prior) prior.remove();
+    submit.disabled = true;
+    cancel.disabled = true;
+    try {
+      await postJson(`/api/tasks/${encodeURIComponent(task.id)}/comments`, { message });
+      await refreshTasks(context);
+    } catch (error) {
+      submit.disabled = false;
+      cancel.disabled = false;
+      detail.prepend(
+        el("div", {
+          class: "action-error",
+          text: `comment failed: ${error.message || String(error)}`,
+        }),
+      );
+    }
+  });
+  cancel.addEventListener("click", (e) => {
+    e.stopPropagation();
+    form.replaceWith(actions);
+  });
+  buttons.appendChild(submit);
+  buttons.appendChild(cancel);
+  form.appendChild(ta);
+  form.appendChild(buttons);
+  actions.replaceWith(form);
+  ta.focus();
+}
+
 function showRejectForm(task, detail, actions, context) {
   const form = el("div", { class: "reject-form" });
   form.addEventListener("click", (e) => e.stopPropagation());
@@ -829,7 +915,7 @@ async function runAction(task, kind, detail, body, btnNode, context, opts = {}) 
   const prior = detail.querySelector(".action-error");
   if (prior) prior.remove();
   try {
-    const res = await fetch(opts.path || `/api/tasks/${encodeURIComponent(task.id)}/${kind}`, {
+    const res = await fetch(withWorkspace(opts.path || `/api/tasks/${encodeURIComponent(task.id)}/${kind}`), {
       method: opts.method || "POST",
       headers: body ? { "content-type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
@@ -868,6 +954,11 @@ function takeTaskActionNotice() {
 export function renderTasks(tasks, context) {
   const body = $("tasks-body");
   if (!body) return;
+
+  // ORB-00030: in the aggregate ("All workspaces") view each task carries its
+  // owning workspace; show it as a badge in the Title cell. Detected from the
+  // data so no extra plumbing is needed (single-workspace lists lack the field).
+  const aggregate = Array.isArray(tasks) && tasks.some((t) => t && t.workspace_name);
 
   // Auto-clear pinned external (global resolver) if its status+search now makes it
   // visible in the normal filtered list (user enabled the chip or cleared search).
@@ -980,15 +1071,21 @@ export function renderTasks(tasks, context) {
           idSpan.style.color = "";
         }, 1000);
       });
+      const titleCell = aggregate && t.workspace_name
+        ? el("span", { class: "title" }, [
+            el("span", { class: "ws-badge mono", text: t.workspace_name, title: `Workspace: ${t.workspace_name}` }),
+            t.title,
+          ])
+        : el("span", { class: "title", text: t.title });
       const row = el("div", { class: "row", title: t.title }, [
         idSpan,
-        el("span", { class: "title", text: t.title }),
+        titleCell,
         buildStatusUpdateControl(t, context),
         buildCrewUpdateControl(t, context),
       ]);
       row.dataset.key = `task-${t.id}`;
       // Basic hash based on row presentation parameters + expanded state
-      row.dataset.hash = `${t.id}-${t.title}-${t.status}-${t.crew || ""}-${t.resolved_crew || ""}-${crewOptionsSignature()}-${crewUpdateErrors.get(t.id) || ""}-${expandedTaskIds.has(t.id)}`;
+      row.dataset.hash = `${t.id}-${t.title}-${t.status}-${t.crew || ""}-${t.resolved_crew || ""}-${t.workspace_id || ""}-${crewOptionsSignature()}-${crewUpdateErrors.get(t.id) || ""}-${expandedTaskIds.has(t.id)}`;
       row.addEventListener("click", () => {
         const toggle = () => {
           if (expandedTaskIds.has(t.id)) expandedTaskIds.delete(t.id);

@@ -1,3 +1,31 @@
+mod sandbox_kind_platform {
+    use super::super::super::executor_def::ExecutorSandboxKind;
+
+    #[test]
+    fn target_os_matches_std_env_consts_naming() {
+        assert_eq!(ExecutorSandboxKind::MacosSandboxExec.target_os(), "macos");
+    }
+
+    #[test]
+    fn is_available_on_matches_only_its_target_os() {
+        assert!(ExecutorSandboxKind::MacosSandboxExec.is_available_on("macos"));
+        assert!(!ExecutorSandboxKind::MacosSandboxExec.is_available_on("linux"));
+        assert!(!ExecutorSandboxKind::MacosSandboxExec.is_available_on("windows"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn is_available_on_current_platform_is_true_on_macos() {
+        assert!(ExecutorSandboxKind::MacosSandboxExec.is_available_on_current_platform());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn is_available_on_current_platform_is_false_off_macos() {
+        assert!(!ExecutorSandboxKind::MacosSandboxExec.is_available_on_current_platform());
+    }
+}
+
 mod external_variant {
     use super::super::super::executor_def::*;
     use crate::types::ExecutorResource;

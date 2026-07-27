@@ -3,7 +3,8 @@ summary: "Agent Families — Decisions"
 type: design
 title: "Agent Families — Decisions"
 owner: grok
-last_updated: 2026-05-18
+last_updated: 2026-07-27
+last_validated: 2026-07-27
 status: Draft
 feature: agent-families
 doc_role: decisions
@@ -12,7 +13,7 @@ tags: ["agent-families"]
 
 # Agent Families — Decisions
 
-ADR entries are append-only and ordered ascending by global ID. New entries are allocated via `orbit.adr.add` *before* the local heading is written — see [../CONVENTIONS.md §4](../CONVENTIONS.md) and the `orbit-adr` skill. The local heading uses the allocated global ID verbatim.
+ADR entries are append-only and ordered ascending by global ID. New entries are allocated via `orbit.adr.add` *before* the local heading is written — see [../CONVENTIONS.md §4](../CONVENTIONS.md) and the `orbit-knowledge` skill. The local heading uses the allocated global ID verbatim.
 
 Historical note: prior to 2026-05-17, ADR-0154 / ADR-0155 / ADR-0156 in this file were authored with locally-invented IDs (`ADR-0152` / `ADR-0153` / `ADR-0154`) that did not match the global store. They were re-allocated through `orbit.adr.add` per [ORB-00098]; the original local IDs survive as `legacy_ids` so prior citations still resolve.
 
@@ -32,7 +33,7 @@ See full ADR-0151 for context, alternatives considered, and cost analysis.
 
 ## ADR-0154 — Replace `[agent.<role>]` tables with named `[crews.*]` registry
 
-**Status:** Accepted · 2026-05 · [ORB-00058] · legacy_id: `agent-families/ADR-0152`
+**Status:** Superseded by [ADR-0213](#adr-0213--flatten-crews-to-one-provider-model-assignment) · 2026-07-11 · [ORB-00058] · legacy_id: `agent-families/ADR-0152`
 
 **Context.** Workspace config previously selected planner, implementer, and reviewer models with three top-level `[agent.<role>]` tables, while task execution had no durable way to request a different lineup. Layering a new registry beside the old role tables would have forced Orbit to validate and explain two schemas for the same decision.
 
@@ -51,7 +52,7 @@ See full ADR-0151 for context, alternatives considered, and cost analysis.
 
 **Context.** Duel-plan previously walked the full `all_agent_families()` registry and used the same model-pair resolution chain as non-duel callers. That made local CLI availability load-bearing for every supported family and made reproducible planning-duel scoreboards depend on executor YAML state.
 
-**Decision.** Add a workspace `[duel]` section with `candidates` as a normalized subset of `all_agent_families()` and `[duel.models]` as flat orchestrator-only per-family overrides. Duel role selection reads those values through `RuntimeHost`; non-duel callers continue to use executor overrides and builtin model pairs.
+**Decision.** Add a workspace `[duel]` section with `candidates` as a normalized subset of `all_agent_families()` and `[duel.models]` as flat orchestrator-only per-family overrides. Duel role selection reads those values through `DeterministicActionHost`; non-duel callers continue to use executor overrides and builtin model pairs.
 
 **Consequences.**
 - Duel permutations remain dynamic but require at least three distinct configured families.
@@ -75,9 +76,9 @@ See full ADR-0151 for context, alternatives considered, and cost analysis.
 
 ## ADR-0167 — Favor claude (opus) for planner role on planning duels and design-shaped plans
 
-**Status:** Proposed · 2026-05-18 · cites [AO-002](../../agent-observations/AO-002/observation.md) · (acceptance pending a related task — see lifecycle note in adr-artifact/2_design.md §5)
+**Status:** Proposed · 2026-05-18 · cites AO-002 · (acceptance pending a related task — see [CONVENTIONS.md §4](../CONVENTIONS.md#4-adr-template-strict))
 
-**Context.** AO-002 ([Instruction surface shapes plan output, not tool selection](../../agent-observations/AO-002/observation.md)) closed on 2026-05-18 after four experiments spanning four Gemini-as-planner implementation/audit duels and one 4-model cross-read on an identical UX-design task. Three observations recurred across the thread:
+**Context.** AO-002 ("Instruction surface shapes plan output, not tool selection") closed on 2026-05-18 after four experiments spanning four Gemini-as-planner implementation/audit duels and one 4-model cross-read on an identical UX-design task. Three observations recurred across the thread:
 
 - Gemini ranked last on plan depth on every task shape tested (implementation, audit, refactor, UX-taste), losing every duel it played as planner. Arbiter rationales consistently cited graph-discovery gaps, hallucinated symbols, generic findings, and thin ADR content.
 - Claude won every duel it entered as planner in the window, including the UX-redesign duel (ORB-00154), where claude's metric-major layout call was the differentiating taste signal. Codex placed in the middle — thorough plans without bold design calls, ranked above grok and gemini but below claude on plan depth in the 4-way UX comparison.
@@ -95,11 +96,41 @@ AO-002 scope: planning-duel plan quality on the Orbit codebase, single window in
 - Re-evaluation triggers: (1) a new Gemini-family release with a stable model alias; (2) the missing AO-002 experimental cell (post-rubric Gemini run on `gemini-3.1-pro-preview` against an implementation-shaped task) producing a counter-finding; (3) a non-Orbit codebase producing a different ranking; (4) a same-task within-model-version repeat that flips the outcome. Any of these reopens AO-002 or spawns a follow-up observation that this ADR must be reconciled against.
 - Cost: surrendering planning diversity. Defaulting to one family forfeits the safety net of cross-family disagreement, concentrates dependency on a single provider, and risks anchoring on claude's distinctive design patterns (e.g. the metric-major preference observed in ORB-00154) as if they were universally correct. The duel mechanism partially mitigates this when explicitly invoked: a duel still gathers multiple plans before selecting one.
 
+## ADR-0211 — Default Claude to opus/sonnet CLI aliases; centralize model defaults in orbit-common::model_defaults
+
+**Status:** Proposed · 2026-07-06 · relates [ORB-10051] · cites [ADR-0167](#adr-0167--favor-claude-opus-for-planner-role-on-planning-duels-and-design-shaped-plans)
+
+**Context.** Default model names were hardcoded as version-pinned string literals scattered across ~7 production sites, and the pins had drifted out of sync: the default Claude model appeared as `claude-opus-4-7` (`agent_detect`, seeded crews, `claude.yaml` strong), `claude-sonnet-4-6` (`claude.yaml` weak), and `claude-sonnet-4-5` (`exec_ctx::DEFAULT_MODEL_FOR_SESSION`, `agent_loop_driver::DEFAULT_ANTHROPIC_MODEL`) depending on the code path. The Claude CLI accepts the unversioned `opus`/`sonnet` aliases, which never drift.
+
+**Decision.** Introduce `orbit-common::model_defaults` as the single source of truth for production default model names; every production default now references a constant there (`agent_detect::default_model_for` delegates to `default_model_for_provider`; seeded crews, the Anthropic HTTP session/loop defaults, and the dashboard ADR/friction tool models reference the constants). The default Claude CLI model becomes the unversioned `opus` (strong) / `sonnet` (weak) aliases — planner+reviewer=opus, implementer=sonnet — applied to `assets/executors/claude.yaml` and the Rust crew/duel seeds. codex/gemini/grok keep their existing values (no unversioned aliases invented for CLIs that may not accept them). The Anthropic **HTTP Messages API** default stays version-pinned (`claude-sonnet-4-5`, `ANTHROPIC_HTTP_DEFAULT_MODEL`) because the Messages API rejects bare aliases. Tests keep referencing model strings via frozen `orbit-common::test_fixtures` constants (behind the `test-util` feature) rather than being deleted.
+
+**Consequences.**
+- One edit updates every production default; the opus-4-7 / sonnet-4-6 / sonnet-4-5 drift can no longer recur.
+- Fresh workspaces seed `opus`/`sonnet` for the claude crew and duel default; existing workspaces are unchanged until `orbit init --refresh-defaults` (config.toml is never overwritten; executor defs re-seed only on refresh).
+- Asset ↔ const seam: YAML/TOML assets cannot reference a Rust const, so `claude.yaml` uses the alias directly while `model_defaults` stays authoritative for Rust paths; an executor-asset guard test pins the `claude.yaml` pair to `{CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK}`.
+- Scoreboard attribution matches model strings exactly, so historical review/duel artifacts recorded as `claude-opus-4-7` stop matching the new `opus` pair; only new runs match. A family-equality fallback was considered and left as a possible follow-up.
+- Cost: default model names now live in two layers (Rust `model_defaults` const for code paths, literal alias duplicated into the executor/config assets); a future model bump must touch both the const and the YAML asset, and the asset↔const guard test is what keeps them honest.
+
+## ADR-0213 — Flatten crews to one provider-model assignment
+
+**Status:** Accepted · 2026-07-11 · [ORB-10130] · supersedes ADR-0154
+
+**Context.** Named crews carried separate planner, implementer, and reviewer assignments, but production crews were homogeneous and only implementer was on the primary ship path. Role labels still matter for prompts and telemetry; three independent model-selection slots added configuration and persistence complexity without selecting distinct behavior.
+
+**Decision.** A crew is one provider-model-backend assignment. Every activity role resolves to it; role labels remain descriptive, duel participant selection stays independent, and legacy three-role config is accepted by choosing implementer while warning when discarded roles diverge.
+
+**Consequences.**
+- Per-task and default crew selection directly choose one provider-model binding.
+- Run records and projections expose one crew model; legacy SQLite role columns remain nullable for compatibility.
+- Existing homogeneous legacy crew configuration continues to load without behavior changes.
+- Cost: deliberately heterogeneous legacy crews collapse to their implementer assignment and require a warning-guided config rewrite; cross-provider review must use duel machinery or a future explicit mechanism.
+
 ## Task References
 
 - ORB-00042: Onboard Grok (xAI) as a first-class supported agent family.
 - ORB-00058: Introduce per-task crew override for agent model selection.
 - ORB-00072: Make duel-plan agent pool and per-family model configurable via `[duel]`.
 - ORB-00080: Collapse agent identity to family; isolate model strings to invocation surface.
+- ORB-10130: Flatten each crew to one provider-model assignment.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

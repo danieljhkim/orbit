@@ -16,7 +16,15 @@ pub(super) fn write_lines(path: &std::path::Path, lines: &[String]) {
 }
 
 pub(super) fn write_replay_job(runtime: &OrbitRuntime, name: &str) -> std::path::PathBuf {
-    let jobs_dir = runtime.data_root().join("resources/jobs");
+    write_replay_job_under(&runtime.data_root(), name)
+}
+
+/// Writes the stub sleep-workflow job asset into `<root>/resources/jobs`.
+/// Default-named jobs (e.g. `task_auto_pipeline`) are loaded from the *global*
+/// orbit root, so global-mode fixtures must seed them there rather than in a
+/// workspace's `.orbit` directory.
+pub(super) fn write_replay_job_under(root: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let jobs_dir = root.join("resources/jobs");
     std::fs::create_dir_all(&jobs_dir).expect("create jobs dir");
     let path = jobs_dir.join(format!("{name}.yaml"));
     std::fs::write(
@@ -73,9 +81,7 @@ pub(super) fn seed_run(
         retry_source_run_id: None,
         knowledge_metrics: None,
         resolved_crew: None,
-        planner_model: None,
-        implementer_model: None,
-        reviewer_model: None,
+        crew_model: None,
         steps: Vec::new(),
     };
     write_seeded_run(runtime, &run);

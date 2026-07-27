@@ -24,7 +24,7 @@ async fn get_scoreboard(runtime: OrbitRuntime, query: Option<&str>) -> axum::res
         None => "/scoreboard".to_string(),
     };
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .method(Method::GET)

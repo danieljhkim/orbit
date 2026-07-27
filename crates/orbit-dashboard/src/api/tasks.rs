@@ -1,32 +1,30 @@
 //! Task CRUD and lifecycle handlers.
 
-use std::sync::Arc;
-
+use crate::state::Ws;
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Path, RawQuery};
 use axum::http::{HeaderName, HeaderValue, header};
 use axum::response::{IntoResponse, Json, Response};
-use orbit_common::types::validate_relative_artifact_path;
+use orbit_common::types::task_artifacts::TaskRelation;
+use orbit_common::types::{
+    agent_family_from_cli, all_agent_families, infer_agent_family_from_model,
+    validate_relative_artifact_path,
+};
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{
-    ExternalRef, OrbitRuntime, Task, TaskComplexity, TaskPriority, TaskStatus, TaskType,
+    DEFAULT_TASK_LIST_LIMIT, ExternalRef, OrbitRuntime, Task, TaskComplexity, TaskCreateStatus,
+    TaskPriority, TaskStatus, TaskType,
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 
-use super::{bad_request, map_runtime_error, server_error, validate_id};
+use super::{bad_request, map_runtime_error, non_empty_string, server_error, validate_id};
 use crate::projections::{task_locks_json, task_to_json_with_sidecars};
 
-const DASHBOARD_TASK_STATUSES: &[TaskStatus] = &[
-    TaskStatus::InProgress,
-    TaskStatus::Review,
-    TaskStatus::Blocked,
-    TaskStatus::Proposed,
-    TaskStatus::Friction,
-    TaskStatus::Backlog,
-    TaskStatus::Someday,
-    TaskStatus::Rejected,
-];
+/// Actor recorded for a dashboard-authored comment when the request supplies no
+/// usable human identity. The dashboard is a human-operated surface, so this is
+/// the floor — never the server process's ambient agent identity.
+const HUMAN_ACTOR_LABEL: &str = "human";
 
 struct ArtifactResponsePolicy {
     content_type: &'static str,
@@ -48,6 +46,17 @@ pub(super) struct RejectBody {
     comment: Option<String>,
 }
 
+/// Body for `POST /tasks/:id/comments`. `author` is the operator's own name;
+/// it is sanitized to a human identity by [`human_comment_author`], never taken
+/// as-is when it names an agent family or a model.
+#[derive(Deserialize, Default)]
+pub(super) struct CommentBody {
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    author: Option<String>,
+}
+
 #[derive(Deserialize)]
 pub(super) struct CreateTaskBody {
     title: String,
@@ -57,17 +66,28 @@ pub(super) struct CreateTaskBody {
     #[serde(default)]
     dependencies: Vec<String>,
     #[serde(default)]
+    relations: Vec<TaskRelation>,
+    #[serde(default)]
     tags: Vec<String>,
     #[serde(default)]
     plan: String,
-    #[serde(default)]
-    comment: Option<String>,
     #[serde(default)]
     context_files: Vec<String>,
     #[serde(default)]
     external_refs: Vec<ExternalRef>,
     #[serde(default)]
     workspace_path: Option<String>,
+    /// Trap field (ORB-00042): `workspace` is a *workspace selector* and this
+    /// endpoint takes it as the `?workspace=<id>` query parameter, never as a
+    /// body field. Historically bridge sent `{"workspace": <path>}` here and
+    /// serde silently dropped the unknown key, so every task landed in the
+    /// default workspace. Deserializing the key just to reject it makes the
+    /// mistake a loud 400. A `#[serde(alias = "workspace")]` on
+    /// `workspace_path` would be wrong semantics (a selector is not a sub-path
+    /// hint), and `#[serde(deny_unknown_fields)]` would break every tolerant
+    /// caller that sends extra keys.
+    #[serde(default)]
+    workspace: Option<String>,
     #[serde(default = "default_priority")]
     priority: TaskPriority,
     #[serde(default)]
@@ -75,7 +95,7 @@ pub(super) struct CreateTaskBody {
     #[serde(default)]
     task_type: Option<TaskType>,
     #[serde(default)]
-    status: Option<TaskStatus>,
+    status: Option<TaskCreateStatus>,
     #[serde(default)]
     parent_id: Option<String>,
     #[serde(default)]
@@ -91,10 +111,6 @@ fn default_priority() -> TaskPriority {
 /// Partial-update body for `PATCH /tasks/:id`. Each field is `Option<...>`;
 /// fields absent from the JSON body remain unchanged.
 ///
-/// Note: `pr_status` and `job_run_id` are intentionally omitted from this v1
-/// surface. They use `Option<Option<String>>` in `TaskUpdateParams` to
-/// distinguish absent vs. clear; the dashboard does not currently need to set
-/// them. Add them via a `deserialize_with` adapter when a UI use case appears.
 #[derive(Deserialize, Default)]
 pub(super) struct UpdateTaskBody {
     #[serde(default)]
@@ -106,6 +122,8 @@ pub(super) struct UpdateTaskBody {
     #[serde(default)]
     dependencies: Option<Vec<String>>,
     #[serde(default)]
+    relations: Option<Vec<TaskRelation>>,
+    #[serde(default)]
     tags: Option<Vec<String>>,
     #[serde(default)]
     plan: Option<String>,
@@ -116,7 +134,11 @@ pub(super) struct UpdateTaskBody {
     #[serde(default)]
     status: Option<TaskStatus>,
     #[serde(default)]
+    complexity: Option<TaskComplexity>,
+    #[serde(default)]
     task_type: Option<TaskType>,
+    #[serde(default, deserialize_with = "deserialize_nullable_string_patch_field")]
+    pr_status: Option<Option<String>>,
     #[serde(default)]
     context_files: Option<Vec<String>>,
     #[serde(default, deserialize_with = "deserialize_nullable_string_patch_field")]
@@ -132,51 +154,234 @@ where
     Option::<String>::deserialize(deserializer).map(Some)
 }
 
-pub(super) async fn list_tasks(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
-    match list_dashboard_tasks(&runtime) {
-        Ok(tasks) => match dashboard_status_index(&runtime) {
-            Ok(status_by_id) => {
-                let values = match tasks
-                    .iter()
-                    .map(|task| task_to_json_with_sidecars(&runtime, task, &status_by_id))
-                    .collect::<Result<Vec<_>, _>>()
-                {
-                    Ok(values) => values,
-                    Err(error) => return server_error(error),
-                };
-                Json(Value::Array(values)).into_response()
-            }
-            Err(e) => server_error(e),
-        },
+/// `GET /api/tasks` — the request workspace's tasks, filtered server-side.
+///
+/// ## Query parameters
+///
+/// - `status` — repeatable and/or comma-separated (`?status=proposed,backlog`).
+///   OR semantics across values; omitted means every lifecycle status.
+/// - `tag` (alias `tags`) — repeatable and/or comma-separated. AND semantics:
+///   a task must carry every requested tag. Values go through Orbit's own
+///   [`normalize_task_tags`](orbit_common::types::normalize_task_tags) /
+///   `task_matches_tags`, so a colon is ordinary tag content and
+///   `auto-task:qa-sweep` matches that whole tag rather than being split.
+/// - `type` (alias `task_type`) — a single task type (`feature`/`bug`/
+///   `refactor`/`chore`).
+/// - `limit` — positive integer, defaulting to [`DEFAULT_TASK_LIST_LIMIT`].
+///
+/// Unknown keys (including the `?workspace=<id>` selector consumed by the
+/// [`Ws`] extractor) are ignored; an unparseable value is a 400 rather than a
+/// silently-dropped filter.
+///
+/// ## Response contract (ORB-10400, consumed by bridge ORB-10398)
+///
+/// ```json
+/// { "items": [ /* task objects, newest first */ ],
+///   "total": 137, "limit": 50, "truncated": true }
+/// ```
+///
+/// **Every predicate is applied before the limit**, so `items` holds the newest
+/// *matching* tasks — a match older than the newest `limit` unfiltered tasks is
+/// still reachable by passing its filters. `total` is the pre-limit match count
+/// and `truncated` is `total > items.len()`, which is what lets a client tell a
+/// genuinely empty result (`total: 0`) from a filter whose matches fell outside
+/// the window (previously indistinguishable, because the handler answered a bare
+/// truncated array with no metadata).
+///
+/// The cross-workspace `/api/tasks/all` aggregate still answers a bare array; it
+/// takes no filters and is bounded by the same default limit.
+pub(super) async fn list_tasks(Ws(runtime): Ws, RawQuery(query): RawQuery) -> Response {
+    let query = match TaskListQuery::parse(query.as_deref()) {
+        Ok(query) => query,
+        Err(message) => return bad_request(message),
+    };
+    match task_list_page_json(&runtime, &query) {
+        Ok(value) => Json(value).into_response(),
         Err(e) => server_error(e),
     }
 }
 
-pub(super) async fn list_task_locks(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
+/// Server-side filters for `GET /api/tasks`, mirroring `orbit task list`
+/// semantics (ORB-10400).
+struct TaskListQuery {
+    /// Accepted statuses; empty means status-neutral (every lifecycle status).
+    statuses: Vec<TaskStatus>,
+    /// Required tags, AND-combined. Passed verbatim to `list_tasks_by_tags`,
+    /// which normalizes them.
+    tags: Vec<String>,
+    task_type: Option<TaskType>,
+    limit: usize,
+}
+
+impl Default for TaskListQuery {
+    fn default() -> Self {
+        Self {
+            statuses: Vec::new(),
+            tags: Vec::new(),
+            task_type: None,
+            limit: DEFAULT_TASK_LIST_LIMIT,
+        }
+    }
+}
+
+impl TaskListQuery {
+    /// Parse the raw (still percent-encoded) query string.
+    ///
+    /// Repeated keys accumulate and each value may itself be comma-separated,
+    /// matching the CLI's `--status a,b` / repeated `--tag`. Empty values are
+    /// ignored so `?status=` behaves like an omitted filter, and unknown keys
+    /// are skipped because this endpoint shares its query string with the `Ws`
+    /// workspace selector.
+    fn parse(raw_query: Option<&str>) -> Result<Self, String> {
+        let mut parsed = Self::default();
+        let Some(raw_query) = raw_query else {
+            return Ok(parsed);
+        };
+        for (key, value) in url::form_urlencoded::parse(raw_query.as_bytes()) {
+            match key.as_ref() {
+                "status" => {
+                    for raw in split_filter_values(&value) {
+                        let status = raw
+                            .to_ascii_lowercase()
+                            .parse::<TaskStatus>()
+                            .map_err(|error| format!("invalid `status` value `{raw}`: {error}"))?;
+                        if !parsed.statuses.contains(&status) {
+                            parsed.statuses.push(status);
+                        }
+                    }
+                }
+                // A tag is matched whole: only `,` separates values, so a
+                // colon-bearing tag (`auto-task:qa-sweep`) stays intact.
+                "tag" | "tags" => parsed
+                    .tags
+                    .extend(split_filter_values(&value).map(str::to_string)),
+                "type" | "task_type" => {
+                    for raw in split_filter_values(&value) {
+                        parsed.task_type =
+                            Some(raw.to_ascii_lowercase().parse::<TaskType>().map_err(
+                                |error| format!("invalid `type` value `{raw}`: {error}"),
+                            )?);
+                    }
+                }
+                "limit" => {
+                    if let Some(raw) = split_filter_values(&value).next_back() {
+                        parsed.limit = parse_limit(raw)?;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(parsed)
+    }
+}
+
+/// Split one query value into its comma-separated parts, trimming each and
+/// dropping empties.
+fn split_filter_values(value: &str) -> impl DoubleEndedIterator<Item = &str> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+}
+
+/// Parse `?limit=`, rejecting zero (which would return nothing) the same way the
+/// CLI's `--limit` does.
+fn parse_limit(raw: &str) -> Result<usize, String> {
+    let value: usize = raw
+        .parse()
+        .map_err(|_| format!("invalid `limit` value `{raw}` (expected a positive integer)"))?;
+    if value == 0 {
+        return Err("`limit` must be at least 1".to_string());
+    }
+    Ok(value)
+}
+
+/// Build the `{ items, total, limit, truncated }` page for `GET /api/tasks`.
+fn task_list_page_json(
+    runtime: &OrbitRuntime,
+    query: &TaskListQuery,
+) -> Result<Value, orbit_core::OrbitError> {
+    let (tasks, total) = filtered_dashboard_tasks(runtime, query)?;
+    let items = task_values(runtime, &tasks)?;
+    let truncated = total > items.len();
+    Ok(json!({
+        "items": items,
+        "total": total,
+        "limit": query.limit,
+        "truncated": truncated,
+    }))
+}
+
+/// Build the dashboard task list as JSON values for the cross-workspace
+/// `/api/tasks/all` aggregate: unfiltered and bounded by the default limit,
+/// exactly as `GET /api/tasks` was before it grew query filters.
+pub(super) fn list_tasks_json(
+    runtime: &OrbitRuntime,
+) -> Result<Vec<Value>, orbit_core::OrbitError> {
+    let (tasks, _total) = filtered_dashboard_tasks(runtime, &TaskListQuery::default())?;
+    task_values(runtime, &tasks)
+}
+
+fn task_values(
+    runtime: &OrbitRuntime,
+    tasks: &[Task],
+) -> Result<Vec<Value>, orbit_core::OrbitError> {
+    let status_by_id = dashboard_status_index(runtime)?;
+    tasks
+        .iter()
+        .map(|task| task_to_json_with_sidecars(runtime, task, &status_by_id))
+        .collect()
+}
+
+pub(super) async fn list_task_locks(Ws(runtime): Ws) -> Response {
     match task_locks_json(&runtime) {
         Ok(value) => Json(value).into_response(),
         Err(e) => server_error(e),
     }
 }
 
-fn list_dashboard_tasks(runtime: &OrbitRuntime) -> Result<Vec<Task>, orbit_core::OrbitError> {
-    let mut tasks = Vec::new();
-    for status in DASHBOARD_TASK_STATUSES {
-        tasks.extend(runtime.list_tasks_filtered(Some(*status), None, None, None, None, None)?);
-    }
-    Ok(tasks)
+/// The dashboard task list: status-neutral by default, newest-first, and
+/// bounded (ORB-10310). Returns the page plus the **pre-limit** match count.
+///
+/// `list_tasks_by_tags` orders by `created_at DESC` with task ID ascending for
+/// ties and applies Orbit's own `normalize_task_tags`/`task_matches_tags`, so
+/// tag matching here is identical to `orbit task list --tag` (a colon is
+/// ordinary tag content). The remaining predicates preserve that order, and —
+/// the point of ORB-10400 — every predicate runs *before* the truncation, so
+/// the page holds the newest tasks matching the filter rather than whatever
+/// survives a truncation of the unfiltered set. With no filters this is exactly
+/// the previous behavior: the newest `DEFAULT_TASK_LIST_LIMIT` tasks of any
+/// lifecycle status, `done`/`archived` included.
+fn filtered_dashboard_tasks(
+    runtime: &OrbitRuntime,
+    query: &TaskListQuery,
+) -> Result<(Vec<Task>, usize), orbit_core::OrbitError> {
+    let mut matching = runtime
+        .list_tasks_by_tags(&query.tags)?
+        .into_iter()
+        .filter(|task| query.statuses.is_empty() || query.statuses.contains(&task.status))
+        .filter(|task| query.task_type.is_none_or(|kind| task.task_type == kind))
+        .collect::<Vec<_>>();
+    let total = matching.len();
+    matching.truncate(query.limit);
+    Ok((matching, total))
 }
 
+/// Dependency-status projection for dashboard task serialization.
+///
+/// Uses the coordination registry's global status index
+/// ([`OrbitRuntime::task_status_index`]) rather than `runtime.list_tasks()`
+/// (workspace-scoped), so a task depending on another registered workspace's
+/// task resolves that dependency's real status instead of `[missing]`
+/// (ORB-10291). Task *listing* stays workspace-scoped: this index is only
+/// consulted to label dependencies, never to add tasks to the response body.
 fn dashboard_status_index(
     runtime: &OrbitRuntime,
 ) -> Result<std::collections::BTreeMap<String, TaskStatus>, orbit_core::OrbitError> {
-    Ok(orbit_core::build_task_status_index(&runtime.list_tasks()?))
+    runtime.task_status_index()
 }
 
-pub(super) async fn get_task(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn get_task(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let id = match validate_id(&id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
@@ -194,7 +399,7 @@ pub(super) async fn get_task(
 }
 
 pub(super) async fn get_task_artifact(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path((id, path)): Path<(String, String)>,
 ) -> Response {
     let id = match validate_id(&id) {
@@ -269,26 +474,43 @@ fn validate_artifact_request_path(path: &str) -> Result<String, String> {
     Ok(path.to_string())
 }
 
+/// `POST /tasks` — create a task in the request's workspace.
+///
+/// Workspace selection is the [`Ws`] extractor's: the `?workspace=<id>` query
+/// parameter picks the target workspace; omitting it falls back to the
+/// server's configured default workspace; an unknown id is a 404 and an
+/// inactive (stale-path) one a 400 — never a silent fallback. The body's
+/// `workspace_path` is *not* a selector: it is an optional sub-path hint
+/// within the already-selected workspace. A stray `workspace` body key is
+/// rejected with a 400 (see [`CreateTaskBody::workspace`], ORB-00042).
 pub(super) async fn create_task_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Json(body): Json<CreateTaskBody>,
 ) -> Response {
+    if body.workspace.is_some() {
+        return bad_request(
+            "unsupported body field `workspace`: select the target workspace with the \
+             `?workspace=<id>` query parameter (`workspace_path` is a sub-path hint \
+             within the selected workspace, not a workspace selector)"
+                .to_string(),
+        );
+    }
     let params = TaskAddParams {
         parent_id: body.parent_id,
         title: body.title,
         description: body.description,
         acceptance_criteria: body.acceptance_criteria,
         dependencies: body.dependencies,
-        relations: Vec::new(),
+        relations: body.relations,
         tags: body.tags,
         plan: body.plan,
-        comment: body.comment,
+        comment: None,
         context_files: body.context_files,
         workspace_path: body.workspace_path,
         priority: body.priority,
         complexity: body.complexity,
         task_type: body.task_type,
-        status: body.status,
+        status: body.status.map(Into::into),
         system_created: false,
         external_refs: body.external_refs,
         source_task_id: body.source_task_id,
@@ -307,7 +529,7 @@ pub(super) async fn create_task_action(
 }
 
 pub(super) async fn update_task_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path(id): Path<String>,
     Json(body): Json<UpdateTaskBody>,
 ) -> Response {
@@ -320,22 +542,22 @@ pub(super) async fn update_task_action(
         description: body.description,
         acceptance_criteria: body.acceptance_criteria,
         dependencies: body.dependencies,
-        relations: None,
+        relations: body.relations,
         tags: body.tags,
         plan: body.plan,
         execution_summary: body.execution_summary,
         comment: body.comment,
         status: body.status,
+        complexity: body.complexity,
         task_type: body.task_type,
         source_task_id: None,
         planned_by: None,
         implemented_by: None,
-        pr_status: None,
+        pr_status: body.pr_status,
         job_run_id: None,
         crew: body.crew,
         context_files: body.context_files,
         upsert_artifacts: Vec::new(),
-        append_review_threads: Vec::new(),
     };
     match runtime.update_task_with_identity(id, params, None, None) {
         Ok(task) => match dashboard_status_index(&runtime) {
@@ -349,8 +571,72 @@ pub(super) async fn update_task_action(
     }
 }
 
+/// `POST /tasks/:id/comments` — append a human comment to a task.
+///
+/// Comments are stored in the task's existing review-thread structure (the
+/// bundle's `comments.jsonl`, written through `TaskUpdateParams::comment`), so
+/// this adds no parallel persistence model on the task record.
+///
+/// Authorship is forced to a human identity (ORB-10444). The dashboard server
+/// process may itself be running inside a managed Orbit run, where the runtime's
+/// ambient actor is an agent model — attributing an operator's note to that
+/// model would be a lie, so the author comes from the request (sanitized by
+/// [`human_comment_author`]) and never from the ambient identity.
+pub(super) async fn add_task_comment_action(
+    Ws(runtime): Ws,
+    Path(id): Path<String>,
+    Json(body): Json<CommentBody>,
+) -> Response {
+    let id = match validate_id(&id) {
+        Ok(id) => id,
+        Err(message) => return bad_request(message),
+    };
+    let Some(message) = non_empty_string(&body.message) else {
+        return bad_request("comment message must not be empty".to_string());
+    };
+    let author = human_comment_author(body.author.as_deref());
+    let params = TaskUpdateParams {
+        comment: Some(message),
+        ..TaskUpdateParams::default()
+    };
+    match runtime.update_task_with_identity(id, params, Some(author), None) {
+        Ok(task) => match dashboard_status_index(&runtime) {
+            Ok(status_by_id) => match task_to_json_with_sidecars(&runtime, &task, &status_by_id) {
+                Ok(value) => Json(value).into_response(),
+                Err(e) => server_error(e),
+            },
+            Err(e) => server_error(e),
+        },
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+/// Resolve the author label recorded for a dashboard comment.
+///
+/// A caller-supplied label is kept only if it is a genuine human identity: a
+/// blank value, a known agent family (`codex`/`claude`/…), a string that maps to
+/// one of those families as a model constant, or the `system`/`agent` role words
+/// all collapse to [`HUMAN_ACTOR_LABEL`]. That keeps a model constant out of the
+/// `by` field whether it arrives from a confused client or from the ambient
+/// identity the runtime would otherwise supply.
+fn human_comment_author(requested: Option<&str>) -> String {
+    let Some(label) = requested.and_then(non_empty_string) else {
+        return HUMAN_ACTOR_LABEL.to_string();
+    };
+    let normalized = agent_family_from_cli(&label);
+    let looks_like_agent = normalized == "system"
+        || normalized == "agent"
+        || all_agent_families().contains(&normalized.as_str())
+        || infer_agent_family_from_model(&label).is_some();
+    if looks_like_agent {
+        HUMAN_ACTOR_LABEL.to_string()
+    } else {
+        label
+    }
+}
+
 pub(super) async fn approve_task_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path(id): Path<String>,
     body: Option<Json<ApproveBody>>,
 ) -> Response {
@@ -372,7 +658,7 @@ pub(super) async fn approve_task_action(
 }
 
 pub(super) async fn reject_task_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path(id): Path<String>,
     Json(body): Json<RejectBody>,
 ) -> Response {
@@ -392,10 +678,7 @@ pub(super) async fn reject_task_action(
     }
 }
 
-pub(super) async fn archive_task_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn archive_task_action(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let id = match validate_id(&id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),

@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use orbit_common::types::{
-    Learning, LearningComment, LearningVoteSummary, OrbitError, Task, TaskArtifact, TaskComment,
-    TaskHistoryEntry, TaskStatus, build_task_status_index, resolve_task_dependencies,
+    Learning, OrbitError, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskStatus,
+    resolve_task_dependencies,
 };
 use serde_json::{Map, Value, json};
 
@@ -36,39 +36,8 @@ pub(super) fn learning_to_json(learning: &Learning) -> Value {
     })
 }
 
-pub(super) fn learning_show_to_json(
-    learning: &Learning,
-    vote_summary: &LearningVoteSummary,
-) -> Value {
-    let mut value = learning_to_json(learning);
-    if let Some(object) = value.as_object_mut() {
-        object.insert("vote_count".to_string(), json!(vote_summary.vote_count));
-        object.insert(
-            "last_voted_at".to_string(),
-            vote_summary
-                .last_voted_at
-                .map(|ts| json!(ts.to_rfc3339()))
-                .unwrap_or(Value::Null),
-        );
-    }
-    value
-}
-
-pub(super) fn learning_vote_summary_to_json(summary: &LearningVoteSummary) -> Value {
-    json!({
-        "vote_count": summary.vote_count,
-        "last_voted_at": summary.last_voted_at.map(|ts| ts.to_rfc3339()),
-    })
-}
-
-pub(super) fn learning_comment_to_json(comment: &LearningComment) -> Value {
-    json!({
-        "id": comment.id,
-        "learning_id": comment.learning_id,
-        "body": comment.body,
-        "author_model": comment.author_model,
-        "created_at": comment.created_at.to_rfc3339(),
-    })
+pub(super) fn learning_show_to_json(learning: &Learning) -> Value {
+    learning_to_json(learning)
 }
 
 pub(super) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStatus>) -> Value {
@@ -106,8 +75,7 @@ pub(super) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStat
 }
 
 pub(super) fn serialize_task(runtime: &OrbitRuntime, task: &Task) -> Result<Value, OrbitError> {
-    let tasks = runtime.list_tasks()?;
-    let status_by_id = build_task_status_index(&tasks);
+    let status_by_id = runtime.task_status_index()?;
     let mut value = task_to_json(task, &status_by_id);
     let object = value.as_object_mut().ok_or_else(|| {
         OrbitError::Execution("task JSON projection did not produce an object".to_string())
@@ -120,24 +88,8 @@ pub(super) fn serialize_task(runtime: &OrbitRuntime, task: &Task) -> Result<Valu
         "history".to_string(),
         serialize_history(&runtime.get_task_history(&task.id)?)?,
     );
-    object.insert(
-        "review_threads".to_string(),
-        serde_json::to_value(runtime.get_task_review_threads(&task.id)?)
-            .map_err(serialize_error("serialize review threads"))?,
-    );
     insert_resolved_crew(runtime, task, object)?;
     Ok(value)
-}
-
-pub(super) fn task_lock_to_json(task: &Task) -> Value {
-    json!({
-        "id": task.id,
-        "title": task.title,
-        "status": task.status.to_string(),
-        "job_run_id": task.job_run_id,
-        "crew": task.crew,
-        "context_files": task.context_files,
-    })
 }
 
 fn insert_resolved_crew(
@@ -149,18 +101,7 @@ fn insert_resolved_crew(
         return Ok(());
     };
     object.insert("resolved_crew".to_string(), Value::String(projection.name));
-    object.insert(
-        "planner_model".to_string(),
-        Value::String(projection.planner_model),
-    );
-    object.insert(
-        "implementer_model".to_string(),
-        Value::String(projection.implementer_model),
-    );
-    object.insert(
-        "reviewer_model".to_string(),
-        Value::String(projection.reviewer_model),
-    );
+    object.insert("crew_model".to_string(), Value::String(projection.model));
     Ok(())
 }
 
@@ -174,7 +115,7 @@ pub(super) fn task_fields_to_json(
     fields: &[String],
 ) -> Result<Value, OrbitError> {
     let status_by_id = if fields.iter().any(|field| field == "resolved_dependencies") {
-        Some(build_task_status_index(&runtime.list_tasks()?))
+        Some(runtime.task_status_index()?)
     } else {
         None
     };
@@ -268,14 +209,6 @@ fn serialize_comments(comments: &[TaskComment]) -> Result<Value, OrbitError> {
 
 fn serialize_history(history: &[TaskHistoryEntry]) -> Result<Value, OrbitError> {
     serde_json::to_value(history).map_err(serialize_error("serialize history"))
-}
-
-pub(super) fn task_lock_status_rank(status: TaskStatus) -> u8 {
-    match status {
-        TaskStatus::InProgress => 0,
-        TaskStatus::Review => 1,
-        _ => 2,
-    }
 }
 
 pub(super) fn serialize_error(label: &'static str) -> impl FnOnce(serde_json::Error) -> OrbitError {

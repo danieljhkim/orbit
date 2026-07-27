@@ -3,7 +3,8 @@ summary: "Auditability — Overview"
 type: design
 title: "Auditability — Overview"
 owner: codex
-last_updated: 2026-05-16
+last_updated: 2026-07-27
+last_validated: 2026-07-27
 status: Draft
 feature: auditability
 doc_role: overview
@@ -34,23 +35,27 @@ Orbit runs fleets of agents against user-owned repositories, so auditability is 
 
 The CLI audit middleware and runtime tool-dispatch paths write persistent `AuditEvent` records for most top-level commands and tool calls. These compact rows back `orbit audit list`, `orbit audit show`, `orbit audit stats`, and export commands. They carry command/target metadata, actor role, status, timing, working directory, host, process id, and optional argument/error fields, but not full provider transcripts.
 
-### 2.2 Activity/job run traces are file-backed JSONL trees
+### 2.2 MCP command rows distinguish trusted caller and process provenance
 
-The v2 activity/job runtime emits `V2AuditEvent` envelopes for run, step, activity, fan-out, loop, filesystem, denial, and CLI-backend lifecycle events under `.orbit/state/audit/v2_loop/`. This layer is the workflow replay spine: it carries `run_id`, `event_id`, `parent_event_id`, `agent_identity`, and optional `workspace_path`. `orbit run events`, `orbit run trace`, `orbit run show -s`, and `orbit run logs -s` expose the same activity DAG `step.id` source of truth after [T20260426-0705] and [T20260426-0709].
+MCP audit keeps legacy meanings stable: `host` is still the executing-process hostname, `session_id` is unchanged, and `job_run_id` remains canonical run correlation. Additive fields identify validated workspace, caller/process machines and display hosts, transport, the complete effective capability set, origin session, unique MCP call, and lease. Standalone calls are `unverified`; client JSON cannot populate trusted columns. [ORB-10228]
 
-### 2.3 Agent-loop audit events preserve provider and tool detail
+### 2.3 Activity/job run traces are SQLite-backed trees
 
-The HTTP loop engine emits `LoopAuditEvent` records for sessions, HTTP requests/responses, tool requests/results, iteration boundaries, and policy denials. Loop JSONL materializes under `.orbit/state/audit/loop/` only once a run emits loop-level events; large request, response, input, and output bodies are stored as redacted content-addressed blobs under `.orbit/state/audit/blobs/`.
+The v2 activity/job runtime emits `V2AuditEvent` envelopes for run, step, activity, fan-out, loop, filesystem, denial, and CLI-backend lifecycle events into the `v2_audit_events` SQLite store. This layer is the workflow replay spine: it carries `run_id`, `event_id`, `parent_event_id`, `agent_identity`, and optional `workspace_path`. `orbit run events`, `orbit run trace`, `orbit run show -s`, and `orbit run logs -s` expose the same activity DAG `step.id` source of truth after [T20260426-0705] and [T20260426-0709].
 
-### 2.4 Invocation metrics are adjacent, not a replacement
+### 2.4 Agent-loop audit events preserve provider and tool detail
+
+The HTTP loop engine emits `LoopAuditEvent` records for sessions, HTTP requests/responses, tool requests/results, iteration boundaries, and policy denials. Loop events are persisted in the same `v2_audit_events` SQLite store only when emitted; large request, response, input, and output bodies are stored as redacted content-addressed blobs under `.orbit/state/audit/blobs/`.
+
+### 2.5 Invocation metrics are adjacent, not a replacement
 
 The invocation store records token usage, tool-call counts, task IDs, agent, model, job run, and activity IDs for metrics and scoreboards. It helps answer cost and usage questions, but it summarizes rather than preserves transcript structure. V2 job metrics began persisting beside audit in [T20260426-0526].
 
-### 2.5 Redaction happens before durable payload storage
+### 2.6 Redaction happens before durable payload storage
 
 Blob writes apply pattern-based redaction at write time, and CLI error audit paths scrub sensitive live environment values before persistence. Readers should not need to re-scrub normal audit artifacts. The detailed contract lives in [specs/redaction-retention.md](./specs/redaction-retention.md).
 
-### 2.6 Process tracing has a global JSONL feed
+### 2.7 Process tracing has a global JSONL feed
 
 The default tracing subscriber appends redacted structured events to `~/.orbit/state/logs/orbit.jsonl` after [T20260426-2343] and [T20260426-2349]. The feed is global because logging initializes before workspace resolution. After [T20260427-0023], filesystem policy denials, proc-spawn allowlist denials, and friction record submissions also project stable `tracing::warn!` events beside their canonical stores. First-class friction artifacts now live under `.orbit/frictions/` and surface in `Knowledge > Frictions` for scan and triage without re-entering the task lifecycle.
 
@@ -61,13 +66,14 @@ The default tracing subscriber appends redacted structured events to `~/.orbit/s
 | Concern | Where it lives | Primary task ID |
 |---------|----------------|-----------------|
 | Audit design ownership | `docs/design/auditability/` | [T20260426-0605] |
-| Command audit records and queries | `crates/orbit-common/src/types/audit_event.rs`, `crates/orbit-cli/src/command/observe/audit.rs`, `crates/orbit-store/src/sqlite/audit_event_store.rs` | [T20260426-0605] |
-| V2 activity/job envelopes and JSONL sink | `crates/orbit-common/src/types/activity_job/audit_envelope.rs`, `crates/orbit-engine/src/activity_job/audit_writer.rs` | [T20260419-0002], [T20260426-0519] |
+| Command audit records and queries | `crates/orbit-common/src/types/audit_event.rs`, `crates/orbit-cli/src/command/audit/`, `crates/orbit-store/src/sqlite/audit_event_store/` | [T20260426-0605] |
+| Remote MCP preflight, placement denials, and checkoutless global audit writes | `crates/orbit-remote/src/mcp/host.rs`, `crates/orbit-remote/src/lib.rs` | [ORB-10228], [ORB-10262], [ORB-10319] |
+| V2 activity/job envelopes and SQLite sink | `crates/orbit-common/src/types/activity_job/audit_envelope.rs`, `crates/orbit-engine/src/activity_job/audit_writer.rs`, `crates/orbit-engine/src/activity_job/sqlite_sink.rs` | [T20260419-0002], [T20260426-0519] |
 | Run trace inspection CLI | `crates/orbit-cli/src/command/run/mod.rs`, `crates/orbit-core/src/runtime/run_audit.rs` | [T20260426-0705], [T20260426-0709] |
-| Loop audit events and blobs | `crates/orbit-agent/src/loop_engine/audit/mod.rs`, `crates/orbit-common/src/utility/blob_store.rs` | [T20260426-0605] |
+| Loop audit events and blobs | `crates/orbit-agent/src/loop_engine/audit/mod.rs`, `crates/orbit-engine/src/activity_job/sqlite_sink.rs`, `crates/orbit-common/src/utility/blob_store.rs` | [T20260426-0605] |
 | Redaction utilities | `crates/orbit-common/src/utility/redaction.rs` | [T20260426-0605], [T20260426-2349] |
 | Global tracing JSONL feed and live projections | `crates/orbit-common/src/utility/logging.rs`, selected FS/proc/task producers | [T20260426-2343], [T20260427-0023] |
-| Friction artifact feedback loop | `.orbit/frictions/`, `crates/orbit-store/src/file/friction_store.rs`, `crates/orbit-cli/src/command/web/api/frictions.rs` | [T20260510-13], [ORB-00062] |
+| Friction artifact feedback loop | `.orbit/frictions/`, `crates/orbit-store/src/file/friction_store/`, `crates/orbit-dashboard/src/api/frictions.rs` | [T20260510-13], [ORB-00062] |
 | V2 invocation metrics persistence | `crates/orbit-store/src/sqlite/invocation_store.rs`, `crates/orbit-core/src/runtime/v2_host/mod.rs` | [T20260426-0526] |
 | Task attribution fields | `crates/orbit-common/src/types/task.rs`, task update/runtime host paths | [T20260426-0605], [T20260427-47] |
 | Workflow git commit identity attribution | `crates/orbit-engine/src/executor/automation/vcs/commit/` | [T20260508-22], [T20260509-12] |
@@ -91,5 +97,6 @@ The default tracing subscriber appends redacted structured events to `~/.orbit/s
 - **[T20260508-22]** — Use `task.implemented_by` to set git commit authors for automated task commits.
 - **[T20260509-12]** — Scope workflow git author and committer identity to the spawned commit process without writing repo-local Git config.
 - **[ORB-00062]** — Surface first-class friction artifacts in the dashboard Knowledge tab and add triage endpoints.
+- **[ORB-10319]** — Consolidate Remote MCP policy/preflight and global audit composition in `orbit-remote`, retaining Core's shared runtime audit boundary.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

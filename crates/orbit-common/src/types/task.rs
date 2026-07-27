@@ -3,22 +3,19 @@
 //! ## Task Status Lifecycle
 //!
 //! Transitions are **permissive by default** — any move is allowed unless it
-//! violates one of the four invariants below.
+//! violates one of the three invariants below.
 //!
 //! ### Invariants (blocklist)
 //! 1. **Done is terminal** — no transitions out of done.
 //! 2. **Archived requires dedicated command** — use `orbit task archive`; the
 //!    bare `--status archived` path is rejected.
-//! 3. **Friction is legacy-only** — new friction reports are stored through
-//!    `orbit.friction.add`, not the task lifecycle.
-//! 4. **InProgress → Review requires execution_summary** — enforced at the
+//! 3. **InProgress → Review requires execution_summary** — enforced at the
 //!    command layer, not in [`TaskStatus::validate_transition`].
 //!
 //! ### Statuses
 //! | Status       | Purpose |
 //! |--------------|---------|
 //! | Proposed     | Awaiting human approval before entering the backlog. |
-//! | Friction     | Legacy agent self-reported friction task. |
 //! | Backlog      | Approved and queued for work. |
 //! | Someday      | Future-scoped — wanted but not yet actionable. Agents skip someday tasks. |
 //! | InProgress   | Actively being worked on. |
@@ -30,7 +27,7 @@
 //!
 //! See [`TaskStatus::validate_transition`] for the blocklist implementation.
 
-// ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
+// Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -41,13 +38,25 @@ use std::sync::OnceLock;
 
 use chrono::{DateTime, Utc};
 use regex::Regex;
-use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::types::task_artifacts::{TaskRelation, TaskRelationType};
 use crate::types::{OrbitError, OrbitId};
 use crate::utility::selector::exists_in_workspace;
+
+/// Tasks carrying this tag may complete successfully without producing a
+/// repository diff. Their durable side effects live outside git (for example,
+/// QA validation tasks file follow-up Orbit tasks).
+pub const NO_DIFF_EXPECTED_TAG: &str = "no-diff-expected";
+
+/// Default maximum number of tasks a status-neutral task listing returns
+/// (ORB-10310). Every discovery surface — the `orbit task list` CLI, the
+/// `orbit.task.list` MCP tool, and the dashboard HTTP task routes — returns the
+/// newest `DEFAULT_TASK_LIST_LIMIT` matching tasks first rather than filtering
+/// on lifecycle status, matching Orbit's existing recent-history convention
+/// (see `HISTORY_DEFAULT_LIMIT` in orbit-dashboard).
+pub const DEFAULT_TASK_LIST_LIMIT: usize = 50;
 
 /// Current lifecycle state of a task.
 ///
@@ -58,8 +67,6 @@ use crate::utility::selector::exists_in_workspace;
 pub enum TaskStatus {
     /// Awaiting human approval before entering the backlog.
     Proposed,
-    /// Legacy agent self-reported friction task.
-    Friction,
     /// Approved and queued for work; not yet started.
     Backlog,
     /// Actively being worked on.
@@ -80,6 +87,29 @@ pub enum TaskStatus {
     Someday,
 }
 
+/// Lifecycle states that may be selected when a task is first created.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+#[serde(rename_all = "snake_case")]
+pub enum TaskCreateStatus {
+    /// Awaiting human approval before entering the backlog.
+    Proposed,
+    /// Approved and queued for work; not yet started.
+    Backlog,
+    /// Future-scoped — wanted but not yet actionable.
+    Someday,
+}
+
+impl From<TaskCreateStatus> for TaskStatus {
+    fn from(value: TaskCreateStatus) -> Self {
+        match value {
+            TaskCreateStatus::Proposed => Self::Proposed,
+            TaskCreateStatus::Backlog => Self::Backlog,
+            TaskCreateStatus::Someday => Self::Someday,
+        }
+    }
+}
+
 impl Display for TaskStatus {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.cli_name())
@@ -92,7 +122,6 @@ impl FromStr for TaskStatus {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "proposed" => Ok(TaskStatus::Proposed),
-            "friction" => Ok(TaskStatus::Friction),
             "backlog" => Ok(TaskStatus::Backlog),
             "in-progress" => Ok(TaskStatus::InProgress),
             "in_progress" => Ok(TaskStatus::InProgress),
@@ -111,7 +140,6 @@ impl TaskStatus {
     pub fn cli_name(self) -> &'static str {
         match self {
             TaskStatus::Proposed => "proposed",
-            TaskStatus::Friction => "friction",
             TaskStatus::Backlog => "backlog",
             TaskStatus::InProgress => "in-progress",
             TaskStatus::Review => "review",
@@ -136,9 +164,7 @@ impl TaskStatus {
     /// 1. **Done is terminal** — no transitions out of done.
     /// 2. **Archived requires dedicated command** — use `orbit task archive`, not a
     ///    bare status update (enforced upstream; blocked here as defense-in-depth).
-    /// 3. **Friction is legacy-only** — new friction reports use
-    ///    `orbit.friction.add`.
-    /// 4. **InProgress → Review requires execution_summary** — enforced upstream in
+    /// 3. **InProgress → Review requires execution_summary** — enforced upstream in
     ///    `update_task_with_status_note`, not here (we lack the task data).
     ///
     /// Everything else is allowed.
@@ -160,15 +186,6 @@ impl TaskStatus {
         if target == TaskStatus::Archived {
             return Err(format!(
                 "invalid status transition: {} -> {} (use the archive command)",
-                self, target
-            ));
-        }
-
-        // Friction is retained for legacy persisted tasks only. New friction
-        // reports are append-only records under `.orbit/frictions/`.
-        if target == TaskStatus::Friction {
-            return Err(format!(
-                "invalid status transition: {} -> {} (friction can only be set at task creation)",
                 self, target
             ));
         }
@@ -289,107 +306,6 @@ impl FromStr for TaskType {
 impl TaskType {
     pub fn valid_names() -> &'static [&'static str] {
         &["feature", "bug", "refactor", "chore"]
-    }
-}
-
-/// Status of a review thread (open or resolved).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ReviewThreadStatus {
-    Open,
-    Resolved,
-}
-
-impl Display for ReviewThreadStatus {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ReviewThreadStatus::Open => write!(f, "open"),
-            ReviewThreadStatus::Resolved => write!(f, "resolved"),
-        }
-    }
-}
-
-impl FromStr for ReviewThreadStatus {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "open" => Ok(ReviewThreadStatus::Open),
-            "resolved" => Ok(ReviewThreadStatus::Resolved),
-            other => Err(format!("unknown review thread status: {other}")),
-        }
-    }
-}
-
-/// A single message within a [`ReviewThread`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ReviewMessage {
-    pub message_id: String,
-    pub at: DateTime<Utc>,
-    pub by: String,
-    pub body: String,
-    /// GitHub comment ID, set after sync. `None` means pending sync.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub github_comment_id: Option<u64>,
-}
-
-/// Anchor kind for a [`ReviewThread`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ReviewThreadAnchor {
-    Inline { path: String, line: u64 },
-    TaskLevel,
-}
-
-/// A review thread on a task, replacing direct GitHub review comments.
-///
-/// Threads with `path` and `line` are inline (file-specific) comments.
-/// Threads without are general comments (e.g. review summaries).
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct ReviewThread {
-    pub thread_id: String,
-    /// File path relative to repo root. `None` for general comments.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    /// Line number in the file. `None` for general comments.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub line: Option<u64>,
-    pub status: ReviewThreadStatus,
-    pub messages: Vec<ReviewMessage>,
-    /// GitHub review thread/comment ID, set after first sync.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub github_thread_id: Option<u64>,
-}
-
-impl ReviewThread {
-    pub fn anchor(&self) -> ReviewThreadAnchor {
-        match (&self.path, self.line) {
-            (Some(path), Some(line)) => ReviewThreadAnchor::Inline {
-                path: path.clone(),
-                line,
-            },
-            _ => ReviewThreadAnchor::TaskLevel,
-        }
-    }
-}
-
-impl Serialize for ReviewThread {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("ReviewThread", 7)?;
-        state.serialize_field("thread_id", &self.thread_id)?;
-        state.serialize_field("anchor", &self.anchor())?;
-        if let Some(path) = &self.path {
-            state.serialize_field("path", path)?;
-        }
-        if let Some(line) = self.line {
-            state.serialize_field("line", &line)?;
-        }
-        state.serialize_field("status", &self.status)?;
-        state.serialize_field("messages", &self.messages)?;
-        if let Some(github_thread_id) = self.github_thread_id {
-            state.serialize_field("github_thread_id", &github_thread_id)?;
-        }
-        state.end()
     }
 }
 
@@ -862,18 +778,6 @@ pub fn validate_task_dependencies(
     current_task_id: Option<&str>,
     dependencies: &[OrbitId],
 ) -> Result<(), OrbitError> {
-    let task_ids = tasks
-        .iter()
-        .map(|task| task.id.clone())
-        .collect::<BTreeSet<_>>();
-    for dependency in dependencies {
-        if !task_ids.contains(dependency) {
-            return Err(OrbitError::InvalidInput(format!(
-                "task dependency '{dependency}' does not resolve in this workspace"
-            )));
-        }
-    }
-
     let Some(current_task_id) = current_task_id else {
         return Ok(());
     };

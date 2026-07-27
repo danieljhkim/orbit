@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end smoke for the /plugin install orbit chain.
+# End-to-end smoke for the agent plugin install orbit chain.
 #
 # Runs against the *published* @orbit-tools/cli@latest from npm (not the
 # local working tree) so it catches version drift between the npm proxy
@@ -11,6 +11,10 @@
 #   2. drive `orbit mcp serve` over stdio with a JSON-RPC handshake
 #      (initialize + tools/list) and assert at least one `orbit.*` tool
 #      appears in the response.
+#   3. install the repository Codex plugin into an isolated CODEX_HOME,
+#      render a fresh Codex task prompt to verify Orbit skill discovery, and
+#      call the read-only orbit.task.list MCP tool through the installed
+#      plugin transport.
 #
 # Pass: exit 0. Fail: non-zero with the relevant stderr captured.
 # Supported: macOS arm64 / x86_64, Linux x86_64 / arm64. Not Windows.
@@ -27,6 +31,8 @@ require_bin() {
 require_bin node
 require_bin npx
 require_bin npm
+require_bin python3
+require_bin codex
 
 case "$(uname -s)" in
   Darwin|Linux) ;;
@@ -37,6 +43,7 @@ case "$(uname -s)" in
 esac
 
 NPM_PKG="@orbit-tools/cli"
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 TMPDIR_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_ROOT"' EXIT
 
@@ -73,6 +80,39 @@ run_with_timeout() {
     gnu_g) gtimeout "$secs" "$@" ;;
     perl) perl -e '$t=shift @ARGV; alarm $t; exec @ARGV or die "exec failed: $!\n"' "$secs" "$@" ;;
   esac
+}
+
+assert_jsonrpc_tool_call_ok() {
+  local jsonrpc_output="$1"
+  local call_id="$2"
+  python3 - "$jsonrpc_output" "$call_id" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+call_id = int(sys.argv[2])
+target = None
+for line in path.read_text(encoding="utf-8").splitlines():
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if payload.get("id") == call_id:
+        target = payload
+        break
+
+if target is None:
+    print(f"FAIL: no JSON-RPC response with id={call_id}", file=sys.stderr)
+    raise SystemExit(1)
+if "error" in target:
+    print(f"FAIL: JSON-RPC response id={call_id} returned error: {target['error']}", file=sys.stderr)
+    raise SystemExit(1)
+print(f"JSON-RPC response id={call_id} succeeded")
+PY
 }
 
 echo "--- step 1: npx -y $NPM_PKG@latest --version ---"
@@ -179,4 +219,166 @@ fi
 orbit_tool_count="$(grep -o '"orbit_[a-z_]*"' "$RPC_OUT" | sort -u | wc -l | tr -d '[:space:]')"
 echo "tools/list returned $orbit_tool_count distinct orbit_* tools"
 
-echo "PASS: /plugin install orbit chain serves MCP successfully (orbit $binary_version)"
+echo "--- step 4: Codex plugin install in isolated CODEX_HOME ---"
+CODEX_HOME_DIR="$TMPDIR_ROOT/codex-home"
+mkdir -p "$CODEX_HOME_DIR"
+CODEX_ENV=(env CODEX_HOME="$CODEX_HOME_DIR")
+
+if ! "${CODEX_ENV[@]}" codex plugin marketplace add "$repo_root" --json \
+     >"$TMPDIR_ROOT/codex-marketplace-add.json" 2>"$TMPDIR_ROOT/codex-marketplace-add.err"; then
+  echo "FAIL: codex plugin marketplace add $repo_root exited non-zero" >&2
+  echo "--- stderr ---" >&2
+  cat "$TMPDIR_ROOT/codex-marketplace-add.err" >&2
+  exit 1
+fi
+python3 - "$TMPDIR_ROOT/codex-marketplace-add.json" <<'PY'
+import json
+import sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+if payload.get("marketplaceName") != "orbit":
+    raise SystemExit(f"FAIL: expected marketplaceName=orbit, got {payload!r}")
+print("codex marketplace => orbit")
+PY
+
+if ! "${CODEX_ENV[@]}" codex plugin add orbit@orbit --json \
+     >"$TMPDIR_ROOT/codex-plugin-add.json" 2>"$TMPDIR_ROOT/codex-plugin-add.err"; then
+  echo "FAIL: codex plugin add orbit@orbit exited non-zero" >&2
+  echo "--- stderr ---" >&2
+  cat "$TMPDIR_ROOT/codex-plugin-add.err" >&2
+  exit 1
+fi
+python3 - "$TMPDIR_ROOT/codex-plugin-add.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+if payload.get("name") != "orbit" or payload.get("marketplaceName") != "orbit":
+    raise SystemExit(f"FAIL: expected installed orbit@orbit, got {payload!r}")
+installed = Path(payload.get("installedPath", ""))
+required = [
+    installed / "skills" / "orbit-task-pilot" / "SKILL.md",
+    installed / "agents" / "orbit-task-pilot.md",
+]
+missing = [str(path) for path in required if not path.is_file()]
+if missing:
+    raise SystemExit(f"FAIL: installed Orbit plugin is missing task-pilot assets: {missing}")
+print(f"codex plugin installed with task-pilot assets => {installed}")
+PY
+
+if ! "${CODEX_ENV[@]}" codex mcp list --json \
+     >"$TMPDIR_ROOT/codex-mcp-list.json" 2>"$TMPDIR_ROOT/codex-mcp-list.err"; then
+  echo "FAIL: codex mcp list exited non-zero" >&2
+  echo "--- stderr ---" >&2
+  cat "$TMPDIR_ROOT/codex-mcp-list.err" >&2
+  exit 1
+fi
+CODEX_MCP_TRANSPORT="$TMPDIR_ROOT/codex-mcp-transport.json"
+python3 - "$TMPDIR_ROOT/codex-mcp-list.json" "$CODEX_MCP_TRANSPORT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+servers = json.load(open(sys.argv[1], encoding="utf-8"))
+transport_path = Path(sys.argv[2])
+orbit = next((server for server in servers if server.get("name") == "orbit"), None)
+if orbit is None:
+    raise SystemExit("FAIL: installed Codex plugin did not register an orbit MCP server")
+transport = orbit.get("transport", {})
+serialized = json.dumps(transport)
+if "CLAUDE_PROJECT_DIR" in serialized:
+    raise SystemExit("FAIL: Codex MCP server config references CLAUDE_PROJECT_DIR")
+if transport.get("type") != "stdio":
+    raise SystemExit(f"FAIL: expected stdio Orbit MCP transport: {transport!r}")
+command = transport.get("command")
+args = transport.get("args", [])
+if not isinstance(command, str) or not command:
+    raise SystemExit(f"FAIL: Orbit MCP transport command is missing: {transport!r}")
+if not isinstance(args, list) or not all(isinstance(arg, str) and arg for arg in args):
+    raise SystemExit(f"FAIL: Orbit MCP transport args are invalid: {transport!r}")
+if command != "npx" or "mcp" not in args:
+    raise SystemExit(f"FAIL: unexpected Orbit MCP transport: {transport!r}")
+transport_path.write_text(json.dumps({"command": command, "args": args}), encoding="utf-8")
+print("codex mcp => orbit server registered")
+PY
+
+echo "--- step 5: Codex fresh task prompt discovers Orbit skills ---"
+CODEX_PROMPT_OUT="$TMPDIR_ROOT/codex-prompt.json"
+if ! "${CODEX_ENV[@]}" codex -C "$WORKSPACE_DIR" debug prompt-input "Use Orbit to list tasks." \
+     >"$CODEX_PROMPT_OUT" 2>"$TMPDIR_ROOT/codex-prompt.err"; then
+  echo "FAIL: codex debug prompt-input exited non-zero" >&2
+  echo "--- stderr ---" >&2
+  cat "$TMPDIR_ROOT/codex-prompt.err" >&2
+  exit 1
+fi
+python3 - "$CODEX_PROMPT_OUT" <<'PY'
+import json
+import sys
+text = json.dumps(json.load(open(sys.argv[1], encoding="utf-8")))
+required = [
+    "orbit:orbit",
+    "orbit:orbit-task",
+    "orbit:orbit-search",
+    "orbit:orbit-knowledge",
+    "orbit:orbit-task-pilot",
+]
+missing = [name for name in required if name not in text]
+if missing:
+    raise SystemExit(f"FAIL: fresh Codex task prompt is missing Orbit skills: {missing}")
+print("codex prompt-input => canonical Orbit skills discovered")
+PY
+
+echo "--- step 6: Codex plugin MCP command handles read-only tool call ---"
+CODEX_RPC_IN="$TMPDIR_ROOT/codex-rpc-in.txt"
+CODEX_RPC_OUT="$TMPDIR_ROOT/codex-rpc-out.txt"
+CODEX_RPC_ERR="$TMPDIR_ROOT/codex-rpc-err.txt"
+CODEX_MCP_ARGV=()
+while IFS= read -r arg; do
+  CODEX_MCP_ARGV+=("$arg")
+done < <(python3 - "$CODEX_MCP_TRANSPORT" <<'PY'
+import json
+import sys
+
+transport = json.load(open(sys.argv[1], encoding="utf-8"))
+print(transport["command"])
+for arg in transport["args"]:
+    print(arg)
+PY
+)
+if [[ "${#CODEX_MCP_ARGV[@]}" -eq 0 ]]; then
+  echo "FAIL: Codex plugin MCP transport command was empty" >&2
+  exit 1
+fi
+
+cat >"$CODEX_RPC_IN" <<'EOF'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke-codex-plugin-install","version":"0.0.1"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"orbit_task_list","arguments":{"status":"backlog","model":"codex"}}}
+EOF
+
+rc=0
+{
+  cat "$CODEX_RPC_IN"
+  sleep 5
+} | ( cd "$WORKSPACE_DIR" && run_with_timeout 120 "${CODEX_MCP_ARGV[@]}" ) \
+     >"$CODEX_RPC_OUT" 2>"$CODEX_RPC_ERR" || rc=$?
+
+if [[ "$rc" -ne 0 && "$rc" -ne 124 && "$rc" -ne 142 && "$rc" -ne 143 ]]; then
+  echo "FAIL: Codex plugin MCP command exited with $rc" >&2
+  echo "--- stderr ---" >&2
+  cat "$CODEX_RPC_ERR" >&2
+  echo "--- stdout ---" >&2
+  cat "$CODEX_RPC_OUT" >&2
+  exit 1
+fi
+if ! grep -q '"orbit_task_list"' "$CODEX_RPC_OUT"; then
+  echo "FAIL: Codex plugin tools/list response did not include orbit_task_list" >&2
+  echo "--- stdout ---" >&2
+  cat "$CODEX_RPC_OUT" >&2
+  echo "--- stderr ---" >&2
+  cat "$CODEX_RPC_ERR" >&2
+  exit 1
+fi
+assert_jsonrpc_tool_call_ok "$CODEX_RPC_OUT" 3
+
+echo "PASS: agent plugin install chains serve MCP successfully (orbit $binary_version)"

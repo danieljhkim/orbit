@@ -14,8 +14,8 @@ use orbit_engine::{
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
-use crate::OrbitRuntime;
 use crate::command::task::{SYSTEM_ACTOR_LABEL, TaskAddParams, TaskUpdateParams};
+use crate::{ActorIdentity, OrbitRuntime};
 
 fn test_runtime() -> (tempfile::TempDir, OrbitRuntime) {
     let root = tempdir().expect("create tempdir");
@@ -63,7 +63,7 @@ fn insert_run_with_resolved_crew(runtime: &OrbitRuntime, job_id: &str, input: Va
     let run = runtime
         .stores()
         .jobs()
-        .insert_run(job_id, 1, Utc::now(), Some(input.clone()), None)
+        .insert_job_run(job_id, 1, Utc::now(), Some(input.clone()), None)
         .expect("insert job run");
     runtime
         .record_run_crew_from_input(&run.run_id, &input)
@@ -94,6 +94,7 @@ fn run_update_task_v2_activity(runtime: &OrbitRuntime, run_id: &str, input: Valu
         input,
         audit,
         run_id,
+        agent_override: None,
         host: Some(runtime),
     })
     .expect("dispatch update_task activity")
@@ -316,7 +317,6 @@ fn worktree_setup_admits_unplanned_workflow_statuses() {
         })
         .expect("create archived candidate");
     runtime.archive_task(&archived.id).expect("archive task");
-
     let task_ids = vec![
         proposed.id.clone(),
         backlog.id.clone(),
@@ -363,6 +363,28 @@ fn direct_update_to_in_progress_still_requires_plan_for_unapproved_statuses() {
             },
         )
         .expect_err("direct update should still require a plan");
+    assert!(
+        err.to_string()
+            .contains("requires a non-empty execution plan"),
+        "{err}"
+    );
+}
+
+#[test]
+fn direct_start_from_proposed_still_requires_plan() {
+    let (_root, runtime) = test_runtime();
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Direct start remains gated".to_string(),
+            description: "A human start is not workflow admission.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("create proposed task");
+
+    let err = runtime
+        .start_task(&task.id, Some("attempt direct start".to_string()), None)
+        .expect_err("direct start should still require a plan");
     assert!(
         err.to_string()
             .contains("requires a non-empty execution plan"),
@@ -632,12 +654,13 @@ fn activity_update_comment_records_comment_as_system() {
         .expect("reload comments");
     let comment = comments.last().expect("activity comment");
     assert_eq!(comment.by, SYSTEM_ACTOR_LABEL);
+    assert_eq!(comment.message, "Automation left a note.");
+    // ORB-10311: the comment persists but no bare `commented` history stub is created.
     let history = runtime.get_task_history(&task.id).expect("reload history");
-    let comment_history = history
-        .iter()
-        .find(|entry| entry.event == "commented")
-        .expect("comment history");
-    assert_eq!(comment_history.by, SYSTEM_ACTOR_LABEL);
+    assert!(
+        !history.iter().any(|entry| entry.event == "commented"),
+        "a persisted comment must not emit a `commented` history entry"
+    );
 }
 
 #[test]
@@ -686,6 +709,8 @@ fn automation_update_under_agent_runtime_uses_model_identity_for_attribution() {
 
 #[test]
 fn automation_update_without_agent_runtime_falls_back_to_system_attribution() {
+    let _env =
+        orbit_common::test_env::unset(orbit_common::test_env::AGENT_IDENTITY_ENV.iter().copied());
     let (_root, runtime) = test_runtime();
     let task = runtime
         .add_task(TaskAddParams {
@@ -736,7 +761,9 @@ fn automation_review_done_transitions_preserve_existing_implemented_by_without_m
             &task.id,
             TaskUpdateParams {
                 execution_summary: Some("Existing implementation summary.".to_string()),
-                implemented_by: Some(Some("claude-opus-4-7".to_string())),
+                implemented_by: Some(Some(
+                    orbit_common::test_fixtures::TEST_CLAUDE_MODEL.to_string(),
+                )),
                 ..Default::default()
             },
         )
@@ -752,7 +779,10 @@ fn automation_review_done_transitions_preserve_existing_implemented_by_without_m
         )
         .expect("automation review update");
     let reviewed = runtime.get_task(&task.id).expect("reload reviewed task");
-    assert_eq!(reviewed.implemented_by.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(
+        reviewed.implemented_by.as_deref(),
+        Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL)
+    );
 
     runtime
         .apply_task_automation_update(
@@ -764,7 +794,10 @@ fn automation_review_done_transitions_preserve_existing_implemented_by_without_m
         )
         .expect("automation done update");
     let done = runtime.get_task(&task.id).expect("reload done task");
-    assert_eq!(done.implemented_by.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(
+        done.implemented_by.as_deref(),
+        Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL)
+    );
 }
 
 #[test]
@@ -810,11 +843,12 @@ fn generic_automation_status_update_uses_system_history_and_preserves_implemente
 }
 
 #[test]
-fn direct_update_task_keeps_default_human_attribution() {
+fn direct_update_task_uses_unknown_attribution_without_an_actor_envelope() {
     let (_root, runtime) = test_runtime();
+    let runtime = runtime.with_actor(ActorIdentity::unknown());
     let task = runtime
         .add_task(TaskAddParams {
-            title: "Human comment".to_string(),
+            title: "Unenveloped comment".to_string(),
             description: "Exercise direct update attribution.".to_string(),
             workspace_path: Some(".".to_string()),
             ..Default::default()
@@ -825,7 +859,7 @@ fn direct_update_task_keeps_default_human_attribution() {
         .update_task(
             &task.id,
             TaskUpdateParams {
-                comment: Some("Human-visible note.".to_string()),
+                comment: Some("Visible note.".to_string()),
                 ..Default::default()
             },
         )
@@ -834,55 +868,130 @@ fn direct_update_task_keeps_default_human_attribution() {
     let comments = runtime
         .get_task_comments(&task.id)
         .expect("reload comments");
-    let comment = comments.last().expect("human comment");
-    assert_eq!(comment.by, "human");
+    let comment = comments.last().expect("direct comment");
+    assert_eq!(comment.by, "unknown");
+    assert_eq!(comment.message, "Visible note.");
+    // ORB-10311: the full comment is persisted, but no redundant `commented`
+    // history entry is emitted alongside it.
     let history = runtime.get_task_history(&task.id).expect("reload history");
-    let comment_history = history
-        .iter()
-        .find(|entry| entry.event == "commented")
-        .expect("comment history");
-    assert_eq!(comment_history.by, "human");
+    assert!(
+        !history.iter().any(|entry| entry.event == "commented"),
+        "a persisted comment must not emit a `commented` history entry"
+    );
 }
 
 #[test]
-fn dispatch_batch_claim_records_start_and_comment_as_system() {
+fn source_task_id_change_history_records_previous_and_replacement() {
     let (_root, runtime) = test_runtime();
+    let source = runtime
+        .add_task(TaskAddParams {
+            title: "Source of regression".to_string(),
+            description: "Origin task referenced by a regression.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("add source task");
     let task = runtime
         .add_task(TaskAddParams {
-            title: "Claim in batch".to_string(),
-            description: "Exercise dispatch_batch attribution.".to_string(),
+            title: "Regressed task".to_string(),
+            description: "Exercise source_task_id change history enrichment.".to_string(),
             workspace_path: Some(".".to_string()),
             ..Default::default()
         })
         .expect("add task");
-    let task = approve_for_execution(&runtime, &task);
 
-    orbit_engine::execute_deterministic_action(
-        &runtime,
-        "dispatch_batch",
-        &json!({
-            "run_id": "jrun-test",
-            "parallelism": 1,
-            "task_ids": [task.id.clone()]
-        }),
-        false,
-        &HashMap::new(),
-        None,
-    )
-    .expect("dispatch batch");
+    runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                source_task_id: Some(Some(source.id.clone())),
+                ..Default::default()
+            },
+        )
+        .expect("set source_task_id");
+    let set_note = latest_source_task_id_note(&runtime, &task.id);
+    assert!(set_note.contains("(none)"), "{set_note}");
+    assert!(set_note.contains(&source.id), "{set_note}");
 
-    let history = runtime.get_task_history(&task.id).expect("reload history");
-    let start_entry = history
-        .iter()
-        .find(|entry| entry.event == "started")
-        .expect("start history");
-    assert_eq!(start_entry.by, SYSTEM_ACTOR_LABEL);
-    let comments = runtime
-        .get_task_comments(&task.id)
-        .expect("reload comments");
-    let batch_comment = comments
-        .iter()
-        .find(|comment| comment.message.starts_with("Batch dispatched:"))
-        .expect("batch dispatch comment");
-    assert_eq!(batch_comment.by, SYSTEM_ACTOR_LABEL);
+    runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                source_task_id: Some(None),
+                ..Default::default()
+            },
+        )
+        .expect("clear source_task_id");
+    let cleared_note = latest_source_task_id_note(&runtime, &task.id);
+    assert!(cleared_note.contains(&source.id), "{cleared_note}");
+    assert!(cleared_note.contains("(none)"), "{cleared_note}");
+}
+
+fn latest_source_task_id_note(runtime: &OrbitRuntime, id: &str) -> String {
+    runtime
+        .get_task_history(id)
+        .expect("reload history")
+        .into_iter()
+        .rev()
+        .find(|entry| {
+            entry.event == "updated"
+                && entry
+                    .note
+                    .as_deref()
+                    .is_some_and(|note| note.contains("source_task_id changed"))
+        })
+        .and_then(|entry| entry.note)
+        .expect("source_task_id change history entry")
+}
+
+#[test]
+fn direct_update_identity_prefers_model_for_authored_roles() {
+    let (_root, runtime) = test_runtime();
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Human update identity precedence".to_string(),
+            description: "Exercise direct update authored-role precedence.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("add task");
+
+    let planned = runtime
+        .update_task_with_identity(
+            &task.id,
+            TaskUpdateParams {
+                plan: Some("Implement and validate the task.".to_string()),
+                ..Default::default()
+            },
+            Some("codex".to_string()),
+            Some("gpt-explicit".to_string()),
+        )
+        .expect("author plan with explicit identity");
+    assert_eq!(planned.planned_by.as_deref(), Some("gpt-explicit"));
+
+    runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                status: Some(TaskStatus::Backlog),
+                ..Default::default()
+            },
+        )
+        .expect("approve task");
+    runtime
+        .start_task(&task.id, Some("start task".to_string()), None)
+        .expect("start task");
+    let reviewed = runtime
+        .update_task_with_identity(
+            &task.id,
+            TaskUpdateParams {
+                status: Some(TaskStatus::Review),
+                execution_summary: Some("Implemented and validated.".to_string()),
+                ..Default::default()
+            },
+            Some("codex".to_string()),
+            Some("gpt-explicit".to_string()),
+        )
+        .expect("review task with explicit identity");
+    assert_eq!(reviewed.implemented_by.as_deref(), Some("gpt-explicit"));
 }

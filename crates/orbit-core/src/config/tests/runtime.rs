@@ -1,11 +1,56 @@
 use super::super::runtime::*;
-use orbit_common::types::{OrbitError, all_agent_families};
+use orbit_common::types::{Crew, CrewRoleAssignment, OrbitError, all_agent_families};
 use std::collections::BTreeMap;
 use std::path::Path;
 use tempfile::tempdir;
 
 fn write_config(dir: &Path, body: &str) {
     std::fs::write(dir.join("config.toml"), body).expect("write config");
+}
+
+fn single_family_crew(name: &str) -> Crew {
+    let role = CrewRoleAssignment {
+        model: format!("{name}-model"),
+        provider: name.to_string(),
+        backend: "cli".to_string(),
+    };
+    Crew {
+        name: name.to_string(),
+        assignment: role,
+        description: None,
+        tags: Vec::new(),
+    }
+}
+
+#[test]
+fn built_in_crews_use_standard_model_specific_names() {
+    let crews = default_crews();
+    assert_eq!(
+        crews.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec![
+            "fable", "gemini", "grok", "luna", "opus", "sol", "sonnet", "terra"
+        ]
+    );
+    for (name, provider, model) in [
+        ("opus", "claude", "opus"),
+        ("sonnet", "claude", "sonnet"),
+        ("fable", "claude", "fable"),
+        ("sol", "codex", "gpt-5.6-sol"),
+        ("terra", "codex", "gpt-5.6-terra"),
+        ("luna", "codex", "gpt-5.6-luna"),
+        ("gemini", "gemini", "pro"),
+        ("grok", "grok", "grok-build"),
+    ] {
+        let assignment = &crews.get(name).expect("built-in crew").assignment;
+        assert_eq!(assignment.provider, provider);
+        assert_eq!(assignment.model, model);
+        assert_eq!(assignment.backend, "cli");
+    }
+    assert!(!crews.contains_key("claude"));
+    assert!(!crews.contains_key("codex"));
+
+    let config = RuntimeConfig::default_for_data_root(Path::new(".orbit"));
+    assert_eq!(config.default_crew.as_deref(), Some("opus"));
 }
 
 fn load_config(body: &str) -> Result<RuntimeConfig, OrbitError> {
@@ -28,6 +73,27 @@ fn assert_invalid_duel_config(body: &str, substrings: &[&str]) {
 }
 
 #[test]
+fn crew_description_and_tags_normalize_without_loss() {
+    let config = load_config(
+        r#"
+[workflow]
+default_crew = "sol"
+
+[crews.sol]
+model = "gpt-test"
+provider = "codex"
+backend = "cli"
+description = "  Systems implementation  "
+tags = [" review ", "", "hard", "review"]
+"#,
+    )
+    .expect("config loads");
+    let crew = config.crews.get("sol").expect("sol crew");
+    assert_eq!(crew.description.as_deref(), Some("Systems implementation"));
+    assert_eq!(crew.tags, vec!["hard", "review"]);
+}
+
+#[test]
 fn duel_config_loads_candidates_and_models() {
     let config = load_config(
         r#"
@@ -43,7 +109,10 @@ CLAUDE = " opus-4.7 "
 
     let mut expected_models = BTreeMap::new();
     expected_models.insert("claude".to_string(), "opus-4.7".to_string());
-    expected_models.insert("codex".to_string(), "gpt-5.5".to_string());
+    expected_models.insert(
+        "codex".to_string(),
+        orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string(),
+    );
     assert_eq!(
         config.duel,
         DuelConfig {
@@ -248,9 +317,9 @@ fn crews_load_when_present_and_well_formed() {
         workspace.path(),
         r#"
 [crews.codex]
-planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+model = "gpt-5.5"
+provider = "codex"
+backend = "cli"
 
 [workflow]
 default_crew = "codex"
@@ -266,9 +335,9 @@ default_crew = "codex"
             .crews
             .get("codex")
             .expect("crew exists")
-            .implementer
+            .assignment
             .model,
-        "gpt-5.5"
+        orbit_common::test_fixtures::TEST_CODEX_MODEL
     );
 }
 
@@ -280,9 +349,9 @@ fn default_crew_must_reference_defined_crew() {
         workspace.path(),
         r#"
 [crews.codex]
-planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+model = "gpt-5.5"
+provider = "codex"
+backend = "cli"
 
 [workflow]
 default_crew = "missing"
@@ -305,9 +374,9 @@ fn default_crew_unset_with_custom_crews_fails_load() {
         workspace.path(),
         r#"
 [crews.my-team]
-planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+model = "gpt-5.5"
+provider = "codex"
+backend = "cli"
 "#,
     );
 
@@ -324,42 +393,68 @@ reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 fn default_crew_unset_with_seeded_crew_still_loads() {
     let global = tempdir().expect("global tempdir");
     let workspace = tempdir().expect("workspace tempdir");
-    // The seeded codex crew is present, so the default-crew fallback applies.
+    // The canonical claude system crew is present, so the fallback applies.
     write_config(
         workspace.path(),
         r#"
-[crews.codex]
-planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+[crews.claude]
+model = "opus"
+provider = "claude"
+backend = "cli"
 "#,
     );
 
     let config =
         RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
-    assert_eq!(config.default_crew.as_deref(), Some("codex"));
+    assert_eq!(config.default_crew.as_deref(), Some("claude"));
 }
 
 #[test]
 fn workflow_default_crew_no_crews_defined_is_noop() {
+    use super::super::registry::resolve_default_crew;
     let crews = BTreeMap::new();
 
-    let default_crew =
-        workflow_default_crew_from_raw(None, &crews).expect("empty registry is allowed");
+    let default_crew = resolve_default_crew(None, &crews, None).expect("empty registry is allowed");
 
     assert_eq!(default_crew, None);
 }
 
 #[test]
-fn crews_with_incomplete_role_fail_load() {
+fn workflow_default_crew_uses_environment_then_claude_system_default() {
+    use super::super::registry::resolve_default_crew;
+    let crews = BTreeMap::from([
+        ("opus".to_string(), single_family_crew("claude")),
+        ("sol".to_string(), single_family_crew("codex")),
+        ("gemini".to_string(), single_family_crew("gemini")),
+    ]);
+
+    let env = resolve_default_crew(None, &crews, Some("google"))
+        .expect("deprecated environment alias resolves");
+    assert_eq!(env.as_deref(), Some("gemini"));
+
+    let codex = resolve_default_crew(None, &crews, Some("codex"))
+        .expect("provider environment maps to standard crew");
+    assert_eq!(codex.as_deref(), Some("sol"));
+
+    let system =
+        resolve_default_crew(None, &crews, None).expect("canonical system default resolves");
+    assert_eq!(system.as_deref(), Some("opus"));
+
+    let error = resolve_default_crew(None, &crews, Some("bogus"))
+        .expect_err("selected invalid environment value must not fall back");
+    assert!(error.to_string().contains("CONSTELLATION_DEFAULT_PROVIDER"));
+}
+
+#[test]
+fn flat_crews_with_incomplete_assignment_fail_load() {
     let global = tempdir().expect("global tempdir");
     let workspace = tempdir().expect("workspace tempdir");
     write_config(
         workspace.path(),
         r#"
 [crews.codex]
-planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+model = "gpt-5.5"
+provider = "codex"
 "#,
     );
 
@@ -368,7 +463,27 @@ implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 
     assert!(matches!(error, OrbitError::InvalidInput(_)));
     assert!(error.to_string().contains("[crews.codex]"));
-    assert!(error.to_string().contains("reviewer"));
+    assert!(error.to_string().contains("backend"));
+}
+
+#[test]
+fn legacy_divergent_crew_uses_implementer_assignment() {
+    let config = load_config(
+        r#"
+[crews.legacy]
+planner = { model = "planner-model", provider = "claude", backend = "cli" }
+implementer = { model = "implementer-model", provider = "codex", backend = "cli" }
+reviewer = { model = "reviewer-model", provider = "gemini", backend = "cli" }
+
+[workflow]
+default_crew = "legacy"
+"#,
+    )
+    .expect("legacy crew loads");
+
+    let crew = config.crews.get("legacy").expect("legacy crew");
+    assert_eq!(crew.assignment.model, "implementer-model");
+    assert_eq!(crew.assignment.provider, "codex");
 }
 
 #[test]
@@ -384,4 +499,83 @@ fn task_artifact_store_rejects_removed_key() {
     assert!(message.contains("[task] artifact_store"));
     assert!(message.contains("no longer supported"));
     assert!(message.contains("v2"));
+}
+
+#[test]
+fn workflow_auto_ship_defaults_false_and_loads_when_set() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+
+    write_config(workspace.path(), "");
+    let config =
+        RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
+    assert!(!config.workflow_auto_ship());
+
+    write_config(
+        workspace.path(),
+        r#"
+[workflow]
+auto_ship = true
+"#,
+    );
+    let config =
+        RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
+    assert!(config.workflow_auto_ship());
+}
+
+#[test]
+fn workspace_config_replaces_global_instead_of_merging() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        global.path(),
+        "[workflow]\nbase_branch = \"global-branch\"\n[scoring]\nenabled = false\n",
+    );
+    write_config(workspace.path(), "[workflow]\nauto_ship = true\n");
+
+    let config = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("workspace config loads");
+
+    assert!(config.workflow_auto_ship());
+    assert_eq!(config.workflow_base_branch(), "main");
+    assert!(config.scoring_enabled);
+}
+
+#[test]
+fn runtime_log_rotation_rejects_invalid_values() {
+    // [ORB-00415] Malformed rotation knobs must fail at config load with a
+    // clear, key-naming error.
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+
+    write_config(workspace.path(), "[runtime]\nlog_retention_days = 0\n");
+    let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect_err("zero retention must fail config load");
+    assert!(
+        error.to_string().contains("log_retention_days"),
+        "message: {error}"
+    );
+
+    write_config(
+        workspace.path(),
+        "[runtime]\nlog_max_total_mb = 10\nlog_max_file_mb = 50\n",
+    );
+    let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect_err("per-file budget above total must fail config load");
+    assert!(
+        error.to_string().contains("log_max_file_mb"),
+        "message: {error}"
+    );
+}
+
+#[test]
+fn runtime_log_rotation_accepts_valid_values() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        workspace.path(),
+        "[runtime]\nlog_retention_days = 14\nlog_max_total_mb = 200\nlog_max_file_mb = 20\n",
+    );
+    RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("valid log rotation config should load");
 }

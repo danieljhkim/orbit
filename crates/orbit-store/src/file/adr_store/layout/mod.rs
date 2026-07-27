@@ -6,7 +6,7 @@ use orbit_common::types::OrbitError;
 
 use super::constants::{ADR_YAML, BODY_MD};
 #[cfg(test)]
-use crate::file::layout::read_child_dirs;
+use crate::file::path_safety::read_child_dirs;
 
 pub(super) use orbit_common::types::validate_adr_id;
 

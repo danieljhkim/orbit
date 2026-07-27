@@ -20,17 +20,18 @@ mod workspace_config;
 mod workspace_id;
 
 const CONFIG_SCHEMA_VERSION: u32 = 1;
-const REGISTRY_SCHEMA_VERSION: u32 = 3;
+const REGISTRY_SCHEMA_VERSION: u32 = 4;
 
 pub use store::TaskRegistryStore;
+pub(crate) use store::parse_orb_task_number;
 pub use types::{
-    BindWorkspaceParams, ProjectionRebuildResult, TaskBundleBinding, TaskIndexFilter,
-    WorkspaceBinding, WorkspaceConfig,
+    AllocatorSeedOutcome, BindWorkspaceParams, DanglingRelationTarget, ProjectionRebuildResult,
+    RegisterWorkspaceParams, TaskBundleBinding, TaskIndexFilter, WorkspaceBinding,
+    WorkspaceCheckoutBinding, WorkspaceConfig,
 };
 pub use workspace_config::{
-    assign_workspace_id, home_task_workspace_dir, read_workspace_config,
-    read_workspace_config_optional, task_registry_path, workspace_config_path,
-    workspace_id_for_orbit_dir, write_workspace_config,
+    read_workspace_config, read_workspace_config_optional, task_registry_path,
+    workspace_config_path, workspace_id_for_orbit_dir, write_workspace_config,
 };
 
 #[cfg(test)]

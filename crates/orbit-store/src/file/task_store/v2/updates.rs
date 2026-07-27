@@ -12,12 +12,14 @@ impl TaskV2Store {
                 "task actor must not be empty".to_string(),
             ));
         }
-        reject_unsupported_document_fields(fields)?;
-
         self.with_task_lock(id, || {
             let mut bundle = self.read_existing_bundle(id)?;
             let mut envelope_changed = false;
             let mut title_changed = false;
+            let mut previous_title: Option<String> = None;
+            let relations_changed = fields.dependencies.is_some()
+                || fields.source_task_id.is_some()
+                || fields.relations.is_some();
 
             if let Some(value) = &fields.title {
                 if value.trim().is_empty() {
@@ -26,6 +28,9 @@ impl TaskV2Store {
                     ));
                 }
                 title_changed = *value != bundle.envelope.title;
+                if title_changed {
+                    previous_title = Some(bundle.envelope.title.clone());
+                }
                 bundle.envelope.title = value.clone();
                 envelope_changed = true;
             }
@@ -59,6 +64,10 @@ impl TaskV2Store {
             }
             if let Some(value) = fields.task_type {
                 bundle.envelope.task_type = value;
+                envelope_changed = true;
+            }
+            if let Some(value) = &fields.pr_status {
+                bundle.envelope.pr_status = value.clone();
                 envelope_changed = true;
             }
             if let Some(value) = &fields.dependencies {
@@ -100,6 +109,14 @@ impl TaskV2Store {
                 envelope_changed = true;
             }
 
+            if relations_changed {
+                self.registry.validate_task_relations(
+                    &self.workspace_id,
+                    id,
+                    &bundle.envelope.relations,
+                )?;
+            }
+
             if let Some(value) = &fields.description {
                 self.bundle_store
                     .rewrite_document(id, TaskDocumentV2::Description, value)?;
@@ -122,13 +139,18 @@ impl TaskV2Store {
 
             if title_changed {
                 let now = Utc::now();
+                // ORB-10311: capture both titles so the rename is auditable from
+                // history alone rather than an empty `renamed` marker.
+                let note = previous_title
+                    .as_ref()
+                    .map(|previous| format!("\"{previous}\" → \"{}\"", bundle.envelope.title));
                 let event = TaskEventRowV2 {
                     schema_version: TASK_ARTIFACT_SCHEMA_VERSION,
                     event_id: next_event_id(&bundle.events),
                     at: now,
                     by: fields.actor.clone(),
                     event_type: "renamed".to_string(),
-                    note: None,
+                    note,
                     from_status: None,
                     to_status: None,
                 };
@@ -231,37 +253,6 @@ impl TaskV2Store {
                 self.bundle_store.rewrite_envelope(id, &bundle.envelope)?;
                 self.replace_index_best_effort(&bundle.envelope, "task history update");
             }
-            Ok(())
-        })
-    }
-
-    pub(crate) fn update_task_reviews(
-        &self,
-        id: &str,
-        fields: &TaskReviewUpdateParams,
-    ) -> Result<(), OrbitError> {
-        orbit_common::types::validate_orb_task_id(id)?;
-        self.with_task_lock(id, || {
-            let mut bundle = self.read_existing_bundle(id)?;
-            let mut threads = std::mem::take(&mut bundle.review_threads)
-                .into_iter()
-                .map(review_thread_from_v2)
-                .collect::<Vec<_>>();
-
-            if let Some(replacement) = &fields.replace_review_threads {
-                threads = replacement.clone();
-            } else if !fields.append_review_threads.is_empty() {
-                merge_review_threads_v2(&mut threads, fields.append_review_threads.clone());
-            }
-
-            let threads = threads
-                .into_iter()
-                .map(review_thread_to_v2)
-                .collect::<Result<Vec<_>, _>>()?;
-            self.bundle_store.rewrite_review_threads(id, &threads)?;
-            bundle.envelope.updated_at = Utc::now();
-            self.bundle_store.rewrite_envelope(id, &bundle.envelope)?;
-            self.replace_index_best_effort(&bundle.envelope, "task review update");
             Ok(())
         })
     }

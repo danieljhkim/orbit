@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-// ORB-00013: Tests use unwrap/expect to keep fixture setup readable.
+// Tests use unwrap/expect to keep fixture setup readable.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fs;
@@ -154,120 +154,6 @@ fn repeated_payload_with_same_session_dedups_and_skips_second_audit() {
 }
 
 #[test]
-fn review_threads_surface_once_replies_reopen_and_resolve_suppresses() {
-    let workspace = TestWorkspace::new();
-    let task_id = workspace.add_task("Review hook task");
-    workspace.add_review_thread(&task_id, "Human steering note.", "human");
-    let thread_id = workspace.review_thread_id(&task_id);
-    let payload = r#"{"tool_name":"Edit","file_path":"src/lib.rs"}"#;
-
-    let first = workspace.run_hook(
-        payload,
-        &[
-            ("ORBIT_SESSION_ID", "review-thread-session"),
-            ("ORBIT_ACTIVE_TASK_ID", &task_id),
-        ],
-        "review thread first",
-    );
-    let stdout = String::from_utf8_lossy(&first.stdout);
-    assert!(stdout.contains("Review threads awaiting agent attention"));
-    assert!(stdout.contains("Human steering note."));
-    assert!(stdout.contains("human [human]"));
-
-    let second = workspace.run_hook(
-        payload,
-        &[
-            ("ORBIT_SESSION_ID", "review-thread-session"),
-            ("ORBIT_ACTIVE_TASK_ID", &task_id),
-        ],
-        "review thread second",
-    );
-    assert!(second.stdout.is_empty());
-
-    workspace.reply_review_thread(&task_id, &thread_id, "Agent folded it in.", "codex");
-    workspace.resolve_review_thread(&task_id, &thread_id);
-    let resolved = workspace.run_hook(
-        payload,
-        &[
-            ("ORBIT_SESSION_ID", "review-thread-session"),
-            ("ORBIT_ACTIVE_TASK_ID", &task_id),
-        ],
-        "review thread resolved",
-    );
-    assert!(resolved.stdout.is_empty());
-
-    workspace.reply_review_thread(&task_id, &thread_id, "Please revisit this.", "human");
-    let reopened = workspace.run_hook(
-        payload,
-        &[
-            ("ORBIT_SESSION_ID", "review-thread-session"),
-            ("ORBIT_ACTIVE_TASK_ID", &task_id),
-        ],
-        "review thread reopened",
-    );
-    let stdout = String::from_utf8_lossy(&reopened.stdout);
-    assert!(stdout.contains("Please revisit this."));
-
-    let final_pass = workspace.run_hook(
-        payload,
-        &[
-            ("ORBIT_SESSION_ID", "review-thread-session"),
-            ("ORBIT_ACTIVE_TASK_ID", &task_id),
-        ],
-        "review thread reopened dedup",
-    );
-    assert!(final_pass.stdout.is_empty());
-
-    let events = workspace.run_json(
-        &[
-            "audit",
-            "list",
-            "--kind",
-            "review_thread_surfaced",
-            "--json",
-        ],
-        "audit list",
-    );
-    let rows = events.as_array().expect("audit rows");
-    assert_eq!(rows.len(), 2, "audit rows: {events}");
-    let mut seqs = rows
-        .iter()
-        .map(|row| {
-            let arguments: Value =
-                serde_json::from_str(row["arguments_json"].as_str().expect("arguments_json"))
-                    .expect("audit arguments JSON");
-            assert_eq!(arguments["task_id"], json!(task_id));
-            assert_eq!(arguments["thread_id"], json!(thread_id));
-            arguments["last_seen_message_seq"].as_u64().expect("seq")
-        })
-        .collect::<Vec<_>>();
-    seqs.sort_unstable();
-    assert_eq!(seqs, [1, 3]);
-}
-
-#[test]
-fn combined_learning_and_review_thread_output_renders_both_paths() {
-    let workspace = TestWorkspace::new();
-    workspace.add_learning("Combined learning reminder", &["src/**"]);
-    let task_id = workspace.add_task("Combined hook task");
-    workspace.add_review_thread(&task_id, "Combined review note.", "human");
-
-    let output = workspace.run_hook(
-        r#"{"tool_name":"Read","path":"src/lib.rs"}"#,
-        &[
-            ("ORBIT_SESSION_ID", "combined-session"),
-            ("ORBIT_ACTIVE_TASK_ID", &task_id),
-        ],
-        "combined hook",
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Project learnings relevant to this task"));
-    assert!(stdout.contains("Combined learning reminder"));
-    assert!(stdout.contains("Review threads awaiting agent attention"));
-    assert!(stdout.contains("Combined review note."));
-}
-
-#[test]
 fn per_call_cap_limits_rendered_learning_count() {
     let workspace = TestWorkspace::new();
     for idx in 0..6 {
@@ -382,6 +268,147 @@ fn missing_session_uses_tmpdir_parent_pid_state_file() {
     );
 }
 
+#[test]
+fn payload_session_id_keys_dedup_without_env_var() {
+    let workspace = TestWorkspace::new();
+    workspace.add_learning("Payload session id anchors dedup", &["src/**"]);
+    // No ORBIT_SESSION_ID in the environment — the session id rides in the
+    // hook payload itself, as Claude Code sends it on every hook event. This
+    // is the previously-dead path: ORBIT_SESSION_ID was exported on 0/2,374
+    // observed fires, so dedup only engages once the payload anchors it.
+    let payload = r#"{"tool_name":"Edit","tool_input":{"file_path":"src/lib.rs"},"session_id":"payload-session"}"#;
+
+    let first = workspace.run_hook(payload, &[], "payload session first");
+    assert!(!first.stdout.is_empty());
+    let second = workspace.run_hook(payload, &[], "payload session second");
+    assert!(
+        second.stdout.is_empty(),
+        "second stdout: {}",
+        String::from_utf8_lossy(&second.stdout)
+    );
+
+    let state = workspace.session_learning_state("payload-session");
+    assert_eq!(state["count"], 1);
+
+    let events = workspace.run_json(
+        &["audit", "list", "--kind", "learning_injected", "--json"],
+        "audit list",
+    );
+    let rows = events.as_array().expect("audit rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["session_id"], "payload-session");
+}
+
+#[test]
+fn env_session_id_takes_priority_over_payload_session_id() {
+    let workspace = TestWorkspace::new();
+    workspace.add_learning("Env session id wins over payload", &["src/**"]);
+    let payload = r#"{"tool_name":"Edit","tool_input":{"file_path":"src/lib.rs"},"session_id":"payload-session"}"#;
+
+    let output = workspace.run_hook(
+        payload,
+        &[("ORBIT_SESSION_ID", "env-session")],
+        "env-priority hook",
+    );
+    assert!(!output.stdout.is_empty());
+
+    // Engine-managed runs pre-seed dedup state under the env session id, so
+    // the env var must key the state even when the payload carries its own.
+    let state = workspace.session_learning_state("env-session");
+    assert_eq!(state["count"], 1);
+}
+
+#[test]
+fn unavailable_audit_backend_fails_open_and_still_injects() {
+    let workspace = TestWorkspace::new();
+    workspace.add_learning("Injection survives a dead audit backend", &["src/**"]);
+    workspace.break_audit_event_inserts();
+
+    let output = workspace.run_hook(
+        r#"{"tool_name":"Edit","tool_input":{"file_path":"src/lib.rs"},"session_id":"failopen-session"}"#,
+        &[],
+        "fail-open hook",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Injection survives a dead audit backend"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
+fn show_emits_learning_shown_event_and_stats_roll_up() {
+    let workspace = TestWorkspace::new();
+    let shown = workspace.add_learning("Shown learning gets read", &["src/**"]);
+    let shown_id = shown["id"].as_str().expect("shown learning id").to_string();
+    let unshown = workspace.add_learning("Unshown learning stays cold", &["src/**"]);
+    let unshown_id = unshown["id"]
+        .as_str()
+        .expect("unshown learning id")
+        .to_string();
+
+    // Inject both learnings in one hook fire.
+    let output = workspace.run_hook(
+        r#"{"tool_name":"Edit","tool_input":{"file_path":"src/lib.rs"},"session_id":"show-session"}"#,
+        &[],
+        "show rollup hook",
+    );
+    assert!(!output.stdout.is_empty());
+
+    // Opening the full body is the passive usage signal.
+    let shown_view =
+        workspace.run_json(&["learning", "show", &shown_id, "--json"], "learning show");
+    assert_eq!(shown_view["id"], shown_id);
+
+    let shown_events = workspace.run_json(
+        &["audit", "list", "--kind", "learning_shown", "--json"],
+        "audit list shown",
+    );
+    let shown_rows = shown_events.as_array().expect("shown rows");
+    assert_eq!(shown_rows.len(), 1, "shown rows: {shown_events}");
+    assert_eq!(shown_rows[0]["target_id"], shown_id);
+
+    let stats = workspace.run_json(&["learning", "stats", "--json"], "learning stats");
+    let rows = stats.as_array().expect("stats rows");
+    assert_eq!(rows.len(), 2, "stats rows: {stats}");
+    let row_for = |id: &str| {
+        rows.iter()
+            .find(|row| row["learning_id"] == *id)
+            .unwrap_or_else(|| panic!("no stats row for {id}: {stats}"))
+    };
+
+    let shown_row = row_for(&shown_id);
+    assert_eq!(shown_row["injected_count"], 1);
+    assert_eq!(shown_row["shown_count"], 1);
+    assert_eq!(shown_row["shown_ratio"], 1.0);
+    assert!(shown_row["last_shown_at"].is_string());
+
+    let unshown_row = row_for(&unshown_id);
+    assert_eq!(unshown_row["injected_count"], 1);
+    assert_eq!(unshown_row["shown_count"], 0);
+    assert_eq!(unshown_row["shown_ratio"], 0.0);
+    assert!(unshown_row["last_shown_at"].is_null());
+}
+
+#[test]
+fn show_fails_open_when_audit_backend_unavailable() {
+    let workspace = TestWorkspace::new();
+    let learning = workspace.add_learning("Show survives a dead audit backend", &["src/**"]);
+    let learning_id = learning["id"].as_str().expect("learning id").to_string();
+
+    workspace.break_audit_event_inserts();
+    // Showing still works — the learning_shown emission is instrumentation
+    // and must not break the read surface when the audit backend is down.
+    let output = workspace.run(
+        &["learning", "show", &learning_id, "--json"],
+        None,
+        &[],
+        "show with dead audit backend",
+    );
+    let view: Value = serde_json::from_slice(&output.stdout).expect("show JSON stdout");
+    assert_eq!(view["id"], learning_id);
+}
+
 struct TestWorkspace {
     _temp: TempDir,
     home: PathBuf,
@@ -419,81 +446,16 @@ impl TestWorkspace {
         self.run_json(&args, "add learning")
     }
 
-    fn add_task(&self, title: &str) -> String {
-        let input = json!({
-            "title": title,
-            "description": "Hook review thread fixture task.",
-            "workspace": self.work.to_string_lossy(),
-            "model": "codex"
-        })
-        .to_string();
-        let task = self.run_json(
-            &["tool", "run", "orbit.task.add", "--input", &input],
-            "add task",
-        );
-        task["id"].as_str().expect("task id").to_string()
-    }
-
-    fn add_review_thread(&self, task_id: &str, body: &str, model: &str) {
-        let input = json!({ "task_id": task_id, "body": body, "model": model }).to_string();
-        self.run_json(
-            &[
-                "tool",
-                "run",
-                "orbit.task.review_thread.add",
-                "--input",
-                &input,
-            ],
-            "add review thread",
-        );
-    }
-
-    fn reply_review_thread(&self, task_id: &str, thread_id: &str, body: &str, model: &str) {
-        let input =
-            json!({ "task_id": task_id, "thread_id": thread_id, "body": body, "model": model })
-                .to_string();
-        self.run_json(
-            &[
-                "tool",
-                "run",
-                "orbit.task.review_thread.reply",
-                "--input",
-                &input,
-            ],
-            "reply review thread",
-        );
-    }
-
-    fn resolve_review_thread(&self, task_id: &str, thread_id: &str) {
-        let input = json!({ "task_id": task_id, "thread_id": thread_id }).to_string();
-        self.run_json(
-            &[
-                "tool",
-                "run",
-                "orbit.task.review_thread.resolve",
-                "--input",
-                &input,
-            ],
-            "resolve review thread",
-        );
-    }
-
-    fn review_thread_id(&self, task_id: &str) -> String {
-        let input = json!({ "task_id": task_id }).to_string();
-        let threads = self.run_json(
-            &[
-                "tool",
-                "run",
-                "orbit.task.review_thread.list",
-                "--input",
-                &input,
-            ],
-            "list review threads",
-        );
-        threads[0]["thread_id"]
-            .as_str()
-            .expect("thread id")
-            .to_string()
+    /// Simulate an unavailable audit/log backend: reads (learning search,
+    /// session state) keep working, but every `audit_events` insert fails.
+    fn break_audit_event_inserts(&self) {
+        let conn = rusqlite::Connection::open(self.home.join(".orbit").join("orbit.db"))
+            .expect("open orbit db");
+        conn.execute_batch(
+            "CREATE TRIGGER break_audit_inserts BEFORE INSERT ON audit_events \
+             BEGIN SELECT RAISE(ABORT, 'audit backend unavailable'); END;",
+        )
+        .expect("install audit insert trigger");
     }
 
     fn session_learning_state(&self, session_id: &str) -> Value {

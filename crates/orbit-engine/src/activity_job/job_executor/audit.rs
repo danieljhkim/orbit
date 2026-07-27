@@ -28,6 +28,23 @@ pub(super) fn emit_job_event(
     audit.emit(kind)
 }
 
+/// [ORB-00414] Non-fatal variant of [`emit_job_event`]: on an audit-write
+/// failure it records the failure through the writer's per-run counter +
+/// `tracing::error!` rather than discarding it with `let _ =`. Used at the
+/// job-lifecycle emission sites whose returned event id is not load-bearing;
+/// `StepStarted` (whose id parents nested events) keeps using the fatal
+/// [`emit_job_event`] directly.
+pub(super) fn emit_job_event_lossy(
+    audit: &V2AuditWriter,
+    task_id: Option<&str>,
+    kind: V2AuditEventKind,
+) {
+    let event_kind = kind.event_type();
+    if let Err(error) = emit_job_event(audit, task_id, kind) {
+        audit.note_audit_failure(event_kind, &error);
+    }
+}
+
 /// Project a job-lifecycle `V2AuditEventKind` onto the unified tracing feed
 /// using the per-variant target/level rules documented in T20260427-27.
 ///

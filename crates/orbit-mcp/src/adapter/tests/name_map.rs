@@ -7,8 +7,8 @@ use super::super::test_support::tool_schema;
 fn sanitize_tool_name_replaces_dots_with_underscores() {
     assert_eq!(sanitize_tool_name("orbit.task.add"), "orbit_task_add");
     assert_eq!(
-        sanitize_tool_name("orbit.task.review_thread.add"),
-        "orbit_task_review_thread_add"
+        sanitize_tool_name("orbit.task.artifact.put"),
+        "orbit_task_artifact_put"
     );
     assert_eq!(sanitize_tool_name("orbit_task_add"), "orbit_task_add");
 }
@@ -17,7 +17,7 @@ fn sanitize_tool_name_replaces_dots_with_underscores() {
 fn build_name_map_keys_are_advertised_names() {
     let schemas = vec![
         tool_schema("orbit.task.add"),
-        tool_schema("orbit.task.review_thread.add"),
+        tool_schema("orbit.task.artifact.put"),
     ];
     let map = build_name_map(&schemas).expect("unique advertised names");
     assert_eq!(
@@ -25,8 +25,8 @@ fn build_name_map_keys_are_advertised_names() {
         Some("orbit.task.add")
     );
     assert_eq!(
-        map.get("orbit_task_review_thread_add").map(String::as_str),
-        Some("orbit.task.review_thread.add")
+        map.get("orbit_task_artifact_put").map(String::as_str),
+        Some("orbit.task.artifact.put")
     );
 }
 
@@ -51,4 +51,12 @@ fn build_name_map_rejects_sanitized_name_collisions() {
         data.get("advertised_name").and_then(Value::as_str),
         Some("foo_bar")
     );
+}
+
+#[test]
+fn build_name_map_rejects_duplicate_canonical_names() {
+    let schemas = vec![tool_schema("orbit.task.add"), tool_schema("orbit.task.add")];
+    let err = build_name_map(&schemas).expect_err("canonical names must be unique");
+    assert_eq!(err.advertised_name, "orbit_task_add");
+    assert_eq!(err.canonical_names, vec!["orbit.task.add".to_string()]);
 }

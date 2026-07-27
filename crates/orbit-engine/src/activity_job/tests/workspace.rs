@@ -37,8 +37,74 @@ fn resolve_subprocess_cwd_prefers_input_over_task_over_tool_ctx() {
         Some(task_dir.path().canonicalize().expect("canonical task dir"))
     );
 
+    // Absent key (direct, non-worktree run): fall back to the tool context's
+    // workspace_root — the repo root is the correct cwd there.
     let resolved =
         resolve_subprocess_cwd(&input, None, Some(tool_dir.path())).expect("tool cwd resolves");
+    assert_eq!(
+        resolved,
+        Some(tool_dir.path().canonicalize().expect("canonical tool dir"))
+    );
+}
+
+#[test]
+fn resolve_subprocess_cwd_fails_closed_on_declared_non_string_workspace_path() {
+    // Regression (ORB-10134): a worktree pipeline step whose workspace_path
+    // template rendered to a non-string, non-null value must fail closed, not
+    // silently fall back to the tool context's workspace_root (the primary
+    // checkout).
+    let tool_dir = tempdir().expect("tool tempdir");
+
+    for value in [
+        serde_json::json!(42),
+        serde_json::json!(true),
+        serde_json::json!({ "nested": "object" }),
+    ] {
+        let input = serde_json::json!({ "workspace_path": value });
+        let err = resolve_subprocess_cwd(&input, None, Some(tool_dir.path()))
+            .expect_err("non-string workspace_path must fail closed");
+        match err {
+            DispatchError::CliInvocationFailed(message) => {
+                assert!(
+                    message.contains("non-string workspace_path"),
+                    "message should flag the non-string value: {message}"
+                );
+            }
+            other => panic!("expected CliInvocationFailed, got {other:?}"),
+        }
+    }
+
+    // An empty-string render is likewise refused (fail closed, not fall back).
+    let input = serde_json::json!({ "workspace_path": "   " });
+    let err = resolve_subprocess_cwd(&input, None, Some(tool_dir.path()))
+        .expect_err("empty workspace_path must fail closed");
+    assert!(matches!(err, DispatchError::CliInvocationFailed(_)));
+}
+
+#[test]
+fn resolve_subprocess_cwd_treats_null_workspace_path_as_absent() {
+    // The agent envelope / task context serialize an undeclared workspace_path
+    // as JSON null; that must be treated as "not declared" so direct
+    // (non-worktree) runs fall back to the tool context's workspace_root.
+    let tool_dir = tempdir().expect("tool tempdir");
+
+    let input = serde_json::json!({ "workspace_path": null });
+    let resolved = resolve_subprocess_cwd(&input, None, Some(tool_dir.path()))
+        .expect("null input workspace_path falls back to tool cwd");
+    assert_eq!(
+        resolved,
+        Some(tool_dir.path().canonicalize().expect("canonical tool dir"))
+    );
+
+    // Same for a null workspace_path on the task context (its always-present
+    // key), which is how a task with no declared workspace serializes.
+    let task_ctx = serde_json::json!({ "workspace_path": null });
+    let resolved = resolve_subprocess_cwd(
+        &serde_json::json!({}),
+        Some(&task_ctx),
+        Some(tool_dir.path()),
+    )
+    .expect("null task-context workspace_path falls back to tool cwd");
     assert_eq!(
         resolved,
         Some(tool_dir.path().canonicalize().expect("canonical tool dir"))
@@ -85,4 +151,18 @@ fn resolve_subprocess_cwd_rejects_declared_missing_path() {
         }
         other => panic!("expected CliInvocationFailed, got {other:?}"),
     }
+}
+
+#[test]
+fn vanished_untracked_staging_file_is_not_a_snapshot_failure() {
+    let root = tempdir().expect("tempdir");
+    let path = root.path().join(".tracked.yaml.refresh.tmp");
+    std::fs::write(&path, "staged").expect("stage file");
+    std::fs::remove_file(&path).expect("atomic rename consumed staging file");
+
+    assert_eq!(
+        untracked_file_identity(root.path(), ".tracked.yaml.refresh.tmp")
+            .expect("vanished staging file is benign"),
+        None
+    );
 }

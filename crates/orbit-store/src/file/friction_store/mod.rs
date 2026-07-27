@@ -11,9 +11,226 @@ use orbit_common::types::{
 use orbit_common::utility::fs::{atomic_write_text, with_exclusive_file_lock};
 use serde_json::{Value, json};
 
+use crate::file::yaml_doc::{parse_yaml_with, serialize_yaml_with};
+
 pub use orbit_common::types::validate_friction_id;
 
 const TAGS_FILENAME: &str = "tags.yaml";
+const HUB_FRICTION_MIGRATION_MARKERS: &str = ".migration-markers";
+
+/// Canonical checkout-independent friction state for a logical workspace.
+pub fn canonical_hub_friction_root(
+    global_root: &Path,
+    workspace_id: &str,
+) -> Result<PathBuf, OrbitError> {
+    let workspace_id = workspace_id.trim();
+    if workspace_id.is_empty()
+        || workspace_id == "."
+        || workspace_id == ".."
+        || workspace_id.contains(['/', '\\'])
+    {
+        return Err(OrbitError::InvalidInput(format!(
+            "invalid logical workspace ID '{workspace_id}' for hub friction state"
+        )));
+    }
+    Ok(global_root
+        .join("frictions")
+        .join("workspaces")
+        .join(workspace_id))
+}
+
+/// Publishes legacy checkout-local friction state into the canonical hub root.
+///
+/// The destination directory is renamed into place only after a complete copy.
+/// The separate marker is the commit record: reads continue using `legacy_root`
+/// until it exists. Identical interrupted/repeated publishes are idempotent;
+/// differing source and destination trees fail closed.
+pub fn prepare_hub_friction_root(
+    global_root: &Path,
+    workspace_id: &str,
+    legacy_root: Option<&Path>,
+) -> Result<PathBuf, OrbitError> {
+    let canonical = canonical_hub_friction_root(global_root, workspace_id)?;
+    let parent = canonical.parent().ok_or_else(|| {
+        OrbitError::Store("canonical hub friction root has no parent".to_string())
+    })?;
+    let marker = parent
+        .join(HUB_FRICTION_MIGRATION_MARKERS)
+        .join(format!("{workspace_id}.complete"));
+    let lock = parent
+        .join(HUB_FRICTION_MIGRATION_MARKERS)
+        .join(format!("{workspace_id}.migration"));
+    with_exclusive_file_lock(&lock, "hub friction migration", || {
+        fs::create_dir_all(parent).map_err(|error| OrbitError::Io(error.to_string()))?;
+        if marker.exists() {
+            if !canonical.is_dir() {
+                return Err(OrbitError::Store(format!(
+                    "hub friction migration marker for workspace '{workspace_id}' exists but canonical root '{}' is unavailable",
+                    canonical.display()
+                )));
+            }
+            return Ok(canonical.clone());
+        }
+
+        // A checkoutless caller may not know whether legacy state exists.
+        // Make the canonical root usable, but do not publish a migration
+        // decision that would prevent a later caller with the legacy root
+        // from copying or conflict-checking that state.
+        if legacy_root.is_none() {
+            fs::create_dir_all(&canonical).map_err(|error| OrbitError::Io(error.to_string()))?;
+            return Ok(canonical.clone());
+        }
+
+        let source = legacy_root.filter(|path| path.exists());
+        if canonical.exists()
+            && let Some(source) = source
+            && !directory_trees_identical(source, &canonical)?
+        {
+            if directory_tree_is_empty(&canonical)? {
+                fs::remove_dir_all(&canonical)
+                    .map_err(|error| OrbitError::Io(error.to_string()))?;
+            } else {
+                return Err(OrbitError::Store(format!(
+                    "hub friction migration conflict for workspace '{workspace_id}': legacy '{}' differs from uncommitted canonical '{}'",
+                    source.display(),
+                    canonical.display()
+                )));
+            }
+        }
+        if !canonical.exists()
+            && let Some(source) = source
+        {
+            let staging = parent.join(format!(
+                ".{workspace_id}.migration-{}-{}",
+                std::process::id(),
+                Utc::now().timestamp_nanos_opt().unwrap_or_default()
+            ));
+            if staging.exists() {
+                fs::remove_dir_all(&staging).map_err(|error| OrbitError::Io(error.to_string()))?;
+            }
+            if let Err(error) = copy_directory_tree(source, &staging) {
+                let _ = fs::remove_dir_all(&staging);
+                return Err(error);
+            }
+            fs::rename(&staging, &canonical).map_err(|error| {
+                let _ = fs::remove_dir_all(&staging);
+                OrbitError::Io(format!(
+                    "publish hub friction migration '{}': {error}",
+                    canonical.display()
+                ))
+            })?;
+        } else if !canonical.exists() {
+            fs::create_dir_all(&canonical).map_err(|error| OrbitError::Io(error.to_string()))?;
+        }
+
+        atomic_write_text(&marker, "schema_version: 1\nstate: complete\n")?;
+        Ok(canonical.clone())
+    })
+}
+
+fn directory_tree_is_empty(root: &Path) -> Result<bool, OrbitError> {
+    for entry in fs::read_dir(root).map_err(|error| OrbitError::Io(error.to_string()))? {
+        let entry = entry.map_err(|error| OrbitError::Io(error.to_string()))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| OrbitError::Io(error.to_string()))?;
+        if file_type.is_file() || !file_type.is_dir() || !directory_tree_is_empty(&entry.path())? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Resolves the readable root without treating an unmarked publish as committed.
+pub fn readable_hub_friction_root(
+    global_root: &Path,
+    workspace_id: &str,
+    legacy_root: Option<&Path>,
+) -> Result<PathBuf, OrbitError> {
+    let canonical = canonical_hub_friction_root(global_root, workspace_id)?;
+    let parent = canonical.parent().ok_or_else(|| {
+        OrbitError::Store("canonical hub friction root has no parent".to_string())
+    })?;
+    let marker = parent
+        .join(HUB_FRICTION_MIGRATION_MARKERS)
+        .join(format!("{workspace_id}.complete"));
+    if !marker.exists()
+        && let Some(legacy) = legacy_root.filter(|path| path.exists())
+    {
+        return Ok(legacy.to_path_buf());
+    }
+    Ok(canonical)
+}
+
+fn copy_directory_tree(source: &Path, destination: &Path) -> Result<(), OrbitError> {
+    fs::create_dir_all(destination).map_err(|error| OrbitError::Io(error.to_string()))?;
+    for entry in fs::read_dir(source).map_err(|error| OrbitError::Io(error.to_string()))? {
+        let entry = entry.map_err(|error| OrbitError::Io(error.to_string()))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| OrbitError::Io(error.to_string()))?;
+        let target = destination.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_directory_tree(&entry.path(), &target)?;
+        } else if file_type.is_file() {
+            fs::copy(entry.path(), target).map_err(|error| OrbitError::Io(error.to_string()))?;
+        } else {
+            return Err(OrbitError::Store(format!(
+                "hub friction migration refuses non-file entry '{}'",
+                entry.path().display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn directory_trees_identical(left: &Path, right: &Path) -> Result<bool, OrbitError> {
+    fn snapshot(
+        root: &Path,
+        current: &Path,
+        directories: &mut BTreeSet<PathBuf>,
+        files: &mut BTreeMap<PathBuf, Vec<u8>>,
+    ) -> Result<(), OrbitError> {
+        for entry in fs::read_dir(current).map_err(|error| OrbitError::Io(error.to_string()))? {
+            let entry = entry.map_err(|error| OrbitError::Io(error.to_string()))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|error| OrbitError::Io(error.to_string()))?;
+            if file_type.is_dir() {
+                let relative = entry
+                    .path()
+                    .strip_prefix(root)
+                    .map_err(|error| OrbitError::Store(error.to_string()))?
+                    .to_path_buf();
+                directories.insert(relative);
+                snapshot(root, &entry.path(), directories, files)?;
+            } else if file_type.is_file() {
+                let relative = entry
+                    .path()
+                    .strip_prefix(root)
+                    .map_err(|error| OrbitError::Store(error.to_string()))?
+                    .to_path_buf();
+                files.insert(
+                    relative,
+                    fs::read(entry.path()).map_err(|error| OrbitError::Io(error.to_string()))?,
+                );
+            } else {
+                return Err(OrbitError::Store(format!(
+                    "hub friction migration refuses non-file entry '{}'",
+                    entry.path().display()
+                )));
+            }
+        }
+        Ok(())
+    }
+    let mut left_directories = BTreeSet::new();
+    let mut right_directories = BTreeSet::new();
+    let mut left_files = BTreeMap::new();
+    let mut right_files = BTreeMap::new();
+    snapshot(left, left, &mut left_directories, &mut left_files)?;
+    snapshot(right, right, &mut right_directories, &mut right_files)?;
+    Ok(left_directories == right_directories && left_files == right_files)
+}
 
 #[derive(Debug, Clone)]
 pub struct FrictionAddParams {
@@ -354,8 +571,9 @@ fn load_tag_taxonomy(frictions_root: &Path) -> Result<BTreeSet<String>, OrbitErr
     let path = ensure_default_tag_taxonomy(frictions_root)?;
     let raw = fs::read_to_string(&path)
         .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
-    let value: serde_yaml::Value = serde_yaml::from_str(&raw)
-        .map_err(|error| OrbitError::InvalidInput(format!("parse {}: {error}", path.display())))?;
+    let value: serde_yaml::Value = parse_yaml_with(&raw, &path, |_, error| {
+        OrbitError::InvalidInput(format!("parse {}: {error}", path.display()))
+    })?;
     let mut tags = BTreeSet::new();
     collect_tags_from_yaml(&value, &mut tags);
     if tags.is_empty() {
@@ -488,8 +706,9 @@ fn write_record_at(
         during_task: record.during_task.clone(),
         resolved_by_task: record.resolved_by_task.clone(),
     };
-    let yaml = serde_yaml::to_string(&frontmatter)
-        .map_err(|error| OrbitError::Store(format!("serialize friction frontmatter: {error}")))?;
+    let yaml = serialize_yaml_with(&frontmatter, |error| {
+        OrbitError::Store(format!("serialize friction frontmatter: {error}"))
+    })?;
     let content = format!("---\n{}---\n{}\n", yaml, record.body.trim_end());
     atomic_write_text(path, &content).map_err(|error| OrbitError::Io(error.to_string()))?;
     Ok(StoredFrictionRecord {
@@ -507,7 +726,7 @@ fn read_record_at(path: &Path) -> Result<StoredFrictionRecord, OrbitError> {
             path.display()
         ))
     })?;
-    let frontmatter: FrictionFrontmatter = serde_yaml::from_str(yaml).map_err(|error| {
+    let frontmatter: FrictionFrontmatter = parse_yaml_with(yaml, path, |_, error| {
         OrbitError::Store(format!(
             "parse friction frontmatter {}: {error}",
             path.display()

@@ -1,0 +1,126 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: task_pilot
+spec:
+  type: agent_loop
+  require_response_envelope: true
+  description: >
+    Read-only task preflight for one explicit bounded partition. The pilot
+    inspects the selected workspace and target branch, returns exact canonical
+    context_files proposals plus orchestration recommendations, and has no
+    repository-write, task-update, lifecycle, dispatch, or scheduling grant.
+  input_schema_json:
+    type: object
+    required: [task_ids, workspace_path, base_branch, crew, partition_index]
+    properties:
+      task_ids:
+        type: array
+        minItems: 1
+        maxItems: 5
+        items:
+          type: string
+      workspace_path:
+        type: string
+      base_branch:
+        type: string
+      crew:
+        type: string
+      partition_index:
+        type: number
+  # Agent-returned data is advisory until apply_task_pilot_results validates
+  # the complete fan-in, so keep fields optional at this boundary and let that
+  # validation step — not the schema — reject an incomplete partition.
+  output_schema_json:
+    type: object
+    properties:
+      partition_index:
+        type: number
+      task_ids:
+        type: array
+        items:
+          type: string
+      tasks:
+        type: array
+        items:
+          type: object
+      summary:
+        type: string
+  instruction: |
+    You are Orbit's task-pilot for one explicit, bounded partition.
+
+    Input contains `task_ids` (one to five exact IDs), `workspace_path`,
+    `base_branch`, `crew`, and `partition_index`. Work only on those task IDs
+    and treat the workspace as read-only.
+
+    For every task:
+
+    1. Call `orbit.task.show` and read its title, description, acceptance
+       criteria, plan, tags, relations, status, and exact current
+       `context_files`. Use `orbit.search` for the task ID and relevant design
+       terms; inspect accepted ADRs with `orbit.adr.show` when a result points
+       to one.
+    2. With `proc.spawn` run only read-only `git`/`rg` commands. Verify the
+       workspace Git top-level, inspect `base_branch`, and determine every real
+       file, directory, or symbol the stated change would modify or delete.
+       Use `fs.read` to inspect candidate targets. Do not edit repository files.
+    3. Propose `context_files_after` as exact canonical selectors using only
+       `file:`, `dir:`, or `symbol:`. Every anchor must already exist inside
+       `workspace_path`; omit read-for-context files. Preserve the exact current
+       list as `context_files_before`.
+    4. If the task genuinely requires no repository diff, return an empty
+       `context_files_after`, disposition `verified_no_diff`, and concrete
+       `evidence`. For host-operational work use `host_operational` with
+       evidence. Otherwise use disposition `selectors`. Never use an empty list
+       merely because inspection was inconclusive.
+    5. Report recommendations only; do not apply them:
+       `recommended_crew`, `recommended_complexity`, real `blocked_by` task IDs,
+       `duplicate_of`, `already_landed`, `adr_conflicts`, `utility_warnings`,
+       and `surface_warnings`. Cite evidence for duplicates/already-landed work
+       and ADR conflicts. Do not choose an architecture alternative silently.
+
+    Hard bounds:
+    - Never update a task, transition lifecycle state, promote, dispatch,
+      invoke a pipeline, edit/delete files, commit, push, or open a PR.
+    - Never inspect or report on task IDs outside the input partition except
+      when citing a concrete dependency, duplicate, or accepted ADR.
+    - Preserve provider provenance: task-pilot is a role, not an actor family.
+
+    Return exactly one Orbit response envelope:
+    {"schemaVersion":1,"status":"success","result":{
+      "partition_index":0,
+      "task_ids":["ORB-NNNNN"],
+      "tasks":[{
+        "task_id":"ORB-NNNNN",
+        "context_files_before":[],
+        "context_files_after":["file:path/to/target"],
+        "disposition":"selectors|verified_no_diff|host_operational",
+        "evidence":"required when context_files_after is empty",
+        "recommended_crew":"luna",
+        "recommended_complexity":"low|medium|hard",
+        "blocked_by":[],
+        "duplicate_of":null,
+        "already_landed":null,
+        "adr_conflicts":[],
+        "utility_warnings":[],
+        "surface_warnings":[]
+      }],
+      "summary":"one short partition summary"
+    },"error":null}
+
+    Copy `partition_index` and `task_ids` exactly from the input and return one
+    task assessment per input ID. If any task cannot be assessed, return a
+    failed envelope for the whole partition; never omit it or claim success.
+  tools:
+    - orbit.task.show
+    - orbit.task.list
+    - orbit.adr.show
+    - orbit.search
+    - orbit.learning.show
+    - fs.read
+    - proc.spawn
+  proc_allowed_programs:
+    - git
+    - rg
+  on_denial: terminate
+  wall_clock_timeout_seconds: 1800

@@ -5,11 +5,13 @@
 //! leftover from pre-two-root binaries, not a mirror of the canonical global
 //! `~/.orbit/orbit.db`. The CLI and runtime always use the global store.
 
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, Utc};
-use orbit_common::types::{AuditEvent, AuditEventStatus, OrbitError};
+use orbit_common::types::{AuditEvent, AuditEventStatus, McpCapability, McpTransport, OrbitError};
 use rusqlite::params;
 
-use crate::{Store, now_string, parse_timestamp};
+use crate::{Store, StoreTx, now_string, parse_timestamp};
 
 #[derive(Debug, Clone)]
 pub struct AuditEventInsertParams {
@@ -31,6 +33,16 @@ pub struct AuditEventInsertParams {
     pub host: Option<String>,
     pub pid: u32,
     pub session_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub caller_machine_id: Option<String>,
+    pub caller_host_id: Option<String>,
+    pub process_machine_id: Option<String>,
+    pub process_host_id: Option<String>,
+    pub transport: Option<McpTransport>,
+    pub effective_capabilities: BTreeSet<McpCapability>,
+    pub origin_session_id: Option<String>,
+    pub mcp_call_id: Option<String>,
+    pub lease_id: Option<String>,
     pub task_id: Option<String>,
     pub job_run_id: Option<String>,
     pub activity_id: Option<String>,
@@ -44,6 +56,15 @@ pub struct AuditEventFilter {
     pub target_type: Option<String>,
     pub status: Option<AuditEventStatus>,
     pub role: Option<String>,
+    pub workspace_id: Option<String>,
+    pub caller_machine_id: Option<String>,
+    pub process_machine_id: Option<String>,
+    pub transport: Option<McpTransport>,
+    pub capability: Option<McpCapability>,
+    pub origin_session_id: Option<String>,
+    pub mcp_call_id: Option<String>,
+    pub job_run_id: Option<String>,
+    pub lease_id: Option<String>,
     pub limit: usize,
 }
 
@@ -102,6 +123,123 @@ pub struct AuditRoleAggregate {
     pub cli: i64,
 }
 
+/// `target_type` of the per-fire injection audit event emitted by the
+/// learning PreToolUse hook.
+pub const LEARNING_INJECTED_TARGET_TYPE: &str = "learning_injected";
+/// `target_type` of the passive usage-signal audit event recorded when a
+/// learning's full body is opened via `orbit learning show`.
+pub const LEARNING_SHOWN_TARGET_TYPE: &str = "learning_shown";
+
+/// Per-learning rollup of injection and show audit events. Raw counts only;
+/// the derived shown ratio lives on an accessor so the "shown is the passive
+/// usage signal" semantics stay in one place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LearningUsageStat {
+    pub learning_id: String,
+    /// Number of `learning_injected` events that included this learning.
+    pub injected_count: u64,
+    /// Number of `learning_shown` events for this learning (full body opened
+    /// via `orbit learning show`). The ungameable usage signal.
+    pub shown_count: u64,
+    pub last_injected_at: Option<DateTime<Utc>>,
+    pub last_shown_at: Option<DateTime<Utc>>,
+}
+
+impl LearningUsageStat {
+    fn new(learning_id: String) -> Self {
+        Self {
+            learning_id,
+            injected_count: 0,
+            shown_count: 0,
+            last_injected_at: None,
+            last_shown_at: None,
+        }
+    }
+
+    /// `shown_count / injected_count`, or `None` when nothing was injected.
+    /// A low ratio is the deprecation-candidate signal: injected often, never
+    /// read.
+    pub fn shown_ratio(&self) -> Option<f64> {
+        (self.injected_count > 0).then(|| self.shown_count as f64 / self.injected_count as f64)
+    }
+}
+
+fn audit_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEvent> {
+    let ts_raw: String = row.get(2)?;
+    let status_raw: String = row.get(9)?;
+    let timestamp = parse_timestamp(&ts_raw)?;
+    let status = status_raw
+        .parse::<AuditEventStatus>()
+        .map_err(|error| invalid_text(9, &status_raw, error))?;
+    let transport_raw: Option<String> = row.get(25)?;
+    let transport = transport_raw
+        .as_deref()
+        .map(str::parse::<McpTransport>)
+        .transpose()
+        .map_err(|error| invalid_text(25, transport_raw.as_deref().unwrap_or_default(), error))?;
+    let capabilities_raw: Option<String> = row.get(26)?;
+    let effective_capabilities = capabilities_raw
+        .as_deref()
+        .map(serde_json::from_str::<BTreeSet<McpCapability>>)
+        .transpose()
+        .map_err(|error| {
+            invalid_text(
+                26,
+                capabilities_raw.as_deref().unwrap_or_default(),
+                error.to_string(),
+            )
+        })?
+        .unwrap_or_default();
+
+    Ok(AuditEvent {
+        id: row.get(0)?,
+        execution_id: row.get(1)?,
+        timestamp,
+        command: row.get(3)?,
+        subcommand: row.get(4)?,
+        tool_name: row.get(5)?,
+        target_type: row.get(6)?,
+        target_id: row.get(7)?,
+        role: row.get(8)?,
+        status,
+        exit_code: row.get(10)?,
+        duration_ms: row.get(11)?,
+        working_directory: row.get(12)?,
+        arguments_json: row.get(13)?,
+        stdout_truncated: row.get(14)?,
+        stderr_truncated: row.get(15)?,
+        error_message: row.get(16)?,
+        host: row.get(17)?,
+        pid: row.get(18)?,
+        session_id: row.get(19)?,
+        workspace_id: row.get(20)?,
+        caller_machine_id: row.get(21)?,
+        caller_host_id: row.get(22)?,
+        process_machine_id: row.get(23)?,
+        process_host_id: row.get(24)?,
+        transport,
+        effective_capabilities,
+        origin_session_id: row.get(27)?,
+        mcp_call_id: row.get(28)?,
+        lease_id: row.get(29)?,
+        task_id: row.get(30)?,
+        job_run_id: row.get(31)?,
+        activity_id: row.get(32)?,
+        step_index: row.get(33)?,
+    })
+}
+
+fn invalid_text(index: usize, raw: &str, error: impl Into<String>) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        index,
+        rusqlite::types::Type::Text,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{} ({raw})", error.into()),
+        )),
+    )
+}
+
 impl Store {
     pub fn insert_audit_event_record(
         &self,
@@ -112,54 +250,87 @@ impl Store {
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
 
-        conn.execute(
-            r#"INSERT INTO audit_events(
-                execution_id, timestamp, command, subcommand, tool_name,
-                target_type, target_id, role, status, exit_code,
-                duration_ms, working_directory, arguments_json,
-                stdout_truncated, stderr_truncated, error_message,
-                host, pid, session_id, task_id, job_run_id, activity_id,
-                step_index
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)"#,
-            rusqlite::params![
-                params.execution_id,
-                now_string(),
-                params.command,
-                params.subcommand,
-                params.tool_name,
-                params.target_type,
-                params.target_id,
-                params.role,
-                params.status.to_string(),
-                params.exit_code,
-                params.duration_ms,
-                params.working_directory,
-                params.arguments_json,
-                params.stdout_truncated,
-                params.stderr_truncated,
-                params.error_message,
-                params.host,
-                params.pid,
-                params.session_id,
-                params.task_id,
-                params.job_run_id,
-                params.activity_id,
-                params.step_index,
-            ],
-        )
+        insert_audit_event_record_on_connection(&conn, params)
+    }
+}
+
+impl StoreTx<'_> {
+    /// Insert one canonical audit row inside the caller's existing Store
+    /// transaction. Vertical features use this when their domain mutation and
+    /// its audit outcome must commit or roll back together.
+    pub fn insert_audit_event_record(
+        &mut self,
+        params: &AuditEventInsertParams,
+    ) -> Result<(), OrbitError> {
+        insert_audit_event_record_on_connection(self.connection(), params)
+    }
+}
+
+fn insert_audit_event_record_on_connection(
+    conn: &rusqlite::Connection,
+    params: &AuditEventInsertParams,
+) -> Result<(), OrbitError> {
+    let capabilities_json = serde_json::to_string(&params.effective_capabilities)
+        .map_err(|error| OrbitError::Store(format!("serialize MCP capability set: {error}")))?;
+
+    conn.execute(
+        r#"INSERT INTO audit_events(
+            execution_id, timestamp, command, subcommand, tool_name,
+            target_type, target_id, role, status, exit_code,
+            duration_ms, working_directory, arguments_json,
+            stdout_truncated, stderr_truncated, error_message,
+            host, pid, session_id, workspace_id, caller_machine_id,
+            caller_host_id, process_machine_id, process_host_id, transport,
+            capabilities_json, origin_session_id, mcp_call_id, lease_id,
+            task_id, job_run_id, activity_id, step_index
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)"#,
+        rusqlite::params![
+            params.execution_id,
+            now_string(),
+            params.command,
+            params.subcommand,
+            params.tool_name,
+            params.target_type,
+            params.target_id,
+            params.role,
+            params.status.to_string(),
+            params.exit_code,
+            params.duration_ms,
+            params.working_directory,
+            params.arguments_json,
+            params.stdout_truncated,
+            params.stderr_truncated,
+            params.error_message,
+            params.host,
+            params.pid,
+            params.session_id,
+            params.workspace_id,
+            params.caller_machine_id,
+            params.caller_host_id,
+            params.process_machine_id,
+            params.process_host_id,
+            params.transport.map(|transport| transport.to_string()),
+            capabilities_json,
+            params.origin_session_id,
+            params.mcp_call_id,
+            params.lease_id,
+            params.task_id,
+            params.job_run_id,
+            params.activity_id,
+            params.step_index,
+        ],
+    )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
 
-        Ok(())
-    }
+    Ok(())
+}
 
+impl Store {
     pub fn list_audit_events(
         &self,
         filter: &AuditEventFilter,
     ) -> Result<Vec<AuditEvent>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let mut conditions = Vec::new();
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -184,6 +355,46 @@ impl Store {
             conditions.push(format!("role = ?{}", param_values.len() + 1));
             param_values.push(Box::new(role.clone()));
         }
+        if let Some(ref workspace_id) = filter.workspace_id {
+            conditions.push(format!("workspace_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(workspace_id.clone()));
+        }
+        if let Some(ref machine_id) = filter.caller_machine_id {
+            conditions.push(format!("caller_machine_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(machine_id.clone()));
+        }
+        if let Some(ref machine_id) = filter.process_machine_id {
+            conditions.push(format!("process_machine_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(machine_id.clone()));
+        }
+        if let Some(transport) = filter.transport {
+            conditions.push(format!("transport = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(transport.to_string()));
+        }
+        if let Some(capability) = filter.capability {
+            conditions.push(format!(
+                "EXISTS (SELECT 1 FROM json_each(COALESCE(capabilities_json, '[]')) \
+                 WHERE json_each.value = ?{})",
+                param_values.len() + 1
+            ));
+            param_values.push(Box::new(capability.to_string()));
+        }
+        if let Some(ref origin_session_id) = filter.origin_session_id {
+            conditions.push(format!("origin_session_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(origin_session_id.clone()));
+        }
+        if let Some(ref mcp_call_id) = filter.mcp_call_id {
+            conditions.push(format!("mcp_call_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(mcp_call_id.clone()));
+        }
+        if let Some(ref job_run_id) = filter.job_run_id {
+            conditions.push(format!("job_run_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(job_run_id.clone()));
+        }
+        if let Some(ref lease_id) = filter.lease_id {
+            conditions.push(format!("lease_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(lease_id.clone()));
+        }
 
         let where_clause = if conditions.is_empty() {
             String::new()
@@ -201,8 +412,10 @@ impl Store {
             "SELECT id, execution_id, timestamp, command, subcommand, tool_name, \
              target_type, target_id, role, status, exit_code, duration_ms, \
              working_directory, arguments_json, stdout_truncated, stderr_truncated, \
-             error_message, host, pid, session_id, task_id, job_run_id, activity_id, \
-             step_index \
+             error_message, host, pid, session_id, workspace_id, caller_machine_id, \
+             caller_host_id, process_machine_id, process_host_id, transport, \
+             capabilities_json, origin_session_id, mcp_call_id, lease_id, task_id, \
+             job_run_id, activity_id, step_index \
              FROM audit_events {where_clause} ORDER BY id DESC LIMIT ?{}",
             param_values.len() + 1
         );
@@ -217,46 +430,7 @@ impl Store {
             param_values.iter().map(|b| b.as_ref()).collect();
 
         let rows = stmt
-            .query_map(param_refs.as_slice(), |row| {
-                let ts_raw: String = row.get(2)?;
-                let status_raw: String = row.get(9)?;
-
-                let timestamp = parse_timestamp(&ts_raw)?;
-                let status: AuditEventStatus = status_raw.parse().map_err(|e: String| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        status_raw.len(),
-                        rusqlite::types::Type::Text,
-                        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
-                    )
-                })?;
-
-                Ok(AuditEvent {
-                    id: row.get(0)?,
-                    execution_id: row.get(1)?,
-                    timestamp,
-                    command: row.get(3)?,
-                    subcommand: row.get(4)?,
-                    tool_name: row.get(5)?,
-                    target_type: row.get(6)?,
-                    target_id: row.get(7)?,
-                    role: row.get(8)?,
-                    status,
-                    exit_code: row.get(10)?,
-                    duration_ms: row.get(11)?,
-                    working_directory: row.get(12)?,
-                    arguments_json: row.get(13)?,
-                    stdout_truncated: row.get(14)?,
-                    stderr_truncated: row.get(15)?,
-                    error_message: row.get(16)?,
-                    host: row.get(17)?,
-                    pid: row.get(18)?,
-                    session_id: row.get(19)?,
-                    task_id: row.get(20)?,
-                    job_run_id: row.get(21)?,
-                    activity_id: row.get(22)?,
-                    step_index: row.get(23)?,
-                })
-            })
+            .query_map(param_refs.as_slice(), audit_event_from_row)
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         rows.collect::<Result<Vec<_>, _>>()
@@ -264,63 +438,23 @@ impl Store {
     }
 
     pub fn get_audit_event(&self, id: i64) -> Result<Option<AuditEvent>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let mut stmt = conn
             .prepare(
                 "SELECT id, execution_id, timestamp, command, subcommand, tool_name, \
                  target_type, target_id, role, status, exit_code, duration_ms, \
                  working_directory, arguments_json, stdout_truncated, stderr_truncated, \
-                 error_message, host, pid, session_id, task_id, job_run_id, activity_id, \
-                 step_index \
+                 error_message, host, pid, session_id, workspace_id, caller_machine_id, \
+                 caller_host_id, process_machine_id, process_host_id, transport, \
+                 capabilities_json, origin_session_id, mcp_call_id, lease_id, task_id, \
+                 job_run_id, activity_id, step_index \
                  FROM audit_events WHERE id = ?1",
             )
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         let result = stmt
-            .query_row(params![id], |row| {
-                let ts_raw: String = row.get(2)?;
-                let status_raw: String = row.get(9)?;
-
-                let timestamp = parse_timestamp(&ts_raw)?;
-                let status: AuditEventStatus = status_raw.parse().map_err(|e: String| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        status_raw.len(),
-                        rusqlite::types::Type::Text,
-                        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
-                    )
-                })?;
-
-                Ok(AuditEvent {
-                    id: row.get(0)?,
-                    execution_id: row.get(1)?,
-                    timestamp,
-                    command: row.get(3)?,
-                    subcommand: row.get(4)?,
-                    tool_name: row.get(5)?,
-                    target_type: row.get(6)?,
-                    target_id: row.get(7)?,
-                    role: row.get(8)?,
-                    status,
-                    exit_code: row.get(10)?,
-                    duration_ms: row.get(11)?,
-                    working_directory: row.get(12)?,
-                    arguments_json: row.get(13)?,
-                    stdout_truncated: row.get(14)?,
-                    stderr_truncated: row.get(15)?,
-                    error_message: row.get(16)?,
-                    host: row.get(17)?,
-                    pid: row.get(18)?,
-                    session_id: row.get(19)?,
-                    task_id: row.get(20)?,
-                    job_run_id: row.get(21)?,
-                    activity_id: row.get(22)?,
-                    step_index: row.get(23)?,
-                })
-            })
+            .query_row(params![id], audit_event_from_row)
             .optional()
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
@@ -332,10 +466,7 @@ impl Store {
         since: Option<&DateTime<Utc>>,
         tool: Option<&str>,
     ) -> Result<(i64, i64, i64, i64, f64, i64), OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let mut conditions = Vec::new();
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -387,10 +518,7 @@ impl Store {
         since: Option<&DateTime<Utc>>,
         tool: Option<&str>,
     ) -> Result<Vec<i64>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let mut conditions = Vec::new();
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -436,10 +564,7 @@ impl Store {
         &self,
         since: &DateTime<Utc>,
     ) -> Result<Vec<(String, i64)>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let sql = "SELECT strftime('%Y-%m-%dT%H:00:00Z', timestamp) AS bucket, COUNT(*) \
                    FROM audit_events WHERE timestamp >= ?1 \
@@ -466,10 +591,7 @@ impl Store {
         &self,
         since: Option<&DateTime<Utc>>,
     ) -> Result<Vec<(String, i64)>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let sql = if since.is_some() {
             "SELECT role, COUNT(*) FROM audit_events \
@@ -506,10 +628,7 @@ impl Store {
         &self,
         since: Option<&DateTime<Utc>>,
     ) -> Result<Vec<AuditToolCallCountsByRole>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let sql = if since.is_some() {
             "SELECT role, COUNT(*), \
@@ -568,10 +687,7 @@ impl Store {
         &self,
         since: Option<&DateTime<Utc>>,
     ) -> Result<Vec<AuditToolCallCountsBySurfaceAndRole>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         // SUBSTR(tool_name, 7) strips the literal "orbit." prefix; the
         // appended "." in the inner SUBSTR ensures INSTR finds a delimiter
@@ -647,10 +763,7 @@ impl Store {
         since: Option<&DateTime<Utc>>,
         limit: usize,
     ) -> Result<Vec<AuditTopToolCall>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let base = "SELECT tool_name, role, COUNT(*) \
                     FROM audit_events \
@@ -710,10 +823,7 @@ impl Store {
         &self,
         since: &DateTime<Utc>,
     ) -> Result<Vec<i64>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let sql = "SELECT duration_ms FROM audit_events \
                    WHERE tool_name IS NULL AND timestamp >= ?1 \
@@ -741,10 +851,7 @@ impl Store {
         &self,
         since: &DateTime<Utc>,
     ) -> Result<Vec<AuditToolAggregate>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let sql = "SELECT COALESCE(tool_name, 'unknown') AS tool, \
                    COUNT(*), \
@@ -786,10 +893,7 @@ impl Store {
         &self,
         since: &DateTime<Utc>,
     ) -> Result<Vec<AuditRoleAggregate>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
 
         let sql = "SELECT role, \
                    COUNT(*), \
@@ -815,6 +919,92 @@ impl Store {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| OrbitError::Store(e.to_string()))
+    }
+
+    /// Fold `learning_injected` and `learning_shown` audit events into a
+    /// per-learning usage rollup. Malformed `arguments_json` payloads are
+    /// skipped rather than failing the whole aggregation — the rollup is an
+    /// observability surface over best-effort instrumentation.
+    pub fn get_learning_usage_stats(
+        &self,
+        since: Option<&DateTime<Utc>>,
+    ) -> Result<Vec<LearningUsageStat>, OrbitError> {
+        let conn = self.read()?;
+
+        let (since_clause, since_params) = match since {
+            Some(since) => (
+                " AND timestamp >= ?1",
+                vec![Box::new(since.to_rfc3339()) as Box<dyn rusqlite::types::ToSql>],
+            ),
+            None => ("", Vec::new()),
+        };
+        let sql = format!(
+            "SELECT timestamp, target_type, target_id, arguments_json \
+             FROM audit_events \
+             WHERE target_type IN ('{LEARNING_INJECTED_TARGET_TYPE}', '{LEARNING_SHOWN_TARGET_TYPE}') \
+             AND status = 'success'{since_clause} ORDER BY id ASC"
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            since_params.iter().map(|b| b.as_ref()).collect();
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .map_err(|e| OrbitError::Store(e.to_string()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+        let mut stats = std::collections::BTreeMap::<String, LearningUsageStat>::new();
+        for (ts_raw, target_type, target_id, arguments_json) in rows {
+            let Ok(timestamp) = parse_timestamp(&ts_raw) else {
+                continue;
+            };
+            if target_type == LEARNING_INJECTED_TARGET_TYPE {
+                let arguments = arguments_json
+                    .as_deref()
+                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
+                let Some(learning_ids) = arguments
+                    .as_ref()
+                    .and_then(|value| value.get("learning_ids"))
+                    .and_then(serde_json::Value::as_array)
+                else {
+                    continue;
+                };
+                for learning_id in learning_ids.iter().filter_map(serde_json::Value::as_str) {
+                    let stat = stats
+                        .entry(learning_id.to_string())
+                        .or_insert_with(|| LearningUsageStat::new(learning_id.to_string()));
+                    stat.injected_count += 1;
+                    stat.last_injected_at = Some(timestamp);
+                }
+            } else {
+                // `learning_shown` keys the learning ID directly on target_id.
+                let Some(learning_id) = target_id.as_deref().filter(|id| !id.is_empty()) else {
+                    continue;
+                };
+                let stat = stats
+                    .entry(learning_id.to_string())
+                    .or_insert_with(|| LearningUsageStat::new(learning_id.to_string()));
+                stat.shown_count += 1;
+                stat.last_shown_at = Some(timestamp);
+            }
+        }
+
+        let mut stats = stats.into_values().collect::<Vec<_>>();
+        stats.sort_by(|a, b| {
+            b.injected_count
+                .cmp(&a.injected_count)
+                .then_with(|| a.learning_id.cmp(&b.learning_id))
+        });
+        Ok(stats)
     }
 
     pub fn prune_audit_events(&self, older_than: &DateTime<Utc>) -> Result<usize, OrbitError> {

@@ -19,15 +19,19 @@
 //! - [`redact_all`] — env + default patterns in one pass (use when you don't
 //!   know what shape the input has and want maximum coverage)
 
-// ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
+// Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
-use std::{borrow::Cow, ffi::OsString, sync::OnceLock};
+use std::{
+    borrow::Cow,
+    ffi::{OsStr, OsString},
+    sync::OnceLock,
+};
 
 use regex::Regex;
 use serde_json::Value;
 
-use crate::types::OrbitError;
+use crate::types::{ArtifactOrigin, DependencyNotDelivered, OrbitError};
 
 const REDACTED_ENV_VALUE: &str = "[REDACTED_ENV]";
 static DEFAULT_PATTERN_REDACTOR: OnceLock<PatternRedactor> = OnceLock::new();
@@ -88,12 +92,30 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
             kind,
             id: redact_sensitive_env_text(&id),
         },
-        OrbitError::TaskApprovalRequired(m) => {
-            OrbitError::TaskApprovalRequired(redact_sensitive_env_text(&m))
+        OrbitError::CapabilityDenied(m) => {
+            OrbitError::CapabilityDenied(redact_sensitive_env_text(&m))
         }
         OrbitError::AdrInvalidTransition(m) => {
             OrbitError::AdrInvalidTransition(redact_sensitive_env_text(&m))
         }
+        OrbitError::RemoteArtifactUnavailable {
+            kind,
+            id,
+            artifact_origin,
+        } => OrbitError::RemoteArtifactUnavailable {
+            kind,
+            id: redact_sensitive_env_text(&id),
+            artifact_origin: redact_artifact_origin(artifact_origin, redact_sensitive_env_text),
+        },
+        OrbitError::ArtifactNotLocal {
+            kind,
+            id,
+            artifact_origin,
+        } => OrbitError::ArtifactNotLocal {
+            kind,
+            id: redact_sensitive_env_text(&id),
+            artifact_origin: redact_artifact_origin(artifact_origin, redact_sensitive_env_text),
+        },
         OrbitError::CompanionNotInstalled(m) => {
             OrbitError::CompanionNotInstalled(redact_sensitive_env_text(&m))
         }
@@ -122,17 +144,234 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         OrbitError::UnsupportedAgentProvider(m) => {
             OrbitError::UnsupportedAgentProvider(redact_sensitive_env_text(&m))
         }
+        OrbitError::HubUnavailable(m) => OrbitError::HubUnavailable(redact_sensitive_env_text(&m)),
+        OrbitError::HubNegotiation(m) => OrbitError::HubNegotiation(redact_sensitive_env_text(&m)),
+        OrbitError::OutcomeUnknown {
+            mcp_call_id,
+            message,
+        } => OrbitError::OutcomeUnknown {
+            mcp_call_id: redact_sensitive_env_text(&mcp_call_id),
+            message: redact_sensitive_env_text(&message),
+        },
+        OrbitError::RemoteTool {
+            code,
+            message,
+            payload,
+        } => OrbitError::RemoteTool {
+            code: redact_sensitive_env_text(&code),
+            message: redact_sensitive_env_text(&message),
+            payload: redact_sensitive_env_json(payload),
+        },
         OrbitError::Execution(m) => OrbitError::Execution(redact_sensitive_env_text(&m)),
+        OrbitError::RunCancellationIncomplete {
+            pid,
+            pgid,
+            term_sent,
+            kill_sent,
+            leader_alive,
+            group_alive,
+        } => OrbitError::RunCancellationIncomplete {
+            pid,
+            pgid,
+            term_sent,
+            kill_sent,
+            leader_alive,
+            group_alive,
+        },
+        OrbitError::TaskBundleCorrupt {
+            task_id,
+            path,
+            reason,
+        } => OrbitError::TaskBundleCorrupt {
+            task_id: redact_sensitive_env_text(&task_id),
+            path: redact_sensitive_env_text(&path),
+            reason: redact_sensitive_env_text(&reason),
+        },
         OrbitError::Store(m) => OrbitError::Store(redact_sensitive_env_text(&m)),
         OrbitError::TaskStatusTransition(m) => {
             OrbitError::TaskStatusTransition(redact_sensitive_env_text(&m))
         }
+        OrbitError::DependencyNotDelivered(diagnostic) => OrbitError::DependencyNotDelivered(
+            redact_dependency_not_delivered(*diagnostic, redact_sensitive_env_text),
+        ),
         OrbitError::JobRunStateTransition(m) => {
             OrbitError::JobRunStateTransition(redact_sensitive_env_text(&m))
         }
         OrbitError::Io(m) => OrbitError::Io(redact_sensitive_env_text(&m)),
         OrbitError::WorkspaceError(m) => OrbitError::WorkspaceError(redact_sensitive_env_text(&m)),
         OrbitError::Migration(m) => OrbitError::Migration(redact_sensitive_env_text(&m)),
+    }
+}
+
+/// Scrub an [`OrbitError`]'s string payloads with the full [`redact_all`]
+/// pipeline (live env values **plus** the HTTP header / bearer / provider-key
+/// patterns), not just env values like [`redact_sensitive_env_error`].
+/// [ORB-00417] Apply at the error persistence/log boundary so an error message
+/// embedding a `Bearer <token>` or `sk-*` key in a URL is never written out
+/// un-redacted. Idempotent: `redact_all` placeholders never re-match the secret
+/// patterns.
+pub fn redact_all_error(error: OrbitError) -> OrbitError {
+    match error {
+        OrbitError::PolicyDenied(m) => OrbitError::PolicyDenied(redact_all(&m)),
+        OrbitError::NotFound { kind, id } => OrbitError::NotFound {
+            kind,
+            id: redact_all(&id),
+        },
+        OrbitError::CapabilityDenied(m) => OrbitError::CapabilityDenied(redact_all(&m)),
+        OrbitError::AdrInvalidTransition(m) => OrbitError::AdrInvalidTransition(redact_all(&m)),
+        OrbitError::RemoteArtifactUnavailable {
+            kind,
+            id,
+            artifact_origin,
+        } => OrbitError::RemoteArtifactUnavailable {
+            kind,
+            id: redact_all(&id),
+            artifact_origin: redact_artifact_origin(artifact_origin, redact_all),
+        },
+        OrbitError::ArtifactNotLocal {
+            kind,
+            id,
+            artifact_origin,
+        } => OrbitError::ArtifactNotLocal {
+            kind,
+            id: redact_all(&id),
+            artifact_origin: redact_artifact_origin(artifact_origin, redact_all),
+        },
+        OrbitError::CompanionNotInstalled(m) => OrbitError::CompanionNotInstalled(redact_all(&m)),
+        OrbitError::InvalidInput(m) => OrbitError::InvalidInput(redact_all(&m)),
+        OrbitError::SensitiveInput { field, reason } => OrbitError::SensitiveInput {
+            field: redact_all(&field),
+            reason: redact_all(&reason),
+        },
+        OrbitError::InvalidInputDiagnostic {
+            message,
+            did_you_mean,
+        } => OrbitError::InvalidInputDiagnostic {
+            message: redact_all(&message),
+            did_you_mean: did_you_mean
+                .into_iter()
+                .map(|suggestion| redact_all(&suggestion))
+                .collect(),
+        },
+        OrbitError::SkillValidation(m) => OrbitError::SkillValidation(redact_all(&m)),
+        OrbitError::JobValidation(m) => OrbitError::JobValidation(redact_all(&m)),
+        OrbitError::AgentProtocolViolation(m) => OrbitError::AgentProtocolViolation(redact_all(&m)),
+        OrbitError::UnsupportedAgentProvider(m) => {
+            OrbitError::UnsupportedAgentProvider(redact_all(&m))
+        }
+        OrbitError::HubUnavailable(m) => OrbitError::HubUnavailable(redact_all(&m)),
+        OrbitError::HubNegotiation(m) => OrbitError::HubNegotiation(redact_all(&m)),
+        OrbitError::OutcomeUnknown {
+            mcp_call_id,
+            message,
+        } => OrbitError::OutcomeUnknown {
+            mcp_call_id: redact_all(&mcp_call_id),
+            message: redact_all(&message),
+        },
+        OrbitError::RemoteTool {
+            code,
+            message,
+            payload,
+        } => OrbitError::RemoteTool {
+            code: redact_all(&code),
+            message: redact_all(&message),
+            payload: redact_json_with(payload, redact_all),
+        },
+        OrbitError::Execution(m) => OrbitError::Execution(redact_all(&m)),
+        OrbitError::RunCancellationIncomplete {
+            pid,
+            pgid,
+            term_sent,
+            kill_sent,
+            leader_alive,
+            group_alive,
+        } => OrbitError::RunCancellationIncomplete {
+            pid,
+            pgid,
+            term_sent,
+            kill_sent,
+            leader_alive,
+            group_alive,
+        },
+        OrbitError::TaskBundleCorrupt {
+            task_id,
+            path,
+            reason,
+        } => OrbitError::TaskBundleCorrupt {
+            task_id: redact_all(&task_id),
+            path: redact_all(&path),
+            reason: redact_all(&reason),
+        },
+        OrbitError::Store(m) => OrbitError::Store(redact_all(&m)),
+        OrbitError::TaskStatusTransition(m) => OrbitError::TaskStatusTransition(redact_all(&m)),
+        OrbitError::DependencyNotDelivered(diagnostic) => OrbitError::DependencyNotDelivered(
+            redact_dependency_not_delivered(*diagnostic, redact_all),
+        ),
+        OrbitError::JobRunStateTransition(m) => OrbitError::JobRunStateTransition(redact_all(&m)),
+        OrbitError::Io(m) => OrbitError::Io(redact_all(&m)),
+        OrbitError::WorkspaceError(m) => OrbitError::WorkspaceError(redact_all(&m)),
+        OrbitError::Migration(m) => OrbitError::Migration(redact_all(&m)),
+    }
+}
+
+fn redact_dependency_not_delivered(
+    diagnostic: DependencyNotDelivered,
+    redact: fn(&str) -> String,
+) -> Box<DependencyNotDelivered> {
+    Box::new(DependencyNotDelivered {
+        task_id: redact(&diagnostic.task_id),
+        dependency_id: redact(&diagnostic.dependency_id),
+        base_ref: redact(&diagnostic.base_ref),
+        base_sha: redact(&diagnostic.base_sha),
+        detail: redact(&diagnostic.detail),
+    })
+}
+
+fn redact_json_with(value: Value, redact: fn(&str) -> String) -> Value {
+    match value {
+        Value::String(raw) => Value::String(redact(&raw)),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| redact_json_with(item, redact))
+                .collect(),
+        ),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, value)| (key, redact_json_with(value, redact)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn redact_artifact_origin(
+    artifact_origin: ArtifactOrigin,
+    redact: fn(&str) -> String,
+) -> ArtifactOrigin {
+    ArtifactOrigin {
+        mode: artifact_origin.mode,
+        worktree_root: credential_safe_location_with(&artifact_origin.worktree_root, redact),
+        branch: artifact_origin
+            .branch
+            .map(|branch| credential_safe_location_with(&branch, redact)),
+    }
+}
+
+/// Return a public-safe worktree or branch location. URI-shaped values are
+/// rejected wholesale so allocation metadata can never expose a credentialed
+/// transport target; ordinary filesystem paths retain their useful location
+/// while the standard credential patterns are scrubbed.
+pub fn credential_safe_location(raw: &str) -> String {
+    credential_safe_location_with(raw, redact_all)
+}
+
+fn credential_safe_location_with(raw: &str, redact: fn(&str) -> String) -> String {
+    let lower = raw.trim().to_ascii_lowercase();
+    if lower.contains("://") || lower.starts_with("bearer ") || lower.contains("authorization:") {
+        "[REDACTED_LOCATION]".to_string()
+    } else {
+        redact(raw)
     }
 }
 
@@ -156,14 +395,108 @@ fn sensitive_env_values() -> Vec<String> {
 /// Return the current process environment with sensitive variable names
 /// removed. Provider subprocesses use this when they need normal runtime
 /// context such as `PATH`/`HOME` without inheriting ambient credentials.
+///
+/// The login identity (`USER` / `LOGNAME`) is backfilled from the OS when it
+/// is absent from the current process — see [`backfill_login_identity`].
 pub fn non_sensitive_env_vars() -> Vec<(OsString, OsString)> {
-    std::env::vars_os()
+    let mut vars: Vec<(OsString, OsString)> = std::env::vars_os()
         .filter(|(name, _)| {
             name.to_str()
                 .map(|name| !is_sensitive_env_name(name))
                 .unwrap_or(true)
         })
-        .collect()
+        .collect();
+    backfill_login_identity(&mut vars);
+    vars
+}
+
+/// Ensure a forwarded environment carries a login identity (`USER` /
+/// `LOGNAME`).
+///
+/// A provider CLI such as `claude` reads `USER` to locate its per-user
+/// credential store (macOS Keychain account). When orbit's executor is started
+/// without a login environment — e.g. a detached pipeline worker that did not
+/// inherit a login shell's variables — `USER`/`LOGNAME` are absent and the
+/// spawned provider fails to authenticate (HTTP 401) even though valid
+/// credentials exist. We backfill the real OS login name resolved from the
+/// current uid so the child always has a correct identity. An already-present,
+/// non-empty value is never overwritten. [ORB-00409]
+// pub(crate) for sibling-layout tests in utility/tests/redaction.rs.
+pub(crate) fn backfill_login_identity(vars: &mut Vec<(OsString, OsString)>) {
+    let present = |key: &str| {
+        vars.iter()
+            .any(|(name, value)| name == OsStr::new(key) && !value.is_empty())
+    };
+    let need_user = !present("USER");
+    let need_logname = !present("LOGNAME");
+    if !need_user && !need_logname {
+        return;
+    }
+    let Some(login) = os_login_name() else {
+        // Cannot resolve a login name; leave the environment untouched rather
+        // than inject a placeholder that would itself fail credential lookup.
+        return;
+    };
+    let mut set = |key: &str| {
+        // Drop any empty placeholder first so the resolved value is the only
+        // entry for `key` (Command::envs would otherwise keep both).
+        vars.retain(|(name, _)| name != OsStr::new(key));
+        vars.push((OsString::from(key), OsString::from(&login)));
+    };
+    if need_user {
+        set("USER");
+    }
+    if need_logname {
+        set("LOGNAME");
+    }
+}
+
+/// Resolve the current process's OS login name.
+///
+/// On Unix this is the `pw_name` for the real uid via the reentrant
+/// `getpwuid_r`, which (unlike `$USER`) does not depend on the ambient
+/// environment. Returns `None` when no passwd entry exists or the lookup
+/// fails.
+// pub(crate) for sibling-layout tests in utility/tests/redaction.rs.
+#[cfg(unix)]
+pub(crate) fn os_login_name() -> Option<String> {
+    use std::ffi::CStr;
+
+    // SAFETY: getuid cannot fail. getpwuid_r writes into caller-owned buffers
+    // (`pwd` and `buf`); we only read `pw_name` after a success (rc == 0) with a
+    // non-null `result`, and copy it out before either buffer is dropped.
+    let uid = unsafe { libc::getuid() };
+    let mut buf = vec![0 as libc::c_char; 1024];
+    loop {
+        let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+        let mut result: *mut libc::passwd = std::ptr::null_mut();
+        let rc =
+            unsafe { libc::getpwuid_r(uid, &mut pwd, buf.as_mut_ptr(), buf.len(), &mut result) };
+        if rc == 0 {
+            if result.is_null() || pwd.pw_name.is_null() {
+                return None;
+            }
+            let name = unsafe { CStr::from_ptr(pwd.pw_name) };
+            return name
+                .to_str()
+                .ok()
+                .map(str::to_owned)
+                .filter(|s| !s.is_empty());
+        }
+        // ERANGE: buffer too small. Grow and retry up to a sane ceiling.
+        if rc == libc::ERANGE && buf.len() < (1 << 20) {
+            buf.resize(buf.len() * 2, 0);
+            continue;
+        }
+        return None;
+    }
+}
+
+/// Non-Unix fallback: derive the login name from `USERNAME` if present.
+// pub(crate) for sibling-layout tests in utility/tests/redaction.rs.
+#[cfg(not(unix))]
+pub(crate) fn os_login_name() -> Option<String> {
+    std::env::var("USERNAME").ok().filter(|s| !s.is_empty())
 }
 
 fn is_redactable_value(value: &str) -> bool {

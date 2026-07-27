@@ -1,7 +1,7 @@
 #![deny(clippy::print_stderr, clippy::print_stdout)]
 // ORB-00004: legacy tool-registry surfaces still need a focused documentation pass.
 #![allow(missing_docs)]
-// ORB-00013: Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
+// Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 #![allow(
     rustdoc::broken_intra_doc_links,
@@ -16,8 +16,8 @@
 //!
 //! # Role
 //! Depends on `orbit-exec` for process spawning and `orbit-common` for shared
-//! types. Consumed by `orbit-engine` and `orbit-core`, which pass a configured
-//! [`ToolRegistry`] into the execution context.
+//! types. Consumed by `orbit-engine`, `orbit-core`, and `orbit-remote`, which
+//! compose its workspace-scoped definitions with Remote-owned discovery tools.
 //!
 //! # Key exports
 //! - [`ToolRegistry`] — central registry; call `register_builtins()` to load all standard tools
@@ -35,7 +35,7 @@
 //! process allowlists, and the narrow Orbit host surface used by Orbit builtins.
 //!
 //! # Dependency direction
-//! `orbit-common` → `orbit-exec` → `orbit-tools` → orbit-engine, orbit-core
+//! orbit-common / orbit-exec / orbit-policy → `orbit-tools` → orbit-engine, orbit-core, orbit-remote
 
 pub(crate) mod builtin;
 pub mod external;
@@ -47,6 +47,7 @@ use std::sync::Arc;
 use orbit_policy::PolicyEngine;
 use serde_json::{Map, Value};
 
+use orbit_common::friction::FrictionVerb;
 use orbit_common::types::{OrbitError, RoleSlot, ToolSchema};
 
 /// Fast operation timeout (1 s). Used for local command resolution (e.g. `which`).
@@ -64,7 +65,16 @@ pub const TIMEOUT_SLOW_MS: u64 = 30_000;
 /// fetches a branch and may transfer significant data over the network.
 pub const TIMEOUT_LONG_MS: u64 = 60_000;
 
-pub use registry::ToolRegistry;
+pub use registry::{ToolRegistry, canonical_builtin_mcp_tool_definitions};
+
+/// Materialize a task artifact before a spoke sends the coordination request
+/// to its hub. The returned value contains artifact bytes but no source path.
+pub fn prepare_remote_task_artifact_put(
+    input: Value,
+    cwd: Option<&std::path::Path>,
+) -> Result<Value, OrbitError> {
+    builtin::orbit::task::artifact_put::prepare_remote_payload(input, cwd)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrbitBuiltinAction {
@@ -73,35 +83,29 @@ pub enum OrbitBuiltinAction {
     AdrList,
     AdrUpdate,
     AdrSupersede,
+    AutoTaskAdd,
+    AutoTaskList,
+    AutoTaskShow,
+    AutoTaskUpdate,
+    AutoTaskToggle,
     DocsList,
     DocsShow,
     DocsAdd,
     DocsIndex,
     DocsMigrate,
-    FrictionAdd,
-    FrictionList,
-    FrictionResolve,
-    FrictionShow,
-    FrictionStats,
-    FrictionTags,
-    FrictionUpdate,
+    /// ADR-0209 bearing 1 [ORB-10358]: friction verbs are registry data, so one
+    /// action variant carries the verb instead of one variant per verb.
+    Friction(FrictionVerb),
     LearningAdd,
-    LearningCommentAdd,
-    LearningCommentDelete,
-    LearningCommentList,
+    LearningArchive,
     LearningList,
     LearningPrune,
     LearningShow,
     LearningSupersede,
     LearningSync,
     LearningUpdate,
-    LearningUpvote,
     PipelineInvoke,
     PipelineWait,
-    ReviewThreadAdd,
-    ReviewThreadList,
-    ReviewThreadReply,
-    ReviewThreadResolve,
     Search,
     SemanticIndex,
     SemanticInstall,
@@ -123,26 +127,11 @@ pub enum OrbitBuiltinAction {
     TaskUpdate,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GroundhogBuiltinAction {
-    CheckpointSuccess,
-    CheckpointFailure,
-    CheckpointDeviate,
-    SideEffect,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OrbitTaskScope {
     pub orbit_root: Option<PathBuf>,
     pub task_id: Option<String>,
     pub run_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GroundhogScope {
-    pub active_day: bool,
-    pub task_id: Option<String>,
-    pub checkpoint_id: Option<String>,
 }
 
 pub trait OrbitToolHost: Send + Sync {
@@ -156,12 +145,6 @@ pub trait OrbitToolHost: Send + Sync {
     ) -> Result<Value, OrbitError>;
 
     fn task_scope(&self) -> OrbitTaskScope;
-}
-
-pub trait GroundhogToolHost: Send + Sync {
-    fn execute(&self, action: GroundhogBuiltinAction, input: Value) -> Result<Value, OrbitError>;
-
-    fn scope(&self) -> GroundhogScope;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -233,8 +216,6 @@ pub struct ToolContext {
     /// Narrow Orbit application host used by Orbit builtins instead of respawning
     /// the Orbit CLI or carrying task-specific state in the generic tool context.
     pub orbit_host: Option<Arc<dyn OrbitToolHost>>,
-    /// Optional Groundhog runner host used by the Groundhog verb tools.
-    pub groundhog_host: Option<Arc<dyn GroundhogToolHost>>,
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -256,7 +237,6 @@ impl std::fmt::Debug for ToolContext {
             .field("fs_profile", &self.fs_profile)
             .field("reservation_owner", &self.reservation_owner)
             .field("has_orbit_host", &self.orbit_host.is_some())
-            .field("has_groundhog_host", &self.groundhog_host.is_some())
             .finish()
     }
 }

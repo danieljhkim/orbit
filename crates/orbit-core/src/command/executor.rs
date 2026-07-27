@@ -1,6 +1,6 @@
 use orbit_common::types::{
-    EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorDef, ExecutorResource, ExecutorType, OrbitError,
-    ResourceKind,
+    EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorDef, ExecutorResource, ExecutorSandboxKind,
+    ExecutorType, OrbitError, ResourceKind,
 };
 use orbit_store::ExecutorDefStoreBackend;
 
@@ -19,9 +19,21 @@ pub(crate) fn seed_default_executors(
     store: &dyn ExecutorDefStoreBackend,
     overwrite: bool,
 ) -> Result<usize, OrbitError> {
+    seed_default_executors_for_platform(store, overwrite, std::env::consts::OS)
+}
+
+/// Platform-injected core of [`seed_default_executors`]. The host OS is passed
+/// explicitly (rather than read from `std::env::consts::OS`) so both the macOS
+/// and Linux seeding paths can be exercised deterministically in tests on a
+/// single CI host. See [ORB-10112].
+pub(super) fn seed_default_executors_for_platform(
+    store: &dyn ExecutorDefStoreBackend,
+    overwrite: bool,
+    target_os: &str,
+) -> Result<usize, OrbitError> {
     let mut created = 0usize;
     for (name, yaml) in DEFAULT_EXECUTOR_FILES {
-        let def = parse_default_executor(name, yaml)?;
+        let def = parse_default_executor_for_platform(name, yaml, target_os)?;
         let existing = store.get_executor_def(&def.name)?;
         match existing {
             None => {
@@ -33,7 +45,9 @@ pub(crate) fn seed_default_executors(
                 created += 1;
             }
             Some(existing) => {
-                if let Some(migrated) = migrated_default_executor(&existing, &def) {
+                if let Some(migrated) =
+                    migrated_default_executor_for_platform(&existing, &def, target_os)
+                {
                     store.upsert_executor_def(&migrated)?;
                     created += 1;
                 }
@@ -43,23 +57,85 @@ pub(crate) fn seed_default_executors(
     Ok(created)
 }
 
-fn migrated_default_executor(existing: &ExecutorDef, seeded: &ExecutorDef) -> Option<ExecutorDef> {
+/// Select the sandbox setting a *shipped* executor should be installed with on
+/// `target_os`. Shipped assets declare their macOS sandbox intent; keep it on
+/// hosts where the primitive applies and install without an OS sandbox
+/// elsewhere until a native backend for that host exists.
+///
+/// This is deliberate platform selection for Orbit's own defaults, so it is
+/// silent. It does NOT relax validation of user-authored executor defs: a
+/// custom def that explicitly requests an incompatible sandbox backend is left
+/// untouched here and still fails closed at dispatch in
+/// `runtime::v2_host::sandbox`. See [ORB-10112] / [ORB-10047].
+fn select_shipped_sandbox(
+    declared: Option<ExecutorSandboxKind>,
+    target_os: &str,
+) -> Option<ExecutorSandboxKind> {
+    match declared {
+        Some(kind) if kind.is_available_on(target_os) => Some(kind),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+pub(super) fn migrated_default_executor(
+    existing: &ExecutorDef,
+    seeded: &ExecutorDef,
+) -> Option<ExecutorDef> {
+    migrated_default_executor_for_platform(existing, seeded, std::env::consts::OS)
+}
+
+pub(super) fn migrated_default_executor_for_platform(
+    existing: &ExecutorDef,
+    seeded: &ExecutorDef,
+    target_os: &str,
+) -> Option<ExecutorDef> {
     if existing.name != seeded.name {
         return None;
     }
 
-    if existing.executor_type != ExecutorType::AgentCli
-        || seeded.executor_type != ExecutorType::DirectAgent
+    let mut migrated = existing.clone();
+    let mut changed = false;
+
+    if existing.executor_type == ExecutorType::AgentCli
+        && seeded.executor_type == ExecutorType::DirectAgent
     {
-        return None;
+        migrated.executor_type = ExecutorType::DirectAgent;
+        changed = true;
     }
 
-    let mut migrated = existing.clone();
-    migrated.executor_type = ExecutorType::DirectAgent;
-    Some(migrated)
+    // Re-align a leftover platform-mismatched sandbox on an installed default
+    // to the platform-appropriate value chosen at seed time. Upgrading a host
+    // that can't apply the persisted primitive (e.g. `macos-sandbox-exec`
+    // installed on Linux before [ORB-10112]) drops it to the seeded value so
+    // dispatch doesn't fail closed. See [ORB-10047].
+    if let Some(kind) = existing.sandbox
+        && !kind.is_available_on(target_os)
+        && existing.sandbox != seeded.sandbox
+    {
+        tracing::debug!(
+            executor = %existing.name,
+            sandbox = %kind,
+            target_os,
+            "re-aligning platform-mismatched sandbox on installed default executor to seeded value",
+        );
+        migrated.sandbox = seeded.sandbox;
+        changed = true;
+    }
+
+    if changed { Some(migrated) } else { None }
 }
 
-fn parse_default_executor(name: &str, yaml: &str) -> Result<ExecutorDef, OrbitError> {
+#[cfg(test)]
+pub(super) fn parse_default_executor(name: &str, yaml: &str) -> Result<ExecutorDef, OrbitError> {
+    parse_default_executor_for_platform(name, yaml, std::env::consts::OS)
+}
+
+pub(super) fn parse_default_executor_for_platform(
+    name: &str,
+    yaml: &str,
+    target_os: &str,
+) -> Result<ExecutorDef, OrbitError> {
     let resource: ExecutorResource = serde_yaml::from_str(yaml).map_err(|e| {
         OrbitError::InvalidInput(format!("invalid embedded executor def '{name}': {e}"))
     })?;
@@ -82,10 +158,22 @@ fn parse_default_executor(name: &str, yaml: &str) -> Result<ExecutorDef, OrbitEr
         )));
     }
 
-    Ok(ExecutorDef::from_resource_spec(
+    let mut def = ExecutorDef::from_resource_spec(
         resource.metadata.name,
         resource.spec.clone(),
         resource.spec.created_at,
         resource.spec.updated_at,
-    ))
+    );
+
+    // Shipped executor assets declare their macOS sandbox intent
+    // (`macos-sandbox-exec`), which dispatch fails closed on if the runner
+    // platform can't apply it. Select the platform-appropriate sandbox at seed
+    // time so first-install and re-install (overwrite mode) persist the value
+    // that matches the host: kept where the primitive applies, dropped
+    // elsewhere until a native backend for that host lands. This is deliberate
+    // selection for our own defaults, so — unlike the earlier mismatch
+    // handling — it is silent. See [ORB-10112] / [ORB-10047].
+    def.sandbox = select_shipped_sandbox(def.sandbox, target_os);
+
+    Ok(def)
 }

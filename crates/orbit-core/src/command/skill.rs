@@ -1,7 +1,5 @@
 use std::path::Path;
 
-use std::collections::HashSet;
-
 use orbit_common::types::OrbitError;
 
 use orbit_common::utility::fs::write_text_with_parent;
@@ -9,70 +7,53 @@ use orbit_common::utility::fs::write_text_with_parent;
 use crate::OrbitRuntime;
 use crate::skill_catalog::{LoadedSkill, SkillCatalogDoctorStatus};
 
-const DEFAULT_SKILL_FILES: [(&str, &str); 12] = [
+const DEFAULT_SKILL_FILES: [(&str, &str); 6] = [
     ("orbit", include_str!("../../assets/skills/orbit/SKILL.md")),
     (
-        "orbit-adr",
-        include_str!("../../assets/skills/orbit-adr/SKILL.md"),
+        "orbit-task",
+        include_str!("../../assets/skills/orbit-task/SKILL.md"),
     ),
     (
-        "orbit-create-task",
-        include_str!("../../assets/skills/orbit-create-task/SKILL.md"),
+        "orbit-task-pilot",
+        include_str!("../../assets/skills/orbit-task-pilot/SKILL.md"),
     ),
     (
-        "orbit-debug-job-failure",
-        include_str!("../../assets/skills/orbit-debug-job-failure/SKILL.md"),
-    ),
-    (
-        "orbit-execute-task",
-        include_str!("../../assets/skills/orbit-execute-task/SKILL.md"),
-    ),
-    (
-        "orbit-docs",
-        include_str!("../../assets/skills/orbit-docs/SKILL.md"),
-    ),
-    (
-        "orbit-graph",
-        include_str!("../../assets/skills/orbit-graph/SKILL.md"),
-    ),
-    (
-        "orbit-guide",
-        include_str!("../../assets/skills/orbit-guide/SKILL.md"),
-    ),
-    (
-        "orbit-learning",
-        include_str!("../../assets/skills/orbit-learning/SKILL.md"),
-    ),
-    (
-        "orbit-review-task",
-        include_str!("../../assets/skills/orbit-review-task/SKILL.md"),
+        "orbit-workflow",
+        include_str!("../../assets/skills/orbit-workflow/SKILL.md"),
     ),
     (
         "orbit-search",
         include_str!("../../assets/skills/orbit-search/SKILL.md"),
     ),
     (
-        "orbit-track-issues",
-        include_str!("../../assets/skills/orbit-track-issues/SKILL.md"),
+        "orbit-knowledge",
+        include_str!("../../assets/skills/orbit-knowledge/SKILL.md"),
     ),
 ];
 
-const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 1] = [(
-    "orbit-debug-job-failure",
-    "references/common_failures.md",
-    include_str!("../../assets/skills/orbit-debug-job-failure/references/common_failures.md"),
-)];
-
-/// Skills intentionally NOT shipped in `plugin/skills/` because they depend on
-/// CLI-only surfaces the Claude Code plugin does not expose. The CLI still
-/// seeds them; the plugin omits the symlink. Update this list when adding a
-/// skill that should be CLI-only — the `plugin_skill_symlinks_resolve_to_assets`
-/// test reads it.
-#[cfg(test)]
-const PLUGIN_EXCLUDED_SKILLS: &[&str] = &[
-    // No `orbit run` surface in the plugin, so there are no jobs to debug.
-    "orbit-debug-job-failure",
+const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 4] = [
+    (
+        "orbit-workflow",
+        "references/debug-job-failure.md",
+        include_str!("../../assets/skills/orbit-workflow/references/debug-job-failure.md"),
+    ),
+    (
+        "orbit-workflow",
+        "references/common_failures.md",
+        include_str!("../../assets/skills/orbit-workflow/references/common_failures.md"),
+    ),
+    (
+        "orbit-workflow",
+        "references/operational-logs.md",
+        include_str!("../../assets/skills/orbit-workflow/references/operational-logs.md"),
+    ),
+    (
+        "orbit",
+        "references/guide.md",
+        include_str!("../../assets/skills/orbit/references/guide.md"),
+    ),
 ];
+
 use crate::paths::ORBIT_ROOT_TOKEN;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,7 +70,7 @@ pub struct SkillDoctorResult {
     pub message: String,
 }
 
-pub(crate) fn default_skill_ids() -> [&'static str; 12] {
+pub(crate) fn default_skill_ids() -> [&'static str; 6] {
     DEFAULT_SKILL_FILES.map(|(id, _)| id)
 }
 
@@ -178,36 +159,30 @@ impl OrbitRuntime {
             })
             .collect())
     }
-
-    pub(crate) fn resolve_activity_skill_refs(
-        &self,
-        refs: &[String],
-    ) -> Result<Vec<LoadedSkill>, OrbitError> {
-        let mut dedup = HashSet::new();
-        let mut output = Vec::new();
-        for skill_id in refs {
-            if !dedup.insert(skill_id.clone()) {
-                continue;
-            }
-            output.push(self.skill_catalog().load(skill_id)?);
-        }
-        Ok(output)
-    }
 }
 
 #[cfg(test)]
-mod drift_tests {
-    //! Parity tests guarding against drift between the four skill catalogs:
-    //! the on-disk assets, the seeded registry, the plugin symlinks, and the
-    //! router skill's enumeration. The next agent who adds a skill folder
-    //! must update all four; these tests fail loudly if any catalog lags.
+mod tests {
+    //! Tests guarding the on-disk assets, seeded registry, router skill, and
+    //! plugin package configuration. Each delivery surface validates its own
+    //! contract without requiring the skill trees to match.
+    //!
+    //! Plus a portability regression (`embedded_assets_are_repository_agnostic`)
+    //! guarding the shipped skill *and* activity trees against leaking
+    //! Orbit-source paths, private Constellation names, maintainers' personal
+    //! names, workspace-local artifact IDs (task/friction/learning/ADR), and
+    //! fixed consumer design-doc filenames into public consumer workspaces.
 
     use super::*;
     use std::collections::BTreeSet;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn assets_skills_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/skills")
+    }
+
+    fn assets_activities_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/activities")
     }
 
     fn repo_root() -> PathBuf {
@@ -219,6 +194,38 @@ mod drift_tests {
             .parent()
             .expect("crates/ has a parent (repo root)")
             .to_path_buf()
+    }
+
+    fn collect_relative_files(root: &Path) -> Result<BTreeSet<PathBuf>, String> {
+        let mut pending = vec![root.to_path_buf()];
+        let mut files = BTreeSet::new();
+
+        while let Some(dir) = pending.pop() {
+            let entries =
+                std::fs::read_dir(&dir).map_err(|e| format!("read_dir({}): {e}", dir.display()))?;
+            for entry in entries {
+                let entry = entry.map_err(|e| format!("read_dir({}) entry: {e}", dir.display()))?;
+                let path = entry.path();
+                let file_type = entry
+                    .file_type()
+                    .map_err(|e| format!("file_type({}): {e}", path.display()))?;
+                if file_type.is_dir() {
+                    pending.push(path);
+                    continue;
+                }
+                if file_type.is_file() || file_type.is_symlink() {
+                    let relative = path
+                        .strip_prefix(root)
+                        .map_err(|e| {
+                            format!("strip_prefix({}, {}): {e}", root.display(), path.display())
+                        })?
+                        .to_path_buf();
+                    files.insert(relative);
+                }
+            }
+        }
+
+        Ok(files)
     }
 
     #[test]
@@ -254,85 +261,158 @@ mod drift_tests {
     }
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "plugin/skills/ symlinks rely on POSIX symlinks; Windows checkouts with core.symlinks=false break this test"
-    )]
-    fn plugin_skill_symlinks_resolve_to_assets() {
+    fn plugin_package_configuration_is_valid() {
         let repo = repo_root();
-        let plugin_skills = repo.join("plugin/skills");
-        let assets = repo.join("crates/orbit-core/assets/skills");
-        let excluded: BTreeSet<&str> = PLUGIN_EXCLUDED_SKILLS.iter().copied().collect();
+        let claude_mcp_path = repo.join("plugin/.mcp.json");
+        let codex_manifest_path = repo.join("plugin/.codex-plugin/plugin.json");
+        let marketplace_path = repo.join(".agents/plugins/marketplace.json");
 
         let mut failures: Vec<String> = Vec::new();
 
-        // Forward: every non-excluded default skill must have a symlink resolving
-        // to the corresponding asset directory.
-        let expected_ids: BTreeSet<&str> = default_skill_ids()
-            .iter()
-            .copied()
-            .filter(|id| !excluded.contains(id))
-            .collect();
-        for id in &expected_ids {
-            let link = plugin_skills.join(id);
-            if !link.exists() {
-                failures.push(format!(
-                    "  {id}: plugin/skills/{id} does not exist (run: ln -s ../../crates/orbit-core/assets/skills/{id} plugin/skills/{id})"
-                ));
-                continue;
-            }
-            let expected_path = match assets.join(id).canonicalize() {
-                Ok(p) => p,
-                Err(e) => {
-                    failures.push(format!("  {id}: canonicalize asset path failed: {e}"));
-                    continue;
-                }
-            };
-            let actual = match link.canonicalize() {
-                Ok(p) => p,
+        // Validate the Codex and Claude package configuration independently.
+        let codex_manifest: serde_json::Value = match std::fs::read_to_string(&codex_manifest_path)
+        {
+            Ok(contents) => match serde_json::from_str(&contents) {
+                Ok(value) => value,
                 Err(e) => {
                     failures.push(format!(
-                        "  {id}: canonicalize plugin/skills/{id} failed: {e}"
+                        "  {}: invalid JSON: {e}",
+                        codex_manifest_path.display()
                     ));
-                    continue;
+                    serde_json::Value::Null
                 }
-            };
-            if actual != expected_path {
+            },
+            Err(e) => {
                 failures.push(format!(
-                    "  {id}: plugin/skills/{id} resolves to {actual:?}, expected {expected_path:?}"
+                    "  {}: failed to read Codex plugin manifest: {e}",
+                    codex_manifest_path.display()
                 ));
+                serde_json::Value::Null
+            }
+        };
+        if !codex_manifest.is_null() {
+            if codex_manifest
+                .get("skills")
+                .and_then(|value| value.as_str())
+                != Some("./skills/")
+            {
+                failures.push(
+                    "  plugin/.codex-plugin/plugin.json: `skills` must point at ./skills/"
+                        .to_string(),
+                );
+            }
+            if codex_manifest.get("hooks").is_some() {
+                failures.push(
+                    "  plugin/.codex-plugin/plugin.json: must not declare Claude-only hooks"
+                        .to_string(),
+                );
+            }
+            let mcp_servers = codex_manifest.get("mcpServers");
+            if !matches!(mcp_servers, Some(serde_json::Value::Object(map)) if !map.is_empty()) {
+                failures.push(
+                    "  plugin/.codex-plugin/plugin.json: `mcpServers` must be a non-empty object"
+                        .to_string(),
+                );
+            }
+            if mcp_servers
+                .map(|value| value.to_string().contains("CLAUDE_PROJECT_DIR"))
+                .unwrap_or(false)
+            {
+                failures.push(
+                    "  plugin/.codex-plugin/plugin.json: Codex MCP config must not reference CLAUDE_PROJECT_DIR"
+                        .to_string(),
+                );
             }
         }
 
-        // L-0020: retired skills can leave dangling symlinks behind, so
-        // keep this reverse check strict about orphan plugin entries.
-        // Reverse: no orphan symlinks in plugin/skills/ (catches stale entries
-        // for retired skills and accidental inclusion of an excluded skill).
-        let on_disk: BTreeSet<String> = std::fs::read_dir(&plugin_skills)
-            .unwrap_or_else(|e| panic!("read_dir({}): {e}", plugin_skills.display()))
-            .filter_map(|entry| {
-                entry
-                    .ok()
-                    .map(|e| e.file_name().to_string_lossy().into_owned())
-            })
-            .collect();
-        for name in &on_disk {
-            if excluded.contains(name.as_str()) {
+        // MCP workspace selection is per initialize/session context or tool
+        // call. A launch-time --root silently reintroduces the retired cwd
+        // routing model and is rejected by `orbit mcp serve`.
+        let claude_mcp: serde_json::Value = match std::fs::read_to_string(&claude_mcp_path) {
+            Ok(contents) => match serde_json::from_str(&contents) {
+                Ok(value) => value,
+                Err(e) => {
+                    failures.push(format!(
+                        "  {}: invalid JSON: {e}",
+                        claude_mcp_path.display()
+                    ));
+                    serde_json::Value::Null
+                }
+            },
+            Err(e) => {
                 failures.push(format!(
-                    "  {name}: plugin/skills/{name} exists but is in PLUGIN_EXCLUDED_SKILLS — either remove the symlink or remove the exclusion"
+                    "  {}: failed to read Claude MCP config: {e}",
+                    claude_mcp_path.display()
                 ));
-                continue;
+                serde_json::Value::Null
             }
-            if !expected_ids.contains(name.as_str()) {
+        };
+        if !claude_mcp.is_null() {
+            let command = claude_mcp
+                .pointer("/mcpServers/orbit/command")
+                .and_then(|value| value.as_str());
+            let args = claude_mcp
+                .pointer("/mcpServers/orbit/args")
+                .and_then(|value| value.as_array())
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|value| value.as_str())
+                        .collect::<Vec<_>>()
+                });
+            if command != Some("npx")
+                || args != Some(vec!["-y", "@orbit-tools/cli@latest", "mcp", "serve"])
+            {
+                failures.push(
+                    "  plugin/.mcp.json: Orbit MCP launch must be `npx -y @orbit-tools/cli@latest mcp serve` with no cwd or --root routing"
+                        .to_string(),
+                );
+            }
+        }
+
+        let marketplace: serde_json::Value = match std::fs::read_to_string(&marketplace_path) {
+            Ok(contents) => match serde_json::from_str(&contents) {
+                Ok(value) => value,
+                Err(e) => {
+                    failures.push(format!(
+                        "  {}: invalid JSON: {e}",
+                        marketplace_path.display()
+                    ));
+                    serde_json::Value::Null
+                }
+            },
+            Err(e) => {
                 failures.push(format!(
-                    "  {name}: plugin/skills/{name} has no matching entry in default_skill_ids() — remove the orphan symlink or register the skill"
+                    "  {}: failed to read Codex marketplace manifest: {e}",
+                    marketplace_path.display()
                 ));
+                serde_json::Value::Null
             }
+        };
+        if let Some(plugins) = marketplace
+            .get("plugins")
+            .and_then(|value| value.as_array())
+        {
+            let source_path = plugins
+                .iter()
+                .find(|entry| entry.get("name").and_then(|value| value.as_str()) == Some("orbit"))
+                .and_then(|entry| entry.get("source"))
+                .and_then(|source| source.get("path"))
+                .and_then(|value| value.as_str());
+            if source_path != Some("./plugin") {
+                failures.push(
+                    "  .agents/plugins/marketplace.json: orbit entry must point at ./plugin"
+                        .to_string(),
+                );
+            }
+        } else if !marketplace.is_null() {
+            failures
+                .push("  .agents/plugins/marketplace.json: `plugins` must be an array".to_string());
         }
 
         assert!(
             failures.is_empty(),
-            "plugin/skills/ symlink parity failed for {} skill(s):\n{}",
+            "plugin package configuration failed with {} error(s):\n{}",
             failures.len(),
             failures.join("\n"),
         );
@@ -359,6 +439,255 @@ mod drift_tests {
             missing.is_empty(),
             "router skill at {} does not name these default skills as inline-code identifiers (expected occurrences of `<id>`): {missing:?}\nfix by adding a bullet to the ## Skill Selection block.",
             router_path.display(),
+        );
+    }
+
+    // --- Portability regression -------------------------------------------
+    //
+    // The shipped skill tree is embedded into the binary, seeded into arbitrary
+    // consumer workspaces, and mirrored into the public plugin package. It must
+    // not encode assumptions that only hold in an Orbit source checkout or in
+    // Daniel's private Constellation environment. `portability_violations`
+    // classifies the leak families the ORB-10208 audit found; the test asserts
+    // no shipped file trips them, while allowing genuine public Orbit runtime
+    // paths (`.orbit/...`, `~/.orbit/...`) and placeholder IDs (`ORB-NNNN`,
+    // `L-NNNN`, `<task-id>`).
+
+    /// Concrete workspace-local artifact IDs (task/friction/learning/decision)
+    /// that would become dangling references in a consumer workspace. Placeholder
+    /// forms (`ORB-NNNN`, `L-NNNN`, `ADR-NNNN`, `<task-id>`) use non-digit
+    /// stand-ins and are intentionally *not* matched.
+    fn find_artifact_ids(content: &str) -> Vec<String> {
+        let b = content.as_bytes();
+        let n = b.len();
+        let boundary = |i: usize| i == 0 || !b[i - 1].is_ascii_alphanumeric();
+        let digit_run = |start: usize| {
+            let mut k = 0;
+            while start + k < n && b[start + k].is_ascii_digit() {
+                k += 1;
+            }
+            k
+        };
+        let starts = |i: usize, pat: &[u8]| i + pat.len() <= n && &b[i..i + pat.len()] == pat;
+        let is_digit = |j: usize| j < n && b[j].is_ascii_digit();
+
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < n {
+            if boundary(i) {
+                // ORB-<digit...> (task ids). ORB-NNNN / ORB-NNNNN placeholders
+                // have a non-digit after the dash and are skipped.
+                if starts(i, b"ORB-") && is_digit(i + 4) {
+                    let d = digit_run(i + 4);
+                    out.push(String::from_utf8_lossy(&b[i..i + 4 + d]).into_owned());
+                }
+                // ADR-<digit...> (decision-record ids). ADR ids are allocated
+                // per workspace, so a concrete one resolves to a different
+                // decision — or to nothing — in a consumer's `.orbit/adrs/`.
+                // The ADR-NNNN placeholder has a non-digit after the dash and
+                // is skipped.
+                if starts(i, b"ADR-") && is_digit(i + 4) {
+                    let d = digit_run(i + 4);
+                    out.push(String::from_utf8_lossy(&b[i..i + 4 + d]).into_owned());
+                }
+                // L-<3+ digits> (learning ids). L-NNNN placeholder is skipped.
+                if starts(i, b"L-") {
+                    let d = digit_run(i + 2);
+                    if d >= 3 {
+                        out.push(String::from_utf8_lossy(&b[i..i + 2 + d]).into_owned());
+                    }
+                }
+                // F<yyyy>-<mm>-<nnn> (friction ids). F<YYYY>-<MM>-<NNN> is skipped.
+                if b[i] == b'F'
+                    && i + 12 <= n
+                    && (1..=4).all(|k| is_digit(i + k))
+                    && b[i + 5] == b'-'
+                    && is_digit(i + 6)
+                    && is_digit(i + 7)
+                    && b[i + 8] == b'-'
+                    && (9..=11).all(|k| is_digit(i + k))
+                {
+                    out.push(String::from_utf8_lossy(&b[i..i + 12]).into_owned());
+                }
+                // T<6+ digits> (legacy task ids like T20260514-3).
+                if b[i] == b'T' {
+                    let d = digit_run(i + 1);
+                    if d >= 6 {
+                        out.push(String::from_utf8_lossy(&b[i..i + 1 + d]).into_owned());
+                    }
+                }
+            }
+            i += 1;
+        }
+        out
+    }
+
+    /// Fixed numbered consumer design-doc filenames such as `4_decisions.md` or
+    /// `2_design.md` — an Orbit-source layout convention that does not hold in an
+    /// arbitrary consumer repo.
+    fn find_numbered_design_doc(content: &str) -> Option<String> {
+        let b = content.as_bytes();
+        let n = b.len();
+        let boundary = |i: usize| i == 0 || !b[i - 1].is_ascii_alphanumeric();
+        let mut i = 0;
+        while i < n {
+            if b[i].is_ascii_digit() && boundary(i) && i + 1 < n && b[i + 1] == b'_' {
+                let mut j = i + 2;
+                while j < n && (b[j].is_ascii_lowercase() || b[j] == b'_') {
+                    j += 1;
+                }
+                if j > i + 2 && j + 3 <= n && &b[j..j + 3] == b".md" {
+                    return Some(String::from_utf8_lossy(&b[i..j + 3]).into_owned());
+                }
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Given names of this repository's maintainers. Shipped assets address an
+    /// arbitrary consumer's agent, so naming a maintainer turns an enforceable
+    /// policy into a referral to someone the reader cannot reach.
+    const PRIVATE_PERSONAL_NAMES: &[&str] = &["Daniel"];
+
+    /// Every reason `content` is not repository-agnostic. Empty == portable.
+    fn portability_violations(content: &str) -> Vec<String> {
+        let mut hits = Vec::new();
+
+        // Unguarded Orbit source paths (crate tree only exists in a source clone).
+        if content.contains("crates/") {
+            hits.push("Orbit source path `crates/...`".to_string());
+        }
+
+        // Private / Constellation-specific names.
+        for needle in ["almanac", "dk-mac", "dk-server", "Constellation"] {
+            if content.contains(needle) {
+                hits.push(format!("private name `{needle}`"));
+            }
+        }
+
+        // Personal names. A shipped asset is read by an agent in someone else's
+        // workspace, where a maintainer's given name is an unreachable stranger
+        // rather than an authority — so policy must be stated by the *role* that
+        // holds it ("the workspace's orchestrator or owner"), never by person.
+        for needle in PRIVATE_PERSONAL_NAMES {
+            if content.contains(needle) {
+                hits.push(format!(
+                    "personal name `{needle}` (state the role, not the person)"
+                ));
+            }
+        }
+
+        // A shipped example must not silently select one provider family.
+        // Ignore formatting whitespace so both compact and pretty JSON are caught.
+        let compact: String = content
+            .chars()
+            .filter(|ch| !ch.is_ascii_whitespace())
+            .collect();
+        if compact.contains("\"model\":\"codex\"") {
+            hits.push("hard-coded agent model `codex`".to_string());
+        }
+
+        // Fixed consumer design-doc filenames.
+        if let Some(name) = find_numbered_design_doc(content) {
+            hits.push(format!("fixed design-doc filename `{name}`"));
+        }
+
+        // Workspace-local artifact IDs.
+        for id in find_artifact_ids(content) {
+            hits.push(format!("workspace-local artifact id `{id}`"));
+        }
+
+        hits
+    }
+
+    #[test]
+    fn portability_checker_flags_and_allows_representative_inputs() {
+        // Fails on representative leaks from each family.
+        for bad in [
+            "see crates/orbit-core/src/lib.rs",
+            "the almanac workspace",
+            "hosts: [dk-mac]",
+            "part of the Constellation",
+            r#"{"model": "codex"}"#,
+            "migrated by ORB-00200",
+            "see learning L-0065",
+            "the runtime gate (ADR-0250) refuses the call",
+            "learnings are authored by the orchestrator or by Daniel",
+            "silently drops it (F2026-05-024)",
+            "--evidence task:T20260514-3",
+            "docs/design/<feature>/4_decisions.md",
+            "put it in 2_design.md",
+        ] {
+            assert!(
+                !portability_violations(bad).is_empty(),
+                "portability checker failed to flag a leak: {bad:?}",
+            );
+        }
+
+        // Allows genuine public Orbit runtime paths and placeholder IDs.
+        for good in [
+            "artifacts live under `.orbit/adrs/{accepted,proposed}/`",
+            "scheduler state in `~/.orbit/orbit.db` is host-local",
+            "evidence under `.orbit/state/job-runs/`",
+            "dependencies: [\"ORB-NNNN\", ...] require ORB-NNNNN targets",
+            "drop a `// L-NNNN: <rationale>` citation",
+            "record the choice as ADR-NNNN once `orbit.adr.add` allocates it",
+            "learnings are curated by the workspace's orchestrator or owner",
+            "recommended layout: `docs/design/<feature>/`",
+            "resolve `context_files` selectors, then `fs.read` a `<task-id>`",
+            "run `orbit search --kind adr`",
+        ] {
+            assert!(
+                portability_violations(good).is_empty(),
+                "portability checker false-positive on portable text {good:?}: {:?}",
+                portability_violations(good),
+            );
+        }
+    }
+
+    /// Every portability violation in `root`, each prefixed with its path
+    /// relative to `crates/orbit-core/assets/` for a readable failure report.
+    fn portability_failures_under(label: &str, root: &Path) -> Vec<String> {
+        let files = collect_relative_files(root)
+            .unwrap_or_else(|e| panic!("collect_relative_files({}): {e}", root.display()));
+
+        let mut failures = Vec::new();
+        for relative in files {
+            let path = root.join(&relative);
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            for violation in portability_violations(&content) {
+                failures.push(format!("  {label}/{}: {violation}", relative.display()));
+            }
+        }
+        failures
+    }
+
+    #[test]
+    fn embedded_assets_are_repository_agnostic() {
+        // Both trees ship: skills are embedded and mirrored into the public
+        // plugin package, and activities are `include_str!`'d by
+        // `command::activity` and seeded into every workspace on `orbit init`
+        // (with a byte-identical copy under `.orbit/resources/activities/`).
+        // Activities were outside this check until a task description's own
+        // wording — a maintainer's name plus a concrete ADR id — was copied
+        // verbatim into `agent_implement.yaml` (PR #702).
+        let mut failures = portability_failures_under("skills", &assets_skills_dir());
+        failures.extend(portability_failures_under(
+            "activities",
+            &assets_activities_dir(),
+        ));
+
+        assert!(
+            failures.is_empty(),
+            "embedded assets under crates/orbit-core/assets/{{skills,activities}}/ are not \
+             repository-agnostic ({} leak(s)) — generalize, remove, or guard as explicitly \
+             source-only/client-specific guidance. State a policy by the role that holds it and \
+             the mechanism that enforces it, never by a person's name or a workspace-local \
+             artifact id (ORB-10208):\n{}",
+            failures.len(),
+            failures.join("\n"),
         );
     }
 }

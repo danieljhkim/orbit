@@ -104,3 +104,233 @@ fn apply_schema_creates_adrs_table_and_indexes() {
         assert_eq!(count, 1, "expected index {index_name} to exist");
     }
 }
+
+#[test]
+fn run_archive_stage_migration_adds_archived_at() {
+    let conn = Connection::open_in_memory().expect("open in-memory connection");
+    apply_schema(&conn).expect("apply schema");
+    assert!(table_has_column(&conn, "job_runs", "archived_at").expect("archived_at column"));
+}
+
+#[test]
+fn coordination_migrations_create_typed_tables_without_touching_existing_records() {
+    let conn = Connection::open_in_memory().expect("open in-memory connection");
+    conn.execute_batch(
+        r#"
+            CREATE TABLE schema_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO schema_meta VALUES
+                ('migration.v0001', 'baseline', '2026-07-01T00:00:00Z'),
+                ('migration.v0002', 'learnings_index_workspace_scope', '2026-07-02T00:00:00Z'),
+                ('migration.v0003', 'flat_crew_model', '2026-07-03T00:00:00Z'),
+                ('migration.v0004', 'job_run_archive_stage', '2026-07-04T00:00:00Z');
+            CREATE TABLE audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                execution_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                command TEXT NOT NULL,
+                subcommand TEXT,
+                tool_name TEXT,
+                target_type TEXT,
+                target_id TEXT,
+                role TEXT NOT NULL,
+                status TEXT NOT NULL,
+                exit_code INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL,
+                working_directory TEXT NOT NULL,
+                arguments_json TEXT,
+                stdout_truncated TEXT,
+                stderr_truncated TEXT,
+                error_message TEXT,
+                host TEXT,
+                pid INTEGER NOT NULL,
+                session_id TEXT,
+                task_id TEXT,
+                job_run_id TEXT,
+                activity_id TEXT,
+                step_index INTEGER
+            );
+            CREATE TABLE existing_records (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO existing_records VALUES ('keep-me', 'unchanged');
+        "#,
+    )
+    .expect("seed v4 database");
+
+    apply_schema(&conn).expect("apply host registry migration");
+
+    for table in ["hosts", "host_aliases"] {
+        assert!(table_exists(&conn, table).expect("table lookup"));
+    }
+    for column in [
+        "machine_id",
+        "host_id",
+        "labels_json",
+        "status",
+        "registered_at",
+        "updated_at",
+        "retired_at",
+        "last_seen_at",
+    ] {
+        assert!(
+            table_has_column(&conn, "hosts", column).expect("host column"),
+            "missing hosts.{column}"
+        );
+    }
+    let preserved: String = conn
+        .query_row(
+            "SELECT value FROM existing_records WHERE id = 'keep-me'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("existing row");
+    assert_eq!(preserved, "unchanged");
+    assert_eq!(
+        current_schema_version(&conn).expect("version"),
+        SUPPORTED_SCHEMA_VERSION
+    );
+    for table in [
+        "workspace_ownership",
+        "host_workspace_presence",
+        "workspace_execution_profiles",
+    ] {
+        assert!(table_exists(&conn, table).expect("coordination table"));
+    }
+
+    let first = applied_migrations(&conn).expect("first ledger");
+    apply_schema(&conn).expect("reapply");
+    assert_eq!(applied_migrations(&conn).expect("second ledger"), first);
+}
+
+#[test]
+fn failed_host_registry_migration_rolls_back_schema_and_ledger() {
+    let conn = Connection::open_in_memory().expect("open in-memory connection");
+    conn.execute_batch(
+        r#"
+            CREATE TABLE schema_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO schema_meta VALUES
+                ('migration.v0001', 'baseline', '2026-07-01T00:00:00Z'),
+                ('migration.v0002', 'learnings_index_workspace_scope', '2026-07-02T00:00:00Z'),
+                ('migration.v0003', 'flat_crew_model', '2026-07-03T00:00:00Z'),
+                ('migration.v0004', 'job_run_archive_stage', '2026-07-04T00:00:00Z');
+            CREATE TABLE hosts (machine_id TEXT PRIMARY KEY);
+            INSERT INTO hosts VALUES ('preexisting-sentinel');
+        "#,
+    )
+    .expect("seed incompatible v4 database");
+
+    let error = apply_schema(&conn).expect_err("v5 must fail on incompatible table");
+    assert!(error.to_string().contains("status"), "unexpected: {error}");
+    assert_eq!(current_schema_version(&conn).expect("version"), 4);
+    assert!(
+        !table_exists(&conn, "host_aliases").expect("alias table rolled back"),
+        "partially created alias table must roll back"
+    );
+    let sentinel: String = conn
+        .query_row("SELECT machine_id FROM hosts", [], |row| row.get(0))
+        .expect("sentinel remains");
+    assert_eq!(sentinel, "preexisting-sentinel");
+}
+
+#[test]
+fn learnings_index_migration_rekeys_by_workspace_and_discards_legacy_rows() {
+    let conn = Connection::open_in_memory().expect("open in-memory connection");
+    // Simulate a legacy database whose learning envelope index is keyed only
+    // by id — no workspace discriminator — carrying a row that cannot be
+    // attributed to any workspace (the `dk1` shape from ORB-10113).
+    conn.execute_batch(
+        r#"
+            CREATE TABLE learnings_index (
+                id          TEXT PRIMARY KEY,
+                status      TEXT NOT NULL,
+                paths       TEXT NOT NULL,
+                tags        TEXT NOT NULL,
+                summary     TEXT NOT NULL,
+                updated_at  TEXT NOT NULL,
+                priority    INTEGER
+            );
+            INSERT INTO learnings_index (id, status, paths, tags, summary, updated_at, priority)
+            VALUES ('L-0002', 'active', '[]', '[]', 'legacy orrery summary', '2026-07-11T00:00:00Z', NULL);
+        "#,
+    )
+    .expect("seed legacy learnings_index");
+
+    apply_schema(&conn).expect("migrate legacy learnings_index");
+
+    // The index is now scoped: `workspace_id` exists and the primary key is
+    // the composite `(workspace_id, id)`.
+    assert!(
+        table_has_column(&conn, "learnings_index", "workspace_id").expect("workspace_id column")
+    );
+    let mut primary_key: Vec<(i64, String)> = conn
+        .prepare("PRAGMA table_info(learnings_index)")
+        .expect("prepare pragma")
+        .query_map([], |row| {
+            let name: String = row.get(1)?;
+            let pk: i64 = row.get(5)?;
+            Ok((pk, name))
+        })
+        .expect("query pragma")
+        .filter_map(|row| {
+            let (pk, name) = row.expect("pragma row");
+            (pk > 0).then_some((pk, name))
+        })
+        .collect();
+    primary_key.sort_by_key(|(pk, _)| *pk);
+    let pk_columns: Vec<String> = primary_key.into_iter().map(|(_, name)| name).collect();
+    assert_eq!(pk_columns, vec!["workspace_id", "id"]);
+
+    // Legacy rows are discarded (YAML is the source of truth; each runtime
+    // rebuilds its own rows via sync), and all migrations are recorded.
+    let remaining: i64 = conn
+        .query_row("SELECT COUNT(*) FROM learnings_index", [], |row| row.get(0))
+        .expect("count rows");
+    assert_eq!(
+        remaining, 0,
+        "legacy envelope rows must be discarded, not migrated"
+    );
+    assert_eq!(
+        current_schema_version(&conn).expect("schema version"),
+        SUPPORTED_SCHEMA_VERSION
+    );
+}
+
+// ── read-only ledger inspection for `orbit migrate --dry-run` [ORB-10012] ──
+
+#[test]
+fn read_schema_ledger_status_of_a_missing_database_lists_everything_pending() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let status =
+        read_schema_ledger_status(&temp.path().join("orbit.db")).expect("read missing db status");
+
+    assert_eq!(status.current_version, 0);
+    assert!(!status.pending.is_empty());
+    assert_eq!(
+        status.pending.last().map(|m| m.version),
+        Some(SUPPORTED_SCHEMA_VERSION)
+    );
+    // Read-only: inspecting must not create the database.
+    assert!(!temp.path().join("orbit.db").exists());
+}
+
+#[test]
+fn read_schema_ledger_status_of_a_migrated_database_reports_current_without_writing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let db_path = temp.path().join("orbit.db");
+    drop(crate::Store::open(&db_path).expect("open store"));
+
+    let status = read_schema_ledger_status(&db_path).expect("read status");
+    assert_eq!(status.current_version, SUPPORTED_SCHEMA_VERSION);
+    assert!(status.pending.is_empty());
+    assert!(pending_schema_migrations_after(SUPPORTED_SCHEMA_VERSION).is_empty());
+    assert_eq!(
+        pending_schema_migrations_after(0).last().map(|m| m.version),
+        Some(SUPPORTED_SCHEMA_VERSION)
+    );
+}

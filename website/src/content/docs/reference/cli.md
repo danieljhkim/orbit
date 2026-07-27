@@ -27,13 +27,12 @@ sidebar:
 | `orbit task artifact put <task_id> <source_path>` | Store a UTF-8 file under a task's artifacts directory. |
 | `orbit search <query>` | Search tasks, docs, learnings, and ADRs; add `--hybrid` for task/doc vector ranking, use `orbit search similar <id>` for task neighbors, or `orbit search path <path>` for applicability lookup. |
 | `orbit docs` | List, show, add, index, and migrate the docs corpus. |
-| `orbit learning` | Create, search, and curate project learnings. |
+| `orbit learning` | Create, inspect, update, sync, and prune project learnings. |
 
 ## Observe
 
 | Command | Purpose |
 |---------|---------|
-| `orbit graph` | Build and query the knowledge graph. See [Knowledge Graph](../concepts/knowledge-graph). |
 | `orbit audit` | Query the audit event log. |
 | `orbit run history` | Show recent job runs. Filter to one job with `-j <job_id>`. |
 | `orbit run show [run_id]` | Show structured state and step summary for a job run (defaults to latest). |

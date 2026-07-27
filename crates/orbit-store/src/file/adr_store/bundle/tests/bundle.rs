@@ -48,18 +48,19 @@ fn write_then_read_round_trips_the_bundle() {
 }
 
 #[test]
-fn read_bundle_returns_empty_body_when_body_md_missing() {
+fn read_bundle_rejects_missing_body_md() {
     let tempdir = tempdir().expect("tempdir");
     let dir = tempdir.path().join("ADR-0001");
     fs::create_dir_all(&dir).expect("create adr dir");
     let bundle = sample_bundle("ADR-0001");
-    write_yaml_atomic_with(&adr_doc_path(&dir), &bundle.doc, serialize_adr_doc_yaml)
-        .expect("write doc only");
+    write_yaml_atomic_with(&adr_doc_path(&dir), &bundle.doc, |error| {
+        OrbitError::Store(error.to_string())
+    })
+    .expect("write doc only");
 
-    let loaded = read_bundle_at(&dir).expect("read bundle");
+    let error = read_bundle_at(&dir).expect_err("missing body must fail");
 
-    assert_eq!(loaded.body, "");
-    assert_eq!(loaded.doc, bundle.doc);
+    assert!(matches!(error, OrbitError::Io(_)), "{error:?}");
 }
 
 #[test]

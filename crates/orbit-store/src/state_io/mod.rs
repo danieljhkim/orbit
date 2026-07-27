@@ -6,7 +6,7 @@ use chrono::Utc;
 use orbit_common::types::{NotFoundKind, OrbitError, PipelineState};
 use serde_json::Value;
 
-use crate::file::layout::validate_path_stem;
+use crate::file::path_safety::validate_path_stem;
 use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
 
 pub mod import;
@@ -74,13 +74,6 @@ pub fn validate_active_run_state_dir(
 
 pub fn read_pipeline(state_dir: &Path) -> Result<Value, OrbitError> {
     Ok(read_state_file(state_dir)?.pipeline)
-}
-
-pub fn read_step_output(state_dir: &Path, step_index: u32) -> Result<Option<Value>, OrbitError> {
-    Ok(read_state_file(state_dir)?
-        .step_outputs
-        .get(&step_index)
-        .cloned())
 }
 
 pub fn write_step_output(

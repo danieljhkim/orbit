@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use orbit_common::friction::FrictionVerb;
 use orbit_common::types::{
     AuditEventStatus, OrbitError, audit_execution_id, normalize_optional_attribution_label,
 };
@@ -188,13 +189,6 @@ fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
                 nested_arrays: LEARNING_NESTED,
             })
         }
-        OrbitBuiltinAction::LearningCommentAdd => Some(ActionPolicy {
-            free_text_fields: &["body"],
-            free_text_arrays: &[],
-            path_fields: &[],
-            path_arrays: &[],
-            nested_arrays: &[],
-        }),
         OrbitBuiltinAction::TaskAdd => Some(ActionPolicy {
             free_text_fields: &["title", "description", "plan", "comment"],
             free_text_arrays: &["acceptance_criteria"],
@@ -222,43 +216,29 @@ fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
             path_arrays: &[],
             nested_arrays: &[],
         }),
-        OrbitBuiltinAction::ReviewThreadAdd => Some(ActionPolicy {
-            free_text_fields: &["body"],
-            free_text_arrays: &[],
-            path_fields: &["path"],
-            path_arrays: &[],
-            nested_arrays: &[],
-        }),
-        OrbitBuiltinAction::ReviewThreadReply => Some(ActionPolicy {
-            free_text_fields: &["body"],
-            free_text_arrays: &[],
-            path_fields: &[],
-            path_arrays: &[],
-            nested_arrays: &[],
-        }),
-        OrbitBuiltinAction::FrictionAdd => Some(ActionPolicy {
+        OrbitBuiltinAction::Friction(FrictionVerb::Add) => Some(ActionPolicy {
             free_text_fields: &["body", "description"],
             free_text_arrays: &[],
             path_fields: &[],
             path_arrays: &[],
             nested_arrays: &[],
         }),
-        OrbitBuiltinAction::FrictionUpdate => Some(ActionPolicy {
+        OrbitBuiltinAction::Friction(FrictionVerb::Update) => Some(ActionPolicy {
             free_text_fields: &["body"],
             free_text_arrays: &[],
             path_fields: &[],
             path_arrays: &[],
             nested_arrays: &[],
         }),
-        OrbitBuiltinAction::AdrSupersede | OrbitBuiltinAction::LearningSupersede => {
-            Some(ActionPolicy {
-                free_text_fields: &[],
-                free_text_arrays: &[],
-                path_fields: &[],
-                path_arrays: &[],
-                nested_arrays: &[],
-            })
-        }
+        OrbitBuiltinAction::AdrSupersede
+        | OrbitBuiltinAction::LearningSupersede
+        | OrbitBuiltinAction::LearningArchive => Some(ActionPolicy {
+            free_text_fields: &[],
+            free_text_arrays: &[],
+            path_fields: &[],
+            path_arrays: &[],
+            nested_arrays: &[],
+        }),
         _ => None,
     }
 }
@@ -272,14 +252,11 @@ fn is_covered_mutating_action(action: OrbitBuiltinAction) -> bool {
             | OrbitBuiltinAction::LearningAdd
             | OrbitBuiltinAction::LearningUpdate
             | OrbitBuiltinAction::LearningSupersede
-            | OrbitBuiltinAction::LearningCommentAdd
+            | OrbitBuiltinAction::LearningArchive
             | OrbitBuiltinAction::TaskAdd
             | OrbitBuiltinAction::TaskUpdate
             | OrbitBuiltinAction::TaskReject
-            | OrbitBuiltinAction::ReviewThreadAdd
-            | OrbitBuiltinAction::ReviewThreadReply
-            | OrbitBuiltinAction::FrictionAdd
-            | OrbitBuiltinAction::FrictionUpdate
+            | OrbitBuiltinAction::Friction(FrictionVerb::Add | FrictionVerb::Update)
     )
 }
 
@@ -469,6 +446,16 @@ fn emit_audit_events(
             host: std::env::var("HOSTNAME").ok(),
             pid: std::process::id(),
             session_id: None,
+            workspace_id: None,
+            caller_machine_id: None,
+            caller_host_id: None,
+            process_machine_id: None,
+            process_host_id: None,
+            transport: None,
+            effective_capabilities: Default::default(),
+            origin_session_id: None,
+            mcp_call_id: None,
+            lease_id: None,
             task_id: artifact.task_id.map(ToOwned::to_owned),
             job_run_id: std::env::var("ORBIT_RUN_ID").ok().filter(|s| !s.is_empty()),
             activity_id: std::env::var("ORBIT_ACTIVITY_ID")
@@ -502,14 +489,10 @@ fn artifact_target(
         }),
         OrbitBuiltinAction::LearningAdd
         | OrbitBuiltinAction::LearningUpdate
-        | OrbitBuiltinAction::LearningSupersede => Ok(ArtifactTarget {
+        | OrbitBuiltinAction::LearningSupersede
+        | OrbitBuiltinAction::LearningArchive => Ok(ArtifactTarget {
             artifact_type: "learning",
             artifact_id: learning_response_id(action, response)?,
-            task_id: None,
-        }),
-        OrbitBuiltinAction::LearningCommentAdd => Ok(ArtifactTarget {
-            artifact_type: "learning_comment",
-            artifact_id: response_string(response, "id")?,
             task_id: None,
         }),
         OrbitBuiltinAction::TaskAdd
@@ -522,15 +505,7 @@ fn artifact_target(
                 task_id: Some(id),
             })
         }
-        OrbitBuiltinAction::ReviewThreadAdd | OrbitBuiltinAction::ReviewThreadReply => {
-            let id = response_string(response, "id")?;
-            Ok(ArtifactTarget {
-                artifact_type: "review_thread",
-                artifact_id: id,
-                task_id: Some(id),
-            })
-        }
-        OrbitBuiltinAction::FrictionAdd | OrbitBuiltinAction::FrictionUpdate => {
+        OrbitBuiltinAction::Friction(FrictionVerb::Add | FrictionVerb::Update) => {
             Ok(ArtifactTarget {
                 artifact_type: "friction",
                 artifact_id: response_string(response, "id")?,
@@ -570,14 +545,12 @@ fn tool_name(action: OrbitBuiltinAction) -> &'static str {
         OrbitBuiltinAction::LearningAdd => "orbit.learning.add",
         OrbitBuiltinAction::LearningUpdate => "orbit.learning.update",
         OrbitBuiltinAction::LearningSupersede => "orbit.learning.supersede",
-        OrbitBuiltinAction::LearningCommentAdd => "orbit.learning.comment.add",
+        OrbitBuiltinAction::LearningArchive => "orbit.learning.archive",
         OrbitBuiltinAction::TaskAdd => "orbit.task.add",
         OrbitBuiltinAction::TaskUpdate => "orbit.task.update",
         OrbitBuiltinAction::TaskReject => "orbit.task.reject",
-        OrbitBuiltinAction::ReviewThreadAdd => "orbit.task.review_thread.add",
-        OrbitBuiltinAction::ReviewThreadReply => "orbit.task.review_thread.reply",
-        OrbitBuiltinAction::FrictionAdd => "orbit.friction.add",
-        OrbitBuiltinAction::FrictionUpdate => "orbit.friction.update",
+        OrbitBuiltinAction::Friction(FrictionVerb::Add) => "orbit.friction.add",
+        OrbitBuiltinAction::Friction(FrictionVerb::Update) => "orbit.friction.update",
         _ => "orbit.unknown",
     }
 }
@@ -589,6 +562,23 @@ mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use crate::runtime::orbit_tool_host::test_support::test_runtime;
+
+    /// Declare a human caller context for a test that dispatches a learning
+    /// *write* tool.
+    ///
+    /// [ORB-10364] gates `orbit.learning.add`/`update`/`supersede` on the
+    /// `ORBIT_AGENT_*` pair, which a child of a managed Orbit run inherits (the
+    /// ORB-10350 hazard). These tests assert redaction behaviour, not the role
+    /// gate, so they state the context they need instead of inheriting whatever
+    /// the suite was launched with.
+    fn human_context_env() -> orbit_common::test_env::ScopedEnv {
+        orbit_common::test_env::unset(
+            orbit_common::test_env::AGENT_IDENTITY_ENV
+                .iter()
+                .copied()
+                .chain(std::iter::once("ORBIT_LEARNING_AUTHOR")),
+        )
+    }
 
     struct EnvVarGuard {
         _lock: MutexGuard<'static, ()>,
@@ -684,14 +674,7 @@ mod tests {
                 }),
             ),
             (
-                OrbitBuiltinAction::ReviewThreadAdd,
-                json!({
-                    "id": "ORB-00001",
-                    "body": "sk-abcdefghijklmnopqrstuvwxyz",
-                }),
-            ),
-            (
-                OrbitBuiltinAction::FrictionAdd,
+                OrbitBuiltinAction::Friction(FrictionVerb::Add),
                 json!({
                     "body": "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd123456",
                 }),
@@ -775,7 +758,7 @@ mod tests {
                     "workspace": ".",
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("task add succeeds");
 
@@ -804,6 +787,9 @@ mod tests {
     #[test]
     fn adr_and_learning_dispatch_redact_live_github_token_in_persisted_fields() {
         let token = "orbit-adr-learning-secret-value";
+        // Acquired before `EnvVarGuard` so the two locks are always taken in
+        // the same order.
+        let _identity = human_context_env();
         let _env = EnvVarGuard::set("GITHUB_TOKEN", token);
         let (_root, runtime, _repo_root) = test_runtime();
 
@@ -815,7 +801,7 @@ mod tests {
                     "body": format!("## Context\n{token}"),
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("adr add succeeds");
         assert_eq!(adr["redactions_applied"], true);
@@ -831,7 +817,7 @@ mod tests {
                     "evidence": [{ "kind": "task", "ref": format!("ref {token}") }],
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("learning add succeeds");
         assert_eq!(learning["redactions_applied"], true);
@@ -853,7 +839,7 @@ mod tests {
                     "workspace": ".",
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("task add succeeds");
         let id = created["id"].as_str().expect("task id");
@@ -866,7 +852,7 @@ mod tests {
                     "execution_summary": "already [REDACTED_ENV]",
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("task update succeeds");
 
@@ -884,6 +870,7 @@ mod tests {
 
     #[test]
     fn dispatch_adds_false_response_flags_for_each_covered_family() {
+        let _identity = human_context_env();
         let (_root, runtime, _repo_root) = test_runtime();
 
         let task = runtime
@@ -895,11 +882,10 @@ mod tests {
                     "workspace": ".",
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("task add succeeds");
         assert_eq!(task["redactions_applied"], false);
-        let task_id = task["id"].as_str().expect("task id");
 
         let adr = runtime
             .execute_tool_command(
@@ -909,7 +895,7 @@ mod tests {
                     "body": "## Context\nBody",
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("adr add succeeds");
         assert_eq!(adr["redactions_applied"], false);
@@ -923,24 +909,10 @@ mod tests {
                     "scope": { "paths": ["crates/**"], "tags": ["testing"] },
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("learning add succeeds");
         assert_eq!(learning["redactions_applied"], false);
-
-        let review = runtime
-            .execute_tool_command(
-                "orbit.task.review_thread.add",
-                json!({
-                    "id": task_id,
-                    "body": "Please tighten this.",
-                    "path": "src/lib.rs",
-                }),
-                Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
-            )
-            .expect("review thread add succeeds");
-        assert_eq!(review["redactions_applied"], false);
 
         let friction = runtime
             .execute_tool_command(
@@ -950,7 +922,7 @@ mod tests {
                     "tags": ["tooling"],
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("friction add succeeds");
         assert_eq!(friction["redactions_applied"], false);
@@ -977,7 +949,7 @@ mod tests {
                     "tags": [tag],
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("friction add succeeds");
         assert_eq!(created["tags"], json!([tag]));
@@ -991,7 +963,7 @@ mod tests {
                     "tags": [tag],
                 }),
                 Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
             .expect("friction update succeeds");
 

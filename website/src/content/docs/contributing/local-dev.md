@@ -7,13 +7,14 @@ sidebar:
 
 ## Setup
 
-Run targeted tests while iterating, then run the workspace checks before landing a change.
+Run targeted checks while iterating. Before handing off a task, run the
+repository's fast guardrail gate:
 
 ```bash
-cargo test --workspace
-make build
-make fmt
+make ci-fast
 ```
+
+The full `make ci` workflow is the canonical PR merge gate and runs in CI.
 
 ## Website
 

@@ -1,5 +1,8 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    AuditEventStatus, Role, TaskStatus, audit_execution_id, optional_string_list_alias,
+    AuditEventStatus, Role, TaskComment, TaskStatus, audit_execution_id, optional_string_list_alias,
 };
 use orbit_engine::{DispatchError, ensure_task_can_enter_workflow};
 use orbit_store::AuditEventInsertParams;
@@ -7,7 +10,8 @@ use orbit_tools::ToolContext;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
-use crate::runtime::orbit_tool_host::parse_task_ids;
+use crate::command::job::JobRunListParams;
+use crate::runtime::task_locks::parse_task_ids;
 
 pub(super) fn validate_bundles(action: &str, input: &Value) -> Result<Value, DispatchError> {
     let bundles_raw = input
@@ -101,34 +105,39 @@ pub(super) fn invoke_and_wait(
         .get("run_input")
         .cloned()
         .unwrap_or_else(|| Value::Object(Default::default()));
-    let mut invoke_args = serde_json::Map::new();
-    invoke_args.insert("job_name".to_string(), Value::String(job_name.clone()));
-    invoke_args.insert("input".to_string(), run_input);
-    if let Some(priority) = input.get("priority").cloned() {
-        invoke_args.insert("priority".to_string(), priority);
-    }
+    let run_id = match deduped_child_run_id(runtime, action, input, &job_name, &run_input)? {
+        Some(run_id) => run_id,
+        None => {
+            let mut invoke_args = serde_json::Map::new();
+            invoke_args.insert("job_name".to_string(), Value::String(job_name.clone()));
+            invoke_args.insert("input".to_string(), run_input);
+            if let Some(priority) = input.get("priority").cloned() {
+                invoke_args.insert("priority".to_string(), priority);
+            }
 
-    let invoke_ctx = tool_context.clone();
-    let invoke_output = runtime
-        .run_tool_with_context_and_role(
-            "orbit.pipeline.invoke",
-            Value::Object(invoke_args),
-            Role::Admin,
-            invoke_ctx,
-        )
-        .map_err(|err| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: format!("pipeline.invoke failed: {err}"),
-        })?;
+            let invoke_ctx = tool_context.clone();
+            let invoke_output = runtime
+                .run_tool_with_context_and_role(
+                    "orbit.pipeline.invoke",
+                    Value::Object(invoke_args),
+                    Role::Admin,
+                    invoke_ctx,
+                )
+                .map_err(|err| DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: format!("pipeline.invoke failed: {err}"),
+                })?;
 
-    let run_id = invoke_output
-        .get("run_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: "pipeline.invoke returned no run_id".to_string(),
-        })?
-        .to_string();
+            invoke_output
+                .get("run_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: "pipeline.invoke returned no run_id".to_string(),
+                })?
+                .to_string()
+        }
+    };
 
     let mut wait_args = serde_json::Map::new();
     wait_args.insert(
@@ -166,6 +175,67 @@ pub(super) fn invoke_and_wait(
             })
         });
     Ok(first)
+}
+
+// `pub(super)` (not private): the sibling `tests/pipeline_actions.rs`
+// unit-tests dedupe behavior directly — see
+// docs/design-patterns/test_layout.md migration recipe step 6.
+pub(super) fn deduped_child_run_id(
+    runtime: &OrbitRuntime,
+    action: &str,
+    input: &Value,
+    job_name: &str,
+    run_input: &Value,
+) -> Result<Option<String>, DispatchError> {
+    let Some(field) = input
+        .get("dedupe_run_input_field")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let key = run_input
+        .get(field)
+        .filter(|value| !value.is_null())
+        .ok_or_else(|| {
+            action_failed(
+                action,
+                format!("dedupe field '{field}' is missing from run_input"),
+            )
+        })?;
+    let runs = runtime
+        .list_job_runs(JobRunListParams {
+            job_id: Some(job_name.to_string()),
+            ..JobRunListParams::default()
+        })
+        .map_err(|error| {
+            action_failed(
+                action,
+                format!("list existing {job_name} Runs for dedupe: {error}"),
+            )
+        })?;
+    let matches = runs
+        .into_iter()
+        .filter(|run| {
+            run.input
+                .as_ref()
+                .and_then(|value| value.get(field))
+                .is_some_and(|value| value == key)
+        })
+        .map(|run| run.run_id)
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [] => Ok(None),
+        [run_id] => Ok(Some(run_id.clone())),
+        _ => Err(action_failed(
+            action,
+            format!(
+                "multiple {job_name} Runs match dedupe field '{field}' value {key}: {}",
+                matches.join(", ")
+            ),
+        )),
+    }
 }
 
 fn stale_gate_admission_noop(
@@ -311,49 +381,22 @@ fn record_gate_stale_noop(
             host: std::env::var("HOSTNAME").ok(),
             pid: std::process::id(),
             session_id: None,
+            workspace_id: None,
+            caller_machine_id: None,
+            caller_host_id: None,
+            process_machine_id: None,
+            process_host_id: None,
+            transport: None,
+            effective_capabilities: Default::default(),
+            origin_session_id: None,
+            mcp_call_id: None,
+            lease_id: None,
             task_id: task_ids.first().cloned(),
             job_run_id: parent_run_id,
             activity_id: None,
             step_index: None,
         })
         .map_err(|err| action_failed(action, format!("record gate.stale_noop audit: {err}")))
-}
-
-pub(super) fn pipeline_wait(
-    runtime: &OrbitRuntime,
-    action: &str,
-    input: &Value,
-    tool_context: ToolContext,
-) -> Result<Value, DispatchError> {
-    let run_ids =
-        input
-            .get("run_ids")
-            .cloned()
-            .ok_or_else(|| DispatchError::DeterministicActionFailed {
-                action: action.to_string(),
-                message: "missing `run_ids`".to_string(),
-            })?;
-
-    let mut wait_args = serde_json::Map::new();
-    wait_args.insert("run_ids".to_string(), run_ids);
-    if let Some(timeout) = input.get("timeout_seconds").cloned() {
-        wait_args.insert("timeout_seconds".to_string(), timeout);
-    }
-    if let Some(poll) = input.get("poll_interval_seconds").cloned() {
-        wait_args.insert("poll_interval_seconds".to_string(), poll);
-    }
-
-    runtime
-        .run_tool_with_context_and_role(
-            "orbit.pipeline.wait",
-            Value::Object(wait_args),
-            Role::Admin,
-            tool_context,
-        )
-        .map_err(|err| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: format!("pipeline.wait failed: {err}"),
-        })
 }
 
 pub(super) fn pipeline_success_guard(action: &str, input: &Value) -> Result<Value, DispatchError> {
@@ -409,6 +452,344 @@ pub(super) fn pipeline_success_guard(action: &str, input: &Value) -> Result<Valu
         "succeeded": true,
         "checked_count": checked_count,
     }))
+}
+
+/// Prefix of the durable review record an independent reviewer appends to each
+/// participating task as a comment.
+///
+/// The reviewer's structured response is advisory, so the per-criterion verdict
+/// it claims cannot be the thing this guard checks. The record below is durable
+/// task state: it survives the run, is readable by anyone later, and is what the
+/// guard reads. The marker also partitions comments — a comment carrying it is a
+/// review record, and every other comment is task authority the reviewer must
+/// have reconciled before approving.
+pub(super) const REVIEW_RECORD_MARKER: &str = "[independent-review]";
+
+/// One reviewer-persisted per-criterion record, recovered from durable task
+/// comments rather than from the agent's response.
+struct ReviewRecord {
+    task_id: String,
+    verdict: String,
+    reconciled_through: DateTime<Utc>,
+    /// 1-based acceptance-criterion index → the reviewer's verdict for it.
+    criteria: BTreeMap<u64, String>,
+    late_corrections: usize,
+}
+
+pub(super) fn independent_review_guard(
+    runtime: &OrbitRuntime,
+    action: &str,
+    input: &Value,
+) -> Result<Value, DispatchError> {
+    let reported_verdict = match non_blank_str(input, "verdict") {
+        Some(verdict) => {
+            if !matches!(verdict, "approve" | "request_changes") {
+                return Err(action_failed(
+                    action,
+                    format!(
+                        "unknown independent review verdict '{verdict}' (expected 'approve' or 'request_changes')"
+                    ),
+                ));
+            }
+            Some(verdict.to_string())
+        }
+        None => None,
+    };
+
+    let reviewed_head_sha = non_blank_str(input, "reviewed_head_sha").ok_or_else(|| {
+        action_failed(action, "missing non-blank `reviewed_head_sha`".to_string())
+    })?;
+    let candidate_head_sha = non_blank_str(input, "candidate_head_sha").ok_or_else(|| {
+        action_failed(action, "missing non-blank `candidate_head_sha`".to_string())
+    })?;
+    if reviewed_head_sha != candidate_head_sha {
+        return Err(action_failed(
+            action,
+            format!(
+                "independent review head mismatch: reviewer reported '{reviewed_head_sha}', published candidate is '{candidate_head_sha}'"
+            ),
+        ));
+    }
+
+    // The bundle comes from the parent pipeline's own input, never from the
+    // reviewer, so the set of criteria that must be covered cannot be narrowed
+    // by the thing being checked.
+    let task_ids = parse_task_ids(input).map_err(|error| {
+        action_failed(
+            action,
+            format!("independent review guard cannot resolve its task bundle: {error}"),
+        )
+    })?;
+
+    let mut records = Vec::with_capacity(task_ids.len());
+    for task_id in &task_ids {
+        let comments = runtime.get_task_comments(task_id).map_err(|error| {
+            action_failed(action, format!("read comments for task {task_id}: {error}"))
+        })?;
+        records.push((
+            latest_review_record(action, task_id, candidate_head_sha, &comments)?,
+            latest_task_authority(&comments),
+        ));
+    }
+
+    // Any task whose durable record withholds approval decides the bundle.
+    let durable_verdict = if records
+        .iter()
+        .any(|(record, _)| record.verdict == "request_changes")
+    {
+        "request_changes"
+    } else {
+        "approve"
+    };
+    if let Some(reported) = reported_verdict.as_deref()
+        && reported != durable_verdict
+    {
+        return Err(action_failed(
+            action,
+            format!(
+                "independent review verdict mismatch: response reported '{reported}', persisted review records say '{durable_verdict}'"
+            ),
+        ));
+    }
+
+    if durable_verdict == "approve" {
+        let mut violations = Vec::new();
+        for (record, latest_authority) in &records {
+            let task = runtime.get_task(&record.task_id).map_err(|error| {
+                action_failed(action, format!("read task {}: {error}", record.task_id))
+            })?;
+            violations.extend(approval_violations(
+                record,
+                task.acceptance_criteria.len(),
+                *latest_authority,
+            ));
+        }
+        if !violations.is_empty() {
+            return Err(action_failed(
+                action,
+                format!(
+                    "independent review approval is not admissible: {}",
+                    violations.join("; ")
+                ),
+            ));
+        }
+    }
+
+    let criteria_covered: usize = records
+        .iter()
+        .map(|(record, _)| record.criteria.len())
+        .sum();
+    let tasks_reviewed = records
+        .iter()
+        .map(|(record, _)| {
+            serde_json::json!({
+                "task_id": record.task_id,
+                "verdict": record.verdict,
+                "criteria_covered": record.criteria.len(),
+                "reconciled_through": record.reconciled_through.to_rfc3339(),
+                "late_corrections": record.late_corrections,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Ok(serde_json::json!({
+        "verdict": durable_verdict,
+        "reviewed_head_sha": reviewed_head_sha,
+        "exact_head": true,
+        "criteria_covered": criteria_covered,
+        "tasks_reviewed": tasks_reviewed,
+    }))
+}
+
+/// Newest durable review record for `candidate_head_sha`.
+///
+/// Structurally invalid records are skipped rather than fatal: a reviewer that
+/// re-runs after a rejected record must be able to supersede it, and a record
+/// that named an older candidate belongs to an older review.
+fn latest_review_record(
+    action: &str,
+    task_id: &str,
+    candidate_head_sha: &str,
+    comments: &[TaskComment],
+) -> Result<ReviewRecord, DispatchError> {
+    let mut rejected: Vec<String> = Vec::new();
+    let mut latest: Option<(DateTime<Utc>, ReviewRecord)> = None;
+
+    for comment in comments {
+        let Some(payload) = review_record_payload(&comment.message) else {
+            continue;
+        };
+        let payload = match payload {
+            Ok(payload) => payload,
+            Err(error) => {
+                rejected.push(format!("unparsable record at {}: {error}", comment.at));
+                continue;
+            }
+        };
+        if payload
+            .get("candidate_head_sha")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            != Some(candidate_head_sha)
+        {
+            continue;
+        }
+        match review_record_from_payload(task_id, &payload) {
+            Ok(record) => {
+                let supersedes = latest
+                    .as_ref()
+                    .map(|(at, _)| comment.at >= *at)
+                    .unwrap_or(true);
+                if supersedes {
+                    latest = Some((comment.at, record));
+                }
+            }
+            Err(error) => rejected.push(format!("invalid record at {}: {error}", comment.at)),
+        }
+    }
+
+    match latest {
+        Some((_, record)) => Ok(record),
+        None => Err(action_failed(
+            action,
+            format!(
+                "independent review persisted no `{REVIEW_RECORD_MARKER}` per-criterion record on task {task_id} for candidate {candidate_head_sha}{}",
+                if rejected.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (rejected: {})", rejected.join(", "))
+                }
+            ),
+        )),
+    }
+}
+
+/// The JSON body of a review-record comment, or `None` when the comment is
+/// ordinary task authority rather than a review record.
+fn review_record_payload(message: &str) -> Option<Result<Value, String>> {
+    let body = message.trim_start().strip_prefix(REVIEW_RECORD_MARKER)?;
+    Some(serde_json::from_str::<Value>(body.trim()).map_err(|error| error.to_string()))
+}
+
+fn review_record_from_payload(task_id: &str, payload: &Value) -> Result<ReviewRecord, String> {
+    let verdict = payload
+        .get("verdict")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| matches!(*value, "approve" | "request_changes"))
+        .ok_or_else(|| "`verdict` must be 'approve' or 'request_changes'".to_string())?;
+    let reconciled_through = payload
+        .get("reconciled_through")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .ok_or_else(|| "`reconciled_through` is missing".to_string())?;
+    let reconciled_through = DateTime::parse_from_rfc3339(reconciled_through)
+        .map_err(|error| format!("`reconciled_through` is not an RFC 3339 timestamp: {error}"))?
+        .with_timezone(&Utc);
+    let late_corrections = payload
+        .get("late_corrections")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            "`late_corrections` must be an array (empty when the task carries none)".to_string()
+        })?
+        .len();
+
+    let entries = payload
+        .get("criteria")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "`criteria` must be an array".to_string())?;
+    let mut criteria = BTreeMap::new();
+    for entry in entries {
+        let index = entry
+            .get("index")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "every `criteria` entry needs a 1-based integer `index`".to_string())?;
+        let criterion_verdict = entry
+            .get("verdict")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| matches!(*value, "met" | "not_met"))
+            .ok_or_else(|| format!("criterion {index} verdict must be 'met' or 'not_met'"))?;
+        if criteria
+            .insert(index, criterion_verdict.to_string())
+            .is_some()
+        {
+            return Err(format!("criterion {index} is reported more than once"));
+        }
+    }
+
+    Ok(ReviewRecord {
+        task_id: task_id.to_string(),
+        verdict: verdict.to_string(),
+        reconciled_through,
+        criteria,
+        late_corrections,
+    })
+}
+
+/// Timestamp of the newest comment that is task authority rather than a review
+/// record — the correction an approval must not have been written before.
+fn latest_task_authority(comments: &[TaskComment]) -> Option<DateTime<Utc>> {
+    comments
+        .iter()
+        .filter(|comment| review_record_payload(&comment.message).is_none())
+        .map(|comment| comment.at)
+        .max()
+}
+
+/// Why this record may not carry an approval. Empty means it may.
+fn approval_violations(
+    record: &ReviewRecord,
+    criteria_count: usize,
+    latest_authority: Option<DateTime<Utc>>,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    let task_id = &record.task_id;
+
+    let expected: BTreeSet<u64> = (1..=criteria_count as u64).collect();
+    let reported: BTreeSet<u64> = record.criteria.keys().copied().collect();
+    let missing = expected.difference(&reported).copied().collect::<Vec<_>>();
+    if !missing.is_empty() {
+        violations.push(format!(
+            "task {task_id} has no verdict for acceptance criteria {missing:?} (of {criteria_count})"
+        ));
+    }
+    let unknown = reported.difference(&expected).copied().collect::<Vec<_>>();
+    if !unknown.is_empty() {
+        violations.push(format!(
+            "task {task_id} reports verdicts for criteria {unknown:?} that do not exist (it has {criteria_count})"
+        ));
+    }
+    let unmet = record
+        .criteria
+        .iter()
+        .filter(|(_, verdict)| verdict.as_str() != "met")
+        .map(|(index, _)| *index)
+        .collect::<Vec<_>>();
+    if !unmet.is_empty() {
+        violations.push(format!(
+            "task {task_id} approves while reporting criteria {unmet:?} as not met"
+        ));
+    }
+
+    if let Some(latest_authority) = latest_authority
+        && record.reconciled_through < latest_authority
+    {
+        violations.push(format!(
+            "task {task_id} was approved against authority reconciled through {}, but a later task comment landed at {latest_authority}",
+            record.reconciled_through
+        ));
+    }
+
+    violations
+}
+
+fn non_blank_str<'a>(input: &'a Value, field: &str) -> Option<&'a str> {
+    input
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn pipeline_wait_entry_failure(label: &str, entry: &Value) -> Option<String> {
@@ -507,6 +888,16 @@ pub(super) fn gate_starvation_fail(
             host: std::env::var("HOSTNAME").ok(),
             pid: std::process::id(),
             session_id: None,
+            workspace_id: None,
+            caller_machine_id: None,
+            caller_host_id: None,
+            process_machine_id: None,
+            process_host_id: None,
+            transport: None,
+            effective_capabilities: Default::default(),
+            origin_session_id: None,
+            mcp_call_id: None,
+            lease_id: None,
             task_id: task_ids_vec.first().cloned(),
             job_run_id: None,
             activity_id: None,
@@ -525,84 +916,4 @@ pub(super) fn gate_starvation_fail(
             task_ids_vec, conflicting_files, max_wait_seconds
         ),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn action_failure_message(err: DispatchError) -> String {
-        match err {
-            DispatchError::DeterministicActionFailed { action, message } => {
-                assert_eq!(action, "pipeline_success_guard");
-                message
-            }
-            other => panic!("expected deterministic action failure, got {other}"),
-        }
-    }
-
-    #[test]
-    fn pipeline_success_guard_accepts_succeeded_result() {
-        let output = pipeline_success_guard(
-            "pipeline_success_guard",
-            &json!({
-                "result": {
-                    "run_id": "jrun-ok",
-                    "status": "succeeded"
-                }
-            }),
-        )
-        .expect("succeeded result should pass");
-
-        assert_eq!(output["succeeded"], json!(true));
-        assert_eq!(output["checked_count"], json!(1));
-    }
-
-    #[test]
-    fn pipeline_success_guard_rejects_failed_result() {
-        let err = pipeline_success_guard(
-            "pipeline_success_guard",
-            &json!({
-                "context": "task gate child",
-                "result": {
-                    "run_id": "jrun-failed",
-                    "status": "failed",
-                    "error": "implementation failed"
-                }
-            }),
-        )
-        .expect_err("failed child run should fail the guard");
-
-        let message = action_failure_message(err);
-        assert!(message.contains("task gate child did not succeed"));
-        assert!(message.contains("jrun-failed"));
-        assert!(message.contains("status failed"));
-        assert!(message.contains("implementation failed"));
-    }
-
-    #[test]
-    fn pipeline_success_guard_rejects_mixed_results() {
-        let err = pipeline_success_guard(
-            "pipeline_success_guard",
-            &json!({
-                "results": [
-                    {
-                        "run_id": "jrun-ok",
-                        "status": "succeeded"
-                    },
-                    {
-                        "run_id": "jrun-cancelled",
-                        "status": "cancelled"
-                    },
-                    null
-                ]
-            }),
-        )
-        .expect_err("any non-succeeded result should fail the guard");
-
-        let message = action_failure_message(err);
-        assert!(message.contains("results[1] run jrun-cancelled status cancelled"));
-        assert!(message.contains("results[2] missing string status"));
-    }
 }

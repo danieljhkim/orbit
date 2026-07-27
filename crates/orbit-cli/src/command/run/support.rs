@@ -209,7 +209,10 @@ fn summary_step(run: &JobRun) -> Option<&JobRunStep> {
             run.steps.iter().rev().find(|step| {
                 matches!(
                     step.state,
-                    JobRunState::Failed | JobRunState::Timeout | JobRunState::Cancelled
+                    JobRunState::Failed
+                        | JobRunState::Timeout
+                        | JobRunState::Cancelled
+                        | JobRunState::Interrupted
                 )
             })
         })
@@ -588,11 +591,13 @@ impl ShipAutoGateRun {
     }
 
     fn is_failed(&self) -> bool {
-        matches!(self.wait_status.as_str(), "failed" | "cancelled")
-            || matches!(
-                self.current_status.as_str(),
-                "failed" | "cancelled" | "timeout"
-            )
+        matches!(
+            self.wait_status.as_str(),
+            "failed" | "cancelled" | "interrupted"
+        ) || matches!(
+            self.current_status.as_str(),
+            "failed" | "cancelled" | "timeout" | "interrupted"
+        )
     }
 
     fn to_json(&self) -> Value {
@@ -608,7 +613,7 @@ impl ShipAutoGateRun {
 fn is_terminal_gate_status(status: &str) -> bool {
     matches!(
         status,
-        "success" | "succeeded" | "failed" | "cancelled" | "timeout"
+        "success" | "succeeded" | "failed" | "cancelled" | "timeout" | "interrupted"
     )
 }
 

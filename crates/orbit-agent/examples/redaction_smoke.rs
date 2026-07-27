@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-// ORB-00013: Examples are user-facing smoke binaries that print progress and unwrap setup invariants.
+// Examples are user-facing smoke binaries that print progress and unwrap setup invariants.
 #![allow(
     clippy::expect_used,
     clippy::print_stderr,
@@ -49,14 +49,14 @@ content-type: application/json
     if stored_str.contains(secret) {
         eprintln!(
             "FAIL: stored blob contains raw secret. first 200 chars: {}",
-            &stored_str.chars().take(200).collect::<String>()
+            stored_str.chars().take(200).collect::<String>()
         );
         return ExitCode::FAILURE;
     }
     if !stored_str.contains("[REDACTED_AUTH]") {
         eprintln!(
             "FAIL: stored blob missing redaction marker. first 200 chars: {}",
-            &stored_str.chars().take(200).collect::<String>()
+            stored_str.chars().take(200).collect::<String>()
         );
         return ExitCode::FAILURE;
     }

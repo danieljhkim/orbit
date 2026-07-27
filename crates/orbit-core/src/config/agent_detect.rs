@@ -106,19 +106,21 @@ pub fn detect(probe: &dyn AgentEnvProbe) -> DetectedAgents {
     }
 }
 
-/// Agent families available for crew-backed config seeding.
+/// CLI agent families available for crew-backed config seeding.
 ///
-/// The order intentionally mirrors [`default_provider`] for the overlapping
-/// families, excluding `ollama` because Orbit does not ship an `ollama` crew.
+/// Seeded crews always use the CLI backend, so API-key-only detection is not
+/// sufficient. The order intentionally mirrors [`default_provider`] for the
+/// overlapping families, excluding `ollama` because Orbit does not ship an
+/// `ollama` crew.
 pub fn available_crew_families(detected: &DetectedAgents) -> Vec<&'static str> {
     let mut families = Vec::new();
-    if detected.claude_cli || detected.anthropic_api_key {
+    if detected.claude_cli {
         families.push("claude");
     }
-    if detected.codex_cli || detected.openai_api_key {
+    if detected.codex_cli {
         families.push("codex");
     }
-    if detected.gemini_cli || detected.gemini_api_key {
+    if detected.gemini_cli {
         families.push("gemini");
     }
     if detected.grok_cli {
@@ -127,29 +129,28 @@ pub fn available_crew_families(detected: &DetectedAgents) -> Vec<&'static str> {
     families
 }
 
-/// Default crew name frozen into newly seeded config.
-///
-/// Falling back to `codex` preserves the historical no-detection template
-/// behavior even though [`default_provider`] still falls back to `claude` for
-/// role prompt defaults.
-pub fn default_crew_name(detected: &DetectedAgents) -> &'static str {
+/// Default crew name frozen into newly seeded config, when a supported CLI is
+/// available. The result always names the first emitted crew for that family.
+pub fn default_crew_name(detected: &DetectedAgents) -> Option<&'static str> {
     available_crew_families(detected)
         .first()
-        .copied()
-        .unwrap_or("codex")
+        .map(|family| match *family {
+            "claude" => "opus",
+            "codex" => "sol",
+            "gemini" => "gemini",
+            "grok" => "grok",
+            _ => unreachable!("available crew families are fixed"),
+        })
 }
 
-/// Hardcoded "latest known good" model per provider. Returned to seed prompt
-/// defaults; users can override at the prompt. Update this map when new
-/// flagship models ship.
+/// "Latest known good" model per provider. Returned to seed prompt defaults;
+/// users can override at the prompt.
+///
+/// Thin delegate to [`orbit_common::model_defaults::default_model_for_provider`],
+/// the single source of truth for production default model names. Update that
+/// module when new flagship models ship.
 pub fn default_model_for(provider: &str) -> Option<&'static str> {
-    match provider {
-        "claude" => Some("claude-opus-4-7"),
-        "codex" => Some("gpt-5.5"),
-        "gemini" => Some("gemini-3-pro"),
-        "grok" => Some("grok-build"),
-        _ => None,
-    }
+    orbit_common::model_defaults::default_model_for_provider(provider)
 }
 
 /// Pick a default provider for the role given a detection snapshot.

@@ -81,3 +81,23 @@ fn legacy_flat_layout_detection_names_migration_command() {
     assert!(matches!(err, OrbitError::Migration(_)));
     assert!(err.to_string().contains("orbit learning migrate-layout"));
 }
+
+#[test]
+fn dry_run_reports_without_moving_or_locking() {
+    let dir = tempdir().expect("tempdir");
+    let root = dir.path().join("learnings");
+    fs::create_dir_all(root.join("superseded")).expect("dirs");
+    fs::write(root.join("L-0001.yaml"), "").expect("active");
+    fs::write(root.join("superseded").join("L-0002.yaml"), "").expect("superseded");
+
+    let report = inspect_learning_layout(&root).expect("dry run");
+
+    assert!(!report.already_migrated);
+    assert_eq!(report.moved_active, 1);
+    assert_eq!(report.moved_superseded, 1);
+    assert!(report.removed_superseded_dir);
+    assert!(root.join("L-0001.yaml").is_file());
+    assert!(root.join("superseded").join("L-0002.yaml").is_file());
+    assert!(!root.join("L-0001").exists());
+    assert!(!dir.path().join(WORKSPACE_LOCK_RELATIVE_PATH).exists());
+}

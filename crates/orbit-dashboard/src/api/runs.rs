@@ -1,12 +1,12 @@
 //! Run lifecycle: detail, cancel, replay, events, logs.
 
-use std::sync::Arc;
-
-use axum::extract::{Path, Query, State};
+use crate::state::Ws;
+use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use orbit_common::utility::redaction::redact_all;
-use orbit_core::runtime::run_audit::{RunAuditStep, RunCliInvocationRecord};
+use orbit_core::command::job::JobRunListParams;
+use orbit_core::runtime::run_audit::{RunAuditStep, RunCliInvocationRecord, RunProviderProcess};
 use orbit_core::{JobRun, OrbitRuntime, V2AuditEventFilter};
 use serde_json::{Value, json};
 
@@ -24,10 +24,152 @@ const RUN_LOG_PREVIEW_MAX_BYTES: usize = 8192;
 /// Maximum lines included in stdout/stderr previews returned by run-log APIs.
 const RUN_LOG_PREVIEW_MAX_LINES: usize = 120;
 
-pub(super) async fn get_run(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
+/// Cap on the run history scanned by the in-flight ship guard. Non-terminal
+/// runs are always among the newest rows, so a bounded window is enough to spot
+/// a duplicate dispatch without walking the whole history.
+const SHIP_IN_FLIGHT_SCAN_LIMIT: usize = 200;
+
+#[derive(serde::Deserialize, Default)]
+pub(super) struct ShipBody {
+    /// Explicit task selection; empty selects auto (backlog-discovery) mode.
+    #[serde(default)]
+    task_ids: Vec<String>,
+    /// `"pr"` or `"local"`. Omitted means the workspace's own configured ship
+    /// mode (ORB-10444) — what the dashboard's one-click Ship sends.
+    #[serde(default)]
+    mode: Option<String>,
+    /// Base branch override; defaults to the workspace's `[workflow] base_branch`.
+    #[serde(default)]
+    base: Option<String>,
+    /// Whether to run an independent review before shipment.
+    #[serde(default)]
+    review: bool,
+    /// Explicit crew used only for the independent review step.
+    #[serde(default)]
+    review_crew: Option<String>,
+}
+
+/// Submit a `ship` workflow run (`POST /workflows/ship?workspace=<id>`).
+///
+/// One-shot: responds as soon as the run is persisted, with the same
+/// `queued`/`submitted` states the CLI reports. Callers poll
+/// `GET /runs/:id` for progress.
+///
+/// An omitted `mode` resolves to the selected workspace's own ship mode
+/// (ORB-10444), so the dashboard's one-click Ship needs no PR/local toggle;
+/// a workspace with no registry binding (single/embedded mode) keeps the
+/// historical `pr` default.
+///
+/// Explicitly-selected task ids are additionally guarded against duplicate
+/// dispatch: if any of them is already carried by a non-terminal run, the
+/// request is a 409 naming that run rather than a second run for the same task.
+/// Auto (backlog-discovery) mode has no task ids to guard and is unaffected.
+pub(super) async fn ship_workflow_action(
+    Ws(runtime): Ws,
+    body: Option<Json<ShipBody>>,
 ) -> Response {
+    let Json(body) = body.unwrap_or_default();
+    let mode = match body.mode.as_deref() {
+        Some(raw) => match orbit_core::ShipMode::parse(raw) {
+            Ok(mode) => mode,
+            Err(e) => return bad_request(e.to_string()),
+        },
+        None => workspace_default_ship_mode(&runtime),
+    };
+    match in_flight_run_for_tasks(&runtime, &body.task_ids) {
+        Ok(Some(conflict)) => return ship_conflict(&conflict),
+        Ok(None) => {}
+        Err(e) => return map_runtime_error(e),
+    }
+    match runtime.submit_ship_run(
+        mode,
+        body.base.as_deref(),
+        &body.task_ids,
+        body.review,
+        body.review_crew.as_deref(),
+        Some("dashboard"),
+    ) {
+        Ok(invoke) => Json(json!({
+            "workflow": "ship",
+            "job_id": invoke.job_name,
+            "run_id": invoke.run_id,
+            "state": if invoke.queued { "queued" } else { "submitted" },
+            "submitted_at": invoke.submitted_at,
+        }))
+        .into_response(),
+        Err(orbit_core::OrbitError::InvalidInput(msg)) => bad_request(msg),
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+/// The selected workspace's configured ship mode, or `pr` when this runtime was
+/// built without a registry binding (single/embedded serving mode), which is the
+/// default the endpoint has always applied to a body with no `mode`.
+fn workspace_default_ship_mode(runtime: &OrbitRuntime) -> orbit_core::ShipMode {
+    runtime
+        .workspace_runtime_binding()
+        .map_or(orbit_core::ShipMode::Pr, |binding| binding.ship_mode)
+}
+
+/// The newest non-terminal run already carrying one of `task_ids`, if any.
+///
+/// A run's task selection lives in its persisted `input.task_ids`, which is
+/// what `submit_ship_run` writes, so this sees pipeline dispatches regardless of
+/// which surface submitted them.
+fn in_flight_run_for_tasks(
+    runtime: &OrbitRuntime,
+    task_ids: &[String],
+) -> Result<Option<InFlightRun>, orbit_core::OrbitError> {
+    if task_ids.is_empty() {
+        return Ok(None);
+    }
+    let runs = runtime.list_job_runs(JobRunListParams {
+        limit: Some(SHIP_IN_FLIGHT_SCAN_LIMIT),
+        ..Default::default()
+    })?;
+    Ok(runs.into_iter().find_map(|run| {
+        if run.state.is_terminal() {
+            return None;
+        }
+        let matched = run
+            .input
+            .as_ref()
+            .and_then(|input| input.get("task_ids"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .find(|candidate| task_ids.iter().any(|wanted| wanted == candidate))
+            .map(str::to_string)?;
+        Some(InFlightRun {
+            run_id: run.run_id,
+            task_id: matched,
+        })
+    }))
+}
+
+struct InFlightRun {
+    run_id: String,
+    task_id: String,
+}
+
+fn ship_conflict(conflict: &InFlightRun) -> Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": format!(
+                "task {} already has an in-flight run ({}); wait for it to finish or cancel it",
+                conflict.task_id, conflict.run_id
+            ),
+            "code": "ship_run_in_flight",
+            "run_id": conflict.run_id,
+            "task_id": conflict.task_id,
+        })),
+    )
+        .into_response()
+}
+
+pub(super) async fn get_run(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let id = match validate_id(&id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
@@ -38,10 +180,7 @@ pub(super) async fn get_run(
     }
 }
 
-pub(super) async fn cancel_run_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn cancel_run_action(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let id = match validate_id(&id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
@@ -65,10 +204,7 @@ pub(super) async fn cancel_run_action(
     }
 }
 
-pub(super) async fn replay_run_action(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn replay_run_action(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     let id = match validate_id(&id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
@@ -97,7 +233,40 @@ pub(super) fn job_run_detail_to_json(runtime: &OrbitRuntime, run: &JobRun) -> Va
         Value::Array(audit_steps.iter().map(audit_step_to_json).collect())
     };
 
-    json!({ "run": full, "steps": steps })
+    // [ORB-10496] Provider subprocesses for this run's agent steps, with a
+    // liveness verdict for any that have not reported an exit. Without this a
+    // healthy long-running ship-pipeline implementation agent is
+    // indistinguishable from a dead child without shell access to the host.
+    let provider_processes = runtime
+        .collect_run_provider_processes(&run.run_id)
+        .unwrap_or_default();
+
+    json!({
+        "run": full,
+        "steps": steps,
+        "provider_processes": provider_processes
+            .iter()
+            .map(run_provider_process_to_json)
+            .collect::<Vec<_>>(),
+    })
+}
+
+fn run_provider_process_to_json(record: &RunProviderProcess) -> Value {
+    json!({
+        "run_id": record.run_id,
+        "event_id": record.event_id,
+        "ts": record.ts.map(|ts| ts.to_rfc3339()),
+        "step_id": record.step_id,
+        "step_index": record.step_index,
+        "provider": record.provider,
+        "pid": record.pid,
+        "pid_start_time": record.pid_start_time,
+        "finished": record.finished,
+        "liveness": record.liveness.as_str(),
+        "exit_code": record.exit_code,
+        "timed_out": record.timed_out,
+        "duration_ms": record.duration_ms,
+    })
 }
 
 fn audit_step_to_json(step: &RunAuditStep) -> Value {
@@ -128,7 +297,7 @@ fn audit_step_to_json(step: &RunAuditStep) -> Value {
 }
 
 pub(super) async fn list_run_events(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path(id): Path<String>,
     Query(q): Query<RunEventsQuery>,
 ) -> Response {
@@ -201,7 +370,7 @@ pub(super) async fn list_run_events(
 }
 
 pub(super) async fn list_run_logs(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Path(id): Path<String>,
     Query(q): Query<LimitQuery>,
 ) -> Response {

@@ -5,18 +5,7 @@ sidebar:
   order: 5
 ---
 
-## Claude Code (plugin path)
-
-For Claude Code, the simplest setup is the official plugin — it registers the MCP server, skills, and subagents in one step and pulls the native binary via the `@orbit-tools/cli` npm proxy:
-
-```text
-/plugin marketplace add danieljhkim/orbit
-/plugin install orbit
-```
-
-Requires Node 18+ on `PATH`. Skip the rest of this page if you go this route; the plugin handles registration. Use the manual flow below for Codex, Gemini, Grok Build, or a Claude Code install you want to wire by hand.
-
-## Initialize (manual)
+## Initialize
 
 Use auto-detection:
 
@@ -43,7 +32,9 @@ Start the MCP surface:
 orbit mcp serve
 ```
 
-The surface includes task tools and graph read tools. Graph write tools are not exposed; write coordination is handled through task lock reservations before dispatch.
+Use `orbit tool list` to inspect the current local registry. MCP exposure is a
+capability-filtered subset of that registry. The retired graph tools are not
+exposed.
 
 ## Remove
 

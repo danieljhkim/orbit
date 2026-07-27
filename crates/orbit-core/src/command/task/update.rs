@@ -8,14 +8,13 @@ use crate::OrbitRuntime;
 use crate::runtime::TaskRecordUpdateParams;
 
 use super::helpers::{
-    SYSTEM_ACTOR_LABEL, build_task_comments, effective_actor_label, implementation_label,
-    task_comment_history_entries,
+    SYSTEM_ACTOR_LABEL, TaskAttributionInput, assemble_task_attribution, build_task_comments,
+    describe_optional_field_value,
 };
 use super::params::TaskUpdateParams;
 use super::paths::{
     canonicalize_context_files_for_read, context_files_pruned_history_entry,
-    context_workspace_root, emit_graph_unavailable_warning_if_needed,
-    normalize_context_files_for_write,
+    context_workspace_root, normalize_context_files_for_write,
 };
 use super::transitions::{ensure_task_has_execution_plan, in_progress_transition_requires_plan};
 
@@ -78,14 +77,12 @@ impl OrbitRuntime {
             params.context_files.take()
         {
             let normalized = normalize_context_files_for_write(candidates, &prune_root)?;
-            emit_graph_unavailable_warning_if_needed(&normalized, self.data_root_path());
             // L-0030: explicit replacements preserve draft/future selectors; pruning stays read-time.
             params.context_files = Some(normalized);
             Vec::new()
         } else {
             let normalized = canonicalize_context_files_for_read(&task.context_files, &prune_root);
             if normalized != task.context_files {
-                emit_graph_unavailable_warning_if_needed(&normalized, self.data_root_path());
                 let (kept, dropped) = prune_missing_context_files(&prune_root, normalized);
                 params.context_files = Some(kept);
                 dropped
@@ -104,15 +101,20 @@ impl OrbitRuntime {
         if let Some(crew) = &params.crew {
             self.validate_crew_name(crew.as_deref())?;
         }
-        if params.has_any_mutation() && task.status == TaskStatus::Archived {
+        // Archived tasks accept exactly one mutation: the guarded restore to
+        // backlog (formerly `orbit task unarchive`). Everything else requires
+        // restoring the task first.
+        let unarchiving =
+            task.status == TaskStatus::Archived && params.status == Some(TaskStatus::Backlog);
+        if params.has_any_mutation() && task.status == TaskStatus::Archived && !unarchiving {
             return Err(OrbitError::InvalidInput(format!(
-                "task {id} is {} and cannot be modified; unarchive or reopen it first",
+                "task {id} is {} and cannot be modified; restore it with `orbit task update {id} --status backlog` first",
                 task.status
             )));
         }
         if params.has_non_comment_mutation() && task.status == TaskStatus::Done {
             return Err(OrbitError::InvalidInput(format!(
-                "task {id} is {} and cannot be modified; unarchive or reopen it first",
+                "task {id} is {} and cannot be modified; done is terminal",
                 task.status
             )));
         }
@@ -123,14 +125,6 @@ impl OrbitRuntime {
                     "use `orbit task archive <id>` instead of setting status to archived"
                         .to_string(),
                 ));
-            }
-            if target_status == TaskStatus::Friction && task.status != TaskStatus::Friction {
-                let history = self.get_task_history(id)?;
-                return Err(OrbitError::InvalidInput(friction_reentry_error(
-                    id,
-                    task.status,
-                    &history,
-                )));
             }
             task.status
                 .validate_transition(target_status)
@@ -157,11 +151,21 @@ impl OrbitRuntime {
         }
 
         let actor = self.actor().clone();
-        let effective_label = effective_actor_label(
-            &actor.label,
-            canonical_agent.as_deref(),
-            canonical_model.as_deref(),
+        let attribution = assemble_task_attribution(
+            &task,
+            TaskAttributionInput {
+                default_actor_label: &actor.label,
+                actor_override: None,
+                agent: canonical_agent.as_deref(),
+                model: canonical_model.as_deref(),
+                runtime_model_identity: None,
+                plan_changed: params.plan.is_some(),
+                target_status: params.status,
+                explicit_planned_by: params.planned_by.as_ref(),
+                explicit_implemented_by: params.implemented_by.as_ref(),
+            },
         );
+        let effective_label = attribution.actor;
         let status_note = status_note
             .as_deref()
             .map(str::trim)
@@ -169,25 +173,13 @@ impl OrbitRuntime {
             .map(ToOwned::to_owned);
         let append_comments =
             build_task_comments(params.comment.clone(), effective_label.as_str())?;
-        let planned_by = params
-            .planned_by
-            .clone()
-            .or_else(|| params.plan.as_ref().map(|_| Some(effective_label.clone())));
-        let implementation_label =
-            implementation_label(&task, effective_label.as_str(), canonical_model.as_deref());
-        let implemented_by = params.implemented_by.clone().or_else(|| {
-            params.status.and_then(|status| {
-                if matches!(status, TaskStatus::Review | TaskStatus::Done) {
-                    implementation_label.clone().map(Some)
-                } else {
-                    None
-                }
-            })
-        });
-        let source_task_id_changed = params
+        // ORB-10311: a persisted task comment no longer emits a bare `commented`
+        // history stub; the comment itself (append_comments) is the record.
+        let source_task_id_replacement = params
             .source_task_id
             .as_ref()
-            .is_some_and(|source_task_id| task.source_task_id() != source_task_id.as_deref());
+            .map(|value| value.as_deref())
+            .filter(|replacement| task.source_task_id() != *replacement);
 
         let mut append_history: Vec<TaskHistoryEntry> = if dropped_context_files.is_empty() {
             Vec::new()
@@ -197,31 +189,42 @@ impl OrbitRuntime {
                 &dropped_context_files,
             )]
         };
-        append_history.extend(task_comment_history_entries(&append_comments));
-        if source_task_id_changed {
+        if let Some(replacement) = source_task_id_replacement {
+            // ORB-10311: record the explicit previous and replacement source
+            // ids (with a clear marker for the unset case) so the change is
+            // auditable from history alone.
             append_history.push(TaskHistoryEntry {
                 at: chrono::Utc::now(),
                 by: effective_label.clone(),
                 event: "updated".to_string(),
-                note: Some("source_task_id changed".to_string()),
+                note: Some(format!(
+                    "source_task_id changed: {} → {}",
+                    describe_optional_field_value(task.source_task_id()),
+                    describe_optional_field_value(replacement),
+                )),
                 from_status: None,
                 to_status: None,
             });
         }
         let updated = self.with_mutation(|| {
-            let task = self.stores().tasks().update(
+            let task = self.stores().task_records().update(
                 id,
                 TaskRecordUpdateParams {
                     actor: effective_label.clone(),
-                    planned_by,
-                    implemented_by,
+                    planned_by: attribution.planned_by.clone(),
+                    implemented_by: attribution.implemented_by.clone(),
                     status_note,
                     append_comments: append_comments.clone(),
                     append_history: append_history.clone(),
                     ..TaskRecordUpdateParams::from(params)
                 },
             )?;
-            Ok((task.clone(), OrbitEvent::TaskUpdated { id: id.to_string() }))
+            let event = if unarchiving {
+                OrbitEvent::TaskUnarchived { id: id.to_string() }
+            } else {
+                OrbitEvent::TaskUpdated { id: id.to_string() }
+            };
+            Ok((task.clone(), event))
         })?;
         if updated.status == TaskStatus::Done {
             self.record_resolves_side_effects(&updated)?;
@@ -229,29 +232,4 @@ impl OrbitRuntime {
 
         Ok(updated)
     }
-}
-
-fn friction_reentry_error(
-    id: &str,
-    current_status: TaskStatus,
-    history: &[TaskHistoryEntry],
-) -> String {
-    if let Some(entry) = history
-        .iter()
-        .rev()
-        .find(|entry| entry.from_status == Some(TaskStatus::Friction))
-    {
-        let to_status = entry
-            .to_status
-            .map(|status| status.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
-        return format!(
-            "status 'friction' can only be set at creation; task '{id}' previously transitioned out of friction (friction -> {to_status})"
-        );
-    }
-
-    format!(
-        "status 'friction' can only be set at creation; task '{id}' is currently '{}'",
-        current_status
-    )
 }

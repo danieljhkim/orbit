@@ -1,9 +1,7 @@
 //! `orbit run ship` CLI entrypoint.
 
-use std::collections::HashSet;
-
 use clap::{Args, ValueEnum};
-use orbit_core::{OrbitError, OrbitRuntime, find_workflow};
+use orbit_core::{OrbitError, OrbitRuntime, build_ship_input, find_workflow};
 use serde_json::Value;
 
 use crate::command::Execute;
@@ -19,10 +17,10 @@ pub enum ShipMode {
 }
 
 impl ShipMode {
-    fn as_input_value(self) -> &'static str {
+    pub(super) fn to_core(self) -> orbit_core::ShipMode {
         match self {
-            ShipMode::Pr => "pr",
-            ShipMode::Local => "local",
+            ShipMode::Pr => orbit_core::ShipMode::Pr,
+            ShipMode::Local => orbit_core::ShipMode::Local,
         }
     }
 }
@@ -31,19 +29,28 @@ impl ShipMode {
 #[command(
     about = "Ship backlog or explicitly selected tasks through the gated task pipeline",
     override_usage = "orbit run ship [<TASK_ID>...] [OPTIONS]",
-    after_help = "Examples:\n  orbit run ship\n  orbit run ship T123\n  orbit run ship T123 T456 --mode local\n  orbit run ship T123 --base main\n\nInspect submitted runs with `orbit run history -j task_auto_pipeline` and `orbit run show <RUN_ID>`."
+    after_help = "Examples:\n  orbit run ship\n  orbit run ship T123\n  orbit run ship T123 T456 --mode local\n  orbit run ship T123 --base main\n  orbit run ship T123 --review --review-crew opus-review\n\nInspect submitted runs with `orbit run history -j task_auto_pipeline` and `orbit run show <RUN_ID>`."
 )]
 pub struct ShipCommand {
     /// Optional task IDs to seed explicit gated shipment. Omit for auto mode.
     #[arg(value_name = "TASK_ID", num_args = 0..)]
     pub task_ids: Vec<String>,
-    /// Pipeline mode for selected or auto-discovered task bundles.
-    #[arg(short = 'm', long, value_enum, default_value = "pr")]
-    pub mode: ShipMode,
+    /// Pipeline mode for selected or auto-discovered task bundles. When omitted,
+    /// the mode is resolved from the current workspace's registry entry
+    /// (explicit `ship_mode`, else defaults to `local`).
+    #[arg(short = 'm', long, value_enum)]
+    pub mode: Option<ShipMode>,
     /// Base branch for shipment. Defaults to
     /// `[workflow] base_branch` from `config.toml` (or `main` if unset).
     #[arg(short = 'b', long)]
     pub base: Option<String>,
+    /// Run an independent review after implementation and before shipment.
+    /// Requires `--review-crew`.
+    #[arg(long)]
+    pub review: bool,
+    /// Explicit crew used only for the independent review step.
+    #[arg(long, value_name = "CREW")]
+    pub review_crew: Option<String>,
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
@@ -51,10 +58,39 @@ pub struct ShipCommand {
 
 impl Execute for ShipCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let plan = build_ship_run_plan(&self, runtime.workflow_base_branch())?;
+        let mode = resolve_ship_mode(&self, runtime)?;
+        let plan = build_ship_run_plan(&self, runtime.workflow_base_branch(), mode)?;
         let runs = dispatch_workflow(runtime, plan.workflow_alias, &plan.input, false, false, 1)?;
         print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)
     }
+}
+
+/// Resolve the effective ship mode for a `ship` invocation.
+///
+/// An explicit `--mode` wins. Otherwise the mode is resolved from the current
+/// workspace's registry entry (matched by `orbit_dir`): explicit `ship_mode`,
+/// else the `local` default. If the current workspace isn't found in the
+/// registry, fall back to `local` (the safe default — a repo without an explicit
+/// `pr` mode should never attempt a PR that could fail structurally).
+fn resolve_ship_mode(
+    args: &ShipCommand,
+    runtime: &OrbitRuntime,
+) -> Result<orbit_core::ShipMode, OrbitError> {
+    if let Some(mode) = args.mode {
+        return Ok(mode.to_core());
+    }
+    let registry = orbit_remote::workspace_registry::load_registry()?;
+    let orbit_dir = runtime.shared_root();
+    let mode = registry
+        .checkouts
+        .iter()
+        .find(|checkout| checkout.orbit_dir == orbit_dir)
+        .and_then(|checkout| {
+            orbit_remote::workspace_registry::find_workspace(&registry, &checkout.workspace_id)
+        })
+        .map(orbit_core::resolved_ship_mode)
+        .unwrap_or(orbit_core::ShipMode::Local);
+    Ok(mode)
 }
 
 #[derive(Args)]
@@ -93,6 +129,7 @@ pub(crate) struct WorkflowRunPlan {
 pub(crate) fn build_ship_run_plan(
     args: &ShipCommand,
     config_base_branch: &str,
+    mode: orbit_core::ShipMode,
 ) -> Result<WorkflowRunPlan, OrbitError> {
     validate_task_selection(&args.task_ids)?;
     let workflow_alias = SHIP_WORKFLOW;
@@ -100,40 +137,20 @@ pub(crate) fn build_ship_run_plan(
     let base = args.base.as_deref().unwrap_or(config_base_branch);
     Ok(WorkflowRunPlan {
         workflow_alias,
-        input: ship_input(args.mode, base, &args.task_ids),
+        input: build_ship_input(
+            mode,
+            base,
+            &args.task_ids,
+            args.review,
+            args.review_crew.as_deref(),
+        )?,
     })
-}
-
-fn ship_input(mode: ShipMode, base: &str, task_ids: &[String]) -> Value {
-    let mut map = serde_json::Map::new();
-    map.insert(
-        "mode".to_string(),
-        Value::String(mode.as_input_value().to_string()),
-    );
-    map.insert("base_branch".to_string(), Value::String(base.to_string()));
-    if !task_ids.is_empty() {
-        map.insert(
-            "task_ids".to_string(),
-            Value::Array(task_ids.iter().cloned().map(Value::String).collect()),
-        );
-    }
-    Value::Object(map)
 }
 
 fn validate_task_selection(task_ids: &[String]) -> Result<(), OrbitError> {
     if let Some(legacy) = task_ids.first().and_then(|value| legacy_ship_form(value)) {
         return Err(OrbitError::InvalidInput(legacy.to_string()));
     }
-
-    let mut seen = HashSet::new();
-    for task_id in task_ids {
-        if !seen.insert(task_id.as_str()) {
-            return Err(OrbitError::InvalidInput(format!(
-                "duplicate task id '{task_id}' in explicit task selection"
-            )));
-        }
-    }
-
     Ok(())
 }
 

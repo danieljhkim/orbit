@@ -2,6 +2,7 @@
 //! `orbit-search-companion` subprocess. The protocol is deliberately small:
 //! `info`, `embed`, `token_count`, `exit`. Both sides serialize via serde.
 
+use orbit_common::types::OrbitError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -55,4 +56,18 @@ pub enum RpcResult {
 pub struct RpcError {
     pub code: String,
     pub message: String,
+}
+
+/// Translate a companion [`RpcError`] into the workspace-public [`OrbitError`]
+/// surface at the subprocess boundary.
+///
+/// Every error the companion reports over the wire is an execution failure on
+/// its side, so the whole `code` set collapses into [`OrbitError::Execution`];
+/// callers translate with `.map_err(rpc_error_to_orbit)?` per
+/// `docs/design-patterns/error_translation.md` [ORB-10013].
+pub fn rpc_error_to_orbit(error: RpcError) -> OrbitError {
+    OrbitError::Execution(format!(
+        "search companion {}: {}",
+        error.code, error.message
+    ))
 }

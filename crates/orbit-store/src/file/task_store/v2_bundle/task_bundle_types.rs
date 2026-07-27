@@ -1,7 +1,7 @@
 use orbit_common::types::{
-    ArtifactManifestV2, ReviewThreadMetadataV2, TASK_ACCEPTANCE_FILE_NAME,
-    TASK_DESCRIPTION_FILE_NAME, TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME,
-    TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2,
+    ArtifactManifestV2, TASK_ACCEPTANCE_FILE_NAME, TASK_DESCRIPTION_FILE_NAME,
+    TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME, TaskCommentRowV2, TaskEnvelopeV2,
+    TaskEventRowV2,
 };
 
 use crate::sqlite::task_registry::{ProjectionRebuildResult, TaskBundleBinding};
@@ -15,14 +15,7 @@ pub(crate) struct TaskBundleV2 {
     pub(crate) execution_summary: String,
     pub(crate) events: Vec<TaskEventRowV2>,
     pub(crate) comments: Vec<TaskCommentRowV2>,
-    pub(crate) review_threads: Vec<TaskReviewThreadV2>,
     pub(crate) artifact_manifest: Option<ArtifactManifestV2>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TaskReviewThreadV2 {
-    pub(crate) metadata: ReviewThreadMetadataV2,
-    pub(crate) body: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

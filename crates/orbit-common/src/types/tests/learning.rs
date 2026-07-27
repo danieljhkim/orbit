@@ -1,6 +1,4 @@
 mod admission {
-    use chrono::{TimeZone, Utc};
-
     use super::super::super::learning::*;
 
     #[test]
@@ -30,7 +28,7 @@ mod admission {
             .map(|idx| LearningReminder {
                 id: format!("L{idx}"),
                 summary: format!("summary {idx}"),
-                comments: Vec::new(),
+                tags: Vec::new(),
             })
             .collect();
 
@@ -41,34 +39,6 @@ mod admission {
             vec!["L0", "L1"]
         );
         assert_eq!(state.count, 2);
-    }
-
-    #[test]
-    fn decayed_vote_score_halves_each_half_life() {
-        let now = Utc.with_ymd_and_hms(2026, 5, 17, 0, 0, 0).unwrap();
-        let recent = now;
-        let old = now - chrono::Duration::days(180);
-
-        let recent_weight = decayed_vote_score(&[recent], now, 180.0);
-        let old_weight = decayed_vote_score(&[old], now, 180.0);
-
-        let ratio = recent_weight / old_weight;
-        assert!(
-            (ratio - 2.0).abs() < 1e-6,
-            "expected 2:1 ratio, got {ratio}"
-        );
-    }
-
-    #[test]
-    fn decayed_vote_score_zero_half_life_returns_raw_count() {
-        let now = Utc.with_ymd_and_hms(2026, 5, 17, 0, 0, 0).unwrap();
-        let votes = [
-            now - chrono::Duration::days(30),
-            now - chrono::Duration::days(730),
-            now - chrono::Duration::days(1460),
-        ];
-
-        assert_eq!(decayed_vote_score(&votes, now, 0.0), 3.0);
     }
 }
 
@@ -133,8 +103,6 @@ mod parsing {
 }
 
 mod reminders {
-    use chrono::{TimeZone, Utc};
-
     use super::super::super::learning::*;
 
     #[test]
@@ -148,7 +116,7 @@ mod reminders {
         let block = render_reminder_block(&[LearningReminder {
             id: "L-0001".to_string(),
             summary: "Verify output equivalence before freezing a result.".to_string(),
-            comments: Vec::new(),
+            tags: Vec::new(),
         }]);
 
         assert_eq!(
@@ -162,27 +130,28 @@ Read full body via `orbit.learning.show <id>` if needed.\n\
     }
 
     #[test]
-    fn render_reminder_block_renders_comments_under_learning() {
-        let ts = Utc.with_ymd_and_hms(2026, 5, 17, 0, 0, 0).unwrap();
+    fn render_reminder_block_includes_scope_tags_in_teaser() {
         let block = render_reminder_block(&[LearningReminder {
-            id: "L-0001".to_string(),
-            summary: "Remember the important thing.".to_string(),
-            comments: vec![LearningComment {
-                id: "C20260517-1".to_string(),
-                learning_id: "L-0001".to_string(),
-                body: "Use the narrow helper.\nExtra detail stays hidden.".to_string(),
-                author_model: "codex".to_string(),
-                created_at: ts,
-            }],
+            id: "L-0002".to_string(),
+            summary: "Scope tags ride in the teaser.".to_string(),
+            tags: vec!["hooks".to_string(), "observability".to_string()],
         }]);
 
-        assert!(block.contains("- [L-0001] Remember the important thing.\n"));
-        assert!(block.contains("  - [C20260517-1] Use the narrow helper.\n"));
+        assert_eq!(
+            block,
+            "<system-reminder>\n\
+Project learnings relevant to this task:\n\n\
+- [L-0002] Scope tags ride in the teaser. [tags: hooks, observability]\n\n\
+Read full body via `orbit.learning.show <id>` if needed.\n\
+</system-reminder>"
+        );
     }
 }
 
 mod serialization {
     use chrono::{TimeZone, Utc};
+
+    use crate::test_fixtures::TEST_CLAUDE_MODEL;
 
     use super::super::super::learning::*;
 
@@ -208,7 +177,7 @@ mod serialization {
             legacy_ids: Vec::new(),
             created_at: ts,
             updated_at: ts,
-            created_by: Some("claude-opus-4-7".to_string()),
+            created_by: Some(TEST_CLAUDE_MODEL.to_string()),
             priority: None,
         }
     }

@@ -1,21 +1,39 @@
 ---
-title: External Executor Protocol v1
+title: External Executor Protocol v1 (Retired)
 owner: claude
-last_updated: 2026-06-13
-status: Draft
+last_updated: 2026-07-26
+last_validated: 2026-07-27
+status: Retired
 feature: executors
 type: design
-summary: "External Executor Protocol v1: wire contract for registering a homegrown out-of-process executor via executor_type external."
-tags: [executors, extensibility, protocol]
+summary: "RETIRED: External Executor Protocol v1 was never a supported surface; the executor_type external transport was deleted in ORB-10395. Kept as a historical record of the retired wire contract."
+tags: [executors, extensibility, protocol, retired]
 paths:
-  - "crates/orbit-engine/src/executor/external.rs"
-  - "crates/orbit-engine/src/executor/direct_agent.rs"
   - "crates/orbit-common/src/types/executor_def.rs"
 related_features: [executors]
-related_artifacts: [ORB-00384, ADR-0196]
+related_artifacts: [ORB-00384, ORB-10395, ADR-0196]
 ---
 
-# Spec: External Executor Protocol v1
+# Spec: External Executor Protocol v1 — RETIRED
+
+> **Status: Retired ([ORB-10395], 2026-07-26).** The External Executor Protocol
+> is **not** a supported Orbit surface. `ExecutorType::External`, the
+> `ExternalExecutor` implementation, and the shared `direct_agent` subprocess
+> transport it rode on were deleted together with the rest of the v1 executor
+> stack — the `ActivityExecutor` trait, `ActivityExecutorRegistry`, and the v1
+> `ExecutionContext` — when v2 dispatch (`orbit-engine::activity_job`) became the
+> only execution path. Nothing in Orbit spawns an `executor_type: external` def
+> any more; such a def parses and stores, but is inert.
+>
+> The `external.example.yaml` template and the conformance fixture referenced
+> below were deleted in the same change. **Do not implement against this
+> document.** It is retained only so an operator who finds an old `external` def
+> can recognize what it was. A future out-of-process extension point would be a
+> new, separately decided contract on the v2 dispatch path — see
+> [4_decisions.md](../4_decisions.md) §ADR-0196 for the original rationale and
+> its retirement note.
+
+## Historical contract (no longer implemented)
 
 The External Executor Protocol lets an operator register a homegrown executor —
 a binary or script — without forking or recompiling Orbit. The operator declares
@@ -38,10 +56,9 @@ semantics, so a non-agent homegrown executor is a first-class citizen.
 
 ## Registration
 
-An external executor is an `Executor` resource. Drop the YAML into the executor
-def store (seed/upsert) — no recompile. A copy-paste template ships at
-[`crates/orbit-core/assets/executors/external.example.yaml`](../../../../crates/orbit-core/assets/executors/external.example.yaml)
-(a reference file, deliberately not seeded as a default):
+An external executor was an `Executor` resource. The copy-paste template that
+used to ship at `crates/orbit-core/assets/executors/external.example.yaml` was
+deleted in [ORB-10395]; the shape it declared was:
 
 ```yaml
 schemaVersion: 2
@@ -155,14 +172,19 @@ exercised by the planning-duel flow).
 The `schemaVersion: 1` request envelope and the exit-code result semantics above
 are the stable surface of v1. Future capability must be **additive** — new
 optional envelope fields, or a new explicit envelope version — never a
-breaking reinterpretation of an existing field. A conformance fixture
-(`crates/orbit-engine/src/executor/tests/external.rs`) pins the success and
-protocol-violation paths.
+breaking reinterpretation of an existing field. A conformance fixture formerly lived at
+`crates/orbit-engine/src/executor/tests/external.rs`; it was deleted with the
+transport in [ORB-10395].
 
 ## Task References
 
 - **[ORB-00384]** — defined External Executor Protocol v1: added `ExecutorType::External`,
   registered a generic external-process executor, wrote this spec, and shipped the
   conformance fixture.
+- **[ORB-10395]** — retired the protocol: deleted `ExternalExecutor`, the shared
+  `direct_agent` subprocess transport, the executor registry, the example def
+  template, and the conformance fixture along with the rest of the v1 executor
+  stack. `ExecutorType::External` survives only so pre-existing defs still
+  deserialize; dropping the wire variant is a separate release decision.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

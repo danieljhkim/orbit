@@ -4,27 +4,25 @@ use std::process::Command;
 
 use chrono::Utc;
 use orbit_common::types::{
-    Activity, ExternalRef, Job, JobTargetType, NotFoundKind, OrbitError, OrbitEvent, Role, Task,
-    TaskArtifact, TaskPriority, TaskStatus, TaskType,
+    ExternalRef, NotFoundKind, OrbitError, OrbitEvent, Role, Task, TaskArtifact, TaskPriority,
+    TaskStatus, TaskType,
 };
 use orbit_tools::ToolContext;
 use serde_json::Value;
 use tempfile::tempdir;
 
 use crate::context::{
-    JobRunResult, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost,
-    TaskWriteHost,
+    DeterministicActionHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
 };
-use crate::executor::registry::ActivityExecutorRegistry;
 
 use super::super::super::git::git_success;
 
 pub struct CommitTestHost {
     tasks: Vec<Task>,
+    crew_model: Option<String>,
     repo_root: PathBuf,
     data_root: PathBuf,
     scoreboard_dir: PathBuf,
-    registry: ActivityExecutorRegistry,
 }
 
 impl CommitTestHost {
@@ -33,11 +31,16 @@ impl CommitTestHost {
         let scoreboard_dir = data_root.join("scoreboard");
         Self {
             tasks,
+            crew_model: None,
             repo_root,
             data_root,
             scoreboard_dir,
-            registry: ActivityExecutorRegistry::default(),
         }
+    }
+
+    pub fn with_crew_model(mut self, model: impl Into<String>) -> Self {
+        self.crew_model = Some(model.into());
+        self
     }
 }
 
@@ -130,7 +133,7 @@ impl TaskWriteHost for CommitTestHost {
     }
 }
 
-impl RuntimeHost for CommitTestHost {
+impl DeterministicActionHost for CommitTestHost {
     fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
         Ok(())
     }
@@ -139,37 +142,12 @@ impl RuntimeHost for CommitTestHost {
         Ok(self.repo_root.to_string_lossy().to_string())
     }
 
+    fn resolved_crew_model(&self, _run_id: &str) -> Result<Option<String>, OrbitError> {
+        Ok(self.crew_model.clone())
+    }
+
     fn data_root(&self) -> &Path {
         &self.data_root
-    }
-
-    fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
-        &self.registry
-    }
-
-    fn run_job_now_with_input_debug(
-        &self,
-        _job_id: &str,
-        _input: Value,
-        _debug: bool,
-    ) -> Result<JobRunResult, OrbitError> {
-        Err(OrbitError::Execution(
-            "run_job_now_with_input_debug is not needed by commit tests".to_string(),
-        ))
-    }
-
-    fn validate_activity_target_exists(
-        &self,
-        _target_type: JobTargetType,
-        _target_id: &str,
-    ) -> Result<Activity, OrbitError> {
-        Err(OrbitError::Execution(
-            "validate_activity_target_exists is not needed by commit tests".to_string(),
-        ))
-    }
-
-    fn get_job(&self, _job_id: &str) -> Result<Option<Job>, OrbitError> {
-        Ok(None)
     }
 
     fn run_tool_with_context_and_role(
@@ -200,19 +178,31 @@ impl RuntimeHost for CommitTestHost {
         false
     }
 
-    fn graph_editing(&self) -> bool {
-        false
-    }
-
     fn scoreboard_dir(&self) -> &Path {
         &self.scoreboard_dir
     }
+}
+
+/// Detach a fixture repo from any machine-global `core.hooksPath`.
+///
+/// A developer box may configure arbitrary global Git hooks. A fixture repo
+/// must not inherit host-specific commit mutation, so its empty hooks directory
+/// makes the no-hook production contract explicit and deterministic.
+fn detach_global_git_hooks(repo: &Path) {
+    let hooks = repo.join(".git").join("orbit-test-empty-hooks");
+    fs::create_dir_all(&hooks).expect("create empty hooks dir");
+    git_success(
+        repo,
+        &["config", "core.hooksPath", &hooks.to_string_lossy()],
+    )
+    .expect("config core.hooksPath");
 }
 
 pub fn initialized_git_repo() -> tempfile::TempDir {
     let temp = tempdir().unwrap();
     let repo = temp.path();
     git_success(repo, &["init"]).expect("git init");
+    detach_global_git_hooks(repo);
     git_success(repo, &["config", "user.name", "Local User"]).expect("config user.name");
     git_success(repo, &["config", "user.email", "local@example.test"]).expect("config user.email");
     fs::write(repo.join("README.md"), "base\n").unwrap();
@@ -225,6 +215,7 @@ pub fn initialized_git_repo_without_local_user_config() -> tempfile::TempDir {
     let temp = tempdir().unwrap();
     let repo = temp.path();
     git_success(repo, &["init"]).expect("git init");
+    detach_global_git_hooks(repo);
     fs::write(repo.join("README.md"), "base\n").unwrap();
     git_success(repo, &["add", "README.md"]).expect("git add");
     git_success(
@@ -295,7 +286,10 @@ pub fn task_with_file(id: &str, title: &str, path: &str, implemented_by: &str) -
         acceptance_criteria: Vec::new(),
         tags: Vec::new(),
         plan: String::new(),
-        execution_summary: String::new(),
+        // ORB-10313: the delivery gate reads the durable outcome before touching
+        // the checkout. Individual tests override this meaningful default to
+        // exercise failed and nonstandard outcomes.
+        execution_summary: "Outcome: success".to_string(),
         context_files: vec![format!("file:{path}")],
         created_by: None,
         planned_by: None,

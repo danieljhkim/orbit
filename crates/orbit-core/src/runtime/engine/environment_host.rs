@@ -1,6 +1,6 @@
+use orbit_common::types::CrewRoleAssignment;
 use orbit_common::types::activity_job::{AgentRole, Backend, Provider};
-use orbit_common::types::{CrewRoleAssignment, OrbitError};
-use orbit_engine::{AgentRoleConfig, EnvironmentHost, ExecutorLookupHost};
+use orbit_engine::{AgentRoleConfig, EnvironmentHost};
 
 use super::paths::codex_workspace_write_writable_dirs;
 use crate::OrbitRuntime;
@@ -55,8 +55,9 @@ impl EnvironmentHost for OrbitRuntime {
     fn agent_role_config(&self, role: AgentRole) -> Option<AgentRoleConfig> {
         let crew = self
             .context
+            .settings()
             .default_crew()
-            .and_then(|name| self.context.crews().get(name))?;
+            .and_then(|name| self.context.settings().crews().get(name))?;
         let raw = crew.role(role.as_str())?;
         Some(typed_role_config_from_assignment(role, raw))
     }
@@ -72,16 +73,33 @@ pub(crate) fn typed_role_config_from_assignment(
     raw: &CrewRoleAssignment,
 ) -> AgentRoleConfig {
     let provider = Some(raw.provider.as_str()).and_then(|raw_value| {
-        let parsed = parse_provider(raw_value);
-        if parsed.is_none() {
-            tracing::warn!(
-                target: "orbit.config.crew",
-                role = role.as_str(),
-                raw = raw_value,
-                "[crews.<name>].provider has an unrecognized value; falling back to inline activity provider",
-            );
+        // Canonical string→provider parsing lives on the orbit-common `Provider`
+        // surface (ORB-10091); the crew path routes through it so casing/alias
+        // handling cannot drift from the other layers. `resolve_name` preserves
+        // the deprecation signal so a legacy alias resolves *and* warns.
+        match Provider::resolve_name(raw_value) {
+            Ok(identity) => {
+                if let Some(deprecation) = identity.deprecation {
+                    tracing::warn!(
+                        target: "orbit.config.crew",
+                        role = role.as_str(),
+                        alias = %deprecation.alias,
+                        canonical = %deprecation.canonical,
+                        "[crews.<name>].provider uses a deprecated alias; resolving to the canonical id — update the config",
+                    );
+                }
+                Some(identity.provider)
+            }
+            Err(_) => {
+                tracing::warn!(
+                    target: "orbit.config.crew",
+                    role = role.as_str(),
+                    raw = raw_value,
+                    "[crews.<name>].provider has an unrecognized value; falling back to inline activity provider",
+                );
+                None
+            }
         }
-        parsed
     });
 
     let backend = Some(raw.backend.as_str()).and_then(|raw_value| {
@@ -104,26 +122,5 @@ pub(crate) fn typed_role_config_from_assignment(
         provider,
         model,
         backend,
-    }
-}
-
-fn parse_provider(raw: &str) -> Option<Provider> {
-    match raw.trim() {
-        "claude" => Some(Provider::Claude),
-        "codex" => Some(Provider::Codex),
-        "gemini" => Some(Provider::Gemini),
-        "grok" => Some(Provider::Grok),
-        "ollama" => Some(Provider::Ollama),
-        "openai_compat" | "openai-compat" => Some(Provider::OpenaiCompat),
-        _ => None,
-    }
-}
-
-impl ExecutorLookupHost for OrbitRuntime {
-    fn get_executor_def(
-        &self,
-        name: &str,
-    ) -> Result<Option<orbit_common::types::ExecutorDef>, OrbitError> {
-        self.stores().executors().get(name)
     }
 }

@@ -3,7 +3,7 @@ summary: "Project Learnings — Vision"
 type: design
 title: "Project Learnings — Vision"
 owner: claude
-last_updated: 2026-05-12
+last_updated: 2026-07-25
 status: Draft
 feature: project-learnings
 doc_role: vision
@@ -18,15 +18,18 @@ This document captures the questions phase 1 deliberately defers, the prior work
 
 ## 1. Open Questions
 
-### 1.1 Symbol-aware scope (deferred to phase 2)
+### 1.1 Symbol-aware scope (unplanned)
 
-Phase 1 scopes learnings by path globs and tags ([2_design.md §3](./2_design.md)). This breaks under renames: a learning scoped to `crates/orbit-knowledge/src/graph_bench.rs` becomes invisible the moment someone moves the file, even though the knowledge is still about the same logic.
+Phase 1 scopes learnings by path globs and tags ([2_design.md §3](./2_design.md)). This breaks under renames: a learning scoped to a benchmark source file becomes invisible the moment someone moves the file, even though the knowledge is still about the same logic.
 
-The knowledge graph already tracks symbol identity across moves. A `scope.symbols: ["orbit-engine::perf_runner::run_benchmark"]` field would survive renames cleanly because the graph resolves symbols regardless of file location. Reasons phase 1 doesn't ship this:
+The schema preserves a `scope.symbols:
+["orbit-engine::perf_runner::run_benchmark"]` field, but Orbit has no live
+symbol resolver. Reasons the field remains inactive:
 
-- Coupling the learning store to the knowledge graph adds a hot-path dependency on graph rebuilds. Phase 1 keeps the dependency one-way (graph triggers staleness checks) rather than bidirectional.
+- A resolver would add a new indexing dependency and lifecycle surface.
 - Symbol-aware scope is more useful once semantic-similarity ranking exists ([§1.2](#12-semantic-similarity-ranking-deferred-to-phase-2)), because the two together give "find learnings about this symbol or anything semantically near it."
-- The phase-1 schema reserves `scope.symbols` so adding it later is additive, not a migration.
+- The phase-1 schema reserves `scope.symbols`, so a future design can remain
+  additive rather than requiring a data migration.
 
 **Cost of deferring:** every refactor that moves files requires manual `orbit learning prune` or `update` calls. At low learning volume that's tolerable; at higher volume it becomes drag.
 
@@ -41,7 +44,7 @@ Phase 1 ranks matched learnings by `updated_at` desc, with optional manual `prio
 [docs/design/orbit-search/](../orbit-search/) builds the infrastructure that resolves all three: per-field embeddings, brute-force cosine, RRF fusion. Phase 2 of project-learnings layers on top of that:
 
 - Each learning's `summary` and `body` are embedded under the same `embeddings` table orbit-search uses (`source_kind = "learning"`).
-- Injection-time ranking unions path-glob matches with cosine matches against the current edit's surrounding context, fused via RRF.
+- Search-time ranking unions path-glob matches with cosine matches against the query and selected path context, fused via RRF.
 - Manual `priority` becomes a soft signal in fusion, not a hard tier.
 
 The phase-2 design lands as its own task once orbit-search reaches Accepted. The schema reservation in phase 1 is a `scope.semantic_seed` field — short text describing what the learning is "about" — that becomes the embedding source for phase 2.
@@ -58,7 +61,7 @@ The whole system depends on someone writing the learnings. Phase 1 ships:
 
 None of these guarantee learnings get authored. Three candidate accelerators, all out of scope phase 1:
 
-- **Auto-suggestion at task close.** When `orbit task approve` runs, surface "did the agent learn anything from this task that should become a learning?" Adds friction; may help.
+- **Auto-suggestion at task close.** When a task is approved (`orbit.task.approve`, or `orbit task update --status done` out of review), surface "did the agent learn anything from this task that should become a learning?" Adds friction; may help.
 - **Mining from review threads.** Crawl resolved review threads for sentences matching patterns like "remember to" / "always" / "don't" / "we got burned" and suggest them as draft learnings. Cheap to implement, high-noise without a relevance filter.
 - **Mining from MEMORY.md.** Agent-private memory often contains lessons that should be project-wide. A migration tool ("promote this MEMORY.md entry to a project learning") would convert quietly-accumulating private knowledge into shared artifact.
 
@@ -76,15 +79,15 @@ Three options:
 
 The third is probably right; phase 1 ships option 1.
 
-### 1.5 Cross-agent hook universality
+### 1.5 Pull discovery quality
 
-[2_design.md §4.3](./2_design.md) ships layer 3 as Claude-Code-only because that's the only agent vendor with a documented `PreToolUse` hook surface today. Codex, Gemini, and others may gain similar facilities; some won't. Three responses:
+Automatic delivery was retired in [ORB-10346] after the hook relevancy audit showed that it added broad tool-call overhead without a useful direct signal. The remaining discovery model must make the right record easy to locate without vendor-specific hooks.
 
-- **Wait for vendor parity.** Accept uneven coverage until each vendor adds hooks. Slowest; least Orbit work.
-- **Layer 4: an Orbit-side proxy.** Run the agent's tool calls through an Orbit interceptor that simulates `PreToolUse` for any agent. Adds a new component in the hot path; large surface area.
-- **Push fine-grained injection up to layer 1+2.** Make engine-pre-prompt and MCP-sidecar smart enough that the per-edit precision of layer 3 is rarely needed.
+- **Search and show only.** Lowest runtime overhead and portable across every agent, but relies on the query being meaningful.
+- **Search and show plus reference comments.** A concise artifact ID and rationale at a code or workflow boundary give agents a concrete locator before they retrieve the authoritative body.
+- **Restore automatic injection.** Reopens the audit's low-relevancy, vendor- and transport-specific hot path; it needs evidence beyond the frozen historical counters.
 
-The third is the most palatable; it depends on how good ranking gets in phase 2. If phase-2 ranking is strong, the gap layer 3 fills shrinks; if it's weak, layer 4 becomes more attractive.
+Phase 1 uses search/show plus reference comments. Future ranking work should improve the pull results rather than reintroduce an automatic tool-call hook.
 
 ### 1.6 Privacy of learning content under shared repos
 
@@ -93,7 +96,7 @@ Learnings are checked in. In a public open-source repo, every learning is public
 Two paths if this becomes load-bearing:
 
 - A `private` flag plus a separate `.orbit/learnings/private/` directory that's `.gitignore`d. Operator-driven.
-- A redaction layer that injects sanitized summaries into agents in untrusted contexts. Heavier; probably overkill until a real use case appears.
+- A redaction layer that filters or sanitizes retrieval results in untrusted contexts. Heavier; probably overkill until a real use case appears.
 
 Phase 1 ships nothing here and flags the consideration; if the project becomes a multi-tenant or open-source codebase, this is the section to revisit first.
 
@@ -113,7 +116,7 @@ The YAML schema declares `schemaVersion: 1`. Anticipated changes:
 - v2: add `scope.symbols` ([§1.1](#11-symbol-aware-scope-deferred-to-phase-2)).
 - v2 or v3: add `scope.semantic_seed` ([§1.2](#12-semantic-similarity-ranking-deferred-to-phase-2)).
 - Possibly: add `confidence` (low/medium/high) for ranking.
-- Possibly: add `audience` (agent/human/both) for filtering injection.
+- Possibly: add `audience` (agent/human/both) for filtering retrieval results.
 
 Migrations follow the same pattern as task `schemaVersion: 2` — additive when possible, with a one-shot migrator otherwise. The cost line: every schema bump is operationally non-trivial because YAML records are checked in and PRs from before the bump may need rebasing.
 
@@ -123,23 +126,23 @@ Migrations follow the same pattern as task `schemaVersion: 2` — additive when 
 
 ### 2.1 Internal precedents
 
-- **Agent `MEMORY.md`** — the per-agent feedback/preference store this design is modeled after. Project-learnings extends the same idea (push-based discovery via auto-loading) from agent-private to project-shared, and from session-context-load to per-action injection.
+- **Agent `MEMORY.md`** — the per-agent feedback/preference store this design is modeled after. Project-learnings makes the same kind of knowledge project-shared and retrievable through a durable registry.
 - **Friction Reports** ([CLAUDE.md](../../../CLAUDE.md)) — agent self-reports of tooling problems. Same authoring shape, different content focus (process pain vs. project knowledge). The friction-bounty scoreboard is a precedent for incentivizing agent-authored artifacts.
 - **ADR logs** ([docs/design/CONVENTIONS.md](../CONVENTIONS.md) §4) — the closest existing artifact for "non-obvious decisions a future reader needs." Different shape: ADRs are feature-scoped, decision-shaped, and human-curated; learnings are cross-cutting, rule-shaped, and agent-or-human authored.
-- **gstack `/learn` skill** — pull-only project-learnings store. Cited as the failure mode this design improves on: pull-only requires agent discipline to query, which is the exact failure mode push-injection prevents.
+- **gstack `/learn` skill** — a pull-oriented project-learning store. It is a useful precedent for explicit retrieval; Orbit adds structured records, searchable metadata, and point-of-use reference comments.
 
 ### 2.2 External precedents
 
-- **Runbooks and operational playbooks.** The closest industry pattern. Runbooks are typically pull-only and topic-organized; the push-injection layer here is what makes the form useful at the moment of action rather than at the moment of question.
-- **Linter rules and ESLint custom plugins.** Push-based delivery (the linter fires on save) for code-shaped knowledge. Project-learnings extends the form to natural-language knowledge that doesn't compile down to a lint rule.
+- **Runbooks and operational playbooks.** The closest industry pattern: durable, explicitly retrieved guidance organized around an operator's question.
+- **Linter rules and ESLint custom plugins.** An appropriate push mechanism for mechanical rules that can be checked deterministically. Project learnings retain natural-language judgment and do not impersonate a linter.
 - **CodeQL queries / Semgrep rules.** Programmatic "remember to" rules. Strong for what they cover (mechanical patterns); they don't capture the wider class of judgment-shaped knowledge ("never declare a perf win on latency alone" is hard to express as a regex).
-- **Notion/Obsidian/Confluence project wikis.** Same content domain, pull-only delivery. The vocabulary-mismatch problem dominates ("I searched for X and the right page didn't come up"). Project-learnings sidesteps it by pushing rather than waiting for the agent to query.
-- **Continue.dev / Cursor "rules" files.** Vendor-specific configuration files that get prepended to every agent prompt. Closest in spirit to layer-1 push-injection. Differences: rules-files are coarse (one file, all agents, all tasks), un-scoped (no path-glob filter), and vendor-locked (each editor has its own format).
+- **Notion/Obsidian/Confluence project wikis.** Same content domain, but their vocabulary mismatch makes the right page hard to find. Orbit uses structured scope metadata and nearby reference comments to improve the locator.
+- **Continue.dev / Cursor "rules" files.** Vendor-specific configuration files that prepend instructions to prompts. They remain a useful contrast: coarse and vendor-locked automatic context rather than explicit, portable retrieval.
 
 ### 2.3 What was rejected
 
 - **Flat markdown directory** (`docs/learnings/*.md`). Easy to author, impossible to query at agent runtime. Rejected as the storage substrate; see [4_decisions.md ADR-002](./4_decisions.md).
-- **Pull-only via search tool**. Discoverability falls to agent discipline; the failure mode being prevented. See [4_decisions.md ADR-001](./4_decisions.md).
+- **Automatic delivery via hooks, pre-prompts, or MCP sidecars.** Retired after the 2026-07-18 relevancy audit; the historical injection counters are retained only as calibration data. See [2_design.md §4.3](./2_design.md).
 - **CLAUDE.md fragments**. Loaded on every session regardless of relevance. Pollutes context for unrelated work. Rejected; learnings need scope filtering.
 - **Workspace-private storage** (under `.orbit/state/` only, not checked in). Loses cross-collaborator value; same defect as agent `MEMORY.md` for this content type. See [4_decisions.md ADR-003](./4_decisions.md).
 
@@ -149,17 +152,20 @@ Migrations follow the same pattern as task `schemaVersion: 2` — additive when 
 
 Three properties separate this design from the prior art it draws on.
 
-### 3.1 Push-based delivery for natural-language knowledge
+### 3.1 Pull delivery with point-of-use locators
 
-Linter rules push (they fire on save). Wikis pull (you have to look). Project-learnings is push-based for natural-language, judgment-shaped knowledge — a combination the prior art doesn't cover. The closest analog is vendor-specific "rules files" (Cursor, Continue), but those are unscoped and vendor-locked; the design here is scope-filtered and cross-agent.
+Wikis are often hard to retrieve because the reader must guess the vocabulary. Project-learnings keeps the authoritative guidance searchable and supplements it with a compact reference comment where a recurring boundary needs explanation. It stays vendor-neutral, avoids per-tool-call overhead, and does not duplicate the durable body into source.
 
 ### 3.2 Native to the dev-loop infrastructure
 
-Most "team knowledge base" tools live outside the dev loop — a separate web app, a wiki, a chat channel. Project-learnings lives in `.orbit/learnings/` next to `.orbit/tasks/`, with the same lifecycle, the same git semantics, and the same MCP surface. The friction of authoring is whatever the agent's friction-of-running-an-Orbit-tool-call is, which is roughly zero. The friction of consumption is also roughly zero, because injection is automatic.
+Most "team knowledge base" tools live outside the dev loop — a separate web app, a wiki, a chat channel. Project-learnings lives in `.orbit/learnings/` next to `.orbit/tasks/`, with the same lifecycle, git semantics, and MCP/CLI retrieval surface. A reference comment at a code or workflow boundary keeps the registry connected to the work without serving content automatically.
 
-### 3.3 Lifecycle bound to code via the knowledge graph
+### 3.3 Lifecycle bound to code via explicit scopes
 
-A learning that references a function the graph no longer recognizes is flagged stale automatically. This is a small thing, but it directly attacks the most common failure mode of long-lived knowledge bases: stale content that's still being served. The phase-1 implementation is conservative (opportunistic checks, manual prune); phase 2 ties it more tightly into the graph rebuild path.
+A learning becomes a staleness candidate when its path scope or cited
+task/commit evidence no longer resolves. Checks are opportunistic and pruning
+remains explicit, keeping lifecycle behavior deterministic without a background
+indexer.
 
 ---
 
@@ -169,16 +175,16 @@ A learning that references a function the graph no longer recognizes is flagged 
 
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) — folder layout, frontmatter, ADR template.
 - [docs/design/orbit-search/](../orbit-search/) — phase 2 dependency for semantic-similarity ranking.
-- [docs/design/knowledge-graph/](../knowledge-graph/) — phase 2 dependency for symbol-aware scope and staleness detection.
-- [docs/design/task-sync/](../task-sync/) — relevant for whether learnings should sync across machines (decision: yes, via the same checked-in path tasks use).
+- [docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) —
+  historical context for the retired symbol-aware proposal.
+- [docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md) — relevant for whether learnings should sync across machines (decision: yes, via the same checked-in path tasks use). Archived; superseded by [remote-access](../remote-access/1_overview.md).
 - [CLAUDE.md](../../../CLAUDE.md) — friction-reports section is the closest existing precedent for agent-authored project artifacts.
 - `orbit-create-task` skill (`~/.claude/skills/orbit-create-task/`) — the authoring shape `orbit-learnings` will mirror.
 
 ### 4.2 External
 
-- **Continue.dev `rules` files** — `https://docs.continue.dev/customization/rules`. Vendor-specific approximation of layer-1 push injection.
+- **Continue.dev `rules` files** — `https://docs.continue.dev/customization/rules`. Vendor-specific contrast to Orbit's explicit retrieval model.
 - **Cursor `.cursorrules`** — same shape, different vendor. Cited as evidence the form is in demand and as an example of why a cross-agent design is needed.
-- **Anthropic Claude Code hooks** — `https://docs.claude.com/en/docs/claude-code/hooks`. The mechanism layer 3 uses.
 - **Reciprocal Rank Fusion (Cormack, Clarke, Büttcher 2009)** — same fusion algorithm orbit-search uses; relevant once phase 2 fuses path-glob matches with cosine matches.
 - **"The Documentation System" / Diátaxis framework** — `https://diataxis.fr/`. Useful taxonomy for what *isn't* a learning (tutorials, reference, how-to, explanation) and therefore what belongs elsewhere.
 
@@ -187,5 +193,6 @@ A learning that references a function the graph no longer recognizes is flagged 
 ## Task References
 
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
+- [ORB-10346] — Retired automatic delivery in favor of pull discovery and reference comments.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

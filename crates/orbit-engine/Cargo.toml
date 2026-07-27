@@ -2,10 +2,15 @@
 name = "orbit-engine"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 
 [package.metadata.orbit]
 stability = "internal"
+
+[features]
+default = []
+replay = []
 
 [lints]
 workspace = true
@@ -29,4 +34,5 @@ tiktoken-rs.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+orbit-common = { path = "../orbit-common", features = ["test-util"] }
 tracing-subscriber.workspace = true

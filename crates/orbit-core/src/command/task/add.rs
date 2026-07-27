@@ -1,7 +1,8 @@
 use orbit_common::types::{
     OrbitError, OrbitEvent, Task, TaskStatus, TaskType, normalize_task_dependencies,
-    normalize_task_tags, prune_missing_context_files, validate_task_dependencies,
+    normalize_task_tags, prune_missing_context_files,
 };
+use orbit_common::utility::redaction::redact_all;
 use orbit_store::TaskCreateParams as StoreTaskCreateParams;
 
 use crate::OrbitRuntime;
@@ -10,8 +11,7 @@ use crate::runtime::TaskRecordUpdateParams;
 use super::helpers::{authored_role_value, build_task_comments, effective_actor_label};
 use super::params::TaskAddParams;
 use super::paths::{
-    context_files_pruned_history_entry, context_workspace_root,
-    emit_graph_unavailable_warning_if_needed, normalize_context_files_for_write,
+    context_files_pruned_history_entry, context_workspace_root, normalize_context_files_for_write,
     normalize_workspace_path,
 };
 
@@ -22,10 +22,22 @@ impl OrbitRuntime {
 
     pub fn add_task_with_identity(
         &self,
-        params: TaskAddParams,
+        mut params: TaskAddParams,
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
+        // [ORB-00417] Redact secrets at the single task-creation choke point
+        // (shared by the dashboard POST, CLI `task add`, and the MCP task tool)
+        // so a pasted key never lands in the task registry or the audit trail.
+        // `redact_all` is idempotent, so read-time redaction still composes.
+        params.title = redact_all(&params.title);
+        params.description = redact_all(&params.description);
+        params.plan = redact_all(&params.plan);
+        for criterion in params.acceptance_criteria.iter_mut() {
+            *criterion = redact_all(criterion);
+        }
+        params.comment = params.comment.map(|comment| redact_all(&comment));
+
         let (canonical_agent, canonical_model) =
             self.try_canonical_agent_model_identity(agent.as_deref(), model.as_deref())?;
         let actor = self.actor().clone();
@@ -50,18 +62,16 @@ impl OrbitRuntime {
         let workspace_path =
             normalize_workspace_path(&self.paths().repo_root, params.workspace_path.as_deref())?;
         let dependencies = normalize_task_dependencies(params.dependencies.clone())?;
-        validate_task_dependencies(&self.list_tasks()?, None, &dependencies)?;
         self.validate_crew_name(params.crew.as_deref())?;
 
         let prune_root = context_workspace_root(&self.paths().repo_root, workspace_path.as_deref());
         let normalized_context_files =
             normalize_context_files_for_write(params.context_files.clone(), &prune_root)?;
-        emit_graph_unavailable_warning_if_needed(&normalized_context_files, self.data_root_path());
         let (kept_context_files, dropped_context_files) =
             prune_missing_context_files(&prune_root, normalized_context_files);
 
         let task = self.with_mutation(|| {
-            let task = self.stores().tasks().create(StoreTaskCreateParams {
+            let task = self.stores().task_records().create(StoreTaskCreateParams {
                 actor: create_label.clone(),
                 parent_id: params.parent_id.clone(),
                 title: params.title.clone(),
@@ -98,7 +108,7 @@ impl OrbitRuntime {
         let task = if dropped_context_files.is_empty() {
             task
         } else {
-            self.stores().tasks().update(
+            self.stores().task_records().update(
                 &task.id,
                 TaskRecordUpdateParams {
                     actor: create_label.clone(),
@@ -123,12 +133,6 @@ fn infer_task_create_type_and_status(
     if requested_status == Some(TaskStatus::Archived) {
         return Err(OrbitError::InvalidInput(
             "status 'archived' cannot be set at task creation; use the archive command".to_string(),
-        ));
-    }
-
-    if requested_status == Some(TaskStatus::Friction) {
-        return Err(OrbitError::InvalidInput(
-            "friction reports are no longer tasks; use orbit.friction.add".to_string(),
         ));
     }
 

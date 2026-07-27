@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-// ORB-00013: Tests use unwrap/expect to keep fixture setup readable.
+// Tests use unwrap/expect to keep fixture setup readable.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fs;
@@ -10,15 +10,40 @@ use assert_cmd::cargo::cargo_bin_cmd;
 use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
 
+// ORB-10366: `orbit workspace init` no longer wires up learning-reminder
+// registrations as a side effect. `orbit hook install` remains as an
+// explicit, human-invoked opt-in — see crates/orbit-cli/CLAUDE.md /
+// docs/design/project-learnings/4_decisions.md for the rationale.
+
 #[test]
-fn workspace_init_seeds_hooks_for_detected_agents() {
+fn workspace_init_rejects_hooks_flag() {
+    let workspace = TestWorkspace::new();
+    workspace.seed_agent_dirs(&[".claude"]);
+
+    let output = workspace.run_raw(
+        &["workspace", "init", "--name", "hooks", "--hooks"],
+        "init with removed --hooks flag",
+    );
+
+    assert!(
+        !output.status.success(),
+        "expected --hooks to be rejected by clap, stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--hooks") || stderr.contains("unexpected argument"),
+        "stderr did not mention the rejected flag: {stderr}"
+    );
+}
+
+#[test]
+fn workspace_init_leaves_no_learning_reminder_registrations() {
     let workspace = TestWorkspace::new();
     workspace.seed_agent_dirs(&[".claude", ".codex", ".gemini", ".grok"]);
 
-    workspace.run(
-        &["workspace", "init", "--name", "hooks", "--hooks"],
-        "init hooks",
-    );
+    workspace.run(&["workspace", "init", "--name", "hooks"], "init workspace");
 
     for path in [
         ".claude/hooks/orbit-learning-reminder",
@@ -26,48 +51,23 @@ fn workspace_init_seeds_hooks_for_detected_agents() {
         ".gemini/hooks/orbit-learning-reminder",
         ".grok/hooks/orbit-learning-reminder",
     ] {
-        assert!(workspace.work.join(path).exists(), "missing {path}");
+        assert!(
+            !workspace.work.join(path).exists(),
+            "fresh workspace init must not write shim {path}"
+        );
     }
 
-    assert_json_hook(
-        &workspace.work.join(".claude/settings.json"),
-        "PreToolUse",
-        ".claude/hooks/orbit-learning-reminder",
-    );
-    assert_json_hook(
-        &workspace.work.join(".gemini/settings.json"),
-        "BeforeTool",
-        ".gemini/hooks/orbit-learning-reminder",
-    );
-    assert_toml_hook(
-        &workspace.work.join(".codex/config.toml"),
-        "PreToolUse",
-        ".codex/hooks/orbit-learning-reminder",
-    );
-    assert_toml_hook(
-        &workspace.work.join(".grok/config.toml"),
-        "PreToolUse",
-        ".grok/hooks/orbit-learning-reminder",
-    );
-}
-
-#[test]
-fn workspace_init_hooks_is_idempotent() {
-    let workspace = TestWorkspace::new();
-    workspace.seed_agent_dirs(&[".claude", ".codex", ".gemini", ".grok"]);
-
-    workspace.run(
-        &["workspace", "init", "--name", "hooks", "--hooks"],
-        "init hooks",
-    );
-    let first = workspace.read_configs();
-    workspace.run(
-        &["workspace", "init", "--name", "hooks", "--hooks"],
-        "init hooks again",
-    );
-    let second = workspace.read_configs();
-
-    assert_eq!(first, second);
+    for path in [".claude/settings.json", ".codex/config.toml"] {
+        let full = workspace.work.join(path);
+        if !full.exists() {
+            continue;
+        }
+        let contents = fs::read_to_string(&full).expect("read config");
+        assert!(
+            !contents.contains("orbit-learning-reminder"),
+            "{path} unexpectedly contains a learning-reminder registration:\n{contents}"
+        );
+    }
 }
 
 #[test]
@@ -95,115 +95,6 @@ fn hook_install_command_seeds_hooks_and_is_idempotent() {
 }
 
 #[test]
-fn workspace_init_hooks_preserves_user_entries() {
-    let workspace = TestWorkspace::new();
-    workspace.seed_agent_dirs(&[".claude"]);
-    fs::write(
-        workspace.work.join(".claude/settings.json"),
-        serde_json::to_string_pretty(&json!({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "Write",
-                    "hooks": [{
-                        "type": "command",
-                        "command": ".claude/hooks/user-hook"
-                    }]
-                }]
-            },
-            "theme": "dark"
-        }))
-        .expect("serialize settings"),
-    )
-    .expect("write settings");
-
-    workspace.run(
-        &["workspace", "init", "--name", "hooks", "--hooks"],
-        "init hooks",
-    );
-
-    let settings: Value = serde_json::from_str(
-        &fs::read_to_string(workspace.work.join(".claude/settings.json")).expect("read settings"),
-    )
-    .expect("parse settings");
-    assert_eq!(settings["theme"], "dark");
-    assert_json_value_contains_command(&settings, ".claude/hooks/user-hook");
-    assert_json_value_contains_command(&settings, ".claude/hooks/orbit-learning-reminder");
-}
-
-#[test]
-fn workspace_init_hooks_skips_absent_agent_dirs() {
-    let workspace = TestWorkspace::new();
-    workspace.seed_agent_dirs(&[".claude"]);
-
-    workspace.run(
-        &["workspace", "init", "--name", "hooks", "--hooks"],
-        "init hooks",
-    );
-
-    assert!(
-        workspace
-            .work
-            .join(".claude/hooks/orbit-learning-reminder")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .work
-            .join(".codex/hooks/orbit-learning-reminder")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .work
-            .join(".gemini/hooks/orbit-learning-reminder")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .work
-            .join(".grok/hooks/orbit-learning-reminder")
-            .exists()
-    );
-}
-
-#[test]
-fn workspace_init_hooks_failure_is_warned_not_fatal() {
-    let workspace = TestWorkspace::new();
-    workspace.seed_agent_dirs(&[".claude", ".codex", ".gemini", ".grok"]);
-    fs::write(workspace.work.join(".claude/settings.json"), "{ not json")
-        .expect("write malformed settings");
-
-    workspace.run(
-        &["workspace", "init", "--name", "hooks", "--hooks"],
-        "init hooks",
-    );
-
-    assert!(
-        workspace
-            .work
-            .join(".codex/hooks/orbit-learning-reminder")
-            .exists()
-    );
-    assert!(
-        workspace
-            .work
-            .join(".gemini/hooks/orbit-learning-reminder")
-            .exists()
-    );
-    assert!(
-        workspace
-            .work
-            .join(".grok/hooks/orbit-learning-reminder")
-            .exists()
-    );
-    assert_json_hook(
-        &workspace.work.join(".gemini/settings.json"),
-        "BeforeTool",
-        ".gemini/hooks/orbit-learning-reminder",
-    );
-}
-
-#[test]
 fn workspace_teardown_removes_orbit_hooks_only() {
     let workspace = TestWorkspace::new();
     workspace.seed_agent_dirs(&[".claude"]);
@@ -224,10 +115,8 @@ fn workspace_teardown_removes_orbit_hooks_only() {
     )
     .expect("write settings");
 
-    workspace.run(
-        &["workspace", "init", "--name", "hooks", "--hooks"],
-        "init hooks",
-    );
+    workspace.run(&["workspace", "init", "--name", "hooks"], "init workspace");
+    workspace.run(&["hook", "install"], "install hooks");
     workspace.run(&["workspace", "teardown", "--confirm"], "teardown hooks");
 
     assert!(
@@ -356,16 +245,25 @@ impl TestWorkspace {
         .collect()
     }
 
-    fn run(&self, args: &[&str], label: &str) -> Output {
+    fn run_raw(&self, args: &[&str], _label: &str) -> Output {
         let mut command = cargo_bin_cmd!("orbit");
-        let output = command
+        command
             .current_dir(&self.work)
             .env("HOME", &self.home)
             .env("USERPROFILE", &self.home)
+            // ORB-10453: a test binary is not a terminal, so the capability
+            // chokepoint resolves it as an unidentified caller and refuses
+            // `workspace teardown`. Claiming the operator capability explicitly
+            // is exactly the escape hatch the denial names.
+            .env("ORBIT_OPERATOR", "1")
             .env_remove("ORBIT_ROOT")
             .args(args)
             .output()
-            .expect("run orbit");
+            .expect("run orbit")
+    }
+
+    fn run(&self, args: &[&str], label: &str) -> Output {
+        let output = self.run_raw(args, label);
         assert!(
             output.status.success(),
             "{label} failed\nargs: {args:?}\nstdout:\n{}\nstderr:\n{}",

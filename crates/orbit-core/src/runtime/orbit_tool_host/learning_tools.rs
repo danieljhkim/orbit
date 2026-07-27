@@ -13,18 +13,14 @@ use orbit_common::types::{
     optional_string, optional_string_alias, required_string,
 };
 use orbit_store::{
-    LearningCreateParams, LearningListEntry, LearningUpdateParams, LearningUpvoteParams,
-    RemoteArtifactStub,
+    LearningCreateParams, LearningListEntry, LearningUpdateParams, RemoteArtifactStub,
 };
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
 
 use super::input::optional_bool_alias;
-use super::json::{
-    learning_comment_to_json, learning_show_to_json, learning_to_json,
-    learning_vote_summary_to_json,
-};
+use super::json::{learning_show_to_json, learning_to_json};
 
 pub(super) fn add(
     runtime: &OrbitRuntime,
@@ -43,7 +39,7 @@ pub(super) fn add(
     let priority = parse_optional_priority(&input)?;
     let created_by = optional_string_alias(&input, &["created_by", "createdBy"])?.or(model);
 
-    let learning = runtime.create_learning(LearningCreateParams {
+    let learning = runtime.author_learning(LearningCreateParams {
         summary,
         scope,
         body,
@@ -57,8 +53,9 @@ pub(super) fn add(
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
     let learning = runtime.get_learning(&id)?;
-    let vote_summary = runtime.stores().learnings().vote_summary(&id)?;
-    Ok(learning_show_to_json(&learning, &vote_summary))
+    // Opening the full body is the passive usage signal for this learning.
+    runtime.record_learning_shown(&learning.id)?;
+    Ok(learning_show_to_json(&learning))
 }
 
 pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
@@ -132,89 +129,48 @@ fn remote_stub_to_json(stub: &RemoteArtifactStub) -> Value {
     })
 }
 
-pub(super) fn upvote(
-    runtime: &OrbitRuntime,
-    input: Value,
-    _agent: Option<String>,
-    model: Option<String>,
-) -> Result<Value, OrbitError> {
-    let learning_id = required_string(&input, &["id", "learning_id", "learningId"], "id")?;
-    let voter_model = optional_string(&input, "model")?
-        .or(model)
-        .ok_or_else(|| OrbitError::InvalidInput("learning upvote requires `model`".to_string()))?;
-    let task_id = optional_string_alias(&input, &["task", "task_id", "taskId"])?;
-
-    let summary = runtime.upvote_learning(LearningUpvoteParams {
-        learning_id,
-        voter_model,
-        task_id,
-    })?;
-    Ok(learning_vote_summary_to_json(&summary))
-}
-
-pub(super) fn comment_add(
-    runtime: &OrbitRuntime,
-    input: Value,
-    _agent: Option<String>,
-    model: Option<String>,
-) -> Result<Value, OrbitError> {
-    let learning_id = required_string(&input, &["learning_id", "learningId", "id"], "learning_id")?;
-    let body = required_string(&input, &["body"], "body")?;
-    let author_model = optional_string(&input, "model")?.or(model).ok_or_else(|| {
-        OrbitError::InvalidInput("learning comment add requires `model`".to_string())
-    })?;
-    let comment = runtime.add_learning_comment(learning_id, body, author_model)?;
-    Ok(json!({
-        "id": comment.id,
-        "learning_id": comment.learning_id,
-        "created_at": comment.created_at.to_rfc3339(),
-    }))
-}
-
-pub(super) fn comment_list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    let learning_id = required_string(&input, &["learning_id", "learningId", "id"], "learning_id")?;
-    let include_deleted =
-        optional_bool_alias(&input, &["include_deleted", "includeDeleted"])?.unwrap_or(false);
-    let comments = runtime.list_learning_comments(&learning_id, include_deleted)?;
-    Ok(Value::Array(
-        comments.iter().map(learning_comment_to_json).collect(),
-    ))
-}
-
-pub(super) fn comment_delete(
-    runtime: &OrbitRuntime,
-    input: Value,
-    _agent: Option<String>,
-    model: Option<String>,
-) -> Result<Value, OrbitError> {
-    let id = required_string(&input, &["id"], "id")?;
-    let deleted_by =
-        optional_string_alias(&input, &["deleted_by", "deletedBy", "model"])?.or(model);
-    runtime.delete_learning_comment(id.clone(), deleted_by)?;
-    Ok(json!({ "id": id, "deleted": true }))
-}
-
 pub(super) fn update(
     runtime: &OrbitRuntime,
     input: Value,
     _agent: Option<String>,
     _model: Option<String>,
 ) -> Result<Value, OrbitError> {
-    let id = required_string(&input, &["id"], "id")?;
-    let summary = optional_string(&input, "summary")?;
+    let (id, params) = parse_update_input(&input)?;
+    let updated = runtime.author_learning_update(&id, params)?;
+    Ok(learning_to_json(&updated))
+}
+
+/// The same update, without the [ORB-10364] caller-role gate.
+///
+/// Backs [`OrbitRuntime::update_learning_from_request`], which the dashboard's
+/// `PATCH /api/learnings/:id` route calls instead of dispatching the tool.
+/// Sharing `parse_update_input` keeps the two paths byte-identical apart from
+/// the gate.
+pub(crate) fn update_without_role_gate(
+    runtime: &OrbitRuntime,
+    input: Value,
+) -> Result<Value, OrbitError> {
+    let (id, params) = parse_update_input(&input)?;
+    let updated = runtime.update_learning(&id, params)?;
+    Ok(learning_to_json(&updated))
+}
+
+fn parse_update_input(input: &Value) -> Result<(String, LearningUpdateParams), OrbitError> {
+    let id = required_string(input, &["id"], "id")?;
+    let summary = optional_string(input, "summary")?;
     let scope = match input.get("scope") {
         Some(Value::Null) | None => None,
         Some(value) => Some(parse_scope_value(value.clone())?),
     };
-    let body = optional_string(&input, "body")?;
+    let body = optional_string(input, "body")?;
     let evidence = match input.get("evidence") {
         Some(Value::Null) | None => None,
         Some(value) => Some(parse_evidence_value(Some(value))?),
     };
-    let priority = parse_optional_priority_field(&input)?;
+    let priority = parse_optional_priority_field(input)?;
 
-    let updated = runtime.stores().learnings().update(
-        &id,
+    Ok((
+        id,
         LearningUpdateParams {
             summary,
             scope,
@@ -222,8 +178,7 @@ pub(super) fn update(
             evidence,
             priority,
         },
-    )?;
-    Ok(learning_to_json(&updated))
+    ))
 }
 
 pub(super) fn supersede(
@@ -234,21 +189,19 @@ pub(super) fn supersede(
 ) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id", "old_id", "oldId"], "id")?;
     let with = required_string(&input, &["with", "new_id", "newId"], "with")?;
-    if id == with {
-        return Err(OrbitError::InvalidInput(format!(
-            "learning '{id}' cannot supersede itself"
-        )));
-    }
-    runtime.stores().learnings().supersede(&id, &with)?;
+    // Self-supersede validation lives on `author_learning_supersede`'s
+    // delegate, so the [ORB-10364] caller-role gate is evaluated first and an
+    // executor never learns which inputs would have been valid.
+    runtime.author_learning_supersede(&id, &with)?;
     let old = runtime
         .stores()
         .learnings()
-        .get(&id)?
+        .get_learning(&id)?
         .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, id.clone()))?;
     let new = runtime
         .stores()
         .learnings()
-        .get(&with)?
+        .get_learning(&with)?
         .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, with.clone()))?;
     Ok(json!({
         "old": learning_to_json(&old),
@@ -256,16 +209,27 @@ pub(super) fn supersede(
     }))
 }
 
+pub(super) fn archive(
+    runtime: &OrbitRuntime,
+    input: Value,
+    _agent: Option<String>,
+    _model: Option<String>,
+) -> Result<Value, OrbitError> {
+    let id = required_string(&input, &["id"], "id")?;
+    let learning = runtime.author_learning_archive(&id)?;
+    Ok(learning_to_json(&learning))
+}
+
 pub(super) fn sync(runtime: &OrbitRuntime, _input: Value) -> Result<Value, OrbitError> {
-    runtime.stores().learnings().sync()?;
+    runtime.stores().learnings().sync_learnings()?;
     let active = runtime
         .stores()
         .learnings()
-        .list(Some(LearningStatus::Active))?;
+        .list_learnings(Some(LearningStatus::Active))?;
     let superseded = runtime
         .stores()
         .learnings()
-        .list(Some(LearningStatus::Superseded))?;
+        .list_learnings(Some(LearningStatus::Superseded))?;
     Ok(json!({
         "rebuilt_count": active.len() + superseded.len(),
     }))

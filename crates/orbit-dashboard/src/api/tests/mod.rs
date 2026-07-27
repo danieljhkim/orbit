@@ -5,6 +5,7 @@
 mod test_support;
 
 mod adrs;
+mod audit;
 mod denials;
 mod diagnostics;
 mod frictions;
@@ -12,7 +13,9 @@ mod handlers;
 mod learnings;
 mod log;
 mod metrics;
-mod review_threads;
+mod routines;
 mod runs;
 mod scoreboard;
+mod search;
 mod tasks;
+mod workspaces;

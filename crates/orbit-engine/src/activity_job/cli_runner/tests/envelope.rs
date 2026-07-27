@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use orbit_common::types::TokenUsage;
+use orbit_store::{InvocationInsertParams, InvocationQuery, Store};
 use serde_json::Value;
 
 use super::super::envelope::{
@@ -50,6 +51,7 @@ fn cli_agent_envelope_carries_input_run_id_and_task_context() {
             "workspace_path": "/tmp/orbit-worktree",
             "plan": "implement it"
         })),
+        workspace_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
     let input = serde_json::json!({
@@ -137,8 +139,74 @@ fn parse_cli_invocation_trace_extracts_gemini_cli_stats_tokens() {
             input: 12,
             cache_read: 3,
             cache_create: 0,
+            cache_create_1h: 0,
             output: 4,
         })
+    );
+}
+
+#[test]
+fn claude_cache_creation_ttl_split_ingests_at_the_one_hour_rate() {
+    // Ground truth from worker run 91d7ef01. This exercises the production
+    // Claude CLI wrapper parser and then persists its trace through the
+    // invocation store, rather than constructing a pre-split TokenUsage.
+    let stdout = serde_json::json!({
+        "type": "result",
+        "subtype": "success",
+        "result": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{}}",
+        "total_cost_usd": 1.014_018,
+        "modelUsage": {
+            "claude-opus-4-8[1m]": {
+                "costUSD": 1.014_018,
+                "canonicalModel": "claude-opus-4-8"
+            }
+        },
+        "usage": {
+            "input_tokens": 36,
+            "output_tokens": 8_265,
+            "cache_read_input_tokens": 858_526,
+            "cache_creation_input_tokens": 37_795,
+            "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 37_795,
+            }
+        }
+    })
+    .to_string();
+    let trace = parse_cli_invocation_trace(stdout.as_bytes(), b"", Some(0), 99, true)
+        .expect("Claude CLI envelope parses");
+    assert_eq!(trace.provider_model.as_deref(), Some("claude-opus-4-8[1m]"));
+    assert_eq!(trace.provider_cost_usd, Some(1.014_018));
+    let store = Store::open_in_memory().expect("open store");
+
+    store
+        .insert_invocation_trace_record(&InvocationInsertParams {
+            job_run_id: "jrun-91d7ef01".to_string(),
+            activity_id: "implement_one".to_string(),
+            agent: "claude".to_string(),
+            model: Some("claude-opus-4-8[1m]".to_string()),
+            slot: None,
+            task_ids: vec!["ORB-10353".to_string()],
+            trace,
+        })
+        .expect("persist parsed trace");
+
+    let records = store
+        .list_invocation_records(&InvocationQuery {
+            job_run_id: Some("jrun-91d7ef01".to_string()),
+            limit: 1,
+            ..InvocationQuery::default()
+        })
+        .expect("read persisted trace");
+
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].cache_create_tokens, 0);
+    assert_eq!(records[0].cache_create_1h_tokens, 37_795);
+    assert_eq!(records[0].provider_cost_usd, Some(1.014_018));
+    let derived = records[0].derived_cost_usd.expect("priced Claude model");
+    assert!(
+        (derived - 1.014_018).abs() < 1e-6,
+        "derived cost was {derived}, expected ~1.014018"
     );
 }
 

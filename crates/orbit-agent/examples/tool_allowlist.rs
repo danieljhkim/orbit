@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-// ORB-00013: Examples are user-facing smoke binaries that print progress and unwrap setup invariants.
+// Examples are user-facing smoke binaries that print progress and unwrap setup invariants.
 #![allow(
     clippy::expect_used,
     clippy::print_stderr,
@@ -33,7 +33,7 @@ fn main() -> ExitCode {
     };
 
     let model = env::var("ORBIT_EXAMPLE_ANTHROPIC_MODEL")
-        .unwrap_or_else(|_| "claude-haiku-4-5-20251001".to_string());
+        .unwrap_or_else(|_| orbit_common::model_defaults::ANTHROPIC_EXAMPLE_MODEL.to_string());
 
     let transport = match AnthropicMessagesTransport::new(api_key, &model) {
         Ok(t) => t,

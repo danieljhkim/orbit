@@ -1,4 +1,4 @@
-.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci ci-fast bench stability release-check cleanup-branches
+.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci ci-fast stability release-check docs-index cleanup-branches
 
 # ------------------------------------------------------------
 # Config
@@ -45,13 +45,13 @@ help:
 	@echo "  make fmt          Format code"
 	@echo "  make fmt-check    Check formatting"
 	@echo "  make clippy       Lint with clippy (deny warnings)"
-	@echo "  make bench        Run graph build benchmark (ARGS=... optional)"
-	@echo "  make audit        Cargo audit (security)"
+	@echo "  make audit        Supply-chain audit (cargo-deny: advisories + licenses)"
 	@echo "  make tree         Print dependency tree"
 	@echo "  make ci           Full CI pass (clippy + tests + doc + guardrails; also runs on PRs)"
 	@echo "  make ci-fast      Pre-handoff gate for agents (fmt-check + guardrail scripts; no compile)"
+	@echo "  make docs-index   Regenerate docs/INDEX.md"
 	@echo "  make stability    Verify per-crate stability tier markers"
-	@echo "  make release-check  Verify /plugin install orbit version lockstep (see docs/RELEASE.md)"
+	@echo "  make release-check  Verify /plugin install orbit version lockstep (see docs/runbooks/release.md)"
 	@echo "  make install      Install CLI locally (INSTALL_PROFILE=debug optional)"
 	@echo "  make uninstall    Remove installed binary"
 	@echo "  make clean        Clean build artifacts"
@@ -95,12 +95,11 @@ fmt-check:
 clippy:
 	$(CARGO) clippy $(WORKSPACE) --all-targets -- -D warnings
 
-bench:
-	$(CARGO) run -p orbit-knowledge --example graph_build --release -- $(ARGS)
-
-# Security audit (requires cargo-audit)
+# Supply-chain audit: advisories + license allow-list via cargo-deny (deny.toml).
+# Canonical command; CI runs the same check via scripts/ci-guardrails.sh.
 audit:
-	$(CARGO) audit || echo "Install cargo-audit via: cargo install cargo-audit"
+	@command -v cargo-deny >/dev/null 2>&1 || { echo "Install cargo-deny via: cargo install cargo-deny --locked"; exit 1; }
+	$(CARGO) deny check
 
 # Dependency tree inspection
 tree:
@@ -113,6 +112,7 @@ ci:
 # Pre-handoff gate for agents: fast checks, no compile. Full make ci runs on PRs.
 ci-fast:
 	cargo fmt --all -- --check
+	./scripts/generate-doc-indexes.sh --check
 	./scripts/check-installer-pubkey.sh
 	./scripts/test-installer-security.sh
 	./scripts/check-dependency-direction.sh
@@ -120,6 +120,9 @@ ci-fast:
 	./scripts/check-stability.sh
 	./scripts/check-learning-layout.sh
 	./scripts/check-artifact-redaction-guardrail.sh
+	./scripts/check-changelog-style.sh
+	./scripts/check-error-translation.sh
+	./scripts/check-orphan-modules.sh
 
 # Verify every workspace crate declares its stability tier
 stability:
@@ -128,6 +131,10 @@ stability:
 # Verify /plugin install orbit version invariant before cutting a release
 release-check:
 	./scripts/release-check.sh
+
+# Regenerate human-authored documentation indexes from source frontmatter.
+docs-index:
+	./scripts/generate-doc-indexes.sh
 
 # ------------------------------------------------------------
 # Install

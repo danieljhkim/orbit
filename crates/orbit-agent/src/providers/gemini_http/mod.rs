@@ -7,4 +7,7 @@
 mod transport;
 mod wire;
 
+#[cfg(test)]
+mod tests;
+
 pub use transport::GeminiHttpTransport;

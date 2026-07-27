@@ -17,6 +17,36 @@ cargo test --workspace
 
 Use targeted tests while iterating, then run the full workspace suite before landing a change.
 
+## Toolchain (MSRV)
+
+Orbit's minimum supported Rust version is declared as `rust-version` in the
+workspace `Cargo.toml` (`[workspace.package]`) and enforced by the `msrv` job
+in `.github/workflows/ci.yml` (`cargo check --workspace --locked` on the
+pinned toolchain). If a change genuinely needs a newer compiler or a
+dependency bump raises the floor, bump `rust-version` and the workflow's
+`MSRV` env var together in the same PR, and call it out in the CHANGELOG.
+
+## Testing & Coverage
+
+CI collects workspace test coverage with
+[`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) on every PR
+(the `Coverage (informational)` job in `.github/workflows/ci.yml`) and
+uploads an lcov report as the `coverage-lcov` workflow artifact. The job is
+**informational only — it never gates a merge**.
+
+Per-crate line-coverage **targets** — goals to steer test investment, not
+gates that fail CI:
+
+| Crate | Target | Why |
+|---|---|---|
+| `orbit-policy` | > 90% | Policy evaluation is the security decision surface; on Linux it is the only enforcement layer. |
+| `orbit-core` | > 80% | Composition root and command handling — regressions here surface everywhere. |
+| `orbit-exec` | > 70% | Process spawning/sandboxing is platform-conditional, so some paths are unreachable on any single CI runner. |
+
+When touching those crates, check the coverage summary in the CI job log (or
+run `cargo llvm-cov -p <crate> --summary-only` locally) and prefer adding
+tests that close the gap toward the target.
+
 ## Repository Shape
 
 Rust workspace crates live under `crates/` (for example `crates/orbit-cli`).
@@ -32,6 +62,41 @@ Rust workspace crates live under `crates/` (for example `crates/orbit-cli`).
 - Add or update tests when behavior changes.
 - Prefer removing legacy paths over carrying compatibility code when the product is still pre-adoption.
 - If you discover friction or recurring issues, fix them in scope or create a concrete follow-up task.
+
+## Supply-chain (cargo-deny)
+
+Dependencies are gated by [`cargo-deny`](https://embarkstudios.github.io/cargo-deny/)
+on every PR (via `scripts/ci-guardrails.sh`) and locally with `make audit`. The
+policy lives in [`deny.toml`](deny.toml): it denies crates with an open RUSTSEC
+advisory or a yanked version, and restricts licenses to a reviewed allow-list.
+
+Run it before landing a dependency change:
+
+```bash
+cargo install cargo-deny --locked   # one-time
+make audit                          # == cargo deny check
+```
+
+**Adding a license.** If a new dependency introduces a license not in the
+`[licenses].allow` list, `cargo deny check` fails. Add the SPDX identifier to
+the list in `deny.toml` **only** if it is a permissive/public-domain-equivalent
+license, with a one-line comment naming the crate(s) and (for weak-copyleft
+licenses such as MPL-2.0) a short justification. Copyleft licenses that would
+impose obligations on Orbit's own sources must not be added — replace the
+dependency instead.
+
+**Advisory exceptions.** Only when there is no safe upgrade available may an
+advisory be time-boxed in `[advisories].ignore`. Each entry must be an object
+carrying:
+
+- `id` — the `RUSTSEC-YYYY-NNNN` identifier, and
+- `reason` — why it is safe in Orbit's usage (why the vulnerable path is
+  unreachable or the impact is bounded) **and** a `Re-review YYYY-MM-DD` date
+  (default: ~6 months out).
+
+Re-review ignored advisories on or before their date and drop the entry once an
+upstream fix lands. Never ignore an advisory that has an available patched
+release — bump the dependency instead.
 
 ## Orbit State
 

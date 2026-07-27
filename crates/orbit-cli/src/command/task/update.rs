@@ -1,7 +1,7 @@
 use clap::{ArgAction, Args};
 use orbit_common::types::TaskArtifact;
 use orbit_core::command::task::TaskUpdateParams;
-use orbit_core::{OrbitError, OrbitRuntime, TaskStatus, TaskType};
+use orbit_core::{OrbitError, OrbitRuntime, TaskComplexity, TaskStatus, TaskType};
 
 use crate::command::Execute;
 
@@ -41,6 +41,9 @@ pub struct TaskUpdateArgs {
     /// New task type
     #[arg(long = "type", value_enum)]
     pub task_type: Option<TaskType>,
+    /// Task complexity
+    #[arg(long, value_enum)]
+    pub complexity: Option<TaskComplexity>,
     /// Explicit planning attribution label (empty string clears)
     #[arg(long)]
     pub planned_by: Option<String>,
@@ -63,9 +66,6 @@ pub struct TaskUpdateArgs {
     /// Task artifact write in `path=content` form. Repeat for multiple artifacts.
     #[arg(long = "artifact")]
     pub artifacts: Vec<String>,
-    /// Explicit agent name to persist on the task artifact
-    #[arg(long)]
-    pub agent: Option<String>,
     /// Explicit agent model to persist on the task artifact
     #[arg(long)]
     pub model: Option<String>,
@@ -88,6 +88,7 @@ impl Execute for TaskUpdateArgs {
             comment,
             status,
             task_type,
+            complexity,
             planned_by,
             implemented_by,
             pr_status,
@@ -95,7 +96,6 @@ impl Execute for TaskUpdateArgs {
             crew,
             context_files,
             artifacts,
-            agent,
             model,
             json,
         } = self;
@@ -139,6 +139,7 @@ impl Execute for TaskUpdateArgs {
         let dependencies = dependencies.map(|value| crate::parse::csv_to_vec(&value));
         let tags = (!tags.is_empty()).then_some(tags);
         let upsert_artifacts = parse_artifact_args(&artifacts)?;
+        let (agent, model) = super::mutation_identity(model);
 
         let task = runtime.update_task_with_identity(
             &id,
@@ -153,6 +154,7 @@ impl Execute for TaskUpdateArgs {
                 comment,
                 status: status.map(Into::into),
                 task_type,
+                complexity,
                 planned_by,
                 implemented_by,
                 pr_status,
@@ -178,7 +180,6 @@ impl Execute for TaskUpdateArgs {
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum TaskUpdateStatusArg {
     Proposed,
-    Friction,
     Backlog,
     Someday,
     #[value(name = "in-progress", alias = "in_progress")]
@@ -193,7 +194,6 @@ impl From<TaskUpdateStatusArg> for TaskStatus {
     fn from(value: TaskUpdateStatusArg) -> Self {
         match value {
             TaskUpdateStatusArg::Proposed => TaskStatus::Proposed,
-            TaskUpdateStatusArg::Friction => TaskStatus::Friction,
             TaskUpdateStatusArg::Backlog => TaskStatus::Backlog,
             TaskUpdateStatusArg::Someday => TaskStatus::Someday,
             TaskUpdateStatusArg::InProgress => TaskStatus::InProgress,

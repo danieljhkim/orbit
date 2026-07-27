@@ -1,5 +1,19 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactOriginMode {
+    Local,
+    Federated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactOrigin {
+    pub mode: ArtifactOriginMode,
+    pub worktree_root: String,
+    pub branch: Option<String>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -13,7 +27,6 @@ pub enum NotFoundKind {
     Adr,
     DesignFeature,
     Learning,
-    LearningComment,
     AgentSession,
     Workspace,
 }
@@ -30,7 +43,6 @@ impl std::fmt::Display for NotFoundKind {
             Self::Adr => "ADR",
             Self::DesignFeature => "design feature",
             Self::Learning => "learning",
-            Self::LearningComment => "learning comment",
             Self::AgentSession => "agent session",
             Self::Workspace => "workspace",
         };
@@ -38,16 +50,54 @@ impl std::fmt::Display for NotFoundKind {
     }
 }
 
+/// Evidence behind [`OrbitError::DependencyNotDelivered`]: which task was
+/// refused, which of its done dependencies is missing from the base, the base
+/// itself, and `detail` — the delivery commits found elsewhere in the
+/// repository plus the remedy.
+///
+/// Boxed into the error enum: five inline strings would widen every
+/// `Result<_, OrbitError>` in the workspace past the large-error threshold for
+/// one rare refusal.
+#[derive(Debug, Serialize)]
+pub struct DependencyNotDelivered {
+    pub task_id: String,
+    pub dependency_id: String,
+    pub base_ref: String,
+    pub base_sha: String,
+    pub detail: String,
+}
+
 #[derive(Debug, Error, Serialize)]
+#[non_exhaustive]
+/// Keep this widely propagated error below its 128-byte size budget. Box the
+/// payload of any future multi-field variant so adding it does not widen every
+/// `Result<_, OrbitError>` in the workspace.
 pub enum OrbitError {
     #[error("policy denied: {0}")]
     PolicyDenied(String),
     #[error("{kind} not found: {id}")]
     NotFound { kind: NotFoundKind, id: String },
-    #[error("task requires approval: {0}")]
-    TaskApprovalRequired(String),
+    /// A governed operation was refused because the caller lacked the required
+    /// capability [ORB-10453]. Distinct from [`Self::PolicyDenied`], which is
+    /// `orbit-policy`'s filesystem-scoping refusal: this one is about *who is
+    /// asking*, not *which path was touched*, and every surface maps it to a
+    /// `denied` audit status so refusals stay separable from failures.
+    #[error("capability denied: {0}")]
+    CapabilityDenied(String),
     #[error("Invalid ADR status transition: {0}")]
     AdrInvalidTransition(String),
+    #[error("{kind} artifact unavailable for {id}")]
+    RemoteArtifactUnavailable {
+        kind: NotFoundKind,
+        id: String,
+        artifact_origin: ArtifactOrigin,
+    },
+    #[error("{kind} artifact is not local to the current worktree: {id}")]
+    ArtifactNotLocal {
+        kind: NotFoundKind,
+        id: String,
+        artifact_origin: ArtifactOrigin,
+    },
     #[error("companion not installed: {0}")]
     CompanionNotInstalled(String),
     #[error("invalid input: {0}")]
@@ -67,12 +117,53 @@ pub enum OrbitError {
     AgentProtocolViolation(String),
     #[error("unsupported agent provider: {0}")]
     UnsupportedAgentProvider(String),
+    #[error("hub unavailable: {0}")]
+    HubUnavailable(String),
+    #[error("hub negotiation failed: {0}")]
+    HubNegotiation(String),
+    #[error("hub call outcome unknown for {mcp_call_id}: {message}")]
+    OutcomeUnknown {
+        mcp_call_id: String,
+        message: String,
+    },
+    #[error("remote tool failed ({code}): {message}")]
+    RemoteTool {
+        code: String,
+        message: String,
+        payload: serde_json::Value,
+    },
     #[error("execution failed: {0}")]
     Execution(String),
+    #[error(
+        "run cancellation incomplete: pid={pid}, pgid={pgid:?}, term_sent={term_sent}, kill_sent={kill_sent}, leader_alive={leader_alive}, group_alive={group_alive}"
+    )]
+    RunCancellationIncomplete {
+        pid: u32,
+        pgid: Option<i32>,
+        term_sent: bool,
+        kill_sent: bool,
+        leader_alive: bool,
+        group_alive: bool,
+    },
+    #[error("task bundle corrupt for {task_id} at {path}: {reason}")]
+    TaskBundleCorrupt {
+        task_id: String,
+        path: String,
+        reason: String,
+    },
     #[error("store error: {0}")]
     Store(String),
     #[error("invalid task status transition: {0}")]
     TaskStatusTransition(String),
+    /// A workflow run was refused because a dependency that reached `done` has
+    /// not been delivered into the base the run would be cut from
+    /// [ORB-10464]. Distinct from [`Self::TaskStatusTransition`]: the
+    /// lifecycle transition is legal, the *baseline* is wrong.
+    #[error(
+        "task '{}' depends on '{}', which is done but not delivered into base '{}' ({}): {}",
+        .0.task_id, .0.dependency_id, .0.base_ref, .0.base_sha, .0.detail
+    )]
+    DependencyNotDelivered(Box<DependencyNotDelivered>),
     #[error("invalid job run state transition: {0}")]
     JobRunStateTransition(String),
     #[error("workspace error: {0}")]
@@ -82,6 +173,11 @@ pub enum OrbitError {
     #[error("schema migration failed: {0}")]
     Migration(String),
 }
+
+const _: () = assert!(
+    std::mem::size_of::<OrbitError>() <= 128,
+    "OrbitError exceeds its 128-byte size budget; box multi-field variant payloads"
+);
 
 impl OrbitError {
     pub fn not_found(kind: NotFoundKind, id: impl Into<String>) -> Self {
@@ -105,11 +201,58 @@ impl OrbitError {
         }
     }
 
+    pub fn remote_artifact_unavailable(
+        kind: NotFoundKind,
+        id: impl Into<String>,
+        artifact_origin: ArtifactOrigin,
+    ) -> Self {
+        Self::RemoteArtifactUnavailable {
+            kind,
+            id: id.into(),
+            artifact_origin,
+        }
+    }
+
+    pub fn artifact_not_local(
+        kind: NotFoundKind,
+        id: impl Into<String>,
+        artifact_origin: ArtifactOrigin,
+    ) -> Self {
+        Self::ArtifactNotLocal {
+            kind,
+            id: id.into(),
+            artifact_origin,
+        }
+    }
+
+    pub fn artifact_origin(&self) -> Option<&ArtifactOrigin> {
+        match self {
+            Self::RemoteArtifactUnavailable {
+                artifact_origin, ..
+            }
+            | Self::ArtifactNotLocal {
+                artifact_origin, ..
+            } => Some(artifact_origin),
+            _ => None,
+        }
+    }
+
     pub fn did_you_mean(&self) -> Option<&[String]> {
         match self {
             Self::InvalidInputDiagnostic { did_you_mean, .. } if !did_you_mean.is_empty() => {
                 Some(did_you_mean)
             }
+            _ => None,
+        }
+    }
+
+    pub fn task_bundle_corruption(&self) -> Option<(&str, &str, &str)> {
+        match self {
+            Self::TaskBundleCorrupt {
+                task_id,
+                path,
+                reason,
+            } => Some((task_id, path, reason)),
             _ => None,
         }
     }

@@ -1,0 +1,22 @@
+schemaVersion: 2
+kind: Executor
+metadata:
+  name: gemini
+spec:
+  executor_type: direct_agent
+  command: gemini
+  args:
+  - --approval-mode
+  - yolo
+  - --allowed-mcp-server-names
+  - orbit
+  - -o
+  - json
+  stdout_format: envelope
+  model_pair_override:
+    strong: gemini-3.1-pro
+    weak: gemini-3-flash
+  model_flag: -m
+  env: {}
+  created_at: 2026-07-16T03:30:02.284152046Z
+  updated_at: 2026-07-16T03:30:02.284152105Z

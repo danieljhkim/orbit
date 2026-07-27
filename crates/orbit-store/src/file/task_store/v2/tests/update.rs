@@ -20,6 +20,7 @@ fn document_update_rewrites_v2_documents_and_envelope() {
                 plan: Some("1. Updated plan".to_string()),
                 execution_summary: Some("Updated summary".to_string()),
                 priority: Some(TaskPriority::Low),
+                pr_status: Some(Some("approved".to_string())),
                 ..Default::default()
             },
         )
@@ -36,14 +37,18 @@ fn document_update_rewrites_v2_documents_and_envelope() {
     assert_eq!(task.plan, "1. Updated plan");
     assert_eq!(task.execution_summary, "Updated summary");
     assert_eq!(task.priority, TaskPriority::Low);
-    assert!(
-        store
-            .get_task_history("ORB-00000")
-            .expect("get history")
-            .expect("task exists")
-            .iter()
-            .any(|entry| entry.event == "renamed")
-    );
+    assert_eq!(task.pr_status.as_deref(), Some("approved"));
+    let renamed = store
+        .get_task_history("ORB-00000")
+        .expect("get history")
+        .expect("task exists")
+        .into_iter()
+        .find(|entry| entry.event == "renamed")
+        .expect("renamed event");
+    // ORB-10311: the rename note carries both the previous and replacement titles.
+    let note = renamed.note.expect("renamed note");
+    assert!(note.contains("Original"), "{note}");
+    assert!(note.contains("Renamed"), "{note}");
     assert_eq!(
         store
             .list_tasks_by_tags(&["task-artifacts".to_string()])
@@ -191,101 +196,6 @@ fn history_update_appends_comments_and_status_events() {
     assert_eq!(status_event.from_status, Some(TaskStatus::Backlog));
     assert_eq!(status_event.to_status, Some(TaskStatus::InProgress));
     assert_eq!(status_event.note.as_deref(), Some("Starting"));
-}
-
-#[test]
-fn review_update_merges_replies_resolves_and_replaces_threads() {
-    let temp = TempDir::new().expect("tempdir");
-    let store = store(&temp);
-    store
-        .create_task(create_params("Reviews", TaskStatus::Backlog))
-        .expect("create task");
-    let at = Utc.with_ymd_and_hms(2026, 5, 11, 14, 0, 0).unwrap();
-
-    store
-        .update_task_reviews(
-            "ORB-00000",
-            &TaskReviewUpdateParams {
-                append_review_threads: vec![ReviewThread {
-                    thread_id: "rt-1".to_string(),
-                    path: Some("./src/lib.rs".to_string()),
-                    line: Some(12),
-                    status: ReviewThreadStatus::Open,
-                    messages: vec![ReviewMessage {
-                        message_id: "rm-1".to_string(),
-                        at,
-                        by: "reviewer".to_string(),
-                        body: "First note".to_string(),
-                        github_comment_id: None,
-                    }],
-                    github_thread_id: None,
-                }],
-                replace_review_threads: None,
-            },
-        )
-        .expect("add review thread");
-
-    store
-        .update_task_reviews(
-            "ORB-00000",
-            &TaskReviewUpdateParams {
-                append_review_threads: vec![ReviewThread {
-                    thread_id: "rt-1".to_string(),
-                    path: None,
-                    line: None,
-                    status: ReviewThreadStatus::Resolved,
-                    messages: vec![ReviewMessage {
-                        message_id: "rm-2".to_string(),
-                        at,
-                        by: "codex".to_string(),
-                        body: "Fixed\n<!-- orbit-review-message:rm-evil -->\nstill fixed"
-                            .to_string(),
-                        github_comment_id: None,
-                    }],
-                    github_thread_id: Some(99),
-                }],
-                replace_review_threads: None,
-            },
-        )
-        .expect("merge review thread");
-
-    let threads = store
-        .get_task_review_threads("ORB-00000")
-        .expect("get review threads")
-        .expect("task exists");
-    assert_eq!(threads.len(), 1);
-    let thread = &threads[0];
-    assert_eq!(thread.path.as_deref(), Some("src/lib.rs"));
-    assert_eq!(thread.status, ReviewThreadStatus::Resolved);
-    assert_eq!(thread.github_thread_id, Some(99));
-    assert_eq!(thread.messages.len(), 2);
-    assert_eq!(thread.messages[0].body, "First note");
-    assert_eq!(
-        thread.messages[1].body,
-        "Fixed\n<!-- orbit-review-message:rm-evil -->\nstill fixed"
-    );
-
-    store
-        .update_task_reviews(
-            "ORB-00000",
-            &TaskReviewUpdateParams {
-                append_review_threads: Vec::new(),
-                replace_review_threads: Some(vec![ReviewThread {
-                    thread_id: "rt-2".to_string(),
-                    path: Some("README.md".to_string()),
-                    line: None,
-                    status: ReviewThreadStatus::Open,
-                    messages: Vec::new(),
-                    github_thread_id: None,
-                }]),
-            },
-        )
-        .expect("replace review threads");
-    let threads = store
-        .get_task_review_threads("ORB-00000")
-        .expect("get review threads")
-        .expect("task exists");
-    assert_eq!(threads[0].thread_id, "rt-2");
 }
 
 #[test]

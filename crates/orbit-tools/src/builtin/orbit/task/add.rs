@@ -22,12 +22,17 @@ impl Tool for OrbitTaskAddTool {
                 param_type: "string".to_string(),
                 required: true,
             },
-            // ADR-0149: `workspace` is the binding key for ~/.orbit/tasks/workspaces/<id>/
+            // `workspace` is the binding key for ~/.orbit/tasks/workspaces/<id>/
             // home-store projection; ambient MCP session context may supply this field,
             // but process cwd must never be used as the fallback.
             ToolParam {
                 name: "workspace".to_string(),
-                description: "Workspace path for the task".to_string(),
+                description:
+                    "Filesystem path to an existing directory inside the target repository \
+                     (e.g. the repository root). This is a repository path, never a logical/bridge \
+                     workspace id (such as a `ws_*` id). Falls back to the MCP session's \
+                     `_meta.orbit.workspace` when omitted."
+                        .to_string(),
                 param_type: "string".to_string(),
                 required: false,
             },
@@ -76,6 +81,12 @@ impl Tool for OrbitTaskAddTool {
                     "Optional typed task relations as an array of {type, target} objects"
                         .to_string(),
                 param_type: "array".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "crew".to_string(),
+                description: "Optional named crew to use when running this task".to_string(),
+                param_type: "string".to_string(),
                 required: false,
             },
         ];

@@ -3,7 +3,8 @@ summary: "Auditability — Vision"
 type: design
 title: "Auditability — Vision"
 owner: codex
-last_updated: 2026-05-17
+last_updated: 2026-07-18
+last_validated: 2026-07-27
 status: Draft
 feature: auditability
 doc_role: vision
@@ -21,7 +22,7 @@ This document captures the questions that remain before Orbit's auditability sto
 1. **Canonical query surface.** Should `orbit audit` stay command-row-only, or grow a run-centric view that joins command rows, job-run state, v2 envelopes, loop JSONL, blobs, and invocation metrics?
 2. **Local tamper evidence.** Should Orbit use per-file hash chains, SQLite append proofs, signed manifests, git-backed checkpoints, or export-time attestations while staying self-hosted by default?
 3. **Auditing audit reads.** Should `orbit audit` reads, exports, and prunes remain outside the guard to avoid recursion, or be recorded through a separate path?
-4. **Stable identity key.** What joins human CLI usage, family-based tool inputs, task attribution fields, v2 `agent_identity`, invocation metrics, commits, and PR metadata?
+4. **Stable identity across channels.** MCP now records trusted caller/process machine identity separately from managed agent identity; what joins those fields to human CLI usage, task attribution, v2 envelopes, metrics, commits, and PR metadata?
 5. **Stdout/stderr retention.** The command schema has truncated stdout/stderr fields, but most paths leave them empty. What retention policy should exist before broad capture?
 6. **JSONL migration.** [T20260426-0519] moved run traces to `.orbit/state/audit/`; should old `.orbit/audit/` files be migrated, ignored, or read through a legacy fallback?
 7. **Replay payload depth.** When are redacted verbatim prompts/responses required, and when are summaries enough?
@@ -40,6 +41,8 @@ Activity / Job's audit-envelope section and ADRs in [../activity-job/2_design.md
 The product contract lives in [../../../README.md](../../../README.md) and [../../POSITIONING.md](../../POSITIONING.md): auditability should answer what, why, and who; audit rows should be structured and queryable; provider interactions should be reproducible after redaction; retention should become tamper-evident; and identity should attach to every write.
 
 The redaction and blob-store implementation is the existing write-side safety boundary. Future query tools should preserve it even if they read blobs more directly.
+
+[ORB-10228] closes the MCP caller-JSON ambiguity for command rows: trusted adapter/runtime provenance wins, standalone calls are unverified, capability is a full set, and call/session/lease correlation is additive. Future remote authentication may strengthen caller-machine assurance but must not move authority back into model-authored JSON.
 
 ### 2.2 Workflow and Observability Systems
 
@@ -95,5 +98,6 @@ External reference categories:
 - **[T20260426-0605]** — Add this auditability design folder and name future auditability questions.
 - **[T20260430-20]** — Shorten the auditability docs while preserving required guarantees.
 - **[ORB-00090]** — Aligned auditability identity wording with the family-as-identity convention.
+- **[ORB-10228]** — Established trusted MCP caller/process provenance and anti-spoofing.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

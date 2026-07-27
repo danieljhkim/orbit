@@ -8,8 +8,6 @@
 // `*_tests` modules are the documented exception for test harness code.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
-use std::sync::Arc;
-
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
@@ -17,7 +15,6 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
-use orbit_core::OrbitRuntime;
 use serde::Deserialize;
 use serde_json::json;
 use url::Url;
@@ -32,10 +29,12 @@ mod jobs;
 mod learnings;
 mod log;
 mod metrics;
-mod review_threads;
+mod routines;
 mod runs;
 mod scoreboard;
+mod search;
 mod tasks;
+mod workspaces;
 
 pub(super) const HISTORY_DEFAULT_LIMIT: usize = 50;
 pub(super) const HISTORY_MAX_LIMIT: usize = 200;
@@ -66,6 +65,24 @@ pub(super) struct AuditQuery {
     pub(super) status: Option<String>,
     #[serde(default)]
     pub(super) role: Option<String>,
+    #[serde(default)]
+    pub(super) workspace_id: Option<String>,
+    #[serde(default)]
+    pub(super) caller_machine: Option<String>,
+    #[serde(default)]
+    pub(super) process_machine: Option<String>,
+    #[serde(default)]
+    pub(super) transport: Option<String>,
+    #[serde(default)]
+    pub(super) capability: Option<String>,
+    #[serde(default)]
+    pub(super) origin_session: Option<String>,
+    #[serde(default)]
+    pub(super) mcp_call: Option<String>,
+    #[serde(default)]
+    pub(super) job_run_id: Option<String>,
+    #[serde(default)]
+    pub(super) lease: Option<String>,
     /// Filters audit events by orbit invocation id. The SQLite `audit_events`
     /// schema has no `run_id` column; `run_id` here is a backward-compat alias
     /// of `execution_id` (T20260427-26). When both are supplied, `execution_id`
@@ -241,8 +258,27 @@ pub(super) fn map_runtime_error(e: orbit_core::OrbitError) -> Response {
         orbit_core::OrbitError::AdrInvalidTransition(message) => {
             bad_request(format!("Invalid ADR status transition: {message}"))
         }
+        error @ orbit_core::OrbitError::RemoteArtifactUnavailable { .. } => {
+            artifact_conflict(error, "remote_artifact_unavailable")
+        }
+        error @ orbit_core::OrbitError::ArtifactNotLocal { .. } => {
+            artifact_conflict(error, "artifact_not_local")
+        }
         other => server_error(other),
     }
+}
+
+fn artifact_conflict(error: orbit_core::OrbitError, code: &'static str) -> Response {
+    let artifact_origin = error.artifact_origin().cloned();
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": error.to_string(),
+            "code": code,
+            "artifact_origin": artifact_origin,
+        })),
+    )
+        .into_response()
 }
 
 pub(super) fn bad_request(message: String) -> Response {
@@ -293,33 +329,46 @@ async fn require_localhost_origin(request: Request<Body>, next: Next) -> Respons
     next.run(request).await
 }
 
-pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
+pub(super) fn router() -> Router<crate::state::DashboardState> {
     Router::new()
+        .route("/search", get(search::search))
         .route(
             "/tasks",
             get(tasks::list_tasks).post(tasks::create_task_action),
         )
         .route("/tasks/locks", get(tasks::list_task_locks))
+        .route("/tasks/all", get(workspaces::list_all_tasks))
+        .route("/workspaces", get(workspaces::list_workspaces))
         .route(
             "/tasks/:id",
             get(tasks::get_task).patch(tasks::update_task_action),
         )
         .route("/crews", get(crews::list_crews))
         .route("/tasks/:id/artifacts/*path", get(tasks::get_task_artifact))
+        .route("/tasks/:id/comments", post(tasks::add_task_comment_action))
         .route("/tasks/:id/approve", post(tasks::approve_task_action))
         .route("/tasks/:id/reject", post(tasks::reject_task_action))
         .route("/tasks/:id/archive", post(tasks::archive_task_action))
         .route("/learnings", get(learnings::list_learnings))
-        .route("/learnings/:id", get(learnings::get_learning))
+        .route(
+            "/learnings/:id",
+            get(learnings::get_learning).patch(learnings::update_learning_action),
+        )
         .route(
             "/learnings/:id/supersede",
             post(learnings::supersede_learning_action),
         )
-        .route("/adrs", get(adrs::list_adrs))
-        .route("/adrs/:id", get(adrs::get_adr))
+        .route("/adrs", get(adrs::list_adrs).post(adrs::create_adr_action))
+        .route(
+            "/adrs/:id",
+            get(adrs::get_adr).patch(adrs::update_adr_action),
+        )
         .route("/adrs/:id/accept", post(adrs::accept_adr_action))
         .route("/adrs/:id/supersede", post(adrs::supersede_adr_action))
-        .route("/frictions", get(frictions::list_frictions))
+        .route(
+            "/frictions",
+            get(frictions::list_frictions).post(frictions::create_friction_action),
+        )
         .route("/frictions/stats", get(frictions::friction_stats))
         .route(
             "/frictions/:id",
@@ -331,6 +380,8 @@ pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
         )
         .route("/jobs", get(jobs::list_jobs))
         .route("/job-runs", get(jobs::list_job_runs))
+        .route("/job-runs/:id/resume", post(jobs::resume_job_run_action))
+        .route("/workflows/ship", post(runs::ship_workflow_action))
         .route("/runs/:id", get(runs::get_run))
         .route("/runs/:id/cancel", post(runs::cancel_run_action))
         .route("/runs/:id/replay", post(runs::replay_run_action))
@@ -340,12 +391,16 @@ pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
         .route("/log", get(log::get_log))
         .route("/log/stream", get(log::stream_log))
         .route("/audit/summary", get(audit::audit_summary))
+        .route("/routines", get(routines::list_routine_health))
         .route("/scoreboard", get(scoreboard::scoreboard))
         .route("/metrics/knowledge", get(metrics::knowledge_metrics))
         .route("/metrics/activity", get(metrics::activity_metrics))
         .route("/metrics/tools", get(metrics::tool_metrics))
         .route("/metrics/task/:id", get(metrics::task_metrics))
-        .route("/metrics/invocations", get(metrics::invocation_metrics))
+        .route(
+            "/metrics/invocations",
+            get(metrics::invocation_metrics).post(metrics::ingest_invocation),
+        )
         .route(
             "/diagnostics/metrics",
             get(diagnostics::list_diagnostics_metrics),
@@ -363,19 +418,6 @@ pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
             get(diagnostics::diagnostics_implement_one),
         )
         .route("/diagnostics/denials", get(denials::list_denials))
-        .route("/review-threads", get(review_threads::list_review_threads))
-        .route(
-            "/tasks/:id/review-threads/:thread_id/reply",
-            post(review_threads::reply_review_thread_action),
-        )
-        .route(
-            "/tasks/:id/review-threads/:thread_id/resolve",
-            post(review_threads::resolve_review_thread_action),
-        )
-        .route(
-            "/tasks/:id/review-threads/:thread_id/reopen",
-            post(review_threads::reopen_review_thread_action),
-        )
         .layer(middleware::from_fn(require_localhost_origin))
 }
 

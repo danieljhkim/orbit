@@ -109,9 +109,8 @@ pub struct LearningEvidence {
 /// Scope under which a learning applies.
 ///
 /// Phase 1 evaluates `paths` (glob match) OR `tags` (exact match). The
-/// remaining two fields are reserved for phase 2 and persist verbatim:
-/// - `symbols` — symbol-aware scope (`module::ident` IDs from the
-///   knowledge graph).
+/// remaining two fields are reserved for future use and persist verbatim:
+/// - `symbols` — symbol-aware scope identifiers for a future resolver.
 /// - `semantic_seed` — a representative passage used to compute embedding
 ///   similarity at query time.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -163,95 +162,22 @@ pub struct Learning {
     pub priority: Option<u8>,
 }
 
-/// Append-only vote event for an existing learning.
-///
-/// Vote rows are projection metadata stored beside the learning YAML record
-/// in `votes.jsonl`; they are not part of the persisted `Learning` document.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LearningVoteRow {
-    pub learning_id: OrbitId,
-    pub voter_model: String,
-    pub voted_at: DateTime<Utc>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<OrbitId>,
-}
-
-/// Derived vote statistics for a learning.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct LearningVoteSummary {
-    pub vote_count: usize,
-    pub last_voted_at: Option<DateTime<Utc>>,
-}
-
-/// Append-only comment anchored to exactly one learning.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LearningComment {
-    pub id: OrbitId,
-    pub learning_id: OrbitId,
-    pub body: String,
-    pub author_model: String,
-    pub created_at: DateTime<Utc>,
-}
-
-/// Tombstone event that soft-deletes a learning comment without rewriting the
-/// original create row.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LearningCommentTombstone {
-    pub id: OrbitId,
-    pub learning_id: OrbitId,
-    #[serde(default = "learning_comment_delete_op")]
-    pub op: String,
-    pub deleted_at: DateTime<Utc>,
-    pub deleted_by: String,
-}
-
-fn learning_comment_delete_op() -> String {
-    "delete".to_string()
-}
-
-/// JSONL row stored in `.orbit/learnings/<L-id>/comments.jsonl`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum LearningCommentEvent {
-    Create(LearningComment),
-    Tombstone(LearningCommentTombstone),
-}
-
-/// Compute the decay-weighted score for vote timestamps at `now`.
-///
-/// A half-life of `0.0` disables decay and returns the raw vote count.
-pub fn decayed_vote_score(
-    voted_at_values: &[DateTime<Utc>],
-    now: DateTime<Utc>,
-    half_life_days: f64,
-) -> f64 {
-    if half_life_days == 0.0 {
-        return voted_at_values.len() as f64;
-    }
-
-    voted_at_values
-        .iter()
-        .map(|voted_at| {
-            let age_days =
-                now.signed_duration_since(*voted_at).num_milliseconds() as f64 / 86_400_000.0;
-            2_f64.powf(-age_days / half_life_days)
-        })
-        .sum()
-}
-
 pub const DEFAULT_LEARNING_REMINDER_PER_CALL_CAP: usize = 5;
 pub const DEFAULT_LEARNING_REMINDER_SESSION_CAP: usize = 20;
-pub const DEFAULT_LEARNING_COMMENT_RENDER_CAP: usize = 3;
 
 /// Envelope projected into agent context by the project-learnings injection
-/// layers. The learning itself carries only the summary; short anchored
-/// comments are optional footnotes rendered beneath it.
+/// layers. The teaser carries only the id, one-line summary, and scope tags;
+/// agents open the full body via `orbit.learning.show` when they need the
+/// details — that show is the passive usage signal ([ORB-10316]).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LearningReminder {
     pub id: OrbitId,
     pub summary: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub comments: Vec<LearningComment>,
+    /// Scope tags for the learning, rendered inline in the teaser. Empty when
+    /// the learning is path-scoped only; `#[serde(default)]` keeps older
+    /// persisted dedup state readable.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 /// Budget controls for project-learning injection.
@@ -290,10 +216,6 @@ fn read_cap_env(name: &str) -> Option<usize> {
         .ok()
         .and_then(|value| value.trim().parse::<usize>().ok())
         .filter(|value| *value > 0)
-}
-
-pub fn read_comment_render_cap_env() -> usize {
-    read_cap_env("ORBIT_LEARNING_COMMENT_RENDER_CAP").unwrap_or(DEFAULT_LEARNING_COMMENT_RENDER_CAP)
 }
 
 /// Per-session deduplication state for all learning-injection layers.
@@ -362,12 +284,16 @@ pub fn render_reminder_block(reminders: &[LearningReminder]) -> String {
 
     let mut out = String::from("<system-reminder>\n");
     out.push_str("Project learnings relevant to this task:\n\n");
-    let comment_cap = read_comment_render_cap_env();
     for reminder in reminders {
-        out.push_str(&format!("- [{}] {}\n", reminder.id, reminder.summary));
-        for comment in reminder.comments.iter().take(comment_cap) {
-            let first_line = comment.body.lines().next().unwrap_or("").trim();
-            out.push_str(&format!("  - [{}] {}\n", comment.id, first_line));
+        if reminder.tags.is_empty() {
+            out.push_str(&format!("- [{}] {}\n", reminder.id, reminder.summary));
+        } else {
+            out.push_str(&format!(
+                "- [{}] {} [tags: {}]\n",
+                reminder.id,
+                reminder.summary,
+                reminder.tags.join(", ")
+            ));
         }
     }
     out.push('\n');

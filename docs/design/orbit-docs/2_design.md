@@ -1,23 +1,23 @@
 ---
 title: "Orbit Docs — Design"
 owner: claude
-last_updated: 2026-05-21
+last_updated: 2026-07-18
 status: Draft
 feature: orbit-docs
 doc_role: design
 type: design
 summary: "Orbit Docs — frontmatter schema, walker, doc embeddings index, hybrid search, and the `.orbit/` exclusion invariant."
 tags: [orbit-docs]
-paths: ["crates/orbit-core/src/command/docs.rs", "crates/orbit-cli/src/command/docs.rs"]
+paths: ["crates/orbit-core/src/command/docs/**", "crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs", "crates/orbit-tools/src/builtin/orbit/docs.rs", "crates/orbit-remote/src/mcp/host.rs", "crates/orbit-cli/src/command/docs.rs"]
 related_features: [orbit-docs]
-related_artifacts: [ORB-00163, ORB-00206, ADR-0169, ADR-0170, ADR-0171, ADR-0180]
+related_artifacts: [ORB-00163, ORB-00206, ORB-10319, ADR-0169, ADR-0170, ADR-0171, ADR-0180]
 ---
 
 # Orbit Docs — Design
 
-This document specifies what [ORB-00163] and [ORB-00206] ship: the locked frontmatter schema, the strict-then-tolerant parser, the walker (including the `.orbit/` exclusion invariant), the six-verb CLI / MCP surface, doc-corpus embeddings, hybrid doc search, and the migration verb that backfills legacy docs. It also names the remaining limitations the follow-ups ([ORB-00164] through [ORB-00169]) address.
+This document specifies what [ORB-00163] and [ORB-00206] ship: the locked frontmatter schema, the strict-then-tolerant parser, the walker (including the `.orbit/` exclusion invariant), the CLI/admin doc verbs, unified agent MCP retrieval, doc-corpus embeddings, hybrid doc search, and the migration verb that backfills legacy docs. It also names the remaining limitations the follow-ups ([ORB-00164] through [ORB-00169]) address.
 
-The design lives in two files: [crates/orbit-core/src/command/docs.rs](../../../crates/orbit-core/src/command/docs.rs) (~1290 lines, parser + walker + verb implementations + tests) and [crates/orbit-cli/src/command/docs.rs](../../../crates/orbit-cli/src/command/docs.rs) (~250 lines, clap argument shapes + table rendering). The MCP twin lives in [crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs](../../../crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs).
+The design lives in [crates/orbit-core/src/command/docs/](../../../crates/orbit-core/src/command/docs/) (parser + walker + verb implementations + tests) and [crates/orbit-cli/src/command/docs.rs](../../../crates/orbit-cli/src/command/docs.rs) (~250 lines, clap argument shapes + table rendering). The MCP twin lives in [crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs](../../../crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs).
 
 ---
 
@@ -106,7 +106,7 @@ A `DocFrontmatter` struct with the six fields, ready to serialize as JSON for th
 
 ## 3. Tolerant Indexer
 
-Strict mode is the canonical contract. Tolerant mode is what makes the corpus queryable on day one without a flag-day migration. It is the path most reads go through ([crates/orbit-core/src/command/docs.rs:368](../../../crates/orbit-core/src/command/docs.rs)).
+Strict mode is the canonical contract. Tolerant mode is what makes the corpus queryable on day one without a flag-day migration. It is the path most reads go through ([crates/orbit-core/src/command/docs/](../../../crates/orbit-core/src/command/docs/)).
 
 ### 3.1 Algorithm
 
@@ -238,7 +238,7 @@ The line-based YAML editing is fragile against multi-line / quoted values — [O
 
 ## 7. MCP Surface
 
-Five tools, registered in `safe_mcp_tool_names` ([crates/orbit-cli/src/command/mcp/mod.rs](../../../crates/orbit-cli/src/command/mcp/mod.rs)):
+Five domain tools remain defined in [crates/orbit-tools/src/builtin/orbit/docs.rs](../../../crates/orbit-tools/src/builtin/orbit/docs.rs):
 
 ```
 orbit.docs.list
@@ -248,7 +248,7 @@ orbit.docs.index
 orbit.docs.migrate
 ```
 
-The per-domain doc-search MCP tool was retired by [ORB-00202]; content-similarity queries now route through the unified `orbit.search` tool with `kind: "doc"`. Each remaining tool's `execute` forwards to `OrbitBuiltinAction::Docs*` and routes through the same `OrbitRuntime` methods the CLI uses. CLI and MCP shapes are identical. Audit events for MCP invocations land in the same SQLite store as CLI events, tagged `subcommand: "run-mcp"`.
+The per-domain doc-search MCP tool was retired by [ORB-00202]; content-similarity queries now route through the unified `orbit.search` tool with `kind: "doc"`. The five definitions above forward to `OrbitBuiltinAction::Docs*` and the same `OrbitRuntime` methods used by the CLI, but `crates/orbit-tools/src/builtin/orbit/mod.rs` registers them inactive for the agent surface. `orbit-remote` owns the canonical MCP schema-plus-policy set and therefore exposes `orbit.search`, not `orbit.docs.*`, to agents. Any runtime invocation that does enter through MCP retains the shared SQLite audit contract and `subcommand: "run-mcp"`. [ORB-10319]
 
 ---
 
@@ -288,6 +288,7 @@ When the section is absent or the file is empty, the default root is `["docs/"]`
 - [ORB-00166] — Wire `orbit docs` retrieval into `task.show --with-context` and `task.start`
 - [ORB-00167] — Extend PreToolUse hook to surface relevant docs alongside learnings
 - [ORB-00168] — Add semantic embeddings index for orbit-docs corpus (v2)
+- [ORB-10319] — Move canonical MCP exposure policy into `orbit-remote` while preserving Core's doc runtime and the unified agent search route.
 - [ORB-00169] — Design: fold `.orbit/adrs/` into the orbit-docs corpus (v2)
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

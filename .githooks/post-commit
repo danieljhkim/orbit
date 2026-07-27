@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-
-# Incrementally update knowledge graph after each commit.
-# Runs in background so it does not block the commit flow.
-if command -v orbit >/dev/null 2>&1; then
-    orbit graph update 2>/dev/null &
-fi

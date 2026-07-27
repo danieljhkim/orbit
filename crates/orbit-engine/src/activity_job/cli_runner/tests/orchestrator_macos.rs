@@ -28,7 +28,7 @@ fn run_cli_backend_audit_argv_starts_with_sandbox_exec_for_each_provider() {
         let script = temp.path().join(provider_name);
         write_executable(
             &script,
-            "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"status\":\"ok\"}'\n",
+            "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
         );
 
         let sink = Arc::new(RecordingSink::default());
@@ -44,6 +44,7 @@ fn run_cli_backend_audit_argv_starts_with_sandbox_exec_for_each_provider() {
             provider_config: HashMap::new(),
             sandbox: Some(sandbox_for_test()),
             task_context: None,
+            workspace_root: None,
         };
         let spec = test_agent_loop_spec_for(provider_name, Duration::from_secs(5));
 
@@ -99,7 +100,7 @@ fn run_cli_backend_pins_codex_sandbox_under_outer_wrapper() {
     let script = temp.path().join("codex");
     write_executable(
         &script,
-        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"status\":\"ok\"}'\n",
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
     );
 
     let sink = Arc::new(RecordingSink::default());
@@ -117,6 +118,7 @@ fn run_cli_backend_pins_codex_sandbox_under_outer_wrapper() {
         provider_config,
         sandbox: Some(sandbox_for_test()),
         task_context: None,
+        workspace_root: None,
     };
     let spec = test_agent_loop_spec_for("codex", Duration::from_secs(5));
 
@@ -167,7 +169,7 @@ fn run_cli_backend_drops_gemini_sandbox_flag_under_outer_wrapper() {
     let script = temp.path().join("gemini");
     write_executable(
         &script,
-        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"status\":\"ok\"}'\n",
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
     );
 
     let sink = Arc::new(RecordingSink::default());
@@ -189,6 +191,7 @@ fn run_cli_backend_drops_gemini_sandbox_flag_under_outer_wrapper() {
         provider_config: HashMap::new(),
         sandbox: Some(sandbox_for_test()),
         task_context: None,
+        workspace_root: None,
     };
     let spec = test_agent_loop_spec_for("gemini", Duration::from_secs(5));
 
@@ -233,7 +236,7 @@ fn run_cli_backend_drops_grok_sandbox_flag_under_outer_wrapper() {
     let script = temp.path().join("grok");
     write_executable(
         &script,
-        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"status\":\"ok\"}'\n",
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
     );
 
     let sink = Arc::new(RecordingSink::default());
@@ -254,6 +257,7 @@ fn run_cli_backend_drops_grok_sandbox_flag_under_outer_wrapper() {
         provider_config: HashMap::new(),
         sandbox: Some(sandbox_for_test()),
         task_context: None,
+        workspace_root: None,
     };
     let spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
 
@@ -296,7 +300,7 @@ fn run_cli_backend_leaves_claude_argv_suffix_unchanged_under_sandbox() {
     let script = temp.path().join("claude");
     write_executable(
         &script,
-        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"status\":\"ok\"}'\n",
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
     );
 
     let sink = Arc::new(RecordingSink::default());
@@ -319,6 +323,7 @@ fn run_cli_backend_leaves_claude_argv_suffix_unchanged_under_sandbox() {
         provider_config: HashMap::new(),
         sandbox: Some(sandbox_for_test()),
         task_context: None,
+        workspace_root: None,
     };
     let spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
 

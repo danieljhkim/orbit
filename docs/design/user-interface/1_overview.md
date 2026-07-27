@@ -21,13 +21,13 @@ Agent runs produce more state changes, logs, and diagnostics than a human can re
 ## 2. Core Concepts
 
 - **Canon Refined and typography:** Layered dark surfaces, fine borders, compact spacing, and muted status colors; `Inter` carries labels and prose while `JetBrains Mono` carries IDs, metrics, timestamps, code, and logs.
-- **Surfaces:** The local dashboard lives in `crates/orbit-cli/assets/dashboard/`; static docs and project pages should reuse the same visual grammar without importing runtime-only dashboard assumptions.
+- **Surfaces:** The local dashboard lives in `crates/orbit-dashboard/assets/dashboard/`; static docs and project pages should reuse the same visual grammar without importing runtime-only dashboard assumptions.
 
 ## 3. At a Glance
 
 | Concern | File | Task |
 |---------|------|------|
-| Local dashboard | `crates/orbit-cli/assets/dashboard/` | Runtime tabs, tables, tiles, logs, and diagnostics. |
+| Local dashboard | `crates/orbit-dashboard/assets/dashboard/` | Runtime tabs, tables, tiles, logs, and diagnostics. |
 | Theme rules | `./specs/theme.md` | Canon Refined tokens and visual invariants. |
 | Current mechanisms | `./2_design.md` | Layout, telemetry, palette, typography, and known limitations. |
 

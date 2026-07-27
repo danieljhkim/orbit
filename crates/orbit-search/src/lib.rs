@@ -1,7 +1,7 @@
 #![deny(clippy::print_stderr, clippy::print_stdout)]
 // ORB-00004: legacy semantic-indexing surfaces still need a focused documentation pass.
 #![allow(missing_docs)]
-// ORB-00013: Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
+// Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 #![allow(
     rustdoc::broken_intra_doc_links,
@@ -60,7 +60,7 @@ pub use lexical::docs::{
     adr_paths_contain_path, score_adr_record, score_doc_record, sort_search_results,
 };
 pub use noop::NoopEmbedder;
-pub use rpc::{RpcError, RpcRequest, RpcResponse, RpcResult};
+pub use rpc::{RpcError, RpcRequest, RpcResponse, RpcResult, rpc_error_to_orbit};
 pub use subprocess::SubprocessEmbedder;
 pub use vector::{
     AdrEmbeddingSource, DocEmbeddingSource, EmbedWorker, LearningEmbeddingSource, SOURCE_KIND_ADR,

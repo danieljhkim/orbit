@@ -3,7 +3,6 @@
 use std::path::Path;
 use std::time::Duration;
 
-use orbit_common::utility::output_capture::OUTPUT_TRUNCATED_MARKER;
 use tempfile::tempdir;
 
 use super::super::supervisor::{SpawnTraceContext, SpawnWithTimeoutRequest, spawn_with_timeout};
@@ -26,6 +25,7 @@ fn spawn_test_request<'a>(
         sandbox: None,
         trace,
         output_capture_limit: None,
+        on_spawn: None,
     }
 }
 
@@ -48,8 +48,8 @@ fn spawn_with_timeout_emits_structured_stdout_and_stderr_events() {
     });
     let (stdout, stderr, exit_code, _duration, timed_out) = result.expect("spawn succeeds");
 
-    assert_eq!(stdout, b"out-one\nout-two\n");
-    assert_eq!(stderr, b"err-one\n");
+    assert_eq!(stdout.bytes(), b"out-one\nout-two\n");
+    assert_eq!(stderr.bytes(), b"err-one\n");
     assert_eq!(exit_code, Some(0));
     assert!(!timed_out);
     assert_eq!(events.len(), 3);
@@ -85,14 +85,66 @@ fn spawn_with_timeout_emits_structured_stdout_and_stderr_events() {
     });
     let (stdout, stderr, exit_code, _duration, timed_out) = result.expect("spawn succeeds");
 
-    assert_eq!(stdout, b"out-one\nout-two\n");
-    assert_eq!(stderr, b"err-one\n");
+    assert_eq!(stdout.bytes(), b"out-one\nout-two\n");
+    assert_eq!(stderr.bytes(), b"err-one\n");
     assert_eq!(exit_code, Some(0));
     assert!(!timed_out);
     assert_eq!(events.len(), 3);
     for event in &events {
         assert_eq!(event.field("cwd"), Some(cwd_string.as_str()));
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn spawn_with_timeout_reports_the_child_pid_while_the_child_is_still_running() {
+    use std::sync::Mutex;
+
+    // The child holds the PID observable long enough for the callback's view of
+    // it to be checked against a live process, which is what the run-status
+    // surface actually needs: a PID reported mid-invocation, not post-mortem.
+    let args = sh_args("printf '%s\\n' started; sleep 0.3");
+    let observed: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+    let alive_at_callback = Mutex::new(None);
+    let on_spawn = |pid: u32| {
+        observed.lock().expect("observed lock").push(pid);
+        *alive_at_callback.lock().expect("alive lock") = Some(process_is_live(pid));
+    };
+
+    let mut request = spawn_test_request(
+        "/bin/sh",
+        &args,
+        None,
+        Duration::from_secs(5),
+        SpawnTraceContext {
+            provider: "codex",
+            job_run_id: "job-pid",
+            task_id: Some("TPID"),
+            cwd: None,
+        },
+    );
+    request.on_spawn = Some(&on_spawn);
+
+    let (stdout, _stderr, exit_code, _duration, timed_out) =
+        spawn_with_timeout(request).expect("spawn succeeds");
+
+    assert_eq!(exit_code, Some(0));
+    assert!(!timed_out);
+    assert_eq!(stdout.bytes(), b"started\n");
+
+    let observed = observed.into_inner().expect("observed pids");
+    assert_eq!(observed.len(), 1, "the pid is reported exactly once");
+    assert_ne!(observed[0], 0);
+    assert_ne!(
+        observed[0],
+        std::process::id(),
+        "the reported pid must be the child, not the supervisor"
+    );
+    assert_eq!(
+        alive_at_callback.into_inner().expect("alive flag"),
+        Some(true),
+        "the pid must be reported while the child is still running"
+    );
 }
 
 #[test]
@@ -114,8 +166,8 @@ fn spawn_with_timeout_redacts_tracing_line_without_redacting_raw_stdout() {
     });
     let (stdout, stderr, exit_code, _duration, timed_out) = result.expect("spawn succeeds");
 
-    assert_eq!(stdout, b"Authorization: Bearer abc123\n");
-    assert!(stderr.is_empty());
+    assert_eq!(stdout.bytes(), b"Authorization: Bearer abc123\n");
+    assert!(stderr.bytes().is_empty());
     assert_eq!(exit_code, Some(0));
     assert!(!timed_out);
     assert!(formatted_output.contains("[REDACTED_AUTH]"));
@@ -144,8 +196,8 @@ fn spawn_with_timeout_kills_timed_out_process_and_keeps_partial_output() {
     });
     let (stdout, stderr, exit_code, _duration, timed_out) = result.expect("spawn succeeds");
 
-    assert_eq!(stdout, b"before timeout\n");
-    assert!(stderr.is_empty());
+    assert_eq!(stdout.bytes(), b"before timeout\n");
+    assert!(stderr.bytes().is_empty());
     assert_eq!(exit_code, None);
     assert!(timed_out);
     assert_eq!(events.len(), 1);
@@ -154,8 +206,10 @@ fn spawn_with_timeout_kills_timed_out_process_and_keeps_partial_output() {
 }
 
 #[test]
-fn spawn_with_timeout_kills_when_output_capture_limit_is_exceeded() {
-    let args = sh_args("yes capped-output");
+fn spawn_with_timeout_bounds_verbose_output_without_killing_the_process() {
+    let args = sh_args(
+        "i=0; while [ $i -lt 200 ]; do printf 'event-%04d verbose-output-line\\n' \"$i\"; i=$((i + 1)); done; printf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'",
+    );
     let mut request = spawn_test_request(
         "/bin/sh",
         &args,
@@ -168,20 +222,26 @@ fn spawn_with_timeout_kills_when_output_capture_limit_is_exceeded() {
             cwd: None,
         },
     );
-    request.output_capture_limit = Some(64);
+    request.output_capture_limit = Some(256);
 
     let started = std::time::Instant::now();
     let (stdout, stderr, exit_code, _duration, timed_out) =
         spawn_with_timeout(request).expect("spawn succeeds");
 
     assert!(!timed_out);
-    assert_eq!(exit_code, None);
-    assert!(stderr.is_empty());
-    assert!(stdout.ends_with(OUTPUT_TRUNCATED_MARKER));
-    assert!(stdout.len() <= 64 + OUTPUT_TRUNCATED_MARKER.len());
+    assert_eq!(exit_code, Some(0));
+    assert!(stderr.bytes().is_empty());
+    assert!(stdout.truncated());
+    assert_eq!(stdout.capture_limit_bytes(), 256);
+    assert!(stdout.observed_bytes() > stdout.capture_limit_bytes());
+    assert!(stdout.bytes().len() < stdout.observed_bytes());
+    assert!(
+        String::from_utf8_lossy(stdout.protocol_bytes()).contains("\"status\":\"success\""),
+        "the retained protocol tail must include the final response envelope"
+    );
     assert!(
         started.elapsed() < Duration::from_secs(2),
-        "output cap should kill the subprocess promptly"
+        "bounded capture should drain finite verbose output promptly"
     );
 }
 
@@ -213,8 +273,8 @@ fn spawn_with_timeout_kills_grandchild_holding_output_pipes() {
 
     assert!(timed_out);
     assert_eq!(exit_code, None);
-    assert_eq!(stdout, b"before timeout\n");
-    assert!(stderr.is_empty());
+    assert_eq!(stdout.bytes(), b"before timeout\n");
+    assert!(stderr.bytes().is_empty());
     assert!(
         started.elapsed() < Duration::from_secs(2),
         "timeout path should return promptly; reported duration={duration:?}"

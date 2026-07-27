@@ -5,8 +5,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::types::{
-    ExternalRef, OrbitError, OrbitId, ReviewThreadStatus, TaskComplexity, TaskPriority, TaskStatus,
-    TaskType, is_valid_adr_id, is_valid_friction_id, is_valid_learning_id,
+    ExternalRef, OrbitError, OrbitId, TaskComplexity, TaskPriority, TaskStatus, TaskType,
+    is_valid_adr_id, is_valid_friction_id, is_valid_learning_id,
 };
 
 pub const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
@@ -21,7 +21,6 @@ pub const TASK_PLAN_FILE_NAME: &str = "plan.md";
 pub const TASK_EXECUTION_SUMMARY_FILE_NAME: &str = "execution-summary.md";
 pub const TASK_EVENTS_FILE_NAME: &str = "events.jsonl";
 pub const TASK_COMMENTS_FILE_NAME: &str = "comments.jsonl";
-pub const TASK_REVIEW_THREADS_DIR_NAME: &str = "review-threads";
 pub const TASK_ARTIFACTS_DIR_NAME: &str = "artifacts";
 pub const TASK_ARTIFACT_MANIFEST_FILE_NAME: &str = "manifest.yaml";
 pub const TASK_ARTIFACT_FILES_DIR_NAME: &str = "files";
@@ -63,6 +62,8 @@ pub struct TaskEnvelopeV2 {
     pub priority: TaskPriority,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complexity: Option<TaskComplexity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub job_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -268,63 +269,6 @@ impl TaskCommentRowV2 {
         if self.by.trim().is_empty() {
             return Err(OrbitError::InvalidInput(
                 "task comment actor must not be empty".to_string(),
-            ));
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct ReviewThreadMetadataV2 {
-    pub schema_version: u32,
-    pub thread_id: String,
-    pub status: ReviewThreadStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub line: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub github_thread_id: Option<u64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub messages: Vec<ReviewThreadMessageMetadataV2>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-impl ReviewThreadMetadataV2 {
-    pub fn validate(&self) -> Result<(), OrbitError> {
-        validate_schema_version(self.schema_version, "review thread metadata")?;
-        if self.thread_id.trim().is_empty() {
-            return Err(OrbitError::InvalidInput(
-                "review thread id must not be empty".to_string(),
-            ));
-        }
-        if let Some(path) = &self.path {
-            validate_relative_artifact_path(path)?;
-        }
-        for message in &self.messages {
-            message.validate()?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct ReviewThreadMessageMetadataV2 {
-    pub message_id: String,
-    pub at: DateTime<Utc>,
-    pub by: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub github_comment_id: Option<u64>,
-}
-
-impl ReviewThreadMessageMetadataV2 {
-    pub fn validate(&self) -> Result<(), OrbitError> {
-        if self.message_id.trim().is_empty() {
-            return Err(OrbitError::InvalidInput(
-                "review thread message id must not be empty".to_string(),
             ));
         }
         Ok(())

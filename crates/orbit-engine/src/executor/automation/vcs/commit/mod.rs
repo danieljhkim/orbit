@@ -6,14 +6,15 @@ mod scope;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
+use orbit_common::types::{NO_DIFF_EXPECTED_TAG, OrbitError};
 use serde_json::{Value, json};
 
-use crate::context::{RuntimeHost, TaskHost};
+use crate::context::{DeterministicActionHost, TaskHost};
 
 use super::super::input::{canonicalize_existing_dir, input_string_field, required_job_run_id};
-use super::git::git_success;
-use author::{append_co_author_trailers, commit_author_for_tasks, git_author_for_task};
+use super::git::{git_output, git_success};
+use super::handoff::reject_failed_delivery;
+use author::{append_co_author_trailers, commit_author_for_tasks};
 use git_ops::{
     ensure_named_branch, ensure_no_unmerged_changes, git_commit_with_identity, stage_paths,
     staged_changed_files,
@@ -21,7 +22,9 @@ use git_ops::{
 use message::{batch_commit_message, finalize_commit_message, task_commit_message};
 use scope::{changed_files_for_task, collect_worktree_changes, filter_changed_files_for_task};
 
-pub(in crate::executor::automation) fn git_commit<H: TaskHost + RuntimeHost + ?Sized>(
+pub(in crate::executor::automation) fn git_commit<
+    H: TaskHost + DeterministicActionHost + ?Sized,
+>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -36,7 +39,7 @@ pub(in crate::executor::automation) fn git_commit<H: TaskHost + RuntimeHost + ?S
     }
 }
 
-pub(super) fn commit_task_artifact_changes<H: TaskHost + RuntimeHost + ?Sized>(
+pub(super) fn commit_task_artifact_changes<H: TaskHost + DeterministicActionHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -70,6 +73,7 @@ pub(super) fn commit_task_artifact_changes<H: TaskHost + RuntimeHost + ?Sized>(
     let workspace_path = resolve_workspace_path(host, input, batch_id)?;
     ensure_named_branch(&workspace_path)?;
     ensure_no_unmerged_changes(&workspace_path)?;
+    let resolved_model = host.resolved_crew_model(batch_id)?;
 
     let task_ids = match explicit_completed_task_ids {
         Some(task_ids) => task_ids,
@@ -99,8 +103,7 @@ pub(super) fn commit_task_artifact_changes<H: TaskHost + RuntimeHost + ?Sized>(
         }
 
         let message = task_commit_message(&task);
-        let author = git_author_for_task(&task);
-        git_commit_with_identity(&workspace_path, &message, author.as_ref())?;
+        git_commit_with_identity(&workspace_path, &message, resolved_model.as_deref())?;
         committed_task_ids.push(task.id);
     }
 
@@ -111,7 +114,7 @@ pub(super) fn commit_task_artifact_changes<H: TaskHost + RuntimeHost + ?Sized>(
     }))
 }
 
-pub(super) fn commit_finalize_artifact_changes<H: TaskHost + RuntimeHost + ?Sized>(
+pub(super) fn commit_finalize_artifact_changes<H: TaskHost + DeterministicActionHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -153,9 +156,10 @@ pub(super) fn commit_finalize_artifact_changes<H: TaskHost + RuntimeHost + ?Size
     }
 
     let mut message = finalize_commit_message(&affected_tasks);
-    let (author, coauthors) = commit_author_for_tasks(&affected_tasks);
+    let (_, coauthors) = commit_author_for_tasks(&affected_tasks);
     append_co_author_trailers(&mut message, &coauthors);
-    git_commit_with_identity(&workspace_path, &message, author.as_ref())?;
+    let resolved_model = host.resolved_crew_model(batch_id)?;
+    git_commit_with_identity(&workspace_path, &message, resolved_model.as_deref())?;
 
     Ok(json!({
         "workspace_path": workspace_path.to_string_lossy().to_string(),
@@ -164,7 +168,7 @@ pub(super) fn commit_finalize_artifact_changes<H: TaskHost + RuntimeHost + ?Size
     }))
 }
 
-pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
+pub(super) fn commit_batch_changes<H: TaskHost + DeterministicActionHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -177,26 +181,241 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
         )));
     };
 
+    // ORB-10313: fail closed on the durable execution outcome before resolving
+    // the delivery checkout, staging files, mutating the index, or committing.
+    reject_failed_delivery(task)?;
+
     let workspace_path = resolve_workspace_path(host, input, batch_id)?;
     ensure_named_branch(&workspace_path)?;
 
     ensure_no_unmerged_changes(&workspace_path)?;
+
+    // ADR-0219: an explicitly side-effect-only task skips this phase instead of
+    // failing it. Read the tag before any gate so the carve-out is reachable
+    // from every failure branch below, not just the empty-stage one (ORB-10380).
+    let no_diff_expected = task.tags.iter().any(|tag| tag == NO_DIFF_EXPECTED_TAG);
+
+    let base_sha = match validate_pinned_head(&workspace_path, input)? {
+        PinnedHead::Matched(base_sha) => Some(base_sha),
+        PinnedHead::Unpinned => None,
+        PinnedHead::Changed { base_sha, head_sha } => {
+            if no_diff_expected {
+                return Ok(skipped_no_diff_expected_result(&task.id));
+            }
+            return Err(changed_head_error(
+                &task.id,
+                &workspace_path,
+                &base_sha,
+                &head_sha,
+            ));
+        }
+    };
+
     git_success(&workspace_path, &["add", "--all", "--", "."])?;
 
     let changed_files = staged_changed_files(&workspace_path)?;
     if changed_files.is_empty() {
-        git_success(&workspace_path, &["reset", "HEAD"])?;
-        return Ok(json!({}));
+        // ORB-10380: no failure path mutates worktree state on its way out.
+        // `git add --all` staged nothing here, so the index already matches
+        // HEAD and the former `git reset HEAD` was both pointless and a
+        // mutation performed while erroring.
+        if no_diff_expected {
+            return Ok(skipped_no_diff_expected_result(&task.id));
+        }
+        return Err(empty_stage_error(
+            &task.id,
+            &workspace_path,
+            base_sha.as_deref(),
+        )?);
     }
 
     let message = batch_commit_message(task);
-    let author = git_author_for_task(task);
+    let resolved_model = host.resolved_crew_model(batch_id)?;
 
-    git_commit_with_identity(&workspace_path, &message, author.as_ref())?;
-    Ok(json!({}))
+    git_commit_with_identity(&workspace_path, &message, resolved_model.as_deref())?;
+    let commit_sha = git_output(&workspace_path, &["rev-parse", "HEAD"])?;
+    let mut result = json!({
+        "phase": "commit",
+        "decision": "performed",
+        "committed": true,
+        "commit_sha": commit_sha.trim(),
+        "job_run_id": batch_id,
+        "skipped_no_diff_expected": false,
+        "task_id": task.id,
+    });
+    if let Some(base_sha) = base_sha {
+        result["base_sha"] = json!(base_sha);
+    }
+    Ok(result)
 }
 
-fn resolve_workspace_path<H: RuntimeHost + ?Sized>(
+/// Commit a terminally-failed shipment's dirty candidate without consulting
+/// the normal success-summary delivery gate. ADR-0246 confines this bypass to
+/// the failure handoff, which blocks rather than promotes the task.
+pub(super) fn commit_failure_candidate<H: DeterministicActionHost + ?Sized>(
+    host: &H,
+    run_id: &str,
+    workspace_path: &Path,
+    task: &orbit_common::types::Task,
+) -> Result<(String, Vec<String>), OrbitError> {
+    ensure_named_branch(workspace_path)?;
+    ensure_no_unmerged_changes(workspace_path)?;
+    git_success(workspace_path, &["add", "--all", "--", "."])?;
+    let changed_files = staged_changed_files(workspace_path)?;
+    if !changed_files.is_empty() {
+        let message = batch_commit_message(task);
+        let resolved_model = host.resolved_crew_model(run_id)?;
+        git_commit_with_identity(workspace_path, &message, resolved_model.as_deref())?;
+    }
+    let head_sha = git_output(workspace_path, &["rev-parse", "--verify", "HEAD^{commit}"])?;
+    Ok((head_sha.trim().to_string(), changed_files))
+}
+
+/// Outcome of comparing `input.base_sha` with the worktree's current HEAD.
+enum PinnedHead {
+    /// No base was pinned by the caller, so this step attributes no history.
+    Unpinned,
+    Matched(String),
+    Changed {
+        base_sha: String,
+        head_sha: String,
+    },
+}
+
+/// Compare HEAD with the immutable checkpoint `worktree_setup` pinned for this
+/// run without traversing or interpreting provider-created history.
+///
+/// ORB-10380: the input is a commit id resolved once at worktree creation, not
+/// a ref name. `refs/remotes/origin/<base>` is shared by every worktree off the
+/// one `.git`, so any sibling run's fetch or any merge moves it mid-run; a
+/// commit step that re-resolved the name failed every older in-flight run by
+/// construction. Nothing here resolves a ref.
+fn validate_pinned_head(workspace_path: &Path, input: &Value) -> Result<PinnedHead, OrbitError> {
+    let Some(pinned) = input_string_field(input, "base_sha") else {
+        return Ok(PinnedHead::Unpinned);
+    };
+    let pinned = pinned_object_id(&pinned)?;
+
+    let base_sha = git_output(
+        workspace_path,
+        &["rev-parse", "--verify", &format!("{pinned}^{{commit}}")],
+    )
+    .map_err(|error| {
+        OrbitError::Execution(format!(
+            "commit_batch_changes: pinned base commit '{pinned}' is not present in worktree \
+             '{}': {error}",
+            workspace_path.display()
+        ))
+    })?;
+    let head_sha = git_output(workspace_path, &["rev-parse", "--verify", "HEAD^{commit}"])?;
+
+    if base_sha == head_sha {
+        return Ok(PinnedHead::Matched(base_sha));
+    }
+
+    Ok(PinnedHead::Changed { base_sha, head_sha })
+}
+
+/// Reject anything that is not a full Git object id.
+///
+/// The commit step's contract is a base pinned at worktree setup; accepting a
+/// ref name here would silently restore the moving-base failure (ORB-10380).
+fn pinned_object_id(value: &str) -> Result<String, OrbitError> {
+    let candidate = value.trim();
+    let is_object_id =
+        matches!(candidate.len(), 40 | 64) && candidate.chars().all(|c| c.is_ascii_hexdigit());
+    if !is_object_id {
+        return Err(OrbitError::InvalidInput(format!(
+            "git_commit: input.base_sha must be the full commit id pinned by worktree_setup, got \
+             '{value}'; the commit step never resolves a ref name because the shared base ref \
+             moves while a run is in flight"
+        )));
+    }
+    Ok(candidate.to_ascii_lowercase())
+}
+
+fn skipped_no_diff_expected_result(task_id: &str) -> Value {
+    json!({
+        "phase": "commit",
+        "decision": "skipped_no_diff_expected",
+        "committed": false,
+        "skipped_no_diff_expected": true,
+        "task_id": task_id,
+    })
+}
+
+/// The worktree carries no committable work. Reports only what was observed —
+/// this message shares no wording with [`unrelated_history_error`] so a reader
+/// can tell the two conditions apart (ORB-10380).
+fn empty_stage_error(
+    task_id: &str,
+    workspace_path: &Path,
+    base_sha: Option<&str>,
+) -> Result<OrbitError, OrbitError> {
+    let counts = worktree_status_counts(workspace_path)?;
+    let head_sha = git_output(workspace_path, &["rev-parse", "--verify", "HEAD^{commit}"])?;
+    let base = match base_sha {
+        Some(base_sha) => format!("pinned base {base_sha}"),
+        None => "no pinned base in this step's input".to_string(),
+    };
+    Ok(OrbitError::Execution(format!(
+        "commit_batch_changes: nothing to commit for task '{task_id}' in worktree '{}'. \
+         Observed after `git add --all`: {} staged, {} unstaged, {} untracked file(s); \
+         HEAD {head_sha}; {base}. Orbit did not inspect, stage, or reset any other checkout",
+        workspace_path.display(),
+        counts.staged,
+        counts.unstaged,
+        counts.untracked
+    )))
+}
+
+fn changed_head_error(
+    task_id: &str,
+    workspace_path: &Path,
+    base_sha: &str,
+    head_sha: &str,
+) -> OrbitError {
+    OrbitError::Execution(format!(
+        "commit_batch_changes: worktree_head_changed for task '{task_id}' in '{}'. \
+         Observed pinned base {base_sha} and HEAD {head_sha}; the provider boundary must leave \
+         the immutable setup checkpoint at HEAD. Orbit did not stage, reset, or adopt history.",
+        workspace_path.display()
+    ))
+}
+
+#[derive(Default)]
+struct WorktreeStatusCounts {
+    staged: usize,
+    unstaged: usize,
+    untracked: usize,
+}
+
+fn worktree_status_counts(workspace_path: &Path) -> Result<WorktreeStatusCounts, OrbitError> {
+    let status = git_output(
+        workspace_path,
+        &["status", "--porcelain=v1", "--untracked-files=all"],
+    )?;
+    let mut counts = WorktreeStatusCounts::default();
+    for line in status.lines() {
+        let mut code = line.chars();
+        let (Some(index_state), Some(worktree_state)) = (code.next(), code.next()) else {
+            continue;
+        };
+        if index_state == '?' {
+            counts.untracked += 1;
+            continue;
+        }
+        if index_state != ' ' {
+            counts.staged += 1;
+        }
+        if worktree_state != ' ' {
+            counts.unstaged += 1;
+        }
+    }
+    Ok(counts)
+}
+
+fn resolve_workspace_path<H: DeterministicActionHost + ?Sized>(
     host: &H,
     input: &Value,
     batch_id: &str,

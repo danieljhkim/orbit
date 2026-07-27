@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-// ORB-00013: Tests use unwrap/expect to keep fixture setup readable.
+// Tests use unwrap/expect to keep fixture setup readable.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 //! CLI parity tests for `orbit learning <subcommand>`.
@@ -31,249 +31,6 @@ fn cli_add_then_show_round_trips_every_field() {
     assert_eq!(shown["scope"]["paths"], json!(["foo/**"]));
     assert_eq!(shown["scope"]["tags"], json!(["perf"]));
     assert_eq!(shown["status"], "active");
-    assert_eq!(shown["vote_count"], 0);
-    assert!(shown["last_voted_at"].is_null());
-}
-
-#[test]
-fn cli_upvote_is_task_idempotent_and_show_reports_vote_stats() {
-    let workspace = TestWorkspace::new();
-    let added = workspace.add_learning("rule one", &["foo/**"], &["perf"]);
-    let id = added["id"].as_str().expect("id");
-
-    let first = workspace.run_json(
-        &[
-            "learning",
-            "upvote",
-            "--id",
-            id,
-            "--model",
-            "claude",
-            "--task",
-            "ORB-00095",
-            "--json",
-        ],
-        "upvote first",
-    );
-    assert_eq!(first["vote_count"], 1);
-    assert!(first["last_voted_at"].as_str().is_some());
-
-    let duplicate = workspace.run_json(
-        &[
-            "learning",
-            "upvote",
-            "--id",
-            id,
-            "--model",
-            "claude",
-            "--task",
-            "ORB-00095",
-            "--json",
-        ],
-        "upvote duplicate",
-    );
-    assert_eq!(duplicate["vote_count"], 1);
-
-    let second_task = workspace.run_json(
-        &[
-            "learning",
-            "upvote",
-            "--id",
-            id,
-            "--model",
-            "claude",
-            "--task",
-            "ORB-OTHER",
-            "--json",
-        ],
-        "upvote second task",
-    );
-    assert_eq!(second_task["vote_count"], 2);
-
-    let shown = workspace.run_json(&["learning", "show", id, "--json"], "show learning");
-    assert_eq!(shown["vote_count"], 2);
-    assert!(shown["last_voted_at"].as_str().is_some());
-}
-
-#[test]
-fn cli_upvote_without_task_rejects_free_floating_vote_policy() {
-    let workspace = TestWorkspace::new();
-    let added = workspace.add_learning("rule one", &["foo/**"], &["perf"]);
-    let id = added["id"].as_str().expect("id");
-
-    let output = run_orbit(
-        &workspace.work,
-        &workspace.home,
-        &["learning", "upvote", "--id", id, "--model", "claude"],
-        None,
-    );
-    assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("free-floating votes"),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-#[test]
-fn cli_learning_comment_add_list_delete_round_trips_with_tombstone() {
-    let workspace = TestWorkspace::new();
-    let added = workspace.add_learning("rule one", &["foo/**"], &["perf"]);
-    let id = added["id"].as_str().expect("id");
-    let comments_path = workspace
-        .work
-        .join(".orbit/learnings")
-        .join(id)
-        .join("comments.jsonl");
-    assert!(comments_path.exists());
-    assert!(fs::read_to_string(&comments_path).unwrap().is_empty());
-
-    let comment = workspace.run_json(
-        &[
-            "learning",
-            "comment",
-            "add",
-            "--learning-id",
-            id,
-            "--body",
-            "  keep this nearby  ",
-            "--model",
-            "claude",
-            "--json",
-        ],
-        "add comment",
-    );
-    let comment_id = comment["id"].as_str().expect("comment id");
-    assert_eq!(comment["learning_id"], id);
-    assert!(comment_id.starts_with('C'));
-
-    assert_eq!(
-        fs::read_to_string(&comments_path).unwrap().lines().count(),
-        1
-    );
-
-    let listed = workspace.run_json(
-        &["learning", "comment", "list", "--learning-id", id, "--json"],
-        "list comments",
-    );
-    assert_eq!(listed.as_array().unwrap().len(), 1);
-    assert_eq!(listed[0]["id"], comment_id);
-    assert_eq!(listed[0]["body"], "keep this nearby");
-
-    workspace.run(
-        &[
-            "learning", "comment", "delete", "--id", comment_id, "--json",
-        ],
-        None,
-        "delete comment",
-    );
-    workspace.run(
-        &[
-            "learning", "comment", "delete", "--id", comment_id, "--json",
-        ],
-        None,
-        "delete comment again",
-    );
-
-    let active = workspace.run_json(
-        &["learning", "comment", "list", "--learning-id", id, "--json"],
-        "list active comments",
-    );
-    assert!(active.as_array().unwrap().is_empty());
-    let deleted = workspace.run_json(
-        &[
-            "learning",
-            "comment",
-            "list",
-            "--learning-id",
-            id,
-            "--include-deleted",
-            "--json",
-        ],
-        "list deleted comments",
-    );
-    assert_eq!(deleted.as_array().unwrap().len(), 1);
-    assert_eq!(
-        fs::read_to_string(&comments_path).unwrap().lines().count(),
-        2
-    );
-}
-
-#[test]
-fn cli_learning_comment_rejects_missing_and_superseded_parents_without_appending() {
-    let workspace = TestWorkspace::new();
-    let output = run_orbit(
-        &workspace.work,
-        &workspace.home,
-        &[
-            "learning",
-            "comment",
-            "add",
-            "--learning-id",
-            "L-0404",
-            "--body",
-            "valid",
-            "--model",
-            "claude",
-        ],
-        None,
-    );
-    assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("learning not found"),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        !workspace
-            .work
-            .join(".orbit/learnings/L-0404/comments.jsonl")
-            .exists()
-    );
-
-    let old = workspace.add_learning("old", &["old/**"], &[]);
-    let new = workspace.add_learning("new", &["new/**"], &[]);
-    workspace.run(
-        &[
-            "learning",
-            "supersede",
-            old["id"].as_str().unwrap(),
-            "--with",
-            new["id"].as_str().unwrap(),
-            "--json",
-        ],
-        None,
-        "supersede",
-    );
-    let output = run_orbit(
-        &workspace.work,
-        &workspace.home,
-        &[
-            "learning",
-            "comment",
-            "add",
-            "--learning-id",
-            old["id"].as_str().unwrap(),
-            "--body",
-            "valid",
-            "--model",
-            "claude",
-        ],
-        None,
-    );
-    assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("orbit.learning.supersede"),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let comments_path = workspace
-        .work
-        .join(".orbit/learnings")
-        .join(old["id"].as_str().unwrap())
-        .join("comments.jsonl");
-    assert!(comments_path.exists());
-    assert!(fs::read_to_string(comments_path).unwrap().is_empty());
 }
 
 #[test]
@@ -403,6 +160,76 @@ fn cli_update_then_show_reflects_changes() {
 }
 
 #[test]
+fn cli_update_scope_fields_preserve_omitted_fields_and_empty_tag_clears() {
+    let workspace = TestWorkspace::new();
+    let added = workspace.add_learning("original", &["old/**"], &["alpha", "beta"]);
+    let id = added["id"].as_str().unwrap();
+
+    workspace.run(
+        &["learning", "update", id, "--path", "new/**", "--json"],
+        None,
+        "update paths while preserving tags",
+    );
+    let after_path_update = workspace.run_json(
+        &["learning", "show", id, "--json"],
+        "show paths-only update",
+    );
+    assert_eq!(after_path_update["scope"]["paths"], json!(["new/**"]));
+    assert_eq!(after_path_update["scope"]["tags"], json!(["alpha", "beta"]));
+
+    workspace.run(
+        &["learning", "update", id, "--tag", "", "--json"],
+        None,
+        "clear tags explicitly",
+    );
+    let after_tag_clear = workspace.run_json(
+        &["learning", "show", id, "--json"],
+        "show explicit tag clear",
+    );
+    assert_eq!(after_tag_clear["scope"]["paths"], json!(["new/**"]));
+    assert_eq!(after_tag_clear["scope"]["tags"], json!([]));
+}
+
+#[test]
+fn cli_archive_retires_a_single_active_learning_without_a_replacement() {
+    let workspace = TestWorkspace::new();
+    let learning = workspace.add_learning("obsolete rule", &[], &[]);
+    let id = learning["id"].as_str().unwrap();
+
+    let archived = workspace.run_json(&["learning", "archive", id, "--json"], "archive");
+    assert_eq!(archived["status"], "superseded");
+    assert!(archived["superseded_by"].is_null());
+
+    let active_ids = workspace.learning_projection("active");
+    assert!(
+        active_ids
+            .iter()
+            .all(|row| !row.starts_with(&format!("{id}|")))
+    );
+}
+
+#[test]
+fn cli_archive_is_idempotent_and_rejects_a_missing_id() {
+    let workspace = TestWorkspace::new();
+    let learning = workspace.add_learning("obsolete rule", &[], &[]);
+    let id = learning["id"].as_str().unwrap();
+
+    workspace.run(
+        &["learning", "archive", id, "--json"],
+        None,
+        "first archive",
+    );
+    let second = workspace.run_json(
+        &["learning", "archive", id, "--json"],
+        "second archive is a no-op success",
+    );
+    assert_eq!(second["status"], "superseded");
+
+    let missing = workspace.try_run_as(&["learning", "archive", "L-9999999"], HUMAN);
+    assert!(!missing.status.success(), "missing id must fail");
+}
+
+#[test]
 fn cli_sync_returns_rebuilt_count() {
     let workspace = TestWorkspace::new();
     workspace.add_learning("a", &[], &[]);
@@ -423,10 +250,30 @@ fn cli_prune_stale_only_reports_without_modifying() {
 }
 
 #[test]
-fn cli_prune_delete_archives_stale_learnings() {
+fn cli_prune_confirm_archives_stale_learnings_and_preserves_delete_alias() {
     let workspace = TestWorkspace::new();
     let learning = workspace.add_learning("stale", &["totally-nonexistent-dir-xyz-456/**"], &[]);
-    let result = workspace.run_json(&["learning", "prune", "--delete", "--json"], "prune delete");
+
+    // ORB-10453: pruning is a governed operation, so an agent caller is
+    // refused at the CLI chokepoint before the command runs at all.
+    let refused = workspace.try_run_as(
+        &["learning", "prune", "--confirm", "--json"],
+        &[("ORBIT_AGENT_NAME", "claude")],
+    );
+    assert!(!refused.status.success());
+    let refusal = String::from_utf8_lossy(&refused.stderr);
+    assert!(refusal.contains("capability denied"), "{refusal}");
+    assert!(refusal.contains("ORBIT_OPERATOR"), "{refusal}");
+
+    // A test binary is not a terminal, so it claims the operator capability
+    // the same explicit way a deliberate human action would.
+    const OPERATOR: &[(&str, &str)] = &[("ORBIT_OPERATOR", "1")];
+
+    let result = json_output(workspace.run_as(
+        &["learning", "prune", "--confirm", "--json"],
+        OPERATOR,
+        "prune confirm",
+    ));
     let deleted: Vec<&str> = result["deleted"]
         .as_array()
         .unwrap()
@@ -447,6 +294,13 @@ fn cli_prune_delete_archives_stale_learnings() {
     );
     assert_eq!(shown["status"], "superseded");
     assert!(shown["superseded_by"].is_null());
+
+    let alias = json_output(workspace.run_as(
+        &["learning", "prune", "--delete", "--json"],
+        OPERATOR,
+        "prune delete alias",
+    ));
+    assert!(alias["deleted"].as_array().expect("deleted").is_empty());
 }
 
 #[test]
@@ -471,8 +325,21 @@ fn cli_migrate_layout_preserves_records_and_is_idempotent() {
     let superseded_before = workspace.learning_projection("superseded");
 
     workspace.convert_learning_store_to_legacy_flat();
+    let before_dry_run = snapshot_files(&workspace.work.join(".orbit/learnings"));
     let output = workspace.run(
         &["learning", "migrate-layout"],
+        None,
+        "inspect legacy learning layout",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Would migrate learning layout"));
+    assert_eq!(
+        snapshot_files(&workspace.work.join(".orbit/learnings")),
+        before_dry_run
+    );
+
+    let output = workspace.run(
+        &["learning", "migrate-layout", "--confirm"],
         None,
         "migrate legacy learning layout",
     );
@@ -500,7 +367,7 @@ fn cli_migrate_layout_preserves_records_and_is_idempotent() {
 
     let before_rerun = snapshot_files(&learnings_root);
     let output = workspace.run(
-        &["learning", "migrate-layout"],
+        &["learning", "migrate-layout", "--confirm"],
         None,
         "rerun migrated layout",
     );
@@ -532,6 +399,331 @@ fn guardrail_rejects_flat_learning_root_files() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+// --- ORB-10364: caller-role gate on the learning authoring surfaces --------
+//
+// Policy: task executors file frictions; learnings are authored by the
+// orchestrator or by a human. These tests spawn the CLI with an explicitly
+// declared identity environment, so they exercise the real end-to-end
+// behaviour of both the `orbit learning *` subcommands and their
+// `orbit.learning.*` tool equivalents without mutating this process's env.
+
+/// An agent-context run with no authoring opt-in — i.e. a task executor.
+const EXECUTOR: &[(&str, &str)] = &[("ORBIT_AGENT_MODEL", "claude-opus-5")];
+/// A human at a terminal: no agent-identity pair at all.
+const HUMAN: &[(&str, &str)] = &[];
+/// The orchestrator dispatching curation work as an agent, opted in.
+const ORCHESTRATOR: &[(&str, &str)] = &[
+    ("ORBIT_AGENT_MODEL", "claude-opus-5"),
+    ("ORBIT_LEARNING_AUTHOR", "1"),
+];
+
+#[test]
+fn executor_context_learning_add_is_refused_and_redirected_to_friction_add() {
+    let workspace = TestWorkspace::new();
+
+    let output = workspace.try_run_as(
+        &[
+            "learning",
+            "add",
+            "--summary",
+            "executor observation",
+            "--body",
+            "the body",
+        ],
+        EXECUTOR,
+    );
+
+    assert!(!output.status.success(), "executor add must be refused");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("policy denied"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("orbit friction add"),
+        "names the correct channel: {stderr}"
+    );
+    assert!(
+        stderr.contains("executor observation") && stderr.contains("the body"),
+        "preserves the attempted content: {stderr}"
+    );
+    assert!(
+        stderr.contains("ORBIT_LEARNING_AUTHOR"),
+        "names the orchestrator opt-in: {stderr}"
+    );
+    assert!(
+        workspace.learning_projection("active").is_empty(),
+        "nothing was written"
+    );
+}
+
+#[test]
+fn executor_context_learning_update_and_supersede_are_refused_leaving_records_untouched() {
+    let workspace = TestWorkspace::new();
+    let old = workspace.add_learning("original summary", &[], &[]);
+    let new = workspace.add_learning("replacement summary", &[], &[]);
+    let old_id = old["id"].as_str().expect("old id");
+    let new_id = new["id"].as_str().expect("new id");
+    let before = workspace.learning_projection("active");
+
+    let update = workspace.try_run_as(
+        &["learning", "update", old_id, "--summary", "rewritten"],
+        EXECUTOR,
+    );
+    assert!(!update.status.success(), "executor update must be refused");
+    let update_stderr = String::from_utf8_lossy(&update.stderr);
+    assert!(
+        update_stderr.contains("orbit friction add") && update_stderr.contains("rewritten"),
+        "stderr: {update_stderr}"
+    );
+
+    let supersede = workspace.try_run_as(
+        &["learning", "supersede", old_id, "--with", new_id],
+        EXECUTOR,
+    );
+    assert!(
+        !supersede.status.success(),
+        "executor supersede must be refused"
+    );
+    let supersede_stderr = String::from_utf8_lossy(&supersede.stderr);
+    assert!(
+        supersede_stderr.contains("orbit friction add") && supersede_stderr.contains(old_id),
+        "stderr: {supersede_stderr}"
+    );
+
+    assert_eq!(workspace.learning_projection("active"), before);
+    assert!(workspace.learning_projection("superseded").is_empty());
+}
+
+#[test]
+fn executor_context_learning_archive_is_refused_leaving_the_record_untouched() {
+    let workspace = TestWorkspace::new();
+    let learning = workspace.add_learning("obsolete rule", &[], &[]);
+    let id = learning["id"].as_str().expect("id");
+    let before = workspace.learning_projection("active");
+
+    let archive = workspace.try_run_as(&["learning", "archive", id], EXECUTOR);
+    assert!(
+        !archive.status.success(),
+        "executor archive must be refused"
+    );
+    let stderr = String::from_utf8_lossy(&archive.stderr);
+    assert!(
+        stderr.contains("orbit friction add") && stderr.contains(id),
+        "stderr: {stderr}"
+    );
+    assert_eq!(workspace.learning_projection("active"), before);
+}
+
+#[test]
+fn executor_context_learning_tools_are_refused_with_the_same_redirect() {
+    let workspace = TestWorkspace::new();
+    let old = workspace.add_learning("tool original", &[], &[]);
+    let new = workspace.add_learning("tool replacement", &[], &[]);
+    let old_id = old["id"].as_str().expect("old id").to_string();
+    let new_id = new["id"].as_str().expect("new id").to_string();
+    let before = workspace.learning_projection("active");
+
+    let add_input = json!({ "summary": "tool observation", "body": "tool body" }).to_string();
+    let update_input = json!({ "id": old_id, "summary": "tool rewrite" }).to_string();
+    let supersede_input = json!({ "id": old_id, "with": new_id }).to_string();
+    let archive_input = json!({ "id": old_id }).to_string();
+    let attempts = [
+        ("orbit.learning.add", &add_input, "tool observation"),
+        ("orbit.learning.update", &update_input, "tool rewrite"),
+        (
+            "orbit.learning.supersede",
+            &supersede_input,
+            old_id.as_str(),
+        ),
+        ("orbit.learning.archive", &archive_input, old_id.as_str()),
+    ];
+
+    for (tool, input, echoed) in attempts {
+        let output = workspace.try_run_as(&["tool", "run", tool, "--input", input], EXECUTOR);
+        assert!(!output.status.success(), "{tool} must be refused");
+        // `tool run` reports failures as a JSON envelope on stdout.
+        let reported: Value = serde_json::from_slice(&output.stdout)
+            .unwrap_or_else(|e| panic!("{tool} produced invalid JSON: {e}"));
+        assert_eq!(reported["code"], "policy_denied", "{tool}");
+        let message = reported["error"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("orbit friction add"),
+            "{tool} names the correct channel: {message}"
+        );
+        assert!(
+            message.contains(echoed),
+            "{tool} preserves the attempted content: {message}"
+        );
+        assert!(
+            message.contains("ORBIT_LEARNING_AUTHOR"),
+            "{tool} names the orchestrator opt-in: {message}"
+        );
+    }
+
+    assert_eq!(workspace.learning_projection("active"), before);
+}
+
+#[test]
+fn human_context_authors_learnings_across_every_write_surface() {
+    let workspace = TestWorkspace::new();
+
+    let added = workspace.run_json(
+        &["learning", "add", "--summary", "human authored", "--json"],
+        "human add",
+    );
+    let id = added["id"].as_str().expect("id").to_string();
+
+    workspace.run_as(
+        &["learning", "update", &id, "--summary", "human rewrote"],
+        HUMAN,
+        "human update",
+    );
+
+    let replacement = workspace.add_learning("human replacement", &[], &[]);
+    let replacement_id = replacement["id"].as_str().expect("id").to_string();
+    workspace.run_as(
+        &["learning", "supersede", &id, "--with", &replacement_id],
+        HUMAN,
+        "human supersede",
+    );
+
+    let shown = workspace.run_json(&["learning", "show", &id, "--json"], "show superseded");
+    assert_eq!(shown["summary"], "human rewrote");
+    assert_eq!(shown["status"], "superseded");
+}
+
+#[test]
+fn the_orchestrator_opt_in_authors_learnings_from_an_agent_context() {
+    let workspace = TestWorkspace::new();
+
+    let added: Value = serde_json::from_slice(
+        &workspace
+            .run_as(
+                &["learning", "add", "--summary", "curated rule", "--json"],
+                ORCHESTRATOR,
+                "opt-in add",
+            )
+            .stdout,
+    )
+    .expect("opt-in add JSON");
+    let id = added["id"].as_str().expect("id").to_string();
+
+    workspace.run_as(
+        &[
+            "learning",
+            "update",
+            &id,
+            "--summary",
+            "curated rule, narrowed",
+        ],
+        ORCHESTRATOR,
+        "opt-in update",
+    );
+
+    // The tool surface honours the same opt-in.
+    let replacement: Value = serde_json::from_slice(
+        &workspace
+            .run_as(
+                &[
+                    "tool",
+                    "run",
+                    "orbit.learning.add",
+                    "--input",
+                    &json!({ "summary": "curated replacement" }).to_string(),
+                ],
+                ORCHESTRATOR,
+                "opt-in tool add",
+            )
+            .stdout,
+    )
+    .expect("opt-in tool add JSON");
+    let replacement_id = replacement["id"].as_str().expect("id").to_string();
+
+    workspace.run_as(
+        &["learning", "supersede", &id, "--with", &replacement_id],
+        ORCHESTRATOR,
+        "opt-in supersede",
+    );
+
+    let shown = workspace.run_json(&["learning", "show", &id, "--json"], "show superseded");
+    assert_eq!(shown["summary"], "curated rule, narrowed");
+    assert_eq!(shown["status"], "superseded");
+    assert_eq!(shown["superseded_by"], replacement_id);
+}
+
+#[test]
+fn human_context_archives_a_learning_without_a_replacement() {
+    let workspace = TestWorkspace::new();
+    let learning = workspace.add_learning("human obsolete rule", &[], &[]);
+    let id = learning["id"].as_str().expect("id").to_string();
+
+    workspace.run_as(&["learning", "archive", &id], HUMAN, "human archive");
+
+    let shown = workspace.run_json(&["learning", "show", &id, "--json"], "show archived");
+    assert_eq!(shown["status"], "superseded");
+    assert!(shown["superseded_by"].is_null());
+}
+
+#[test]
+fn the_orchestrator_opt_in_archives_a_learning_from_an_agent_context() {
+    let workspace = TestWorkspace::new();
+    let added: Value = serde_json::from_slice(
+        &workspace
+            .run_as(
+                &["learning", "add", "--summary", "curated obsolete", "--json"],
+                ORCHESTRATOR,
+                "opt-in add",
+            )
+            .stdout,
+    )
+    .expect("opt-in add JSON");
+    let id = added["id"].as_str().expect("id").to_string();
+
+    workspace.run_as(
+        &["learning", "archive", &id],
+        ORCHESTRATOR,
+        "opt-in archive",
+    );
+
+    let shown = workspace.run_json(&["learning", "show", &id, "--json"], "show archived");
+    assert_eq!(shown["status"], "superseded");
+    assert!(shown["superseded_by"].is_null());
+}
+
+#[test]
+fn learning_reads_are_unaffected_in_every_caller_context() {
+    let workspace = TestWorkspace::new();
+    let added = workspace.add_learning("readable rule", &["foo/**"], &["perf"]);
+    let id = added["id"].as_str().expect("id").to_string();
+
+    let show_input = json!({ "id": id }).to_string();
+    // `orbit.learning.list` is deliberately inactive on the agent tool
+    // surface, so the tool-side read under test is `orbit.learning.show`.
+    let reads: [Vec<&str>; 3] = [
+        vec!["learning", "show", &id, "--json"],
+        vec!["learning", "list", "--json"],
+        vec!["tool", "run", "orbit.learning.show", "--input", &show_input],
+    ];
+
+    for (context_name, context) in [
+        ("human", HUMAN),
+        ("executor", EXECUTOR),
+        ("orchestrator", ORCHESTRATOR),
+    ] {
+        for read in &reads {
+            let output = workspace.run_as(read, context, &format!("{context_name} read {read:?}"));
+            let value: Value = serde_json::from_slice(&output.stdout)
+                .unwrap_or_else(|e| panic!("{context_name} {read:?} invalid JSON: {e}"));
+            let summary = match &value {
+                Value::Array(rows) => rows[0]["summary"].clone(),
+                other => other["summary"].clone(),
+            };
+            assert_eq!(
+                summary, "readable rule",
+                "{context_name} read {read:?} must return the record"
+            );
+        }
+    }
 }
 
 struct TestWorkspace {
@@ -572,6 +764,23 @@ impl TestWorkspace {
             args.push(*tag);
         }
         self.run_json(&args, "add learning")
+    }
+
+    /// Run with an explicit caller context, returning the raw outcome so a
+    /// test can assert on a refusal as well as on success.
+    fn try_run_as(&self, args: &[&str], context: &[(&str, &str)]) -> Output {
+        run_orbit_with_env(&self.work, &self.home, args, None, context)
+    }
+
+    fn run_as(&self, args: &[&str], context: &[(&str, &str)], label: &str) -> Output {
+        let output = self.try_run_as(args, context);
+        assert!(
+            output.status.success(),
+            "{label} failed\nargs: {args:?}\ncontext: {context:?}\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
     }
 
     fn run(&self, args: &[&str], stdin: Option<&str>, label: &str) -> Output {
@@ -678,13 +887,42 @@ fn snapshot_files(root: &Path) -> Vec<(String, Vec<u8>)> {
 }
 
 fn run_orbit(cwd: &Path, home: &Path, args: &[&str], stdin: Option<&str>) -> Output {
+    run_orbit_with_env(cwd, home, args, stdin, &[])
+}
+
+/// Parse a successful command's stdout as JSON.
+fn json_output(output: Output) -> Value {
+    serde_json::from_slice(&output.stdout).expect("parse JSON output")
+}
+
+/// Spawn the CLI with a fully declared identity environment.
+///
+/// The [ORB-10364] caller-role gate and audit-role resolution both read
+/// `ORBIT_AGENT_*` from the process env, and a child inherits whatever the
+/// suite was launched with. Clearing the identity pair and the authoring
+/// opt-in here makes "human context" an explicit property of each test rather
+/// than an accident of how the suite was started (the ORB-10350 hazard);
+/// `extra_env` then declares the context a test actually wants.
+fn run_orbit_with_env(
+    cwd: &Path,
+    home: &Path,
+    args: &[&str],
+    stdin: Option<&str>,
+    extra_env: &[(&str, &str)],
+) -> Output {
     let mut command = cargo_bin_cmd!("orbit");
     command
         .current_dir(cwd)
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env_remove("ORBIT_ROOT")
+        .env_remove("ORBIT_AGENT_NAME")
+        .env_remove("ORBIT_AGENT_MODEL")
+        .env_remove("ORBIT_LEARNING_AUTHOR")
         .args(args);
+    for (name, value) in extra_env {
+        command.env(name, value);
+    }
     if let Some(input) = stdin {
         command.write_stdin(input);
     }

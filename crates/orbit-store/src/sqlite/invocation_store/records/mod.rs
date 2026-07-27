@@ -1,16 +1,53 @@
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
 use rusqlite::{params, types::ToSql};
 
-use orbit_common::types::{OrbitError, RoleSlot};
+use orbit_common::types::{OrbitError, RoleSlot, TokenUsage, derive_cost_usd};
 
 use crate::{Store, now_string};
 
 use super::types::{
     InvocationInsertParams, InvocationQuery, InvocationRecord, InvocationToolCallRecord,
 };
+
+/// Every column the invocation-trace insert binds, in bind order.
+///
+/// [ORB-10367] This list is the single source of truth for both the INSERT
+/// statement below and the migration regression test that asserts a migrated
+/// legacy database carries each column. Adding a column here without a
+/// matching schema migration fails that test instead of failing a live job
+/// run at the telemetry-persistence boundary.
+pub(crate) const INVOCATION_INSERT_COLUMNS: &[&str] = &[
+    "ts",
+    "job_run_id",
+    "activity_id",
+    "agent",
+    "model",
+    "slot",
+    "duration_ms",
+    "input_tokens",
+    "cache_read_tokens",
+    "cache_create_tokens",
+    "cache_create_1h_tokens",
+    "output_tokens",
+    "tool_call_count",
+    "provider_cost_usd",
+];
+
+/// `INSERT INTO invocations(...) VALUES (?1, ...)` rendered from
+/// [`INVOCATION_INSERT_COLUMNS`] so the column list and the bind arity can
+/// never drift from each other.
+static INVOCATION_INSERT_SQL: LazyLock<String> = LazyLock::new(|| {
+    let columns = INVOCATION_INSERT_COLUMNS.join(", ");
+    let placeholders = (1..=INVOCATION_INSERT_COLUMNS.len())
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("INSERT INTO invocations({columns}) VALUES ({placeholders})")
+});
 
 impl Store {
     pub fn insert_invocation_trace_record(
@@ -26,11 +63,7 @@ impl Store {
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         tx.execute(
-            r#"INSERT INTO invocations(
-                ts, job_run_id, activity_id, agent, model, slot, duration_ms,
-                input_tokens, cache_read_tokens, cache_create_tokens,
-                output_tokens, tool_call_count
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"#,
+            INVOCATION_INSERT_SQL.as_str(),
             params![
                 now_string(),
                 params.job_run_id,
@@ -42,8 +75,10 @@ impl Store {
                 params.trace.usage.input as i64,
                 params.trace.usage.cache_read as i64,
                 params.trace.usage.cache_create as i64,
+                params.trace.usage.cache_create_1h as i64,
                 params.trace.usage.output as i64,
                 params.trace.tool_calls.len() as i64,
+                params.trace.provider_cost_usd,
             ],
         )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -59,10 +94,7 @@ impl Store {
         &self,
         filter: &InvocationQuery,
     ) -> Result<Vec<InvocationRecord>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         let (sql, params) = build_invocation_list_query(filter);
         let param_refs: Vec<&dyn ToSql> = params.iter().map(|value| value.as_ref()).collect();
 
@@ -219,8 +251,8 @@ fn build_invocation_list_query(filter: &InvocationQuery) -> (String, Vec<Box<dyn
 
     let sql = format!(
         "SELECT i.id, i.ts, i.job_run_id, i.activity_id, i.agent, i.model, i.slot, i.duration_ms, \
-         i.input_tokens, i.cache_read_tokens, i.cache_create_tokens, i.output_tokens, \
-         i.tool_call_count \
+         i.input_tokens, i.cache_read_tokens, i.cache_create_tokens, i.cache_create_1h_tokens, \
+         i.output_tokens, i.tool_call_count, i.provider_cost_usd \
          FROM invocations i {} ORDER BY i.ts DESC, i.id DESC LIMIT ?{}",
         query.where_clause(),
         query.len()
@@ -232,16 +264,36 @@ fn build_invocation_list_query(filter: &InvocationQuery) -> (String, Vec<Box<dyn
 fn map_invocation_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvocationRecord> {
     let ts_raw: String = row.get(1)?;
     let slot_raw: Option<String> = row.get(6)?;
+    let model: Option<String> = row.get(5)?;
+    let ts = parse_rfc3339_timestamp(&ts_raw)?;
     let input_tokens = row.get::<_, i64>(8)? as u64;
-    let output_tokens = row.get::<_, i64>(11)? as u64;
+    let cache_read_tokens = row.get::<_, i64>(9)? as u64;
+    let cache_create_tokens = row.get::<_, i64>(10)? as u64;
+    let cache_create_1h_tokens = row.get::<_, i64>(11)? as u64;
+    let output_tokens = row.get::<_, i64>(12)? as u64;
+    let provider_cost_usd: Option<f64> = row.get(14)?;
+
+    let derived_cost_usd = model.as_deref().and_then(|model| {
+        derive_cost_usd(
+            model,
+            ts,
+            &TokenUsage {
+                input: input_tokens,
+                cache_read: cache_read_tokens,
+                cache_create: cache_create_tokens,
+                cache_create_1h: cache_create_1h_tokens,
+                output: output_tokens,
+            },
+        )
+    });
 
     Ok(InvocationRecord {
         id: row.get(0)?,
-        ts: parse_rfc3339_timestamp(&ts_raw)?,
+        ts,
         job_run_id: row.get(2)?,
         activity_id: row.get(3)?,
         agent: row.get(4)?,
-        model: row.get(5)?,
+        model,
         slot: slot_raw
             .as_deref()
             .map(RoleSlot::from_str)
@@ -255,13 +307,16 @@ fn map_invocation_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<Invocation
             })?,
         duration_ms: row.get::<_, i64>(7)? as u64,
         input_tokens,
-        cache_read_tokens: row.get::<_, i64>(9)? as u64,
-        cache_create_tokens: row.get::<_, i64>(10)? as u64,
+        cache_read_tokens,
+        cache_create_tokens,
+        cache_create_1h_tokens,
         output_tokens,
         total_tokens: input_tokens.saturating_add(output_tokens),
-        tool_call_count: row.get::<_, i64>(12)? as u64,
+        tool_call_count: row.get::<_, i64>(13)? as u64,
         task_ids: Vec::new(),
         tool_calls: Vec::new(),
+        provider_cost_usd,
+        derived_cost_usd,
     })
 }
 
@@ -383,11 +438,7 @@ impl InvocationListQuery {
 }
 
 impl Store {
-    fn connection_handle(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, rusqlite::Connection>, OrbitError> {
-        self.conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))
+    fn connection_handle(&self) -> Result<crate::sqlite::read_pool::ReadGuard<'_>, OrbitError> {
+        self.read()
     }
 }

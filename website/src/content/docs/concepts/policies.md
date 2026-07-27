@@ -34,4 +34,5 @@ spec:
 
 ## Use
 
-Use narrow profiles for review, summarization, and read-only graph operations. Use broader profiles only when an agent is expected to edit code.
+Use narrow profiles for review and summarization. Use broader profiles only when
+an agent is expected to edit code.

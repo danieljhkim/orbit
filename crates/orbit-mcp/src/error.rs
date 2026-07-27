@@ -14,6 +14,9 @@ pub(crate) fn tool_error_result(err: &OrbitError) -> CallToolResult {
 }
 
 fn error_payload(err: &OrbitError) -> Value {
+    if let OrbitError::RemoteTool { payload, .. } = err {
+        return payload.clone();
+    }
     let mut payload = json!({
         "code": error_code(err),
         "message": err.to_string(),
@@ -23,10 +26,22 @@ fn error_payload(err: &OrbitError) -> Value {
     {
         object.insert("did_you_mean".to_string(), json!(did_you_mean));
     }
+    if let Some(artifact_origin) = err.artifact_origin()
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert("artifact_origin".to_string(), json!(artifact_origin));
+    }
+    if let Some((task_id, path, reason)) = err.task_bundle_corruption()
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert("task_id".to_string(), json!(task_id));
+        object.insert("path".to_string(), json!(path));
+        object.insert("reason".to_string(), json!(reason));
+    }
     payload
 }
 
-fn error_code(err: &OrbitError) -> &'static str {
+fn error_code(err: &OrbitError) -> &str {
     match err {
         OrbitError::NotFound { kind, .. } => match kind {
             NotFoundKind::Tool => "tool_not_found",
@@ -38,25 +53,40 @@ fn error_code(err: &OrbitError) -> &'static str {
             | NotFoundKind::Adr
             | NotFoundKind::DesignFeature
             | NotFoundKind::Learning
-            | NotFoundKind::LearningComment
             | NotFoundKind::AgentSession
             | NotFoundKind::Workspace => "not_found",
         },
         OrbitError::CompanionNotInstalled(_) => "companion_not_installed",
         OrbitError::PolicyDenied(_) => "policy_denied",
-        OrbitError::TaskApprovalRequired(_) => "approval_required",
+        OrbitError::CapabilityDenied(_) => "capability_denied",
         OrbitError::InvalidInput(_) | OrbitError::InvalidInputDiagnostic { .. } => "invalid_input",
         OrbitError::SensitiveInput { .. } => "sensitive_input",
         OrbitError::SkillValidation(_) | OrbitError::JobValidation(_) => "validation_failed",
         OrbitError::TaskStatusTransition(_)
         | OrbitError::JobRunStateTransition(_)
         | OrbitError::AdrInvalidTransition(_) => "invalid_transition",
+        OrbitError::DependencyNotDelivered { .. } => "dependency_not_delivered",
+        OrbitError::RemoteArtifactUnavailable { .. } => "remote_artifact_unavailable",
+        OrbitError::ArtifactNotLocal { .. } => "artifact_not_local",
         OrbitError::AgentProtocolViolation(_) => "agent_protocol_violation",
         OrbitError::UnsupportedAgentProvider(_) => "unsupported_provider",
+        OrbitError::HubUnavailable(_) => "hub_unavailable",
+        OrbitError::HubNegotiation(_) => "hub_negotiation",
+        OrbitError::OutcomeUnknown { .. } => "outcome_unknown",
+        OrbitError::RemoteTool { code, .. } => code.as_str(),
         OrbitError::Execution(_) => "execution_failed",
+        OrbitError::TaskBundleCorrupt { .. } => "task_bundle_corrupt",
         OrbitError::Store(_) => "store_error",
         OrbitError::WorkspaceError(_) => "workspace_error",
         OrbitError::Io(_) => "io_error",
         OrbitError::Migration(_) => "migration_failed",
+        // OrbitError is non-exhaustive so newly added errors can cross this
+        // crate boundary without forcing an MCP release. Unknown variants are
+        // intentionally classified conservatively until given a stable code.
+        _ => "internal_error",
     }
 }
+
+#[cfg(test)]
+#[path = "tests/error.rs"]
+mod tests;

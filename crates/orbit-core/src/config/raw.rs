@@ -3,42 +3,17 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawRuntimeConfig {
-    pub(super) execution: Option<RawExecutionConfig>,
     #[allow(dead_code)]
     pub(super) identity: Option<toml::Value>,
     pub(super) task: Option<RawTaskSection>,
-    pub(super) pr: Option<RawPrSection>,
-    pub(super) scoring: Option<RawScoringConfig>,
-    pub(super) graph: Option<RawGraphConfig>,
     pub(super) knowledge: Option<RawKnowledgeConfig>,
     pub(super) watch: Option<toml::Value>,
-    pub(super) runtime: Option<RawRuntimeSection>,
-    pub(super) workflow: Option<RawWorkflowConfig>,
-    pub(super) duel: Option<RawDuelSection>,
     /// Removed in ORB-00058. Kept only so config loading can reject stale
     /// `[agent.<role>]` tables with an explicit migration error.
     pub(super) agent: Option<BTreeMap<String, RawAgentRoleConfig>>,
-    /// `[crews.<name>]` registry. Each table supplies the three role
-    /// assignments Orbit resolves at task run start.
+    /// `[crews.<name>]` registry. Each table supplies one assignment Orbit
+    /// resolves for every activity role at task run start.
     pub(super) crews: Option<BTreeMap<String, RawCrewEntry>>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub(super) struct RawWorkflowConfig {
-    /// `workflow.base_branch` — repo-level default base branch for ship and
-    /// duel-plan workflows. When absent, defaults to `main`.
-    /// Repos that keep an `agent-main` buffer branch set this to
-    /// `"agent-main"`.
-    pub(super) base_branch: Option<String>,
-    /// Named crew used when a task does not declare `crew` and no CLI
-    /// override is provided.
-    pub(super) default_crew: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub(super) struct RawDuelSection {
-    pub(super) candidates: Option<Vec<String>>,
-    pub(super) models: Option<BTreeMap<String, String>>,
 }
 
 /// Schema for a single role assignment in `[crews.<name>]`.
@@ -60,11 +35,31 @@ pub struct RawAgentRoleConfig {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RawCrewEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// Legacy three-role fields retained for compatibility. Runtime loading
+    /// selects `implementer` and warns when the discarded roles diverge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub planner: Option<RawAgentRoleConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub implementer: Option<RawAgentRoleConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reviewer: Option<RawAgentRoleConfig>,
+}
+
+/// Bootstrap writer shape for the fixed planning-duel section. Runtime
+/// admission reads these keys through the registry table.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub(super) struct RawDuelSection {
+    pub(super) candidates: Option<Vec<String>>,
+    pub(super) models: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -74,60 +69,8 @@ pub(super) struct RawKnowledgeConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(super) struct RawRuntimeSection {
-    /// `runtime.backend` — persisted default for the v2 `agent_loop` execution
-    /// backend (§3.1). One of `http`, `cli`, `auto`; validated by
-    /// `RuntimeConfig::load_layered`.
-    pub(super) backend: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct RawGraphConfig {
-    pub(super) editing: Option<bool>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct RawScoringConfig {
-    pub(super) enabled: Option<bool>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct RawExecutionConfig {
-    pub(super) env: Option<RawExecutionEnvConfig>,
-    pub(super) codex: Option<RawCodexExecutionConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct RawExecutionEnvConfig {
-    // `inherit` is intentionally not a field: env inheritance is not
-    // configurable. Agent subprocesses always run with a cleared environment
-    // plus the `pass` allowlist, never the orbit process's full environment.
-    // A stale `inherit = ...` key in an existing config.toml is silently
-    // ignored (no `deny_unknown_fields`). See ORB-00365.
-    pub(super) pass: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct RawCodexExecutionConfig {
-    pub(super) sandbox: Option<String>,
-    pub(super) approval_policy: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawTaskSection {
-    pub(super) approval: Option<RawTaskApprovalConfig>,
     /// Removed pre-release selector. Kept here only so config loading can
     /// reject stale keys with an explicit task-artifacts cutover message.
     pub(super) artifact_store: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct RawPrSection {
-    pub(super) task_url_template: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct RawTaskApprovalConfig {
-    pub(super) required_for_agent: Option<bool>,
-    pub(super) delegate_approval: Option<bool>,
 }

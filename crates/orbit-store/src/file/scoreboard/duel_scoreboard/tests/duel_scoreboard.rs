@@ -4,9 +4,10 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 
 use chrono::Utc;
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::{
-    Cost, ImplementerStats, Outcome, ReviewerStats, RoleAssignment, Roles, Scores, TaskClass,
-    ValidIssuesBySeverity,
+    Cost, Decision, ImplementerStats, Outcome, ReviewerStats, RoleAssignment, Roles, Scores,
+    TaskClass, ValidIssuesBySeverity,
 };
 
 use super::super::*;
@@ -73,7 +74,7 @@ fn test_run(run_id: String) -> DuelRun {
             source: "test".to_string(),
         },
         roles: Roles {
-            implementer: role("codex", "gpt-5.5"),
+            implementer: role("codex", TEST_CODEX_MODEL),
             reviewer: role("claude", "opus"),
             arbiter: role("gemini", "pro"),
         },

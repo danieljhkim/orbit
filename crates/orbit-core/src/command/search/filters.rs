@@ -25,7 +25,10 @@ pub(super) fn learning_has_all_tags(
     })
 }
 
-pub(super) fn doc_has_all_tags(record: &crate::DocRecord, tag_filter: &[String]) -> bool {
+pub(super) fn doc_has_all_tags(
+    record: &crate::command::docs::DocRecord,
+    tag_filter: &[String],
+) -> bool {
     tag_filter.iter().all(|needle| {
         record
             .frontmatter
@@ -109,7 +112,7 @@ impl SearchStatusFilters {
         }
         let status = TaskStatus::from_str(value).map_err(|_| {
             OrbitError::InvalidInput(format!(
-                "invalid status `{value}` for kind `task`; expected open, proposed, friction, backlog, in-progress, review, done, blocked, archived, rejected, or someday"
+                "invalid status `{value}` for kind `task`; expected open, proposed, backlog, in-progress, review, done, blocked, archived, rejected, or someday"
             ))
         })?;
         push_unique(statuses, status);

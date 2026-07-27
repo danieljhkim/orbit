@@ -5,6 +5,8 @@ use super::*;
 #[cfg(unix)]
 use super::super::owner::process_is_alive;
 use chrono::{Duration, Utc};
+#[cfg(unix)]
+use orbit_common::types::OrbitError;
 use std::path::Path;
 #[cfg(unix)]
 use std::process::{Command, Stdio};
@@ -86,12 +88,12 @@ fn cancel_job_run_rejects_terminal_run_without_mutating_bundle() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, started_at, std::process::id())
+        .mark_job_run_running(&run.run_id, started_at, std::process::id())
         .expect("mark running");
     runtime
         .stores()
         .jobs()
-        .finalize_run(&run.run_id, JobRunState::Success, finished_at, Some(2_000))
+        .finalize_job_run(&run.run_id, JobRunState::Success, finished_at, Some(2_000))
         .expect("finalize success");
     let before = runtime.show_job_run(&run.run_id).expect("show before");
 
@@ -156,7 +158,7 @@ fn cancel_job_run_does_not_signal_reused_pid_identity_mismatch() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, started_at, sentinel_pid)
+        .mark_job_run_running(&run.run_id, started_at, sentinel_pid)
         .expect("mark running");
     // Versioned token guarantees we exercise the strict `Mismatch`
     // classification path; legacy unversioned tokens may flow through the
@@ -183,7 +185,7 @@ fn cancel_job_run_does_not_signal_reused_pid_identity_mismatch() {
 
 #[cfg(unix)]
 #[test]
-fn cancel_job_run_terminates_owner_process_group_and_child() {
+fn cancel_job_run_kills_term_resistant_process_group() {
     use std::os::unix::process::CommandExt;
 
     let (_root, runtime) = test_runtime();
@@ -225,7 +227,7 @@ fn cancel_job_run_terminates_owner_process_group_and_child() {
     runtime
         .stores()
         .jobs()
-        .mark_run_running(&run.run_id, Utc::now(), owner_pid)
+        .mark_job_run_running(&run.run_id, Utc::now(), owner_pid)
         .expect("mark running");
 
     let result = runtime.cancel_job_run(&run.run_id).expect("cancel run");
@@ -239,6 +241,87 @@ fn cancel_job_run_terminates_owner_process_group_and_child() {
     assert!(
         wait_until(StdDuration::from_secs(3), || !process_is_alive(child_pid)),
         "child process {child_pid} should be gone after process-group cancellation"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cancellation_of_an_already_exited_process_group_is_successful() {
+    let (_root, runtime) = test_runtime();
+    let run = insert_pending_run(&runtime, "qa_cancel_exited_group");
+    let mut owner = Command::new("/bin/sh")
+        .arg("-c")
+        .arg("exit 0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn exited owner");
+    let owner_pid = owner.id();
+    owner.wait().expect("reap exited owner");
+    runtime
+        .stores()
+        .jobs()
+        .mark_job_run_running(&run.run_id, Utc::now(), owner_pid)
+        .expect("mark running");
+
+    let result = runtime
+        .cancel_job_run(&run.run_id)
+        .expect("cancel exited owner");
+
+    assert_eq!(result.signal_outcome.as_deref(), Some("already_exited"));
+    assert_eq!(
+        runtime.show_job_run(&run.run_id).expect("show run").state,
+        JobRunState::Cancelled
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cancellation_survivor_returns_typed_evidence_without_finalizing_run() {
+    let (_root, runtime) = test_runtime();
+    let run = insert_pending_run(&runtime, "qa_cancel_survivor");
+    runtime
+        .stores()
+        .jobs()
+        .mark_job_run_running(&run.run_id, Utc::now(), std::process::id())
+        .expect("mark running");
+
+    let error = runtime
+        .cancel_job_run_with_signaller(&run.run_id, "tester", "unit", |_| {
+            Err(OrbitError::RunCancellationIncomplete {
+                pid: 4242,
+                pgid: Some(4242),
+                term_sent: true,
+                kill_sent: true,
+                leader_alive: true,
+                group_alive: true,
+            })
+        })
+        .expect_err("a survivor must fail cancellation");
+    assert!(matches!(
+        error,
+        OrbitError::RunCancellationIncomplete {
+            pid: 4242,
+            pgid: Some(4242),
+            term_sent: true,
+            kill_sent: true,
+            leader_alive: true,
+            group_alive: true,
+        }
+    ));
+    assert_eq!(
+        runtime.show_job_run(&run.run_id).expect("show run").state,
+        JobRunState::Running,
+        "a failed liveness verification must not finalize the run"
+    );
+    assert!(
+        runtime
+            .list_session_events(20)
+            .expect("list events")
+            .iter()
+            .all(|event| event.event_type != "JobRunCancelled"),
+        "a failed cancellation must not emit a success audit event"
     );
 }
 

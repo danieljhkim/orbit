@@ -9,6 +9,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::response::Response;
 use chrono::Utc;
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_core::{OrbitRuntime, V2AuditEventInsertParams};
 use serde_json::json;
 use tempfile::tempdir;
@@ -25,7 +26,7 @@ use orbit_common::utility::blob_store::BlobStore;
 async fn request_dashboard_errors(runtime: OrbitRuntime) -> Response {
     Router::new()
         .nest("/api", router())
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .uri("/api/diagnostics/errors?limit=10")
@@ -123,17 +124,20 @@ fn diagnostics_metrics_values_adapt_invocation_records() {
         job_run_id: "jrun-1".to_string(),
         activity_id: "implement_one".to_string(),
         agent: "codex".to_string(),
-        model: Some("gpt-5.5".to_string()),
+        model: Some(TEST_CODEX_MODEL.to_string()),
         slot: None,
         duration_ms: 1234,
         input_tokens: 100,
         cache_read_tokens: 0,
         cache_create_tokens: 0,
+        cache_create_1h_tokens: 0,
         output_tokens: 23,
         total_tokens: 123,
         tool_call_count: 4,
         task_ids: vec!["T20260505-1".to_string()],
         tool_calls: Vec::new(),
+        provider_cost_usd: None,
+        derived_cost_usd: None,
     }]);
 
     assert_eq!(rows.len(), 1);

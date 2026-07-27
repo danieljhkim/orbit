@@ -1,23 +1,23 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
 use chrono::Utc;
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::{
-    Activity, ExternalRef, Job, JobTargetType, NotFoundKind, OrbitError, OrbitEvent, Role, Task,
-    TaskArtifact, TaskComment, TaskPriority, TaskStatus, TaskType, push_external_ref_if_missing,
+    ExternalRef, NotFoundKind, OrbitError, OrbitEvent, Role, Task, TaskArtifact, TaskComment,
+    TaskPriority, TaskStatus, TaskType, push_external_ref_if_missing,
 };
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
 
 use crate::context::{
-    JobRunResult, PrConfig, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost,
+    DeterministicActionHost, PrConfig, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost,
     TaskWriteHost,
 };
-use crate::executor::registry::ActivityExecutorRegistry;
 
 use super::super::super::freshness::BranchFreshness;
 
@@ -36,8 +36,9 @@ pub struct PrOpenTestHost {
     repo_root: PathBuf,
     data_root: PathBuf,
     scoreboard_dir: PathBuf,
-    registry: ActivityExecutorRegistry,
     tool_errors: Mutex<HashMap<String, String>>,
+    queued_tool_results: Mutex<HashMap<String, VecDeque<Result<Value, String>>>>,
+    pr_exists: Mutex<bool>,
 }
 
 impl PrOpenTestHost {
@@ -53,8 +54,9 @@ impl PrOpenTestHost {
             repo_root,
             data_root,
             scoreboard_dir,
-            registry: ActivityExecutorRegistry::default(),
             tool_errors: Mutex::new(HashMap::new()),
+            queued_tool_results: Mutex::new(HashMap::new()),
+            pr_exists: Mutex::new(false),
         }
     }
 
@@ -68,6 +70,20 @@ impl PrOpenTestHost {
             .lock()
             .expect("tool errors lock")
             .insert(name.to_string(), message.to_string());
+    }
+
+    pub fn queue_tool_error(&self, name: &str, message: &str) {
+        self.queued_tool_results
+            .lock()
+            .expect("queued tool results lock")
+            .entry(name.to_string())
+            .or_default()
+            .push_back(Err(message.to_string()));
+    }
+
+    pub fn with_existing_pr(self) -> Self {
+        *self.pr_exists.lock().expect("pr exists lock") = true;
+        self
     }
 
     pub fn comments_for(&self, task_id: &str) -> Vec<TaskComment> {
@@ -248,7 +264,7 @@ impl TaskWriteHost for PrOpenTestHost {
     }
 }
 
-impl RuntimeHost for PrOpenTestHost {
+impl DeterministicActionHost for PrOpenTestHost {
     fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
         Ok(())
     }
@@ -261,10 +277,6 @@ impl RuntimeHost for PrOpenTestHost {
         &self.data_root
     }
 
-    fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
-        &self.registry
-    }
-
     fn activity_implementer_identity(
         &self,
         _input: &Value,
@@ -274,31 +286,6 @@ impl RuntimeHost for PrOpenTestHost {
             .clone()
             .map(|(agent, model)| (Some(agent), Some(model)))
             .unwrap_or((None, None)))
-    }
-
-    fn run_job_now_with_input_debug(
-        &self,
-        _job_id: &str,
-        _input: Value,
-        _debug: bool,
-    ) -> Result<JobRunResult, OrbitError> {
-        Err(OrbitError::Execution(
-            "run_job_now_with_input_debug is not needed by pr_open tests".to_string(),
-        ))
-    }
-
-    fn validate_activity_target_exists(
-        &self,
-        _target_type: JobTargetType,
-        _target_id: &str,
-    ) -> Result<Activity, OrbitError> {
-        Err(OrbitError::Execution(
-            "validate_activity_target_exists is not needed by pr_open tests".to_string(),
-        ))
-    }
-
-    fn get_job(&self, _job_id: &str) -> Result<Option<Job>, OrbitError> {
-        Ok(None)
     }
 
     fn run_tool_with_context_and_role(
@@ -325,16 +312,61 @@ impl RuntimeHost for PrOpenTestHost {
         {
             return Err(OrbitError::Execution(message));
         }
+        if let Some(result) = self
+            .queued_tool_results
+            .lock()
+            .expect("queued tool results lock")
+            .get_mut(name)
+            .and_then(VecDeque::pop_front)
+        {
+            return result.map_err(OrbitError::Execution);
+        }
 
         match name {
             "git.push" => Ok(json!({})),
             "github.pr.merge" => Ok(json!({})),
-            "github.pr.create" => Ok(json!({
-                "url": "https://github.example/orbit/orbit/pull/42"
-            })),
-            "github.pr.view" => Ok(json!({
-                "pull_request": { "number": 42 }
-            })),
+            "github.pr.list" => {
+                let head = input.get("head").and_then(Value::as_str).ok_or_else(|| {
+                    OrbitError::InvalidInput("github.pr.list requires a head branch".to_string())
+                })?;
+                let pull_requests = if *self.pr_exists.lock().expect("pr exists lock") {
+                    json!([{
+                        "number": 42,
+                        "headRefName": head,
+                    }])
+                } else {
+                    json!([])
+                };
+                Ok(json!({ "pull_requests": pull_requests }))
+            }
+            "github.pr.create" => {
+                *self.pr_exists.lock().expect("pr exists lock") = true;
+                Ok(json!({
+                    "url": "https://github.example/orbit/orbit/pull/42"
+                }))
+            }
+            "github.pr.view" => {
+                let selector = input.get("pr").and_then(Value::as_str).ok_or_else(|| {
+                    OrbitError::InvalidInput("github.pr.view requires a PR selector".to_string())
+                })?;
+                let valid_selector = selector.chars().all(|character| character.is_ascii_digit())
+                    || (selector.contains("://") && selector.contains("/pull/"));
+                if !valid_selector {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "invalid pr: {selector}; must be a numeric PR number or GitHub PR URL"
+                    )));
+                }
+                if *self.pr_exists.lock().expect("pr exists lock") {
+                    Ok(json!({
+                        "pull_request": {
+                            "number": 42,
+                            "url": "https://github.example/orbit/orbit/pull/42"
+                        }
+                    }))
+                } else {
+                    Err(OrbitError::Execution("no pull request found".to_string()))
+                }
+            }
             other => Err(OrbitError::not_found(NotFoundKind::Tool, other.to_string())),
         }
     }
@@ -355,10 +387,6 @@ impl RuntimeHost for PrOpenTestHost {
         false
     }
 
-    fn graph_editing(&self) -> bool {
-        false
-    }
-
     fn scoreboard_dir(&self) -> &Path {
         &self.scoreboard_dir
     }
@@ -375,7 +403,7 @@ pub fn task(id: &str, title: &str, execution_summary: &str) -> Task {
         plan: String::new(),
         execution_summary: execution_summary.to_string(),
         context_files: Vec::new(),
-        created_by: Some("gpt-5.5".to_string()),
+        created_by: Some(TEST_CODEX_MODEL.to_string()),
         planned_by: None,
         implemented_by: None,
         status: TaskStatus::Review,
@@ -461,6 +489,11 @@ pub struct PrWorkspace {
 pub fn pr_workspace() -> PrWorkspace {
     let temp = tempdir().expect("tempdir");
     let repo = temp.path().join("repo");
+    let remote = temp.path().join("remote.git");
+    git(
+        temp.path(),
+        &["init", "--bare", remote.to_str().expect("remote path")],
+    );
     fs::create_dir_all(&repo).expect("create repo dir");
     git(&repo, &["init"]);
     git(&repo, &["checkout", "-b", "agent-main"]);
@@ -469,11 +502,22 @@ pub fn pr_workspace() -> PrWorkspace {
     fs::write(repo.join("README.md"), "base\n").expect("write readme");
     git(&repo, &["add", "README.md"]);
     git(&repo, &["commit", "-m", "base"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&repo, &["push", "-u", "origin", "agent-main"]);
     git(&repo, &["checkout", "-b", "orbit/test-batch"]);
     fs::create_dir_all(repo.join("src")).expect("create src dir");
     fs::write(repo.join("src/lib.rs"), "pub fn changed() {}\n").expect("write lib");
     git(&repo, &["add", "src/lib.rs"]);
     git(&repo, &["commit", "-m", "change"]);
+    git(&repo, &["push", "-u", "origin", "orbit/test-batch"]);
 
     PrWorkspace { _temp: temp, repo }
 }
@@ -481,6 +525,11 @@ pub fn pr_workspace() -> PrWorkspace {
 pub fn no_diff_pr_workspace() -> PrWorkspace {
     let temp = tempdir().expect("tempdir");
     let repo = temp.path().join("repo");
+    let remote = temp.path().join("remote.git");
+    git(
+        temp.path(),
+        &["init", "--bare", remote.to_str().expect("remote path")],
+    );
     fs::create_dir_all(&repo).expect("create repo dir");
     git(&repo, &["init"]);
     git(&repo, &["checkout", "-b", "agent-main"]);
@@ -489,18 +538,32 @@ pub fn no_diff_pr_workspace() -> PrWorkspace {
     fs::write(repo.join("README.md"), "base\n").expect("write readme");
     git(&repo, &["add", "README.md"]);
     git(&repo, &["commit", "-m", "base"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&repo, &["push", "-u", "origin", "agent-main"]);
     git(&repo, &["checkout", "-b", "orbit/test-batch"]);
 
     PrWorkspace { _temp: temp, repo }
 }
 
-/// Workspace where rebasing `orbit/test-batch` onto `agent-main` conflicts:
-/// both branches edited the same file with incompatible content, so
-/// `git rebase agent-main` fails and `ensure_branch_rebased_onto_base`
-/// returns the original "behind" error.
+/// Workspace where rebasing `orbit/test-batch` onto `agent-main` conflicts.
+/// Recovery can resolve and continue the still-active rebase before the
+/// checkpointed rebase activity is retried.
 pub fn rebase_conflict_pr_workspace() -> PrWorkspace {
     let temp = tempdir().expect("tempdir");
     let repo = temp.path().join("repo");
+    let remote = temp.path().join("remote.git");
+    git(
+        temp.path(),
+        &["init", "--bare", remote.to_str().expect("remote path")],
+    );
     fs::create_dir_all(&repo).expect("create repo dir");
     git(&repo, &["init"]);
     git(&repo, &["checkout", "-b", "agent-main"]);
@@ -511,25 +574,40 @@ pub fn rebase_conflict_pr_workspace() -> PrWorkspace {
     fs::write(repo.join("src/lib.rs"), "pub fn base() {}\n").expect("write lib");
     git(&repo, &["add", "README.md", "src/lib.rs"]);
     git(&repo, &["commit", "-m", "base"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
     git(&repo, &["checkout", "-b", "orbit/test-batch"]);
     fs::write(repo.join("src/lib.rs"), "pub fn branch() {}\n").expect("write branch lib");
     git(&repo, &["add", "src/lib.rs"]);
     git(&repo, &["commit", "-m", "branch change"]);
+    git(&repo, &["push", "-u", "origin", "orbit/test-batch"]);
     git(&repo, &["checkout", "agent-main"]);
     fs::write(repo.join("src/lib.rs"), "pub fn diverged() {}\n").expect("write base lib");
     git(&repo, &["add", "src/lib.rs"]);
     git(&repo, &["commit", "-m", "diverged base"]);
+    git(&repo, &["push", "-u", "origin", "agent-main"]);
     git(&repo, &["checkout", "orbit/test-batch"]);
 
     PrWorkspace { _temp: temp, repo }
 }
 
 pub fn pr_open_input(repo: &Path, completed_task_ids: Vec<&str>) -> Value {
+    let base_sha = git(repo, &["rev-parse", "agent-main"]);
     json!({
         "workspace_path": repo.to_string_lossy(),
         "job_run_id": "batch-1",
         "completed_task_ids": completed_task_ids,
         "base": "agent-main",
+        "base_ref": "agent-main",
+        "base_sha": base_sha,
+        "head": "orbit/test-batch",
         "base_sync": "local",
     })
 }

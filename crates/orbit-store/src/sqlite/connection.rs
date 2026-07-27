@@ -2,17 +2,42 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use orbit_common::types::OrbitError;
+use orbit_common::utility::sqlite::apply_default_pragmas;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::sqlite::migration;
+use crate::sqlite::read_pool::{ReadGuard, ReadPool};
 
+/// SQLite store handle: one writer connection behind a mutex (WAL permits a
+/// single writer) plus a read-only connection pool so reads never queue
+/// behind writes. See [`crate::sqlite::read_pool`] for the pool shape.
 #[derive(Clone)]
 pub struct Store {
+    /// The single writer connection. Every mutating statement and every
+    /// transaction serializes here; lock scope is one method call, never
+    /// held across unrelated I/O.
     pub(crate) conn: Arc<Mutex<Connection>>,
+    /// Read pool for file-backed stores. `None` for in-memory stores, whose
+    /// reads fall back to the writer connection (a second connection would
+    /// see a different empty database).
+    readers: Option<Arc<ReadPool>>,
 }
 
 pub struct StoreTx<'a> {
     pub(crate) tx: Transaction<'a>,
+}
+
+impl StoreTx<'_> {
+    /// Borrow the transaction as a raw SQLite connection.
+    ///
+    /// Feature crates use this narrow escape hatch to keep their SQL and row
+    /// codecs inside the owning crate while reusing Store's serialized writer
+    /// and transaction boundary. The returned connection remains inside this
+    /// transaction; callers must not issue transaction-control statements or
+    /// re-enter the parent [`Store`] from the callback.
+    pub fn connection(&self) -> &Connection {
+        &self.tx
+    }
 }
 
 impl Store {
@@ -22,25 +47,22 @@ impl Store {
         }
 
         let conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
-        enable_best_effort_wal_mode(&conn);
-        conn.pragma_update(None, "busy_timeout", "5000")
-            .map_err(|e| OrbitError::Store(format!("failed to set busy_timeout: {e}")))?;
-        conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|e| OrbitError::Store(format!("failed to enable foreign keys: {e}")))?;
+        apply_default_pragmas(&conn)?;
 
         migration::apply_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            readers: Some(Arc::new(ReadPool::new(path.to_path_buf()))),
         })
     }
 
     pub fn open_in_memory() -> Result<Self, OrbitError> {
         let conn = Connection::open_in_memory().map_err(|e| OrbitError::Store(e.to_string()))?;
-        conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|e| OrbitError::Store(format!("failed to enable foreign keys: {e}")))?;
+        apply_default_pragmas(&conn)?;
         migration::apply_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            readers: None,
         })
     }
 
@@ -78,35 +100,97 @@ impl Store {
         Ok(result)
     }
 
+    /// Check out a read-only connection for a SELECT-shaped operation.
+    ///
+    /// File-backed stores hand out pooled reader connections
+    /// (`query_only=ON`), so reads proceed concurrently with the writer.
+    /// In-memory stores fall back to locking the writer connection. Never
+    /// call this while already holding the writer connection (e.g. inside a
+    /// [`Store::with_transaction`] closure): the in-memory fallback would
+    /// deadlock, exactly as the old direct `conn.lock()` did.
+    pub(crate) fn read(&self) -> Result<ReadGuard<'_>, OrbitError> {
+        match &self.readers {
+            Some(pool) => Ok(ReadGuard::pooled(pool.checkout()?, pool)),
+            None => {
+                let guard = self
+                    .conn
+                    .lock()
+                    .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+                Ok(ReadGuard::Writer(guard))
+            }
+        }
+    }
+
+    /// Run a SELECT-shaped callback on Store's pooled read connection.
+    ///
+    /// File-backed stores provide a `query_only=ON` connection; in-memory
+    /// stores use the writer connection because separate in-memory SQLite
+    /// connections do not share state. Callers must therefore treat the
+    /// connection as read-only on every backend and must not re-enter this
+    /// Store from the callback.
+    pub fn with_read_connection<T, F>(&self, op: F) -> Result<T, OrbitError>
+    where
+        F: FnOnce(&Connection) -> Result<T, OrbitError>,
+    {
+        let conn = self.read()?;
+        op(&conn)
+    }
+
     pub fn connection(&self) -> Arc<Mutex<Connection>> {
         self.conn.clone()
     }
-}
 
-fn enable_best_effort_wal_mode(conn: &Connection) {
-    // WAL mode is best-effort: when the database file is read-only or the
-    // filesystem refuses WAL sidecar writes, fall back to the default journal
-    // mode so that read operations can still succeed.
-    match set_journal_mode_wal(conn) {
-        Ok(mode) if mode.eq_ignore_ascii_case("wal") => {}
-        Ok(mode) => {
-            orbit_common::tracing::warn!(
-                target: "orbit.store.sqlite",
-                journal_mode = mode.as_str(),
-                "requested WAL mode on the store database, but SQLite kept the active journal mode",
-            );
-        }
-        Err(err) => {
-            orbit_common::tracing::warn!(
-                target: "orbit.store.sqlite",
-                error = %err,
-                "could not set WAL mode on the store database; continuing with the default journal mode",
-            );
-        }
+    #[cfg(test)]
+    pub(crate) fn reader_pool_for_test(&self) -> Option<&ReadPool> {
+        self.readers.as_deref()
     }
-}
 
-fn set_journal_mode_wal(conn: &Connection) -> Result<String, OrbitError> {
-    conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))
-        .map_err(|e| OrbitError::Store(format!("failed to set journal_mode=WAL: {e}")))
+    /// Current schema version recorded in the migration ledger (0 when no
+    /// versioned migration has run). Foundation for `orbit migrate` (P3.4).
+    pub fn schema_version(&self) -> Result<u32, OrbitError> {
+        let conn = self.read()?;
+        migration::current_schema_version(&conn)
+    }
+
+    /// All migrations recorded as applied in the `schema_meta` ledger,
+    /// ordered by version ascending.
+    pub fn applied_migrations(&self) -> Result<Vec<migration::AppliedMigration>, OrbitError> {
+        let conn = self.read()?;
+        migration::applied_migrations(&conn)
+    }
+
+    /// Run `PRAGMA quick_check` (the fast subset of `integrity_check`).
+    /// Returns `Ok(())` when SQLite reports `ok`; otherwise an
+    /// [`OrbitError::Store`] listing the reported problems.
+    pub fn quick_check(&self) -> Result<(), OrbitError> {
+        let conn = self.read()?;
+        let mut stmt = conn
+            .prepare("PRAGMA quick_check")
+            .map_err(|e| OrbitError::Store(format!("quick_check: {e}")))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| OrbitError::Store(format!("quick_check: {e}")))?
+            .collect::<Result<Vec<String>, _>>()
+            .map_err(|e| OrbitError::Store(format!("quick_check: {e}")))?;
+        if rows.len() == 1 && rows[0] == "ok" {
+            return Ok(());
+        }
+        Err(OrbitError::Store(format!(
+            "quick_check reported problems: {}",
+            rows.join("; ")
+        )))
+    }
+
+    /// Prove the database accepts writes without mutating it: acquire the
+    /// write lock via `BEGIN IMMEDIATE`, then roll back. Fails when the
+    /// database file (or its WAL sidecars) is not writable, or when the
+    /// write lock cannot be obtained within the busy timeout.
+    pub fn check_writable(&self) -> Result<(), OrbitError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        conn.execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
+            .map_err(|e| OrbitError::Store(format!("write probe failed: {e}")))
+    }
 }

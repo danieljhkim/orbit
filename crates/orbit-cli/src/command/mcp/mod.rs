@@ -6,13 +6,11 @@
 //! JSON schemas.
 
 mod command;
-mod host;
 mod setup;
 
 pub use command::{McpCommand, McpSubcommand};
-pub(crate) use host::{ORBIT_MCP_SERVER_ID, safe_mcp_tool_names};
+pub(crate) use orbit_remote::safe_mcp_tool_names;
 #[allow(unused_imports)]
 pub(crate) use setup::init_auto_for_workspace;
 
-#[cfg(test)]
-mod tests;
+pub(crate) const ORBIT_MCP_SERVER_ID: &str = "orbit";

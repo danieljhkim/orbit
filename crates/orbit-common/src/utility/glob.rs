@@ -30,6 +30,12 @@ use crate::types::OrbitError;
 /// leading `./`, and rejects paths that try to escape the workspace
 /// (`..`, `~`, absolute). Returns an empty string for the workspace root
 /// (`.`).
+///
+/// [ORB-10009] The result is rebuilt from the path's normal components, so
+/// redundant separators collapse to a canonical spelling: `a/./b`, `a//b`,
+/// and `a/b/` all normalize to `a/b`. Without this, a deny rule such as
+/// `secret/key.txt` could be dodged by spelling the same file
+/// `secret/./key.txt` while a broad allow rule (`**`) still matched.
 pub fn normalize_glob_path(path: &str) -> Result<String, OrbitError> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -73,7 +79,26 @@ pub fn normalize_glob_path(path: &str) -> Result<String, OrbitError> {
         }
     }
 
-    Ok(normalized)
+    // [ORB-10009] Canonical spelling: drop `.` segments, duplicate and
+    // trailing separators, so rule matching cannot be dodged by an
+    // equivalent-but-differently-spelled path.
+    Ok(join_normal_components(path_ref))
+}
+
+/// Rebuild a validated relative path from its `Normal` components, dropping
+/// `.` segments and redundant separators. The input must already be checked
+/// for `..` / root / prefix components. [ORB-10009]
+pub(crate) fn join_normal_components(path: &Path) -> String {
+    let mut rebuilt = String::new();
+    for component in path.components() {
+        if let Component::Normal(part) = component {
+            if !rebuilt.is_empty() {
+                rebuilt.push('/');
+            }
+            rebuilt.push_str(&part.to_string_lossy());
+        }
+    }
+    rebuilt
 }
 
 /// Test whether `rule` (a glob pattern) matches `path` (already normalized
@@ -99,13 +124,26 @@ pub fn compile_glob_regex(rule: &str) -> Result<Regex, regex::Error> {
         if prefix.is_empty() {
             return compile_filesystem_regex(r"^.*$");
         }
-        let escaped = regex::escape(prefix);
-        return compile_filesystem_regex(&format!("^{escaped}(?:/.*)?$"));
+        // Route the prefix through the same segment-aware translation as the
+        // general path below. Escaping the whole prefix would turn any `*`/`?`
+        // in it into a literal, so `**/secrets/**` would compile to
+        // `^\*\*/secrets(?:/.*)?$` and match nothing — silently voiding a deny
+        // rule (H1). Translating instead yields `^(?:.*/)?secrets(?:/.*)?$`.
+        let body = translate_glob_body(prefix);
+        return compile_filesystem_regex(&format!("^{body}(?:/.*)?$"));
     }
 
+    let body = translate_glob_body(rule);
+    compile_filesystem_regex(&format!("^{body}$"))
+}
+
+/// Translate a glob pattern into an *unanchored* regex body, honoring the
+/// segment-aware operators (`**/`, `**`, `*`, `?`) and escaping every other
+/// character. Callers wrap the result in anchors (`^`…`$`) and any suffix.
+fn translate_glob_body(rule: &str) -> String {
     let chars: Vec<char> = rule.chars().collect();
     let mut index = 0usize;
-    let mut pattern = String::from("^");
+    let mut pattern = String::new();
     while index < chars.len() {
         if chars[index] == '*' {
             if index + 2 < chars.len() && chars[index + 1] == '*' && chars[index + 2] == '/' {
@@ -132,8 +170,7 @@ pub fn compile_glob_regex(rule: &str) -> Result<Regex, regex::Error> {
         pattern.push_str(&regex::escape(&chars[index].to_string()));
         index += 1;
     }
-    pattern.push('$');
-    compile_filesystem_regex(&pattern)
+    pattern
 }
 
 fn compile_filesystem_regex(pattern: &str) -> Result<Regex, regex::Error> {

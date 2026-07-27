@@ -1,4 +1,4 @@
-// ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
+// Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
 use chrono::Utc;
@@ -107,7 +107,7 @@ impl LearningFileStore {
             std::fs::remove_dir(parent).map_err(|e| OrbitError::Io(e.to_string()))?;
         }
         if let Some(index) = &self.index {
-            index.delete_learning_index_row(id)?;
+            index.delete_learning_index_row(&self.workspace_id, id)?;
         }
         self.invalidate_envelope_cache();
         Ok(true)

@@ -1,41 +1,29 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use orbit_common::types::{
-    Crew, CrewRoleAssignment, OrbitError, activity_job::Backend, all_agent_families, resolve_crew,
+use orbit_common::model_defaults::{
+    CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK, CLAUDE_FABLE_MODEL, CODEX_LUNA_MODEL,
+    CODEX_SOL_MODEL, CODEX_TERRA_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
 };
+use orbit_common::types::{Crew, CrewRoleAssignment, OrbitError, all_agent_families};
 use orbit_common::utility::redaction::redact_home_dir;
 use orbit_engine::PrConfig;
 
 use crate::paths;
 
 use super::persistence::PersistenceConfig;
-use super::raw::{
-    RawAgentRoleConfig, RawCodexExecutionConfig, RawCrewEntry, RawDuelSection,
-    RawExecutionEnvConfig, RawPrSection, RawRuntimeConfig, RawRuntimeSection, RawTaskSection,
-    RawWorkflowConfig,
-};
-
-const DEFAULT_ENV_INHERIT: bool = false;
-const DEFAULT_TASK_APPROVAL_REQUIRED_FOR_AGENT: bool = false;
-const DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL: bool = false;
-// Keep the runtime fallback aligned with the seeded default config so repos
-// without an explicit Orbit config still record scoreboard metrics.
-const DEFAULT_SCORING_ENABLED: bool = true;
-const DEFAULT_GRAPH_EDITING: bool = false;
-const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
-const DEFAULT_WORKFLOW_CREW: &str = "codex";
+use super::raw::{RawAgentRoleConfig, RawCrewEntry, RawRuntimeConfig, RawTaskSection};
+use super::registry::ConfigSnapshot;
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
+    pub(crate) snapshot: ConfigSnapshot,
     pub(crate) execution_env: ExecutionEnvPolicy,
     pub(crate) codex_execution: CodexExecutionPolicy,
     pub(crate) persistence: PersistenceConfig,
-    pub(crate) task_approval: TaskApprovalConfig,
     pub(crate) pr: PrConfig,
     pub(crate) scoring_enabled: bool,
-    pub(crate) graph_editing: bool,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     /// `None` means "not configured"; the resolver falls through to the hard-
     /// coded `cli` default.
@@ -44,10 +32,21 @@ pub(crate) struct RuntimeConfig {
     /// from `[workflow] base_branch` in `config.toml`; defaults to `"main"`
     /// when no key is set.
     pub(crate) workflow_base_branch: String,
-    /// Named planner/implementer/reviewer lineups from `[crews.<name>]`.
+    /// Opt-in for unattended ship dispatch (`[workflow] auto_ship` in
+    /// `config.toml`; defaults to `false`).
+    pub(crate) workflow_auto_ship: bool,
+    /// Whether this workspace is a routine source (`[routines] role =
+    /// "source"` in `config.toml`; defaults to `false`). Consulted by
+    /// `orbit sweep` before loading `.orbit/routines/*.yaml`.
+    pub(crate) routines_source: bool,
+    /// Named provider-model assignments from `[crews.<name>]`.
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
     pub(crate) duel: DuelConfig,
+    /// Optional floor for the local task-id allocator (`[tasks] id_start`).
+    /// Applied forward-only on runtime build so machines can hold disjoint id
+    /// ranges. `None` leaves the allocator untouched.
+    pub(crate) tasks_id_start: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,19 +75,27 @@ impl Default for RuntimeConfig {
 
 impl RuntimeConfig {
     pub(crate) fn default_for_data_root(data_root: &Path) -> Self {
+        let snapshot = ConfigSnapshot::default();
         Self {
-            execution_env: ExecutionEnvPolicy::default(),
-            codex_execution: CodexExecutionPolicy::default(),
+            execution_env: ExecutionEnvPolicy::from_snapshot(&snapshot),
+            codex_execution: CodexExecutionPolicy::from_snapshot(&snapshot),
             persistence: PersistenceConfig::default_for_data_root(data_root),
-            task_approval: TaskApprovalConfig::default(),
-            pr: PrConfig::default(),
-            scoring_enabled: DEFAULT_SCORING_ENABLED,
-            graph_editing: DEFAULT_GRAPH_EDITING,
-            v2_backend: None,
-            workflow_base_branch: DEFAULT_WORKFLOW_BASE_BRANCH.to_string(),
+            pr: PrConfig {
+                task_url_template: snapshot.pr_task_url_template.clone(),
+            },
+            scoring_enabled: snapshot.scoring_enabled,
+            v2_backend: snapshot.runtime_backend.clone(),
+            workflow_base_branch: snapshot.workflow_base_branch.clone(),
+            workflow_auto_ship: snapshot.workflow_auto_ship,
+            routines_source: snapshot.routines_role.as_deref() == Some("source"),
             crews: default_crews(),
-            default_crew: Some(DEFAULT_WORKFLOW_CREW.to_string()),
-            duel: DuelConfig::default(),
+            default_crew: snapshot.workflow_default_crew.clone(),
+            duel: DuelConfig {
+                candidates: snapshot.duel_candidates.clone(),
+                models: snapshot.duel_models.clone(),
+            },
+            tasks_id_start: snapshot.tasks_id_start,
+            snapshot,
         }
     }
 
@@ -131,7 +138,31 @@ impl RuntimeConfig {
                 redact_home_dir(&config_path.display().to_string())
             ))
         })?;
-        let parsed = toml::from_str::<RawRuntimeConfig>(&raw).map_err(|err| {
+        Self::from_raw_str(&raw, &config_path, persistence)
+    }
+
+    /// Parse and validate a raw `config.toml` document string into a fully
+    /// resolved [`RuntimeConfig`], running it through the exact same
+    /// validation pipeline as [`Self::load_layered`].
+    ///
+    /// `config_path` is used only to build human-readable error messages
+    /// (it need not exist on disk — this is also the entry point used by
+    /// `ConfigStore::validate` to check an in-memory edit before it is
+    /// written to disk). `persistence` is supplied by the caller because
+    /// persistence paths are derived from the two data roots, not from the
+    /// config document itself.
+    pub(crate) fn from_raw_str(
+        raw: &str,
+        config_path: &Path,
+        persistence: PersistenceConfig,
+    ) -> Result<Self, OrbitError> {
+        let parsed = toml::from_str::<RawRuntimeConfig>(raw).map_err(|err| {
+            OrbitError::InvalidInput(format!(
+                "invalid runtime config '{}': {err}",
+                redact_home_dir(&config_path.display().to_string())
+            ))
+        })?;
+        let document = toml::from_str::<toml::Value>(raw).map_err(|err| {
             OrbitError::InvalidInput(format!(
                 "invalid runtime config '{}': {err}",
                 redact_home_dir(&config_path.display().to_string())
@@ -145,28 +176,10 @@ impl RuntimeConfig {
             ));
         }
 
-        let scoring_enabled = parsed
-            .scoring
-            .as_ref()
-            .and_then(|s| s.enabled)
-            .unwrap_or(DEFAULT_SCORING_ENABLED);
-
-        let graph_editing = parsed
-            .graph
-            .as_ref()
-            .and_then(|g| g.editing)
-            .unwrap_or(DEFAULT_GRAPH_EDITING);
-
         validate_task_artifact_store_from_raw(parsed.task.as_ref())?;
-        let v2_backend = runtime_backend_from_raw(parsed.runtime.as_ref())?;
-
         reject_stale_agent_role_tables(parsed.agent.as_ref())?;
-
-        let workflow_base_branch = workflow_base_branch_from_raw(parsed.workflow.as_ref())?;
         let crews = crews_from_raw(parsed.crews.as_ref())?;
-        let default_crew = workflow_default_crew_from_raw(parsed.workflow.as_ref(), &crews)?;
-        let duel = duel_from_raw(parsed.duel.as_ref())?;
-        let pr = pr_config_from_raw(parsed.pr.as_ref());
+        let snapshot = ConfigSnapshot::admit(&document, config_path, &crews)?;
 
         if parsed
             .knowledge
@@ -174,27 +187,35 @@ impl RuntimeConfig {
             .and_then(|section| section.task_id_pattern.as_ref())
             .is_some()
         {
-            warn_deprecated_task_id_pattern(&config_path);
+            warn_deprecated_task_id_pattern(config_path);
         }
 
         Ok(Self {
-            execution_env: ExecutionEnvPolicy::from_raw(
-                parsed.execution.clone().and_then(|v| v.env),
-            )?,
-            codex_execution: CodexExecutionPolicy::from_raw(
-                parsed.execution.clone().and_then(|v| v.codex),
-            )?,
+            execution_env: ExecutionEnvPolicy::from_snapshot(&snapshot),
+            codex_execution: CodexExecutionPolicy::from_snapshot(&snapshot),
             persistence,
-            task_approval: TaskApprovalConfig::from_raw(parsed.task.as_ref())?,
-            pr,
-            scoring_enabled,
-            graph_editing,
-            v2_backend,
-            workflow_base_branch,
+            pr: PrConfig {
+                task_url_template: snapshot.pr_task_url_template.clone(),
+            },
+            scoring_enabled: snapshot.scoring_enabled,
+            v2_backend: snapshot.runtime_backend.clone(),
+            workflow_base_branch: snapshot.workflow_base_branch.clone(),
+            workflow_auto_ship: snapshot.workflow_auto_ship,
+            routines_source: snapshot.routines_role.as_deref() == Some("source"),
             crews,
-            default_crew,
-            duel,
+            default_crew: snapshot.workflow_default_crew.clone(),
+            duel: DuelConfig {
+                candidates: snapshot.duel_candidates.clone(),
+                models: snapshot.duel_models.clone(),
+            },
+            tasks_id_start: snapshot.tasks_id_start,
+            snapshot,
         })
+    }
+
+    /// Configured `[tasks] id_start` floor, if any.
+    pub(crate) fn tasks_id_start(&self) -> Option<u32> {
+        self.tasks_id_start
     }
 
     /// Configured default backend for v2 `agent_loop` activities (§3.1 step 3).
@@ -204,6 +225,14 @@ impl RuntimeConfig {
 
     pub(crate) fn workflow_base_branch(&self) -> &str {
         &self.workflow_base_branch
+    }
+
+    pub(crate) fn workflow_auto_ship(&self) -> bool {
+        self.workflow_auto_ship
+    }
+
+    pub(crate) fn routines_source(&self) -> bool {
+        self.routines_source
     }
 
     pub(crate) fn pr_config(&self) -> &PrConfig {
@@ -217,42 +246,26 @@ impl RuntimeConfig {
 
 pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
     let mut crews = BTreeMap::new();
-    crews.insert(
-        "claude".to_string(),
-        Crew {
-            name: "claude".to_string(),
-            planner: crew_role("claude-opus-4-7", "claude", "cli"),
-            implementer: crew_role("claude-opus-4-7", "claude", "cli"),
-            reviewer: crew_role("claude-opus-4-7", "claude", "cli"),
-        },
-    );
-    crews.insert(
-        "codex".to_string(),
-        Crew {
-            name: "codex".to_string(),
-            planner: crew_role("gpt-5.5", "codex", "cli"),
-            implementer: crew_role("gpt-5.5", "codex", "cli"),
-            reviewer: crew_role("gpt-5.5", "codex", "cli"),
-        },
-    );
-    crews.insert(
-        "gemini".to_string(),
-        Crew {
-            name: "gemini".to_string(),
-            planner: crew_role("pro", "gemini", "cli"),
-            implementer: crew_role("pro", "gemini", "cli"),
-            reviewer: crew_role("pro", "gemini", "cli"),
-        },
-    );
-    crews.insert(
-        "grok".to_string(),
-        Crew {
-            name: "grok".to_string(),
-            planner: crew_role("grok-build", "grok", "cli"),
-            implementer: crew_role("grok-build", "grok", "cli"),
-            reviewer: crew_role("grok-build", "grok", "cli"),
-        },
-    );
+    for (name, model, provider) in [
+        ("opus", CLAUDE_DEFAULT_STRONG, "claude"),
+        ("sonnet", CLAUDE_DEFAULT_WEAK, "claude"),
+        ("fable", CLAUDE_FABLE_MODEL, "claude"),
+        ("sol", CODEX_SOL_MODEL, "codex"),
+        ("terra", CODEX_TERRA_MODEL, "codex"),
+        ("luna", CODEX_LUNA_MODEL, "codex"),
+        ("gemini", GEMINI_CREW_MODEL, "gemini"),
+        ("grok", GROK_DEFAULT_MODEL, "grok"),
+    ] {
+        crews.insert(
+            name.to_string(),
+            Crew {
+                name: name.to_string(),
+                assignment: crew_role(model, provider, "cli"),
+                description: None,
+                tags: Vec::new(),
+            },
+        );
+    }
     crews
 }
 
@@ -262,98 +275,6 @@ fn crew_role(model: &str, provider: &str, backend: &str) -> CrewRoleAssignment {
         provider: provider.to_string(),
         backend: backend.to_string(),
     }
-}
-
-fn pr_config_from_raw(raw: Option<&RawPrSection>) -> PrConfig {
-    PrConfig {
-        task_url_template: raw.and_then(|section| section.task_url_template.clone()),
-    }
-}
-
-fn duel_from_raw(raw: Option<&RawDuelSection>) -> Result<DuelConfig, OrbitError> {
-    let Some(raw) = raw else {
-        return Ok(DuelConfig::default());
-    };
-
-    let candidates = duel_candidates_from_raw(raw.candidates.as_deref())?;
-    let models = duel_models_from_raw(raw.models.as_ref(), &candidates)?;
-    Ok(DuelConfig { candidates, models })
-}
-
-fn duel_candidates_from_raw(raw: Option<&[String]>) -> Result<Vec<String>, OrbitError> {
-    let Some(raw_candidates) = raw else {
-        return Ok(DuelConfig::default().candidates);
-    };
-    if raw_candidates.is_empty() {
-        return Err(OrbitError::InvalidInput(format!(
-            "[duel] candidates must contain at least 3 entries; valid candidates: {}",
-            valid_duel_candidates()
-        )));
-    }
-
-    let valid: BTreeSet<&str> = all_agent_families().into_iter().collect();
-    let mut seen = BTreeSet::new();
-    let mut candidates = Vec::new();
-    for candidate in raw_candidates {
-        let normalized = candidate.trim().to_ascii_lowercase();
-        if !seen.insert(normalized.clone()) {
-            return Err(OrbitError::InvalidInput(format!(
-                "[duel] candidates contains duplicate '{normalized}' after normalization; valid candidates: {}",
-                valid_duel_candidates()
-            )));
-        }
-        if !valid.contains(normalized.as_str()) {
-            return Err(OrbitError::InvalidInput(format!(
-                "[duel] candidates contains unknown entry '{normalized}'; valid candidates: {}",
-                valid_duel_candidates()
-            )));
-        }
-        candidates.push(normalized);
-    }
-
-    if candidates.len() < 3 {
-        return Err(OrbitError::InvalidInput(format!(
-            "[duel] candidates must contain at least 3 distinct entries after normalization (got {}: {}); valid candidates: {}",
-            candidates.len(),
-            candidates.join(", "),
-            valid_duel_candidates()
-        )));
-    }
-
-    Ok(candidates)
-}
-
-fn duel_models_from_raw(
-    raw: Option<&BTreeMap<String, String>>,
-    candidates: &[String],
-) -> Result<BTreeMap<String, String>, OrbitError> {
-    let Some(raw_models) = raw else {
-        return Ok(BTreeMap::new());
-    };
-    let candidate_set: BTreeSet<&str> = candidates.iter().map(String::as_str).collect();
-    let candidate_list = candidates.join(", ");
-    let mut models = BTreeMap::new();
-    for (family, model) in raw_models {
-        let normalized_family = family.trim().to_ascii_lowercase();
-        if !candidate_set.contains(normalized_family.as_str()) {
-            return Err(OrbitError::InvalidInput(format!(
-                "[duel.models] contains key '{normalized_family}' that is not in resolved [duel].candidates ({candidate_list}); valid candidates: {}",
-                valid_duel_candidates()
-            )));
-        }
-        let trimmed_model = model.trim();
-        if trimmed_model.is_empty() {
-            return Err(OrbitError::InvalidInput(format!(
-                "[duel.models].{normalized_family} must not be empty (found '{model}'); configured candidates: {candidate_list}"
-            )));
-        }
-        models.insert(normalized_family, trimmed_model.to_string());
-    }
-    Ok(models)
-}
-
-fn valid_duel_candidates() -> String {
-    all_agent_families().join(", ")
 }
 
 fn reject_stale_agent_role_tables(
@@ -383,25 +304,70 @@ fn crews_from_raw(
         }
         let crew = Crew {
             name: trimmed.to_string(),
-            planner: required_role_assignment(trimmed, "planner", entry.planner.as_ref())?,
-            implementer: required_role_assignment(
-                trimmed,
-                "implementer",
-                entry.implementer.as_ref(),
-            )?,
-            reviewer: required_role_assignment(trimmed, "reviewer", entry.reviewer.as_ref())?,
+            assignment: crew_assignment_from_raw(trimmed, entry)?,
+            description: normalized_crew_description(entry.description.as_deref()),
+            tags: normalized_crew_tags(&entry.tags),
         };
-        crews.insert(trimmed.to_string(), crew);
-    }
-    if crews.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "[crews] must define at least one crew".to_string(),
-        ));
+        if crews.insert(trimmed.to_string(), crew).is_some() {
+            return Err(OrbitError::InvalidInput(format!(
+                "[crews] contains duplicate name '{trimmed}' after whitespace normalization"
+            )));
+        }
     }
     Ok(crews)
 }
 
-fn required_role_assignment(
+fn normalized_crew_description(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn normalized_crew_tags(raw: &[String]) -> Vec<String> {
+    let mut tags = raw
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    tags.sort();
+    tags.dedup();
+    tags
+}
+
+fn crew_assignment_from_raw(
+    crew: &str,
+    raw: &RawCrewEntry,
+) -> Result<CrewRoleAssignment, OrbitError> {
+    let has_flat = raw.model.is_some() || raw.provider.is_some() || raw.backend.is_some();
+    let has_legacy = raw.planner.is_some() || raw.implementer.is_some() || raw.reviewer.is_some();
+    if has_flat && has_legacy {
+        return Err(OrbitError::InvalidInput(format!(
+            "[crews.{crew}] mixes the flat {{ model, provider, backend }} shape with legacy planner/implementer/reviewer assignments"
+        )));
+    }
+    if has_flat {
+        return Ok(CrewRoleAssignment {
+            model: required_crew_field(crew, "model", raw.model.as_deref())?,
+            provider: required_crew_field(crew, "provider", raw.provider.as_deref())?,
+            backend: required_crew_field(crew, "backend", raw.backend.as_deref())?,
+        });
+    }
+
+    let implementer = required_legacy_assignment(crew, "implementer", raw.implementer.as_ref())?;
+    let planner = required_legacy_assignment(crew, "planner", raw.planner.as_ref())?;
+    let reviewer = required_legacy_assignment(crew, "reviewer", raw.reviewer.as_ref())?;
+    if planner != implementer || reviewer != implementer {
+        tracing::warn!(
+            target: "orbit.config.crew",
+            crew,
+            "legacy three-role crew assignments diverge; using implementer for every role — rewrite [crews.<name>] with flat model/provider/backend fields",
+        );
+    }
+    Ok(implementer)
+}
+
+fn required_legacy_assignment(
     crew: &str,
     role: &str,
     raw: Option<&RawAgentRoleConfig>,
@@ -412,13 +378,13 @@ fn required_role_assignment(
         ))
     })?;
     Ok(CrewRoleAssignment {
-        model: required_role_field(crew, role, "model", raw.model.as_deref())?,
-        provider: required_role_field(crew, role, "provider", raw.provider.as_deref())?,
-        backend: required_role_field(crew, role, "backend", raw.backend.as_deref())?,
+        model: required_legacy_field(crew, role, "model", raw.model.as_deref())?,
+        provider: required_legacy_field(crew, role, "provider", raw.provider.as_deref())?,
+        backend: required_legacy_field(crew, role, "backend", raw.backend.as_deref())?,
     })
 }
 
-fn required_role_field(
+fn required_legacy_field(
     crew: &str,
     role: &str,
     field: &str,
@@ -430,50 +396,11 @@ fn required_role_field(
     })
 }
 
-pub(super) fn workflow_default_crew_from_raw(
-    raw: Option<&RawWorkflowConfig>,
-    crews: &BTreeMap<String, Crew>,
-) -> Result<Option<String>, OrbitError> {
-    let value = raw.and_then(|workflow| workflow.default_crew.as_deref());
-    let Some(value) = value else {
-        // No explicit [workflow].default_crew. Fall back to the seeded default
-        // when its crew is still present; otherwise demand the user pick one
-        // explicitly so downstream `start`/`show` calls don't surprise them
-        // with a generic "no crew selected" error.
-        if crews.contains_key(DEFAULT_WORKFLOW_CREW) {
-            return Ok(Some(DEFAULT_WORKFLOW_CREW.to_string()));
-        }
-        if crews.is_empty() {
-            return Ok(None);
-        }
-        let mut names: Vec<&str> = crews.keys().map(String::as_str).collect();
-        names.sort();
-        return Err(OrbitError::InvalidInput(format!(
-            "[workflow].default_crew must be set when defining [crews.*]; choose one of: {}",
-            names.join(", ")
-        )));
-    };
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "workflow.default_crew must not be empty".to_string(),
-        ));
-    }
-    resolve_crew(trimmed, crews)?;
-    Ok(Some(trimmed.to_string()))
-}
-
-fn runtime_backend_from_raw(raw: Option<&RawRuntimeSection>) -> Result<Option<String>, OrbitError> {
-    let Some(value) = raw.and_then(|section| section.backend.as_deref()) else {
-        return Ok(None);
-    };
-    let trimmed = value.trim();
-    let Some(backend) = Backend::parse(trimmed) else {
-        return Err(OrbitError::InvalidInput(format!(
-            "[runtime] backend has invalid value '{trimmed}'; expected one of: http, cli, auto"
-        )));
-    };
-    Ok(Some(backend.as_str().to_string()))
+fn required_crew_field(crew: &str, field: &str, value: Option<&str>) -> Result<String, OrbitError> {
+    let value = value.map(str::trim).filter(|value| !value.is_empty());
+    value.map(ToOwned::to_owned).ok_or_else(|| {
+        OrbitError::InvalidInput(format!("[crews.{crew}].{field} must not be empty"))
+    })
 }
 
 fn validate_task_artifact_store_from_raw(raw: Option<&RawTaskSection>) -> Result<(), OrbitError> {
@@ -486,22 +413,6 @@ fn validate_task_artifact_store_from_raw(raw: Option<&RawTaskSection>) -> Result
     )))
 }
 
-fn workflow_base_branch_from_raw(raw: Option<&RawWorkflowConfig>) -> Result<String, OrbitError> {
-    let Some(raw) = raw else {
-        return Ok(DEFAULT_WORKFLOW_BASE_BRANCH.to_string());
-    };
-    let Some(value) = raw.base_branch.as_deref() else {
-        return Ok(DEFAULT_WORKFLOW_BASE_BRANCH.to_string());
-    };
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "workflow.base_branch must not be empty".to_string(),
-        ));
-    }
-    Ok(trimmed.to_string())
-}
-
 fn warn_deprecated_task_id_pattern(config_path: &Path) {
     let path = redact_home_dir(&config_path.display().to_string());
     tracing::warn!(
@@ -512,135 +423,33 @@ fn warn_deprecated_task_id_pattern(config_path: &Path) {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CodexExecutionPolicy {
-    sandbox: CodexSandboxMode,
-    approval_policy: Option<CodexApprovalPolicy>,
+    sandbox: String,
+    approval_policy: Option<String>,
 }
 
 impl Default for CodexExecutionPolicy {
     fn default() -> Self {
         Self {
-            sandbox: CodexSandboxMode::WorkspaceWrite,
+            sandbox: "workspace-write".to_string(),
             approval_policy: None,
         }
     }
 }
 
 impl CodexExecutionPolicy {
-    fn from_raw(raw: Option<RawCodexExecutionConfig>) -> Result<Self, OrbitError> {
-        let Some(raw) = raw else {
-            return Ok(Self::default());
-        };
-
-        let sandbox = match raw.sandbox.as_deref() {
-            Some(value) => CodexSandboxMode::parse(value)?,
-            None => CodexSandboxMode::WorkspaceWrite,
-        };
-        let approval_policy = raw
-            .approval_policy
-            .as_deref()
-            .map(CodexApprovalPolicy::parse)
-            .transpose()?;
-
-        Ok(Self {
-            sandbox,
-            approval_policy,
-        })
+    fn from_snapshot(snapshot: &ConfigSnapshot) -> Self {
+        Self {
+            sandbox: snapshot.codex_sandbox.clone(),
+            approval_policy: snapshot.codex_approval_policy.clone(),
+        }
     }
 
     pub(crate) fn sandbox(&self) -> &str {
-        self.sandbox.as_str()
+        &self.sandbox
     }
 
     pub(crate) fn approval_policy(&self) -> Option<&str> {
-        self.approval_policy.map(CodexApprovalPolicy::as_str)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CodexSandboxMode {
-    ReadOnly,
-    WorkspaceWrite,
-    DangerFullAccess,
-}
-
-impl CodexSandboxMode {
-    fn parse(value: &str) -> Result<Self, OrbitError> {
-        match value.trim() {
-            "read-only" => Ok(Self::ReadOnly),
-            "workspace-write" => Ok(Self::WorkspaceWrite),
-            "danger-full-access" => Ok(Self::DangerFullAccess),
-            other => Err(OrbitError::InvalidInput(format!(
-                "execution.codex.sandbox has invalid value '{other}'; expected one of: read-only, workspace-write, danger-full-access"
-            ))),
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::ReadOnly => "read-only",
-            Self::WorkspaceWrite => "workspace-write",
-            Self::DangerFullAccess => "danger-full-access",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CodexApprovalPolicy {
-    Untrusted,
-    OnRequest,
-    Never,
-}
-
-impl CodexApprovalPolicy {
-    fn parse(value: &str) -> Result<Self, OrbitError> {
-        match value.trim() {
-            "untrusted" => Ok(Self::Untrusted),
-            "on-request" => Ok(Self::OnRequest),
-            "never" => Ok(Self::Never),
-            other => Err(OrbitError::InvalidInput(format!(
-                "execution.codex.approval_policy has invalid value '{other}'; expected one of: untrusted, on-request, never"
-            ))),
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Untrusted => "untrusted",
-            Self::OnRequest => "on-request",
-            Self::Never => "never",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct TaskApprovalConfig {
-    pub(crate) required_for_agent: bool,
-    pub(crate) delegate_approval: bool,
-}
-
-impl Default for TaskApprovalConfig {
-    fn default() -> Self {
-        Self {
-            required_for_agent: DEFAULT_TASK_APPROVAL_REQUIRED_FOR_AGENT,
-            delegate_approval: DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL,
-        }
-    }
-}
-
-impl TaskApprovalConfig {
-    fn from_raw(raw: Option<&RawTaskSection>) -> Result<Self, OrbitError> {
-        let required_for_agent = raw
-            .and_then(|section| section.approval.as_ref())
-            .and_then(|approval| approval.required_for_agent)
-            .unwrap_or(DEFAULT_TASK_APPROVAL_REQUIRED_FOR_AGENT);
-        let delegate_approval = raw
-            .and_then(|section| section.approval.as_ref())
-            .and_then(|approval| approval.delegate_approval)
-            .unwrap_or(DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL);
-        Ok(Self {
-            required_for_agent,
-            delegate_approval,
-        })
+        self.approval_policy.as_deref()
     }
 }
 
@@ -653,37 +462,22 @@ pub(crate) struct ExecutionEnvPolicy {
 impl Default for ExecutionEnvPolicy {
     fn default() -> Self {
         Self {
-            inherit: DEFAULT_ENV_INHERIT,
+            inherit: false,
             pass: default_pass_list(),
         }
     }
 }
 
 impl ExecutionEnvPolicy {
-    fn from_raw(raw: Option<RawExecutionEnvConfig>) -> Result<Self, OrbitError> {
-        match raw {
-            Some(raw) => {
-                // Env inheritance is fixed at DEFAULT_ENV_INHERIT and cannot be
-                // overridden by config — an untrusted workspace config.toml must
-                // not be able to widen passthrough to the full host environment
-                // (secrets/tokens). Only the `pass` allowlist is configurable.
-                // See ORB-00365.
-                let pass = normalize_pass_list(raw.pass.unwrap_or_else(default_pass_list))?;
-                Ok(Self {
-                    inherit: DEFAULT_ENV_INHERIT,
-                    pass,
-                })
-            }
-            None => Ok(Self::default()),
+    fn from_snapshot(snapshot: &ConfigSnapshot) -> Self {
+        Self {
+            inherit: snapshot.execution_env_inherit,
+            pass: snapshot.execution_env_pass.clone(),
         }
     }
 
     pub(crate) fn inherit(&self) -> bool {
         self.inherit
-    }
-
-    pub(crate) fn pass(&self) -> &[String] {
-        &self.pass
     }
 
     pub(crate) fn hydrated_allowlist_env_with_extras(
@@ -742,17 +536,7 @@ impl ExecutionEnvPolicy {
 }
 
 fn default_pass_list() -> Vec<String> {
-    // Cross-platform POSIX base: required by virtually all CLI tools.
-    #[allow(unused_mut)]
-    let mut vars: Vec<&str> = vec!["HOME", "PATH", "CODEX_HOME", "TMPDIR", "USER"];
-
-    // macOS: SCDynamicStore / CoreFoundation requires this encoding var.
-    // Without it, agent CLIs that link system-configuration panic with
-    // "Attempted to create a NULL object".
-    #[cfg(target_os = "macos")]
-    vars.push("__CF_USER_TEXT_ENCODING");
-
-    vars.iter().map(ToString::to_string).collect()
+    ConfigSnapshot::default().execution_env_pass
 }
 
 fn cli_command_baseline_pass_list() -> Vec<String> {
@@ -762,34 +546,4 @@ fn cli_command_baseline_pass_list() -> Vec<String> {
     vars.sort();
     vars.dedup();
     vars
-}
-
-pub(crate) fn normalize_pass_list(pass: Vec<String>) -> Result<Vec<String>, OrbitError> {
-    let mut normalized = BTreeSet::new();
-    for entry in pass {
-        let value = entry.trim();
-        if value.is_empty() {
-            return Err(OrbitError::InvalidInput(
-                "execution.env.pass must not contain empty variable names".to_string(),
-            ));
-        }
-        if !is_valid_env_var_name(value) {
-            return Err(OrbitError::InvalidInput(format!(
-                "execution.env.pass contains invalid variable name '{value}'"
-            )));
-        }
-        normalized.insert(value.to_string());
-    }
-    Ok(normalized.into_iter().collect())
-}
-
-fn is_valid_env_var_name(value: &str) -> bool {
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first == '_' || first.is_ascii_alphabetic()) {
-        return false;
-    }
-    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }

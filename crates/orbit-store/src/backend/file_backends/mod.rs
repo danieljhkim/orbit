@@ -1,18 +1,20 @@
+use std::collections::BTreeMap;
+
 use orbit_common::types::{
     Adr, AdrStatus, ArtifactManifestFileV2, ExecutorDef, ExternalRef, Learning, LearningStatus,
-    OrbitError, PolicyDef, ReviewThread, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
-    TaskPriority, TaskStatus,
+    OrbitError, PolicyDef, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority,
+    TaskStatus,
 };
 
 use super::contracts::{
-    AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter, AdrStoreBackend,
-    ExecutorDefStoreBackend, LearningCommentAddParams, LearningCommentDeleteParams,
-    LearningCreateParams, LearningListEntry, LearningSearchParams, LearningSearchResult,
-    LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend,
-    RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
-    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
-    TaskHistoryUpdateParams, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
+    AdrArtifactResolution, AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter,
+    AdrStoreBackend, ExecutorDefStoreBackend, LearningCreateParams, LearningListEntry,
+    LearningSearchParams, LearningSearchResult, LearningStoreBackend, LearningUpdateParams,
+    PolicyDefStoreBackend, RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams,
+    TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskStoreBackend,
 };
+use crate::IdAllocationRecord;
 use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
 use crate::file::learning_store::LearningFileStore;
@@ -27,6 +29,10 @@ impl TaskStoreBackend for TaskV2Store {
 
     fn list_tasks(&self) -> Result<Vec<Task>, OrbitError> {
         self.list_tasks()
+    }
+
+    fn task_status_index(&self) -> Result<BTreeMap<String, TaskStatus>, OrbitError> {
+        self.task_status_index()
     }
 
     fn list_tasks_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
@@ -113,20 +119,6 @@ impl TaskHistoryStoreBackend for TaskV2Store {
     }
 }
 
-impl TaskReviewStoreBackend for TaskV2Store {
-    fn get_task_review_threads(&self, id: &str) -> Result<Option<Vec<ReviewThread>>, OrbitError> {
-        self.get_task_review_threads(id)
-    }
-
-    fn update_task_reviews(
-        &self,
-        id: &str,
-        params: TaskReviewUpdateParams,
-    ) -> Result<(), OrbitError> {
-        self.update_task_reviews(id, &params)
-    }
-}
-
 impl TaskArtifactStoreBackend for TaskV2Store {
     fn get_task_artifact_manifest(
         &self,
@@ -185,13 +177,21 @@ impl AdrStoreBackend for AdrFileStore {
         self.add_adr(params)
     }
 
+    fn finalize_preallocated_adr(
+        &self,
+        id: &str,
+        params: AdrCreateParams,
+    ) -> Result<Adr, OrbitError> {
+        self.finalize_preallocated_adr(id, params)
+    }
+
     fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
         // ADRs use the WorkspaceOnly strategy per `CLAUDE.md`.
         resolve::<Adr, _>(self, id)
     }
 
-    fn get_adr_federated(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
-        AdrFileStore::get_adr_federated(self, id)
+    fn resolve_adr_artifact(&self, id: &str) -> Result<AdrArtifactResolution, OrbitError> {
+        AdrFileStore::resolve_adr_artifact(self, id)
     }
 
     fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError> {
@@ -212,6 +212,14 @@ impl AdrStoreBackend for AdrFileStore {
 
     fn get_adr_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError> {
         AdrFileStore::get_adr_remote_stub(self, id)
+    }
+
+    fn list_orphaned_adr_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError> {
+        AdrFileStore::list_orphaned_adr_allocations(self)
+    }
+
+    fn abandon_orphaned_adr_allocation(&self, id: &str) -> Result<bool, OrbitError> {
+        AdrFileStore::abandon_orphaned_adr_allocation(self, id)
     }
 
     fn update_adr_status(&self, id: &str, new_status: AdrStatus) -> Result<(), OrbitError> {
@@ -244,6 +252,14 @@ impl LearningStoreBackend for LearningFileStore {
         self.create_learning(params)
     }
 
+    fn finalize_preallocated_learning(
+        &self,
+        id: &str,
+        params: LearningCreateParams,
+    ) -> Result<Learning, OrbitError> {
+        self.finalize_preallocated_learning(id, params)
+    }
+
     fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError> {
         // Learnings use the WorkspaceOnly strategy per `CLAUDE.md` Scoping
         // Rules and ADR-003.
@@ -270,47 +286,19 @@ impl LearningStoreBackend for LearningFileStore {
         LearningFileStore::get_learning_remote_stub(self, id)
     }
 
+    fn list_orphaned_learning_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError> {
+        LearningFileStore::list_orphaned_learning_allocations(self)
+    }
+
+    fn abandon_orphaned_learning_allocation(&self, id: &str) -> Result<bool, OrbitError> {
+        LearningFileStore::abandon_orphaned_learning_allocation(self, id)
+    }
+
     fn search_learnings(
         &self,
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
         self.search_learnings(params)
-    }
-
-    fn upvote_learning(
-        &self,
-        params: LearningUpvoteParams,
-    ) -> Result<orbit_common::types::LearningVoteSummary, OrbitError> {
-        self.upvote_learning(params)
-    }
-
-    fn learning_vote_summary(
-        &self,
-        id: &str,
-    ) -> Result<orbit_common::types::LearningVoteSummary, OrbitError> {
-        self.learning_vote_summary(id)
-    }
-
-    fn add_learning_comment(
-        &self,
-        params: LearningCommentAddParams,
-    ) -> Result<orbit_common::types::LearningComment, OrbitError> {
-        self.add_learning_comment(params)
-    }
-
-    fn list_learning_comments(
-        &self,
-        learning_id: &str,
-        include_deleted: bool,
-    ) -> Result<Vec<orbit_common::types::LearningComment>, OrbitError> {
-        self.list_learning_comments(learning_id, include_deleted)
-    }
-
-    fn delete_learning_comment(
-        &self,
-        params: LearningCommentDeleteParams,
-    ) -> Result<(), OrbitError> {
-        self.delete_learning_comment(params)
     }
 
     fn update_learning(

@@ -3,15 +3,13 @@ use std::sync::Arc;
 
 use super::contracts::{
     AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend,
-    LearningStoreBackend, PolicyDefStoreBackend, SessionLearningStateStoreBackend,
-    TaskArtifactStoreBackend, TaskDocumentStoreBackend, TaskHistoryStoreBackend,
-    TaskReservationStoreBackend, TaskReviewStoreBackend, TaskStoreBackend, ToolStoreBackend,
-    V2AuditEnvelopeStoreBackend,
+    LearningStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
+    TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReservationStoreBackend,
+    TaskStoreBackend, ToolStoreBackend,
 };
 use super::layered_policy_def::LayeredPolicyDefStore;
 use super::sqlite_backends::{
-    SqliteAuditEventStoreBackend, SqliteSessionLearningStateStoreBackend,
-    SqliteTaskReservationStoreBackend, SqliteToolStoreBackend, SqliteV2AuditEnvelopeStoreBackend,
+    SqliteAuditEventStoreBackend, SqliteTaskReservationStoreBackend, SqliteToolStoreBackend,
 };
 use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
@@ -26,7 +24,6 @@ pub struct WorkspaceTaskBackends {
     pub task: Arc<dyn TaskStoreBackend>,
     pub document: Arc<dyn TaskDocumentStoreBackend>,
     pub history: Arc<dyn TaskHistoryStoreBackend>,
-    pub review: Arc<dyn TaskReviewStoreBackend>,
     pub artifact: Arc<dyn TaskArtifactStoreBackend>,
 }
 
@@ -48,7 +45,22 @@ pub fn workspace_task_backends(
         task: store.clone(),
         document: store.clone(),
         history: store.clone(),
-        review: store.clone(),
+        artifact: store,
+    }
+}
+
+/// Constructs coordination-only task backends for a logical workspace that
+/// has no checkout on this machine. Canonical bundles and registry indexes
+/// remain available; checkout-local projections are intentionally omitted.
+pub fn coordination_task_backends(
+    registry: TaskRegistryStore,
+    workspace_id: String,
+) -> WorkspaceTaskBackends {
+    let store = Arc::new(TaskV2Store::new_checkoutless(registry, workspace_id));
+    WorkspaceTaskBackends {
+        task: store.clone(),
+        document: store.clone(),
+        history: store.clone(),
         artifact: store,
     }
 }
@@ -84,12 +96,14 @@ pub fn workspace_learning_backend(
     learning_dir: PathBuf,
     store: Store,
     id_allocator: IdAllocator,
+    workspace_id: String,
 ) -> Result<Arc<dyn LearningStoreBackend>, orbit_common::types::OrbitError> {
     LearningFileStore::reject_legacy_flat_layout(&learning_dir)?;
     Ok(Arc::new(LearningFileStore::new_with_index_and_allocator(
         learning_dir,
         store,
         id_allocator,
+        workspace_id,
     )))
 }
 
@@ -103,16 +117,6 @@ pub fn tool_store_sqlite(store: Store) -> Arc<dyn ToolStoreBackend> {
 
 pub fn audit_event_store_sqlite(store: Store) -> Arc<dyn AuditEventStoreBackend> {
     Arc::new(SqliteAuditEventStoreBackend { store })
-}
-
-pub fn v2_audit_event_store_sqlite(store: Store) -> Arc<dyn V2AuditEnvelopeStoreBackend> {
-    Arc::new(SqliteV2AuditEnvelopeStoreBackend { store })
-}
-
-pub fn session_learning_state_store_sqlite(
-    store: Store,
-) -> Arc<dyn SessionLearningStateStoreBackend> {
-    Arc::new(SqliteSessionLearningStateStoreBackend { store })
 }
 
 pub fn task_reservation_store_sqlite(store: Store) -> Arc<dyn TaskReservationStoreBackend> {

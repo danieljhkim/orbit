@@ -2,13 +2,16 @@
 
 use std::collections::BTreeMap;
 use std::str::FromStr;
-use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use crate::state::Ws;
+use axum::extract::Query;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Duration, Utc};
+use orbit_common::types::{McpCapability, McpTransport};
 use orbit_core::command::job::JobRunListParams;
-use orbit_core::{AuditEventStatus, AuditToolAggregate, JobRunState, OrbitError, OrbitRuntime};
+use orbit_core::{
+    AuditEventFilter, AuditEventStatus, AuditToolAggregate, JobRunState, OrbitError, OrbitRuntime,
+};
 use serde_json::{Value, json};
 
 use super::denials::{
@@ -27,10 +30,7 @@ use crate::projections::audit_event_to_json;
 /// switch the tile to alert state without a second round-trip.
 const DEFAULT_DENIAL_THRESHOLD: i64 = 10;
 
-pub(super) async fn list_audit(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Query(q): Query<AuditQuery>,
-) -> Response {
+pub(super) async fn list_audit(Ws(runtime): Ws, Query(q): Query<AuditQuery>) -> Response {
     let since = match q.since.as_deref() {
         Some(raw) => match parse_since(raw) {
             Ok(ts) => Some(ts),
@@ -55,8 +55,48 @@ pub(super) async fn list_audit(
     let prefetch = HISTORY_MAX_LIMIT;
     let tool = q.tool.filter(|s| !s.is_empty());
     let role = q.role.filter(|s| !s.is_empty());
+    let transport = match q
+        .transport
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => match value.parse::<McpTransport>() {
+            Ok(value) => Some(value),
+            Err(message) => return bad_request(message),
+        },
+        None => None,
+    };
+    let capability = match q
+        .capability
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => match value.parse::<McpCapability>() {
+            Ok(value) => Some(value),
+            Err(message) => return bad_request(message),
+        },
+        None => None,
+    };
 
-    let events = match runtime.list_audit_events(since, tool, status, role, prefetch) {
+    let events = match runtime.list_audit_events_filtered(&AuditEventFilter {
+        since,
+        tool_name: tool,
+        target_type: None,
+        status,
+        role,
+        workspace_id: q.workspace_id.filter(|value| !value.is_empty()),
+        caller_machine_id: q.caller_machine.filter(|value| !value.is_empty()),
+        process_machine_id: q.process_machine.filter(|value| !value.is_empty()),
+        transport,
+        capability,
+        origin_session_id: q.origin_session.filter(|value| !value.is_empty()),
+        mcp_call_id: q.mcp_call.filter(|value| !value.is_empty()),
+        job_run_id: q.job_run_id.filter(|value| !value.is_empty()),
+        lease_id: q.lease.filter(|value| !value.is_empty()),
+        limit: prefetch,
+    }) {
         Ok(events) => events,
         Err(e) => return server_error(e),
     };
@@ -146,10 +186,7 @@ fn arguments_json_matches_profile(raw: Option<&str>, expected: &str) -> bool {
     false
 }
 
-pub(super) async fn audit_summary(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Query(q): Query<AuditSummaryQuery>,
-) -> Response {
+pub(super) async fn audit_summary(Ws(runtime): Ws, Query(q): Query<AuditSummaryQuery>) -> Response {
     let raw_since = q.since.as_deref().unwrap_or(DEFAULT_SUMMARY_WINDOW);
     let since = match parse_since(raw_since) {
         Ok(ts) => ts,
@@ -391,10 +428,15 @@ fn count_failed_runs(
     since: DateTime<Utc>,
 ) -> Result<i64, orbit_core::OrbitError> {
     let mut total: i64 = 0;
-    for state in [JobRunState::Failed, JobRunState::Timeout] {
+    for state in [
+        JobRunState::Failed,
+        JobRunState::Timeout,
+        JobRunState::Interrupted,
+    ] {
         let runs = runtime.list_job_runs(JobRunListParams {
             job_id: None,
             state: Some(state),
+            terminal_only: false,
             since: Some(since),
             limit: Some(HISTORY_MAX_LIMIT),
         })?;
@@ -418,10 +460,12 @@ fn count_active_long_runs(
         JobRunState::Failed,
         JobRunState::Timeout,
         JobRunState::Cancelled,
+        JobRunState::Interrupted,
     ] {
         let runs = runtime.list_job_runs(JobRunListParams {
             job_id: None,
             state: Some(state),
+            terminal_only: false,
             since: Some(since),
             limit: Some(HISTORY_MAX_LIMIT),
         })?;
@@ -443,6 +487,7 @@ fn count_active_long_runs(
     let running = runtime.list_job_runs(JobRunListParams {
         job_id: None,
         state: Some(JobRunState::Running),
+        terminal_only: false,
         since: None,
         limit: Some(HISTORY_MAX_LIMIT),
     })?;

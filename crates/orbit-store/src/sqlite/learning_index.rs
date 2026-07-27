@@ -28,7 +28,11 @@ pub(crate) struct LearningIndexRow {
 }
 
 impl Store {
-    pub(crate) fn upsert_learning_index_row(&self, learning: &Learning) -> Result<(), OrbitError> {
+    pub(crate) fn upsert_learning_index_row(
+        &self,
+        workspace_id: &str,
+        learning: &Learning,
+    ) -> Result<(), OrbitError> {
         let paths_json = serde_json::to_string(&learning.scope.paths)
             .map_err(|e| OrbitError::Store(e.to_string()))?;
         let tags_json = serde_json::to_string(&learning.scope.tags)
@@ -40,9 +44,9 @@ impl Store {
         self.with_transaction(|tx| {
             tx.tx
                 .execute(
-                    "INSERT INTO learnings_index (id, status, paths, tags, summary, updated_at, priority)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                     ON CONFLICT(id) DO UPDATE SET
+                    "INSERT INTO learnings_index (workspace_id, id, status, paths, tags, summary, updated_at, priority)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                     ON CONFLICT(workspace_id, id) DO UPDATE SET
                         status = excluded.status,
                         paths = excluded.paths,
                         tags = excluded.tags,
@@ -50,6 +54,7 @@ impl Store {
                         updated_at = excluded.updated_at,
                         priority = excluded.priority",
                     params![
+                        workspace_id,
                         learning.id,
                         status,
                         paths_json,
@@ -64,40 +69,50 @@ impl Store {
         })
     }
 
-    pub(crate) fn delete_learning_index_row(&self, id: &str) -> Result<(), OrbitError> {
+    pub(crate) fn delete_learning_index_row(
+        &self,
+        workspace_id: &str,
+        id: &str,
+    ) -> Result<(), OrbitError> {
         self.with_transaction(|tx| {
             tx.tx
-                .execute("DELETE FROM learnings_index WHERE id = ?1", params![id])
+                .execute(
+                    "DELETE FROM learnings_index WHERE workspace_id = ?1 AND id = ?2",
+                    params![workspace_id, id],
+                )
                 .map_err(|e| OrbitError::Store(e.to_string()))?;
             Ok(())
         })
     }
 
-    pub(crate) fn truncate_learning_index(&self) -> Result<(), OrbitError> {
+    pub(crate) fn truncate_learning_index(&self, workspace_id: &str) -> Result<(), OrbitError> {
         self.with_transaction(|tx| {
             tx.tx
-                .execute("DELETE FROM learnings_index", [])
+                .execute(
+                    "DELETE FROM learnings_index WHERE workspace_id = ?1",
+                    params![workspace_id],
+                )
                 .map_err(|e| OrbitError::Store(e.to_string()))?;
             Ok(())
         })
     }
 
-    pub(crate) fn list_active_learning_rows(&self) -> Result<Vec<LearningIndexRow>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+    pub(crate) fn list_active_learning_rows(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<LearningIndexRow>, OrbitError> {
+        let conn = self.read()?;
         let mut stmt = conn
             .prepare(
                 "SELECT id, status, paths, tags, summary, updated_at, priority
                  FROM learnings_index
-                 WHERE status = 'active'
+                 WHERE workspace_id = ?1 AND status = 'active'
                  ORDER BY updated_at DESC, id ASC",
             )
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         let rows = stmt
-            .query_map([], decode_row)
+            .query_map(params![workspace_id], decode_row)
             .map_err(|e| OrbitError::Store(e.to_string()))?;
         let mut out = Vec::new();
         for row in rows {
@@ -109,21 +124,19 @@ impl Store {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn get_learning_index_row(
         &self,
+        workspace_id: &str,
         id: &str,
     ) -> Result<Option<LearningIndexRow>, OrbitError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let conn = self.read()?;
         let mut stmt = conn
             .prepare(
                 "SELECT id, status, paths, tags, summary, updated_at, priority
                  FROM learnings_index
-                 WHERE id = ?1",
+                 WHERE workspace_id = ?1 AND id = ?2",
             )
             .map_err(|e| OrbitError::Store(e.to_string()))?;
         let mut rows = stmt
-            .query(params![id])
+            .query(params![workspace_id, id])
             .map_err(|e| OrbitError::Store(e.to_string()))?;
         let Some(row) = rows.next().map_err(|e| OrbitError::Store(e.to_string()))? else {
             return Ok(None);

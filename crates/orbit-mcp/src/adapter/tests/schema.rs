@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use orbit_common::types::{ToolParam, ToolSessionContext};
+use orbit_common::types::{
+    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolScope, McpTransport,
+    ToolParam, ToolSchema, ToolSessionContext,
+};
 use rmcp::model::{ClientCapabilities, Implementation, InitializeRequestParams, Meta};
 
 use super::super::dispatch::session_context_from_initialize;
@@ -14,38 +17,32 @@ use super::super::test_support::{
 };
 
 #[test]
-fn task_add_schema_excludes_legacy_friction_and_status_enums() {
+fn generic_task_schema_is_structural_and_owns_no_domain_enums() {
     let schema = build_input_schema("orbit.task.add", &[param("type"), param("status")]);
     let properties = schema
         .get("properties")
         .and_then(Value::as_object)
         .expect("properties");
 
-    let type_enum = properties["type"]["enum"].as_array().expect("type enum");
-    assert!(!type_enum.iter().any(|value| value == "friction"));
-
-    assert!(
-        properties["status"].get("enum").is_none(),
-        "orbit.task.add no longer advertises status at all"
-    );
+    assert!(properties["type"].get("enum").is_none());
+    assert!(properties["status"].get("enum").is_none());
 }
 
 #[test]
-fn task_update_schema_advertises_friction_status_enum() {
+fn generic_task_update_schema_is_structural() {
     let schema = build_input_schema("orbit.task.update", &[param("status")]);
     let properties = schema
         .get("properties")
         .and_then(Value::as_object)
         .expect("properties");
-    let status_enum = properties["status"]["enum"]
-        .as_array()
-        .expect("status enum");
-    assert!(status_enum.iter().any(|value| value == "friction"));
+    assert!(properties["status"].get("enum").is_none());
 }
 
 #[test]
 fn schema_to_tool_keeps_dotted_orbit_tools_advertised_with_underscores() {
-    let tool = schema_to_tool(tool_schema("orbit.task.add"));
+    let schema = tool_schema("orbit.task.add");
+    let input_schema = build_input_schema(&schema.name, &schema.parameters);
+    let tool = schema_to_tool(schema, input_schema);
     assert_eq!(tool.name.as_ref(), "orbit_task_add");
 }
 
@@ -87,21 +84,19 @@ fn task_dependency_schemas_accept_string_or_string_array() {
     );
 }
 
-/// ORB-00382: `orbit.graph.pack`'s handler requires `selectors`, so the
-/// published MCP schema must advertise it in `required` (as a string|array
-/// union) — otherwise a caller following the schema omits it and the backend
-/// rejects the call with `missing selectors`. This pins the adapter contract
-/// that a handler-required param surfaces in the published `required` set.
+/// A handler-required list parameter must be advertised in `required` as a
+/// string|array union. Otherwise a schema-following caller can omit it and the
+/// backend rejects the call only after dispatch.
 #[test]
-fn graph_pack_mcp_schema_marks_required_selectors_as_string_or_array() {
+fn required_string_list_param_is_advertised_as_string_or_array() {
     let selectors = ToolParam {
         name: "selectors".to_string(),
-        description: "Graph selector string or array.".to_string(),
+        description: "Selector string or array.".to_string(),
         param_type: "string_list".to_string(),
         required: true,
     };
     let summary = param_with_type("summary", "boolean");
-    let schema = build_input_schema("orbit.graph.pack", &[selectors, summary]);
+    let schema = build_input_schema("fixture.batch", &[selectors, summary]);
 
     let required = schema
         .get("required")
@@ -138,6 +133,111 @@ fn graph_pack_mcp_schema_marks_required_selectors_as_string_or_array() {
     );
 }
 
+// --- ORB-10448 / F2026-07-099: the broker's workspace selector must be
+// advertised on every workspace-scoped tool. A managed executor speaks through
+// a general-purpose MCP client that cannot inject initialize `_meta`, so the
+// call argument is its only routing surface.
+
+fn definition_with_scope(
+    name: &str,
+    parameters: Vec<ToolParam>,
+    scope: McpToolScope,
+) -> McpToolDefinition {
+    let schema = ToolSchema {
+        name: name.to_string(),
+        description: String::new(),
+        parameters,
+        builtin: true,
+    };
+    let policy = McpToolPolicy::agent_and_operator(McpToolPlacement::Hub).with_scope(scope);
+    McpToolDefinition::new(schema, policy).expect("test definition policy is valid")
+}
+
+fn advertised_properties(definition: &McpToolDefinition) -> serde_json::Map<String, Value> {
+    let server = OrbitToolServer::new(Arc::new(SessionContextHost::default()));
+    let schema = server
+        .input_schema_for(definition)
+        .expect("input schema resolves");
+    schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .expect("properties object")
+}
+
+#[test]
+fn workspace_scoped_tool_advertises_the_broker_workspace_selector() {
+    let definition = definition_with_scope(
+        "orbit.task.show",
+        vec![param("id")],
+        McpToolScope::WorkspaceRequired,
+    );
+
+    let properties = advertised_properties(&definition);
+    let workspace = properties
+        .get("workspace")
+        .and_then(Value::as_object)
+        .expect("workspace selector advertised on a workspace-scoped tool");
+
+    assert_eq!(
+        workspace.get("type").and_then(Value::as_str),
+        Some("string")
+    );
+    let description = workspace
+        .get("description")
+        .and_then(Value::as_str)
+        .expect("selector carries routing guidance");
+    assert!(
+        description.contains("absolute path to a local checkout"),
+        "selector must document the checkout-path form: {description}"
+    );
+    assert!(
+        description.contains("worktree"),
+        "selector must state that a linked worktree resolves: {description}"
+    );
+}
+
+#[test]
+fn global_scoped_tool_does_not_advertise_a_workspace_selector() {
+    let definition = definition_with_scope(
+        "orbit.workspace.list",
+        vec![param("limit")],
+        McpToolScope::Global,
+    );
+
+    let properties = advertised_properties(&definition);
+
+    assert!(
+        !properties.contains_key("workspace"),
+        "a global tool routes without a workspace: {properties:?}"
+    );
+}
+
+#[test]
+fn tool_declaring_its_own_workspace_param_keeps_that_description() {
+    let declared = ToolParam {
+        name: "workspace".to_string(),
+        description: "Workspace path for the task".to_string(),
+        param_type: "string".to_string(),
+        required: false,
+    };
+    let definition = definition_with_scope(
+        "orbit.task.add",
+        vec![param("title"), declared],
+        McpToolScope::WorkspaceRequired,
+    );
+
+    let properties = advertised_properties(&definition);
+
+    assert_eq!(
+        properties["workspace"]
+            .get("description")
+            .and_then(Value::as_str),
+        Some("Workspace path for the task"),
+        "injection must not overwrite a tool's own selector documentation"
+    );
+}
+
 fn initialize_params_with_meta(meta: Value) -> InitializeRequestParams {
     let mut params = InitializeRequestParams::new(
         ClientCapabilities::default(),
@@ -154,20 +254,85 @@ fn initialize_params_with_meta(meta: Value) -> InitializeRequestParams {
 fn initialize_meta_extracts_orbit_workspace_session_context() {
     let params = initialize_params_with_meta(json!({
         "orbit": {
-            "workspace": " /repo/main "
-        }
+            "workspace": " /repo/main ",
+            "workspace_id": "spoofed-workspace",
+            "caller_machine_id": "spoofed-caller",
+            "process_machine_id": "spoofed-process",
+            "transport": "ssh-mcp",
+            "effective_capabilities": ["operator", "runner"],
+            "origin_session_id": "spoofed-session",
+            "mcp_call_id": "spoofed-call",
+            "leased_run": {"run_id": "spoofed-run", "lease_id": "spoofed-lease"},
+            "role": "admin",
+            "model": "spoofed-model",
+            "task_id": "spoofed-task"
+        },
+        "orbit.workspace_id": "also-spoofed"
     }));
 
-    let session_context = session_context_from_initialize(&params);
+    let session_context = session_context_from_initialize(&params, &Meta::new());
 
     assert_eq!(session_context.workspace.as_deref(), Some("/repo/main"));
+    assert_eq!(session_context.workspace_id, None);
+    assert_eq!(session_context.caller_machine_id, None);
+    assert_eq!(session_context.process_machine_id, None);
+    assert_eq!(session_context.transport, None);
+    assert!(session_context.effective_capabilities.is_empty());
+    assert_eq!(session_context.origin_session_id, None);
+    assert_eq!(session_context.mcp_call_id, None);
+    assert_eq!(session_context.leased_run, None);
+}
+
+#[test]
+fn initialize_transport_meta_extracts_orbit_workspace_session_context() {
+    // Over a real transport rmcp strips `_meta` from the params and delivers
+    // it through the request context instead; the params-level field stays
+    // `None`. The announced session workspace must still be honored.
+    let params = InitializeRequestParams::new(
+        ClientCapabilities::default(),
+        Implementation::new("orbit-test-client", "0"),
+    );
+    let Value::Object(meta_object) = json!({
+        "orbit": {
+            "workspace": " /repo/main "
+        }
+    }) else {
+        panic!("test meta must be an object");
+    };
+
+    let session_context = session_context_from_initialize(&params, &Meta(meta_object));
+
+    assert_eq!(session_context.workspace.as_deref(), Some("/repo/main"));
+}
+
+#[test]
+fn initialize_params_meta_wins_over_transport_meta() {
+    let params = initialize_params_with_meta(json!({
+        "orbit": { "workspace": "/repo/params" }
+    }));
+    let Value::Object(meta_object) = json!({
+        "orbit": { "workspace": "/repo/transport" }
+    }) else {
+        panic!("test meta must be an object");
+    };
+
+    let session_context = session_context_from_initialize(&params, &Meta(meta_object));
+
+    assert_eq!(session_context.workspace.as_deref(), Some("/repo/params"));
 }
 
 #[tokio::test]
 async fn mcp_session_context_reaches_tool_calls_without_workspace_input() {
     let host = Arc::new(SessionContextHost::default());
     let server = OrbitToolServer::new(host.clone());
-    server.replace_session_context(ToolSessionContext::with_workspace("/repo/main"));
+    let mut trusted_context = ToolSessionContext::trusted_local(
+        Some("ws_orbit".to_string()),
+        Some("hm_local".to_string()),
+        Some("local-host".to_string()),
+    );
+    trusted_context.workspace = Some("/repo/main".to_string());
+    trusted_context.origin_session_id = Some("mcp-session-shared".to_string());
+    server.replace_session_context(trusted_context);
 
     let explicit = server
         .call_tool_request(request_with_args(
@@ -190,6 +355,20 @@ async fn mcp_session_context_reaches_tool_calls_without_workspace_input() {
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[1].2.workspace.as_deref(), Some("/repo/main"));
     assert!(calls[1].1.get("workspace").is_none());
+    assert_eq!(calls[0].2.workspace_id.as_deref(), Some("ws_orbit"));
+    assert_eq!(calls[0].2.transport, Some(McpTransport::Local));
+    assert_eq!(
+        calls[0].2.effective_capabilities,
+        [McpCapability::Agent].into_iter().collect()
+    );
+    assert_eq!(
+        calls[0].2.origin_session_id.as_deref(),
+        Some("mcp-session-shared")
+    );
+    assert_eq!(calls[1].2.origin_session_id, calls[0].2.origin_session_id);
+    assert!(calls[0].2.mcp_call_id.is_some());
+    assert!(calls[1].2.mcp_call_id.is_some());
+    assert_ne!(calls[0].2.mcp_call_id, calls[1].2.mcp_call_id);
 }
 
 // --- ORB-00102 tests: object_list schema + loud fallback + e2e via MCP adapter ---
@@ -416,7 +595,7 @@ async fn orbit_learning_update_via_mcp_adapter_accepts_evidence_array_live_repro
 /// create-task fields with correct enums (verifiable via debug surfaces or this
 /// direct build).
 #[test]
-fn task_add_mcp_schema_exposes_trimmed_fields_with_complexity_and_model_enums() {
+fn task_add_structural_schema_exposes_trimmed_fields_without_domain_enums() {
     // Use representative params that the real add schema includes (the
     // build_input_schema only cares about the ones passed for enum injection).
     let params = vec![
@@ -430,6 +609,7 @@ fn task_add_mcp_schema_exposes_trimmed_fields_with_complexity_and_model_enums() 
         param_with_type("complexity", "string"),
         param_with_type("type", "string"),
         param_with_type("relations", "array"),
+        param_with_type("crew", "string"),
         param_with_type("model", "string"),
     ];
     let schema = build_input_schema("orbit.task.add", &params);
@@ -445,6 +625,7 @@ fn task_add_mcp_schema_exposes_trimmed_fields_with_complexity_and_model_enums() 
             "acceptance_criteria",
             "complexity",
             "context_files",
+            "crew",
             "description",
             "model",
             "priority",
@@ -456,34 +637,12 @@ fn task_add_mcp_schema_exposes_trimmed_fields_with_complexity_and_model_enums() 
         ]
     );
 
-    // complexity must have the low/medium/hard enum
-    let comp = properties.get("complexity").expect("complexity in schema");
-    let comp_enum = comp
-        .get("enum")
-        .and_then(Value::as_array)
-        .expect("complexity enum array");
-    assert_eq!(
-        comp_enum,
-        &vec![
-            Value::String("low".into()),
-            Value::String("medium".into()),
-            Value::String("hard".into())
-        ]
-    );
-
-    // model must have the four families (injected for any tool's model)
-    let model = properties.get("model").expect("model in schema");
-    let model_enum = model
-        .get("enum")
-        .and_then(Value::as_array)
-        .expect("model enum array");
-    assert!(model_enum.iter().any(|v| v == "codex"));
-    assert!(model_enum.iter().any(|v| v == "grok"));
+    assert!(properties["complexity"].get("enum").is_none());
+    assert!(properties["model"].get("enum").is_none());
 
     for removed in [
         "plan",
         "status",
-        "crew",
         "parent_id",
         "source_task_id",
         "external_refs",
@@ -496,4 +655,10 @@ fn task_add_mcp_schema_exposes_trimmed_fields_with_complexity_and_model_enums() 
             "{removed} must not appear in MCP schema properties for orbit.task.add"
         );
     }
+
+    // crew was un-retired (ORB-10123): it is now an authoring param again.
+    assert!(
+        properties.contains_key("crew"),
+        "crew must appear in MCP schema properties for orbit.task.add"
+    );
 }

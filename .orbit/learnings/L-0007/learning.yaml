@@ -1,11 +1,9 @@
 schema_version: 1
 id: L-0007
-legacy_ids:
-- L20260517-7
 status: active
 scope:
   paths:
-  - crates/orbit-engine/src/executor/automation/vcs/pr.rs
+  - crates/orbit-engine/src/executor/automation/vcs/pr/**/*.rs
   tags:
   - rust
   - attribution
@@ -15,6 +13,8 @@ body: Ship PR handoff has two attribution-sensitive automation updates. `pr_open
 evidence:
 - kind: task
   reference: ORB-00106
+legacy_ids:
+- L20260517-7
 created_at: 2026-05-17T07:09:40.771239Z
-updated_at: 2026-05-17T07:34:25.315401Z
+updated_at: 2026-06-21T20:07:01.886459Z
 priority: 100

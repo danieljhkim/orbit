@@ -1,11 +1,14 @@
 use std::fs;
 
 use orbit_common::types::{AdrStatus, LearningScope, TaskPriority, TaskStatus, TaskType};
-use orbit_search::{AdrSemanticHit, DocSemanticHit, LearningSemanticHit};
+use orbit_search::{
+    AdrSemanticHit, DocSemanticHit, LearningSemanticHit, ScoreBreakdown, SemanticHit,
+};
 use orbit_store::{AdrCreateParams, LearningCreateParams, TaskCreateParams};
 
 use super::*;
-use crate::{OrbitRuntime, SearchResult};
+use crate::OrbitRuntime;
+use crate::command::docs::SearchResult;
 
 mod global;
 mod hybrid;
@@ -20,7 +23,7 @@ fn add_adr(runtime: &OrbitRuntime, title: &str, body: &str) -> String {
     runtime
         .stores()
         .adrs()
-        .add(AdrCreateParams {
+        .add_adr(AdrCreateParams {
             title: title.to_string(),
             owner: "codex".to_string(),
             related_features: Vec::new(),
@@ -36,7 +39,7 @@ fn add_adr(runtime: &OrbitRuntime, title: &str, body: &str) -> String {
 fn add_task_with_status(runtime: &OrbitRuntime, title: &str, status: TaskStatus) -> String {
     runtime
         .stores()
-        .tasks()
+        .task_records()
         .create(TaskCreateParams {
             actor: "test".to_string(),
             parent_id: None,
@@ -178,6 +181,21 @@ fn learning_semantic_hit(id: &str, score: f32) -> LearningSemanticHit {
     }
 }
 
+fn task_semantic_hit(id: &str, score: f32) -> SemanticHit {
+    SemanticHit {
+        source_kind: "task".to_string(),
+        source_id: id.to_string(),
+        best_field: "title".to_string(),
+        snippet: "semantic task snippet".to_string(),
+        score,
+        score_breakdown: ScoreBreakdown {
+            rrf: Some(score),
+            bm25_rank: Some(2),
+            cosine_rank: Some(1),
+        },
+    }
+}
+
 fn with_doc_semantic_override<T>(
     result: Result<Vec<DocSemanticHit>, String>,
     f: impl FnOnce() -> T,
@@ -215,6 +233,20 @@ fn with_learning_semantic_override<T>(
     });
     let out = f();
     LEARNING_SEMANTIC_SEARCH_OVERRIDE.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+    out
+}
+
+fn with_task_semantic_override<T>(
+    result: Result<Vec<SemanticHit>, String>,
+    f: impl FnOnce() -> T,
+) -> T {
+    TASK_SEMANTIC_SEARCH_OVERRIDE.with(|cell| {
+        *cell.borrow_mut() = Some(result);
+    });
+    let out = f();
+    TASK_SEMANTIC_SEARCH_OVERRIDE.with(|cell| {
         *cell.borrow_mut() = None;
     });
     out

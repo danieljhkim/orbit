@@ -1,9 +1,8 @@
 //! Config parsing (roots + search weights) tests migrated for ORB-00250.
 
-use super::super::config::parse_task_context_docs_roots_from_config_toml;
-use super::super::{
+use super::super::config::{
     parse_adr_search_config_from_config_toml, parse_docs_roots_from_config_toml,
-    parse_docs_search_config_from_config_toml,
+    parse_docs_search_config_from_config_toml, parse_task_context_docs_roots_from_config_toml,
 };
 
 #[test]

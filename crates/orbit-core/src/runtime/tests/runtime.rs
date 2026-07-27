@@ -104,6 +104,28 @@ fn orbit_root_env_selects_workspace_but_not_global_root() {
     assert_eq!(resolved_roots.local_root, workspace_root);
 }
 
+#[test]
+fn explicit_root_flag_pins_global_registry_root() {
+    let _guard = ENV_LOCK.lock().expect("lock env");
+    let home = tempdir().expect("home tempdir");
+    let repo = tempdir().expect("repo tempdir");
+    let custom_root_parent = tempdir().expect("custom root parent");
+    let custom_root = custom_root_parent.path().join("custom-orbit");
+    seed_initialized_workspace_root(&custom_root);
+    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
+
+    let resolved_roots =
+        OrbitRuntime::resolve_roots_for_cwd(repo.path(), Some(custom_root.as_path()))
+            .expect("resolve roots with explicit --root");
+
+    // The `--root` flag pins both the shared and global roots to the isolated
+    // custom root, so `workspace list`/`show --root <custom>` read
+    // `<custom>/workspaces.json` rather than `$HOME/.orbit` [ORB-10218].
+    assert_eq!(resolved_roots.global_root, custom_root);
+    assert_eq!(resolved_roots.shared_root, custom_root);
+    assert_ne!(resolved_roots.global_root, home.path().join(".orbit"));
+}
+
 fn seed_initialized_workspace_root(path: &Path) {
     std::fs::create_dir_all(path.join("resources")).expect("create resources dir");
     std::fs::create_dir_all(path.join("tasks")).expect("create tasks dir");
@@ -198,6 +220,45 @@ fn global_default_activity_wins_over_workspace_shadow_in_execution_catalog() {
 }
 
 #[test]
+fn workspace_default_activity_cannot_claim_missing_global_default_name() {
+    let (_root, runtime, _global_root, workspace_root) = test_runtime();
+    write_activity(
+        &workspace_root.join("resources/activities/pr_open.yaml"),
+        "pr_open",
+        "workspace description",
+    );
+
+    let catalog = runtime.v2_activity_catalog().expect("activity catalog");
+
+    assert!(
+        catalog.get("pr_open").is_none(),
+        "workspace assets must never claim shipped default activity names"
+    );
+}
+
+#[test]
+fn activity_catalog_still_skips_retired_assets() {
+    let (_root, runtime, _global_root, workspace_root) = test_runtime();
+    let activities_dir = workspace_root.join("resources/activities");
+    std::fs::create_dir_all(&activities_dir).expect("create activities dir");
+    std::fs::write(
+        activities_dir.join("retired.yaml"),
+        "schemaVersion: 1\nkind: Activity\nmetadata:\n  name: retired\nspec: {}\n",
+    )
+    .expect("write retired activity");
+    write_activity(
+        &activities_dir.join("current.yaml"),
+        "current",
+        "current description",
+    );
+
+    let catalog = runtime.v2_activity_catalog().expect("activity catalog");
+
+    assert!(catalog.get("retired").is_none());
+    assert!(catalog.get("current").is_some());
+}
+
+#[test]
 fn duplicate_activities_within_one_catalog_directory_remain_invalid() {
     let (_root, runtime, _global_root, workspace_root) = test_runtime();
     let activities_dir = workspace_root.join("resources/activities");
@@ -263,18 +324,6 @@ fn activity_catalog_accepts_intentionally_empty_audit_wildcard() {
     let catalog = runtime.v2_activity_catalog().expect("activity catalog");
 
     assert!(catalog.get("audit_tools").is_some());
-}
-
-#[test]
-fn get_job_rejects_retired_v1_lookup() {
-    let (_root, runtime, _global_root, _workspace_root) = test_runtime();
-    let err = runtime
-        .get_job("legacy_job")
-        .expect_err("v1 job lookup should be fenced");
-
-    let message = err.to_string();
-    assert!(message.contains("v1 job lookup is retired"), "{message}");
-    assert!(message.contains("orbit job run"), "{message}");
 }
 
 #[test]

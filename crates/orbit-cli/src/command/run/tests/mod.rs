@@ -8,13 +8,16 @@ mod support;
 
 // Content moved from inline #[cfg(test)] mod tests in run/mod.rs per ORB-00221.
 
+use chrono::Utc;
 use clap::{Parser, error::ErrorKind};
+use orbit_common::types::{JobRun, JobRunState};
 use orbit_core::OrbitRuntime;
 use orbit_core::runtime::run_audit::RunAuditEvent;
 use serde_json::{Value, json};
 
-use crate::command::{Cli, Commands};
+use crate::command::{Cli, Commands, Execute};
 
+use super::cancel::RunCancelArgs;
 use super::*;
 
 fn parse_run(args: &[&str]) -> RunCommand {
@@ -36,12 +39,75 @@ fn assert_cli_rejects(args: &[&str], kind: ErrorKind, expected: &str) {
 }
 
 #[test]
+fn cancel_requires_confirmation_before_terminalizing_pending_run() {
+    let runtime = OrbitRuntime::in_memory().expect("runtime");
+    let workspace_id = runtime.workspace_id().expect("workspace id");
+    let store = runtime.sqlite_store().expect("store");
+    let now = Utc::now();
+    let run = JobRun {
+        run_id: "jrun-confirm-test".to_string(),
+        job_id: "cancel-test".to_string(),
+        attempt: 1,
+        state: JobRunState::Pending,
+        scheduled_at: now,
+        started_at: None,
+        finished_at: None,
+        duration_ms: None,
+        created_at: now,
+        pid: None,
+        pid_start_time: None,
+        input: None,
+        retry_source_run_id: None,
+        knowledge_metrics: None,
+        resolved_crew: None,
+        crew_model: None,
+        steps: Vec::new(),
+    };
+    store
+        .upsert_job_run_for_workspace(&workspace_id, &run, None)
+        .expect("insert pending run");
+
+    let error = RunCancelArgs {
+        run_id: run.run_id.clone(),
+        json: false,
+        confirm: false,
+    }
+    .execute(&runtime)
+    .expect_err("unconfirmed cancellation must refuse");
+    assert!(error.to_string().contains("--confirm"));
+    assert_eq!(
+        store
+            .get_job_run_for_workspace(&workspace_id, &run.run_id)
+            .expect("read pending run")
+            .expect("pending run")
+            .state,
+        JobRunState::Pending
+    );
+
+    RunCancelArgs {
+        run_id: run.run_id.clone(),
+        json: false,
+        confirm: true,
+    }
+    .execute(&runtime)
+    .expect("confirmed cancellation");
+    assert_eq!(
+        store
+            .get_job_run_for_workspace(&workspace_id, &run.run_id)
+            .expect("read cancelled run")
+            .expect("cancelled run")
+            .state,
+        JobRunState::Cancelled
+    );
+}
+
+#[test]
 fn parses_ship_auto_mode_defaults() {
     let command = parse_run(&["orbit", "run", "ship"]);
     match command.command {
         RunSubcommand::Ship(args) => {
             assert!(args.task_ids.is_empty());
-            assert_eq!(args.mode, super::ship::ShipMode::Pr);
+            assert_eq!(args.mode, None);
             assert_eq!(args.base, None);
         }
         _ => panic!("expected ship"),
@@ -54,7 +120,7 @@ fn parses_explicit_ship_defaults() {
     match command.command {
         RunSubcommand::Ship(args) => {
             assert_eq!(args.task_ids, vec!["T1", "T2"]);
-            assert_eq!(args.mode, super::ship::ShipMode::Pr);
+            assert_eq!(args.mode, None);
             assert_eq!(args.base, None);
         }
         _ => panic!("expected ship"),
@@ -67,7 +133,7 @@ fn parses_explicit_ship_mode_and_base() {
     match command.command {
         RunSubcommand::Ship(args) => {
             assert_eq!(args.task_ids, vec!["T1"]);
-            assert_eq!(args.mode, super::ship::ShipMode::Local);
+            assert_eq!(args.mode, Some(super::ship::ShipMode::Local));
             assert_eq!(args.base.as_deref(), Some("main"));
         }
         _ => panic!("expected ship"),

@@ -3,7 +3,8 @@ summary: "Agent Families — Vision"
 type: design
 title: "Agent Families — Vision"
 owner: human
-last_updated: 2026-05-16
+last_updated: 2026-07-11
+last_validated: 2026-07-27
 status: Draft
 feature: agent-families
 doc_role: vision
@@ -17,7 +18,7 @@ The long-term direction is to keep family discovery small and explicit while mov
 ## 1. Open Questions
 
 1. Should duel-plan participant selection read directly from the crew registry, or should it use a separate experiment matrix that references crews by name?
-2. When a user wants to replace only the planner or reviewer for a task, should Orbit add per-role task overrides or require defining another named crew?
+2. If cross-provider review returns, should it be an explicit duel/review workflow rather than part of crew selection?
 3. Should Orbit eventually version crew definitions so run-start can detect that a task pinned an older semantic lineup?
 4. How much validation should occur at task authoring time versus run-start when remote config stores are introduced?
 
@@ -37,9 +38,9 @@ Task artifacts already supported optional fields that can be omitted from older 
 
 ## 3. What May Be Distinctive
 
-Orbit treats crew resolution as part of task execution provenance rather than just configuration lookup. A run records the exact resolved crew and role models so later readers can understand what actually ran even after the workspace registry changes.
+Orbit treats crew resolution as part of task execution provenance rather than just configuration lookup. A run records the exact resolved crew and model so later readers can understand what actually ran even after the workspace registry changes.
 
-The distinction between family and crew also lets future workflows ask two different questions cleanly: "which executors are supported?" and "which concrete lineup should this job use?"
+The distinction between family and crew also lets future workflows ask two different questions cleanly: "which executors are supported?" and "which concrete provider-model should this job use?"
 
 ## 4. References
 

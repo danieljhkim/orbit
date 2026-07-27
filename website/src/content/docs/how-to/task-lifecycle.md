@@ -34,10 +34,10 @@ orbit task show "$TASK_ID" --fields artifacts
 
 ## Approve
 
-If the task is proposed, approve it:
+If the task is proposed, approve it into the backlog:
 
 ```bash
-orbit task approve "$TASK_ID"
+orbit task update "$TASK_ID" --status backlog
 ```
 
 ## Execute

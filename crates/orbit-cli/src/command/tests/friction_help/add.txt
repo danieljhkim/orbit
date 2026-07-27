@@ -1,0 +1,12 @@
+Append an Orbit friction report
+
+Usage: orbit friction add [OPTIONS] --body <BODY> --model <MODEL>
+
+Options:
+      --body <BODY>                Markdown body describing what happened and why it caused friction
+      --root <ROOT>                Override the Orbit root directory (highest precedence)
+      --tag <TAGS>                 Friction taxonomy tag; repeat or comma-separate for multiple tags
+      --during-task <DURING_TASK>  Optional task ID being worked on when friction occurred
+      --model <MODEL>              Agent family to attribute the record to (`codex`, `claude`, `gemini`, or `grok`)
+      --json                       Output as JSON
+  -h, --help                       Print help

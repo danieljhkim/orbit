@@ -1,7 +1,7 @@
 use chrono::Utc;
 use orbit_common::types::{OrbitError, TaskHistoryEntry, TaskType};
 use orbit_common::utility::selector::{
-    anchor_path, canonical_selector, canonical_selector_in_workspace, exists_in_workspace,
+    anchor_path, canonical_selector_in_workspace, exists_in_workspace,
 };
 use std::path::{Path, PathBuf};
 
@@ -26,20 +26,24 @@ pub(super) fn normalize_workspace_path(
     };
     let canonical_workspace = candidate.canonicalize().map_err(|error| {
         OrbitError::InvalidInput(format!(
-            "workspace_path '{}' must reference an existing directory inside the repository: {error}",
+            "workspace (`workspace_path` on the dashboard API) '{}' must be a filesystem path to \
+             an existing directory inside the repository — e.g. the repository root '.' — never a \
+             logical workspace id such as a bridge `ws_*` id: {error}",
             candidate.display()
         ))
     })?;
     if !canonical_workspace.is_dir() {
         return Err(OrbitError::InvalidInput(format!(
-            "workspace_path '{}' must reference a directory inside the repository",
+            "workspace (`workspace_path` on the dashboard API) '{}' must be a directory inside \
+             the repository, not a file",
             canonical_workspace.display()
         )));
     }
 
     if !canonical_workspace.starts_with(&canonical_repo_root) {
         return Err(OrbitError::InvalidInput(format!(
-            "workspace_path '{}' must stay within repository '{}'",
+            "workspace (`workspace_path` on the dashboard API) '{}' must be a filesystem path \
+             inside repository '{}', not outside it",
             canonical_workspace.display(),
             canonical_repo_root.display()
         )));
@@ -94,24 +98,6 @@ pub(crate) fn canonicalize_context_files_for_read(
         .iter()
         .filter_map(|entry| canonical_selector_in_workspace(entry, workspace_root).ok())
         .collect()
-}
-
-pub(crate) fn context_files_need_graph_warning(candidates: &[String], orbit_root: &Path) -> bool {
-    !orbit_root.join("knowledge/graph").is_dir()
-        && candidates.iter().any(|entry| {
-            canonical_selector(entry)
-                .ok()
-                .is_some_and(|selector| selector.starts_with("symbol:"))
-        })
-}
-
-pub(crate) fn emit_graph_unavailable_warning_if_needed(candidates: &[String], orbit_root: &Path) {
-    if context_files_need_graph_warning(candidates, orbit_root) {
-        tracing::warn!(
-            target: "orbit.task.context",
-            "knowledge graph is unavailable; selector validation is falling back to file-level anchor checks",
-        );
-    }
 }
 
 /// Compute advisory warnings for an `orbit.task.add` call based on the raw

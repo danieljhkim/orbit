@@ -3,9 +3,17 @@ use std::path::Path;
 use orbit_common::types::OrbitError;
 use rusqlite::Connection;
 
-use super::queries::workspace_by_id;
+use super::queries::{workspace_by_id, workspace_checkout_by_id};
 use super::util::normalize_path;
 
+/// Allocate an unused logical workspace id for `slug` + `path`.
+///
+/// A candidate counts as taken when *either* registry table already claims it:
+/// the logical `workspace_bindings` row or the machine-local
+/// `workspace_checkout_bindings` row. Checking only the logical table let the
+/// allocator hand back an id whose checkout row already existed, which then
+/// failed the caller's checkout-collision check instead of retrying with the
+/// next attempt (ORB-10507).
 pub(super) fn next_workspace_id_candidate(
     conn: &Connection,
     slug: &str,
@@ -13,7 +21,9 @@ pub(super) fn next_workspace_id_candidate(
 ) -> Result<String, OrbitError> {
     for attempt in 0..1000 {
         let candidate = workspace_id_candidate(slug, path, attempt);
-        if workspace_by_id(conn, &candidate)?.is_none() {
+        if workspace_by_id(conn, &candidate)?.is_none()
+            && workspace_checkout_by_id(conn, &candidate)?.is_none()
+        {
             return Ok(candidate);
         }
     }
@@ -52,9 +62,12 @@ pub(super) fn sanitize_slug(raw: &str) -> String {
 
 pub(super) fn validate_workspace_id(raw: &str) -> Result<String, OrbitError> {
     let trimmed = raw.trim();
+    if is_valid_logical_workspace_id(trimmed) {
+        return Ok(trimmed.to_string());
+    }
     let Some((slug, suffix)) = trimmed.rsplit_once('-') else {
         return Err(OrbitError::InvalidInput(format!(
-            "workspace_id '{trimmed}' must use <slug>-<6char> form"
+            "workspace_id '{trimmed}' must use canonical ws_<name> or legacy <slug>-<6char> form"
         )));
     };
     if !is_valid_workspace_slug(slug)
@@ -65,10 +78,21 @@ pub(super) fn validate_workspace_id(raw: &str) -> Result<String, OrbitError> {
             .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
     {
         return Err(OrbitError::InvalidInput(format!(
-            "workspace_id '{trimmed}' must use <slug>-<6char> form"
+            "workspace_id '{trimmed}' must use canonical ws_<name> or legacy <slug>-<6char> form"
         )));
     }
     Ok(trimmed.to_string())
+}
+
+fn is_valid_logical_workspace_id(value: &str) -> bool {
+    let Some(name) = value.strip_prefix("ws_") else {
+        return false;
+    };
+    !name.is_empty()
+        && name
+            .as_bytes()
+            .iter()
+            .all(|byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_'))
 }
 
 fn is_valid_workspace_slug(slug: &str) -> bool {

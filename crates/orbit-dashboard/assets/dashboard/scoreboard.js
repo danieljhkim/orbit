@@ -1,7 +1,7 @@
 // Orbit dashboard scoreboard-domain rendering.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, syncNodes, fetchJson } from './common.js';
+import { el, syncNodes, fetchJson, isAggregateView } from './common.js';
 import { navigateToRole } from './audit.js';
 
 // ORB-00337: canonical scoreboard windows (mirror of
@@ -20,6 +20,12 @@ function wireScoreboardWindowSelector() {
     const next = seg.dataset.window;
     if (!SCOREBOARD_WINDOWS.includes(next)) return;
     if (seg.classList.contains("on")) return; // no-op refetch
+    // ORB-00040: /api/scoreboard is per-workspace and 400s without a concrete
+    // workspace. The auto-refresh boot fetch is already guarded in app.js; this
+    // guards the user-initiated window re-fetch too, so selecting a window in the
+    // aggregate ("All workspaces") view is a no-op (the panel shows the
+    // placeholder) rather than flipping conn-status to red.
+    if (isAggregateView()) return;
     for (const peer of selector.querySelectorAll(".scoreboard-window-seg")) {
       peer.classList.remove("on");
     }
@@ -95,16 +101,14 @@ const DELIVERY_SCOREBOARD_COLUMNS = [
   { key: "tasks_completed", label: "completed", num: true },
 ];
 
-const REVIEW_SCOREBOARD_COLUMNS = [
+const PR_REVIEW_COLUMNS = [
   { key: "agent", label: "agent", num: false },
-  { key: "task_review.threads", label: "review threads", num: true },
   { key: "pr.review_comments", label: "pr rev", num: true },
 ];
 
 const KNOWLEDGE_SCOREBOARD_COLUMNS = [
   { key: "agent", label: "agent", num: false },
   { key: "knowledge.learnings_created", label: "learnings", num: true },
-  { key: "knowledge.learning_votes_received", label: "votes", num: true },
   { key: "knowledge.adrs_created", label: "adrs", num: true },
   { key: "knowledge.adrs_accepted", label: "accepted", num: true },
   { key: "knowledge.adrs_proposed_open", label: "proposed", num: true },
@@ -173,7 +177,7 @@ const PLANNING_SCOREBOARD_COLUMNS = [
 
 const ALL_SCOREBOARD_SECTIONS = [
   { title: "Delivery", badge: "tasks created · planned · completed", columns: DELIVERY_SCOREBOARD_COLUMNS },
-  { title: "Review", badge: "review threads · PR comments", columns: REVIEW_SCOREBOARD_COLUMNS },
+  { title: "Review", badge: "review threads · PR comments", columns: PR_REVIEW_COLUMNS },
   { title: "Knowledge", badge: "learnings · ADRs · votes", columns: KNOWLEDGE_SCOREBOARD_COLUMNS },
   { title: "Operations", badge: "tool calls · failures · friction", columns: OPERATIONS_SCOREBOARD_COLUMNS },
   { title: "Planning Duels", badge: "wins · losses · roles", columns: PLANNING_SCOREBOARD_COLUMNS },
@@ -282,10 +286,8 @@ function agentActivityTotal(agent) {
     asScoreboardNumber(agent?.tasks_created) +
     asScoreboardNumber(agent?.tasks_planned) +
     asScoreboardNumber(agent?.tasks_completed) +
-    asScoreboardNumber(agent?.task_review?.threads) +
     asScoreboardNumber(agent?.pr?.review_comments) +
     asScoreboardNumber(knowledge.learnings_created) +
-    asScoreboardNumber(knowledge.learning_votes_received) +
     asScoreboardNumber(knowledge.adrs_created) +
     asScoreboardNumber(knowledge.adrs_accepted) +
     asScoreboardNumber(knowledge.adrs_proposed_open) +
@@ -300,7 +302,6 @@ function knowledgeScore(agent) {
   const knowledge = agent?.knowledge || {};
   return (
     asScoreboardNumber(knowledge.learnings_created) +
-    asScoreboardNumber(knowledge.learning_votes_received) +
     asScoreboardNumber(knowledge.adrs_created) +
     asScoreboardNumber(knowledge.adrs_accepted) +
     asScoreboardNumber(knowledge.adrs_proposed_open)

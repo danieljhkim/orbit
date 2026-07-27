@@ -1,4 +1,4 @@
-// ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
+// Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
 use super::*;
@@ -14,7 +14,6 @@ pub(super) fn run_parallel(
             success: true,
             output: Value::Array(Vec::new()),
             message: None,
-            skipped: false,
         });
     }
     let inherited_parent_stack = ctx
@@ -81,7 +80,7 @@ pub(super) fn run_parallel(
         JoinMode::Any => "any",
         JoinMode::Quorum { .. } => "quorum",
     };
-    let _ = emit_job_event(
+    emit_job_event_lossy(
         &ctx.audit,
         ctx.task_id(),
         V2AuditEventKind::StepJoin {
@@ -114,7 +113,6 @@ pub(super) fn run_parallel(
         success: block_ok,
         output: out,
         message: None,
-        skipped: false,
     })
 }
 

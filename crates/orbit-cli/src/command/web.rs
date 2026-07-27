@@ -31,12 +31,17 @@ impl Execute for WebCommand {
 pub enum WebSubcommand {
     /// Run the Orbit dashboard
     Serve(orbit_dashboard::ServeArgs),
+    /// Open a remote workspace's dashboard over an SSH tunnel
+    Connect(orbit_dashboard::ConnectArgs),
 }
 
 impl Execute for WebSubcommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         match self {
             WebSubcommand::Serve(args) => orbit_dashboard::serve(runtime, args),
+            // `connect` is a client-side tunnel helper; the workspace lives on
+            // the remote, so it needs no local runtime.
+            WebSubcommand::Connect(args) => orbit_dashboard::connect(args),
         }
     }
 }

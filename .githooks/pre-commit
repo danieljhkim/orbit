@@ -12,6 +12,11 @@ if command -v ruff >/dev/null 2>&1; then
     git add -u
 fi
 
+if [ -x scripts/generate-doc-indexes.sh ]; then
+    scripts/generate-doc-indexes.sh
+    git add docs/INDEX.md
+fi
+
 if [ -f scripts/update_readme_scoreboard.py ]; then
     python3 scripts/update_readme_scoreboard.py || true
     git add README.md

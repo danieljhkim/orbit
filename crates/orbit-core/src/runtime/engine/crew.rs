@@ -1,3 +1,4 @@
+use orbit_common::types::activity_job::ProviderSource;
 use orbit_common::types::{
     Crew, CrewRoleAssignment, OrbitError, Task, all_agent_families, infer_agent_family_from_model,
     resolve_crew,
@@ -8,6 +9,36 @@ use serde_json::Value;
 use crate::OrbitRuntime;
 use crate::runtime::run_input::{non_empty, singular_task_id_from_input};
 
+/// Select the crew *name* to dispatch by the Constellation provider-resolution
+/// precedence (ORB-10091, contract §3): explicit > task_config >
+/// workspace_default > environment_default > system_default. Empty /
+/// whitespace-only values are skipped (not a selection). Returns the chosen
+/// name and the tier it came from; `None` only when no tier supplies a value.
+/// Pure and table-tested so the precedence cannot drift from the shared
+/// contract or from the `Provider::resolve` surface it mirrors.
+pub(crate) fn select_crew_name<'a>(
+    explicit: Option<&'a str>,
+    task_config: Option<&'a str>,
+    workspace_default: Option<&'a str>,
+    environment_default: Option<&'a str>,
+    system_default: Option<&'a str>,
+) -> Option<(&'a str, ProviderSource)> {
+    [
+        (explicit, ProviderSource::Explicit),
+        (task_config, ProviderSource::TaskConfig),
+        (workspace_default, ProviderSource::WorkspaceDefault),
+        (environment_default, ProviderSource::EnvironmentDefault),
+        (system_default, ProviderSource::SystemDefault),
+    ]
+    .into_iter()
+    .find_map(|(value, source)| {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| (value, source))
+    })
+}
+
 /// Runtime crew registry projection for dashboard/API consumers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConfiguredCrewRegistryProjection {
@@ -15,13 +46,15 @@ pub struct ConfiguredCrewRegistryProjection {
     pub crews: Vec<ConfiguredCrewProjection>,
 }
 
-/// Named crew and role-model strings from the active runtime configuration.
+/// Named crew and model string from the active runtime configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConfiguredCrewProjection {
     pub name: String,
-    pub planner_model: String,
-    pub implementer_model: String,
-    pub reviewer_model: String,
+    pub model: String,
+    pub provider: String,
+    pub backend: String,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
     pub is_default: bool,
 }
 
@@ -29,43 +62,46 @@ impl ConfiguredCrewProjection {
     fn from_crew(crew: &Crew, is_default: bool) -> Self {
         Self {
             name: crew.name.clone(),
-            planner_model: crew.planner.model.clone(),
-            implementer_model: crew.implementer.model.clone(),
-            reviewer_model: crew.reviewer.model.clone(),
+            model: crew.assignment.model.clone(),
+            provider: crew.assignment.provider.clone(),
+            backend: crew.assignment.backend.clone(),
+            description: crew.description.clone(),
+            tags: crew.tags.clone(),
             is_default,
         }
     }
 }
 
-/// Crew/role-model strings to surface on a task projection.
+/// Crew/model strings to surface on a task projection.
 ///
 /// Decouples projection consumers from the full `Crew` type so this struct can
 /// also be hydrated directly from persisted run-record fields, which carry only
-/// the model strings (not provider/backend).
+/// the model string (not provider/backend).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedCrewProjection {
     pub name: String,
-    pub planner_model: String,
-    pub implementer_model: String,
-    pub reviewer_model: String,
+    pub model: String,
 }
 
 impl ResolvedCrewProjection {
     fn from_crew(crew: Crew) -> Self {
         Self {
             name: crew.name,
-            planner_model: crew.planner.model,
-            implementer_model: crew.implementer.model,
-            reviewer_model: crew.reviewer.model,
+            model: crew.assignment.model,
         }
     }
 }
 
 impl OrbitRuntime {
     pub fn configured_crew_registry_projection(&self) -> ConfiguredCrewRegistryProjection {
-        let default_crew = self.context.default_crew().map(ToString::to_string);
+        let default_crew = self
+            .context
+            .settings()
+            .default_crew()
+            .map(ToString::to_string);
         let mut crews = self
             .context
+            .settings()
             .crews()
             .values()
             .map(|crew| {
@@ -86,7 +122,7 @@ impl OrbitRuntime {
         let Some(crew) = crew.map(str::trim).filter(|value| !value.is_empty()) else {
             return Ok(());
         };
-        resolve_crew(crew, self.context.crews()).map(|_| ())
+        resolve_crew(crew, self.context.settings().crews()).map(|_| ())
     }
 
     pub fn resolve_crew_for_task(
@@ -94,18 +130,25 @@ impl OrbitRuntime {
         cli_override: Option<&str>,
         task_crew: Option<&str>,
     ) -> Result<Crew, OrbitError> {
-        let selected = cli_override
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .or_else(|| task_crew.map(str::trim).filter(|value| !value.is_empty()))
-            .or_else(|| self.context.default_crew());
-        let Some(selected) = selected else {
+        // Runtime precedence is explicit > task_config > the default projected
+        // by RuntimeConfig. That projection has already resolved workspace >
+        // environment > system-default precedence, so lower tiers are not
+        // re-read here and cannot drift during a run.
+        let selection = select_crew_name(
+            cli_override,
+            task_crew,
+            self.context.settings().default_crew(),
+            None,
+            None,
+        );
+
+        let Some((selected, _source)) = selection else {
             return Err(OrbitError::InvalidInput(
                 "no crew selected; set [workflow].default_crew, task.crew, or pass crew"
                     .to_string(),
             ));
         };
-        resolve_crew(selected, self.context.crews())
+        resolve_crew(selected, self.context.settings().crews())
     }
 
     pub(crate) fn resolve_crew_for_run_input(&self, input: &Value) -> Result<Crew, OrbitError> {
@@ -124,7 +167,7 @@ impl OrbitRuntime {
     /// Resolve a crew/role-model projection for `orbit.task.show` consumers.
     ///
     /// Selection truth comes first: when the task points at a run record that
-    /// persisted the resolved crew, those four strings win — they reflect what
+    /// persisted the resolved crew, those two strings win — they reflect what
     /// was selected for routing, even if the workspace registry has been edited
     /// since. "Who actually ran?" projections read invocation records instead.
     ///
@@ -138,27 +181,16 @@ impl OrbitRuntime {
     ) -> Result<Option<ResolvedCrewProjection>, OrbitError> {
         if let Some(run_id) = task.job_run_id.as_deref()
             && let Some(run) = self.get_job_run_backend(run_id)?
-            && let (
-                Some(resolved_crew),
-                Some(planner_model),
-                Some(implementer_model),
-                Some(reviewer_model),
-            ) = (
-                run.resolved_crew,
-                run.planner_model,
-                run.implementer_model,
-                run.reviewer_model,
-            )
+            && let (Some(resolved_crew), Some(model)) = (run.resolved_crew, run.crew_model)
         {
             return Ok(Some(ResolvedCrewProjection {
                 name: resolved_crew,
-                planner_model,
-                implementer_model,
-                reviewer_model,
+                model,
             }));
         }
 
-        let has_resolvable_name = task.crew.is_some() || self.context.default_crew().is_some();
+        let has_resolvable_name =
+            task.crew.is_some() || self.context.settings().default_crew().is_some();
         if !has_resolvable_name {
             return Ok(None);
         }
@@ -177,12 +209,10 @@ impl OrbitRuntime {
         tracing::info!(
             run_id,
             resolved_crew = %crew.name,
-            planner_model = %crew.planner.model,
-            implementer_model = %crew.implementer.model,
-            reviewer_model = %crew.reviewer.model,
+            crew_model = %crew.assignment.model,
             "crew resolved for run",
         );
-        self.stores().jobs().record_run_crew(run_id, &crew)?;
+        self.stores().jobs().record_job_run_crew(run_id, &crew)?;
         Ok(crew)
     }
 
@@ -209,14 +239,14 @@ impl OrbitRuntime {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            && let Ok(crew) = resolve_crew(crew_name, self.context.crews())
-            && let Some(family) = family_from_assignment(&crew.implementer)
+            && let Ok(crew) = resolve_crew(crew_name, self.context.settings().crews())
+            && let Some(family) = family_from_assignment(&crew.assignment)
         {
             return Ok((Some(family.clone()), Some(family)));
         }
 
         if let Some(family) = run
-            .implementer_model
+            .crew_model
             .as_deref()
             .and_then(infer_agent_family_from_model)
         {
@@ -236,9 +266,7 @@ impl OrbitRuntime {
         tracing::info!(
             task_id,
             resolved_crew = %crew.name,
-            planner_model = %crew.planner.model,
-            implementer_model = %crew.implementer.model,
-            reviewer_model = %crew.reviewer.model,
+            crew_model = %crew.assignment.model,
             "crew resolved for task start",
         );
         Ok(crew)

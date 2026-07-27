@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::process::Output;
 
 use assert_cmd::cargo::cargo_bin_cmd;
+use orbit_common::test_env::harden_dir;
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
@@ -30,6 +31,33 @@ fn cli_docs_list_and_show_json() {
     let shown = workspace.run_json(&["docs", "show", "docs/pattern.md", "--json"], "docs show");
     assert_eq!(shown["frontmatter"]["type"], "pattern");
     assert!(shown["body"].as_str().expect("body").contains("# Guard"));
+}
+
+#[test]
+fn cli_docs_migrate_is_dry_run_by_default_and_confirm_applies() {
+    let workspace = TestWorkspace::new();
+    workspace.write(
+        "docs/design-patterns/legacy.md",
+        "# Legacy Pattern\n\nBody\n",
+    );
+    let path = workspace.work.join("docs/design-patterns/legacy.md");
+    let before = fs::read_to_string(&path).expect("read legacy doc");
+
+    let preview = workspace.run_json(&["docs", "migrate", "--json"], "docs migrate preview");
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(
+        fs::read_to_string(&path).expect("read previewed doc"),
+        before
+    );
+
+    let applied = workspace.run_json(
+        &["docs", "migrate", "--confirm", "--json"],
+        "docs migrate apply",
+    );
+    assert_eq!(applied["dry_run"], false);
+    let after = fs::read_to_string(&path).expect("read migrated doc");
+    assert_ne!(after, before);
+    assert!(after.starts_with("---\n"));
 }
 
 #[test]
@@ -872,6 +900,7 @@ struct TestWorkspace {
 impl TestWorkspace {
     fn new() -> Self {
         let temp = tempdir().expect("tempdir");
+        harden_dir(temp.path());
         let home = temp.path().join("home");
         let work = temp.path().join("work");
         let companion = temp.path().join("mock-companion");
@@ -1125,6 +1154,13 @@ fn run_orbit_with_companion(
         .env_remove("ORBIT_ROOT")
         .env_remove("ORBIT_SEARCH_COMPANION")
         .env_remove("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE")
+        // These fixtures seed learnings via `orbit learning add`, which the
+        // [ORB-10364] caller-role gate refuses in an agent context. A child
+        // inherits whatever the suite was launched with, so declare the human
+        // context explicitly rather than depending on a bare shell (ORB-10350).
+        .env_remove("ORBIT_AGENT_NAME")
+        .env_remove("ORBIT_AGENT_MODEL")
+        .env_remove("ORBIT_LEARNING_AUTHOR")
         .args(args);
     if let Some(path) = companion {
         cmd.env("ORBIT_SEARCH_COMPANION", path)

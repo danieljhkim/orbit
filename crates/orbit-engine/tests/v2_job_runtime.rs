@@ -1,0 +1,310 @@
+#![allow(missing_docs)]
+#![cfg(feature = "replay")]
+// Integration fixtures exercise public behavior and unwrap setup invariants.
+#![allow(
+    clippy::expect_used,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
+
+//! Phase 3 end-to-end integration coverage for the v2 job DAG executor.
+//!
+//! Runs each sample under `crates/orbit-core/assets/jobs/` through
+//! `orbit_engine::execute_job` and asserts the expected §7 envelope
+//! events appear (or — for the denial sample — don't appear).
+//!
+//! No credentials needed: the loop + denial samples use the replay path
+//! (`ORBIT_V2_REPLAY{,_FIXTURE}`).
+//!
+//! Runs under `cargo nextest run -p orbit-engine --features replay --test v2_job_runtime`.
+
+use std::env;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use orbit_agent::loop_engine::{InMemorySink, LoopAuditEvent};
+use orbit_common::types::activity_job::{V2AuditEventKind, load_job_asset};
+use orbit_engine::{
+    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2RuntimeHost, V2SqliteSink, execute_job,
+    reset_replay_transport,
+};
+use serde_json::Value;
+
+#[test]
+fn job_runtime_regressions() -> Result<(), String> {
+    let samples_dir = workspace_root().join("crates/orbit-core/assets/jobs/examples");
+    let fixtures_dir = samples_dir.join("fixtures");
+    let tmp_audit = tempfile::tempdir().map_err(|err| err.to_string())?;
+    smoke_loop_converge(&samples_dir, &fixtures_dir, tmp_audit.path())?;
+    smoke_denial_no_retry(&samples_dir, tmp_audit.path())
+}
+
+// ---------------------------------------------------------------------------
+// Smokes
+// ---------------------------------------------------------------------------
+
+fn smoke_loop_converge(samples: &Path, fixtures: &Path, audit_root: &Path) -> Result<(), String> {
+    let fixture_path = fixtures.join("loop_review_fix.json");
+    reset_replay_transport();
+    unsafe {
+        env::set_var(
+            "ORBIT_V2_REPLAY_FIXTURE",
+            fixture_path.display().to_string(),
+        );
+    }
+
+    let events_res = run_sample(
+        samples.join("loop_review_fix.yaml"),
+        audit_root,
+        "loop-converge",
+        Value::Null,
+        true,
+        &[],
+    );
+
+    let (events, loop_events) = match events_res {
+        Ok(events) => {
+            let loop_events = take_last_loop_events();
+            (events, loop_events)
+        }
+        Err(err) => {
+            unsafe {
+                env::remove_var("ORBIT_V2_REPLAY_FIXTURE");
+            }
+            return Err(err);
+        }
+    };
+    unsafe {
+        env::remove_var("ORBIT_V2_REPLAY_FIXTURE");
+    }
+
+    let iter_starts: Vec<_> = events
+        .iter()
+        .filter(|e| e.envelope.event_type == "loop.iteration.start")
+        .collect();
+    if iter_starts.len() < 2 {
+        return Err(format!(
+            "expected >=2 loop.iteration.start events, got {}",
+            iter_starts.len()
+        ));
+    }
+    let iter_ends: Vec<_> = events
+        .iter()
+        .filter(|e| e.envelope.event_type == "loop.iteration.end")
+        .collect();
+    let broke = iter_ends.iter().any(|e| {
+        matches!(
+            &e.kind,
+            V2AuditEventKind::LoopIterationEnd { broke, .. } if *broke
+        )
+    });
+    if !broke {
+        return Err("no loop.iteration.end reported broke=true".into());
+    }
+
+    // Session persistence: every tool.call.* from loop_events should share
+    // the same session_id across iterations.
+    let session_ids: Vec<String> = loop_events
+        .iter()
+        .filter_map(|e| match e {
+            LoopAuditEvent::ToolCallRequested { session_id, .. } => Some(session_id.clone()),
+            LoopAuditEvent::ToolCallResult { session_id, .. } => Some(session_id.clone()),
+            _ => None,
+        })
+        .collect();
+    if session_ids.len() < 2 {
+        return Err(format!(
+            "expected >=2 tool.call.* events (one per iteration), got {}",
+            session_ids.len()
+        ));
+    }
+    let first = &session_ids[0];
+    if !session_ids.iter().all(|s| s == first) {
+        return Err(format!(
+            "session_id varies across iterations: {session_ids:?}"
+        ));
+    }
+    Ok(())
+}
+
+fn smoke_denial_no_retry(samples: &Path, audit_root: &Path) -> Result<(), String> {
+    reset_replay_transport();
+    unsafe {
+        env::set_var("ORBIT_V2_REPLAY", "tool_denial");
+    }
+    let events_res = run_sample(
+        samples.join("tool_denial_no_retry.yaml"),
+        audit_root,
+        "denial",
+        Value::Null,
+        false, // the job returns false because ToolDenied propagates as error
+        &[],
+    );
+    unsafe {
+        env::remove_var("ORBIT_V2_REPLAY");
+    }
+
+    // run_sample returns Err when the job call errors; in this sample the
+    // error IS the expected outcome. Inspect the persisted audit writer.
+    let events = match events_res {
+        Ok(events) => events,
+        Err(err) if err.contains("execute_job errored: tool") => take_last_events(),
+        Err(err) => return Err(err),
+    };
+
+    if find_event(&events, "tool.denied").is_none() {
+        return Err("no tool.denied event emitted".into());
+    }
+    let retry_for_step = events.iter().any(|e| {
+        e.envelope.event_type == "step.retry"
+            && matches!(&e.kind, V2AuditEventKind::StepRetry { step_id, .. } if step_id == "denied_call")
+    });
+    if retry_for_step {
+        return Err("step.retry emitted for `denied_call` — denial must skip retry".into());
+    }
+    let denied = events.iter().any(|e| {
+        e.envelope.event_type == "step.denied"
+            && matches!(&e.kind, V2AuditEventKind::StepDenied { step_id, .. } if step_id == "denied_call")
+    });
+    if !denied {
+        return Err("no step.denied event for `denied_call`".into());
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Run a sample through `execute_job`, return the emitted envelope events,
+/// and stash the underlying loop-engine events for callers that inspect them.
+fn run_sample(
+    path: PathBuf,
+    audit_root: &Path,
+    run_id: &str,
+    input: Value,
+    expect_success: bool,
+    _filters: &[&str],
+) -> Result<Vec<orbit_common::types::activity_job::V2AuditEvent>, String> {
+    let yaml = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
+    let spec = load_job_asset(&yaml)
+        .map_err(|e| format!("load {path:?}: {e}"))?
+        .spec;
+
+    let blob_dir = audit_root.join("blobs");
+    let _ = std::fs::create_dir_all(&blob_dir);
+    let inner = Arc::new(InMemorySink::new(blob_dir));
+    let envelope = Arc::new(V2SqliteSink::for_audit_root(
+        orbit_store::Store::open_in_memory().map_err(|e| format!("sinks: {e}"))?,
+        "ws_smoke",
+        run_id,
+        "smoke-agent",
+        None,
+        audit_root,
+    ));
+    let writer = Arc::new(
+        V2AuditWriter::new(run_id, "smoke-agent", inner.clone() as Arc<_>)
+            .with_envelope_sink(envelope),
+    );
+
+    let result = execute_job(&spec, input, run_id, writer.clone(), &StubHost);
+
+    // Stash loop-engine events for loop/denial smokes.
+    *LAST_LOOP.lock().unwrap() = inner.events();
+
+    let events = writer
+        .events_snapshot()
+        .map_err(|e| format!("snapshot: {e:?}"))?;
+    stash_envelope_events(events.clone());
+
+    match result {
+        Ok(outcome) => {
+            if expect_success && !outcome.success {
+                return Err(format!("expected success, got success={}", outcome.success));
+            }
+            if !expect_success && outcome.success {
+                return Err("expected non-success, got success=true".into());
+            }
+            Ok(events)
+        }
+        Err(err) => Err(format!("execute_job errored: {err}")),
+    }
+}
+
+fn find_event<'a>(
+    events: &'a [orbit_common::types::activity_job::V2AuditEvent],
+    event_type: &str,
+) -> Option<&'a orbit_common::types::activity_job::V2AuditEvent> {
+    events.iter().find(|e| e.envelope.event_type == event_type)
+}
+
+// Last-seen-buffers so the denial smoke can inspect events after a failed
+// `execute_job` call bubbles up as Err().
+use std::sync::Mutex;
+static LAST_ENVELOPE: Mutex<Vec<orbit_common::types::activity_job::V2AuditEvent>> =
+    Mutex::new(Vec::new());
+static LAST_LOOP: Mutex<Vec<LoopAuditEvent>> = Mutex::new(Vec::new());
+
+fn stash_envelope_events(events: Vec<orbit_common::types::activity_job::V2AuditEvent>) {
+    *LAST_ENVELOPE.lock().unwrap() = events;
+}
+
+fn take_last_events() -> Vec<orbit_common::types::activity_job::V2AuditEvent> {
+    LAST_ENVELOPE.lock().unwrap().clone()
+}
+
+fn take_last_loop_events() -> Vec<LoopAuditEvent> {
+    LAST_LOOP.lock().unwrap().clone()
+}
+
+// ---------------------------------------------------------------------------
+// Stub host
+// ---------------------------------------------------------------------------
+
+struct StubHost;
+
+impl V2RuntimeHost for StubHost {
+    fn run_deterministic(
+        &self,
+        action: &str,
+        _config: &Value,
+        _input: &Value,
+        _tool_context: orbit_tools::ToolContext,
+    ) -> Result<Value, DispatchError> {
+        Err(DispatchError::DeterministicActionNotRegistered(
+            action.into(),
+        ))
+    }
+
+    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
+        Err(DispatchError::AgentLoopFailed(
+            "smoke host: no credentials".into(),
+        ))
+    }
+
+    fn resolve_cli_executor(&self, _provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
+        Err(DispatchError::CliInvocationFailed(
+            "smoke host: no CLI mapping".into(),
+        ))
+    }
+
+    fn tool_context_for_activity(
+        &self,
+        _run_id: Option<&str>,
+        _fs_profile: Option<&str>,
+        _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
+        _proc_allowed_programs: Option<&[String]>,
+    ) -> orbit_tools::ToolContext {
+        orbit_tools::ToolContext::default()
+    }
+}
+
+fn workspace_root() -> PathBuf {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root")
+        .to_path_buf()
+}

@@ -33,10 +33,13 @@ mod tests;
 
 /// Checks that `path` resolves inside the context workspace root.
 ///
-/// Symlink escapes are blocked because the path is canonicalized before the check.
-/// For paths that do not yet exist (e.g. `fs.write` creating a new file), the
-/// nearest existing ancestor is canonicalized and the remaining components are
-/// appended before the check.
+/// Symlink escapes are blocked because the path is resolved via
+/// [`orbit_policy::resolve_symlinks`] before the check — the same resolver the
+/// policy engine uses ([ORB-00418]), so the two layers cannot drift. It follows
+/// dangling links (an `O_CREAT` open through one creates the link's *target*)
+/// and, for paths that do not yet exist (e.g. `fs.write` creating a new file),
+/// canonicalizes the nearest existing ancestor and appends the remaining
+/// components before the check.
 ///
 /// Returns `Err(PolicyDenied)` when no workspace root is set (fail-closed) or
 /// when the canonical path is outside the root. Returns `Ok` only when the
@@ -54,7 +57,7 @@ pub(crate) fn check_workspace_boundary(
         }
     };
 
-    let canonical = canonicalize_with_missing_tail(path)?;
+    let canonical = orbit_policy::resolve_symlinks(path)?;
 
     // Canonicalize the workspace root so symlinks (e.g. /var -> /private/var on
     // macOS) don't cause false negatives when comparing against the canonical path.
@@ -72,40 +75,11 @@ pub(crate) fn check_workspace_boundary(
     Ok(canonical)
 }
 
-fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, OrbitError> {
-    if path.exists() {
-        return path
-            .canonicalize()
-            .map_err(|e| OrbitError::Io(format!("failed to canonicalize path: {e}")));
-    }
-
-    let mut missing_components = Vec::new();
-    let mut existing_ancestor = path;
-    while !existing_ancestor.exists() {
-        let name = existing_ancestor
-            .file_name()
-            .ok_or_else(|| OrbitError::InvalidInput("path has no file name".to_string()))?;
-        missing_components.push(name.to_os_string());
-        existing_ancestor = existing_ancestor.parent().ok_or_else(|| {
-            OrbitError::InvalidInput("path has no existing parent directory".to_string())
-        })?;
-    }
-
-    let mut canonical = existing_ancestor
-        .canonicalize()
-        .map_err(|e| OrbitError::Io(format!("failed to canonicalize parent directory: {e}")))?;
-    for component in missing_components.iter().rev() {
-        canonical.push(component);
-    }
-    Ok(canonical)
-}
-
 pub(crate) fn check_file_lock(
     _ctx: &ToolContext,
     _canonical_path: &Path,
 ) -> Result<(), OrbitError> {
-    // File-level locking removed; graph-level locking is handled by
-    // the shared lock store at .orbit/knowledge/graph_locks.json.
+    // File-level locking was removed; policy checks still run below.
     Ok(())
 }
 
@@ -144,13 +118,20 @@ fn enforce_fs_policy(
     let Some(policy_engine) = ctx.policy_engine.as_ref() else {
         return Ok(None);
     };
+    let workspace_root = ctx.workspace_root.as_ref().ok_or_else(|| {
+        OrbitError::PolicyDenied("workspace_root is not set; filesystem access denied".to_string())
+    })?;
 
-    let path = workspace_relative_path(ctx, canonical_path)?;
-    let evaluation = policy_engine.check(profile.to_string(), op, path.clone())?;
+    // [ORB-00418] Route through the policy engine's symlink-safe evaluation so
+    // resolution is enforced by the security-critical layer itself, not just by
+    // this caller's earlier canonicalization. `canonical_path` is already
+    // resolved, so re-resolution here is idempotent.
+    let evaluation =
+        policy_engine.check_resolved(workspace_root, profile.to_string(), op, canonical_path)?;
     let allowance = FsPolicyAllowance {
         profile: evaluation.profile,
         op: evaluation.operation,
-        path,
+        path: evaluation.path,
         matched_rule: evaluation.matched_rule,
     };
 
@@ -195,26 +176,4 @@ fn emit_fs_event(
         allowed,
         matched_rule: allowance.matched_rule.clone(),
     })
-}
-
-fn workspace_relative_path(ctx: &ToolContext, canonical_path: &Path) -> Result<String, OrbitError> {
-    let workspace_root = ctx.workspace_root.as_ref().ok_or_else(|| {
-        OrbitError::PolicyDenied("workspace_root is not set; filesystem access denied".to_string())
-    })?;
-    let canonical_root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.clone());
-    let relative = canonical_path.strip_prefix(&canonical_root).map_err(|_| {
-        OrbitError::PolicyDenied(format!(
-            "path is outside workspace: {}",
-            canonical_path.display()
-        ))
-    })?;
-
-    let rendered = relative.to_string_lossy().replace('\\', "/");
-    if rendered.is_empty() {
-        Ok(".".to_string())
-    } else {
-        Ok(format!("./{rendered}"))
-    }
 }

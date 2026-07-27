@@ -2,7 +2,7 @@
 
 Runbook for cutting an Orbit release. Codified from [T20260510-23] (v0.4.0).
 
-See also [docs/RELEASE.md](docs/RELEASE.md) for the npm package, plugin manifest, and GitHub Release publishing steps.
+See also [docs/runbooks/release.md](docs/runbooks/release.md) for the npm package, plugin manifest, and GitHub Release publishing steps.
 
 ## Versioning policy
 
@@ -17,6 +17,7 @@ Pre-1.0 semver: `0.<minor>.<patch>`.
 - MCP tool input or output schema change (including response shape — array → object counts).
 - Activity/job YAML schema removal, rename, or load-time validation that rejects previously-parseable input.
 - Task storage layout or task-field enum change requiring data migration.
+- Any other `.orbit/` on-disk layout change existing workspaces cannot absorb as-is (see [Breaking `.orbit/` layout changes](#breaking-orbit-layout-changes) — these now **require** a layout-migration registry entry).
 - Seeded asset removal (skill, activity, job) that external agent prompts may reference.
 - Workspace knowledge-graph schema version bump that invalidates cached selectors.
 
@@ -29,6 +30,30 @@ Pre-1.0 semver: `0.<minor>.<patch>`.
 - New optional fields with safe defaults.
 
 When in doubt, ask the human during the breaking-change confirmation step (see below) — defaulting conservative, but don't auto-promote behavior tightening to breaking.
+
+### Breaking `.orbit/` layout changes
+
+Since ORB-10012, on-disk `.orbit/` state is versioned end to end and a breaking layout change **requires shipping the migration with it** — an undocumented break is no longer an option:
+
+- **SQLite store schema** changes go through the versioned ledger in `crates/orbit-store/src/sqlite/migration/ledger.rs` (`MIGRATIONS` + `SUPPORTED_SCHEMA_VERSION`, ORB-10003).
+- **Everything else about the `.orbit/` layout** — directory structure, non-SQLite state files, log/index locations, persisted file formats — goes through the workspace-layout registry in `crates/orbit-store/src/layout/mod.rs`: append a `LAYOUT_MIGRATIONS` entry (version, name, description, apply fn over the workspace `.orbit` dir) and bump `SUPPORTED_LAYOUT_VERSION`, in the same PR as the layout change.
+
+Layout migrations must be **idempotent or staged (write-new-then-swap)**: they auto-apply during the workspace-open pre-flight and re-run after a crash (the `state/layout.version` marker only advances after an entry's apply succeeds). A workspace written by a newer orbit refuses to open under an older binary (downgrade guard), and `orbit migrate --dry-run` lists pending migrations — with a backup hint — before an upgrade applies them.
+
+Such a change is still **breaking** for versioning purposes (bump minor) and must be listed under Breaking Changes; the registry entry is what makes it *survivable*, not what makes it non-breaking.
+
+### CHANGELOG archiving
+
+On a **major** release, the CHANGELOG history released before that version is archived under `docs/changelogs/` and `CHANGELOG.md` starts fresh (the new version's section, plus a blank `## Unreleased`). Between major releases, `CHANGELOG.md` accumulates every released section and is never split.
+
+Under the versioning policy above, the current 0.x line has no major bump — every release, including breaking ones, is a `0.<minor>.<patch>` bump. So the archive trigger **does not exist yet**: a breaking `0.9.2 → 0.10.0` (or any other `0.x → 0.(x+1).0`) release does not archive, no matter how large `CHANGELOG.md` has grown. The convention first applies at `1.0.0`, and at each major release after that. Until then, `CHANGELOG.md` accumulates unconditionally.
+
+ORB-10429 executed this archive ahead of `0.10.0` and produced a validated, working diff shape before its PR was rejected — on timing (there was no major-release trigger), not on the mechanism itself. Reuse that shape rather than re-deriving it, once a real major release triggers this:
+
+- `CHANGELOG.md` keeps its exact name and repo-root location; the archive gets the new name and location, never the live file. Four things bind to `CHANGELOG.md`'s current path and must keep resolving: `scripts/check-changelog-style.sh` (hardcodes `$repo_root/CHANGELOG.md`), the convention-file allowlist in `crates/orbit-core/src/command/task/paths.rs`, the never-modify list in `.orbit/auto_tasks/doc-duties.yaml`, and the references to it from this file, `CONTRIBUTING.md`, `CLAUDE.md`, ADR-0176, and ADR-0210.
+- Relocation of released sections into `docs/changelogs/` is byte-for-byte — stale task-id citations and inconsistent old bullet shapes are provenance, not defects, and must survive the move unedited.
+- The live `## Unreleased` section never moves; only already-released `## <X.Y.Z>` sections are archived.
+- Cross-link the two locations so neither reads as a dead end: the archive file links back to `CHANGELOG.md`, and `CHANGELOG.md` links forward to `docs/changelogs/` once that directory exists.
 
 ## Release checklist
 
@@ -61,6 +86,16 @@ Bullet shape:
 ```
 
 Group related task IDs into a single themed bullet rather than emitting one bullet per task. Cite the lead task ID only; skip commit SHAs.
+
+#### Compiled at release time, not accumulated per-PR
+
+Task execution never touches `CHANGELOG.md` — no PR adds an `## Unreleased` bullet. Instead, the release drafter compiles the new `## <X.Y.Z>` section directly from `git log v<prev>..HEAD` (step 1's survey) plus the cited Orbit task IDs, using the same bullet shape:
+
+- Format: `- **Theme**: 1–2 sentences that read in isolation. ([ORB-XXXXX])`. Hard cap **~50 words per bullet** (the `scripts/check-changelog-style.sh` guardrail fails past ~60 words or 3 physical lines).
+- Migration steps, rationale, rejected alternatives, and test inventories live in the cited Orbit task / ADR / commit message — **the task ID is the pointer, don't duplicate the detail here.** Anyone who wants the full story follows the ID.
+- **Breaking changes** get one extra line max, with the migration as a phrase (`x removed → use y`). Multi-step migration guides go in the task or docs, not the CHANGELOG.
+
+`scripts/check-changelog-style.sh` still lints whatever lands under `## Unreleased`, so it's worth drafting bullets there first if that helps you iterate before moving them into the version section — but that section is scratch space at release time now, not a per-PR accumulation target. Released `## <X.Y.Z>` sections are frozen history and are never reflowed.
 
 ### 3. Confirm breaking changes with the human
 

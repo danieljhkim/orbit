@@ -1,10 +1,13 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime, TaskRelatedDoc, build_task_status_index};
+use orbit_core::{OrbitError, OrbitRuntime, TaskRelatedDoc};
 use serde_json::Value;
 
 use crate::command::Execute;
 
-use super::output::{print_task_fields, task_fields_to_json, task_to_json_for_runtime};
+use super::output::{
+    is_human_visible_history_event, print_task_fields, task_fields_to_json,
+    task_to_json_for_runtime,
+};
 
 #[derive(Args)]
 pub struct TaskShowArgs {
@@ -31,7 +34,7 @@ pub struct TaskShowArgs {
 impl Execute for TaskShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let task = runtime.get_task(&self.id)?;
-        let status_by_id = build_task_status_index(&runtime.list_tasks()?);
+        let status_by_id = runtime.task_status_index()?;
         let fields = normalize_task_show_fields(&self.fields)?;
 
         if !fields.is_empty() {
@@ -145,9 +148,13 @@ impl Execute for TaskShowArgs {
                 println!("{} {}", bold("Implemented By:"), implemented_by);
             }
             let history = runtime.get_task_history(&task.id)?;
-            if !history.is_empty() {
+            let visible_history: Vec<_> = history
+                .iter()
+                .filter(|entry| is_human_visible_history_event(&entry.event))
+                .collect();
+            if !visible_history.is_empty() {
                 println!("{}", bold("History:"));
-                for entry in &history {
+                for entry in visible_history {
                     if let Some(note) = &entry.note {
                         println!(
                             "  {} {}: {} ({})",

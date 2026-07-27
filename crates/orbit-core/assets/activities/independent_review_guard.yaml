@@ -1,0 +1,46 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: independent_review_guard
+spec:
+  type: deterministic
+  description: >
+    Require an independent review verdict bound to the exact candidate SHA
+    published by the parent PR pipeline, and prove from durable task state that
+    an approval covered every acceptance criterion and reconciled the newest
+    task comment authority.
+  input_schema_json:
+    type: object
+    required: [reviewed_head_sha, candidate_head_sha, task_ids]
+    properties:
+      verdict:
+        type: string
+        enum: [approve, request_changes]
+      reviewed_head_sha:
+        type: string
+      candidate_head_sha:
+        type: string
+      # The bundle comes from the parent pipeline input, so the set of criteria
+      # that must be covered cannot be narrowed by the reviewer being checked.
+      task_ids:
+        type: array
+        items:
+          type: string
+  output_schema_json:
+    type: object
+    required: [verdict, reviewed_head_sha, exact_head, criteria_covered]
+    properties:
+      verdict:
+        type: string
+      reviewed_head_sha:
+        type: string
+      exact_head:
+        type: boolean
+      criteria_covered:
+        type: integer
+      tasks_reviewed:
+        type: array
+        items:
+          type: object
+  action: independent_review_guard
+  config: {}

@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_core::{
     EvidenceKind, Learning, LearningCreateParams, LearningEvidence, LearningScope, LearningStatus,
     OrbitRuntime,
@@ -29,7 +30,7 @@ fn seed_learning(runtime: &OrbitRuntime, summary: &str) -> Learning {
                 kind: EvidenceKind::Task,
                 reference: "ORB-00061".to_string(),
             }],
-            created_by: Some("gpt-5.5".to_string()),
+            created_by: Some(TEST_CODEX_MODEL.to_string()),
             priority: Some(3),
         })
         .expect("seed learning")
@@ -57,7 +58,7 @@ async fn request_supersede(
     };
 
     router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(request)
         .await
         .expect("response")
@@ -161,7 +162,7 @@ async fn list_learnings_returns_stats_and_rows() {
         .expect("supersede fixture");
 
     let response = router()
-        .with_state(Arc::new(runtime))
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
         .oneshot(
             Request::builder()
                 .method(Method::GET)
@@ -178,4 +179,120 @@ async fn list_learnings_returns_stats_and_rows() {
     assert_eq!(payload["stats"]["superseded"], 1);
     assert!(payload["stats"]["last_indexed"].as_str().is_some());
     assert_eq!(payload["items"].as_array().expect("items").len(), 2);
+}
+
+async fn request_update(
+    runtime: OrbitRuntime,
+    id: &str,
+    origin: Option<&str>,
+    body: Option<Value>,
+) -> axum::response::Response {
+    let mut builder = Request::builder()
+        .method(Method::PATCH)
+        .uri(format!("/learnings/{id}"));
+    if let Some(origin) = origin {
+        builder = builder.header(header::ORIGIN, origin);
+    }
+    let request = if let Some(body) = body {
+        builder
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("request")
+    } else {
+        builder.body(Body::empty()).expect("request")
+    };
+
+    router()
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(request)
+        .await
+        .expect("response")
+}
+
+#[tokio::test]
+async fn update_requires_localhost_origin() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let learning = seed_learning(&runtime, "Cross-origin learning");
+
+    let response = request_update(
+        runtime.clone(),
+        &learning.id,
+        None,
+        Some(json!({ "summary": "Updated" })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let stored = runtime.get_learning(&learning.id).expect("read learning");
+    assert_eq!(stored.summary, "Cross-origin learning");
+}
+
+#[tokio::test]
+async fn update_rejects_empty_body() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let learning = seed_learning(&runtime, "Empty patch learning");
+
+    let response = request_update(
+        runtime,
+        &learning.id,
+        Some("http://localhost:7878"),
+        Some(json!({})),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn update_replaces_summary_and_scope_tags() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let learning = seed_learning(&runtime, "Original learning");
+
+    let response = request_update(
+        runtime.clone(),
+        &learning.id,
+        Some("http://localhost:7878"),
+        Some(json!({
+            "summary": "Curated learning",
+            "scope": { "paths": ["crates/orbit-dashboard/**"], "tags": ["api", "http"] },
+        })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_json(response).await;
+    assert_eq!(payload["summary"], "Curated learning");
+
+    let stored = runtime.get_learning(&learning.id).expect("read learning");
+    assert_eq!(stored.summary, "Curated learning");
+    assert_eq!(
+        stored.scope.tags,
+        vec!["api".to_string(), "http".to_string()]
+    );
+    assert_eq!(stored.status, LearningStatus::Active);
+}
+
+#[tokio::test]
+async fn update_rejects_superseded_record() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let old = seed_learning(&runtime, "Old learning");
+    let new = seed_learning(&runtime, "New learning");
+    runtime
+        .supersede_learning(&old.id, &new.id)
+        .expect("supersede fixture");
+
+    // A superseded learning must never be mutated in place — the lifecycle is
+    // supersede-don't-delete, and updates to it are rejected.
+    let response = request_update(
+        runtime.clone(),
+        &old.id,
+        Some("http://localhost:7878"),
+        Some(json!({ "summary": "Should not apply" })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let stored = runtime.get_learning(&old.id).expect("read superseded");
+    assert_eq!(stored.status, LearningStatus::Superseded);
+    assert_eq!(stored.summary, "Old learning");
 }

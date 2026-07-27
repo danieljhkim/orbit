@@ -4,6 +4,8 @@ use crate::context::PrConfig;
 
 use super::super::freshness::BranchFreshness;
 
+pub(super) const GITHUB_PR_BODY_BYTE_LIMIT: usize = 65_536;
+
 /// Builds the generated PR body. One-task PRs use the task-contract-first
 /// layout; multi-task callers intentionally keep the historical batch layout
 /// until those legacy paths are retired.
@@ -25,7 +27,52 @@ pub(super) fn build_batch_pr_body(
         body.push_str(&signature);
     }
 
-    body
+    bound_pr_body(body, tasks)
+}
+
+/// Projects a PR body into GitHub's UTF-8 byte limit while keeping the
+/// complete task artifacts as the durable source of execution detail.
+pub(super) fn bound_pr_body(body: String, tasks: &[Task]) -> String {
+    if body.len() <= GITHUB_PR_BODY_BYTE_LIMIT {
+        return body;
+    }
+
+    let task_ids = tasks
+        .iter()
+        .map(|task| task.id.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let durable_record = if task_ids.is_empty() {
+        "the persisted Orbit task artifacts".to_string()
+    } else {
+        format!("the persisted Orbit task artifacts for {task_ids}")
+    };
+    let audit_note = format!(
+        "\n\n> **Audit note:** GitHub limits PR bodies to {GITHUB_PR_BODY_BYTE_LIMIT} bytes. This projection is truncated; complete task artifacts remain the durable record in {durable_record}."
+    );
+    let retained_body_bytes = GITHUB_PR_BODY_BYTE_LIMIT.saturating_sub(audit_note.len());
+
+    if retained_body_bytes == 0 {
+        return truncate_utf8(&audit_note, GITHUB_PR_BODY_BYTE_LIMIT).to_string();
+    }
+
+    format!(
+        "{}{}",
+        truncate_utf8(&body, retained_body_bytes),
+        audit_note
+    )
+}
+
+fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
+    if value.len() <= max_bytes {
+        return value;
+    }
+
+    let mut end = max_bytes;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
 }
 
 pub(super) fn build_single_task_pr_body(
@@ -119,7 +166,9 @@ pub(super) fn render_legacy_task_section(task: &Task, pr_config: &PrConfig) -> S
     }
 }
 
-pub(super) fn meaningful_execution_summary(summary: &str) -> Option<&str> {
+pub(in crate::executor::automation::vcs) fn meaningful_execution_summary(
+    summary: &str,
+) -> Option<&str> {
     let trimmed = summary.trim();
     if trimmed.is_empty() || is_placeholder_execution_summary(trimmed) {
         None

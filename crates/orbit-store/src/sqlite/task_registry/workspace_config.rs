@@ -2,12 +2,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::OrbitError;
-use orbit_common::utility::fs::atomic_write_text;
 use serde::{Deserialize, Serialize};
+
+use crate::file::yaml_doc::{parse_yaml_with, write_yaml_atomic_with};
 
 use super::CONFIG_SCHEMA_VERSION;
 use super::types::WorkspaceConfig;
-use super::workspace_id::{sanitize_slug, validate_workspace_id, workspace_id_candidate};
+use super::workspace_id::validate_workspace_id;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -18,13 +19,6 @@ struct WorkspaceConfigDoc {
 
 pub fn task_registry_path(global_root: &Path) -> PathBuf {
     global_root.join("tasks").join("index.sqlite")
-}
-
-pub fn home_task_workspace_dir(global_root: &Path, workspace_id: &str) -> PathBuf {
-    global_root
-        .join("tasks")
-        .join("workspaces")
-        .join(workspace_id)
 }
 
 pub fn workspace_config_path(orbit_dir: &Path) -> PathBuf {
@@ -59,7 +53,7 @@ pub fn read_workspace_config_optional(
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(OrbitError::Io(err.to_string())),
     };
-    let doc: WorkspaceConfigDoc = serde_yaml::from_str(&raw).map_err(|e| {
+    let doc: WorkspaceConfigDoc = parse_yaml_with(&raw, &path, |_, e| {
         OrbitError::InvalidInput(format!(
             "invalid workspace config '{}': {e}",
             path.display()
@@ -84,13 +78,9 @@ pub fn write_workspace_config(
         schema_version: CONFIG_SCHEMA_VERSION,
         workspace_id,
     };
-    let content = serde_yaml::to_string(&doc).map_err(|e| OrbitError::Store(e.to_string()))?;
-    atomic_write_text(&workspace_config_path(orbit_dir), &content)
-        .map_err(|e| OrbitError::Io(e.to_string()))
-}
-
-pub fn assign_workspace_id(slug_source: &str, path: &Path) -> String {
-    workspace_id_candidate(&sanitize_slug(slug_source), path, 0)
+    write_yaml_atomic_with(&workspace_config_path(orbit_dir), &doc, |e| {
+        OrbitError::Store(e.to_string())
+    })
 }
 
 fn validate_workspace_config_doc(doc: WorkspaceConfigDoc) -> Result<WorkspaceConfig, OrbitError> {

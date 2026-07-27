@@ -7,7 +7,7 @@ pub(super) fn run_step(step: &JobV2Step, ctx: &ExecCtx<'_>) -> Result<StepOutcom
         let matched = evaluate_bool_expr(expr, &tctx)
             .map_err(|err| DispatchError::JobExecution(format!("when expr: {err}")))?;
         if !matched {
-            let _ = emit_job_event(
+            emit_job_event_lossy(
                 &ctx.audit,
                 ctx.task_id(),
                 V2AuditEventKind::StepSkipped {
@@ -19,7 +19,6 @@ pub(super) fn run_step(step: &JobV2Step, ctx: &ExecCtx<'_>) -> Result<StepOutcom
                 success: true,
                 output: Value::Null,
                 message: None,
-                skipped: true,
             });
         }
     }
@@ -32,17 +31,17 @@ pub(super) fn run_step(step: &JobV2Step, ctx: &ExecCtx<'_>) -> Result<StepOutcom
         },
     )
     .map_err(|e| DispatchError::AuditFailed(format!("{e:?}")))?;
-    let _ = ctx.audit.push_parent(step_event_id);
+    ctx.audit.push_parent_lossy(step_event_id);
 
     let result = run_step_with_retry(step, ctx);
 
-    let _ = ctx.audit.pop_parent();
+    ctx.audit.pop_parent_lossy();
     let (outcome_str, error_message) = match &result {
         Ok(StepOutcome { success: true, .. }) => ("success", None),
         Ok(StepOutcome { message, .. }) => ("failed", message.clone()),
         Err(err) => ("error", Some(err.to_string())),
     };
-    let _ = emit_job_event(
+    emit_job_event_lossy(
         &ctx.audit,
         ctx.task_id(),
         V2AuditEventKind::StepFinished {
@@ -65,14 +64,28 @@ pub(super) fn run_step_with_retry(
             Ok(outcome) => Ok(outcome),
             Err(err) if err.is_non_retryable() => {
                 emit_denied_if_applicable(&err, &step.id, &ctx.audit, ctx.task_id());
-                Err(err)
+                if err.allows_recovery() {
+                    recover_or_return_original(step, ctx, err, 1, 1)
+                } else {
+                    Err(err)
+                }
             }
             Err(err) => recover_or_return_original(step, ctx, err, 1, 1),
         };
     };
 
     let mut last_err: Option<DispatchError> = None;
+    // [ORB-10449] Keep the last failing attempt's diagnostic. A step that fails
+    // via `Ok(success: false)` — every CLI agent-loop failure, including the
+    // step-completion protocol violation — used to have its message dropped on
+    // retry exhaustion, leaving the run's terminal error as the generic
+    // "completed with success=false" fallback.
+    let mut last_failed_outcome: Option<StepOutcome> = None;
     let max_attempts = retry.max_attempts.max(1);
+    // Full-jitter backoff (ORB-10006): parallel workers retrying the same
+    // failing dependency draw sleeps from decorrelated streams instead of
+    // waking in lockstep. Seeded per step from time + run id.
+    let mut jitter = JitterRng::seeded(&ctx.run_id);
     for attempt in 0..max_attempts {
         match run_step_body(step, ctx) {
             Ok(outcome) => {
@@ -80,14 +93,20 @@ pub(super) fn run_step_with_retry(
                     return Ok(outcome);
                 }
                 // Treat a "not-success-but-no-error" outcome as retryable:
-                // another attempt may succeed. No built-in dispatch leaf
-                // produces this today (leaves signal failure via `Err`); it is
-                // retained as the block-level outcome contract. See ADR-0194.
+                // another attempt may succeed. This is the block-level outcome
+                // contract, and the CLI agent-loop leaf reaches it
+                // for every provider-level failure — timeout, nonzero exit, and
+                // the [ORB-10449] step-completion protocol violation.
                 last_err = None;
+                last_failed_outcome = Some(outcome);
             }
             Err(err) if err.is_non_retryable() => {
                 emit_denied_if_applicable(&err, &step.id, &ctx.audit, ctx.task_id());
-                return Err(err);
+                return if err.allows_recovery() {
+                    recover_or_return_original(step, ctx, err, attempt + 1, max_attempts)
+                } else {
+                    Err(err)
+                };
             }
             Err(err) => {
                 last_err = Some(err);
@@ -96,8 +115,10 @@ pub(super) fn run_step_with_retry(
         if attempt + 1 >= max_attempts {
             break;
         }
-        let backoff_ms = compute_backoff_ms(retry, attempt);
-        let _ = emit_job_event(
+        // `compute_backoff_ms` yields the deterministic cap-growth bound;
+        // the actual sleep is a full-jitter draw in [0, bound].
+        let backoff_ms = jitter.full_jitter(compute_backoff_ms(retry, attempt));
+        emit_job_event_lossy(
             &ctx.audit,
             ctx.task_id(),
             V2AuditEventKind::StepRetry {
@@ -111,12 +132,11 @@ pub(super) fn run_step_with_retry(
 
     match last_err {
         Some(err) => recover_or_return_original(step, ctx, err, max_attempts, max_attempts),
-        None => Ok(StepOutcome {
+        None => Ok(last_failed_outcome.unwrap_or(StepOutcome {
             success: false,
             output: Value::Null,
             message: None,
-            skipped: false,
-        }),
+        })),
     }
 }
 
@@ -143,7 +163,6 @@ pub(super) fn step_activity_name(step: &JobV2Step) -> String {
 pub(super) fn target_activity_label(target: &TargetStep) -> String {
     match &target.spec {
         ActivityV2Spec::AgentLoop(_) => "agent_loop".to_string(),
-        ActivityV2Spec::Groundhog(_) => "groundhog".to_string(),
         ActivityV2Spec::Deterministic(spec) => spec.action.clone(),
     }
 }
@@ -170,7 +189,7 @@ pub(super) fn emit_denied_if_applicable(
     task_id: Option<&str>,
 ) {
     if matches!(err, DispatchError::ToolDenied { .. }) {
-        let _ = emit_job_event(
+        emit_job_event_lossy(
             audit,
             task_id,
             V2AuditEventKind::StepDenied {

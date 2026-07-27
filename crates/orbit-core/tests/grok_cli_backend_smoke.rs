@@ -73,6 +73,8 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         backend: Backend::Cli,
         provider: Provider::Grok,
         wall_clock_timeout_seconds: 120,
+        require_response_envelope: true,
+        require_completion_envelope: true,
         role: None,
         proc_allowed_programs: None,
     };
@@ -86,6 +88,7 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         }),
         audit: audit.clone(),
         run_id: "grok-installed-smoke",
+        agent_override: None,
         host: Some(&runtime),
     })
     .expect("dispatch grok cli backend");

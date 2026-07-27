@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-// ORB-00013: Tests use unwrap/expect to keep fixture setup readable.
+// Tests use unwrap/expect to keep fixture setup readable.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fs;
@@ -82,6 +82,72 @@ fn config_show_reports_shared_and_local_roots_for_git_worktrees_and_overrides() 
 }
 
 #[test]
+fn doctor_graph_cleanup_uses_split_roots_and_keeps_json_stdout_clean() {
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let main_repo = temp.path().join("repo");
+    let linked_worktree = temp.path().join("repo-doctor");
+    fs::create_dir_all(&home).expect("create home");
+    fs::create_dir_all(&main_repo).expect("create main repo");
+
+    init_git_repo(&main_repo);
+    run_git(
+        &main_repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "orbit-worktree-doctor",
+            linked_worktree.to_str().expect("utf8 worktree path"),
+        ],
+    );
+    run_orbit_success(&main_repo, &home, &["workspace", "init"], None);
+
+    let local_marker = linked_worktree.join(".orbit/graph/local.db");
+    let shared_marker = main_repo.join(".orbit/knowledge/graph/shared.db");
+    for marker in [&local_marker, &shared_marker] {
+        fs::create_dir_all(marker.parent().expect("graph parent")).expect("create graph parent");
+        fs::write(marker, b"retired").expect("write graph marker");
+    }
+
+    let ordinary = run_orbit_json(&linked_worktree, &home, &["doctor", "--json"], None);
+    assert!(local_marker.exists());
+    assert!(shared_marker.exists());
+    assert!(
+        ordinary
+            .as_array()
+            .expect("doctor rows")
+            .iter()
+            .all(|row| row["check"] != "graph-index")
+    );
+
+    let cleaned = run_orbit_json(
+        &linked_worktree,
+        &home,
+        &["doctor", "--remove-graph", "--json"],
+        None,
+    );
+    assert!(!local_marker.exists());
+    assert!(!shared_marker.exists());
+    assert!(
+        cleaned
+            .as_array()
+            .expect("doctor rows")
+            .iter()
+            .all(|row| row["check"] != "graph-index")
+    );
+
+    // Parsing succeeds again with no cleanup prose mixed into stdout, and
+    // absence remains a successful no-op.
+    run_orbit_json(
+        &linked_worktree,
+        &home,
+        &["doctor", "--remove-graph", "--json"],
+        None,
+    );
+}
+
+#[test]
 fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
     let temp = tempdir().expect("tempdir");
     let home = temp.path().join("home");
@@ -150,12 +216,63 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
 
     let learning_dir = linked_orbit.join("learnings").join(&learning_id);
     assert!(learning_dir.join("learning.yaml").is_file());
-    assert!(learning_dir.join("votes.jsonl").is_file());
-    assert!(learning_dir.join("comments.jsonl").is_file());
     assert!(!main_orbit.join("learnings").join(&learning_id).exists());
 
     let local_orbit_entries = sorted_child_names(&linked_orbit);
     assert_eq!(local_orbit_entries, vec!["adrs", "learnings"]);
+
+    let federated_show = run_orbit_json(
+        &main_repo,
+        &home,
+        &[
+            "tool",
+            "run",
+            "orbit.adr.show",
+            "--input",
+            &format!(r#"{{"id":"{adr_id}","model":"codex"}}"#),
+        ],
+        None,
+    );
+    assert_eq!(federated_show["id"], adr_id);
+    assert!(
+        federated_show["body"]
+            .as_str()
+            .expect("federated body")
+            .contains("Linked worktree write")
+    );
+    assert_eq!(federated_show["artifact_origin"]["mode"], "federated");
+    assert_eq!(
+        federated_show["artifact_origin"]["worktree_root"],
+        linked_worktree.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        federated_show["artifact_origin"]["branch"],
+        "orbit-worktree-artifacts"
+    );
+    assert!(federated_show["artifact_origin"].get("body_path").is_none());
+
+    let rejected_update = run_orbit_output(
+        &main_repo,
+        &home,
+        &[
+            "tool",
+            "run",
+            "orbit.adr.update",
+            "--input",
+            &format!(r#"{{"id":"{adr_id}","title":"must not mutate","model":"codex"}}"#),
+        ],
+        None,
+    );
+    assert!(!rejected_update.status.success());
+    let rejected_payload: Value =
+        serde_json::from_slice(&rejected_update.stdout).expect("structured update error");
+    assert_eq!(rejected_payload["code"], "artifact_not_local");
+    assert_eq!(rejected_payload["artifact_origin"]["mode"], "federated");
+    assert!(
+        rejected_payload["artifact_origin"]
+            .get("body_path")
+            .is_none()
+    );
 
     run_git(
         &main_repo,
@@ -216,18 +333,22 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
         None,
     );
     assert!(!show_output.status.success());
-    let output_text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&show_output.stdout),
-        String::from_utf8_lossy(&show_output.stderr)
+    let unavailable_payload: Value =
+        serde_json::from_slice(&show_output.stdout).expect("structured unavailable error");
+    assert_eq!(unavailable_payload["code"], "remote_artifact_unavailable");
+    assert_eq!(unavailable_payload["artifact_origin"]["mode"], "federated");
+    assert_eq!(
+        unavailable_payload["artifact_origin"]["worktree_root"],
+        linked_worktree.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        unavailable_payload["artifact_origin"]["branch"],
+        "orbit-worktree-artifacts"
     );
     assert!(
-        output_text.contains("worktree_root="),
-        "output: {output_text}"
-    );
-    assert!(
-        output_text.contains("orbit-worktree-artifacts"),
-        "output: {output_text}"
+        unavailable_payload["artifact_origin"]
+            .get("body_path")
+            .is_none()
     );
 }
 
@@ -275,6 +396,7 @@ fn run_orbit_json(cwd: &Path, home: &Path, args: &[&str], orbit_root: Option<&Pa
         .env("HOME", home)
         .env("USERPROFILE", home)
         .args(args);
+    clear_agent_identity_env(&mut command);
     set_orbit_root_env(&mut command, orbit_root);
     let assert = command.assert().success();
     serde_json::from_slice(&assert.get_output().stdout).expect("orbit json output")
@@ -292,8 +414,23 @@ fn run_orbit_output(
         .env("HOME", home)
         .env("USERPROFILE", home)
         .args(args);
+    clear_agent_identity_env(&mut command);
     set_orbit_root_env(&mut command, orbit_root);
     command.output().expect("run orbit")
+}
+
+/// Declare a human caller context for the spawned `orbit` child.
+///
+/// [ORB-10364] gates `learning add`/`update`/`supersede` on the `ORBIT_AGENT_*`
+/// pair, and a child inherits whatever the suite was launched with — an agent
+/// running this suite inside a managed Orbit run would otherwise be refused
+/// (the ORB-10350 hazard). These tests cover worktree artifact routing, not the
+/// role gate, so they state the context they need rather than inheriting it.
+fn clear_agent_identity_env(command: &mut AssertCommand) {
+    command
+        .env_remove("ORBIT_AGENT_NAME")
+        .env_remove("ORBIT_AGENT_MODEL")
+        .env_remove("ORBIT_LEARNING_AUTHOR");
 }
 
 fn set_orbit_root_env(command: &mut AssertCommand, orbit_root: Option<&Path>) {

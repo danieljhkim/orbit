@@ -3,7 +3,7 @@ summary: "User Interface — Decisions"
 type: design
 title: "User Interface — Decisions"
 owner: gemini
-last_updated: 2026-05-18
+last_updated: 2026-07-26
 status: Draft
 feature: user-interface
 doc_role: decisions
@@ -12,19 +12,18 @@ tags: ["user-interface"]
 
 # User Interface — Decisions
 
-This append-only ADR log records UI decisions in ascending order. Each entry keeps its status line, cited task ID, decision summary, and at least one explicit cost.
+This index records UI ADRs in ascending order. Store-backed entries list their
+global ID, title, and status; print their authoritative bodies with `orbit tool
+run orbit.adr.show --input '{"id":"ADR-NNNN"}'`. Legacy entries below remain
+unchanged until their narratives are separately verified in the ADR store.
 
-## ADR-001 — Canon Refined Aesthetic
+Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `user-interface/ADR-00030` → ADR-0284, `user-interface/ADR-001` → ADR-0283.
 
-**Status:** Proposed · 2026-04 · [T20260427-29]
+## ADR-0283 — Canon Refined Aesthetic
 
-**Context.** The dashboard and project website need one visual identity. The prior Trading Terminal direction was dense but too rigid for hierarchical data, review threads, and mixed telemetry.
+**Status:** Proposed · 2026-04 · [T20260427-29] · legacy_id: `user-interface/ADR-001`
 
-**Decision.** Adopt Canon Refined: layered dark surfaces, `Inter` plus `JetBrains Mono`, soft semantic colors, compact spacing, and subtle radii.
-
-**Consequences.**
-- The UI keeps a serious pro-tool signal while allowing standard web affordances when they improve operator clarity.
-- Cost: The design system must be maintained so Canon Refined does not drift into generic dark SaaS styling.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0283"}'`.
 
 ## ADR-002 — Unified Denial Sources for Policy Dashboard
 
@@ -62,19 +61,7 @@ This append-only ADR log records UI decisions in ascending order. Each entry kee
 - Operators get one clear scroll target for raw log rows while live-tail controls stay visible during short-screen monitoring.
 - Cost: The Tasks view trades narrow-screen stacking for denser columns so the live log remains in the first viewport.
 
-## ADR-0166 — Grouped Scoreboard Sections
-
-**Status:** Accepted · 2026-05 · [ORB-00144]
-
-**Context.** The scoreboard started as one compact per-agent table. Adding knowledge-artifact counters and planning-duel matrix data made the flat table mix delivery attribution, review work, operations, knowledge stewardship, and duel outcomes in one scan path. Alternatives were to keep widening the table, add column groups inside the same table, or split the view into focused sections.
-
-**Decision.** Render the dashboard scoreboard as focused sections: Delivery, Review, Knowledge, Operations, Planning Duels, a family-vs-family Duel Matrix, and Attribution Cleanup for non-canonical rows. Keep compact pair cells where they still help local interpretation, but do not treat the whole scoreboard as one primary flat leaderboard.
-
-**Consequences.**
-- Operators can inspect one contribution dimension at a time without conflating task creation, planning, implementation, review, tool usage, and knowledge artifacts.
-- Non-canonical attribution rows stay visible but no longer compete with canonical agent families in primary sections.
-- No single Rust code anchor; this is enforced by dashboard rendering and design review, and workspace-local ADR comments should not be embedded in shipped dashboard assets.
-- Cost: Cross-section comparison now requires scanning multiple tables instead of one row, and future metrics must choose an explicit section before being added.
+- **ADR-0166 — Grouped Scoreboard Sections** — Accepted.
 
 ## ADR-0167 — Extract Dashboard + JSON API to orbit-dashboard Crate
 
@@ -115,6 +102,47 @@ Rejected alternative: pure heatmap matrix. Rejected because color alone hides pr
 - No single Rust code anchor; this is enforced by dashboard rendering and design review, and workspace-local ADR comments should not be embedded in shipped dashboard assets.
 - Cost: The denser matrix needs careful row-height discipline when new metrics are added.
 
+## ADR-0284 — Global, Multi-Workspace Dashboard
+
+**Status:** Accepted · 2026-07 · [ORB-00030] · legacy_id: `user-interface/ADR-00030`
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0284"}'`.
+
+## ADR-0256 — Top-Level Nav Is the Operator's Four Tabs
+
+**Status:** Accepted · 2026-07 · [ORB-10444]
+
+**Context.** Top-level nav is the dashboard's scarcest surface, and two of its six entries were not earning a slot: a deprecated review-threads tab that no longer had a backing view, and Scoreboard, a diagnostics-shaped read-only telemetry view sitting beside the operator's actual workflow tabs. Both pushed triage → dispatch → annotate down the visual hierarchy.
+
+**Decision.** The top-level nav is exactly Tasks, Audit, Diagnostics, Knowledge (plus the hash-only `run-detail` route). The deprecated tab is removed outright — nav entry, `TABS` route, pane markup, refresh branch, and CSS — rather than hidden, so no dead asset ships and no route resolves to a missing pane. Scoreboard becomes a Diagnostics subtab routed as `#diagnostics/scoreboard`; its markup moves verbatim into the diagnostics pane so every id `scoreboard.js` renders into (and therefore the `/api/scoreboard` contract and its tests) is untouched. Because the scoreboard needs full width, its subtab swaps the diagnostics two-column layout for a full-width `<main>` while leaving the subtab nav reachable.
+
+Rejected alternative: keep the nav entry and hide it behind a feature flag. Rejected because a hidden tab still ships its assets, its route, and its refresh branch — the cost the removal was meant to recover.
+
+Rejected alternative: promote the subtab nav out of the diagnostics panel header so the scoreboard could replace the whole pane. Rejected as a larger structural change to a shared layout for no operator-visible gain.
+
+**Consequences.**
+- The nav reads as the operator's workflow; telemetry lives one level down under Diagnostics.
+- Existing `#scoreboard` bookmarks no longer resolve and fall back to Tasks; the view is reachable at `#diagnostics/scoreboard`.
+- Cost: the diagnostics pane now owns two `<main>` elements and a visibility toggle keyed on the active subtab.
+
+## ADR-0257 — One-Click Ship and Human-Attributed Comments on Tasks
+
+**Status:** Accepted · 2026-07 · [ORB-10444]
+
+**Context.** The Tasks tab was read-only for the operator's two most common actions. Dispatching a backlog task meant leaving for the CLI or an MCP client, and there was no way to leave a note on a task at all. Both are writes against live state, so the question was how much configuration to expose and whose identity to record.
+
+**Decision.** Ship is one click with no configuration UI: the dashboard posts `{ task_ids: [id] }` to `POST /api/workflows/ship` and nothing else. The crew comes from the task's own record (the pipeline already resolves it) and the mode from the selected workspace's registry binding — so the endpoint's omitted-`mode` default changes from the hard-coded `pr` to that binding's ship mode, falling back to `pr` only when a runtime has no binding. Duplicate dispatch is refused server-side: an explicit task selection whose id is already carried by a non-terminal run is a `409 ship_run_in_flight` naming that run, and the UI additionally holds a per-task guard for the double-click window. Comments post to a new `POST /api/tasks/:id/comments`, which writes through `TaskUpdateParams::comment` into the task's existing review-thread structure — no new field on the task record — and forces a human author: an absent, agent-family, or model-constant author collapses to the `human` label rather than the server process's ambient identity.
+
+Rejected alternative: a UI-only idempotency guard. Rejected because the guard is then lost across a reload and untestable without a JS runner, which the dashboard does not have; the server-side check is deterministic and covers every surface.
+
+Rejected alternative: reuse `PATCH /api/tasks/:id` with a `comment` field for comments. Rejected because that path derives its actor from the runtime's ambient identity, which is exactly the model-constant attribution this decision exists to prevent.
+
+**Consequences.**
+- Triage, dispatch, and annotation all complete inside the dashboard; no context switch for routine operation.
+- A dashboard comment is always attributable to a person, even when the server runs inside a managed Orbit run.
+- Ship failures surface the server's error text instead of silently no-opping.
+- Cost: the ship endpoint now scans a bounded window of recent runs before submitting, and a task with a genuinely stuck non-terminal run must have that run cancelled before it can be re-shipped.
+
 ## Task References
 
 - [T20260427-29] introduced the Canon Refined UI direction.
@@ -125,5 +153,7 @@ Rejected alternative: pure heatmap matrix. Rejected because color alone hides pr
 - [ORB-00144] grouped scoreboard metrics and added knowledge counters plus duel matrix data.
 - [ORB-00146] extracted the dashboard and JSON API into the new `orbit-dashboard` internal crate (this document).
 - [ORB-00154] unified the Scoreboard tab into a metric-major leaderboard matrix.
+- [ORB-00030] made the dashboard global/multi-workspace (workspace-keyed state, `Ws` extractor, serve-from-anywhere, aggregate endpoints).
+- [ORB-10444] retired the deprecated tab, folded Scoreboard under Diagnostics, pinned the Knowledge detail pane, and added task ship + comments.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

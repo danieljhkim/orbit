@@ -9,7 +9,7 @@
 //! Persistent audit storage is owned by the runtime layer. Tests use
 //! [`InMemorySink`], callers with no need for persistence use [`NullSink`].
 
-// ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
+// Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
 use std::path::PathBuf;

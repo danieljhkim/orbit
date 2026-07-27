@@ -5,6 +5,7 @@ use orbit_common::types::{
 };
 use serde_json::{Value, json};
 
+use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_GEMINI_MODEL};
 use orbit_common::types::OrbitError;
 
 fn task_artifact(path: &str, content: String) -> TaskArtifact {
@@ -280,10 +281,10 @@ fn planning_duel_winner_marker_requires_arbiter_identity_without_roles() {
 fn planning_duel_winner_marker_accepts_legacy_full_payload_without_roles() {
     let artifacts = planning_duel_artifacts(json!({
         "winner_agent_cli": "claude",
-        "winner_model": "claude-opus-4-7",
+        "winner_model": TEST_CLAUDE_MODEL,
         "artifact_path": "planning-duel/planner_b.md",
         "arbiter_agent_cli": "gemini",
-        "arbiter_model": "gemini-3.1-pro",
+        "arbiter_model": TEST_GEMINI_MODEL,
         "arbiter_rationale": "Claude provided a more comprehensive diagnosis."
     }));
 

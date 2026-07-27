@@ -15,8 +15,12 @@ mod learning_reminders;
 mod pipeline_actions;
 mod sandbox;
 mod task_context;
+mod task_pilot;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod tests;
+mod triage;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -45,6 +49,13 @@ impl V2RuntimeHost for OrbitRuntime {
         tool_context: ToolContext,
     ) -> Result<Value, DispatchError> {
         dispatch::run_deterministic(self, action, config, input, tool_context)
+    }
+
+    /// [ORB-10385] Report this binary's deterministic-action registry so job
+    /// validation can reject a catalog asset naming an action we cannot
+    /// dispatch, before the run admits a task or builds a worktree.
+    fn has_deterministic_action(&self, action: &str) -> bool {
+        dispatch::is_deterministic_action_registered(action)
     }
 
     fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
@@ -104,6 +115,42 @@ impl V2RuntimeHost for OrbitRuntime {
             .upsert_session_learning_state(&workspace_id, session_id, state)
             .map_err(|error| {
                 DispatchError::JobExecution(format!("persist session learning state: {error}"))
+            })
+    }
+
+    /// [ORB-10002] Persist a per-step checkpoint into the run's
+    /// `PipelineState` so an interrupted run can be resumed without
+    /// re-executing completed steps. A missing run row (direct `execute_job`
+    /// callers that never persisted a run) is a silent no-op — there is
+    /// nothing durable to checkpoint into.
+    fn checkpoint_step(
+        &self,
+        run_id: &str,
+        step_index: u32,
+        step_id: &str,
+        output: &Value,
+        pipeline_snapshot: &Value,
+    ) -> Result<(), DispatchError> {
+        let Some(mut state) = self.read_run_state(run_id).map_err(|error| {
+            DispatchError::JobExecution(format!("read run state for checkpoint: {error}"))
+        })?
+        else {
+            return Ok(());
+        };
+        state.record_step(
+            step_index,
+            orbit_common::types::JobRunState::Success,
+            Some(output.clone()),
+            None,
+        );
+        state.sync_pipeline(pipeline_snapshot.clone());
+        self.stores()
+            .jobs()
+            .write_run_state(run_id, &state)
+            .map_err(|error| {
+                DispatchError::JobExecution(format!(
+                    "persist step checkpoint (run {run_id}, step {step_index} `{step_id}`): {error}"
+                ))
             })
     }
 
@@ -168,7 +215,13 @@ impl V2RuntimeHost for OrbitRuntime {
         input: &Value,
         trace: &InvocationTrace,
     ) -> Result<(), DispatchError> {
-        let (agent, model) = self.canonical_agent_model_identity(Some(provider), model);
+        let (agent, model) = self.invocation_agent_model_identity(
+            provider,
+            model,
+            trace.provider_model.as_deref(),
+            job_run_id,
+            activity_id,
+        );
         let store = Store::open(&self.context.persistence().audit_db).map_err(|error| {
             DispatchError::JobExecution(format!("open invocation store: {error}"))
         })?;
@@ -205,7 +258,7 @@ impl V2RuntimeHost for OrbitRuntime {
         if let Some(metrics) = crate::metrics::merge_invocation_trace(existing.as_ref(), trace) {
             self.stores()
                 .jobs()
-                .record_run_knowledge_metrics(job_run_id, metrics)
+                .record_job_run_knowledge_metrics(job_run_id, metrics)
                 .map_err(|error| {
                     DispatchError::JobExecution(format!(
                         "record job-run knowledge metrics: {error}"
@@ -244,6 +297,33 @@ impl V2RuntimeHost for OrbitRuntime {
         )
     }
 
+    fn explicit_agent_crew_config_for_input(
+        &self,
+        input: &serde_json::Value,
+    ) -> Result<Option<AgentRoleConfig>, DispatchError> {
+        let Some(explicit) = input
+            .get("crew")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(None);
+        };
+        let crew = self
+            .resolve_crew_for_task(Some(explicit), None)
+            .map_err(|error| {
+                DispatchError::JobValidation(format!(
+                    "explicit activity crew '{explicit}' cannot be resolved: {error}"
+                ))
+            })?;
+        Ok(Some(
+            crate::runtime::engine::environment_host::typed_role_config_from_assignment(
+                AgentRole::Reviewer,
+                &crew.assignment,
+            ),
+        ))
+    }
+
     fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {
         match provider {
             "anthropic" => {
@@ -274,296 +354,4 @@ fn role_slot_from_input(input: &Value) -> Option<RoleSlot> {
         .or_else(|| input.get("slot"))
         .and_then(Value::as_str)
         .and_then(|value| value.parse().ok())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::{Mutex, MutexGuard, OnceLock};
-
-    use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
-    use orbit_common::types::{
-        InvocationTrace, JobRunState, TaskPriority, TaskStatus, TaskType, TokenUsage, ToolCallTrace,
-    };
-    use orbit_engine::{V2AuditWriter, drive_agent_loop, reset_replay_transport};
-    use tempfile::NamedTempFile;
-
-    use super::test_support::{runtime_with_workspace_layout, seed_list_backlog_task};
-    use super::*;
-
-    fn replay_env_guard() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    struct ReplayFixtureGuard {
-        prior: Option<String>,
-    }
-
-    impl ReplayFixtureGuard {
-        fn set(path: &std::path::Path) -> Self {
-            let prior = std::env::var("ORBIT_V2_REPLAY_FIXTURE").ok();
-            // SAFETY: replay fixture env mutation is serialized by `replay_env_guard`.
-            unsafe {
-                std::env::set_var("ORBIT_V2_REPLAY_FIXTURE", path);
-            }
-            reset_replay_transport();
-            Self { prior }
-        }
-    }
-
-    impl Drop for ReplayFixtureGuard {
-        fn drop(&mut self) {
-            reset_replay_transport();
-            // SAFETY: replay fixture env mutation is serialized by `replay_env_guard`.
-            unsafe {
-                match &self.prior {
-                    Some(value) => std::env::set_var("ORBIT_V2_REPLAY_FIXTURE", value),
-                    None => std::env::remove_var("ORBIT_V2_REPLAY_FIXTURE"),
-                }
-            }
-        }
-    }
-
-    fn write_replay_fixture(value: Value) -> NamedTempFile {
-        let file = NamedTempFile::new().expect("fixture temp file");
-        std::fs::write(
-            file.path(),
-            serde_json::to_vec(&value).expect("serialize replay fixture"),
-        )
-        .expect("write replay fixture");
-        file
-    }
-
-    fn seed_running_job_run(runtime: &OrbitRuntime, job_id: &str) -> String {
-        let run = runtime
-            .stores()
-            .jobs()
-            .insert_run(job_id, 1, chrono::Utc::now(), None, None)
-            .expect("insert job run");
-        runtime
-            .stores()
-            .jobs()
-            .mark_run_running(&run.run_id, chrono::Utc::now(), std::process::id())
-            .expect("mark run running");
-        run.run_id
-    }
-
-    fn payload_tool_call(seq: u32, tool_name: &str, payload: Value) -> ToolCallTrace {
-        ToolCallTrace {
-            seq,
-            tool_name: tool_name.to_string(),
-            result_bytes: serde_json::to_vec(&payload)
-                .expect("serialize payload")
-                .len() as u64,
-            result_payload: Some(payload),
-        }
-    }
-
-    fn byte_count_tool_call(seq: u32, tool_name: &str, result_bytes: u64) -> ToolCallTrace {
-        ToolCallTrace {
-            seq,
-            tool_name: tool_name.to_string(),
-            result_bytes,
-            result_payload: None,
-        }
-    }
-
-    fn trace_with_tool_calls(input_tokens: u64, tool_calls: Vec<ToolCallTrace>) -> InvocationTrace {
-        InvocationTrace {
-            usage: TokenUsage {
-                input: input_tokens,
-                cache_read: 0,
-                cache_create: 0,
-                output: 0,
-            },
-            tool_calls,
-            duration_ms: 10,
-        }
-    }
-
-    fn persist_test_trace(runtime: &OrbitRuntime, run_id: &str, trace: &InvocationTrace) {
-        V2RuntimeHost::persist_invocation_trace(
-            runtime,
-            run_id,
-            "knowledge_step",
-            "codex",
-            Some("gpt-test"),
-            &serde_json::json!({ "task_id": "ORB-KNOWLEDGE-TEST" }),
-            trace,
-        )
-        .expect("persist invocation trace");
-    }
-
-    #[test]
-    fn persist_invocation_trace_no_longer_measures_removed_pack_tool() {
-        // ORB-00391: orbit.graph.pack was removed with orbit-knowledge (v1). A trace
-        // whose only payload tool is the former pack tool records no knowledge metrics,
-        // because merge_invocation_trace now measures fs.read exclusively.
-        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
-        let run_id = seed_running_job_run(&runtime, "knowledge_pack_job");
-        let trace = trace_with_tool_calls(
-            155,
-            vec![payload_tool_call(
-                1,
-                "orbit.graph.pack",
-                serde_json::json!({
-                    "raw_read_token_baseline": 400,
-                    "knowledge_pack_tokens": 100,
-                    "entries": [{ "selector": "file:src/lib.rs", "source": "pub fn demo() {}" }],
-                    "unresolved_selectors": [],
-                }),
-            )],
-        );
-
-        persist_test_trace(&runtime, &run_id, &trace);
-
-        let run = runtime.show_job_run(&run_id).expect("show job run");
-        assert_eq!(run.state, JobRunState::Running);
-        assert!(
-            run.knowledge_metrics.is_none(),
-            "the removed pack tool must not produce knowledge metrics"
-        );
-        assert_eq!(run.job_id, "knowledge_pack_job");
-    }
-
-    #[test]
-    fn persist_invocation_trace_records_fs_read_double_read_metrics() {
-        // ORB-00391: with the pack baseline gone, every fs.read is "double read"
-        // relative to itself, so double_read_rate is 1.0 for an fs.read-only run.
-        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
-
-        let fallback_run_id = seed_running_job_run(&runtime, "knowledge_fallback_job");
-        let fallback_trace =
-            trace_with_tool_calls(50, vec![byte_count_tool_call(1, "fs.read", 120)]);
-
-        persist_test_trace(&runtime, &fallback_run_id, &fallback_trace);
-
-        let fallback_run = runtime
-            .show_job_run(&fallback_run_id)
-            .expect("show fallback job run");
-        let metrics = fallback_run
-            .knowledge_metrics
-            .expect("fallback metrics recorded");
-        assert!(!metrics.knowledge_pack_used);
-        assert_eq!(metrics.raw_read_token_baseline, 30);
-        assert_eq!(metrics.knowledge_pack_tokens, None);
-        assert_eq!(metrics.actual_fs_read_tokens_during_run, 30);
-        assert_eq!(metrics.double_read_rate, Some(1.0));
-        assert_eq!(metrics.total_llm_input_tokens, 50);
-    }
-
-    #[test]
-    fn http_agent_loop_tool_update_persists_runtime_identity_family() {
-        let _lock = replay_env_guard();
-        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
-        let task = seed_list_backlog_task(
-            &runtime,
-            "runtime identity regression",
-            TaskStatus::InProgress,
-            TaskPriority::Medium,
-            TaskType::Chore,
-            None,
-            Vec::new(),
-        );
-        let fixture = write_replay_fixture(serde_json::json!({
-            "turns": [
-                {
-                    "content": [{
-                        "kind": "tool_use",
-                        "id": "toolu_identity_update",
-                        "name": "orbit.task.update",
-                        "input": {
-                            "id": task.id.clone(),
-                            "status": "review",
-                            "execution_summary": "Identity regression covered.",
-                            "model": "grok-build"
-                        }
-                    }],
-                    "stop_reason": "tool_use"
-                },
-                {
-                    "content": [{ "kind": "text", "text": "done" }],
-                    "stop_reason": "end_turn"
-                }
-            ]
-        }));
-        let _guard = ReplayFixtureGuard::set(fixture.path());
-        let audit_dir = tempfile::tempdir().expect("audit tempdir");
-        let audit = V2AuditWriter::with_disk_sinks(
-            audit_dir.path(),
-            Store::open_in_memory().expect("audit store"),
-            "ws_test",
-            "http-identity-regression",
-            "claude:claude-opus-4-7".to_string(),
-            None,
-        )
-        .expect("audit writer");
-        let spec = AgentLoopSpec {
-            instruction: "exercise tool identity".to_string(),
-            tools: vec!["orbit.task.update".to_string()],
-            on_denial: OnDenial::Terminate,
-            model: Some("claude-opus-4-7".to_string()),
-            max_iterations: 2,
-            backend: Backend::Http,
-            provider: Provider::Claude,
-            wall_clock_timeout_seconds: 30,
-            role: None,
-            proc_allowed_programs: None,
-        };
-
-        drive_agent_loop(
-            &spec,
-            None,
-            "http-identity-regression",
-            audit,
-            &serde_json::json!({ "prompt": "update the task" }),
-            &runtime,
-            None,
-        )
-        .expect("replay agent loop succeeds");
-
-        let updated = runtime.get_task(&task.id).expect("updated task");
-        assert_eq!(updated.implemented_by.as_deref(), Some("claude"));
-    }
-
-    #[test]
-    fn tool_context_for_activity_passes_proc_allowlist() {
-        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
-
-        // No allowlist -> not activity-scoped (legacy unrestricted path).
-        let unscoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
-            &runtime,
-            Some("run-allowlist-test"),
-            None,
-            None,
-            None,
-        );
-        assert!(unscoped.proc_allowed_programs.is_empty());
-        assert!(!unscoped.proc_spawn_activity_scoped);
-
-        // Activity-scoped allowlist propagates verbatim and flips the bool.
-        let programs = vec!["git".to_string(), "rg".to_string()];
-        let scoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
-            &runtime,
-            Some("run-allowlist-test"),
-            None,
-            None,
-            Some(programs.as_slice()),
-        );
-        assert_eq!(scoped.proc_allowed_programs, programs);
-        assert!(scoped.proc_spawn_activity_scoped);
-
-        // Empty Some([]) is meaningful: fail-closed when activity-scoped.
-        let empty_scoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
-            &runtime,
-            Some("run-allowlist-test"),
-            None,
-            None,
-            Some(&[]),
-        );
-        assert!(empty_scoped.proc_allowed_programs.is_empty());
-        assert!(empty_scoped.proc_spawn_activity_scoped);
-    }
 }

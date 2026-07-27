@@ -25,13 +25,6 @@ export default defineConfig({
         replacesTitle: true,
       },
       favicon: '/favicon.svg',
-      social: [
-        {
-          icon: 'github',
-          label: 'GitHub',
-          href: 'https://github.com/danieljhkim/orbit',
-        },
-      ],
       tableOfContents: {
         minHeadingLevel: 2,
         maxHeadingLevel: 3,
@@ -41,9 +34,6 @@ export default defineConfig({
         ThemeProvider: './src/components/ThemeProvider.astro',
         ThemeSelect: './src/components/ThemeSelect.astro',
         Footer: './src/components/Footer.astro',
-      },
-      editLink: {
-        baseUrl: 'https://github.com/danieljhkim/orbit/edit/main/website/',
       },
       pagefind: true,
       sidebar: [
@@ -67,7 +57,6 @@ export default defineConfig({
             { slug: 'concepts/tasks', label: 'Tasks' },
             { slug: 'concepts/activities-jobs', label: 'Activities and Jobs' },
             { slug: 'concepts/policies', label: 'Policies' },
-            { slug: 'concepts/knowledge-graph', label: 'Knowledge Graph' },
             { slug: 'concepts/agents', label: 'Agents' },
           ],
         },
@@ -96,27 +85,6 @@ export default defineConfig({
           label: 'Architecture',
           items: [
             { slug: 'architecture', label: 'Overview' },
-            {
-              label: 'Design Mirror',
-              autogenerate: {
-                directory: 'architecture/design',
-                collapsed: true,
-              },
-              collapsed: true,
-            },
-          ],
-        },
-        {
-          label: 'Benchmarks',
-          items: [
-            {
-              label: 'Graph Benchmarks',
-              autogenerate: {
-                directory: 'benchmarks/graph',
-                collapsed: true,
-              },
-              collapsed: true,
-            },
           ],
         },
         {

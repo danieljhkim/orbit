@@ -53,6 +53,135 @@ mod parse {
     }
 
     #[test]
+    fn claude_cli_selects_the_highest_cost_reported_model_and_cost() {
+        // Captured from Claude Code 2.1.220 with `--model fable`: the CLI
+        // reports both a small internal Haiku invocation and the requested
+        // model. Per-model cost is the only provider-owned discriminator.
+        let stdout = serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "result": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
+            "total_cost_usd": 0.286169,
+            "modelUsage": {
+                "claude-haiku-4-5-20251001": {
+                    "costUSD": 0.000598,
+                    "canonicalModel": "claude-haiku-4-5"
+                },
+                "claude-fable-5": {
+                    "costUSD": 0.285571,
+                    "canonicalModel": "claude-fable-5"
+                }
+            }
+        })
+        .to_string();
+
+        let (_, _, trace) =
+            parse_and_validate_response(&exec(&stdout, "", Some(0), true)).expect("Claude parses");
+        assert_eq!(trace.provider_model.as_deref(), Some("claude-fable-5"));
+        assert_eq!(trace.provider_cost_usd, Some(0.286169));
+    }
+
+    #[test]
+    fn claude_cli_leaves_ambiguous_equal_cost_models_unknown() {
+        let stdout = serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "result": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
+            "modelUsage": {
+                "claude-a": { "costUSD": 1.0 },
+                "claude-b": { "costUSD": 1.0 }
+            }
+        })
+        .to_string();
+
+        let (_, _, trace) =
+            parse_and_validate_response(&exec(&stdout, "", Some(0), true)).expect("Claude parses");
+        assert_eq!(trace.provider_model, None);
+    }
+
+    #[test]
+    fn gemini_cli_reads_the_single_stats_model_key_without_a_cost() {
+        // `stats.models` is the live Gemini CLI shape already used by the
+        // token-ingest regression fixtures. Unlike Claude, it reports no
+        // invocation-total USD cost.
+        let stdout = serde_json::json!({
+            "response": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
+            "stats": {
+                "models": {
+                    "gemini-3.1-pro": {
+                        "tokens": {
+                            "input": 40_919,
+                            "output": 70,
+                            "cached": 40_101,
+                            "thoughts": 396,
+                            "tool": 0,
+                            "total": 41_385
+                        }
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let (_, _, trace) =
+            parse_and_validate_response(&exec(&stdout, "", Some(0), true)).expect("Gemini parses");
+        assert_eq!(trace.provider_model.as_deref(), Some("gemini-3.1-pro"));
+        assert_eq!(trace.provider_cost_usd, None);
+    }
+
+    #[test]
+    fn gemini_cli_leaves_multiple_stats_models_unknown() {
+        let stdout = serde_json::json!({
+            "response": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
+            "stats": {
+                "models": {
+                    "gemini-3.1-pro": { "tokens": { "total": 10 } },
+                    "gemini-2.5-flash": { "tokens": { "total": 5 } }
+                }
+            }
+        })
+        .to_string();
+
+        let (_, _, trace) =
+            parse_and_validate_response(&exec(&stdout, "", Some(0), true)).expect("Gemini parses");
+        assert_eq!(trace.provider_model, None);
+    }
+
+    #[test]
+    fn codex_jsonl_reports_usage_but_no_model_or_cost() {
+        // Captured from codex-cli 0.144.1: successful JSONL contains
+        // thread/turn events and turn.completed usage, but no model identity
+        // or provider cost.
+        let stdout = concat!(
+            "{\"type\":\"thread.started\",\"thread_id\":\"thread-1\"}\n",
+            "{\"type\":\"turn.started\"}\n",
+            "{\"type\":\"item.completed\",\"item\":{\"id\":\"item-0\",\"type\":\"agent_message\",\"text\":\"{\\\"schemaVersion\\\":1,\\\"status\\\":\\\"success\\\",\\\"result\\\":{},\\\"error\\\":null}\"}}\n",
+            "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":17389,\"cached_input_tokens\":0,\"output_tokens\":22,\"reasoning_output_tokens\":0}}\n"
+        );
+
+        let (_, _, trace) =
+            parse_and_validate_response(&exec(stdout, "", Some(0), true)).expect("Codex parses");
+        assert_eq!(trace.provider_model, None);
+        assert_eq!(trace.provider_cost_usd, None);
+    }
+
+    #[test]
+    fn grok_json_wrapper_reports_no_model_or_cost() {
+        // The production Grok fix established this text/stopReason wrapper;
+        // the wrapper carries neither model identity nor a USD total.
+        let stdout = serde_json::json!({
+            "text": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
+            "stopReason": "EndTurn"
+        })
+        .to_string();
+
+        let (_, _, trace) =
+            parse_and_validate_response(&exec(&stdout, "", Some(0), true)).expect("Grok parses");
+        assert_eq!(trace.provider_model, None);
+        assert_eq!(trace.provider_cost_usd, None);
+    }
+
+    #[test]
     fn synthesize_trace_falls_back_to_duration_only_when_stdout_unparseable() {
         // Plain non-JSON stdout: regression check that the previous "duration
         // only, zero usage" behavior is preserved when documents can't be
@@ -71,6 +200,76 @@ mod parse {
         assert_eq!(trace.usage.input, 0);
         assert_eq!(trace.usage.output, 0);
         assert_eq!(trace.duration_ms, 1234);
+    }
+
+    // ----- [ORB-10449] step-completion protocol check ---------------------
+
+    #[test]
+    fn protocol_check_rejects_prose_only_stdout() {
+        // The stall shape: the provider exits 0 having emitted only prose, so
+        // there is no termination signal at all.
+        let stdout = r#"{"type":"result","subtype":"success","result":"still waiting on the background run"}"#;
+        let error = response_envelope_protocol_check(stdout).expect_err("no envelope");
+        assert!(
+            error
+                .to_string()
+                .contains("does not contain an Orbit response envelope"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn protocol_check_is_blind_to_declared_status() {
+        // Frame only: every protocol status token satisfies the check, because
+        // an agent that declares failure still ran its contract to the end.
+        for status in ["success", "failed", "timeout"] {
+            let stdout =
+                format!(r#"{{"schemaVersion":1,"status":"{status}","result":{{}},"error":null}}"#);
+            response_envelope_protocol_check(&stdout)
+                .unwrap_or_else(|error| panic!("status {status} must satisfy the frame: {error}"));
+        }
+    }
+
+    #[test]
+    fn protocol_check_rejects_an_unsupported_frame() {
+        let unsupported_version =
+            r#"{"schemaVersion":2,"status":"success","result":{},"error":null}"#;
+        assert!(
+            response_envelope_protocol_check(unsupported_version)
+                .expect_err("bad version")
+                .to_string()
+                .contains("unsupported schemaVersion: 2")
+        );
+
+        let unknown_status = r#"{"schemaVersion":1,"status":"partial","result":{},"error":null}"#;
+        assert!(
+            response_envelope_protocol_check(unknown_status)
+                .expect_err("bad status")
+                .to_string()
+                .contains("unknown status: partial")
+        );
+    }
+
+    #[test]
+    fn protocol_check_finds_the_envelope_past_interleaved_non_json_stdout() {
+        // A wrapped tool writing to the same stdout makes the document stream
+        // unparseable, but the agent still terminated. Failing a completed step
+        // over stray output would be worse than the defect this check catches.
+        let stdout = concat!(
+            "[main abc1234] chore: commit\n",
+            " 1 file changed, 2 insertions(+)\n",
+            r#"{"schemaVersion":1,"status":"success","result":{},"error":null}"#
+        );
+        response_envelope_protocol_check(stdout).expect("envelope after chatter");
+    }
+
+    #[test]
+    fn protocol_check_accepts_a_claude_wrapped_envelope() {
+        // The healthy claude shape: the Orbit envelope arrives as a JSON string
+        // nested in the wrapper's `result`.
+        let inner = r#"{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}"#;
+        let stdout = format!(r#"{{"type":"result","subtype":"success","result":"{inner}"}}"#);
+        response_envelope_protocol_check(&stdout).expect("wrapped envelope");
     }
 
     #[test]
@@ -172,6 +371,50 @@ mod sum {
     use super::super::super::response::usage::*;
 
     #[test]
+    fn claude_cli_cache_creation_ttl_split_maps_each_ttl() {
+        let documents = vec![json!({
+            "usage": {
+                "input_tokens": 36,
+                "output_tokens": 8_265,
+                "cache_read_input_tokens": 858_526,
+                "cache_creation_input_tokens": 37_846,
+                "cache_creation": {
+                    "ephemeral_5m_input_tokens": 51,
+                    "ephemeral_1h_input_tokens": 37_795,
+                }
+            }
+        })];
+
+        assert_eq!(
+            sum_usage(&documents),
+            TokenUsage {
+                input: 36,
+                cache_read: 858_526,
+                cache_create: 51,
+                cache_create_1h: 37_795,
+                output: 8_265,
+            }
+        );
+    }
+
+    #[test]
+    fn cache_creation_without_a_ttl_split_remains_five_minute_usage() {
+        let documents = vec![json!({
+            "usage": {
+                "cache_creation_input_tokens": 100,
+            }
+        })];
+
+        assert_eq!(
+            sum_usage(&documents),
+            TokenUsage {
+                cache_create: 100,
+                ..TokenUsage::default()
+            }
+        );
+    }
+
+    #[test]
     fn gemini_cli_model_token_blocks_are_summed_once_per_model() {
         let documents = vec![json!({
             "stats": {
@@ -229,6 +472,7 @@ mod sum {
                 input: 30,
                 cache_read: 5,
                 cache_create: 0,
+                cache_create_1h: 0,
                 output: 109,
             }
         );
@@ -264,6 +508,7 @@ mod sum {
                 input: 7,
                 cache_read: 1,
                 cache_create: 0,
+                cache_create_1h: 0,
                 output: 3,
             }
         );
@@ -322,6 +567,7 @@ mod sum {
                 input: 40919,
                 cache_read: 40101,
                 cache_create: 0,
+                cache_create_1h: 0,
                 output: 466,
             }
         );

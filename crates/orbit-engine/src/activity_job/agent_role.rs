@@ -1,6 +1,6 @@
 //! Per-role agent settings resolver (ADR-029).
 //!
-//! Bridges the role tag on an `agent_loop` / `groundhog` activity (or its
+//! Bridges the role tag on an `agent_loop` activity (or its
 //! enclosing `TargetStep`) to the selected `[crews.<name>]` role assignment.
 //! The host returns parsed [`AgentRoleConfig`] values, and this module
 //! collapses them with the inline `provider`, `model`, and `backend` fields
@@ -20,7 +20,7 @@ use orbit_common::types::activity_job::{AgentLoopSpec, AgentRole, Backend, Provi
 
 use crate::context::AgentRoleConfig;
 
-use super::dispatcher::V2RuntimeHost;
+use super::dispatcher::{DispatchError, V2RuntimeHost};
 
 /// Resolved `(provider, model, backend)` triple ready to apply to a cloned
 /// [`AgentLoopSpec`] before downstream dispatch.
@@ -42,6 +42,21 @@ pub fn resolve_agent_settings(
 ) -> ResolvedAgentSettings {
     let config = host.agent_role_config_for_input(role, input);
     resolve_from_config(config.as_ref(), inline)
+}
+
+/// Resolve the flat crew selected explicitly by a rendered activity input.
+/// Returns `None` only when the input did not select a crew, leaving untagged
+/// activities on their inline baseline. A selected crew that the host cannot
+/// materialize is an error rather than an inline-provider fallback.
+pub fn resolve_explicit_crew_settings(
+    host: &dyn V2RuntimeHost,
+    inline: &AgentLoopSpec,
+    input: &serde_json::Value,
+) -> Result<Option<ResolvedAgentSettings>, DispatchError> {
+    let Some(config) = host.explicit_agent_crew_config_for_input(input)? else {
+        return Ok(None);
+    };
+    Ok(Some(resolve_from_config(Some(&config), inline)))
 }
 
 /// Pure helper used by both the host-driven path and the unit tests so the

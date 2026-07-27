@@ -9,7 +9,6 @@ use tempfile::tempdir;
 
 use crate::OrbitRuntime;
 use crate::command::task::TaskAddParams;
-use orbit_store::TaskCreateParams;
 
 pub(crate) fn seed_executor(
     runtime: &OrbitRuntime,
@@ -75,48 +74,6 @@ pub(crate) fn seed_list_backlog_task(
     parent_id: Option<String>,
     context_files: Vec<&str>,
 ) -> Task {
-    if status == TaskStatus::Friction {
-        return runtime
-            .stores()
-            .tasks()
-            .create(TaskCreateParams {
-                actor: "test".to_string(),
-                parent_id,
-                title: title.to_string(),
-                description: format!("Fixture task: {title}"),
-                acceptance_criteria: vec!["Fixture task is observable.".to_string()],
-                dependencies: Vec::new(),
-                relations: Vec::new(),
-                tags: Vec::new(),
-                plan: "Fixture plan.".to_string(),
-                execution_summary: String::new(),
-                context_files: context_files
-                    .into_iter()
-                    .map(|path| {
-                        if path.contains(':') {
-                            path.to_string()
-                        } else {
-                            format!("file:{path}")
-                        }
-                    })
-                    .collect(),
-                workspace_path: Some(runtime.paths().repo_root.to_string_lossy().into_owned()),
-                repo_root: None,
-                created_by: Some("test".to_string()),
-                planned_by: Some("test".to_string()),
-                implemented_by: None,
-                status,
-                priority,
-                complexity: None,
-                task_type,
-                external_refs: Vec::new(),
-                source_task_id: None,
-                crew: None,
-                comments: Vec::new(),
-            })
-            .expect("seed legacy friction task");
-    }
-
     runtime
         .add_task(TaskAddParams {
             parent_id,
@@ -132,28 +89,4 @@ pub(crate) fn seed_list_backlog_task(
             ..Default::default()
         })
         .expect("seed task")
-}
-
-pub(crate) fn seed_accepted_friction_task(
-    runtime: &OrbitRuntime,
-    title: &str,
-    priority: TaskPriority,
-    context_files: Vec<&str>,
-) -> Task {
-    let report = seed_list_backlog_task(
-        runtime,
-        title,
-        TaskStatus::Friction,
-        priority,
-        TaskType::Chore,
-        None,
-        context_files,
-    );
-    runtime
-        .approve_task(
-            &report.id,
-            Some("Accepted friction report.".to_string()),
-            None,
-        )
-        .expect("accept friction task")
 }

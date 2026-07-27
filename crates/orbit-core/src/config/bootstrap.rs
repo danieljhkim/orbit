@@ -44,9 +44,17 @@ fn render_seeded_config(
     }
 
     // ADR-0193: freeze agent detection at init; runtime config loading never probes PATH/env.
-    body.push_str(&render_workflow_default_crew(detected, role_settings));
+    let workflow_default = render_workflow_default_crew(detected, role_settings);
+    if !workflow_default.is_empty() {
+        // L-0100: generated TOML keys must be inserted inside their intended table.
+        let marker = "[workflow]\n";
+        let insertion = body.find(marker).ok_or_else(|| {
+            OrbitError::InvalidInput("default config template is missing [workflow]".to_string())
+        })? + marker.len();
+        body.insert_str(insertion, &workflow_default);
+    }
     body.push('\n');
-    body.push_str(&render_crews(role_settings)?);
+    body.push_str(&render_crews(detected, role_settings)?);
     body.push_str(&render_duel(detected)?);
     Ok(body)
 }
@@ -56,37 +64,74 @@ fn render_workflow_default_crew(
     role_settings: Option<&BTreeMap<String, RawAgentRoleConfig>>,
 ) -> String {
     let default_crew = if role_settings.is_some() {
-        "custom"
+        Some("custom")
     } else {
         default_crew_name(detected)
     };
-    format!("default_crew = \"{default_crew}\"\n")
+    default_crew.map_or_else(String::new, |name| format!("default_crew = \"{name}\"\n"))
 }
 
 fn render_crews(
+    detected: &DetectedAgents,
     role_settings: Option<&BTreeMap<String, RawAgentRoleConfig>>,
 ) -> Result<String, OrbitError> {
+    let available_families = available_crew_families(detected);
     let mut crews: BTreeMap<String, RawCrewEntry> = default_crews()
         .into_iter()
+        .filter(|(_, crew)| available_families.contains(&crew.assignment.provider.as_str()))
         .map(|(name, crew)| {
             (
                 name,
                 RawCrewEntry {
-                    planner: Some(raw_role_from_assignment(&crew.planner)),
-                    implementer: Some(raw_role_from_assignment(&crew.implementer)),
-                    reviewer: Some(raw_role_from_assignment(&crew.reviewer)),
+                    provider: Some(crew.assignment.provider),
+                    model: Some(crew.assignment.model),
+                    backend: Some(crew.assignment.backend),
+                    description: crew.description,
+                    tags: crew.tags,
+                    planner: None,
+                    implementer: None,
+                    reviewer: None,
                 },
             )
         })
         .collect();
 
     if let Some(roles) = role_settings {
+        let assignment = roles.get("implementer").ok_or_else(|| {
+            OrbitError::InvalidInput(
+                "custom crew is missing required `implementer` settings".to_string(),
+            )
+        })?;
         crews.insert(
             "custom".to_string(),
             RawCrewEntry {
-                planner: roles.get("planner").cloned(),
-                implementer: roles.get("implementer").cloned(),
-                reviewer: roles.get("reviewer").cloned(),
+                provider: assignment.provider.clone(),
+                model: assignment.model.clone(),
+                backend: assignment.backend.clone(),
+                description: None,
+                tags: Vec::new(),
+                planner: None,
+                implementer: None,
+                reviewer: None,
+            },
+        );
+    }
+
+    if let Some(qa) = role_settings
+        .and_then(|roles| roles.get("qa").cloned())
+        .or_else(|| default_qa_crew(detected))
+    {
+        crews.insert(
+            "qa".to_string(),
+            RawCrewEntry {
+                provider: qa.provider,
+                model: qa.model,
+                backend: qa.backend,
+                description: None,
+                tags: Vec::new(),
+                planner: None,
+                implementer: None,
+                reviewer: None,
             },
         );
     }
@@ -95,36 +140,65 @@ fn render_crews(
     for (name, entry) in crews {
         rendered.push_str(&render_crew_table(&name, &entry)?);
     }
+    if rendered.is_empty() {
+        // Preserve an explicitly empty registry so runtime loading does not
+        // substitute built-in crews for a host where init detected none.
+        rendered.push_str("[crews]\n");
+    }
     Ok(rendered)
+}
+
+fn default_qa_crew(detected: &DetectedAgents) -> Option<RawAgentRoleConfig> {
+    let (provider, model) = if detected.codex_cli {
+        ("codex", orbit_common::model_defaults::CODEX_DEFAULT_MODEL)
+    } else if detected.claude_cli {
+        ("claude", orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK)
+    } else {
+        return None;
+    };
+    Some(RawAgentRoleConfig {
+        provider: Some(provider.to_string()),
+        backend: Some("cli".to_string()),
+        model: Some(model.to_string()),
+    })
 }
 
 fn render_crew_table(name: &str, entry: &RawCrewEntry) -> Result<String, OrbitError> {
     let mut rendered = format!("[crews.{name}]\n");
-    for (role, config) in [
-        ("planner", entry.planner.as_ref()),
-        ("implementer", entry.implementer.as_ref()),
-        ("reviewer", entry.reviewer.as_ref()),
+    for (field, value) in [
+        ("model", entry.model.as_deref()),
+        ("provider", entry.provider.as_deref()),
+        ("backend", entry.backend.as_deref()),
     ] {
-        let config = config.ok_or_else(|| {
-            OrbitError::InvalidInput(format!("crew `{name}` is missing `{role}` role settings"))
+        let value = value.ok_or_else(|| {
+            OrbitError::InvalidInput(format!("crew `{name}` is missing `{field}`"))
         })?;
-        let value = toml::Value::try_from(config).map_err(|err| {
-            OrbitError::Io(format!("serialize [crews.{name}].{role} assignment: {err}"))
-        })?;
-        rendered.push_str(&format!("{role} = {value}\n"));
+        rendered.push_str(&format!(
+            "{field} = {}\n",
+            toml::Value::String(value.to_string())
+        ));
+    }
+    if let Some(description) = entry
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        rendered.push_str(&format!(
+            "description = {}\n",
+            toml::Value::String(description.to_string())
+        ));
+    }
+    if !entry.tags.is_empty() {
+        let tags = entry
+            .tags
+            .iter()
+            .map(|tag| toml::Value::String(tag.clone()))
+            .collect::<Vec<_>>();
+        rendered.push_str(&format!("tags = {}\n", toml::Value::Array(tags)));
     }
     rendered.push('\n');
     Ok(rendered)
-}
-
-fn raw_role_from_assignment(
-    assignment: &orbit_common::types::CrewRoleAssignment,
-) -> RawAgentRoleConfig {
-    RawAgentRoleConfig {
-        provider: Some(assignment.provider.clone()),
-        model: Some(assignment.model.clone()),
-        backend: Some(assignment.backend.clone()),
-    }
 }
 
 fn render_duel(detected: &DetectedAgents) -> Result<String, OrbitError> {
@@ -165,22 +239,20 @@ fn render_duel(detected: &DetectedAgents) -> Result<String, OrbitError> {
 fn validate_complete_role_settings(
     roles: &BTreeMap<String, RawAgentRoleConfig>,
 ) -> Result<(), OrbitError> {
-    for role in ["planner", "implementer", "reviewer"] {
-        let Some(config) = roles.get(role) else {
+    let config = roles.get("implementer").ok_or_else(|| {
+        OrbitError::InvalidInput(
+            "custom crew is missing required `implementer` settings".to_string(),
+        )
+    })?;
+    for (field, value) in [
+        ("provider", config.provider.as_deref()),
+        ("backend", config.backend.as_deref()),
+        ("model", config.model.as_deref()),
+    ] {
+        if value.map(str::trim).is_none_or(str::is_empty) {
             return Err(OrbitError::InvalidInput(format!(
-                "custom crew is missing required `{role}` role settings"
+                "custom crew is missing required `{field}`"
             )));
-        };
-        for (field, value) in [
-            ("provider", config.provider.as_deref()),
-            ("backend", config.backend.as_deref()),
-            ("model", config.model.as_deref()),
-        ] {
-            if value.map(str::trim).is_none_or(str::is_empty) {
-                return Err(OrbitError::InvalidInput(format!(
-                    "custom crew role `{role}` is missing required `{field}`"
-                )));
-            }
         }
     }
     Ok(())

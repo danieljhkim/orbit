@@ -3,7 +3,8 @@ summary: "Auditability — Decisions"
 type: design
 title: "Auditability — Decisions"
 owner: codex
-last_updated: 2026-05-17
+last_updated: 2026-07-27
+last_validated: 2026-07-27
 status: Draft
 feature: auditability
 doc_role: decisions
@@ -13,6 +14,8 @@ tags: ["auditability"]
 # Auditability — Decisions
 
 This is the append-only ADR log for Auditability. Entries are ordered by ADR number. New entries should use the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
+
+Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `auditability/ADR-012` → ADR-0278, `auditability/ADR-022` → ADR-0279, `auditability/ADR-023` → ADR-0280.
 
 ---
 
@@ -162,17 +165,11 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - The terminal-console mockup can use real Orbit events, and library crates fail clippy if raw prints return.
 - Cost: scheduler-event semantics remain aspirational, follow mode is v1, and the reader keeps the file in memory before applying `-n`.
 
-## ADR-012 — Friction scorekeeping derives from lifecycle history
+## ADR-0278 — Friction scorekeeping derives from lifecycle history
 
-**Status:** Superseded · 2026-05 · [T20260510-13]
+**Status:** Superseded · 2026-05 · [T20260510-13] · legacy_id: `auditability/ADR-012`
 
-**Context.** Friction reports once used a dedicated task type, but untriaged reports shared `status: proposed` with human-authored proposals, making scoreboard derivation ambiguous.
-
-**Decision.** Add `status: friction` as the creation status for self-reports, infer legacy friction routing at creation, and rebuild `friction_bounty.json` from task history.
-
-**Consequences.**
-- Friction inbox items are separated from human proposals while legacy friction task records remain readable.
-- Cost: legacy untriaged reports need migration, and already-triaged legacy histories depend on existing transition records.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0278"}'`.
 
 ## ADR-013 — Unified log feed exposes shared backend surfaces for dashboard UI
 
@@ -224,15 +221,16 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ## ADR-017 — Command-audit rows carry task / run / activity correlation IDs
 
-**Status:** Accepted · 2026-04 · [T20260428-7]
+**Status:** Accepted for CLI; MCP precedence superseded · 2026-07 · [ORB-10228]
 
 **Context.** SQLite command-audit rows recorded tool invocations but had no direct link to the task, job run, activity, or step that caused them.
 
-**Decision.** Add nullable `task_id`, `job_run_id`, `activity_id`, and `step_index` columns, populate them at runtime tool dispatch from caller JSON first and engine env vars second, index task/run ids, and render the fields in dashboard detail rows.
+**Decision.** Add nullable `task_id`, `job_run_id`, `activity_id`, and `step_index` columns. CLI retains caller-JSON-first compatibility. For MCP, [ORB-10228] explicitly supersedes that precedence: caller JSON is never trusted audit correlation; an authenticated managed envelope supplies task/run/activity/step, and optional trusted `leased_run.run_id` may fill or must match canonical `job_run_id`.
 
 **Consequences.**
 - Operators can drill from a tool row to the originating task and run context without out-of-band correlation.
-- Cost: historical rows remain NULL, and caller-asserted JSON values are weaker evidence than engine-supplied env context.
+- MCP standalone calls keep these fields NULL unless trusted lease correlation supplies `job_run_id`; managed envelope identity wins over client claims.
+- Cost: historical rows remain NULL, and CLI caller-asserted JSON remains weaker evidence than engine-supplied or MCP trusted context.
 
 ## ADR-018 — Scoreboard tool-call totals project from command audit
 
@@ -282,33 +280,19 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - Runs with no loop-level provider/tool events no longer leave empty loop JSONL placeholders.
 - Cost: consumers must treat a missing loop JSONL file as "no loop events were emitted", not as a missing run; the v2 envelope file remains the canonical run spine.
 
-## ADR-022 — Automated git commits carry implementer authorship
+## ADR-0279 — Automated git commits carry implementer authorship
 
-**Status:** Accepted · 2026-05 · [T20260508-22]
+**Status:** Accepted · 2026-07 · [ORB-10458] · legacy_id: `auditability/ADR-022`
 
-**Context.** Task records already store `implemented_by`, but automated `git_commit` actions previously delegated commit authorship to local git config, hiding the agent that actually produced the change.
-
-**Decision.** Pass a per-commit `--author` derived from `task.implemented_by` for single-implementer commits. Mixed-implementer batch commits use `orbit <orbit@orbit.local>` as the aggregate author and add one `Co-Authored-By` trailer per distinct implementer identity. ADR-023 extends this provenance to committer identity without reusing repo-local user config.
-
-**Consequences.**
-- Reviewers can see implementation provenance directly in git history without joining back through run audit events.
-- Local git config is not written by workflow commit automation and is no longer the source of committer identity for those commits.
-- Cost: multi-implementer batch commits require trailer-aware attribution queries; `git log --author` finds the aggregate commit author, not every co-author trailer.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0279"}'`.
 
 ---
 
-## ADR-023 — Workflow git commit identity is process-scoped
+## ADR-0280 — Workflow git commit identity is process-scoped
 
-**Status:** Accepted · 2026-05 · [T20260509-12]
+**Status:** Accepted · 2026-07 · [ORB-10458] · legacy_id: `auditability/ADR-023`
 
-**Context.** Reusing local Git config for workflow committers made agent identities sticky in developer repositories. If `user.name` or `user.email` was set to an agent identity in repo-local config, later human commits inherited that attribution.
-
-**Decision.** Automated `git_commit` actions set author and committer identity only for the spawned `git commit` process. Single-implementer commits use that implementer's scoped identity for both author and committer. Mixed-implementer commits use `orbit <orbit@orbit.local>` as the aggregate author and committer while preserving distinct implementers as `Co-Authored-By` trailers. Workflows must not write agent or aggregate identities into repo-local Git config.
-
-**Consequences.**
-- Human `user.name` and `user.email` settings remain byte-for-byte stable across workflow commits.
-- Worktrees with no local `user.*` config can still create workflow-owned commits with explicit provenance.
-- The public `git.commit` tool remains user-directed and ambient-config based; workflow-owned commit automation uses this scoped path instead.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0280"}'`.
 
 ---
 
@@ -318,11 +302,12 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 **Context.** Friction reports are operational signal, not planned work. Storing them as task records cluttered task lists and forced accept/reject triage decisions that were more about duplicate handling than report validity.
 
-**Decision.** Store friction reports under `.orbit/frictions/{yyyy}-{mm}/F{nnn}.md` with YAML frontmatter and markdown body. Expose only `orbit.friction.add/list/show/stats`; reject new `orbit.task.add` calls that request legacy friction task routing or `status: friction`; compute rates on demand from friction records plus task completion attribution.
+**Decision.** Store friction reports under `.orbit/frictions/{yyyy}-{mm}/F{nnn}.md` with YAML frontmatter and markdown body. Expose only `orbit.friction.*` artifact operations; exclude `friction` from the task status taxonomy and reject it during task parsing; compute rates on demand from friction records plus task completion attribution.
 
 **Consequences.**
 - The backlog contains work items rather than self-report signal, and friction reports remain append-only.
-- Cost: legacy friction tasks remain readable artifacts and need a one-shot migration command to copy them into the new corpus.
+- The migration window is closed; task CLI, MCP, dashboard, and workflow surfaces no longer expose a friction status.
+- Cost: workspaces with unmigrated legacy friction tasks must migrate them before upgrading because task deserialization no longer accepts `status: friction`.
 
 ---
 
@@ -338,6 +323,67 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - Shipped task records, ship scoreboards, and follow-on git author derivation can preserve the implementer family that actually produced each task before and after PR review.
 - Actor-less automation still records `system` instead of panicking or fabricating a family label.
 - Cost: the ship pipeline must explicitly bridge task/run provenance into automation update payloads, so future edits to PR-open or PR-merge loops need to preserve the regression tests rather than assuming runtime actor context is enough.
+
+---
+
+## ADR-0245 — Derive invocation cost at query time from a versioned price table
+
+**Status:** Accepted · 2026-07 · [ORB-10338] [ORB-10370]
+
+**Context.** The invocation store already retained exact per-invocation token splits, but had no notion of USD cost — cost existed only as a provider-reported total buried in the worker's unparsed per-run JSON, never joined to a model or token split. [ORB-10338] adds cost. Two real alternatives existed: (a) compute cost once at ingest time and store it as a frozen column, or (b) keep rows token-only and derive cost from a versioned price table looked up by exact model string and the invocation's timestamp on every read/aggregate.
+
+**Decision.** Cost is derived at query time, not stored. `orbit_common::types::pricing` ships a versioned price table as an in-repo YAML asset (`crates/orbit-common/assets/model_prices.yaml`), keyed by exact model string plus an `effective_from`/`effective_until` date range, parsed once behind a `OnceLock` cache. `InvocationRecord` gains `derived_cost_usd` (computed at read time from the row's token splits, model, and timestamp against the price table) alongside a new `provider_cost_usd` column that persists the provider's own reported total verbatim for monthly manual reconciliation. Adding or correcting a price row is a YAML edit, not a Rust code change.
+
+**Consequences.**
+- Historical invocation rows re-price automatically when a price row is corrected or backfilled — no migration/backfill script needed to fix a wrong rate.
+- `derived_cost_usd` is `None` whenever no price row covers a model/date, so unpriced or newly-launched models degrade to "unknown" rather than a silently wrong number.
+- `provider_cost_usd` never changes once written, so it stays the ground truth Daniel reconciles against monthly even if `derived_cost_usd` for the same row changes later.
+- [ORB-10370] wires Claude CLI `total_cost_usd` into that column from the same parse that captures provider model identity; providers that report no USD total keep `NULL`.
+- Cost: because derived cost is recomputed on every read instead of frozen at ingest, editing a price row after the fact silently changes the reported cost of every past invocation under that model/date range — there is no record of what a row's derived cost "used to be", unlike the immutable `provider_cost_usd`.
+- Cache-write TTL split: `TokenUsage`/`PriceRow` distinguish 5-minute-TTL cache-creation tokens (`cache_create`, 1.25x input) from 1-hour-TTL (`cache_create_1h`, 2x input), since Anthropic prices them differently; the store persists both. Validated against real worker run 91d7ef01 (`claude-opus-4-8[1m]` → $1.014018 exactly). The ingest path does not yet parse the provider's `ephemeral_1h`/`ephemeral_5m` split, so persisted 1h counts are currently zero (all cache-creation prices at the 5m rate) until that wiring lands — a documented follow-up, matching the pattern by which `provider_cost_usd` was added ahead of its ingest wiring.
+- Model-string keying: rows are keyed by the exact string that lands in `InvocationRecord.model`. A context-window suffix (`claude-opus-4-8[1m]`) is stripped to fall back to the base row rather than duplicating rows, since it bills at base rates; a distinct `model[1m]` row would win by exact match if a long-context premium ever applied. After [ORB-10370], provider-reported CLI model keys replace configured aliases at ingest when available; the configured value remains the fallback, and a structured warning retains requested/reported disagreement without adding a second database column.
+
+---
+
+## ADR-0249 — Workflow commit authors use the persisted crew model
+
+**Status:** Superseded by [ADR-0299] · 2026-07 · [ORB-10519]
+
+**Context.** Pipeline-created commits exposed only a generic or family author even though the job run already persisted the exact resolved crew model used as `AGENT_MODEL` for provider subprocess commit trailers. Deriving attribution again from `task.implemented_by` or crew aliases, or letting the author and trailer read different process state, would permit the ambient author to disagree with durable model telemetry.
+
+**Decision.** Read the persisted job-run `crew_model` once and use that same opaque string both to construct the author name `orbit (<model>)` and to set the spawned Git process's `AGENT_MODEL` for `prepare-commit-msg`. Use `agent@orbit.invalid`; do not resolve aliases, validate model strings, or add a model registry. A missing model uses the generic `orbit <orbit@orbit.local>` author. Keep the committer as the process-scoped generic Orbit identity, and adopt existing commits without amendment.
+
+**Consequences.**
+- `git log --format=%an` distinguishes pipeline commits produced by different resolved models, while the model-bearing author and `Agent-Model` trailer cannot diverge.
+- Existing `Agent-Run`, `Agent-Task`, and `Co-Authored-By` trailers remain additive and unchanged.
+- ORB-10365 retains a host committer because its already-created commit was adopted forward-only, while ORB-10348 was created by pipeline automation with a scoped Orbit committer.
+- Cost: a bare `[crews.*].model` value remains bare in the author because configured model strings stay opaque and Orbit ships no release-coupled alias table.
+
+---
+
+## ADR-0299 — Workflow alone creates shipment commits while dirty failures remain recoverable
+
+**Status:** Accepted · 2026-07 · [ORB-10519]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0299"}'`.
+
+---
+
+## ADR-0297 — Provider subprocess liveness is a separate audit event probed at read time
+
+**Status:** Accepted · 2026-07 · [ORB-10496]
+
+**Context.** A ship-pipeline (`workflow_ship`) implementation agent is a CLI subprocess of the pipeline worker, not of the Worker daemon behind `agent_invoke`, so bridge `agent_run_list` never sees it and `child.id()` existed only inside `cli_runner/supervisor.rs` for process-group cleanup. During run-rescue (F2026-07-083 / [ORB-10257]) a healthy long-running agent was indistinguishable from a dead child without shell process-tree inspection. Two shapes were available: a periodic heartbeat written for as long as the child lives, or a single spawn-time PID record whose liveness the reader probes. Extending `cli.invocation.started` was not available — it is emitted before spawn, so no PID exists yet.
+
+**Decision.** Emit one `cli.invocation.process` event (`provider`, `pid`, `pid_start_time`) immediately after spawn, ordered strictly between `cli.invocation.started` and `cli.invocation.finished`; the envelope writer persists synchronously, so it is readable mid-invocation. Liveness is derived at read time by `orbit_common::utility::process_identity::probe_process_liveness` (`kill(pid, 0)` plus the Linux zombie check, with the recorded start-identity token rejecting a recycled PID). `OrbitRuntime::collect_run_provider_processes` pairs each process event with the exit event that closes it within the same step and probes only the still-open ones; `GET /api/runs/:id` (bridge `workflow_run_status`) and `orbit run show` project the result.
+
+**Consequences.**
+- A long-running `agent_implement` step is distinguishable from a lost child without shell access, which is the decision run-rescue actually has to make.
+- Retries within one step pair in order (newest still-open record wins), so each attempt reports separately instead of collapsing onto the first spawn.
+- A live PID whose versioned start-identity token disagrees reads as `exited`, so PID reuse cannot fake a live agent.
+- An unprobeable host degrades to `alive`/`unknown` rather than `exited`, matching the existing job-run owner-reconciliation policy that a probe which cannot answer is never proof of death.
+- Cost: liveness is only as fresh as the query and only meaningful on the host that ran the child — a remote or later reader sees `exited` for every historical open invocation, because the answer comes from the local process table rather than from the persisted event. A heartbeat would have survived that, at the price of a write per interval per invocation and a staleness threshold to tune.
+- Cost: `pid_start_time` costs one `ps` per provider spawn; a sandbox that blocks `ps` yields `None`, weakening the record to unguarded-PID liveness rather than failing the spawn.
 
 ---
 
@@ -362,6 +408,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[T20260427-52]** — Deprecate `agent` in normal tool-call JSON, infer agent family from `model`, and reject inconsistent legacy pairs.
 - **[T20260428-4]** — Record audit events for MCP tool invocations by moving ownership into the runtime, adding the entry-point discriminator, and bracketing MCP preflight.
 - **[T20260428-7]** — Correlate command-audit rows with originating run/task/activity by adding nullable correlation columns and surfacing them on the dashboard.
+- **[ORB-10228]** — Supersede ADR-017 caller-JSON precedence for MCP; add trusted caller/process provenance, capability sets, and call/lease correlation.
 - **[T20260428-11]** — Derive compact scoreboard all/failed tool-call counts from command-audit tool-run rows.
 - **[T20260428-17]** — Split local Orbit task-review scoring from PR review-comment scoring and surface both in compact scoreboards.
 - **[T20260430-4]** — Count local task-review score by review-thread creations, not replies, and rename the task-review summary field to `threads`.
@@ -378,5 +425,11 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[ORB-00080]** — Collapse Orbit agent identity to family and isolate exact model strings to invocation/configuration surfaces.
 - **[ORB-00090]** — Align agent-facing docs and tool descriptions with the family-as-identity convention.
 - **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
+- **[ORB-10202]** — Remove the retired friction task status and consolidate task mutation attribution and record-parameter construction.
+- **[ORB-10338]** — Add the versioned model price table and query-time `derived_cost_usd`, plus a persisted `provider_cost_usd` column for reconciliation.
+- **[ORB-10370]** — Fill provider model/cost trace fields from CLI result JSON and prefer reported model identity at invocation ingest.
+- **[ORB-10519]** — Keep the persisted crew-model author and process-scoped Orbit committer while removing hook-specific trailer input and provider-commit adoption ([ADR-0299], superseding [ADR-0249] and [ADR-0294]).
+- **[ORB-10369]** — Introduce the persisted resolved crew model as the pipeline commit author with generic fallback and no alias resolver ([ADR-0249], superseded by [ADR-0299]).
+- **[ORB-10496]** — Record the spawned provider subprocess PID as its own audit event and expose read-time liveness through run status and `orbit run show`.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

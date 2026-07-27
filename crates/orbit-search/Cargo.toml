@@ -2,6 +2,7 @@
 name = "orbit-search"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 
 [package.metadata.orbit]
@@ -10,11 +11,17 @@ stability = "internal"
 [lints]
 workspace = true
 
+[[bin]]
+name = "orbit-search-companion"
+path = "src/bin/orbit-search-companion.rs"
+
 [dependencies]
 blake3.workspace = true
 chrono.workspace = true
+clap.workspace = true
+fastembed.workspace = true
 libc.workspace = true
-orbit-common = { path = "../orbit-common" }
+orbit-common = { path = "../orbit-common", features = ["sqlite"] }
 reqwest.workspace = true
 rsa.workspace = true
 rusqlite.workspace = true
@@ -24,4 +31,5 @@ sha2.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+orbit-common = { path = "../orbit-common", features = ["sqlite", "test-util"] }
 tempfile = "3"

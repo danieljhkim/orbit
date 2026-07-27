@@ -1,4 +1,4 @@
-// ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
+// Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
 use super::*;
@@ -43,7 +43,3 @@ impl Drop for Permit {
         self.sem.release();
     }
 }
-
-// Silence unused-import warnings when compiling without the loop sample.
-#[allow(dead_code)]
-pub(super) fn _unused_timing(_: Instant) {}

@@ -24,27 +24,24 @@ pub(super) fn execute(
         OrbitBuiltinAction::AdrSupersede => {
             super::adr_tools::supersede(runtime, input, agent, model)
         }
+        OrbitBuiltinAction::AutoTaskAdd => super::auto_task_tools::add(runtime, input),
+        OrbitBuiltinAction::AutoTaskList => super::auto_task_tools::list(runtime, input),
+        OrbitBuiltinAction::AutoTaskShow => super::auto_task_tools::show(runtime, input),
+        OrbitBuiltinAction::AutoTaskUpdate => super::auto_task_tools::update(runtime, input),
+        OrbitBuiltinAction::AutoTaskToggle => super::auto_task_tools::toggle(runtime, input),
         OrbitBuiltinAction::DocsList => super::docs_tools::list(runtime, input),
         OrbitBuiltinAction::DocsShow => super::docs_tools::show(runtime, input),
         OrbitBuiltinAction::DocsAdd => super::docs_tools::add(runtime, input),
         OrbitBuiltinAction::DocsIndex => super::docs_tools::index(runtime, input),
         OrbitBuiltinAction::DocsMigrate => super::docs_tools::migrate(runtime, input),
-        OrbitBuiltinAction::FrictionAdd => super::friction_tools::add(runtime, input, model),
-        OrbitBuiltinAction::FrictionList => super::friction_tools::list(runtime, input),
-        OrbitBuiltinAction::FrictionResolve => super::friction_tools::resolve(runtime, input),
-        OrbitBuiltinAction::FrictionShow => super::friction_tools::show(runtime, input),
-        OrbitBuiltinAction::FrictionStats => super::friction_tools::stats(runtime),
-        OrbitBuiltinAction::FrictionTags => super::friction_tools::tags(runtime),
-        OrbitBuiltinAction::FrictionUpdate => super::friction_tools::update(runtime, input),
+        // ADR-0209 bearing 1 [ORB-10358]: the friction handler table lives with
+        // the other friction handlers, keyed by the registry's verb enum.
+        OrbitBuiltinAction::Friction(verb) => {
+            super::friction_tools::dispatch(runtime, verb, input, model)
+        }
         OrbitBuiltinAction::LearningAdd => super::learning_tools::add(runtime, input, agent, model),
-        OrbitBuiltinAction::LearningCommentAdd => {
-            super::learning_tools::comment_add(runtime, input, agent, model)
-        }
-        OrbitBuiltinAction::LearningCommentDelete => {
-            super::learning_tools::comment_delete(runtime, input, agent, model)
-        }
-        OrbitBuiltinAction::LearningCommentList => {
-            super::learning_tools::comment_list(runtime, input)
+        OrbitBuiltinAction::LearningArchive => {
+            super::learning_tools::archive(runtime, input, agent, model)
         }
         OrbitBuiltinAction::LearningList => super::learning_tools::list(runtime, input),
         OrbitBuiltinAction::LearningPrune => super::learning_tools::prune(runtime, input),
@@ -56,24 +53,11 @@ pub(super) fn execute(
         OrbitBuiltinAction::LearningUpdate => {
             super::learning_tools::update(runtime, input, agent, model)
         }
-        OrbitBuiltinAction::LearningUpvote => {
-            super::learning_tools::upvote(runtime, input, agent, model)
-        }
         OrbitBuiltinAction::PipelineInvoke => {
             super::pipeline_tools::invoke(runtime, input, agent, model)
         }
         OrbitBuiltinAction::PipelineWait => {
             super::pipeline_tools::wait(runtime, input, agent, model)
-        }
-        OrbitBuiltinAction::ReviewThreadAdd => {
-            super::review_threads::add(runtime, input, agent, model)
-        }
-        OrbitBuiltinAction::ReviewThreadList => super::review_threads::list(runtime, input),
-        OrbitBuiltinAction::ReviewThreadReply => {
-            super::review_threads::reply(runtime, input, agent, model)
-        }
-        OrbitBuiltinAction::ReviewThreadResolve => {
-            super::review_threads::resolve(runtime, input, agent, model)
         }
         OrbitBuiltinAction::Search => super::search_tools::search(runtime, input),
         OrbitBuiltinAction::SemanticIndex => super::semantic_tools::index(runtime, input),
@@ -87,12 +71,12 @@ pub(super) fn execute(
         OrbitBuiltinAction::TaskDelete => super::task_tools::delete(runtime, input),
         OrbitBuiltinAction::TaskLint => super::task_tools::lint(runtime, input),
         OrbitBuiltinAction::TaskList => super::task_tools::list(runtime, input),
-        OrbitBuiltinAction::TaskLocks => super::task_locks::list(runtime),
+        OrbitBuiltinAction::TaskLocks => crate::runtime::task_locks::list(runtime),
         OrbitBuiltinAction::TaskLocksRelease => {
-            super::task_locks::release(runtime, input, agent, model)
+            crate::runtime::task_locks::release(runtime, input, agent, model)
         }
         OrbitBuiltinAction::TaskLocksReserve => {
-            super::task_locks::reserve(runtime, input, agent, model, reservation_owner)
+            crate::runtime::task_locks::reserve(runtime, input, agent, model, reservation_owner)
         }
         OrbitBuiltinAction::TaskReject => super::task_tools::reject(runtime, input, agent, model),
         OrbitBuiltinAction::TaskShow => super::task_tools::show(runtime, input),

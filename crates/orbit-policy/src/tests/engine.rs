@@ -228,3 +228,216 @@ fn check_global_deny_read_overrides_profile_read_allow() {
         "global denyRead must override profile-level read allow"
     );
 }
+
+// --- [ORB-00418] Symlink-safe evaluation (check_resolved) ---
+
+#[cfg(unix)]
+#[test]
+fn resolved_read_through_symlink_into_denied_subtree_is_denied() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::TempDir::new().expect("tempdir");
+    let root_path = root.path();
+    std::fs::create_dir(root_path.join("allowed_dir")).expect("allowed_dir");
+    std::fs::create_dir(root_path.join("denied_dir")).expect("denied_dir");
+    std::fs::write(root_path.join("denied_dir/secret.txt"), b"topsecret").expect("secret");
+    // A symlink inside the allowed subtree pointing into the denied subtree.
+    symlink(
+        root_path.join("denied_dir"),
+        root_path.join("allowed_dir/link"),
+    )
+    .expect("symlink");
+
+    let def = make_def(
+        vec!["denied_dir/**"],
+        vec!["denied_dir/**"],
+        &[("default", &["./**"], &["./**"])],
+    );
+    let engine = PolicyEngine::from_def(&def).expect("engine");
+
+    // Reading through the link resolves to denied_dir/secret.txt -> DENIED,
+    // even though the link path itself is under an allowed subtree.
+    let through_link = root_path.join("allowed_dir/link/secret.txt");
+    let eval = engine
+        .check_resolved(root_path, "default", FsOperation::Read, &through_link)
+        .expect("check");
+    assert!(
+        !eval.allowed,
+        "read through symlink into denied subtree must be denied: {eval:?}"
+    );
+
+    // A genuine (non-symlink) allowed path is still permitted — resolution must
+    // not over-block ordinary paths.
+    std::fs::write(root_path.join("allowed_dir/ok.txt"), b"ok").expect("ok file");
+    let ok = engine
+        .check_resolved(
+            root_path,
+            "default",
+            FsOperation::Read,
+            &root_path.join("allowed_dir/ok.txt"),
+        )
+        .expect("check");
+    assert!(ok.allowed, "non-symlink allowed path should pass: {ok:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn resolved_write_to_missing_path_under_symlinked_ancestor_uses_real_location() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::TempDir::new().expect("tempdir");
+    let root_path = root.path();
+    std::fs::create_dir(root_path.join("allowed_dir")).expect("allowed_dir");
+    std::fs::create_dir(root_path.join("denied_dir")).expect("denied_dir");
+    symlink(
+        root_path.join("denied_dir"),
+        root_path.join("allowed_dir/link"),
+    )
+    .expect("symlink");
+
+    let def = make_def(
+        vec![],
+        vec!["denied_dir/**"],
+        &[("default", &["./**"], &["./**"])],
+    );
+    let engine = PolicyEngine::from_def(&def).expect("engine");
+
+    // The target does not exist yet (a write/create); it must resolve against
+    // the symlinked ancestor's real location for rule matching.
+    let target = root_path.join("allowed_dir/link/newfile.txt");
+    let eval = engine
+        .check_resolved(root_path, "default", FsOperation::Modify, &target)
+        .expect("check");
+    assert!(
+        !eval.allowed,
+        "write under a symlinked ancestor must resolve to the real (denied) location: {eval:?}"
+    );
+    assert!(
+        eval.path.contains("denied_dir/newfile.txt"),
+        "resolved path should point at the real location, got `{}`",
+        eval.path
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn resolved_symlink_escaping_workspace_is_denied() {
+    use std::os::unix::fs::symlink;
+
+    let outside = tempfile::TempDir::new().expect("outside");
+    std::fs::write(outside.path().join("passwd"), b"root:x:0:0").expect("outside file");
+    let root = tempfile::TempDir::new().expect("workspace");
+    let root_path = root.path();
+    symlink(outside.path(), root_path.join("escape")).expect("symlink");
+
+    let def = make_def(vec![], vec![], &[("default", &["./**"], &["./**"])]);
+    let engine = PolicyEngine::from_def(&def).expect("engine");
+
+    let through = root_path.join("escape/passwd");
+    let eval = engine
+        .check_resolved(root_path, "default", FsOperation::Read, &through)
+        .expect("check");
+    assert!(
+        !eval.allowed,
+        "a symlink escaping the workspace root must be denied: {eval:?}"
+    );
+    assert_eq!(eval.matched_rule, "<outside workspace>");
+}
+
+#[cfg(unix)]
+#[test]
+fn resolved_dangling_symlink_into_denied_subtree_is_denied() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::TempDir::new().expect("tempdir");
+    let root_path = root.path();
+    std::fs::create_dir(root_path.join("allowed_dir")).expect("allowed_dir");
+    std::fs::create_dir(root_path.join("denied_dir")).expect("denied_dir");
+    // Dangling link: the target does NOT exist. `exists()` on the link path is
+    // false, but an O_CREAT open through the link creates the *target*, so the
+    // policy must evaluate the target location, not the link path.
+    symlink(
+        root_path.join("denied_dir/planted.txt"),
+        root_path.join("allowed_dir/link"),
+    )
+    .expect("symlink");
+
+    let def = make_def(
+        vec![],
+        vec!["denied_dir/**"],
+        &[("default", &["./**"], &["./**"])],
+    );
+    let engine = PolicyEngine::from_def(&def).expect("engine");
+
+    let eval = engine
+        .check_resolved(
+            root_path,
+            "default",
+            FsOperation::Modify,
+            &root_path.join("allowed_dir/link"),
+        )
+        .expect("check");
+    assert!(
+        !eval.allowed,
+        "a write through a dangling symlink must be evaluated at the link target: {eval:?}"
+    );
+    assert!(
+        eval.path.contains("denied_dir/planted.txt"),
+        "resolved path should be the dangling link's target, got `{}`",
+        eval.path
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn resolved_dangling_symlink_escaping_workspace_is_denied() {
+    use std::os::unix::fs::symlink;
+
+    let outside = tempfile::TempDir::new().expect("outside");
+    let root = tempfile::TempDir::new().expect("workspace");
+    let root_path = root.path();
+    // Dangling link whose (nonexistent) target lives outside the workspace.
+    symlink(outside.path().join("planted.txt"), root_path.join("escape")).expect("symlink");
+
+    let def = make_def(vec![], vec![], &[("default", &["./**"], &["./**"])]);
+    let engine = PolicyEngine::from_def(&def).expect("engine");
+
+    let eval = engine
+        .check_resolved(
+            root_path,
+            "default",
+            FsOperation::Modify,
+            &root_path.join("escape"),
+        )
+        .expect("check");
+    assert!(
+        !eval.allowed,
+        "a dangling symlink escaping the workspace must be denied: {eval:?}"
+    );
+    assert_eq!(eval.matched_rule, "<outside workspace>");
+}
+
+#[cfg(unix)]
+#[test]
+fn resolved_symlink_cycle_fails_closed() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::TempDir::new().expect("tempdir");
+    let root_path = root.path();
+    symlink(root_path.join("b"), root_path.join("a")).expect("symlink a");
+    symlink(root_path.join("a"), root_path.join("b")).expect("symlink b");
+
+    let def = make_def(vec![], vec![], &[("default", &["./**"], &["./**"])]);
+    let engine = PolicyEngine::from_def(&def).expect("engine");
+
+    let result = engine.check_resolved(
+        root_path,
+        "default",
+        FsOperation::Modify,
+        &root_path.join("a"),
+    );
+    assert!(
+        result.is_err(),
+        "a symlink cycle must fail closed (error), got {result:?}"
+    );
+}

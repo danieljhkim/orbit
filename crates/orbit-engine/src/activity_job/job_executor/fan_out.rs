@@ -1,4 +1,4 @@
-// ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
+// Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
 use super::*;
@@ -13,7 +13,7 @@ pub(super) fn run_fan_out(
     let items = render_items_expression(&block.items, &tctx, "fan_out.items")?;
     let worker_count = items.len() as u32;
 
-    let _ = emit_job_event(
+    emit_job_event_lossy(
         &ctx.audit,
         ctx.task_id(),
         V2AuditEventKind::FanoutDispatched {
@@ -23,7 +23,7 @@ pub(super) fn run_fan_out(
     );
 
     if items.is_empty() {
-        let _ = emit_job_event(
+        emit_job_event_lossy(
             &ctx.audit,
             ctx.task_id(),
             V2AuditEventKind::FaninJoined {
@@ -36,7 +36,6 @@ pub(super) fn run_fan_out(
             success: true,
             output: Value::Array(Vec::new()),
             message: None,
-            skipped: false,
         });
     }
 
@@ -80,7 +79,7 @@ pub(super) fn run_fan_out(
                 // below and is no longer accessible afterwards.
                 let worker_task_id =
                     super::super::cli_runner::task_id_from_input(&base_input).map(str::to_string);
-                let _ = emit_job_event(
+                emit_job_event_lossy(
                     &audit,
                     worker_task_id.as_deref(),
                     V2AuditEventKind::WorkerState {
@@ -97,6 +96,7 @@ pub(super) fn run_fan_out(
                     pipeline: Arc::new(Mutex::new(pipeline_snapshot)),
                     sessions: Arc::new(Mutex::new(HashMap::new())),
                     recovery_activity: ctx.recovery_activity.clone(),
+                    failure_activity: ctx.failure_activity.clone(),
                     item: Some(item),
                     iteration: Some(idx),
                 };
@@ -106,7 +106,7 @@ pub(super) fn run_fan_out(
                     Ok(_) => "failed",
                     Err(_) => "failed",
                 };
-                let _ = emit_job_event(
+                emit_job_event_lossy(
                     &audit,
                     worker_task_id.as_deref(),
                     V2AuditEventKind::WorkerState {
@@ -152,7 +152,7 @@ pub(super) fn run_fan_out(
         }
     }
 
-    let _ = emit_job_event(
+    emit_job_event_lossy(
         &ctx.audit,
         ctx.task_id(),
         V2AuditEventKind::FaninJoined {
@@ -182,7 +182,6 @@ pub(super) fn run_fan_out(
         success: block_ok,
         output: collected_value,
         message: None,
-        skipped: false,
     })
 }
 

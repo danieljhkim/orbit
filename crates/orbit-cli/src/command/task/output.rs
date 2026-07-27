@@ -2,10 +2,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{ArtifactManifestFileV2, TaskArtifact};
-use orbit_core::{
-    OrbitError, OrbitRuntime, TaskStatus, build_task_status_index, resolve_task_dependencies,
-};
+use orbit_core::{OrbitError, OrbitRuntime, TaskStatus, resolve_task_dependencies};
 use serde_json::{Value, json};
+
+/// Legacy bare `commented` history entries duplicate the authoritative Comments
+/// list, so human-facing history rendering omits them (ORB-10311). Raw JSON/MCP
+/// history projections keep every event for backward compatibility.
+pub(crate) fn is_human_visible_history_event(event: &str) -> bool {
+    event != "commented"
+}
 
 pub(crate) fn task_to_signal_json(task: &orbit_core::Task) -> Value {
     json!({
@@ -57,7 +62,7 @@ pub(crate) fn task_to_json_for_runtime(
     runtime: &OrbitRuntime,
     task: &orbit_core::Task,
 ) -> Result<Value, OrbitError> {
-    let status_by_id = build_task_status_index(&runtime.list_tasks()?);
+    let status_by_id = runtime.task_status_index()?;
     task_to_json_with_sidecars(runtime, task, &status_by_id)
 }
 
@@ -81,33 +86,17 @@ pub(crate) fn task_to_json_with_sidecars(
             .map_err(|e| OrbitError::Io(e.to_string()))?,
     );
     object.insert(
-        "review_threads".to_string(),
-        serde_json::to_value(runtime.get_task_review_threads(&task.id)?)
-            .map_err(|e| OrbitError::Io(e.to_string()))?,
-    );
-    object.insert(
         "artifacts".to_string(),
         task_artifact_manifest_to_json(&runtime.get_task_artifact_manifest(&task.id)?),
     );
     if let Some(projection) = runtime.resolved_crew_projection(task)? {
         object.insert("resolved_crew".to_string(), Value::String(projection.name));
-        object.insert(
-            "planner_model".to_string(),
-            Value::String(projection.planner_model),
-        );
-        object.insert(
-            "implementer_model".to_string(),
-            Value::String(projection.implementer_model),
-        );
-        object.insert(
-            "reviewer_model".to_string(),
-            Value::String(projection.reviewer_model),
-        );
+        object.insert("crew_model".to_string(), Value::String(projection.model));
     }
     Ok(value)
 }
 
-pub(super) fn task_lock_to_json(task: &orbit_core::Task) -> Value {
+pub(crate) fn task_lock_to_json(task: &orbit_core::Task) -> Value {
     json!({
         "id": task.id,
         "title": task.title,
@@ -155,7 +144,7 @@ pub(super) fn print_task_table(tasks: &[orbit_core::Task], full: bool) {
     println!("{table}");
 }
 
-pub(super) fn print_task_locks(tasks: &[orbit_core::Task], locked_files: &BTreeSet<String>) {
+pub(crate) fn print_task_locks(tasks: &[orbit_core::Task], locked_files: &BTreeSet<String>) {
     if tasks.is_empty() {
         println!("No files currently locked.");
         return;
@@ -333,6 +322,9 @@ pub(super) fn print_single_task_field(
         "history" => {
             use crate::output::color::dimmed;
             for entry in runtime.get_task_history(&task.id)? {
+                if !is_human_visible_history_event(&entry.event) {
+                    continue;
+                }
                 if let Some(note) = &entry.note {
                     println!(
                         "{} {}: {} ({})",

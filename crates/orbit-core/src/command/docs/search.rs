@@ -134,7 +134,7 @@ pub(super) fn adr_embedding_sources(
     adrs: Vec<Adr>,
 ) -> Result<Vec<AdrEmbeddingSource>, OrbitError> {
     let mut sources = Vec::new();
-    // L-0028: ADR ids can briefly appear in multiple status directories; index one source per id.
+    // ADR ids can briefly appear in multiple status directories; index one source per id.
     let adrs = adrs
         .into_iter()
         .map(|adr| (adr.id.clone(), adr))

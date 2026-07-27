@@ -61,6 +61,12 @@ impl Tool for OrbitTaskUpdateTool {
                 required: false,
             },
             ToolParam {
+                name: "complexity".to_string(),
+                description: "Optional task complexity level (low, medium, or hard)".to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+            ToolParam {
                 name: "type".to_string(),
                 description: "New task type".to_string(),
                 param_type: "string".to_string(),
@@ -101,7 +107,8 @@ impl Tool for OrbitTaskUpdateTool {
             },
             ToolParam {
                 name: "pr_status".to_string(),
-                description: "PR review status (e.g. approve, request-changes)".to_string(),
+                description: "PR review status (e.g. approve, request-changes; empty string clears)"
+                    .to_string(),
                 param_type: "string".to_string(),
                 required: false,
             },
@@ -135,15 +142,6 @@ impl Tool for OrbitTaskUpdateTool {
                 param_type: "string".to_string(),
                 required: false,
             },
-            ToolParam {
-                name: "artifacts".to_string(),
-                description:
-                    "Task artifacts to write under `artifacts/`. Accepts either an object \
-                    map of `path -> content` or an array of `{ path, content }` objects."
-                        .to_string(),
-                param_type: "object".to_string(),
-                required: false,
-            },
         ]);
         parameters.extend(super::super::model_identity_params());
 
@@ -157,6 +155,12 @@ impl Tool for OrbitTaskUpdateTool {
 
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
         super::super::reject_agent_field(&input, "orbit.task.update")?;
+        if input.get("artifacts").is_some() {
+            return Err(OrbitError::InvalidInput(
+                "orbit.task.update does not accept inline artifacts; use orbit.task.artifact.put"
+                    .to_string(),
+            ));
+        }
         super::super::execute_host_action(ctx, input, OrbitBuiltinAction::TaskUpdate)
     }
 }

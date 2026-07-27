@@ -1,7 +1,97 @@
+use std::path::Path;
+
 use orbit_common::types::OrbitError;
 use rusqlite::Connection;
 
+mod feature;
+mod ledger;
+
+pub use feature::{
+    AppliedFeatureMigration, FeatureMigration, FeatureSchemaStatus, PendingFeatureMigration,
+};
+pub use ledger::{AppliedMigration, SUPPORTED_SCHEMA_VERSION};
+pub(crate) use ledger::{applied_migrations, current_schema_version};
+
+/// Bring the store database up to the newest supported schema version,
+/// applying any pending versioned migrations (each transactional and
+/// recorded in the `schema_meta` ledger). Refuses to open a database whose
+/// recorded schema version is newer than this binary supports.
 pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
+    ledger::run_migrations(conn, ledger::MIGRATIONS)
+}
+
+/// Registry metadata for one schema migration not yet recorded as applied,
+/// as surfaced by `orbit migrate --dry-run` (ORB-10012).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingSchemaMigration {
+    pub version: u32,
+    pub name: &'static str,
+}
+
+/// Read-only view of a store database's migration ledger: the recorded
+/// schema version plus the registry migrations still pending against it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaLedgerStatus {
+    /// Schema version recorded in the ledger (0 for a fresh/pre-ledger or
+    /// nonexistent database).
+    pub current_version: u32,
+    /// Registry migrations newer than `current_version`, in apply order.
+    /// Empty when the database is current or newer than this binary
+    /// (compare against [`SUPPORTED_SCHEMA_VERSION`] to distinguish).
+    pub pending: Vec<PendingSchemaMigration>,
+}
+
+/// Inspect the migration ledger of the store database at `db_path` without
+/// opening it for writing — and therefore without triggering the automatic
+/// migrations that [`crate::Store::open`] applies. A missing database reads
+/// as version 0 with every registry migration pending (opening it would
+/// create and migrate it). Powers `orbit migrate --dry-run`.
+pub fn read_schema_ledger_status(db_path: &Path) -> Result<SchemaLedgerStatus, OrbitError> {
+    let current_version = if db_path.exists() {
+        let conn = Connection::open_with_flags(
+            db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| {
+            OrbitError::Store(format!(
+                "cannot open store database '{}' read-only: {e}",
+                db_path.display()
+            ))
+        })?;
+        current_schema_version(&conn)?
+    } else {
+        0
+    };
+
+    Ok(SchemaLedgerStatus {
+        current_version,
+        pending: pending_schema_migrations_after(current_version),
+    })
+}
+
+/// Registry migrations newer than `current_version`, in apply order. Lets
+/// callers that already know the recorded version (e.g. via
+/// [`crate::Store::schema_version`]) list what is pending without another
+/// database open.
+pub fn pending_schema_migrations_after(current_version: u32) -> Vec<PendingSchemaMigration> {
+    ledger::MIGRATIONS
+        .iter()
+        .filter(|m| m.version > current_version)
+        .map(|m| PendingSchemaMigration {
+            version: m.version,
+            name: m.name,
+        })
+        .collect()
+}
+
+/// v1 `baseline` migration: the full pre-ledger idempotent schema. Safe to
+/// run on both a fresh database and any legacy database created by the
+/// pre-versioning migration code, which is how existing databases adopt
+/// the versioned ledger.
+///
+/// ADR-0287: this shipped structure is immutable. Later schema belongs in a
+/// new migration so databases that already recorded v1 receive it too.
+fn apply_baseline_schema(conn: &Connection) -> Result<(), OrbitError> {
     conn.execute_batch(
         r#"
             CREATE TABLE IF NOT EXISTS tools (
@@ -112,8 +202,8 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
             -- Arrays (related_features, related_tasks, tags, paths, legacy_ids,
             -- supersedes, validation_warnings) are stored as JSON-encoded strings
             -- so filters can use `LIKE '%"<value>"%'` until the corpus warrants junction
-            -- tables. Per ADR-010 in docs/design/adr-artifact, FTS5 over body
-            -- content is owned by `orbit-search::vector`, not this schema.
+            -- tables. FTS5 over body content is owned by `orbit-search::vector`,
+            -- not this schema.
             CREATE TABLE IF NOT EXISTS adrs (
                 id TEXT PRIMARY KEY,
                 status TEXT NOT NULL,
@@ -145,10 +235,97 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
     ensure_audit_events_schema(conn)?;
     ensure_task_reservations_schema(conn)?;
     ensure_learning_index_schema(conn)?;
-    ensure_invocation_schema(conn)?;
+    ensure_invocation_schema_v1(conn)?;
     ensure_v2_state_consolidation_schema(conn)?;
 
     Ok(())
+}
+
+/// v2 `learnings_index_workspace_scope` migration (ORB-10113): re-key the
+/// learning envelope index by `(workspace_id, id)`.
+///
+/// The index previously had no workspace discriminator and was keyed only by
+/// learning ID, so in the shared host-global database rows written by one
+/// workspace leaked into another workspace's searches and reminders. YAML
+/// under each `.orbit/learnings/` is the source of truth, and legacy rows
+/// cannot be attributed to a workspace reliably, so this migration discards
+/// every indexed row and lets each runtime rebuild its own rows from YAML via
+/// `sync_learnings`. It touches only SQLite — no `learning.yaml` file is read
+/// or modified.
+fn apply_learning_index_workspace_scope(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            DROP TABLE IF EXISTS learnings_index;
+
+            CREATE TABLE learnings_index (
+                workspace_id TEXT NOT NULL,
+                id           TEXT NOT NULL,
+                status       TEXT NOT NULL,
+                paths        TEXT NOT NULL,
+                tags         TEXT NOT NULL,
+                summary      TEXT NOT NULL,
+                updated_at   TEXT NOT NULL,
+                priority     INTEGER,
+                PRIMARY KEY (workspace_id, id)
+            );
+
+            CREATE INDEX IF NOT EXISTS learnings_active
+                ON learnings_index(workspace_id, status) WHERE status = 'active';
+        "#,
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))
+}
+
+fn ensure_routine_schema(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            -- Host-local routine scheduler state [ORB-10021]. Lives only in
+            -- the host-global store database and is never synced between
+            -- hosts (ADR-0208); routine *definitions* are git-versioned YAML
+            -- in routine-source workspaces.
+
+            -- Per-routine cursor: first observation baseline + last slot
+            -- consumed. A routine never fires for slots before its baseline.
+            CREATE TABLE IF NOT EXISTS routine_cursors (
+                routine_name TEXT PRIMARY KEY,
+                baseline_at TEXT NOT NULL,
+                last_slot TEXT,
+                updated_at TEXT NOT NULL
+            );
+
+            -- One row per fire attempt. The (name, slot, attempt) uniqueness
+            -- is the idempotency key that prevents double fires for the same
+            -- scheduled slot across overlapping or crashed sweeps.
+            CREATE TABLE IF NOT EXISTS routine_fires (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                routine_name TEXT NOT NULL,
+                slot TEXT NOT NULL,
+                attempt INTEGER NOT NULL DEFAULT 1,
+                state TEXT NOT NULL,
+                run_id TEXT,
+                source_workspace TEXT NOT NULL,
+                detail TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(routine_name, slot, attempt)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_routine_fires_name_slot
+            ON routine_fires(routine_name, slot DESC, attempt DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_routine_fires_state
+            ON routine_fires(state);
+
+            -- Host-local suppressions written by `orbit routine pause`;
+            -- durable across reboots, invisible to git.
+            CREATE TABLE IF NOT EXISTS routine_pauses (
+                routine_name TEXT PRIMARY KEY,
+                paused_at TEXT NOT NULL,
+                actor TEXT
+            );
+        "#,
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))
 }
 
 fn ensure_adr_index_schema(conn: &Connection) -> Result<(), OrbitError> {
@@ -408,7 +585,41 @@ fn ensure_audit_events_schema(conn: &Connection) -> Result<(), OrbitError> {
     Ok(())
 }
 
-fn ensure_invocation_schema(conn: &Connection) -> Result<(), OrbitError> {
+/// v10 `invocation_telemetry_columns` migration (ORB-10367): re-run the
+/// idempotent invocation-schema step against databases that already recorded
+/// the v1 baseline.
+///
+/// The 5m/1h cache split (`cache_create_1h_tokens`) and the token-derived
+/// cost column (`provider_cost_usd`) were added to
+/// [`ensure_invocation_schema`], which only ever runs as part of the v1
+/// `baseline` migration. Every database created before those columns landed
+/// is already at v1 or newer, so `run_migrations` skips baseline and the
+/// `ALTER`s never reach it — the insert then binds columns the table lacks
+/// and every agent-dispatching run dies at the telemetry write. Registering
+/// the same idempotent step under its own version is what carries it to
+/// existing databases.
+fn apply_invocation_telemetry_columns(conn: &Connection) -> Result<(), OrbitError> {
+    // The `ALTER`s below address tables the v1 baseline creates. A database
+    // without them has nothing to repair (and `ALTER TABLE` on a missing
+    // table is an error, not a no-op), so skip rather than fail the open.
+    if !table_exists(conn, "invocations")?
+        || !table_exists(conn, "invocation_tasks")?
+        || !table_exists(conn, "tool_calls")?
+    {
+        return Ok(());
+    }
+    add_column_if_missing(
+        conn,
+        "ALTER TABLE invocations ADD COLUMN provider_cost_usd REAL",
+    )?;
+    add_column_if_missing(
+        conn,
+        "ALTER TABLE invocations ADD COLUMN cache_create_1h_tokens INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_invocation_schema_v1(conn)
+}
+
+fn ensure_invocation_schema_v1(conn: &Connection) -> Result<(), OrbitError> {
     add_column_if_missing(conn, "ALTER TABLE invocations ADD COLUMN slot TEXT")?;
     conn.execute_batch(
         r#"
@@ -525,6 +736,302 @@ fn ensure_v2_state_consolidation_schema(conn: &Connection) -> Result<(), OrbitEr
         "#,
     )
     .map_err(|e| OrbitError::Store(e.to_string()))
+}
+
+fn apply_flat_crew_model(conn: &Connection) -> Result<(), OrbitError> {
+    // ADR-0213: keep the legacy role columns nullable for existing databases;
+    // new reads fall back to implementer_model when crew_model is not populated.
+    add_column_if_missing(conn, "ALTER TABLE job_runs ADD COLUMN crew_model TEXT")
+}
+
+fn apply_job_run_archive_stage(conn: &Connection) -> Result<(), OrbitError> {
+    add_column_if_missing(conn, "ALTER TABLE job_runs ADD COLUMN archived_at TEXT")
+}
+
+/// v11 `routine_scheduler_schema` migration (ORB-10462): routine tables were
+/// added only to the mutable v1 baseline after the ledger shipped. Register
+/// the idempotent schema step so existing databases receive the same tables
+/// as fresh databases before the baseline is frozen by ADR-0287.
+fn apply_routine_scheduler_schema(conn: &Connection) -> Result<(), OrbitError> {
+    ensure_routine_schema(conn)
+}
+
+/// v5 `host_registry_core` migration (ORB-10255): durable machine identity,
+/// lifecycle state, and immutable historical names in the hub-global store.
+///
+/// This migration is strictly additive. Cross-table triggers backstop the
+/// typed API's preflight so a current or tombstoned `host_id` can never exist
+/// for two machines, even when the database is modified outside that API.
+fn apply_host_registry_core(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            CREATE TABLE IF NOT EXISTS hosts (
+                machine_id    TEXT PRIMARY KEY,
+                host_id       TEXT NOT NULL UNIQUE,
+                labels_json   TEXT NOT NULL DEFAULT '[]',
+                status        TEXT NOT NULL CHECK (status IN ('active', 'retired')),
+                registered_at TEXT NOT NULL,
+                updated_at    TEXT NOT NULL,
+                retired_at    TEXT,
+                last_seen_at  TEXT,
+                CHECK (length(machine_id) > 0),
+                CHECK (length(host_id) > 0),
+                CHECK (json_valid(labels_json) AND json_type(labels_json) = 'array'),
+                CHECK (
+                    (status = 'active' AND retired_at IS NULL)
+                    OR (status = 'retired' AND retired_at IS NOT NULL)
+                )
+            );
+
+            CREATE TABLE IF NOT EXISTS host_aliases (
+                host_id    TEXT PRIMARY KEY,
+                machine_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                warning    TEXT NOT NULL,
+                CHECK (length(host_id) > 0),
+                CHECK (length(warning) > 0),
+                FOREIGN KEY(machine_id) REFERENCES hosts(machine_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_hosts_status_host_id
+                ON hosts(status, host_id);
+            CREATE INDEX IF NOT EXISTS idx_host_aliases_machine_id
+                ON host_aliases(machine_id, created_at);
+
+            CREATE TRIGGER IF NOT EXISTS hosts_host_id_not_alias_insert
+            BEFORE INSERT ON hosts
+            WHEN EXISTS (
+                SELECT 1 FROM host_aliases WHERE host_id = NEW.host_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'host_id is reserved by a permanent alias');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS hosts_host_id_not_alias_update
+            BEFORE UPDATE OF host_id ON hosts
+            WHEN EXISTS (
+                SELECT 1 FROM host_aliases WHERE host_id = NEW.host_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'host_id is reserved by a permanent alias');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS host_alias_not_current_name_insert
+            BEFORE INSERT ON host_aliases
+            WHEN EXISTS (
+                SELECT 1 FROM hosts WHERE host_id = NEW.host_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'host alias conflicts with a current host_id');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS host_aliases_immutable_update
+            BEFORE UPDATE ON host_aliases
+            BEGIN
+                SELECT RAISE(ABORT, 'host aliases are immutable');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS host_aliases_immutable_delete
+            BEFORE DELETE ON host_aliases
+            BEGIN
+                SELECT RAISE(ABORT, 'host aliases are permanent');
+            END;
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
+/// v6 `workspace_coordination_projections` migration (ORB-10257): singular
+/// workspace ownership, private host-keyed presence, and owner-published
+/// execution profiles. The schema is additive and keeps owner payload JSON
+/// separate from hub-owned generation/receipt metadata.
+fn apply_workspace_coordination_projections(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            CREATE TABLE IF NOT EXISTS workspace_ownership (
+                workspace_id     TEXT PRIMARY KEY,
+                owner_machine_id TEXT NOT NULL,
+                bound_at         TEXT NOT NULL,
+                updated_at       TEXT NOT NULL,
+                CHECK (length(workspace_id) > 0),
+                FOREIGN KEY(owner_machine_id) REFERENCES hosts(machine_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_workspace_ownership_owner
+                ON workspace_ownership(owner_machine_id, workspace_id);
+
+            CREATE TABLE IF NOT EXISTS host_workspace_presence (
+                machine_id   TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                root         TEXT NOT NULL,
+                last_verified TEXT NOT NULL,
+                PRIMARY KEY(machine_id, workspace_id),
+                CHECK (length(workspace_id) > 0),
+                CHECK (length(root) > 0),
+                FOREIGN KEY(machine_id) REFERENCES hosts(machine_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_host_workspace_presence_workspace
+                ON host_workspace_presence(workspace_id, machine_id);
+
+            CREATE TABLE IF NOT EXISTS workspace_execution_profiles (
+                workspace_id     TEXT PRIMARY KEY,
+                owner_machine_id TEXT NOT NULL,
+                generation       INTEGER NOT NULL CHECK (generation >= 1),
+                payload_json     TEXT NOT NULL,
+                received_at      TEXT NOT NULL,
+                CHECK (json_valid(payload_json) AND json_type(payload_json) = 'object'),
+                FOREIGN KEY(workspace_id) REFERENCES workspace_ownership(workspace_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT,
+                FOREIGN KEY(owner_machine_id) REFERENCES hosts(machine_id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            );
+
+            CREATE TRIGGER IF NOT EXISTS execution_profile_owner_matches_insert
+            BEFORE INSERT ON workspace_execution_profiles
+            WHEN NOT EXISTS (
+                SELECT 1 FROM workspace_ownership o
+                WHERE o.workspace_id = NEW.workspace_id
+                  AND o.owner_machine_id = NEW.owner_machine_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'execution profile owner does not match workspace ownership');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS execution_profile_owner_matches_update
+            BEFORE UPDATE OF workspace_id, owner_machine_id ON workspace_execution_profiles
+            WHEN NOT EXISTS (
+                SELECT 1 FROM workspace_ownership o
+                WHERE o.workspace_id = NEW.workspace_id
+                  AND o.owner_machine_id = NEW.owner_machine_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'execution profile owner does not match workspace ownership');
+            END;
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
+/// v7 `trusted_mcp_audit_provenance` migration (ORB-10228): additive trusted
+/// workspace, caller/process, transport, capability-set, session/call, and
+/// lease correlation for command-audit rows. Existing rows remain untouched
+/// and therefore read with NULL/empty additions.
+fn apply_trusted_mcp_audit_provenance(conn: &Connection) -> Result<(), OrbitError> {
+    for sql in [
+        "ALTER TABLE audit_events ADD COLUMN workspace_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN caller_machine_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN caller_host_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN process_machine_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN process_host_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN transport TEXT",
+        "ALTER TABLE audit_events ADD COLUMN capabilities_json TEXT",
+        "ALTER TABLE audit_events ADD COLUMN origin_session_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN mcp_call_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN lease_id TEXT",
+    ] {
+        add_column_if_missing(conn, sql)?;
+    }
+
+    conn.execute_batch(
+        r#"
+            CREATE INDEX IF NOT EXISTS idx_audit_events_workspace_id
+            ON audit_events(workspace_id);
+
+            CREATE INDEX IF NOT EXISTS idx_audit_events_caller_machine_id
+            ON audit_events(caller_machine_id);
+
+            CREATE INDEX IF NOT EXISTS idx_audit_events_process_machine_id
+            ON audit_events(process_machine_id);
+
+            CREATE INDEX IF NOT EXISTS idx_audit_events_transport
+            ON audit_events(transport);
+
+            CREATE INDEX IF NOT EXISTS idx_audit_events_origin_session_id
+            ON audit_events(origin_session_id);
+
+            CREATE INDEX IF NOT EXISTS idx_audit_events_mcp_call_id
+            ON audit_events(mcp_call_id);
+
+            CREATE INDEX IF NOT EXISTS idx_audit_events_lease_id
+            ON audit_events(lease_id);
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
+/// v8 `hub_registry_metadata` migration (ORB-10267): one singleton hub-global
+/// metadata row carrying the configured hub `machine_id` and a monotonic
+/// `registry_revision`. Every snapshot-visible host/alias/retirement,
+/// ownership, presence, or execution-profile mutation advances the revision
+/// exactly once inside its own transaction; per-workspace execution-profile
+/// generation remains a separate concept. The `id = 0` primary-key CHECK is
+/// the SQLite singleton guard, and the row is seeded here so every reader sees
+/// a revision without a lazy insert path.
+fn apply_hub_registry_metadata(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            CREATE TABLE IF NOT EXISTS hub_registry_metadata (
+                id                INTEGER PRIMARY KEY CHECK (id = 0),
+                hub_machine_id    TEXT,
+                registry_revision INTEGER NOT NULL DEFAULT 0
+                    CHECK (
+                        typeof(registry_revision) = 'integer'
+                        AND registry_revision >= 0
+                        AND registry_revision <= 9223372036854775807
+                    ),
+                updated_at        TEXT NOT NULL,
+                CHECK (hub_machine_id IS NULL OR length(hub_machine_id) > 0)
+            );
+
+            INSERT OR IGNORE INTO hub_registry_metadata(
+                id, hub_machine_id, registry_revision, updated_at
+            ) VALUES (0, NULL, 0, datetime('now'));
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
+/// v9 `feature_schema_ledger` migration (ORB-10319): generic append-only
+/// migration ledger for vertical feature crates. Feature versions advance
+/// independently from the Store-global schema after this one-time ownership
+/// boundary and are recorded transactionally with their feature-owned DDL.
+fn apply_feature_schema_ledger(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            CREATE TABLE IF NOT EXISTS feature_schema_meta (
+                feature    TEXT NOT NULL,
+                version    INTEGER NOT NULL,
+                name       TEXT NOT NULL,
+                applied_at TEXT NOT NULL,
+                PRIMARY KEY(feature, version),
+                CHECK (length(feature) > 0 AND feature = trim(feature)),
+                CHECK (
+                    typeof(version) = 'integer'
+                    AND version > 0
+                    AND version <= 4294967295
+                ),
+                CHECK (length(name) > 0 AND name = trim(name)),
+                CHECK (length(applied_at) > 0)
+            );
+
+            CREATE TRIGGER IF NOT EXISTS feature_schema_meta_immutable_update
+            BEFORE UPDATE ON feature_schema_meta
+            BEGIN
+                SELECT RAISE(ABORT, 'feature schema migration records are immutable');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS feature_schema_meta_immutable_delete
+            BEFORE DELETE ON feature_schema_meta
+            BEGIN
+                SELECT RAISE(ABORT, 'feature schema migration records are append-only');
+            END;
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
 }
 
 fn ensure_task_reservations_schema(conn: &Connection) -> Result<(), OrbitError> {

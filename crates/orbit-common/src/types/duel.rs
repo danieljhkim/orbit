@@ -7,8 +7,6 @@
 //! contract between:
 //!
 //! - the `arbitrate_review` activity (which produces an [`ArbiterVerdict`]),
-//! - the `check_duel_review_decision` automation (which gates on it),
-//! - the `record_duel_scores` automation (which builds a [`DuelRun`] from it),
 //! - the `orbit-store` duel_scoreboard module (which persists runs),
 //! - the `orbit duel scoreboard` CLI (which computes aggregates over runs).
 //!

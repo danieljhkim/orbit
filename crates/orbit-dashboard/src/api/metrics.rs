@@ -1,13 +1,13 @@
 //! `/metrics/*` parity endpoints for the retired CLI metrics views.
 
-use std::sync::Arc;
-
-use axum::extract::{Path, Query, State};
+use crate::state::Ws;
+use axum::extract::{Path, Query};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::metrics::aggregate as aggregate_knowledge_stats;
-use orbit_core::{InvocationQuery, OrbitRuntime};
+use orbit_core::{InvocationInsertParams, InvocationQuery};
 use serde::Deserialize;
 
 use super::{LimitQuery, map_runtime_error, non_empty_string};
@@ -36,10 +36,7 @@ pub(super) struct MetricsInvocationsQuery {
     limit: Option<usize>,
 }
 
-pub(super) async fn knowledge_metrics(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Query(q): Query<LimitQuery>,
-) -> Response {
+pub(super) async fn knowledge_metrics(Ws(runtime): Ws, Query(q): Query<LimitQuery>) -> Response {
     match runtime.list_job_runs(JobRunListParams {
         limit: q.limit,
         ..Default::default()
@@ -49,24 +46,21 @@ pub(super) async fn knowledge_metrics(
     }
 }
 
-pub(super) async fn activity_metrics(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
+pub(super) async fn activity_metrics(Ws(runtime): Ws) -> Response {
     match runtime.activity_invocation_metrics() {
         Ok(rows) => Json(rows).into_response(),
         Err(e) => map_runtime_error(e),
     }
 }
 
-pub(super) async fn tool_metrics(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
+pub(super) async fn tool_metrics(Ws(runtime): Ws) -> Response {
     match runtime.tool_invocation_metrics() {
         Ok(rows) => Json(rows).into_response(),
         Err(e) => map_runtime_error(e),
     }
 }
 
-pub(super) async fn task_metrics(
-    State(runtime): State<Arc<OrbitRuntime>>,
-    Path(id): Path<String>,
-) -> Response {
+pub(super) async fn task_metrics(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
     match runtime.task_invocation_metrics(&id) {
         Ok(row) => Json(row).into_response(),
         Err(e) => map_runtime_error(e),
@@ -74,7 +68,7 @@ pub(super) async fn task_metrics(
 }
 
 pub(super) async fn invocation_metrics(
-    State(runtime): State<Arc<OrbitRuntime>>,
+    Ws(runtime): Ws,
     Query(q): Query<MetricsInvocationsQuery>,
 ) -> Response {
     let query = match q.into_invocation_query() {
@@ -83,6 +77,16 @@ pub(super) async fn invocation_metrics(
     };
     match runtime.invocation_records(query) {
         Ok(rows) => Json(rows).into_response(),
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+pub(super) async fn ingest_invocation(
+    Ws(runtime): Ws,
+    Json(params): Json<InvocationInsertParams>,
+) -> Response {
+    match runtime.insert_invocation_trace_record(&params) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => map_runtime_error(e),
     }
 }

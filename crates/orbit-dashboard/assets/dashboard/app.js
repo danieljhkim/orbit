@@ -1,11 +1,10 @@
 // Orbit dashboard — terminal-dark, manually refreshed SPA.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, statusPill, stateCell, fetchJson, requestJson, postJson, patchJson, syncNodes, positiveIntParam } from './common.js';
+import { el, statusPill, stateCell, fetchJson, listItems, requestJson, postJson, patchJson, syncNodes, positiveIntParam, getWorkspace, setWorkspace, setMultiWorkspace, isAggregateView, renderPanelPlaceholder } from './common.js';
 import { buildChips, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, setPinnedExternalTask, wireSearch } from './tasks.js';
 import { applyAuditHashQuery, buildAuditChips, buildAuditHash, fetchAndRenderAudit, fetchAndRenderPolicy, getActiveAuditSubtab, navigateToAuditExecution, renderAuditSummary, setActiveAuditSubtabFromButton, setAuditSubtab, syncAuditControls, wireAuditSearch, } from './audit.js';
 import { renderScoreboard } from './scoreboard.js';
-import { fetchAndRender as fetchAndRenderReviewThreads, initReviewThreads, markCurrentAgentThreadsSeen } from './review-threads.js';
 import { initLogTail, fitLogPanelToViewport } from './log-tail.js';
 import { renderDiagnostics, renderImplementOneCard as renderImplOne, } from './diagnostics.js';
 import { renderMarkdown } from './markdown.js';
@@ -47,7 +46,7 @@ const STATUS_ORDER = [
 
 const DEFAULT_INACTIVE_STATUSES = new Set(["someday"]);
 const STATUS_UPDATE_TARGETS = STATUS_ORDER
-  .filter((status) => !["friction", "rejected", "archived"].includes(status))
+  .filter((status) => !["rejected", "archived"].includes(status))
   .concat(["done"]);
 
 const JOB_RUN_LIMIT = positiveIntParam("runs", 25);
@@ -83,6 +82,10 @@ let frictionSearchQuery = "";
 
 // Health strip state
 let lastSummary = null;
+
+// ORB-00030: workspaces the dashboard is serving. Empty/one entry => single
+// mode (no selector). More than one => global mode (selector shown).
+let dashboardWorkspaces = [];
 
 function taskContext() {
   return {
@@ -1151,6 +1154,72 @@ function truncate(text, max) {
   return text.slice(0, max) + "\u2026";
 }
 
+// ORB-00039/00040: the aggregate ("All workspaces") view has no concrete
+// workspace to scope per-workspace endpoints to — the backend `Ws` extractor
+// finds no default and returns 400. The single `isAggregateView()` predicate
+// (shared from common.js, backed by the multi-workspace flag set in
+// initWorkspaceSelector) gates every per-workspace fetch across app.js,
+// audit.js and scoreboard.js; picking a concrete workspace flips it false and
+// restores every panel.
+
+// ORB-00039: in aggregate mode the per-workspace fetches are skipped, so the
+// panels they feed (audit summary, locked files) show an inline placeholder and
+// the health strip is neutralized rather than left displaying one workspace's
+// stale counts.
+function renderAggregatePlaceholders() {
+  renderPanelPlaceholder("audit-summary-body");
+  renderPanelPlaceholder("locks-body");
+  const locksCount = $("locks-count");
+  if (locksCount) locksCount.textContent = "—";
+  resetHealthStrip();
+}
+
+// ORB-00044: the Diagnostics tab is fed exclusively by per-workspace endpoints
+// (/api/job-runs, /api/scoreboard, and
+// /api/diagnostics/{metrics,errors,friction,implement_one}), so in aggregate
+// mode every diagnostics panel — all subtab bodies (ORB-10444 folded the
+// scoreboard in as one) and the implement_one side card — shows the placeholder
+// and the count is neutralized.
+function renderDiagnosticsPlaceholders() {
+  renderPanelPlaceholder("diag-body");
+  renderPanelPlaceholder("runs-body");
+  renderPanelPlaceholder("scoreboard-body");
+  renderPanelPlaceholder("diag-implement-one-body");
+  const diagCount = $("diag-count");
+  if (diagCount) diagCount.textContent = "—";
+}
+
+// ORB-00044: the knowledge detail panels (learning-detail / adr-detail /
+// friction-detail) hold live action buttons (supersede, accept, resolve, and
+// the friction status/tag controls) that POST/PATCH per-workspace endpoints.
+// Left stale in aggregate mode, a click would fire without ?workspace= — 400 in
+// pure-global mode, or a silent write to the default workspace inside a
+// --global workspace — so the stale detail is replaced by the same placeholder
+// as its list panel. Selecting a concrete workspace re-fetches and re-renders.
+function renderKnowledgeDetailPlaceholder(prefix) {
+  renderPanelPlaceholder(`${prefix}-detail`);
+  const count = $(`${prefix}-detail-count`);
+  if (count) count.textContent = "—";
+}
+
+// The health strip is fed by the same per-workspace /api/audit/summary endpoint,
+// so in aggregate mode reset its tiles to a neutral dash rather than showing the
+// last-selected workspace's numbers as if they were machine-wide.
+function resetHealthStrip() {
+  for (const id of [
+    "tile-events-value",
+    "tile-denials-value",
+    "tile-failed-value",
+    "tile-active-value",
+  ]) {
+    const node = $(id);
+    if (node) node.textContent = "—";
+  }
+  const denials = $("tile-denials");
+  if (denials) denials.classList.remove("tile-alert");
+  renderSparkline([]);
+}
+
 function fetchAndCacheCrews() {
   return fetchJson("/api/crews").then((payload) => {
     return cacheCrewPayload(payload);
@@ -1158,42 +1227,110 @@ function fetchAndCacheCrews() {
 }
 
 function fetchAndRenderTasks() {
+  // In global mode with the aggregate ("All workspaces") view selected, pull
+  // every workspace's tasks; otherwise the single/selected workspace's tasks
+  // (the workspace query param is applied by fetchJson).
+  const aggregate = isAggregateView();
+  const path = aggregate ? "/api/tasks/all" : "/api/tasks";
+  // /api/crews is per-workspace and 400s without a concrete workspace, so in
+  // aggregate mode skip the crew fetch and let the crew controls degrade to a
+  // disabled "crew unavailable" fallback rather than rejecting the Promise.all
+  // and blocking the whole task list. Clear any crew cache left over from a
+  // previously-selected concrete workspace so the fallback is consistent (a
+  // stale, still-enabled crew <select> would PATCH with no workspace).
+  if (aggregate) cacheCrewPayload({ crews: [] });
+  const crews = aggregate ? Promise.resolve() : fetchAndCacheCrews();
   return Promise.all([
-    fetchJson("/api/tasks"),
-    fetchAndCacheCrews(),
-  ]).then(([tasks]) => {
+    fetchJson(path),
+    crews,
+  ]).then(([payload]) => {
+    // /api/tasks answers `{ items, ... }` (ORB-10400); /api/tasks/all a bare array.
+    const tasks = listItems(payload);
     lastTasks = tasks;
     renderTasks(tasks, taskContext());
   });
 }
 
+// ORB-00030: discover servable workspaces and, in global mode, install a
+// header selector. Runs before the first refresh so the initial fetches target
+// the right workspace. Failures are non-fatal (single-workspace fallback).
+async function initWorkspaceSelector() {
+  let entries;
+  try {
+    entries = await fetchJson("/api/workspaces");
+  } catch (e) {
+    console.error(e);
+    return;
+  }
+  dashboardWorkspaces = Array.isArray(entries) ? entries : [];
+  // Feed the shared aggregate-view predicate (common.js): multi-workspace mode
+  // is what makes the "All workspaces" (no concrete workspace) view possible.
+  setMultiWorkspace(dashboardWorkspaces.length > 1);
+  if (dashboardWorkspaces.length <= 1) return; // single mode: no selector
+
+  // Default to the workspace flagged by the server (the cwd workspace, if the
+  // server was launched inside one) so every tab works out of the box; else the
+  // first active workspace. "All workspaces" (aggregate) is an explicit choice.
+  if (!getWorkspace()) {
+    const def = dashboardWorkspaces.find((w) => w.is_default);
+    const firstActive = dashboardWorkspaces.find((w) => w.status === "active");
+    const initial = (def || firstActive || dashboardWorkspaces[0]).id;
+    setWorkspace(initial);
+  }
+  buildWorkspaceSelector();
+}
+
+function buildWorkspaceSelector() {
+  const select = el("select", { class: "workspace-select", title: "Workspace" });
+  select.id = "workspace-select";
+
+  const allOption = el("option", { text: "All workspaces" });
+  allOption.value = "";
+  select.appendChild(allOption);
+
+  const current = getWorkspace() || "";
+  for (const ws of dashboardWorkspaces) {
+    const active = ws.status === "active";
+    const label = active ? ws.name : `${ws.name} (unavailable)`;
+    const option = el("option", { text: label });
+    option.value = ws.id;
+    option.disabled = !active;
+    if (ws.id === current) option.selected = true;
+    select.appendChild(option);
+  }
+  if (!current) allOption.selected = true;
+
+  select.addEventListener("change", () => {
+    setWorkspace(select.value);
+    refreshDashboard();
+  });
+
+  const meta = $("meta");
+  meta.insertBefore(select, $("refresh-btn"));
+}
+
 function activeRefreshJobs() {
+  // ORB-00039: in the aggregate "All workspaces" view there is no concrete
+  // workspace to scope per-workspace endpoints to, so skip every per-workspace
+  // fetch (they'd 400) and render placeholders for the panels they feed. Only
+  // the cross-workspace aggregate task list (/api/tasks/all) is fetched.
+  const aggregate = isAggregateView();
+
   // The health strip is global; refresh on every tick alongside the active tab.
-  // Threads also refresh globally so the unread badge updates without visiting
-  // the Threads tab; mark-seen only fires while that tab is active (below).
-  const jobs = [
-    fetchAndRenderSummary(),
-    fetchAndRenderReviewThreads().then(() => {
-      if (activeTab === "threads") markCurrentAgentThreadsSeen();
-    }),
-  ];
+  // The per-workspace summary (/api/audit/summary) is replaced by a placeholder
+  // instead of fetched in aggregate mode.
+  const jobs = [];
+  if (aggregate) {
+    renderAggregatePlaceholders();
+  } else {
+    jobs.push(fetchAndRenderSummary());
+  }
 
   if (activeTab === "tasks") {
     jobs.push(fetchAndRenderTasks());
-    if (!document.hidden) jobs.push(fetchAndRenderTaskLocks());
-    return jobs;
-  }
-
-  if (activeTab === "scoreboard") {
-    // ORB-00337: boot fetch matches the visually-highlighted segment
-    // (`24h`); the user can pick a different window from the selector,
-    // which calls /api/scoreboard?window=... directly.
-    jobs.push(fetchJson("/api/scoreboard?window=24h").then(renderScoreboard));
-    return jobs;
-  }
-
-  if (activeTab === "threads") {
-    // Threads payload is already in the global jobs above; nothing extra needed.
+    // /api/tasks/locks is per-workspace; skip it in aggregate mode (the locks
+    // panel shows the placeholder rendered above).
+    if (!aggregate && !document.hidden) jobs.push(fetchAndRenderTaskLocks());
     return jobs;
   }
 
@@ -1232,6 +1369,25 @@ function activeRefreshJobs() {
   }
 
   if (activeTab === "diagnostics") {
+    // ORB-00044: every diagnostics fetch is per-workspace — /api/job-runs and
+    // all four /api/diagnostics/* endpoints (metrics, errors, friction,
+    // implement_one) take the backend `Ws` extractor and 400 without a concrete
+    // workspace — so in aggregate mode skip the whole tab and show placeholders
+    // (subtab switches are likewise guarded in router.js setDiagSubtabImpl).
+    if (aggregate) {
+      renderDiagnosticsPlaceholders();
+      return jobs;
+    }
+    if (activeDiagSubtab === "scoreboard") {
+      // ORB-10444: Scoreboard folded in from the retired top-level tab.
+      // ORB-00337: the boot fetch matches the visually-highlighted segment
+      // (`24h`); picking a different window calls /api/scoreboard?window=...
+      // directly from scoreboard.js (itself aggregate-guarded, ORB-00040).
+      // The scoreboard subtab replaces the diagnostics two-column layout, so it
+      // returns early rather than also fetching the implement_one side card.
+      jobs.push(fetchJson("/api/scoreboard?window=24h").then(renderScoreboard));
+      return jobs;
+    }
     if (activeDiagSubtab === "runs") {
       jobs.push(fetchAndRenderRuns());
     } else if (activeDiagSubtab === "metrics") {
@@ -1326,6 +1482,15 @@ function fetchAndRenderSummary() {
 }
 
 function fetchAndRenderLearnings() {
+  // ORB-00040: /api/learnings is per-workspace and 400s without a concrete
+  // workspace. Guard at the fetch chokepoint so every entry point (auto-refresh,
+  // tab activation, and the search box) shows the placeholder instead of firing.
+  // ORB-00044: also replace the stale detail panel (live supersede button).
+  if (isAggregateView()) {
+    renderPanelPlaceholder("learnings-body");
+    renderKnowledgeDetailPlaceholder("learning");
+    return Promise.resolve();
+  }
   const sp = new URLSearchParams();
   sp.set("limit", String(LEARNING_LIMIT));
   if (learningSearchQuery) sp.set("q", learningSearchQuery);
@@ -1336,6 +1501,13 @@ function fetchAndRenderLearnings() {
 }
 
 function fetchAndRenderAdrs() {
+  // ORB-00040: /api/adrs is per-workspace; skip it in aggregate mode.
+  // ORB-00044: also replace the stale detail panel (live accept/supersede).
+  if (isAggregateView()) {
+    renderPanelPlaceholder("adrs-body");
+    renderKnowledgeDetailPlaceholder("adr");
+    return Promise.resolve();
+  }
   const sp = new URLSearchParams();
   sp.set("limit", String(ADR_LIMIT));
   if (adrSearchQuery) sp.set("q", adrSearchQuery);
@@ -1346,6 +1518,14 @@ function fetchAndRenderAdrs() {
 }
 
 function fetchAndRenderFrictions() {
+  // ORB-00040: /api/frictions and /api/frictions/stats are per-workspace; skip
+  // both in aggregate mode.
+  // ORB-00044: also replace the stale detail panel (live resolve/status/tags).
+  if (isAggregateView()) {
+    renderPanelPlaceholder("frictions-body");
+    renderKnowledgeDetailPlaceholder("friction");
+    return Promise.resolve();
+  }
   const sp = new URLSearchParams();
   sp.set("limit", String(FRICTION_LIMIT));
   if (frictionSearchQuery) sp.set("q", frictionSearchQuery);
@@ -1462,9 +1642,11 @@ $("refresh-btn").addEventListener("click", refreshDashboard);
 
 initRuns(runsContext());
 initRunDetail(runDetailContext());
-initReviewThreads();
 const rctx = routerContext();
 initRouter(rctx);
+// Resolve workspaces before the router fires its first refresh so the initial
+// fetches carry the right workspace (top-level await; app.js is an ES module).
+await initWorkspaceSelector();
 iT();
 
 initLogTail();

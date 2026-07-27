@@ -7,50 +7,46 @@ sidebar:
 
 ## Platform Support
 
-Orbit's CLI runs on macOS, Linux, and Windows, but **OS-level sandbox enforcement of agent subprocesses is currently macOS only**, via `sandbox-exec`. The bundled `claude`, `codex`, and `gemini` executors declare `sandbox: macos-sandbox-exec` and require macOS to launch with a sandbox; on Linux and Windows the same activities run, but the spawned agent process is not wrapped in a kernel-level sandbox. Filesystem policies still apply to Orbit's own HTTP-tool builtins on every platform.
+Orbit's CLI runs on macOS, Linux, and Windows, but **OS-level sandbox
+enforcement of agent subprocesses is currently macOS only**, via
+`sandbox-exec`. The shipped `claude`, `codex`, `gemini`, and `grok` executor
+assets declare the macOS sandbox; initialization drops that unsupported
+primitive on other platforms so those activities run without a kernel-level
+sandbox. Filesystem policies still apply to Orbit's own HTTP-tool builtins on
+every platform.
 
 ## Install
 
-The recommended install is the install script:
+The recommended project-agnostic install uses the npm binary proxy:
 
 ```bash
-curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | sh
+npm install -g @orbit-tools/cli
 ```
 
-It detects your platform, downloads the matching release binary, authenticates
-the signed release checksums, validates the archive contents, and places it on
-your `PATH`.
+Node 18 or newer is required. The package downloads the matching native Orbit
+binary and exposes it on your `PATH`.
 
 ### Alternatives
 
-Homebrew (macOS, Linuxbrew):
+From a trusted source checkout, the release installer detects the platform,
+downloads the matching release binary, authenticates signed checksums, validates
+the archive contents, and installs the binary:
 
 ```bash
-brew install danieljhkim/tap/orbit
+./install.sh
 ```
 
-Claude Code plugin (skips the install script, downloads the binary on first MCP call):
-
-```text
-/plugin marketplace add danieljhkim/orbit
-/plugin install orbit
-```
-
-The plugin registers Orbit's MCP server, skills, and orchestration subagents in Claude Code, and pulls the matching native `orbit` binary through the [`@orbit-tools/cli`](https://www.npmjs.com/package/@orbit-tools/cli) npm proxy on first invocation. Requires Node 18+ on `PATH`. To get the `orbit` CLI on your shell as well: `npm install -g @orbit-tools/cli`.
-
-From source (requires Rust toolchain):
+For development from a source checkout (requires the Rust toolchain):
 
 ```bash
-git clone https://github.com/danieljhkim/orbit.git
-cd orbit
 make install
 ```
 
 ### Pinned versions and custom install directory
 
 ```bash
-curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | ORBIT_VERSION=v0.3.1 sh
-curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | ORBIT_INSTALL_DIR="$HOME/.local/bin" sh
+ORBIT_VERSION=v0.9.2 ./install.sh
+ORBIT_INSTALL_DIR="$HOME/.local/bin" ./install.sh
 ```
 
 `ORBIT_VERSION`, `ORBIT_INSTALL_REPO`, and `ORBIT_INSTALL_BASE_URL` change the
@@ -86,18 +82,6 @@ orbit workspace init --mcp
 
 ## Configure Orbit
 
-`orbit init` seeds `~/.orbit/config.toml` and prompts for per-role agent settings (reviewer, implementer, planner). See [Configuration](../../reference/config/) for file locations, shape, and backend precedence.
-
-## Update the Graph
-
-The code graph syncs on demand — a file watcher keeps it fresh as you work, so reads are normally up to date without a manual step (there is no separate init-time build). To force a refresh:
-
-```bash
-orbit graph sync
-```
-
-For a complete re-index — needed for full `trace` coverage, since incremental sync resolves fewer command handlers:
-
-```bash
-orbit graph sync --full
-```
+`orbit init` seeds `~/.orbit/config.toml` with crews for detected provider CLIs.
+See [Configuration](../../reference/config/) for file locations, shape, and
+backend precedence.
