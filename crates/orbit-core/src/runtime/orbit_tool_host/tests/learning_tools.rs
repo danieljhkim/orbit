@@ -23,6 +23,7 @@ use orbit_common::types::{
 use orbit_store::{LearningCreateParams, LearningSearchParams};
 use orbit_tools::ToolRegistry;
 use serde_json::{Value, json};
+use tempfile::tempdir;
 
 use super::super::test_support::test_runtime;
 use crate::OrbitRuntime;
@@ -339,6 +340,49 @@ fn supersede_rejects_id_equal_to_with() {
     )
     .expect_err("self-supersede rejected");
     assert!(matches!(err, OrbitError::InvalidInput(_)));
+}
+
+#[test]
+fn supersede_reports_an_unreadable_remote_stub_like_show() {
+    let root = tempdir().expect("tempdir");
+    let global_root = root.path().join("global");
+    let shared_root = root.path().join("repo/.orbit");
+    let remote_root = root.path().join("remote/.orbit");
+    let local_root = root.path().join("local/.orbit");
+    for path in [&global_root, &shared_root, &remote_root, &local_root] {
+        std::fs::create_dir_all(path).expect("create runtime root");
+    }
+
+    let remote = OrbitRuntime::from_resolved_roots(&global_root, &shared_root, &remote_root)
+        .expect("remote runtime");
+    let remote_learning = create_minimal(&remote, "remote", &[], &[]);
+    std::fs::remove_file(
+        remote_root
+            .join("learnings")
+            .join(&remote_learning.id)
+            .join("learning.yaml"),
+    )
+    .expect("remove remote learning body");
+
+    let local = OrbitRuntime::from_resolved_roots(&global_root, &shared_root, &local_root)
+        .expect("local runtime");
+    let replacement = create_minimal(&local, "replacement", &[], &[]);
+    let _env = human_context_env();
+
+    let err = super::super::learning_tools::supersede(
+        &local,
+        json!({"id": remote_learning.id, "with": replacement.id}),
+        None,
+        None,
+    )
+    .expect_err("remote stub is not locally mutable");
+
+    let OrbitError::Store(message) = err else {
+        panic!("expected remote-stub store error");
+    };
+    assert!(message.contains("is recorded in another worktree"));
+    assert!(message.contains("body is not locally readable"));
+    assert!(message.contains("worktree_root="));
 }
 
 #[test]
