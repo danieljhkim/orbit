@@ -20,8 +20,8 @@ pub const LAUNCHD_LABEL: &str = "com.orbit.sweep";
 pub const SYSTEMD_UNIT: &str = "orbit-sweep";
 
 /// Path launchd redirects `orbit sweep` stdout/stderr to on macOS, and the
-/// file `run_sweep` rotates so it stays bounded on an always-on host
-/// ([ORB-00423]). Single source of truth shared by the installer and the sweep
+/// file `run_sweep` rotates so it stays bounded on an always-on host. Single
+/// source of truth shared by the installer and the sweep
 /// pass so the writer and the rotator never disagree. (Linux logs to the
 /// journal, which rotates on its own, so only macOS needs this file.)
 pub fn sweep_log_path(global_root: &Path) -> PathBuf {

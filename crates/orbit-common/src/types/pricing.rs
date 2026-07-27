@@ -9,7 +9,7 @@
 // The shipped asset is a build-time invariant (a checked-in file this crate
 // controls), not user input; `shipped_price_table_parses_and_is_non_empty`
 // guards it in CI. See `redaction.rs` for the same documented-invariant use
-// of `expect` (ORB-00013).
+// of `expect`.
 #![allow(clippy::expect_used)]
 
 use std::sync::OnceLock;

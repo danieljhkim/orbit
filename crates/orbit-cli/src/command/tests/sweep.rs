@@ -1,4 +1,4 @@
-//! `orbit sweep` output/reporting tests [ORB-00423]: the quiet-by-default
+//! `orbit sweep` output/reporting tests: the quiet-by-default
 //! filtering that keeps the once-a-minute clock from growing its log, and the
 //! stable `--json` shape machine consumers depend on.
 

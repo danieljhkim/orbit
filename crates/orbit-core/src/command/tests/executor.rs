@@ -256,7 +256,7 @@ fn seed_default_executors_heals_leftover_macos_sandbox_on_linux() {
     );
 }
 
-/// ADR-0211 asset↔const seam: the shipped `claude.yaml` cannot reference the
+/// The asset↔const seam: the shipped `claude.yaml` cannot reference the
 /// Rust constants, so this test pins the executor asset's model pair to the
 /// authoritative `orbit-common::model_defaults` values. A drift on either side
 /// (bumping the const without the asset, or vice versa) fails here.

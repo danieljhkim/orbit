@@ -70,7 +70,7 @@ pub struct TaskIndexFilter {
 /// [`validate_relation_targets_exist`](crate::sqlite::task_registry::TaskRegistryStore)
 /// rejects at index-rebuild time. These are the "grandfathered" relations that
 /// make an index rebuild fail its validator and fall back to a full bundle
-/// scan (see ORB-10305 / ORB-10246).
+/// scan (see ORB-10305).
 ///
 /// `relation_type` carries the canonical snake_case name as stored in the
 /// registry (`related_to`, `blocked_by`, …); non-`ORB-` targets (friction /

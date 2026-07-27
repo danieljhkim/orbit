@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 #![cfg(feature = "replay")]
-// ORB-00013: Integration fixtures exercise public behavior and unwrap setup invariants.
+// Integration fixtures exercise public behavior and unwrap setup invariants.
 #![allow(
     clippy::expect_used,
     clippy::print_stderr,

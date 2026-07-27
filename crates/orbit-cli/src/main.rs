@@ -1,8 +1,8 @@
 // ORB-00004: legacy CLI binary surfaces still need a focused documentation pass.
 #![allow(missing_docs)]
-// ORB-00013: The CLI binary prints genuine user-facing command output.
+// The CLI binary prints genuine user-facing command output.
 #![allow(clippy::print_stderr, clippy::print_stdout)]
-// ORB-00013: Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
+// Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 #![allow(
     rustdoc::broken_intra_doc_links,

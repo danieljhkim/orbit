@@ -174,8 +174,7 @@ fn validate_rewrite_checkpoint(
     local_sha: &str,
     observed_remote_sha: Option<&str>,
 ) -> Result<(), OrbitError> {
-    // L-0089 / ADR-0225: divergence is safe only with the exact durable
-    // pre-rewrite remote SHA.
+    // Divergence is safe only with the exact durable pre-rewrite remote SHA.
     let rewritten = input
         .get("rewrite_performed")
         .and_then(Value::as_bool)

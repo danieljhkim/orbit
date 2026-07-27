@@ -667,7 +667,7 @@ fn primary_fast_forward_is_benign(
     before: &GitWorktreeFingerprint,
     after: &GitWorktreeFingerprint,
 ) -> Result<bool, DispatchError> {
-    // L-0110: linked-worktree shipment owns clean base fast-forwards; the
+    // Linked-worktree shipment owns clean base fast-forwards; the
     // provider boundary still rejects primary content/history drift.
     if before.head == after.head
         || before.branch != after.branch

@@ -9,7 +9,7 @@
 //! The `tools/list` snapshot is the breaking-change guard for the agent MCP
 //! surface: per RELEASING.md, any tool input/output schema change is breaking.
 #![allow(missing_docs)]
-// ORB-00013: tests use unwrap/expect to keep fixture setup readable.
+// tests use unwrap/expect to keep fixture setup readable.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::BTreeSet;
@@ -132,8 +132,8 @@ impl McpWorkspace {
     }
 
     /// Spawn `orbit mcp serve`, run the MCP initialize handshake (announcing
-    /// this workspace via `_meta.orbit.workspace`, ADR-0181), and return the
-    /// connected client.
+    /// this workspace via `_meta.orbit.workspace`), and return the connected
+    /// client.
     fn serve(&self) -> McpClient {
         let child = Self::orbit_command(&self.work, &self.home)
             .args(["mcp", "serve"])
@@ -579,7 +579,7 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
 
     // Task create → show → list. No explicit `workspace` argument anywhere:
     // the ambient session workspace announced via initialize `_meta` must be
-    // applied (ADR-0181).
+    // applied.
     let created = client.call_tool_ok(
         "orbit_task_add",
         json!({

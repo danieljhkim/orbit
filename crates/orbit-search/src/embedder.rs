@@ -5,7 +5,7 @@
 //! and self-describe via `model_id` / `dim` / `max_input_tokens`. The catalog
 //! pins the three fastembed-rs models the install command knows how to fetch.
 
-// ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
+// Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
 use orbit_common::types::OrbitError;
