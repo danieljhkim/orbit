@@ -44,7 +44,7 @@ fn default_template_keeps_agent_dependent_sections_out() {
     assert!(DEFAULT_CONFIG_TEMPLATE.contains("[execution.env]"));
     assert!(DEFAULT_CONFIG_TEMPLATE.contains("[execution.codex]"));
     assert!(DEFAULT_CONFIG_TEMPLATE.contains("[scoring]"));
-    assert!(DEFAULT_CONFIG_TEMPLATE.contains("[graph]"));
+    assert!(!DEFAULT_CONFIG_TEMPLATE.contains("[graph]"));
     assert!(DEFAULT_CONFIG_TEMPLATE.contains("[workflow]"));
     assert!(DEFAULT_CONFIG_TEMPLATE.contains("base_branch = \"main\""));
 }

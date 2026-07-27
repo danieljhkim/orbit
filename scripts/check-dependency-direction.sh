@@ -27,14 +27,6 @@ allowed_internal_deps() {
       # an internal crate edge.
       echo "orbit-common"
       ;;
-    orbit-graph)
-      # ORB-10013: orbit-common needed for the GraphError -> OrbitError
-      # translator (graph_error_to_orbit), which lives next to the error per
-      # docs/design-patterns/error_translation.md. ORB-10357 folded the former
-      # orbit-graph-extract and orbit-graph-cli crates in as modules; the
-      # crate now has zero workspace dependents and awaits deletion.
-      echo "orbit-common"
-      ;;
     orbit-tools)
       echo "orbit-common orbit-exec orbit-policy"
       ;;

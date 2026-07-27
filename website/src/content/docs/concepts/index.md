@@ -1,6 +1,6 @@
 ---
 title: Concepts
-description: "The core Orbit concepts: tasks, activities, jobs, policies, graph data, and agent runtimes."
+description: "The core Orbit concepts: tasks, activities, jobs, policies, and agent runtimes."
 sidebar:
   order: 1
 ---
@@ -19,10 +19,6 @@ sidebar:
   <a class="orbit-card" href="./policies/">
     <h3>Policies</h3>
     <p>Filesystem guardrails for runtime execution.</p>
-  </a>
-  <a class="orbit-card" href="./knowledge-graph/">
-    <h3>Knowledge Graph</h3>
-    <p>The code-aware structure agents query.</p>
   </a>
   <a class="orbit-card" href="./agents/">
     <h3>Agents</h3>

@@ -7,10 +7,6 @@
 //! truth: call it on every freshly opened connection, then layer any
 //! store-specific overrides (e.g. the task registry's `synchronous=FULL`)
 //! on top.
-//!
-//! orbit-graph cannot depend on this crate today (adding the edge needs an
-//! ADR per `ARCHITECTURE.md`); its local `configure_connection` mirrors
-//! these defaults and must be kept in sync manually.
 
 use rusqlite::Connection;
 
@@ -33,8 +29,8 @@ pub struct PragmaOutcome {
 
 impl PragmaOutcome {
     /// True when the connection ended up in WAL mode. In-memory databases
-    /// report `memory` and return false; callers that require WAL (e.g.
-    /// orbit-graph semantics) can turn that into a hard error.
+    /// report `memory` and return false; callers that require WAL can turn
+    /// that into a hard error.
     pub fn wal_active(&self) -> bool {
         self.journal_mode.eq_ignore_ascii_case("wal")
     }

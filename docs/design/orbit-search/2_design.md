@@ -341,9 +341,12 @@ All embeddings stay local. Task content never leaves the workspace. This is stru
 
 ---
 
-## 9. Phase-2 Graph Corpus (Designed, Deferred)
+## 9. Historical Phase-2 Graph Corpus Proposal (Retired)
 
-**Status: Designed; deferred until a fresh ADR-vector indexing design is accepted and bandwidth is available.**
+**Status: Retired by ADR-0291 / ORB-10491.** Orbit's code-graph subsystem was
+deleted, so this section is retained only as design history and is not an
+implementation plan. Any future code-corpus work requires a new design that
+does not assume the removed graph types, indexer, or synchronization stream.
 
 Phase 2 extends the existing `embeddings` table to a second `source_kind` covering both code symbols and design-doc sections, with ADRs joining later as a third `source_kind` once ADR vector indexing has its own accepted design. No schema migration; the phase-1 `source_kind` discriminator is the seam this section commits against.
 

@@ -127,10 +127,6 @@ impl DeterministicActionHost for OrbitRuntime {
         self.context.scoring_enabled()
     }
 
-    fn graph_editing(&self) -> bool {
-        self.context.graph_editing()
-    }
-
     fn actor_model_identity(&self) -> Option<String> {
         matches!(self.actor().kind, crate::context::ActorKind::Agent)
             .then(|| self.actor_label().trim())

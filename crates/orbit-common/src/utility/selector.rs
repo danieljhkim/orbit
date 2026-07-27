@@ -2,9 +2,7 @@
 //!
 //! This is the single implementation of the stable selector grammar
 //! (`dir:` / `file:` / `symbol:` / `module:` / `command:`) shared by task
-//! scopes and graph queries. `orbit-graph::extract` re-exports this module
-//! for graph consumers; the grammar reference lives in
-//! `docs/design/orbit-graph/specs/GRAPH_SPEC.md`.
+//! scopes and context-file selectors.
 
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
@@ -80,7 +78,7 @@ impl Selector {
     }
 
     /// Return the filesystem anchor path for this selector, or an empty string
-    /// for selector forms that are resolved through graph metadata.
+    /// for selector forms that do not carry filesystem anchors.
     pub fn path(&self) -> &str {
         self.anchor_path().unwrap_or("")
     }

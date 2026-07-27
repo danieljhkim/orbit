@@ -21,9 +21,6 @@ sandbox = "danger-full-access"
 [scoring]
 enabled = true
 
-[graph]
-editing = false
-
 [workflow]
 # Default base branch for `orbit run ship` and `duel-plan`.
 # Override per-invocation with `--base <branch>`. The Orbit repo itself uses

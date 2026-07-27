@@ -18,15 +18,18 @@ This document captures the questions phase 1 deliberately defers, the prior work
 
 ## 1. Open Questions
 
-### 1.1 Symbol-aware scope (deferred to phase 2)
+### 1.1 Symbol-aware scope (unplanned)
 
 Phase 1 scopes learnings by path globs and tags ([2_design.md §3](./2_design.md)). This breaks under renames: a learning scoped to a benchmark source file becomes invisible the moment someone moves the file, even though the knowledge is still about the same logic.
 
-The knowledge graph already tracks symbol identity across moves. A `scope.symbols: ["orbit-engine::perf_runner::run_benchmark"]` field would survive renames cleanly because the graph resolves symbols regardless of file location. Reasons phase 1 doesn't ship this:
+The schema preserves a `scope.symbols:
+["orbit-engine::perf_runner::run_benchmark"]` field, but Orbit has no live
+symbol resolver. Reasons the field remains inactive:
 
-- Coupling the learning store to the knowledge graph adds a hot-path dependency on graph rebuilds. Phase 1 keeps the dependency one-way (graph triggers staleness checks) rather than bidirectional.
+- A resolver would add a new indexing dependency and lifecycle surface.
 - Symbol-aware scope is more useful once semantic-similarity ranking exists ([§1.2](#12-semantic-similarity-ranking-deferred-to-phase-2)), because the two together give "find learnings about this symbol or anything semantically near it."
-- The phase-1 schema reserves `scope.symbols` so adding it later is additive, not a migration.
+- The phase-1 schema reserves `scope.symbols`, so a future design can remain
+  additive rather than requiring a data migration.
 
 **Cost of deferring:** every refactor that moves files requires manual `orbit learning prune` or `update` calls. At low learning volume that's tolerable; at higher volume it becomes drag.
 
@@ -157,9 +160,12 @@ Wikis are often hard to retrieve because the reader must guess the vocabulary. P
 
 Most "team knowledge base" tools live outside the dev loop — a separate web app, a wiki, a chat channel. Project-learnings lives in `.orbit/learnings/` next to `.orbit/tasks/`, with the same lifecycle, git semantics, and MCP/CLI retrieval surface. A reference comment at a code or workflow boundary keeps the registry connected to the work without serving content automatically.
 
-### 3.3 Lifecycle bound to code via the knowledge graph
+### 3.3 Lifecycle bound to code via explicit scopes
 
-A learning that references a function the graph no longer recognizes is flagged stale automatically. This is a small thing, but it directly attacks the most common failure mode of long-lived knowledge bases: stale content that's still being served. The phase-1 implementation is conservative (opportunistic checks, manual prune); phase 2 ties it more tightly into the graph rebuild path.
+A learning becomes a staleness candidate when its path scope or cited
+task/commit evidence no longer resolves. Checks are opportunistic and pruning
+remains explicit, keeping lifecycle behavior deterministic without a background
+indexer.
 
 ---
 
@@ -169,7 +175,8 @@ A learning that references a function the graph no longer recognizes is flagged 
 
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) — folder layout, frontmatter, ADR template.
 - [docs/design/orbit-search/](../orbit-search/) — phase 2 dependency for semantic-similarity ranking.
-- [docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) — phase 2 dependency for symbol-aware scope and staleness detection.
+- [docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) —
+  historical context for the retired symbol-aware proposal.
 - [docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md) — relevant for whether learnings should sync across machines (decision: yes, via the same checked-in path tasks use). Archived; superseded by [remote-access](../remote-access/1_overview.md).
 - [CLAUDE.md](../../../CLAUDE.md) — friction-reports section is the closest existing precedent for agent-authored project artifacts.
 - `orbit-create-task` skill (`~/.claude/skills/orbit-create-task/`) — the authoring shape `orbit-learnings` will mirror.

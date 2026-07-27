@@ -21,7 +21,6 @@ flowchart LR
   Engine --> Exec["orbit-exec"]
   Engine --> Tools
   Agent --> Tools
-  Graph["orbit-graph"] --> Common
   Tools --> Exec["orbit-exec"]
   Tools --> Policy
   Exec --> Common["orbit-common"]
@@ -68,16 +67,15 @@ mechanisms and never depend back on a vertical feature. [ORB-10319, ADR-0240]
   remain in `orbit-core`; generic SQLite connection and migration-ledger
   infrastructure remains in `orbit-store`. Those lower layers must never depend
   back on Remote. [ORB-10319, ADR-0240]
-- **orbit-graph**: SQLite graph store, sync policy, watcher-backed background refresh, query API, extraction contracts, language-specific tree-sitter extractors, and the clap-based JSON command layer, all for the orbit-graph migration. Depends on `orbit-common` for the canonical `Selector` parser (re-exported from `orbit-common::utility::selector`, ORB-10011/ADR-0202) and for the `GraphError` → `OrbitError` boundary translator (`graph_error_to_orbit`, ORB-10013); the ORB-00377 watcher work adds only the external `notify` crate and no new internal crate edge. ORB-10357 folded the former `orbit-graph-extract` and `orbit-graph-cli` crates in as the `extract` and `cli` modules and removed the `orbit graph` subcommand from `orbit-cli`: the crate now has **zero workspace dependents** and is parked awaiting deletion — no further investment.
 - **orbit-store**: layered generic persistence kernel (YAML + SQLite). It owns shared backend traits, SQLite connection/transaction primitives, the namespaced feature-migration ledger, and immutable historical bootstrap migrations, but not Remote's active registry schema or queries. Match existing modules when adding new generic storage infrastructure. Depends only on `orbit-common`; the semantic vector schema is owned by `orbit-search::vector` (not `orbit-store`).
 - **orbit-tools**: generic tool registry plus built-in fs, policy-aware exec, and workspace-scoped Orbit definitions. It depends on `orbit-common`, `orbit-exec`, and `orbit-policy`; Remote-only discovery definitions are composed by `orbit-remote`.
-- **orbit-mcp**: generic Model Context Protocol server/client kernel using `rmcp`. It depends only on `orbit-common` and owns framing, server composition, raw injected-duplex client primitives, and extension contracts. `orbit-remote` owns contract negotiation, schema/learning composition, the bounded SSH link pool, placement router, and hub authority [ORB-10269]. The code graph has no MCP or CLI surface as of ORB-10357 [ORB-10325, ADR-0241].
+- **orbit-mcp**: generic Model Context Protocol server/client kernel using `rmcp`. It depends only on `orbit-common` and owns framing, server composition, raw injected-duplex client primitives, and extension contracts. `orbit-remote` owns contract negotiation, schema/learning composition, the bounded SSH link pool, placement router, and hub authority [ORB-10269].
 - **orbit-dashboard**: read-only web dashboard (axum server + embedded HTML/JS assets + JSON API handlers for tasks, runs, scoreboard, logs, etc.). Depends on `orbit-core` for runtime-backed projections and on `orbit-remote` for registry-backed global workspace discovery; consumed by `orbit-cli` via `web serve`. Extracted from orbit-cli in ORB-00146 to isolate compile graph and co-locate assets. Public surface is `ServeArgs` plus two entry points: `serve_from_env(args)` — what `orbit web serve` actually calls; always serves every registered workspace, global mode being the only mode as of ORB-10029 — and `serve(runtime, args)` for callers that already hold an `OrbitRuntime` and want single-workspace mode embedded directly.
 - **orbit-agent**: per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, gemini_http, grok, openai_compat, anthropic, ollama, mock_agent). Implements `backend: cli`, hosts HTTP `LoopTransport` primitives, and routes loop tool calls through the shared `orbit-tools` registry. Depends on `orbit-common` and `orbit-tools`.
 - **orbit-engine**: activity/job execution, template rendering, retry logic, subprocess execution, and tool-aware automation. Owns the `backend: cli` subprocess runner (`activity_job::cli_runner`), which references `orbit-agent::{Agent, AgentConfig}` directly so orbit-core stays clean of orbit-agent types. Depends on `orbit-agent`, `orbit-common`, `orbit-exec`, `orbit-store`, and `orbit-tools`.
 - **orbit-core**: neutral runtime bootstrap, config layering, default asset seeding, runtime-integrated command modules, and metrics. It exposes the `OrbitRuntime` kernels composed by `orbit-cmd`, `orbit-cli`, `orbit-dashboard`, and `orbit-remote`; it does not depend on the vertical Remote feature, `orbit-agent`, or `orbit-cmd`. Root re-exports are trimmed to the consumer-justified set (ORB-10016, ADR in [docs/design/orbit-core/4_decisions.md](docs/design/orbit-core/4_decisions.md)).
 - **orbit-cmd**: CLI-facing command layer extracted from orbit-core (ORB-10016): workspace doctor, migrate status/dry-run, diagnostics readers, agent-rules injection, hook install + learning/review-thread PreToolUse hook, and the direct v2 activity runner. Pure consumer of `OrbitRuntime`'s public API; runtime methods are exposed as per-module `*Commands` extension traits. Depends on `orbit-core`, `orbit-engine` (v2 dispatch), `orbit-store`, `orbit-common`; consumed by `orbit-cli` and `orbit-dashboard`. orbit-core must never depend on it.
-- **orbit-cli**: clap-based entry point and local client-configuration surface. Remote broker/hub/link construction and spoke registration delegate to `orbit-remote`; it has no graph dependency as of ORB-10357.
+- **orbit-cli**: clap-based entry point and local client-configuration surface. Remote broker/hub/link construction and spoke registration delegate to `orbit-remote`.
 
 ---
 
@@ -98,7 +96,6 @@ Each workspace crate declares a stability tier in its `Cargo.toml` under `[packa
 | orbit-cli             | internal     |
 | orbit-cmd             | internal     |
 | orbit-core            | internal     |
-| orbit-graph           | internal     |
 | orbit-search           | internal     |
 | orbit-engine          | internal     |
 | orbit-exec            | internal     |

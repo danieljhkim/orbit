@@ -81,7 +81,7 @@ spec:
     2. If the injected task context is missing or malformed, recover it with
        `orbit.task.show`.
     3. Read the task description, acceptance criteria, and plan first. Treat
-       `context_files` as Orbit graph selectors (`file:`, `dir:`, etc.) and
+       `context_files` as canonical selectors (`file:`, `dir:`, etc.) and
        resolve them with `fs.read`: read each named file directly, and for
        `dir:` scopes read the directory listing plus its key files. If
        `orbit.search` is available, call it with `semantic: "<task-id>"` to

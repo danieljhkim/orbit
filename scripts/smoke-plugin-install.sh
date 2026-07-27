@@ -319,7 +319,6 @@ required = [
     "orbit:orbit-task",
     "orbit:orbit-search",
     "orbit:orbit-knowledge",
-    "orbit:orbit-graph",
     "orbit:orbit-task-pilot",
 ]
 missing = [name for name in required if name not in text]

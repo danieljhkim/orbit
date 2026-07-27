@@ -14,7 +14,7 @@ use crate::command::routine::seed_default_routines;
 use crate::command::skill::{
     default_skill_ids, is_default_skill_file_for_root, seed_default_skills,
 };
-use orbit_common::utility::fs::{atomic_write_text, create_dir_symlink, remove_path_if_exists};
+use orbit_common::utility::fs::{create_dir_symlink, remove_path_if_exists};
 
 use crate::config::{
     RawAgentRoleConfig, RuntimeConfig,
@@ -254,46 +254,6 @@ fn workspace_slug_from_orbit_root(orbit_root: &Path) -> Option<String> {
         .parent()
         .and_then(Path::file_name)
         .map(|name| name.to_string_lossy().into_owned())
-}
-
-/// Default `.orbitignore` patterns seeded into a freshly initialized
-/// workspace. Kept in sync with the orbit-graph (v2) scanner baseline in
-/// `orbit_graph::sync::scanner` so the seeded file matches what the indexer
-/// applies by default. Relocated here from the decommissioned orbit-knowledge
-/// crate in ORB-00391.
-const DEFAULT_ORBITIGNORE_PATTERNS: &[&str] = &[
-    ".orbit/",
-    "node_modules/",
-    "target/",
-    "dist/",
-    "build/",
-    ".venv/",
-    "venv/",
-    "__pycache__/",
-    "*.egg-info/",
-];
-
-/// Render the default `.orbitignore` file content for `orbit workspace init`.
-pub fn default_orbitignore_template() -> String {
-    let mut content = String::from(
-        "# Common generated/artifact directories that should stay out of the orbit graph.\n",
-    );
-    for pattern in DEFAULT_ORBITIGNORE_PATTERNS {
-        content.push_str(pattern);
-        content.push('\n');
-    }
-    content
-}
-
-pub fn seed_default_orbitignore(workspace_root: &Path) -> Result<bool, OrbitError> {
-    let orbitignore_path = workspace_root.join(".orbitignore");
-    if orbitignore_path.exists() {
-        return Ok(false);
-    }
-    let template = default_orbitignore_template();
-    atomic_write_text(&orbitignore_path, &template)
-        .map_err(|error| OrbitError::Io(error.to_string()))?;
-    Ok(true)
 }
 
 pub(crate) fn global_skills_dir(global_root: &Path) -> PathBuf {

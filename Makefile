@@ -1,4 +1,4 @@
-.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci ci-fast bench stability release-check docs-index cleanup-branches
+.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci ci-fast stability release-check docs-index cleanup-branches
 
 # ------------------------------------------------------------
 # Config
@@ -45,7 +45,6 @@ help:
 	@echo "  make fmt          Format code"
 	@echo "  make fmt-check    Check formatting"
 	@echo "  make clippy       Lint with clippy (deny warnings)"
-	@echo "  make bench        Run graph build benchmark (ARGS=... optional)"
 	@echo "  make audit        Supply-chain audit (cargo-deny: advisories + licenses)"
 	@echo "  make tree         Print dependency tree"
 	@echo "  make ci           Full CI pass (clippy + tests + doc + guardrails; also runs on PRs)"
@@ -95,9 +94,6 @@ fmt-check:
 
 clippy:
 	$(CARGO) clippy $(WORKSPACE) --all-targets -- -D warnings
-
-bench:
-	$(CARGO) run -p orbit-knowledge --example graph_build --release -- $(ARGS)
 
 # Supply-chain audit: advisories + license allow-list via cargo-deny (deny.toml).
 # Canonical command; CI runs the same check via scripts/ci-guardrails.sh.

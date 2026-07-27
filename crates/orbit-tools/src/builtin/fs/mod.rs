@@ -79,8 +79,7 @@ pub(crate) fn check_file_lock(
     _ctx: &ToolContext,
     _canonical_path: &Path,
 ) -> Result<(), OrbitError> {
-    // File-level locking removed; graph-level locking is handled by
-    // the shared lock store at .orbit/knowledge/graph_locks.json.
+    // File-level locking was removed; policy checks still run below.
     Ok(())
 }
 

@@ -39,7 +39,6 @@ flowchart LR
   Remote --> Tools
   Remote --> MCP["orbit-mcp"]
   Remote --> Common
-  Graph --> Common
   Search --> Common
   MCP --> Common
   Store --> Common
@@ -68,7 +67,6 @@ end while reusing neutral mechanisms.
 | `orbit-policy` | Filesystem-scoping policy and profile resolution. |
 | `orbit-exec` | Process, sandbox, and supervision primitives. |
 | `orbit-store` | Generic YAML/SQLite stores, connection primitives, namespaced feature-migration ledger, and immutable historical bootstrap migrations. |
-| `orbit-graph` | Parked, dependent-free derived graph index and query library with no CLI, MCP, or tool-registry surface. |
 | `orbit-search` | Retrieval/ranking feature and workspace-local semantic index; also builds `orbit-search-companion`, a separately installed embedding companion binary, as an additional `[[bin]]` target. |
 | `orbit-agent` | HTTP loop transport and retained CLI runtimes. |
 | `orbit-engine` | Activity/job execution, template rendering, retries, CLI subprocess runner. |

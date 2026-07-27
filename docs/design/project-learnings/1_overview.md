@@ -60,16 +60,19 @@ When a learning or decision applies at a particular code or workflow boundary, a
 
 ### 2.3 Curation lifecycle
 
-Active learnings can be superseded (replaced by a newer entry) or marked stale (the code they reference no longer exists). The knowledge graph is the natural staleness signal: when a symbol or file referenced in a learning's `evidence` disappears in a graph rebuild, the learning is flagged for review. Pruning is human-or-agent-driven; the system does not auto-delete.
+Active learnings can be superseded (replaced by a newer entry) or marked stale
+when their path scope or cited task/commit evidence no longer resolves. Pruning
+is human-or-agent-driven; the system does not auto-delete.
 
 ### 2.4 Phase boundary
 
 | Phase | Scope axis | Ranking | Discovery |
 |-------|-----------|---------|-----------|
 | **Phase 1** | path globs + tags | manual priority + recency | `orbit search` / `orbit learning show` + reference comments |
-| **Phase 2** | + symbol-aware (knowledge graph) | + semantic similarity (orbit-search) | improved pull ranking |
+| **Phase 2** | path globs + tags | + semantic similarity (orbit-search) | improved pull ranking |
 
-Phase 2 is gated on [docs/design/orbit-search/](../orbit-search/) reaching Accepted because the relevance-ranking layer wants real semantic similarity, and the symbol-aware scope wants the same graph integration orbit-search phase 2 will require.
+Phase 2 is gated on [docs/design/orbit-search/](../orbit-search/) reaching
+Accepted because the relevance-ranking layer wants real semantic similarity.
 
 ---
 

@@ -19,9 +19,6 @@ required_for_agent = true
 [scoring]
 enabled = true
 
-[graph]
-editing = false
-
 [workflow]
 auto_ship = true
 base_branch = "agent-main"

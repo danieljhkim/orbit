@@ -8,7 +8,7 @@ use orbit_common::types::{
 };
 use orbit_common::utility::fs::atomic_write_text;
 use orbit_core::OrbitError;
-use orbit_core::command::init::{InitOptions, init_workspace_at_root, seed_default_orbitignore};
+use orbit_core::command::init::{InitOptions, init_workspace_at_root};
 use orbit_remote::runtime::RemoteRuntimeFactory;
 use orbit_remote::workspace_registry;
 use orbit_remote::{HostIdentityState, HostMode, inspect_host_identity};
@@ -185,7 +185,6 @@ impl WorkspaceInitArgs {
                 ..Default::default()
             },
         )?;
-        seed_default_orbitignore(cwd)?;
         ensure_orbit_gitignore_entry(cwd, orbit_dir)?;
 
         let name = self.name.unwrap_or_else(|| dir_name_or_fallback(cwd));

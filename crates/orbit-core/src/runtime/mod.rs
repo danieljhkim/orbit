@@ -383,10 +383,6 @@ impl OrbitRuntime {
         self.context.scoring_enabled()
     }
 
-    pub fn graph_editing(&self) -> bool {
-        self.context.graph_editing()
-    }
-
     pub fn pr_config(&self) -> &orbit_engine::PrConfig {
         self.context.settings().pr_config()
     }
@@ -491,8 +487,7 @@ impl OrbitRuntime {
 
     /// Tool names valid as activity allowlist targets.
     ///
-    /// This is the registry's builtin schema set. CLI-only features such as
-    /// `orbit graph` are not valid activity tool grants.
+    /// This is the registry's builtin schema set.
     /// `pub` for the direct v2 activity runner in `orbit-cmd` [ORB-10016].
     pub fn allowlist_known_tool_names(&self) -> Vec<String> {
         self.tool_registry()

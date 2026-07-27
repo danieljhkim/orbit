@@ -5,7 +5,6 @@ use orbit_common::types::{
     OverlapPolicy, RoutineTarget, Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus,
     parse_routine_yaml,
 };
-use orbit_core::command::init::default_orbitignore_template;
 use orbit_remote::workspace_registry;
 
 use crate::tests::env_isolation::EnvGuard;
@@ -680,19 +679,14 @@ fn workspace_init_with_root_override_uses_custom_registry() {
         std::fs::canonicalize(&custom_root).expect("canonical custom root")
     );
     assert_eq!(workspace_record.base_branch, "main");
-    assert_eq!(
-        std::fs::read_to_string(workspace.path().join(".orbitignore"))
-            .expect("read workspace .orbitignore"),
-        default_orbitignore_template()
-    );
     assert!(
-        !custom_root_parent.path().join(".orbitignore").exists(),
-        ".orbitignore belongs in the workspace root, not beside a custom Orbit root"
+        !workspace.path().join(".orbitignore").exists(),
+        "workspace init must not create the retired graph ignore file"
     );
 }
 
 #[test]
-fn workspace_init_seeds_default_orbitignore_when_missing() {
+fn workspace_init_does_not_create_orbitignore() {
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
 
@@ -712,9 +706,9 @@ fn workspace_init_seeds_default_orbitignore_when_missing() {
     .execute_without_runtime(None);
 
     result.expect("workspace init");
-    assert_eq!(
-        std::fs::read_to_string(workspace.path().join(".orbitignore")).expect("read .orbitignore"),
-        default_orbitignore_template()
+    assert!(
+        !workspace.path().join(".orbitignore").exists(),
+        "workspace init must not create the retired graph ignore file"
     );
 }
 

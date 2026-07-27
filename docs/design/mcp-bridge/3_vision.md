@@ -126,7 +126,7 @@ a relay or universal read proxy.
 - [mcp-session-context/2_design.md](../mcp-session-context/2_design.md)
 - [remote-access/2_design.md](../remote-access/2_design.md)
 - [orbit-search/2_design.md](../orbit-search/2_design.md)
-- [orbit-graph/2_design.md](../orbit-graph/2_design.md)
+- [archived Orbit Graph design](../_archive/orbit-graph/2_design.md)
 
 **External**
 

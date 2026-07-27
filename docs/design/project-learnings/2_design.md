@@ -56,7 +56,7 @@ created_by: claude
 scope:
   paths:
     - "crates/orbit-engine/**/perf*.rs"
-    - "benchmarks/graph-latency/**"
+    - "benchmarks/identity-key/**"
   tags:
     - performance
     - benchmarking
@@ -74,10 +74,10 @@ body: |
   the old and new code paths on the same inputs and assert byte-for-byte
   equivalence (or document the diff and why it's acceptable).
 
-  **Why:** A graph-latency v1 benchmark showed a 4× speedup that turned
-  out to be the new path silently dropping symbols.
+  **Why:** A prior performance comparison showed a speedup that turned out to
+  come from the new path silently dropping output.
 
-  **How to apply:** When working on `benchmarks/graph-latency/**` or any
+  **How to apply:** When working on `benchmarks/identity-key/**` or any
   `perf*` module, the validation phase must include an equivalence check
   alongside the timing measurement.
 
@@ -149,7 +149,11 @@ A learning matches an explicit query if **(path glob matches) OR (any tag matche
 
 ### 3.4 Why not symbol-aware in phase 1
 
-Symbol-aware scoping (e.g. "this learning applies whenever the agent touches the `cosine_similarity` function regardless of where it lives") is more precise than path globs but couples the learning store to the knowledge graph. Phase 2 picks this up alongside semantic ranking; phase 1's scope schema reserves a `scope.symbols` field for forward compatibility ([3_vision.md §1.1](./3_vision.md)).
+Symbol-aware scoping (e.g. "this learning applies whenever the agent touches
+the `cosine_similarity` function regardless of where it lives") is more
+precise than path globs, but Orbit has no live symbol resolver. The schema
+continues to preserve the unused `scope.symbols` field for compatibility; any
+future implementation requires a fresh design ([3_vision.md §1.1](./3_vision.md)).
 
 ---
 
@@ -333,7 +337,10 @@ A learning is **stale** if any of these are true:
 - All `evidence` commit SHAs no longer exist on the active branch.
 - All `evidence` task IDs are deleted.
 
-`orbit learning prune` reports staleness; with `--confirm` it archives the record. The former `--delete` spelling remains a compatibility alias. Staleness detection is opportunistic, not automatic; nothing fires it on every commit. Phase 2 may wire it into the knowledge graph rebuild path ([ORB-10452]).
+`orbit learning prune` reports staleness; with `--confirm` it archives the
+record. The former `--delete` spelling remains a compatibility alias.
+Staleness detection is opportunistic, not automatic; nothing fires it on every
+commit.
 
 ### 7.3.1 Approved physical retirement
 
@@ -390,7 +397,9 @@ This is acknowledged, not fixed. Phase 2's auto-extraction from review threads o
 
 A learning scoped to a benchmark source file becomes invisible the day someone moves the file. Tags partly compensate (tag-based scoping survives renames) but require the author to anticipate the rename, which is rare.
 
-Phase 2's symbol-aware scope handles renames cleanly because the knowledge graph tracks symbol identity across moves. Phase 1's mitigation is operational: when a refactor moves files, run `orbit learning prune --stale-only` and update or supersede affected records as part of the refactor task.
+The mitigation is operational: when a refactor moves files, run
+`orbit learning prune --stale-only` and update or supersede affected records as
+part of the refactor task.
 
 ### 8.3 Vote ranking still depends on agent discipline
 

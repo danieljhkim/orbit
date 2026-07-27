@@ -38,7 +38,10 @@ The companion-binary architecture ([4_decisions.md ADR-005](./4_decisions.md)) m
 
 Phase 1 ships option 1 (manual placement with docs); options 2 and 3 are clean follow-ups that don't require schema or architectural changes.
 
-### 1.3 Graph corpus scaling beyond brute force
+### 1.3 Historical graph corpus scaling question
+
+Retired by ADR-0291 / ORB-10491. This question is preserved as history; no
+current Orbit search roadmap depends on a code graph.
 
 A medium repository's graph holds tens of thousands to hundreds of thousands of symbols. Embedding each at 384d puts the corpus past the comfortable brute-force ceiling. Three candidate paths:
 
@@ -72,7 +75,10 @@ All three are useful, all three are out of scope phase 1, and all three are down
 
 Phase 1 indexes each review-thread message as a separate row. The alternative — index whole threads as single documents — loses authorship signal but improves recall on multi-message threads where the decision context is spread across replies. Which granularity is more useful for "find me the thread where we decided X" is an empirical question that wants the eval harness from §1.1 to settle.
 
-### 1.7 Phase-2 graph corpus (designed, deferred)
+### 1.7 Historical phase-2 graph corpus proposal
+
+Retired by ADR-0291 / ORB-10491. The bullets below describe the removed design
+and are not a live implementation plan.
 
 Phase 2 extends the embeddings table to graph leaves — code symbols and design-doc sections, with ADRs joining once a fresh ADR-vector indexing design exists. The phase-2 design is sketched in [2_design.md §9](./2_design.md#9-phase-2-graph-corpus-designed-deferred). Highlights:
 

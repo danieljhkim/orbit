@@ -311,7 +311,6 @@ pub trait DeterministicActionHost {
             .map(ToOwned::to_owned)
     }
     fn scoring_enabled(&self) -> bool;
-    fn graph_editing(&self) -> bool;
     /// Return the current agent model identity when this runtime is operating
     /// as an agent, or `None` when there is no model-bearing actor.
     fn actor_model_identity(&self) -> Option<String> {

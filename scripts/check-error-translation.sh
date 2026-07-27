@@ -38,7 +38,6 @@ fail=0
 # Add a line when a typed error starts crossing into OrbitError; the owning
 # crate is where the type (and therefore the translator) must be defined.
 registry=(
-  "GraphError:orbit-graph:graph_error_to_orbit"
   "SelectorParseError:orbit-common:selector_error_to_orbit"
   "CatalogError:orbit-common:catalog_error_to_orbit"
   "RpcError:orbit-search:rpc_error_to_orbit"

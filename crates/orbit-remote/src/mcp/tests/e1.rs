@@ -639,7 +639,7 @@ fn registration_reports_registry_commit_before_projection_failure_and_can_repair
 }
 
 #[test]
-fn hub_checkoutless_dispatch_and_denials_each_write_one_trusted_audit() {
+fn hub_checkoutless_dispatch_and_capability_denial_each_write_one_trusted_audit() {
     let root = tempfile::tempdir().expect("global root");
     write_identity(&root, "hub", "hm_hub");
     let database = stamp_store(&root, "hm_hub");
@@ -660,15 +660,6 @@ fn hub_checkoutless_dispatch_and_denials_each_write_one_trusted_audit() {
         .expect("checkoutless hub task");
     assert_eq!(task["title"], "Hub only");
 
-    let graph_error = host
-        .call_tool(
-            "orbit_graph_search",
-            json!({"workspace": "ws_checkoutless", "query": "never"}),
-            context(McpCapability::Agent, "mcall-hub-graph-denied"),
-        )
-        .expect_err("removed graph MCP tool denied");
-    assert!(graph_error.to_string().contains("not found"));
-
     let operator_error = host
         .call_tool(
             "orbit_workspace_list",
@@ -685,7 +676,6 @@ fn hub_checkoutless_dispatch_and_denials_each_write_one_trusted_audit() {
     let connection = Connection::open(database).expect("audit store");
     for (call_id, expected_status) in [
         ("mcall-hub-add", AuditEventStatus::Success),
-        ("mcall-hub-graph-denied", AuditEventStatus::Denied),
         ("mcall-hub-capability-denied", AuditEventStatus::Denied),
     ] {
         let row = connection

@@ -17,7 +17,6 @@ sidebar:
 | `orbit-engine` | Activity and job execution, template rendering, retry logic. Owns the `backend: cli` subprocess runner, which references `orbit-agent::{Agent, AgentConfig}` directly. |
 | `orbit-agent` | Per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, gemini_http, grok, openai_compat, anthropic, ollama, mock_agent). Hosts HTTP `LoopTransport` primitives. |
 | `orbit-tools` | Generic tool registry plus workspace-scoped builtins, filesystem tools, and policy-aware exec tools. |
-| `orbit-graph` | Worktree-local derived graph index and query API; folds language extraction and the (dependent-free, no-command-surface) former CLI layer as modules. |
 | `orbit-policy` | Filesystem-scoping policy engine. Owns `FsProfile` resolution and `denyRead` / `denyModify` evaluation. |
 | `orbit-exec` | Process / sandbox / supervision primitives for shell-command execution under an `FsProfile`. |
 | `orbit-store` | Generic YAML/SQLite stores, connection primitives, namespaced feature-migration ledger, and immutable historical bootstrap migrations. Feature crates own their active schemas and queries. |
@@ -49,7 +48,6 @@ flowchart LR
   Remote --> Tools
   Remote --> MCP["orbit-mcp"]
   Remote --> Common["orbit-common"]
-  Graph --> Common
   MCP --> Common["orbit-common"]
   Store --> Common
   Exec --> Common
