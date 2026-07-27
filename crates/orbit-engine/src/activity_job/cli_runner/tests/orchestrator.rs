@@ -1748,6 +1748,49 @@ fn benign_primary_fast_forward_ignores_primary_dirt_disjoint_from_the_run() {
 }
 
 #[test]
+fn dirty_to_clean_primary_fast_forward_is_accepted() {
+    // The F2026-07-172 shape: the primary already carries untracked
+    // record-store dirt when the guard captures its "before" state, then a
+    // fast-forward commit lands exactly that pre-existing dirty content, so
+    // `dirty_paths` moves from non-empty to empty even though no interference
+    // occurred (HEAD proven to have advanced, `conflicting_paths` empty).
+    let fixture = linked_worktree_fixture();
+    let dirty_record = ".orbit/learnings/L-0009/learning.yaml";
+    write_primary_file(&fixture, dirty_record, "id: L-0009\n");
+
+    let guard = boundary_guard(&fixture, "ORB-DIRTY-TO-CLEAN-FF", "run-dirty-to-clean-ff");
+
+    fs::write(fixture.assigned.join("candidate.txt"), "candidate\n").expect("write run candidate");
+    let head_before = git_bytes(&fixture.primary, &["rev-parse", "HEAD"]);
+    git_ok(&fixture.primary, &["add", "--", dirty_record]);
+    git_ok(
+        &fixture.primary,
+        &[
+            "commit",
+            "-m",
+            "commit exactly the pre-existing dirty content",
+        ],
+    );
+
+    let (result, events) = capture_events(|| guard.verify());
+    result.expect(
+        "a fast-forward that lands exactly the primary's pre-existing dirty content must be accepted",
+    );
+
+    assert_ne!(
+        git_bytes(&fixture.primary, &["rev-parse", "HEAD"]),
+        head_before,
+        "the accepted case is defined by a proven fast-forward advance"
+    );
+    assert!(
+        events.iter().any(|event| event
+            .field("ignored_primary_paths")
+            .is_some_and(|paths| paths.contains(dirty_record))),
+        "the accepted fast-forward must report the dirty-to-clean path: {events:?}"
+    );
+}
+
+#[test]
 fn primary_dirt_intersecting_the_run_defeats_a_fast_forward() {
     for (kind, shared) in [("untracked", "shared-new.txt"), ("tracked", "README.md")] {
         let fixture = linked_worktree_fixture();
