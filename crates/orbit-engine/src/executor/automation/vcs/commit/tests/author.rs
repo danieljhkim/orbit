@@ -298,8 +298,8 @@ fn git_commit_batch_adopts_implement_authored_commits_without_rewriting_them() {
     let workspace = temp.path();
     let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read base checkpoint");
 
-    fs::write(workspace.join("README.md"), "reverted\n").unwrap();
-    git_success(workspace, &["add", "README.md"]).expect("stage revert");
+    fs::write(workspace.join("README.md"), "implementation\n").unwrap();
+    git_success(workspace, &["add", "README.md"]).expect("stage implementation");
     git_success(
         workspace,
         &[
@@ -309,25 +309,12 @@ fn git_commit_batch_adopts_implement_authored_commits_without_rewriting_them() {
             "user.email=implement@example.test",
             "commit",
             "-m",
-            "revert prior change",
-        ],
-    )
-    .expect("author revert commit");
-    fs::write(workspace.join("README.md"), "replacement\n").unwrap();
-    git_success(workspace, &["add", "README.md"]).expect("stage replacement");
-    git_success(
-        workspace,
-        &[
-            "-c",
-            "user.name=Implement Agent",
-            "-c",
-            "user.email=implement@example.test",
-            "commit",
+            "auto-commit",
             "-m",
-            "cherry-pick replacement",
+            "Agent-Run: batch-1\nAgent-Task: T1",
         ],
     )
-    .expect("author replacement commit");
+    .expect("author attributed implementation commit");
 
     let head_before = git_output(workspace, &["rev-parse", "HEAD"]).expect("read authored head");
     let authored_shas = git_output(
@@ -362,13 +349,13 @@ fn git_commit_batch_adopts_implement_authored_commits_without_rewriting_them() {
         "the pipeline must not create or amend a commit"
     );
     assert_eq!(
-        git_output(workspace, &["log", "-2", "--format=%an <%ae>"]).expect("read retained authors"),
-        "Implement Agent <implement@example.test>\nImplement Agent <implement@example.test>"
+        git_output(workspace, &["log", "-1", "--format=%an <%ae>"]).expect("read retained author"),
+        "Implement Agent <implement@example.test>"
     );
 }
 
 #[test]
-fn git_commit_batch_commits_dirty_residue_above_implement_authored_commits() {
+fn git_commit_batch_rejects_dirty_residue_above_an_attributed_commit() {
     let temp = initialized_git_repo();
     let workspace = temp.path();
     let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read base checkpoint");
@@ -384,7 +371,9 @@ fn git_commit_batch_commits_dirty_residue_above_implement_authored_commits() {
             "user.email=implement@example.test",
             "commit",
             "-m",
-            "implement authored",
+            "auto-commit",
+            "-m",
+            "Agent-Run: batch-1\nAgent-Task: T1",
         ],
     )
     .expect("author implement commit");
@@ -402,16 +391,16 @@ fn git_commit_batch_commits_dirty_residue_above_implement_authored_commits() {
         "base_sha": base_sha,
     });
 
-    let result = git_commit(&host, &input).expect("mixed batch succeeds");
-
-    assert_eq!(result["decision"], "performed");
-    assert_eq!(result["committed"], true);
-    assert_eq!(result["adopted_commits"], true);
-    assert_eq!(result["commit_shas"][0], authored_sha);
-    assert_eq!(result["commit_shas"].as_array().map(Vec::len), Some(2));
+    let error = git_commit(&host, &input).expect_err("mixed commit-plus-dirty state is ambiguous");
+    assert!(
+        error.to_string().contains("worktree_content_conflict"),
+        "{error}"
+    );
+    assert!(error.to_string().contains("residue.txt"), "{error}");
     assert_eq!(
-        git_output(workspace, &["log", "-1", "--format=%P"]).expect("read residue parent"),
-        authored_sha
+        git_output(workspace, &["rev-parse", "HEAD"]).expect("read unchanged head"),
+        authored_sha,
+        "the conflict must not create a residue commit"
     );
     assert_eq!(
         git_output(
@@ -422,8 +411,8 @@ fn git_commit_batch_commits_dirty_residue_above_implement_authored_commits() {
         "Implement Agent <implement@example.test>"
     );
     assert_eq!(
-        git_output(workspace, &["log", "-1", "--format=%an <%ae>"]).expect("read residue author"),
-        "orbit[gpt-5.6-terra] <agent@orbit.invalid>"
+        fs::read_to_string(workspace.join("residue.txt")).expect("dirty residue remains"),
+        "dirty residue\n"
     );
 }
 
@@ -472,14 +461,7 @@ fn git_commit_batch_does_not_adopt_commits_reachable_only_from_another_branch() 
 }
 
 #[test]
-fn git_commit_batch_counts_from_the_merge_base_when_head_left_the_pinned_base() {
-    // ORB-10380 reconciliation: this case used to be a hard failure. With the
-    // base pinned at setup a non-descendant HEAD no longer implies a moved base
-    // — it means the branch was rewritten below the checkpoint — and discarding
-    // real work over it is the wrong trade. The commit range now falls back to
-    // `merge-base(base_sha, HEAD)`; only genuinely unrelated histories fail (see
-    // base_checkpoint.rs). The invariant this test still protects is that Orbit
-    // neither rewrites nor drops the commits it finds.
+fn git_commit_batch_rejects_history_rewritten_below_the_pinned_base() {
     let temp = initialized_git_repo();
     let workspace = temp.path();
     let root_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read root");
@@ -506,16 +488,15 @@ fn git_commit_batch_counts_from_the_merge_base_when_head_left_the_pinned_base() 
         "base_sha": base_sha,
     });
 
-    let result = git_commit(&host, &input).expect("divergent history is counted, not rejected");
-
-    assert_eq!(result["decision"], "adopted_existing_commits");
-    assert_eq!(result["committed"], false);
-    assert_eq!(result["base_sha"], base_sha);
-    assert_eq!(result["commit_shas"], json!([divergent_head]));
+    let error = git_commit(&host, &input).expect_err("rewritten history is never adopted");
+    let message = error.to_string();
+    assert!(message.contains("worktree_history_rewritten"), "{message}");
+    assert!(message.contains(&base_sha), "{message}");
+    assert!(message.contains(&divergent_head), "{message}");
     assert_eq!(
         git_output(workspace, &["rev-parse", "HEAD"]).expect("read final divergent head"),
         divergent_head,
-        "the fallback must not rewrite the task branch"
+        "the failure must not rewrite the task branch"
     );
 }
 

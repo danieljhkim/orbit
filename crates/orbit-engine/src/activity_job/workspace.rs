@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
+use orbit_common::utility::selector::anchor_path;
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -347,6 +348,29 @@ struct GitPathState {
     untracked_content_sha256: Option<String>,
 }
 
+/// Durable, content-bearing evidence written before a dirty integrity failure
+/// can reach worktree cleanup.
+#[derive(Debug, Clone, Serialize)]
+struct WorktreeRecoveryArtifact {
+    root: PathBuf,
+    tracked_patch: PathBuf,
+    untracked_payload: PathBuf,
+    manifest: PathBuf,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorktreeRecoveryManifest<'a> {
+    schema_version: u8,
+    task_id: &'a str,
+    run_id: &'a str,
+    recorded_head: &'a str,
+    recorded_branch: &'a Option<String>,
+    tracked_patch: &'static str,
+    untracked_payload: &'static str,
+    untracked_files: Vec<&'a String>,
+}
+
 /// Pre-spawn boundary guard for a linked-worktree provider invocation.
 ///
 /// The registered primary checkout comes from the runtime's tool context; the
@@ -360,6 +384,7 @@ pub(crate) struct WorktreeBoundaryGuard {
     provider: String,
     requested_workspace_path: String,
     requested_repo_root: Option<String>,
+    task_context_files: Vec<String>,
     assigned_root: PathBuf,
     primary_root: PathBuf,
     assigned_before: GitWorktreeFingerprint,
@@ -547,6 +572,7 @@ impl WorktreeBoundaryGuard {
         let requested_workspace_path = pair.requested_workspace_path.clone();
         let requested_repo_root = Some(pair.requested_repo_root.clone());
         let task_id = task_id(input, task_ctx);
+        let task_context_files = task_context_files(input, task_ctx);
 
         Ok(Some(Self {
             task_id,
@@ -554,6 +580,7 @@ impl WorktreeBoundaryGuard {
             provider: provider.to_string(),
             requested_workspace_path,
             requested_repo_root,
+            task_context_files,
             assigned_before: git_fingerprint(&assigned_root)?,
             primary_before: git_fingerprint(&primary_root)?,
             assigned_root,
@@ -592,16 +619,29 @@ impl WorktreeBoundaryGuard {
             .collect::<Vec<_>>();
 
         if assigned_history_changed {
-            return Err(self.integrity_error(
-                "worktree_content_conflict",
-                &assigned_after,
-                &primary_after,
-                &run_changed_paths,
-                &primary_changed_paths,
-                &primary_dirt_paths,
-                &conflicting_paths,
-                "the assigned worktree history or branch changed during implementation",
-            ));
+            match self.admitted_task_fast_forward(&assigned_after)? {
+                Ok(commit_sha) => {
+                    tracing::warn!(
+                        target: "orbit.engine.cli_runner",
+                        task_id = %self.task_id,
+                        run_id = %self.run_id,
+                        commit_sha,
+                        "accepted one clean task-attributed Stop-hook commit; the commit phase owns its single adoption"
+                    );
+                }
+                Err(reason) => {
+                    return Err(self.integrity_error(
+                        "worktree_content_conflict",
+                        &assigned_after,
+                        &primary_after,
+                        &run_changed_paths,
+                        &primary_changed_paths,
+                        &primary_dirt_paths,
+                        &conflicting_paths,
+                        &reason,
+                    ));
+                }
+            }
         }
 
         if primary_after == self.primary_before {
@@ -655,6 +695,224 @@ impl WorktreeBoundaryGuard {
         ))
     }
 
+    /// A provider-side commit is admissible only in the exact known Stop-hook
+    /// shape: one clean first-parent fast-forward on the assigned branch,
+    /// attributed to this run/task, with every changed path inside the task's
+    /// declared context. The commit step rechecks the same durable facts before
+    /// adopting the SHA, so this boundary never needs a second mutation.
+    fn admitted_task_fast_forward(
+        &self,
+        assigned_after: &GitWorktreeFingerprint,
+    ) -> Result<Result<String, String>, DispatchError> {
+        if assigned_after.branch != self.assigned_before.branch {
+            return Ok(Err(
+                "the assigned worktree branch changed during implementation".to_string(),
+            ));
+        }
+        if !assigned_after.dirty_paths.is_empty() {
+            return Ok(Err(format!(
+                "the assigned worktree history changed while dirty content remained at paths: {}",
+                assigned_after.dirty_paths.join(", ")
+            )));
+        }
+        if !git_output_raw(
+            &self.assigned_root,
+            &[
+                "merge-base",
+                "--is-ancestor",
+                &self.assigned_before.head,
+                &assigned_after.head,
+            ],
+        )?
+        .status
+        .success()
+        {
+            return Ok(Err(
+                "the assigned worktree history was rewritten during implementation".to_string(),
+            ));
+        }
+
+        let commits = git_stdout(
+            &self.assigned_root,
+            &[
+                "rev-list",
+                "--reverse",
+                &format!("{}..{}", self.assigned_before.head, assigned_after.head),
+            ],
+        )?;
+        let commits = commits
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>();
+        let [commit_sha] = commits.as_slice() else {
+            return Ok(Err(format!(
+                "the assigned worktree advanced by {} commits; only one task-attributed Stop-hook commit is admissible",
+                commits.len()
+            )));
+        };
+
+        let parent_line = git_stdout(
+            &self.assigned_root,
+            &["rev-list", "--parents", "-n", "1", commit_sha],
+        )?;
+        let parents = parent_line.split_whitespace().collect::<Vec<_>>();
+        if parents.as_slice() != [*commit_sha, self.assigned_before.head.as_str()] {
+            return Ok(Err(
+                "the assigned worktree commit is not a single-parent fast-forward from the captured HEAD"
+                    .to_string(),
+            ));
+        }
+
+        let message = git_stdout(
+            &self.assigned_root,
+            &["show", "-s", "--format=%B", commit_sha],
+        )?;
+        if !has_commit_trailer(&message, "Agent-Run", &self.run_id)
+            || !has_commit_trailer(&message, "Agent-Task", &self.task_id)
+        {
+            return Ok(Err(format!(
+                "the assigned worktree commit is not attributed to run '{}' and task '{}'",
+                self.run_id, self.task_id
+            )));
+        }
+
+        let changed_paths = nul_paths(&git_stdout_bytes(
+            &self.assigned_root,
+            &[
+                "diff-tree",
+                "--no-commit-id",
+                "--name-only",
+                "-r",
+                "-z",
+                commit_sha,
+                "--",
+            ],
+        )?);
+        let scopes = normalized_task_scopes(&self.task_context_files, &self.assigned_root);
+        let off_scope = changed_paths
+            .iter()
+            .filter(|path| !scopes.iter().any(|scope| path_matches_scope(path, scope)))
+            .cloned()
+            .collect::<Vec<_>>();
+        if changed_paths.is_empty() || scopes.is_empty() || !off_scope.is_empty() {
+            return Ok(Err(format!(
+                "the assigned worktree commit is not confined to the admitted task scope; changed paths: {}; off-scope paths: {}",
+                changed_paths.join(", "),
+                off_scope.join(", ")
+            )));
+        }
+
+        Ok(Ok((*commit_sha).to_string()))
+    }
+
+    fn preserve_dirty_assigned_worktree(
+        &self,
+        assigned_after: &GitWorktreeFingerprint,
+    ) -> Result<Option<WorktreeRecoveryArtifact>, DispatchError> {
+        // ADR-0294: content-bearing evidence must outlive forced removal of
+        // the linked checkout, so it lives under the shared Git common dir.
+        if assigned_after.dirty_paths.is_empty() {
+            return Ok(None);
+        }
+        if self.run_id.is_empty()
+            || !self
+                .run_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        {
+            return Err(DispatchError::CliInvocationPermanent(format!(
+                "cannot preserve dirty worktree for unsafe run id '{}'",
+                self.run_id
+            )));
+        }
+
+        let common_dir = git_common_dir(&self.assigned_root)?.ok_or_else(|| {
+            DispatchError::CliInvocationPermanent(format!(
+                "cannot preserve dirty worktree '{}': Git common dir is unavailable",
+                self.assigned_root.display()
+            ))
+        })?;
+        let recovery_parent = common_dir.join("orbit").join("worktree-recovery");
+        let recovery_root = recovery_parent.join(&self.run_id);
+        let artifact = WorktreeRecoveryArtifact {
+            tracked_patch: recovery_root.join("tracked.patch"),
+            untracked_payload: recovery_root.join("untracked"),
+            manifest: recovery_root.join("manifest.json"),
+            root: recovery_root.clone(),
+        };
+        if recovery_root.is_dir() {
+            return Ok(Some(artifact));
+        }
+
+        fs::create_dir_all(&recovery_parent).map_err(|error| {
+            recovery_io_error("create recovery parent", &recovery_parent, error)
+        })?;
+        let pending =
+            recovery_parent.join(format!(".{}.{}.pending", self.run_id, std::process::id()));
+        fs::create_dir(&pending)
+            .map_err(|error| recovery_io_error("create pending recovery", &pending, error))?;
+        let pending_payload = pending.join("untracked");
+        fs::create_dir(&pending_payload).map_err(|error| {
+            recovery_io_error("create untracked recovery payload", &pending_payload, error)
+        })?;
+
+        let patch = git_stdout_bytes(
+            &self.assigned_root,
+            &[
+                "diff",
+                "--binary",
+                "--full-index",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-renames",
+                "HEAD",
+                "--",
+            ],
+        )?;
+        let patch_path = pending.join("tracked.patch");
+        fs::write(&patch_path, patch)
+            .map_err(|error| recovery_io_error("write tracked patch", &patch_path, error))?;
+
+        for relative in assigned_after.untracked_content.keys() {
+            let relative_path = safe_relative_path(relative)?;
+            let source = self.assigned_root.join(&relative_path);
+            let destination = pending_payload.join(&relative_path);
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent).map_err(|error| {
+                    recovery_io_error("create untracked payload directory", parent, error)
+                })?;
+            }
+            fs::copy(&source, &destination).map_err(|error| {
+                recovery_io_error("copy untracked recovery payload", &destination, error)
+            })?;
+        }
+
+        let manifest = WorktreeRecoveryManifest {
+            schema_version: 1,
+            task_id: &self.task_id,
+            run_id: &self.run_id,
+            recorded_head: &assigned_after.head,
+            recorded_branch: &assigned_after.branch,
+            tracked_patch: "tracked.patch",
+            untracked_payload: "untracked/",
+            untracked_files: assigned_after.untracked_content.keys().collect(),
+        };
+        let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(|error| {
+            DispatchError::CliInvocationPermanent(format!(
+                "serialize worktree recovery manifest for run '{}': {error}",
+                self.run_id
+            ))
+        })?;
+        let manifest_path = pending.join("manifest.json");
+        fs::write(&manifest_path, manifest_bytes).map_err(|error| {
+            recovery_io_error("write worktree recovery manifest", &manifest_path, error)
+        })?;
+        fs::rename(&pending, &recovery_root).map_err(|error| {
+            recovery_io_error("publish worktree recovery", &recovery_root, error)
+        })?;
+        Ok(Some(artifact))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn integrity_error(
         &self,
@@ -667,6 +925,13 @@ impl WorktreeBoundaryGuard {
         conflicting_paths: &[String],
         reason: &str,
     ) -> DispatchError {
+        let recovery = match self.preserve_dirty_assigned_worktree(assigned_after) {
+            Ok(Some(artifact)) => json!(artifact),
+            Ok(None) => Value::Null,
+            Err(error) => json!({
+                "preservation_error": error.to_string(),
+            }),
+        };
         let diagnostic = json!({
             "code": code,
             "reason": reason,
@@ -687,6 +952,7 @@ impl WorktreeBoundaryGuard {
             "assigned_after": assigned_after,
             "primary_before": self.primary_before,
             "primary_after": primary_after,
+            "recovery": recovery,
             "automatic_reconciliation": false,
         });
         DispatchError::WorktreeIntegrity {
@@ -809,6 +1075,20 @@ fn declared_workspace_path(input: &Value, task_ctx: Option<&Value>) -> Option<St
         .map(ToOwned::to_owned)
 }
 
+fn task_context_files(input: &Value, task_ctx: Option<&Value>) -> Vec<String> {
+    task_ctx
+        .and_then(|task| task.get("context_files"))
+        .or_else(|| input.get("context_files"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|scope| !scope.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
 fn task_id(input: &Value, task_ctx: Option<&Value>) -> String {
     input
         .get("task_id")
@@ -820,6 +1100,66 @@ fn task_id(input: &Value, task_ctx: Option<&Value>) -> String {
         })
         .unwrap_or("unknown")
         .to_string()
+}
+
+fn has_commit_trailer(message: &str, key: &str, expected: &str) -> bool {
+    message.lines().any(|line| {
+        line.split_once(':')
+            .is_some_and(|(candidate, value)| candidate.trim() == key && value.trim() == expected)
+    })
+}
+
+fn normalized_task_scopes(raw_scopes: &[String], workspace_root: &Path) -> Vec<String> {
+    raw_scopes
+        .iter()
+        .filter_map(|raw| {
+            let anchor = anchor_path(raw).ok()?;
+            let relative = if anchor.is_absolute() {
+                anchor.strip_prefix(workspace_root).ok()?.to_path_buf()
+            } else {
+                anchor
+            };
+            let mut normalized = PathBuf::new();
+            for component in relative.components() {
+                match component {
+                    Component::CurDir => {}
+                    Component::Normal(part) => normalized.push(part),
+                    Component::ParentDir => {
+                        normalized.pop();
+                    }
+                    Component::RootDir | Component::Prefix(_) => return None,
+                }
+            }
+            let scope = normalized.to_string_lossy().replace('\\', "/");
+            (!scope.is_empty()).then_some(scope)
+        })
+        .collect()
+}
+
+fn path_matches_scope(path: &str, scope: &str) -> bool {
+    path == scope
+        || scope == "."
+        || path
+            .strip_prefix(scope)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn safe_relative_path(path: &str) -> Result<PathBuf, DispatchError> {
+    let candidate = Path::new(path);
+    if candidate.as_os_str().is_empty()
+        || candidate
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(DispatchError::CliInvocationPermanent(format!(
+            "cannot preserve unsafe untracked path '{path}'"
+        )));
+    }
+    Ok(candidate.to_path_buf())
+}
+
+fn recovery_io_error(action: &str, path: &Path, error: std::io::Error) -> DispatchError {
+    DispatchError::CliInvocationPermanent(format!("{action} at '{}': {error}", path.display()))
 }
 
 fn git_top_level(path: &Path) -> Result<Option<PathBuf>, DispatchError> {

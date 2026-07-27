@@ -1641,6 +1641,274 @@ fn primary_content_mutation_is_typed_even_when_assigned_content_also_changes() {
 }
 
 #[test]
+fn dirty_integrity_failure_persists_and_restores_tracked_and_untracked_content() {
+    let fixture = linked_worktree_fixture();
+    let guard = boundary_guard(&fixture, "ORB-RECOVER-DIRTY", "run-recover-dirty");
+
+    fs::write(
+        fixture.assigned.join("README.md"),
+        b"recover tracked bytes\0\n",
+    )
+    .expect("write binary tracked candidate");
+    let untracked = write_worktree_file(
+        &fixture.assigned,
+        "nested/untracked.bin",
+        "recover untracked bytes\0\n",
+    );
+    write_primary_file(
+        &fixture,
+        "src/escaped.rs",
+        "fn escaped_primary_write() {}\n",
+    );
+
+    let error = guard
+        .verify()
+        .expect_err("primary escape must fail after preserving assigned dirt");
+    let diagnostic = worktree_integrity_diagnostic(&error);
+    let recovery = &diagnostic["recovery"];
+    let tracked_patch = PathBuf::from(
+        recovery["tracked_patch"]
+            .as_str()
+            .expect("tracked patch path"),
+    );
+    let untracked_payload = PathBuf::from(
+        recovery["untracked_payload"]
+            .as_str()
+            .expect("untracked payload path"),
+    );
+    let manifest = PathBuf::from(recovery["manifest"].as_str().expect("manifest path"));
+
+    assert!(
+        tracked_patch.is_file(),
+        "tracked patch is durable before cleanup"
+    );
+    assert_eq!(
+        fs::read(untracked_payload.join("nested/untracked.bin")).expect("read payload"),
+        b"recover untracked bytes\0\n"
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(manifest).expect("read manifest"))
+            .expect("parse manifest");
+    assert_eq!(manifest["runId"], "run-recover-dirty");
+    assert_eq!(manifest["taskId"], "ORB-RECOVER-DIRTY");
+    assert_eq!(
+        manifest["untrackedFiles"],
+        serde_json::json!(["nested/untracked.bin"])
+    );
+
+    git_ok(&fixture.assigned, &["reset", "--hard", "HEAD"]);
+    fs::remove_file(&untracked).expect("simulate cleanup of untracked candidate");
+    git_ok(
+        &fixture.assigned,
+        &[
+            "apply",
+            "--binary",
+            tracked_patch.to_str().expect("utf8 patch path"),
+        ],
+    );
+    fs::create_dir_all(fixture.assigned.join("nested")).expect("restore nested payload parent");
+    fs::copy(
+        untracked_payload.join("nested/untracked.bin"),
+        fixture.assigned.join("nested/untracked.bin"),
+    )
+    .expect("restore untracked payload");
+
+    assert_eq!(
+        fs::read(fixture.assigned.join("README.md")).expect("read restored tracked file"),
+        b"recover tracked bytes\0\n"
+    );
+    assert_eq!(
+        fs::read(fixture.assigned.join("nested/untracked.bin"))
+            .expect("read restored untracked file"),
+        b"recover untracked bytes\0\n"
+    );
+}
+
+#[test]
+fn one_clean_attributed_on_scope_commit_passes_the_provider_boundary_once() {
+    let fixture = linked_worktree_fixture();
+    let base_sha = String::from_utf8(git_bytes(&fixture.assigned, &["rev-parse", "HEAD"]))
+        .expect("utf8 base")
+        .trim()
+        .to_string();
+    let guard = boundary_guard_with_context(
+        &fixture,
+        "ORB-ADOPT-ONE",
+        "run-adopt-one",
+        &["file:candidate.txt"],
+    );
+
+    fs::write(fixture.assigned.join("candidate.txt"), "hook candidate\n")
+        .expect("write hook candidate");
+    git_ok(&fixture.assigned, &["add", "--", "candidate.txt"]);
+    git_ok(
+        &fixture.assigned,
+        &[
+            "commit",
+            "-m",
+            "auto-commit",
+            "-m",
+            "Agent-Run: run-adopt-one\nAgent-Task: ORB-ADOPT-ONE",
+        ],
+    );
+    let adopted_sha = String::from_utf8(git_bytes(&fixture.assigned, &["rev-parse", "HEAD"]))
+        .expect("utf8 adopted sha")
+        .trim()
+        .to_string();
+
+    guard
+        .verify()
+        .expect("known clean Stop-hook commit is admissible");
+
+    assert_ne!(adopted_sha, base_sha);
+    assert_eq!(
+        String::from_utf8(git_bytes(
+            &fixture.assigned,
+            &["rev-list", "--count", &format!("{base_sha}..HEAD")],
+        ))
+        .expect("utf8 commit count")
+        .trim(),
+        "1",
+        "boundary validation must not create a second commit"
+    );
+    assert!(
+        String::from_utf8(git_bytes(
+            &fixture.assigned,
+            &["status", "--porcelain=v1", "--untracked-files=all"],
+        ))
+        .expect("utf8 clean status")
+        .trim()
+        .is_empty()
+    );
+}
+
+#[test]
+fn admitted_commit_does_not_mask_conflicting_primary_content() {
+    let fixture = linked_worktree_fixture();
+    let guard = boundary_guard_with_context(
+        &fixture,
+        "ORB-ADOPT-CONFLICT",
+        "run-adopt-conflict",
+        &["file:candidate.txt"],
+    );
+
+    fs::write(fixture.assigned.join("candidate.txt"), "hook candidate\n")
+        .expect("write hook candidate");
+    git_ok(&fixture.assigned, &["add", "--", "candidate.txt"]);
+    git_ok(
+        &fixture.assigned,
+        &[
+            "commit",
+            "-m",
+            "auto-commit",
+            "-m",
+            "Agent-Run: run-adopt-conflict\nAgent-Task: ORB-ADOPT-CONFLICT",
+        ],
+    );
+    fs::write(fixture.primary.join("candidate.txt"), "primary escape\n")
+        .expect("write conflicting primary content");
+
+    let error = guard
+        .verify()
+        .expect_err("an admissible assigned commit cannot excuse primary interference");
+    assert_worktree_integrity_error(
+        &error,
+        "primary_checkout_drift",
+        ("ORB-ADOPT-CONFLICT", "run-adopt-conflict", "codex"),
+        &fixture,
+        "candidate.txt",
+    );
+    assert_eq!(
+        worktree_integrity_diagnostic(&error)["conflicting_paths"],
+        serde_json::json!(["candidate.txt"])
+    );
+}
+
+#[test]
+fn multiple_or_off_scope_commits_remain_typed_boundary_failures() {
+    for shape in ["multiple", "off-scope"] {
+        let fixture = linked_worktree_fixture();
+        let task_id = format!("ORB-{}", shape.to_ascii_uppercase());
+        let run_id = format!("run-{shape}");
+        let guard =
+            boundary_guard_with_context(&fixture, &task_id, &run_id, &["file:candidate.txt"]);
+
+        fs::write(fixture.assigned.join("candidate.txt"), "candidate\n")
+            .expect("write first candidate");
+        git_ok(&fixture.assigned, &["add", "--", "candidate.txt"]);
+        git_ok(
+            &fixture.assigned,
+            &[
+                "commit",
+                "-m",
+                "first",
+                "-m",
+                &format!("Agent-Run: {run_id}\nAgent-Task: {task_id}"),
+            ],
+        );
+        if shape == "multiple" {
+            fs::write(fixture.assigned.join("candidate.txt"), "second candidate\n")
+                .expect("write second candidate");
+        } else {
+            fs::write(fixture.assigned.join("unrelated.txt"), "unrelated\n")
+                .expect("write off-scope candidate");
+        }
+        let path = if shape == "multiple" {
+            "candidate.txt"
+        } else {
+            "unrelated.txt"
+        };
+        git_ok(&fixture.assigned, &["add", "--", path]);
+        if shape == "multiple" {
+            git_ok(
+                &fixture.assigned,
+                &[
+                    "commit",
+                    "-m",
+                    "second",
+                    "-m",
+                    &format!("Agent-Run: {run_id}\nAgent-Task: {task_id}"),
+                ],
+            );
+        } else {
+            git_ok(
+                &fixture.assigned,
+                &[
+                    "commit",
+                    "--amend",
+                    "-m",
+                    "off scope",
+                    "-m",
+                    &format!("Agent-Run: {run_id}\nAgent-Task: {task_id}"),
+                ],
+            );
+        }
+
+        let error = guard
+            .verify()
+            .expect_err("unrelated commit history must fail closed");
+        assert!(matches!(
+            error,
+            DispatchError::WorktreeIntegrity {
+                code: "worktree_content_conflict",
+                ..
+            }
+        ));
+        let diagnostic = worktree_integrity_diagnostic(&error);
+        assert!(
+            diagnostic["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains(if shape == "multiple" {
+                    "advanced by 2 commits"
+                } else {
+                    "not confined to the admitted task scope"
+                })),
+            "{shape}: {diagnostic}"
+        );
+    }
+}
+
+#[test]
 fn assigned_history_divergence_is_a_typed_worktree_content_conflict() {
     let fixture = linked_worktree_fixture();
     let script = fixture.root().join("codex");
@@ -2054,14 +2322,27 @@ fn boundary_guard(
     task_id: &str,
     run_id: &str,
 ) -> WorktreeBoundaryGuard {
+    boundary_guard_with_context(fixture, task_id, run_id, &["dir:."])
+}
+
+fn boundary_guard_with_context(
+    fixture: &LinkedWorktreeFixture,
+    task_id: &str,
+    run_id: &str,
+    context_files: &[&str],
+) -> WorktreeBoundaryGuard {
     let input = worktree_input(fixture, task_id);
     let pair =
         validate_declared_worktree_pair(&input, None, run_id, "codex", Some(&fixture.primary))
             .expect("validate declared pair")
             .expect("linked worktree pair");
+    let task_context = serde_json::json!({
+        "id": task_id,
+        "context_files": context_files,
+    });
     WorktreeBoundaryGuard::capture(
         &input,
-        None,
+        Some(&task_context),
         run_id,
         "codex",
         Some(&fixture.assigned),

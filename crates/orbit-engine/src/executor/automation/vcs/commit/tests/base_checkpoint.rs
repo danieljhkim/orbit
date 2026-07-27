@@ -5,8 +5,9 @@
 //! `.git`. A sibling run's setup fetch, a rescue fetch, or a merge moves it
 //! while other runs are still in flight, so a commit step that re-resolved the
 //! name failed every older run by construction. These tests pin the pinned-base
-//! contract, the merge-base fallback, the ADR-0219 carve-out reachability, and
-//! the rule that no failure path mutates the worktree on its way out.
+//! contract, fail-closed history reconciliation, the ADR-0219 carve-out
+//! reachability, and the rule that no failure path mutates the worktree on its
+//! way out.
 
 use std::fs;
 use std::path::Path;
@@ -63,7 +64,10 @@ fn commit_survives_the_shared_base_ref_moving_after_worktree_setup() {
     git_success(workspace, &["checkout", "-b", "orbit/T1"]).expect("create task branch");
 
     fs::write(workspace.join("task.txt"), "task work\n").unwrap();
-    let task_head = commit_all(workspace, "implement-authored commit");
+    let task_head = commit_all(
+        workspace,
+        "auto-commit\n\nAgent-Run: batch-1\nAgent-Task: T1",
+    );
 
     // A sibling run's `worktree_setup` fetch lands a newer base.
     git_success(workspace, &["checkout", "--detach", &base_sha]).expect("detach at base");

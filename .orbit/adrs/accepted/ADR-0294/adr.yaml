@@ -1,0 +1,23 @@
+schema_version: 2
+id: ADR-0294
+title: Preserve failed worktree state before cleanup and admit only proven task commits
+status: accepted
+owner: codex
+created_at: 2026-07-27T02:16:59.670007190Z
+accepted_at: 2026-07-27T02:28:34.746515980Z
+last_updated: 2026-07-27T02:28:34.746515980Z
+related_features:
+- activity-job
+related_tasks:
+- ORB-10468
+tags:
+- worktree
+- recovery
+- vcs
+paths:
+- crates/orbit-engine/src/activity_job/workspace.rs
+- crates/orbit-engine/src/executor/automation/vcs/commit/**
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none
