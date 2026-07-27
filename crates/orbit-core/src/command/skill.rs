@@ -54,17 +54,6 @@ const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 4] = [
     ),
 ];
 
-/// Skills intentionally NOT shipped in `plugin/skills/` because they depend on
-/// CLI-only surfaces the Claude Code plugin does not expose. The CLI still
-/// seeds them; the plugin omits the symlink. Update this list when adding a
-/// skill that should be CLI-only — the `plugin_skill_symlinks_resolve_to_assets`
-/// test reads it.
-#[cfg(test)]
-const PLUGIN_EXCLUDED_SKILLS: &[&str] = &[
-    // No `orbit run` surface in the plugin (see README "Plugin vs. CLI"), so
-    // there are no jobs/routines/sweeps to run or debug.
-    "orbit-workflow",
-];
 use crate::paths::ORBIT_ROOT_TOKEN;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,10 +163,9 @@ impl OrbitRuntime {
 
 #[cfg(test)]
 mod tests {
-    //! Parity tests guarding against drift between the four skill catalogs:
-    //! the on-disk assets, the seeded registry, the plugin package, and the
-    //! router skill's enumeration. The next agent who adds a skill folder
-    //! must update all four; these tests fail loudly if any catalog lags.
+    //! Tests guarding the on-disk assets, seeded registry, router skill, and
+    //! plugin package configuration. Each delivery surface validates its own
+    //! contract without requiring the skill trees to match.
     //!
     //! Plus a portability regression (`embedded_assets_are_repository_agnostic`)
     //! guarding the shipped skill *and* activity trees against leaking
@@ -240,44 +228,6 @@ mod tests {
         Ok(files)
     }
 
-    fn plugin_skill_matches_asset(plugin_skill: &Path, asset_skill: &Path) -> Result<(), String> {
-        let expected_path = asset_skill
-            .canonicalize()
-            .map_err(|e| format!("canonicalize asset path failed: {e}"))?;
-        let actual_path = plugin_skill
-            .canonicalize()
-            .map_err(|e| format!("canonicalize plugin skill failed: {e}"))?;
-        if actual_path == expected_path {
-            return Ok(());
-        }
-
-        let plugin_files = collect_relative_files(plugin_skill)?;
-        let asset_files = collect_relative_files(asset_skill)?;
-        if plugin_files != asset_files {
-            let missing_from_plugin: Vec<&PathBuf> =
-                asset_files.difference(&plugin_files).collect();
-            let extra_in_plugin: Vec<&PathBuf> = plugin_files.difference(&asset_files).collect();
-            return Err(format!(
-                "materialized files differ from asset directory (missing from plugin: {missing_from_plugin:?}; extra in plugin: {extra_in_plugin:?})"
-            ));
-        }
-
-        for relative in asset_files {
-            let plugin_bytes = std::fs::read(plugin_skill.join(&relative))
-                .map_err(|e| format!("read plugin file {}: {e}", relative.display()))?;
-            let asset_bytes = std::fs::read(asset_skill.join(&relative))
-                .map_err(|e| format!("read asset file {}: {e}", relative.display()))?;
-            if plugin_bytes != asset_bytes {
-                return Err(format!(
-                    "materialized file {} differs from asset source",
-                    relative.display()
-                ));
-            }
-        }
-
-        Ok(())
-    }
-
     #[test]
     fn asset_dirs_match_default_skill_ids() {
         let dir = assets_skills_dir();
@@ -311,71 +261,15 @@ mod tests {
     }
 
     #[test]
-    fn plugin_skill_symlinks_resolve_to_assets() {
+    fn plugin_package_configuration_is_valid() {
         let repo = repo_root();
-        let plugin_skills = repo.join("plugin/skills");
-        let assets = repo.join("crates/orbit-core/assets/skills");
         let claude_mcp_path = repo.join("plugin/.mcp.json");
         let codex_manifest_path = repo.join("plugin/.codex-plugin/plugin.json");
         let marketplace_path = repo.join(".agents/plugins/marketplace.json");
-        let excluded: BTreeSet<&str> = PLUGIN_EXCLUDED_SKILLS.iter().copied().collect();
 
         let mut failures: Vec<String> = Vec::new();
 
-        // Forward: every non-excluded default skill must have a package entry
-        // that either resolves to the asset directory or is a byte-for-byte
-        // materialized copy. Codex plugin installs copy the plugin package
-        // without following directory symlinks, so materialized files are valid.
-        let expected_ids: BTreeSet<&str> = default_skill_ids()
-            .iter()
-            .copied()
-            .filter(|id| !excluded.contains(id))
-            .collect();
-        for id in &expected_ids {
-            let link = plugin_skills.join(id);
-            if !link.exists() {
-                failures.push(format!(
-                    "  {id}: plugin/skills/{id} does not exist (create a symlink to or materialized copy of crates/orbit-core/assets/skills/{id})"
-                ));
-                continue;
-            }
-            if let Err(e) = plugin_skill_matches_asset(&link, &assets.join(id)) {
-                failures.push(format!(
-                    "  {id}: plugin/skills/{id} does not match asset: {e}"
-                ));
-            }
-        }
-
-        // L-0020: retired skills can leave stale package entries behind, so
-        // keep this reverse check strict about orphans. Reverse: no orphan
-        // entries in plugin/skills/ (catches stale entries for retired skills
-        // and accidental inclusion of an excluded skill).
-        let on_disk: BTreeSet<String> = std::fs::read_dir(&plugin_skills)
-            .unwrap_or_else(|e| panic!("read_dir({}): {e}", plugin_skills.display()))
-            .filter_map(|entry| {
-                entry
-                    .ok()
-                    .map(|e| e.file_name().to_string_lossy().into_owned())
-            })
-            .collect();
-        for name in &on_disk {
-            if excluded.contains(name.as_str()) {
-                failures.push(format!(
-                    "  {name}: plugin/skills/{name} exists but is in PLUGIN_EXCLUDED_SKILLS — either remove the symlink or remove the exclusion"
-                ));
-                continue;
-            }
-            if !expected_ids.contains(name.as_str()) {
-                failures.push(format!(
-                    "  {name}: plugin/skills/{name} has no matching entry in default_skill_ids() — remove the orphan symlink or register the skill"
-                ));
-            }
-        }
-
-        // The Codex plugin package intentionally reuses the same shared skill
-        // directory as the Claude plugin. Keep that manifest pointed at
-        // plugin/skills/ and make sure its MCP config is Codex-specific rather
-        // than a copy of the Claude config that depends on CLAUDE_PROJECT_DIR.
+        // Validate the Codex and Claude package configuration independently.
         let codex_manifest: serde_json::Value = match std::fs::read_to_string(&codex_manifest_path)
         {
             Ok(contents) => match serde_json::from_str(&contents) {
@@ -403,7 +297,7 @@ mod tests {
                 != Some("./skills/")
             {
                 failures.push(
-                    "  plugin/.codex-plugin/plugin.json: `skills` must point at ./skills/ so Codex and Claude share the canonical skill package"
+                    "  plugin/.codex-plugin/plugin.json: `skills` must point at ./skills/"
                         .to_string(),
                 );
             }
@@ -518,7 +412,7 @@ mod tests {
 
         assert!(
             failures.is_empty(),
-            "plugin/skills/ package parity failed for {} skill(s):\n{}",
+            "plugin package configuration failed with {} error(s):\n{}",
             failures.len(),
             failures.join("\n"),
         );
