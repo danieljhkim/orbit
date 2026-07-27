@@ -1,7 +1,7 @@
 ---
 title: Auto-tasks — Overview
 owner: claude
-last_updated: 2026-07-26
+last_updated: 2026-07-27
 last_validated: 2026-07-27
 status: Accepted
 feature: auto-tasks
@@ -11,7 +11,7 @@ summary: Dynamically-defined recurring task templates minted by one generic sche
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ADR-0218, ADR-0217]
+related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ADR-0218, ADR-0217]
 ---
 
 # Auto-tasks — Overview
@@ -84,6 +84,10 @@ becomes just the first definition.
   friction records, re-verifies survivors against current behavior, resolves
   records that no longer reproduce, and files non-duplicate fix tasks for
   verified-real issues (ORB-10440).
+- `ci-failure-remediation` — disabled-by-default hourly investigation and
+  remediation of current-head GitHub Actions failures across integration,
+  release, and open-PR refs, with stale-run filtering, root-cause clustering,
+  PR-hook deduplication, and evidence-backed no-diff outcomes (ORB-10514).
 
 ## Task References
 
@@ -93,5 +97,6 @@ becomes just the first definition.
 - ORB-10348 — Generalized the definition into artifact-deprecation-review, adding the comment-reference sweep.
 - ORB-10439 — `orbit auto-task mint <name>`, the on-demand manual mint.
 - ORB-10440 — Daily friction-curation definition.
+- ORB-10514 — Disabled CI-failure remediation definition.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
