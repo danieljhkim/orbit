@@ -31,6 +31,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/apply_triage_dispositions.yaml"),
     ),
     (
+        "apply_task_pilot_results",
+        include_str!("../../assets/activities/apply_task_pilot_results.yaml"),
+    ),
+    (
         "dispatch_agent",
         include_str!("../../assets/activities/dispatch_agent.yaml"),
     ),
@@ -95,6 +99,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/pr_promote.yaml"),
     ),
     (
+        "prepare_task_pilot",
+        include_str!("../../assets/activities/prepare_task_pilot.yaml"),
+    ),
+    (
         "propose_duel_plan",
         include_str!("../../assets/activities/propose_duel_plan.yaml"),
     ),
@@ -126,6 +134,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "summarize_epic",
         include_str!("../../assets/activities/summarize_epic.yaml"),
+    ),
+    (
+        "task_pilot",
+        include_str!("../../assets/activities/task_pilot.yaml"),
     ),
     (
         "triage_failed_runs",
@@ -375,6 +387,57 @@ mod tests {
                 assert!(spec.instruction.contains("Do not edit"));
             }
             other => panic!("expected agent_loop agent_review, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn task_pilot_is_read_only_bounded_and_uses_advisory_output() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "task_pilot")
+            .expect("task pilot activity is seeded");
+        let asset = load_activity_asset(yaml).expect("parse task pilot activity");
+        assert!(
+            asset.spec.output_schema_json.get("required").is_none(),
+            "agent-returned task-pilot fields stay advisory until deterministic apply"
+        );
+        assert_eq!(
+            asset.spec.input_schema_json["properties"]["task_ids"]["maxItems"],
+            serde_json::json!(5)
+        );
+        match asset.spec.spec {
+            ActivityV2Spec::AgentLoop(spec) => {
+                assert!(spec.require_response_envelope);
+                assert_eq!(spec.role, None, "task-pilot is not a new crew role");
+                assert_eq!(spec.on_denial, OnDenial::Terminate);
+                assert!(!spec.tools.iter().any(|tool| tool == "orbit.task.update"));
+                assert!(!spec.tools.iter().any(|tool| tool == "orbit.task.*"));
+                assert!(!spec.tools.iter().any(|tool| {
+                    matches!(
+                        tool.as_str(),
+                        "fs.write" | "fs.patch" | "fs.delete" | "orbit.pipeline.invoke"
+                    )
+                }));
+                assert!(
+                    spec.proc_allowed_programs
+                        .as_deref()
+                        .unwrap_or_default()
+                        .iter()
+                        .all(|program| matches!(program.as_str(), "git" | "rg"))
+                );
+                assert!(
+                    !spec
+                        .proc_allowed_programs
+                        .as_deref()
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|program| program == "orbit"),
+                    "proc.spawn must not bypass the scoped Orbit tool allowlist"
+                );
+                assert!(spec.instruction.contains("Never update a task"));
+                assert!(spec.instruction.contains("one to five"));
+            }
+            other => panic!("expected agent_loop task_pilot activity, got {other:?}"),
         }
     }
 

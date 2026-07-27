@@ -1,0 +1,45 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: prepare_task_pilot
+spec:
+  type: deterministic
+  description: >
+    Select task-pilot candidates in the active workspace and partition them
+    into bounded groups. With explicit task_ids it selects exactly those
+    workspace tasks, including tasks with non-empty context_files. Without
+    task_ids it selects only proposed/backlog tasks whose context_files are
+    empty, excluding no-diff-needed/no-diff-expected tasks and every active,
+    review, or terminal status. This action never promotes or dispatches work.
+  input_schema_json:
+    type: object
+    properties:
+      task_ids:
+        type: array
+        items:
+          type: string
+      workspace_path:
+        type: string
+      max_tasks:
+        type: number
+        minimum: 1
+        maximum: 500
+      max_partition_size:
+        type: number
+        minimum: 1
+        maximum: 5
+  output_schema_json:
+    type: object
+    required: [mode, workspace_path, task_count, task_ids, tasks, partition_size, partition_count, partitions, excluded]
+    properties:
+      mode: {type: string, enum: [automatic, explicit]}
+      workspace_path: {type: string}
+      task_count: {type: number}
+      task_ids: {type: array, items: {type: string}}
+      tasks: {type: array, items: {type: object}}
+      partition_size: {type: number}
+      partition_count: {type: number}
+      partitions: {type: array, items: {type: object}}
+      excluded: {type: array, items: {type: object}}
+  action: prepare_task_pilot
+  config: {}
