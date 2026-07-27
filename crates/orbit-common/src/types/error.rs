@@ -69,6 +69,9 @@ pub struct DependencyNotDelivered {
 
 #[derive(Debug, Error, Serialize)]
 #[non_exhaustive]
+/// Keep this widely propagated error below its 128-byte size budget. Box the
+/// payload of any future multi-field variant so adding it does not widen every
+/// `Result<_, OrbitError>` in the workspace.
 pub enum OrbitError {
     #[error("policy denied: {0}")]
     PolicyDenied(String),
@@ -170,6 +173,11 @@ pub enum OrbitError {
     #[error("schema migration failed: {0}")]
     Migration(String),
 }
+
+const _: () = assert!(
+    std::mem::size_of::<OrbitError>() <= 128,
+    "OrbitError exceeds its 128-byte size budget; box multi-field variant payloads"
+);
 
 impl OrbitError {
     pub fn not_found(kind: NotFoundKind, id: impl Into<String>) -> Self {
