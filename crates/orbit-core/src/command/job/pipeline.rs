@@ -1,3 +1,5 @@
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
@@ -27,6 +29,7 @@ const PIPELINE_WAIT_DEFAULT_TIMEOUT_SECONDS: u64 = 3600;
 const PIPELINE_WAIT_MAX_TIMEOUT_SECONDS: u64 = 7200;
 const PIPELINE_WAIT_DEFAULT_POLL_SECONDS: u64 = 5;
 const PIPELINE_WAIT_MIN_POLL_SECONDS: u64 = 1;
+const PIPELINE_WORKER_LOG_TAIL_BYTES: u64 = 16 * 1024;
 // ADR-0233: independent review is a post-publication exact-head child Run.
 const INDEPENDENT_REVIEW_JOB: &str = "task_review_pipeline";
 
@@ -294,10 +297,13 @@ impl OrbitRuntime {
             let queued = !pipeline_run_is_runnable(&active_runs, &run.run_id, spec.max_active_runs);
 
             if let Err(error) = self.spawn_pipeline_worker(&run.run_id, actor) {
+                let worker_log = pipeline_worker_log_path(&self.paths().logs_dir, &run.run_id);
                 let message = format!(
-                    "pipeline worker for run '{}' could not start from registered workspace '{}': {error}",
+                    "pipeline worker for run '{}' could not start from registered workspace '{}': \
+                     {error}; worker log: '{}'",
                     run.run_id,
                     self.paths().repo_root.display(),
+                    worker_log.display(),
                 );
                 let _ = self.finalize_pipeline_worker_startup_failure(&run, &message, actor);
                 return Err(error);
@@ -707,6 +713,19 @@ impl OrbitRuntime {
         })?;
         let mut command = Command::new(resolve_pipeline_worker_executable(current_exe));
         configure_pipeline_worker_command(&mut command, &self.paths().repo_root, run_id);
+        let worker_log =
+            configure_pipeline_worker_stdio(&mut command, &self.paths().logs_dir, run_id)?;
+        self.spawn_pipeline_worker_process(run_id, actor, command, worker_log)
+            .map(|_| ())
+    }
+
+    pub(crate) fn spawn_pipeline_worker_process(
+        &self,
+        run_id: &str,
+        actor: Option<&str>,
+        mut command: Command,
+        worker_log: PathBuf,
+    ) -> Result<u32, OrbitError> {
         #[cfg(unix)]
         unsafe {
             command.pre_exec(|| {
@@ -729,6 +748,7 @@ impl OrbitRuntime {
         let run_id_for_observer = run_id.to_string();
         let actor_for_observer = actor.map(ToOwned::to_owned);
         let workspace_for_observer = self.paths().repo_root.clone();
+        let worker_log_for_observer = worker_log.clone();
         thread::Builder::new()
             .name(format!("pipeline-start-{run_id}"))
             .spawn(move || {
@@ -739,6 +759,7 @@ impl OrbitRuntime {
                     &run_id_for_observer,
                     child,
                     &workspace_for_observer,
+                    &worker_log_for_observer,
                     actor_for_observer.as_deref(),
                 ) {
                     tracing::error!(
@@ -756,9 +777,11 @@ impl OrbitRuntime {
         let child = command
             .spawn()
             .map_err(|error| OrbitError::Execution(format!("spawn pipeline worker: {error}")))?;
+        let child_pid = child.id();
         sender.send(child).map_err(|error| {
             OrbitError::Execution(format!("hand pipeline worker to startup observer: {error}"))
-        })
+        })?;
+        Ok(child_pid)
     }
 
     pub(crate) fn monitor_pipeline_worker_startup(
@@ -766,6 +789,7 @@ impl OrbitRuntime {
         run_id: &str,
         mut child: Child,
         workspace: &Path,
+        worker_log: &Path,
         actor: Option<&str>,
     ) -> Result<(), OrbitError> {
         let child_pid = child.id();
@@ -782,6 +806,7 @@ impl OrbitRuntime {
                         "worker_pid": child_pid,
                         "owner_pid": owner_pid,
                         "workspace": workspace,
+                        "worker_log": worker_log,
                         "state": run.state.to_string(),
                     }),
                     None,
@@ -797,9 +822,19 @@ impl OrbitRuntime {
                     "observe pipeline worker process for run '{run_id}': {error}"
                 ))
             })? {
+                let output = read_pipeline_worker_log_tail(worker_log);
+                let output_detail = output
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                    .map(|value| format!("; worker output:\n{value}"))
+                    .unwrap_or_default();
                 let message = format!(
-                    "pipeline worker for run '{run_id}' exited with status {status} before claiming the persisted run from registered workspace '{}'; verify workspace registration and worker root discovery",
+                    "pipeline worker for run '{run_id}' exited with status {status} before \
+                     claiming the persisted run from registered workspace '{}'; worker log: \
+                     '{}'{output_detail}; verify workspace registration, worker root discovery, \
+                     and action availability",
                     workspace.display(),
+                    worker_log.display(),
                 );
                 self.finalize_pipeline_worker_startup_failure(&run, &message, actor)?;
                 return Ok(());
@@ -850,6 +885,7 @@ impl OrbitRuntime {
             json!({
                 "run_id": run.run_id,
                 "workspace": self.paths().repo_root,
+                "worker_log": pipeline_worker_log_path(&self.paths().logs_dir, &run.run_id),
             }),
             Some(message.to_string()),
         )
@@ -1271,9 +1307,103 @@ pub(crate) fn configure_pipeline_worker_command(
         .arg("run-pipeline-worker")
         .arg(run_id)
         .current_dir(workspace)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdin(Stdio::null());
+}
+
+pub(crate) fn pipeline_worker_log_path(logs_dir: &Path, run_id: &str) -> PathBuf {
+    logs_dir.join(format!("{run_id}.worker.log"))
+}
+
+pub(crate) fn configure_pipeline_worker_stdio(
+    command: &mut Command,
+    logs_dir: &Path,
+    run_id: &str,
+) -> Result<PathBuf, OrbitError> {
+    std::fs::create_dir_all(logs_dir).map_err(|error| {
+        OrbitError::Io(format!(
+            "create pipeline worker log directory '{}': {error}",
+            logs_dir.display()
+        ))
+    })?;
+    restrict_pipeline_worker_log_directory(logs_dir)?;
+
+    let log_path = pipeline_worker_log_path(logs_dir, run_id);
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let log = options.open(&log_path).map_err(|error| {
+        OrbitError::Io(format!(
+            "open pipeline worker log '{}': {error}",
+            log_path.display()
+        ))
+    })?;
+    restrict_pipeline_worker_log_file(&log_path)?;
+    let stdout = log.try_clone().map_err(|error| {
+        OrbitError::Io(format!(
+            "clone pipeline worker log '{}': {error}",
+            log_path.display()
+        ))
+    })?;
+    command.stdout(Stdio::from(stdout)).stderr(Stdio::from(log));
+    Ok(log_path)
+}
+
+fn read_pipeline_worker_log_tail(path: &Path) -> Option<String> {
+    let mut file = File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let start = len.saturating_sub(PIPELINE_WORKER_LOG_TAIL_BYTES);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::with_capacity((len - start) as usize);
+    file.read_to_end(&mut bytes).ok()?;
+    let output = String::from_utf8_lossy(&bytes);
+    let output = orbit_common::utility::logging::redact_event_text(output.trim());
+    if output.is_empty() {
+        None
+    } else if start > 0 {
+        Some(format!(
+            "[truncated to final {PIPELINE_WORKER_LOG_TAIL_BYTES} bytes]\n{output}"
+        ))
+    } else {
+        Some(output)
+    }
+}
+
+#[cfg(unix)]
+fn restrict_pipeline_worker_log_directory(path: &Path) -> Result<(), OrbitError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(|error| {
+        OrbitError::Io(format!(
+            "restrict pipeline worker log directory '{}': {error}",
+            path.display()
+        ))
+    })
+}
+
+#[cfg(not(unix))]
+fn restrict_pipeline_worker_log_directory(_path: &Path) -> Result<(), OrbitError> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn restrict_pipeline_worker_log_file(path: &Path) -> Result<(), OrbitError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|error| {
+        OrbitError::Io(format!(
+            "restrict pipeline worker log '{}': {error}",
+            path.display()
+        ))
+    })
+}
+
+#[cfg(not(unix))]
+fn restrict_pipeline_worker_log_file(_path: &Path) -> Result<(), OrbitError> {
+    Ok(())
 }
 
 fn pipeline_run_is_runnable(runs: &[JobRun], run_id: &str, max_active_runs: u32) -> bool {
