@@ -384,6 +384,54 @@ impl AdrFileStore {
         Ok(Some(remote_stub_from_allocation(&record)))
     }
 
+    /// [ORB-10501] ADR allocations that can never resolve to a bundle again:
+    /// the worktree they were pinned to is gone from disk *and* no local or
+    /// recorded bundle is readable here. See
+    /// `LearningFileStore::list_orphaned_learning_allocations` for why both
+    /// conditions are required.
+    pub(crate) fn list_orphaned_adr_allocations(
+        &self,
+    ) -> Result<Vec<IdAllocationRecord>, OrbitError> {
+        let mut orphaned = Vec::new();
+        for record in self.id_allocator.adr_allocations()? {
+            if !record.worktree_is_missing() {
+                continue;
+            }
+            if self.get_adr(&record.id)?.is_some() || self.read_adr_allocation(&record)?.is_some() {
+                continue;
+            }
+            orphaned.push(record);
+        }
+        Ok(orphaned)
+    }
+
+    /// [ORB-10501] Clear one orphaned allocation row, re-verifying both orphan
+    /// conditions immediately before the write. Returns `false` when `id` has
+    /// no live allocation row; refuses with `InvalidInput` when the row is
+    /// still recoverable.
+    pub(crate) fn abandon_orphaned_adr_allocation(&self, id: &str) -> Result<bool, OrbitError> {
+        validate_adr_id(id)?;
+        let Some(record) = self.id_allocator.adr_allocation(id)? else {
+            return Ok(false);
+        };
+        if !record.worktree_is_missing() {
+            return Err(OrbitError::InvalidInput(format!(
+                "ADR '{id}' is not orphaned: its recorded worktree '{}' still exists",
+                record.worktree_root.display()
+            )));
+        }
+        if self.get_adr(id)?.is_some() || self.read_adr_allocation(&record)?.is_some() {
+            return Err(OrbitError::InvalidInput(format!(
+                "ADR '{id}' is not orphaned: its bundle is still readable"
+            )));
+        }
+        if !self.id_allocator.abandon_orphaned_adr(id)? {
+            return Ok(false);
+        }
+        self.delete_index_row(id);
+        Ok(true)
+    }
+
     /// Updates ADR status, moving the bundle between state directories and
     /// refreshing the index row. Index update is best-effort: a failure is
     /// logged but does not roll back the filesystem move.

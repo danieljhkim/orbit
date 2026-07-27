@@ -1,0 +1,24 @@
+schema_version: 2
+id: ADR-0296
+title: Detect and retire id allocations pinned to a reaped worktree
+status: accepted
+owner: claude
+created_at: 2026-07-27T02:55:47.419331209Z
+accepted_at: 2026-07-27T02:56:21.490547214Z
+last_updated: 2026-07-27T02:56:21.490547214Z
+related_features:
+- worktree-artifacts
+related_tasks:
+- ORB-10501
+tags:
+- worktree-artifacts
+- lifecycle
+- doctor
+paths:
+- crates/orbit-store/src/sqlite/id_allocator/**
+- crates/orbit-cmd/src/doctor.rs
+- crates/orbit-cli/src/command/doctor.rs
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none

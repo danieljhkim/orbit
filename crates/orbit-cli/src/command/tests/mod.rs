@@ -46,6 +46,21 @@ fn cli_parses_doctor_stale_lock_cleanup() {
             assert!(command.fix_stale_locks);
             assert!(command.remove_graph);
             assert!(command.json);
+            // [ORB-10501] Repairs are opt-in: an unflagged run only diagnoses.
+            assert!(!command.fix_orphaned_allocations);
+        }
+        _ => panic!("expected top-level doctor command"),
+    }
+}
+
+/// [ORB-10501] The guarded repair for allocations pinned to a reaped worktree.
+#[test]
+fn cli_parses_doctor_orphaned_allocation_repair() {
+    let cli = Cli::parse_from(["orbit", "doctor", "--fix-orphaned-allocations"]);
+    match cli.command {
+        Commands::Doctor(command) => {
+            assert!(command.fix_orphaned_allocations);
+            assert!(!command.fix_stale_locks);
         }
         _ => panic!("expected top-level doctor command"),
     }

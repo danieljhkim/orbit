@@ -14,6 +14,7 @@ use super::contracts::{
     TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
     TaskHistoryUpdateParams, TaskStoreBackend,
 };
+use crate::IdAllocationRecord;
 use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
 use crate::file::learning_store::LearningFileStore;
@@ -213,6 +214,14 @@ impl AdrStoreBackend for AdrFileStore {
         AdrFileStore::get_adr_remote_stub(self, id)
     }
 
+    fn list_orphaned_adr_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError> {
+        AdrFileStore::list_orphaned_adr_allocations(self)
+    }
+
+    fn abandon_orphaned_adr_allocation(&self, id: &str) -> Result<bool, OrbitError> {
+        AdrFileStore::abandon_orphaned_adr_allocation(self, id)
+    }
+
     fn update_adr_status(&self, id: &str, new_status: AdrStatus) -> Result<(), OrbitError> {
         self.update_adr_status(id, new_status)
     }
@@ -275,6 +284,14 @@ impl LearningStoreBackend for LearningFileStore {
 
     fn get_learning_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError> {
         LearningFileStore::get_learning_remote_stub(self, id)
+    }
+
+    fn list_orphaned_learning_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError> {
+        LearningFileStore::list_orphaned_learning_allocations(self)
+    }
+
+    fn abandon_orphaned_learning_allocation(&self, id: &str) -> Result<bool, OrbitError> {
+        LearningFileStore::abandon_orphaned_learning_allocation(self, id)
     }
 
     fn search_learnings(

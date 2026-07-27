@@ -51,6 +51,7 @@ pub mod backend_resolver;
 pub(crate) mod docs;
 pub(crate) mod executor;
 pub mod gc;
+pub(crate) mod id_allocation;
 pub mod init;
 pub mod job;
 pub mod learning;
