@@ -701,7 +701,7 @@ superseded, and its own flag keeps its meaning.
 
 ## ADR-0251 — Pipeline steps consume a base commit pinned at worktree setup, never a moving ref name
 
-**Status:** Accepted · 2026-07 · [ORB-10380]
+**Status:** Accepted · 2026-07 · [ORB-10380] · adoption/history-rewrite policy amended by [ADR-0294]
 
 **Context.** `worktree_setup` published only the *name* of its start point (`origin/<base>`), and the `commit` step re-resolved that name to decide whether HEAD descended from the base. `refs/remotes/origin/<base>` is shared by every worktree hanging off one `.git`, and any sibling run's setup fetch, any rescue fetch, and every merge moves it. Once it moved, `merge-base --is-ancestor <new tip> HEAD` was false by construction and the commit step failed — so each new run's fetch retroactively invalidated every older in-flight run, making concurrent dispatch unsafe (five failures on 2026-07-25, verified 7/7 against the reflog and reproduced end-to-end). The alternatives were to make `commit` tolerate a moved base by inspecting divergence at commit time — which leaves the step reading state that keeps changing underneath it — or to move base reconciliation earlier, which only relocates the same race.
 
@@ -817,8 +817,17 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ---
 
+## ADR-0294 — Preserve failed worktree state before cleanup and admit only proven task commits
+
+**Status:** Accepted · 2026-07 · [ORB-10468]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0294"}'`.
+
+---
+
 ## Task References
 
+- **[ORB-10468]** — Preserve dirty integrity failures as run-keyed restorable artifacts and narrow assigned-history adoption to one task/run-attributed on-scope commit ([ADR-0294], amending [ADR-0251]).
 - **[ORB-10471]** — Scope the worktree boundary guard's primary dirt check to paths the run touched, so unrelated primary dirt no longer defeats a benign fast-forward ([ADR-0292]).
 - **[ORB-10470]** — Make resume submit a detached run that starts at the failed checkpoint, and reconcile blocked/re-stamped tasks against the run's retry lineage ([ADR-0289]).
 - **[ORB-10467]** — Require independent review to reconcile late task authority and every acceptance criterion ([ADR-0288]).

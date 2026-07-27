@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use crate::context::{DeterministicActionHost, TaskHost};
 
 use super::super::input::{canonicalize_existing_dir, input_string_field, required_job_run_id};
-use super::git::{git_command_success, git_output, git_success};
+use super::git::{git_command_success, git_output, git_output_paths, git_success};
 use super::handoff::reject_failed_delivery;
 use author::{append_co_author_trailers, commit_author_for_tasks};
 use git_ops::{
@@ -20,7 +20,10 @@ use git_ops::{
     staged_changed_files,
 };
 use message::{batch_commit_message, finalize_commit_message, task_commit_message};
-use scope::{changed_files_for_task, collect_worktree_changes, filter_changed_files_for_task};
+use scope::{
+    changed_files_for_task, collect_worktree_changes, filter_changed_files_for_task,
+    normalize_task_scope, path_matches_scope,
+};
 
 pub(in crate::executor::automation) fn git_commit<
     H: TaskHost + DeterministicActionHost + ?Sized,
@@ -198,6 +201,19 @@ pub(super) fn commit_batch_changes<H: TaskHost + DeterministicActionHost + ?Size
     let checkpoint = match resolve_base_checkpoint(&workspace_path, input)? {
         BaseResolution::Reconciled(checkpoint) => Some(checkpoint),
         BaseResolution::Unpinned => None,
+        BaseResolution::RewrittenHistory {
+            base_sha,
+            head_sha,
+            merge_base,
+        } => {
+            return Err(rewritten_history_error(
+                &task.id,
+                &workspace_path,
+                &base_sha,
+                &head_sha,
+                &merge_base,
+            ));
+        }
         BaseResolution::UnrelatedHistories { base_sha, head_sha } => {
             if no_diff_expected {
                 return Ok(skipped_no_diff_expected_result(&task.id));
@@ -212,6 +228,12 @@ pub(super) fn commit_batch_changes<H: TaskHost + DeterministicActionHost + ?Size
     };
     let (base_sha, mut commit_shas) = match checkpoint {
         Some(checkpoint) => {
+            validate_admitted_task_commits(
+                &workspace_path,
+                task,
+                batch_id,
+                &checkpoint.commit_shas,
+            )?;
             warn_on_commits_above_pinned_base(&task.id, &workspace_path, &checkpoint);
             (Some(checkpoint.base_sha), checkpoint.commit_shas)
         }
@@ -316,6 +338,13 @@ enum BaseResolution {
     /// No base was pinned by the caller, so this step attributes no history.
     Unpinned,
     Reconciled(BaseCheckpoint),
+    /// HEAD and the pinned setup commit share history, but HEAD is no longer a
+    /// descendant: an actor rewrote or reset the assigned branch.
+    RewrittenHistory {
+        base_sha: String,
+        head_sha: String,
+        merge_base: String,
+    },
     /// The pinned base and HEAD have no common ancestor.
     UnrelatedHistories {
         base_sha: String,
@@ -364,27 +393,19 @@ fn resolve_base_checkpoint(
         }));
     }
 
-    // The branch was rewritten or reset below the pinned base after setup. Count
-    // this run's commits from the common ancestor instead of failing: only a
-    // genuinely unrelated history leaves nothing to attribute.
+    // A pinned base cannot move. If it is no longer an ancestor of HEAD, an
+    // actor rewrote or reset the assigned branch after setup. Preservation is
+    // handled at the provider boundary; the commit phase must never adopt this
+    // ambiguous history shape.
     if !git_command_success(workspace_path, &["merge-base", &base_sha, "HEAD"])? {
         return Ok(BaseResolution::UnrelatedHistories { base_sha, head_sha });
     }
     let merge_base = git_output(workspace_path, &["merge-base", &base_sha, "HEAD"])?;
-    let commit_shas = commits_since(workspace_path, &merge_base)?;
-    tracing::warn!(
-        workspace_path = %workspace_path.display(),
-        base_sha = %base_sha,
-        head_sha = %head_sha,
-        merge_base = %merge_base,
-        commit_count = commit_shas.len(),
-        "task branch is not a descendant of its pinned base; counting commits from the merge base"
-    );
-    Ok(BaseResolution::Reconciled(BaseCheckpoint {
+    Ok(BaseResolution::RewrittenHistory {
         base_sha,
-        commit_shas,
-        diverged_at: Some(merge_base),
-    }))
+        head_sha,
+        merge_base,
+    })
 }
 
 /// Reject anything that is not a full Git object id.
@@ -417,14 +438,115 @@ fn commits_since(workspace_path: &Path, from: &str) -> Result<Vec<String>, Orbit
     )
 }
 
+/// Recheck the exact provider-boundary exception before adopting its SHA.
+///
+/// The only supported history mutation during implementation is the known
+/// Stop-hook shape: one commit, attributed to this run/task, containing only
+/// declared task-scope paths, with no dirty residue. Anything broader is
+/// ambiguous and stays available for the failure handoff instead of being
+/// silently folded into a shipment.
+fn validate_admitted_task_commits(
+    workspace_path: &Path,
+    task: &orbit_common::types::Task,
+    run_id: &str,
+    commit_shas: &[String],
+) -> Result<(), OrbitError> {
+    if commit_shas.is_empty() {
+        return Ok(());
+    }
+    let [commit_sha] = commit_shas else {
+        return Err(adoption_conflict_error(
+            task.id.as_str(),
+            workspace_path,
+            format!(
+                "observed {} commits above the pinned base; exactly one task-attributed Stop-hook commit is admissible",
+                commit_shas.len()
+            ),
+        ));
+    };
+
+    let dirty_paths = collect_worktree_changes(workspace_path)?;
+    if !dirty_paths.is_empty() {
+        return Err(adoption_conflict_error(
+            task.id.as_str(),
+            workspace_path,
+            format!(
+                "commit {commit_sha} is accompanied by dirty residue at paths: {}",
+                dirty_paths.into_iter().collect::<Vec<_>>().join(", ")
+            ),
+        ));
+    }
+
+    let message = git_output(workspace_path, &["show", "-s", "--format=%B", commit_sha])?;
+    if !has_commit_trailer(&message, "Agent-Run", run_id)
+        || !has_commit_trailer(&message, "Agent-Task", task.id.as_str())
+    {
+        return Err(adoption_conflict_error(
+            task.id.as_str(),
+            workspace_path,
+            format!(
+                "commit {commit_sha} is not attributed to run '{run_id}' and task '{}'",
+                task.id
+            ),
+        ));
+    }
+
+    let scopes = task
+        .context_files
+        .iter()
+        .filter_map(|raw| normalize_task_scope(raw, workspace_path))
+        .collect::<Vec<_>>();
+    let changed_paths = git_output_paths(
+        workspace_path,
+        &[
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "-z",
+            commit_sha,
+            "--",
+        ],
+    )?;
+    let off_scope = changed_paths
+        .iter()
+        .filter(|path| !scopes.iter().any(|scope| path_matches_scope(path, scope)))
+        .cloned()
+        .collect::<Vec<_>>();
+    if changed_paths.is_empty() || scopes.is_empty() || !off_scope.is_empty() {
+        return Err(adoption_conflict_error(
+            task.id.as_str(),
+            workspace_path,
+            format!(
+                "commit {commit_sha} is not confined to the task context; changed paths: {}; off-scope paths: {}",
+                changed_paths.join(", "),
+                off_scope.join(", ")
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn has_commit_trailer(message: &str, key: &str, expected: &str) -> bool {
+    message.lines().any(|line| {
+        line.split_once(':')
+            .is_some_and(|(candidate, value)| candidate.trim() == key && value.trim() == expected)
+    })
+}
+
+fn adoption_conflict_error(task_id: &str, workspace_path: &Path, reason: String) -> OrbitError {
+    OrbitError::Execution(format!(
+        "commit_batch_changes: worktree_content_conflict for task '{task_id}' in '{}': {reason}. \
+         Orbit did not amend, reset, or adopt the conflicting history.",
+        workspace_path.display()
+    ))
+}
+
 /// Commits above the pinned base mean some actor committed inside the assigned
 /// worktree during implementation. The pipeline owns Git context, so no
 /// sanctioned actor does that today; the known live source is an external
-/// editor `Stop` hook that auto-commits. Adopting them preserves the work and
-/// its authorship, which is strictly better than discarding or rewriting it —
-/// but it is an interim, so it is loud. Revisit once implementing agents and
-/// their host hooks are provably non-committing (ORB-10381 owns the activity
-/// contract); at that point this becomes a hard failure instead of a warning.
+/// editor `Stop` hook that auto-commits. ADR-0294 limits adoption to the one
+/// clean, task/run-attributed, on-scope commit rechecked immediately above.
 fn warn_on_commits_above_pinned_base(
     task_id: &str,
     workspace_path: &Path,
@@ -479,6 +601,22 @@ fn empty_stage_error(
         counts.unstaged,
         counts.untracked
     )))
+}
+
+fn rewritten_history_error(
+    task_id: &str,
+    workspace_path: &Path,
+    base_sha: &str,
+    head_sha: &str,
+    merge_base: &str,
+) -> OrbitError {
+    OrbitError::Execution(format!(
+        "commit_batch_changes: worktree_history_rewritten for task '{task_id}' in '{}'. \
+         Observed pinned base {base_sha}, HEAD {head_sha}, and merge base {merge_base}; HEAD is \
+         not a descendant of the immutable setup checkpoint. Orbit did not stage, reset, or \
+         adopt the rewritten history.",
+        workspace_path.display()
+    ))
 }
 
 /// The pinned base and this worktree's HEAD are disjoint histories, so no
