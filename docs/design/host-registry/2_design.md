@@ -2,6 +2,7 @@
 title: Host Registry — Design
 owner: claude
 last_updated: 2026-07-20
+last_validated: 2026-07-27
 status: Accepted
 feature: host-registry
 doc_role: design
