@@ -3,7 +3,8 @@ summary: "Auditability — Design"
 type: design
 title: "Auditability — Design"
 owner: codex
-last_updated: 2026-07-26
+last_updated: 2026-07-27
+last_validated: 2026-07-27
 status: Draft
 feature: auditability
 doc_role: design
@@ -18,13 +19,12 @@ This document describes Orbit's shipped auditability implementation across comma
 
 ## 1. Storage Roots and Audit Channels
 
-Auditability is split across five channels:
+Auditability is split across four channels:
 
 1. **Command audit records.** SQLite rows in the configured audit database; queried through `orbit audit`.
-2. **V2 activity/job envelope events.** JSONL under `.orbit/state/audit/v2_loop/{run_id}.jsonl`.
-3. **Loop-level provider/tool events.** JSONL under `.orbit/state/audit/loop/{run_id}.jsonl`, created lazily when a run emits loop events.
-4. **Global tracing events.** Redacted JSONL under `~/.orbit/state/logs/orbit.jsonl`.
-5. **Invocation metrics.** SQLite records keyed by job run, activity, task, agent, model, usage, and tool-call summaries.
+2. **V2 activity/job and loop events.** SQLite rows in `v2_audit_events`, with loop rows created only when a run emits loop events; redacted content-addressed blobs remain under `.orbit/state/audit/blobs/`.
+3. **Global tracing events.** Redacted JSONL under `~/.orbit/state/logs/orbit.jsonl`.
+4. **Invocation metrics.** SQLite records keyed by job run, activity, task, agent, model, usage, and tool-call summaries.
 
 The split is deliberate: command rows stay compact and queryable; envelopes preserve workflow structure; loop audit preserves provider/tool detail; tracing gives operators a live feed before workspace context exists; metrics answer cost and scoreboard questions without scraping transcripts. [T20260426-0519] moved file-backed run traces under `.orbit/state/audit/` while command audit rows remained in SQLite.
 
@@ -69,17 +69,17 @@ After [T20260427-0023], selected canonical stores also project live tracing even
 
 `V2AuditEnvelope` lives in `crates/orbit-common/src/types/activity_job/audit_envelope.rs`. Each envelope carries `schemaVersion`, `event_type`, `event_id`, timestamp, `run_id`, `agent_identity`, optional `parent_event_id`, optional `workspace_path`, and a tagged `V2AuditEventKind`. Event families cover run, step, retry, skip, denial, join, fan-out/fan-in, loop, activity, filesystem, tool denial, CLI-backend delegation, and subprocess lifecycle. After [T20260508-8], `CliInvocationStarted` also records the resolved subprocess `cwd` when one is supplied by the Activity/Job workspace resolver.
 
-`V2AuditWriter` in `crates/orbit-engine/src/activity_job/audit_writer.rs` assigns event ids, maintains per-thread parent stacks, emits through `V2JsonlSink`, keeps a smoke-verification snapshot, and exposes the inner loop sink for provider/tool events. CLI-launched v2 runs stamp envelope `agent_identity` as `system`; concrete agent identity lives in activity configuration, CLI invocation events, and invocation metrics.
+`V2AuditWriter` in `crates/orbit-engine/src/activity_job/audit_writer.rs` assigns event ids, maintains per-thread parent stacks, emits through `V2SqliteSink` in `crates/orbit-engine/src/activity_job/sqlite_sink.rs`, keeps a smoke-verification snapshot, and exposes the inner loop sink for provider/tool events. CLI-launched v2 runs stamp envelope `agent_identity` as `system`; concrete agent identity lives in activity configuration, CLI invocation events, and invocation metrics.
 
-`crates/orbit-engine/src/activity_job/jsonl_sink.rs` appends one JSON object per line under `v2_loop/` and flushes per write. `crates/orbit-core/src/runtime/run_audit.rs` is the read-side accessor after [T20260426-0709], deriving activity DAG `step.id` values from `parent_event_id` ancestry and resolving CLI stdout/stderr blob references for `orbit run logs`. After [T20260508-14], the same accessor tolerates malformed read-side JSONL lines and missing blobs for dashboard inspection, returning partial per-step CLI invocation records with run id, event id, timestamp, step index, exit status, timeout, duration, provider, blob refs, and bounded stdout/stderr material.
+`V2SqliteSink` stores one serialized event payload per row in `v2_audit_events`. `crates/orbit-core/src/runtime/run_audit.rs` is the read-side accessor after [T20260426-0709], deriving activity DAG `step.id` values from `parent_event_id` ancestry and resolving CLI stdout/stderr blob references for `orbit run logs`. After [T20260508-14], the same accessor tolerates malformed stored event JSON and missing blobs for dashboard inspection, returning partial per-step CLI invocation records with run id, event id, timestamp, step index, exit status, timeout, duration, provider, blob refs, and bounded stdout/stderr material.
 
 ---
 
 ## 5. Loop-Level Provider and Tool Events
 
-`LoopAuditEvent` in `crates/orbit-agent/src/loop_engine/audit/mod.rs` covers session spawn/close, HTTP request/response, tool-call request/result, iteration boundary, and policy denial. `JsonlFileSink` creates `{audit_root}/loop/{run_id}.jsonl` lazily on the first loop event and writes payload blobs to `{audit_root}/blobs/`; runtime callers pass `.orbit/state/audit` as `audit_root`. [T20260506-2] removed zero-byte loop JSONL placeholders for runs that only emit v2 envelope events or CLI-backend blobs.
+`LoopAuditEvent` in `crates/orbit-agent/src/loop_engine/audit/mod.rs` covers session spawn/close, HTTP request/response, tool-call request/result, iteration boundary, and policy denial. `V2SqliteSink` persists loop events lazily into `v2_audit_events` and writes payload blobs to `{audit_root}/blobs/`; runtime callers pass `.orbit/state/audit` as `audit_root`. [T20260506-2] removed the old zero-byte loop JSONL placeholders for runs that only emit v2 envelope events or CLI-backend blobs.
 
-Loop events reference hashes for request bodies, response bodies, tool inputs, and tool outputs instead of embedding the bodies inline. This keeps event lines queryable while preserving replay material in redacted blob storage.
+Loop events reference hashes for request bodies, response bodies, tool inputs, and tool outputs instead of embedding the bodies inline. This keeps event rows queryable while preserving replay material in redacted blob storage.
 
 ---
 
@@ -89,7 +89,7 @@ Loop events reference hashes for request bodies, response bodies, tool inputs, a
 
 `crates/orbit-common/src/utility/redaction.rs` centralizes sensitive live environment value scrubbing plus regex-based HTTP/argv patterns for authorization headers, API keys, bearer tokens, JSON API-key fields, and high-confidence provider token shapes. CLI audit errors, blob bytes, selected pipeline outputs/errors, artifact write tools, and the default tracing subscriber all redact before persistence or terminal/JSONL output. Artifact tool coverage and refuse-vs-mask rules live in [specs/artifact-redaction.md](./specs/artifact-redaction.md). The smoke example `crates/orbit-agent/examples/redaction_smoke.rs` verifies stored blob bytes omit the raw secret and contain a marker.
 
-Dashboard log previews added by [T20260508-14] are derived views over `.orbit/state/audit/v2_loop` and `.orbit/state/audit/blobs`; they do not duplicate full transcripts into SQLite. Preview responses are byte- and line-capped, apply defensive read-time redaction with the shared redactor, and preserve existing write-time redaction markers. The focused diagnostics error feed is also derived, combining global ERROR tracing rows with structured `ERROR <target>:` lines found in agent stderr blobs. No `.orbit/state/diagnostics/errors/` store exists in this design; retention remains bounded by the existing v2 audit, blob, and global log retention roots.
+Dashboard log previews added by [T20260508-14] are derived views over the `v2_audit_events` SQLite store and `.orbit/state/audit/blobs`; they do not duplicate full transcripts into a separate transcript store. Preview responses are byte- and line-capped, apply defensive read-time redaction with the shared redactor, and preserve existing write-time redaction markers. The focused diagnostics error feed is also derived, combining global ERROR tracing rows with structured `ERROR <target>:` lines found in agent stderr blobs. No `.orbit/state/diagnostics/errors/` store exists in this design; retention remains bounded by the existing v2 audit, blob, and global log retention roots.
 
 ---
 
@@ -124,7 +124,7 @@ After [ORB-10338] (see [ADR-0245]), `InvocationInsertParams.trace` carries an op
 
 After [ORB-10370], CLI response parsing also fills `InvocationTrace.provider_model` and `provider_cost_usd` directly from provider-owned result metadata. Claude exposes a `modelUsage` map and `total_cost_usd`; when Claude reports its internal helper model beside the requested model, Orbit selects the unique highest-cost map entry and preserves its key verbatim. Gemini exposes an exact model key under `stats.models` but no invocation USD total; Orbit accepts it only when the map has one entry. Codex JSONL and Grok's JSON wrapper do not currently report either value, so they remain `None`. At SQLite ingest, a non-empty provider model wins over the configured request/alias and the configured model remains the fallback. A disagreement emits a retained `WARN` event under `orbit.core.invocation` with job run, activity, CLI, requested model, and provider model fields. This structured mismatch event was chosen instead of a second invocation column: it makes provider routing drift detectable under the default logging filter without migrating or backfilling rows, while `invocations.model` remains the exact model used for pricing and aggregation.
 
-The local dashboard exposes two read-only API surfaces for these traces after [T20260508-14]: `GET /api/runs/:id/logs` returns bounded per-step CLI invocation previews, and `GET /api/diagnostics/errors` returns recent process ERROR rows plus structured agent-stderr error rows sorted newest first. Both endpoints use existing dashboard limit conventions and tolerate missing v2 audit files, malformed lines, and missing blobs by returning empty or partial arrays.
+The local dashboard exposes two read-only API surfaces for these traces after [T20260508-14]: `GET /api/runs/:id/logs` returns bounded per-step CLI invocation previews, and `GET /api/diagnostics/errors` returns recent process ERROR rows plus structured agent-stderr error rows sorted newest first. Both endpoints use existing dashboard limit conventions and tolerate missing stored event rows, malformed event JSON, and missing blobs by returning empty or partial arrays.
 
 After [T20260428-11], compact `summary.json` counts all audited tool-run attempts and failed attempts from command-audit rows where `command: tool`, `subcommand` is `"run"` or `"run-mcp"`, and `tool_name` is present. Token totals still come from invocation/token scoreboards, with legacy tool-call totals used only as a max overlay to avoid obvious double counting.
 
@@ -144,13 +144,13 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 
 ## 10. Concerns & Honest Limitations
 
-1. **Tamper evidence is promised more strongly than implemented.** SQLite rows and JSONL files do not yet have hash chains, signatures, or external transparency logs.
-2. **Audit is split across stores.** Command rows, v2 JSONL, loop JSONL, blobs, job-run state, and invocation metrics share ids but lack one joined operator command.
+1. **Tamper evidence is promised more strongly than implemented.** SQLite rows and JSONL tracing files do not yet have hash chains, signatures, or external transparency logs.
+2. **Audit is split across stores.** Command rows, v2/loop SQLite events, tracing JSONL, blobs, job-run state, and invocation metrics share ids but lack one joined operator command.
 3. **`orbit audit` does not audit itself.** That avoids recursion but leaves audit reads, exports, and prunes outside the normal guard.
 4. **Some command-audit fields are sparse.** `stdout_truncated`, `stderr_truncated`, and `session_id` often remain `None`.
 5. **CLI backend tool enforcement is weaker than HTTP.** Activity/job audit records the CLI backend allowlist as harness-delegated rather than enforcing Orbit-level tool denial semantics inside the provider path.
 6. **Redaction covers known secret shapes.** Environment-value and regex redaction reduce risk but cannot prove arbitrary user secrets are absent from every payload.
-7. **The global tracing feed is v1-simple.** It has no rotation and no cross-process line lock; readers should tolerate rare malformed lines if concurrent processes interleave large writes.
+7. **The global tracing feed is process-shared.** It is size-rotated and pruned on startup, but has no cross-process line lock; readers should tolerate rare malformed lines if concurrent processes interleave large writes.
 8. **Coverage is still expanding.** Some deterministic mutations write explicit audit rows; others rely on enclosing command/job context. The coverage matrix should become the review checklist for new mutation paths.
 
 ---

@@ -3,7 +3,8 @@ summary: "Agent Families — Decisions"
 type: design
 title: "Agent Families — Decisions"
 owner: grok
-last_updated: 2026-07-11
+last_updated: 2026-07-27
+last_validated: 2026-07-27
 status: Draft
 feature: agent-families
 doc_role: decisions
@@ -75,9 +76,9 @@ See full ADR-0151 for context, alternatives considered, and cost analysis.
 
 ## ADR-0167 — Favor claude (opus) for planner role on planning duels and design-shaped plans
 
-**Status:** Proposed · 2026-05-18 · cites [AO-002](../../agent-observations/AO-002/observation.md) · (acceptance pending a related task — see [CONVENTIONS.md §4](../CONVENTIONS.md#4-adr-template-strict))
+**Status:** Proposed · 2026-05-18 · cites AO-002 · (acceptance pending a related task — see [CONVENTIONS.md §4](../CONVENTIONS.md#4-adr-template-strict))
 
-**Context.** AO-002 ([Instruction surface shapes plan output, not tool selection](../../agent-observations/AO-002/observation.md)) closed on 2026-05-18 after four experiments spanning four Gemini-as-planner implementation/audit duels and one 4-model cross-read on an identical UX-design task. Three observations recurred across the thread:
+**Context.** AO-002 ("Instruction surface shapes plan output, not tool selection") closed on 2026-05-18 after four experiments spanning four Gemini-as-planner implementation/audit duels and one 4-model cross-read on an identical UX-design task. Three observations recurred across the thread:
 
 - Gemini ranked last on plan depth on every task shape tested (implementation, audit, refactor, UX-taste), losing every duel it played as planner. Arbiter rationales consistently cited graph-discovery gaps, hallucinated symbols, generic findings, and thin ADR content.
 - Claude won every duel it entered as planner in the window, including the UX-redesign duel (ORB-00154), where claude's metric-major layout call was the differentiating taste signal. Codex placed in the middle — thorough plans without bold design calls, ranked above grok and gemini but below claude on plan depth in the 4-way UX comparison.

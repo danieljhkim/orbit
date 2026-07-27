@@ -4,6 +4,7 @@ type: design
 title: "Agent Families — Vision"
 owner: human
 last_updated: 2026-07-11
+last_validated: 2026-07-27
 status: Draft
 feature: agent-families
 doc_role: vision

@@ -3,7 +3,8 @@ summary: "Agent Families — Design"
 type: design
 title: "Agent Families — Design"
 owner: human
-last_updated: 2026-07-18
+last_updated: 2026-07-27
+last_validated: 2026-07-27
 status: Draft
 feature: agent-families
 doc_role: design
@@ -16,7 +17,7 @@ This document describes the current implementation of Orbit agent families, crew
 
 ## 1. Family Registry
 
-The family registry lives in `crates/orbit-common/src/types/agent_pair.rs`. `all_agent_families()` returns the supported family identifiers, while `agent_from_model()` and `infer_agent_family_from_model()` map model prefixes to those families. Prefix inference remains intentionally conservative because older persisted artifacts may only contain a model string.
+The family registry spans `crates/orbit-common/src/types/actor.rs` and `crates/orbit-common/src/types/agent_pair.rs`. `all_agent_families()` returns the supported family identifiers; `agent_from_model()` and `provider_from_model()` infer family and provider from model strings in `actor.rs`; and `infer_agent_family_from_model()` in `agent_pair.rs` remains the conservative recovery helper for older persisted artifacts.
 
 Adding a family is still a cross-cutting change: executor assets, sandbox behavior, provider inference, review automation, and scoreboard code all need review. The fixed registry forces that audit instead of silently accepting unknown families.
 
@@ -55,8 +56,7 @@ Duel-plan has an explicit `[duel]` section in `.orbit/config.toml`. `candidates`
 The duel model precedence is:
 
 1. `[duel.models.<family>]`
-2. `.orbit/executors/<family>.yaml::model_pair_override`
-3. `resolve_agent_model_pair()` builtin defaults
+2. `.orbit/executors/<family>.yaml::model_pair_override`, resolved through the executor-backed `resolved_agent_model_pair()` host method
 
 This precedence is scoped to duel role selection through `DeterministicActionHost::duel_orchestrator_model`; non-duel model identity, envelope rendering, review sync, and task-review scoring continue to start at executor overrides and builtin defaults.
 
