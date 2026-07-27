@@ -1779,6 +1779,122 @@ fn primary_dirt_intersecting_the_run_defeats_a_fast_forward() {
 }
 
 #[test]
+fn stationary_primary_record_store_dirt_disjoint_from_the_run_is_accepted() {
+    let fixture = linked_worktree_fixture();
+    let tracked_record = ".orbit/learnings/L-0001/learning.yaml";
+    write_primary_file(&fixture, tracked_record, "id: L-0001\n");
+    git_ok(&fixture.primary, &["add", "--", tracked_record]);
+    git_ok(&fixture.primary, &["commit", "-m", "track a learning"]);
+
+    let guard = boundary_guard(&fixture, "ORB-STATIONARY-DIRT", "run-stationary-dirt");
+
+    fs::write(fixture.assigned.join("candidate.txt"), "candidate\n").expect("write run candidate");
+    // The F2026-07-166 shape: an out-of-run curation pass re-serializes an
+    // already-tracked record and drops an untracked sibling, all disjoint from
+    // the run, while the primary HEAD and branch never move.
+    let head_before = git_bytes(&fixture.primary, &["rev-parse", "HEAD"]);
+    write_primary_file(&fixture, tracked_record, "id: L-0001\ntags: []\n");
+    let untracked_record = write_primary_file(
+        &fixture,
+        ".orbit/frictions/F-0002/friction.yaml",
+        "id: F-0002\n",
+    );
+
+    let (result, events) = capture_events(|| guard.verify());
+    result.expect("stationary record-store dirt disjoint from the run must not raise drift");
+
+    assert_eq!(
+        git_bytes(&fixture.primary, &["rev-parse", "HEAD"]),
+        head_before,
+        "the accepted case is defined by an unmoved primary HEAD"
+    );
+    assert!(
+        events.iter().any(|event| event
+            .field("ignored_primary_paths")
+            .is_some_and(|paths| paths.contains(tracked_record)
+                && paths.contains(".orbit/frictions/F-0002/friction.yaml"))),
+        "the accepted stationary delta must report both ignored primary paths: {events:?}"
+    );
+    assert!(
+        untracked_record.exists(),
+        "the guard must not clean the primary dirt it ignored"
+    );
+}
+
+#[test]
+fn stationary_primary_source_edit_stays_fail_closed_even_when_disjoint() {
+    let fixture = linked_worktree_fixture();
+    let guard = boundary_guard(&fixture, "ORB-STATIONARY-SOURCE", "run-stationary-source");
+
+    fs::write(fixture.assigned.join("candidate.txt"), "candidate\n").expect("write run candidate");
+    // Disjoint from the run, but outside Orbit's record store: this is the
+    // ORB-10134 escape shape, and no path-disjointness argument may excuse it.
+    write_primary_file(
+        &fixture,
+        ".orbit/learnings/L-0003/learning.yaml",
+        "id: L-0003\n",
+    );
+    write_primary_file(&fixture, "src/escaped.rs", "fn escaped() {}\n");
+
+    let error = guard
+        .verify()
+        .expect_err("a primary source edit must remain fail closed");
+
+    assert_worktree_integrity_error(
+        &error,
+        "primary_checkout_drift",
+        ("ORB-STATIONARY-SOURCE", "run-stationary-source", "codex"),
+        &fixture,
+        "src/escaped.rs",
+    );
+    assert_eq!(
+        worktree_integrity_diagnostic(&error)["conflicting_paths"],
+        serde_json::json!([]),
+        "the source edit is fatal on its path class, not on run interference"
+    );
+}
+
+#[test]
+fn stationary_primary_dirt_intersecting_the_run_remains_a_typed_drift_failure() {
+    // Both paths are inside the record store, so only the intersection with
+    // `run_changed_paths` can be what keeps them fail-closed.
+    for (kind, shared) in [
+        ("untracked", ".orbit/frictions/F-0009/friction.yaml"),
+        ("tracked", ".orbit/routines/worktree_gc.yaml"),
+    ] {
+        let fixture = linked_worktree_fixture();
+        if kind == "tracked" {
+            write_primary_file(&fixture, shared, "schemaVersion: 1\n");
+            git_ok(&fixture.primary, &["add", "--", shared]);
+            git_ok(&fixture.primary, &["commit", "-m", "track a routine"]);
+        }
+        let run_id = format!("run-stationary-{kind}-interference");
+        let task_id = format!("ORB-STATIONARY-{}", kind.to_ascii_uppercase());
+        let guard = boundary_guard(&fixture, &task_id, &run_id);
+
+        write_worktree_file(&fixture.assigned, shared, "run candidate\n");
+        write_primary_file(&fixture, shared, "primary escape\n");
+
+        let error = guard
+            .verify()
+            .expect_err("primary dirt on a path the run touched must fail closed");
+
+        assert_worktree_integrity_error(
+            &error,
+            "primary_checkout_drift",
+            (&task_id, &run_id, "codex"),
+            &fixture,
+            shared,
+        );
+        assert_eq!(
+            worktree_integrity_diagnostic(&error)["conflicting_paths"],
+            serde_json::json!([shared]),
+            "stationary {kind} interference must be named as a conflicting path"
+        );
+    }
+}
+
+#[test]
 fn primary_branch_switch_remains_a_typed_drift_failure() {
     let fixture = linked_worktree_fixture();
     let guard = boundary_guard(&fixture, "ORB-PRIMARY-BRANCH", "run-primary-branch");
@@ -1918,6 +2034,19 @@ fn advance_primary(fixture: &LinkedWorktreeFixture, path: &str) {
     fs::write(fixture.primary.join(path), "merged\n").expect("write merged PR file");
     git_ok(&fixture.primary, &["add", "--", path]);
     git_ok(&fixture.primary, &["commit", "-m", "merge sibling PR"]);
+}
+
+/// Write a (possibly nested) path inside the registered primary checkout.
+fn write_primary_file(fixture: &LinkedWorktreeFixture, path: &str, contents: &str) -> PathBuf {
+    write_worktree_file(&fixture.primary, path, contents)
+}
+
+fn write_worktree_file(root: &Path, path: &str, contents: &str) -> PathBuf {
+    let target = root.join(path);
+    fs::create_dir_all(target.parent().expect("nested path has a parent"))
+        .expect("create parent dirs");
+    fs::write(&target, contents).expect("write checkout file");
+    target
 }
 
 fn git_ok(repo: &Path, args: &[&str]) {
