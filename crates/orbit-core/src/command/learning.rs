@@ -89,6 +89,12 @@ impl OrbitRuntime {
             id: old_id,
             with: new_id,
         })?;
+        // Keep lifecycle writes consistent with `learning show`: an allocated
+        // record whose body belongs to an unreadable sibling worktree is a
+        // remote stub, not an unallocated id. Perform this after the role gate
+        // so executor callers still cannot probe learning existence.
+        self.get_learning(old_id)?;
+        self.get_learning(new_id)?;
         self.supersede_learning(old_id, new_id)
     }
 
