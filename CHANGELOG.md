@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.0
 
 - **Telemetry no longer discards completed runs**: the `invocations` insert-bound columns (`cache_create_1h_tokens`, `provider_cost_usd`) reach existing databases through a new `invocation_telemetry_columns` migration (schema v10) instead of only the v1 baseline, and a failed invocation-trace write is now logged and recorded as a `telemetry.persist_failed` event on the run rather than failing the job. ([ORB-10367])
 - **PR review status clearing is documented**: `orbit.task.update` now describes its empty-string clear convention, with tool-host coverage for the persisted null result. ([ORB-10229])
