@@ -169,7 +169,7 @@ fn sync_staged_bundle_dirs(staging_dir: &Path) -> Result<(), OrbitError> {
     let artifact_files_dir = artifact_dir.join(TASK_ARTIFACT_FILES_DIR_NAME);
     sync_parent_dir(&artifact_files_dir).map_err(OrbitError::from)?;
     sync_parent_dir(&artifact_dir).map_err(OrbitError::from)?;
-    sync_parent_dir(&staging_dir).map_err(OrbitError::from)
+    sync_parent_dir(staging_dir).map_err(OrbitError::from)
 }
 
 fn publish_staged_bundle(staging_dir: &Path, bundle_dir: &Path) -> std::io::Result<()> {

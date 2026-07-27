@@ -1,6 +1,6 @@
 ---
 name: orbit
-description: Entry point for Orbit. Once a workspace is initialized (`.orbit/` present), routes to workflow siblings (`orbit-task`, `orbit-workflow`, `orbit-search`, `orbit-knowledge`) and covers tool invocation surfaces and task lifecycle. When `.orbit/` is absent, or for first-time setup/install ("set up orbit", "install orbit", "wire orbit into this repo", "I'm new to orbit") or feature-tour requests ("what is orbit", "give me a tour"), see references/guide.md.
+description: Entry point for Orbit. Once a workspace is initialized (`.orbit/` present), routes to workflow siblings (`orbit-task`, `orbit-task-pilot`, `orbit-workflow`, `orbit-search`, `orbit-knowledge`) and covers tool invocation surfaces and task lifecycle. When `.orbit/` is absent, or for first-time setup/install ("set up orbit", "install orbit", "wire orbit into this repo", "I'm new to orbit") or feature-tour requests ("what is orbit", "give me a tour"), see references/guide.md.
 ---
 
 # Orbit
@@ -83,6 +83,7 @@ Use `blocked` when execution cannot safely continue. Command surface determines 
 ## Skill Selection
 
 - `orbit-task`: Create, execute, and review tasks through the full lifecycle; also files self-reported tooling/skill-guidance friction.
+- `orbit-task-pilot`: Read-only preflight for a bounded partition of existing tasks — proposes canonical `context_files`, crew/complexity, blockers, and duplicate evidence without mutating or dispatching anything.
 - `orbit-workflow`: Jobs, activities, routines, `orbit sweep`, and `orbit run`; diagnosing failed/stuck/cancelled job runs.
 - `orbit-search`: Find tasks, docs, learnings, and ADRs by topic; docs-corpus admin (list/show/add root/index/migrate).
 - `orbit-knowledge`: Author, update, and supersede learnings and ADRs.

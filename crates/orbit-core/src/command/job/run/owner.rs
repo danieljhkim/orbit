@@ -219,7 +219,7 @@ pub(super) fn verify_owner_termination(
     }
     Err(OrbitError::RunCancellationIncomplete {
         pid,
-        pgid: pgid.map(|group| group as i32),
+        pgid,
         term_sent,
         kill_sent,
         leader_alive,
