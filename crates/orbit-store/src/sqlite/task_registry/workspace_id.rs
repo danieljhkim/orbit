@@ -3,9 +3,17 @@ use std::path::Path;
 use orbit_common::types::OrbitError;
 use rusqlite::Connection;
 
-use super::queries::workspace_by_id;
+use super::queries::{workspace_by_id, workspace_checkout_by_id};
 use super::util::normalize_path;
 
+/// Allocate an unused logical workspace id for `slug` + `path`.
+///
+/// A candidate counts as taken when *either* registry table already claims it:
+/// the logical `workspace_bindings` row or the machine-local
+/// `workspace_checkout_bindings` row. Checking only the logical table let the
+/// allocator hand back an id whose checkout row already existed, which then
+/// failed the caller's checkout-collision check instead of retrying with the
+/// next attempt (ORB-10507).
 pub(super) fn next_workspace_id_candidate(
     conn: &Connection,
     slug: &str,
@@ -13,7 +21,9 @@ pub(super) fn next_workspace_id_candidate(
 ) -> Result<String, OrbitError> {
     for attempt in 0..1000 {
         let candidate = workspace_id_candidate(slug, path, attempt);
-        if workspace_by_id(conn, &candidate)?.is_none() {
+        if workspace_by_id(conn, &candidate)?.is_none()
+            && workspace_checkout_by_id(conn, &candidate)?.is_none()
+        {
             return Ok(candidate);
         }
     }

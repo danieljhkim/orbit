@@ -14,7 +14,7 @@ use super::projection::create_projection_symlink;
 use super::queries::{
     decode_task_bundle_binding, decode_workspace_checkout_binding, task_bundle_by_id,
     task_ids_for_workspace, workspace_by_id, workspace_by_orbit_dir, workspace_checkout_by_id,
-    write_task_index_rows,
+    workspace_checkout_by_paths, write_task_index_rows,
 };
 use super::schema::{
     apply_schema, assert_registry_user_version, reject_unsupported_registry_schema,
@@ -106,16 +106,46 @@ impl TaskRegistryStore {
 
         let workspace_id = match requested_workspace_id {
             Some(id) => id,
-            None => next_workspace_id_candidate(&tx, &slug, &workspace_path)?,
+            // A checkout is identified by its repo root and workspace path, not
+            // by the orbit dir the caller happens to be running with. Reusing
+            // the id already bound to those paths keeps a repeat bind from
+            // minting a second logical workspace for the same checkout.
+            None => match workspace_checkout_by_paths(&tx, &repo_root, &workspace_path)? {
+                Some(existing) => existing.workspace_id,
+                None => next_workspace_id_candidate(&tx, &slug, &workspace_path)?,
+            },
         };
+        let now = now_string();
         if let Some(existing) = workspace_checkout_by_id(&tx, &workspace_id)? {
-            return Err(OrbitError::Store(format!(
-                "workspace id '{workspace_id}' already has a local checkout at '{}'",
-                existing.orbit_dir.display()
-            )));
+            // The logical workspace already has a checkout, and it is bound to
+            // a different orbit dir (a matching one returned above). When the
+            // checkout paths are unchanged this is the same checkout whose
+            // orbit dir moved — the shape short-lived CLI invocations produce
+            // when they generate an ephemeral orbit dir per call — so move the
+            // binding instead of failing (ORB-10507). A checkout at genuinely
+            // different paths still conflicts: a real id clash, not a rebind.
+            if normalize_path(&existing.repo_root) != repo_root
+                || normalize_path(&existing.workspace_path) != workspace_path
+            {
+                return Err(OrbitError::Store(format!(
+                    "workspace id '{workspace_id}' already has a local checkout at '{}'",
+                    existing.orbit_dir.display()
+                )));
+            }
+            tx.execute(
+                "UPDATE workspace_checkout_bindings
+                 SET orbit_dir = ?2, updated_at = ?3
+                 WHERE workspace_id = ?1",
+                params![workspace_id, path_to_string(&orbit_dir), now],
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+            let binding = workspace_checkout_by_id(&tx, &workspace_id)?.ok_or_else(|| {
+                OrbitError::Store("failed to read rebound workspace checkout binding".into())
+            })?;
+            tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
+            return Ok(binding);
         }
 
-        let now = now_string();
         if workspace_by_id(&tx, &workspace_id)?.is_none() {
             tx.execute(
                 "INSERT INTO workspace_bindings (

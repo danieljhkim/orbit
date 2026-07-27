@@ -810,6 +810,97 @@ fn bind_workspace_is_idempotent_for_orbit_dir() {
 }
 
 #[test]
+fn bind_workspace_rebinds_same_checkout_under_a_new_orbit_dir() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    let first = bind(&store, temp.path());
+
+    // A later process for the same logical checkout brings its own ephemeral
+    // orbit dir (ORB-10507). The bind must move the existing checkout binding
+    // instead of failing with "already has a local checkout".
+    let ephemeral_orbit_dir = temp.path().join(".orbit-ephemeral");
+    fs::create_dir_all(&ephemeral_orbit_dir).expect("create ephemeral orbit dir");
+    let second = store
+        .bind_workspace(BindWorkspaceParams {
+            workspace_id: Some(first.workspace_id.clone()),
+            slug: "Orbit Test".into(),
+            repo_root: temp.path().to_path_buf(),
+            workspace_path: temp.path().to_path_buf(),
+            orbit_dir: ephemeral_orbit_dir.clone(),
+            repo_fingerprint: None,
+        })
+        .expect("rebind under a new orbit dir");
+
+    assert_eq!(second.workspace_id, first.workspace_id);
+    assert_eq!(second.orbit_dir, normalize_path(&ephemeral_orbit_dir));
+    assert_eq!(
+        store
+            .find_workspace_checkout(&first.workspace_id)
+            .expect("find checkout")
+            .expect("checkout exists")
+            .orbit_dir,
+        normalize_path(&ephemeral_orbit_dir),
+        "the moved binding is the workspace's only checkout row"
+    );
+}
+
+#[test]
+fn bind_workspace_reuses_derived_id_for_same_paths_under_a_new_orbit_dir() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    let repo_root = temp.path().join("repo");
+    let first_orbit_dir = repo_root.join(".orbit");
+    fs::create_dir_all(&first_orbit_dir).expect("create orbit dir");
+    let derive = |orbit_dir: PathBuf| BindWorkspaceParams {
+        workspace_id: None,
+        slug: "Orbit Test".into(),
+        repo_root: repo_root.clone(),
+        workspace_path: repo_root.clone(),
+        orbit_dir,
+        repo_fingerprint: None,
+    };
+
+    let first = store
+        .bind_workspace(derive(first_orbit_dir))
+        .expect("derive first binding");
+    let ephemeral_orbit_dir = repo_root.join(".orbit-ephemeral");
+    fs::create_dir_all(&ephemeral_orbit_dir).expect("create ephemeral orbit dir");
+    let second = store
+        .bind_workspace(derive(ephemeral_orbit_dir.clone()))
+        .expect("derive second binding");
+
+    assert_eq!(
+        second.workspace_id, first.workspace_id,
+        "the same checkout paths resolve back to one logical workspace"
+    );
+    assert_eq!(second.orbit_dir, normalize_path(&ephemeral_orbit_dir));
+}
+
+#[test]
+fn bind_workspace_rejects_reusing_an_id_for_a_different_checkout() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    let first = bind(&store, temp.path());
+
+    let other_root = temp.path().join("other-repo");
+    let other_orbit_dir = other_root.join(".orbit");
+    fs::create_dir_all(&other_orbit_dir).expect("create other orbit dir");
+    let result = store.bind_workspace(BindWorkspaceParams {
+        workspace_id: Some(first.workspace_id.clone()),
+        slug: "Orbit Test".into(),
+        repo_root: other_root.clone(),
+        workspace_path: other_root,
+        orbit_dir: other_orbit_dir,
+        repo_fingerprint: None,
+    });
+
+    assert!(matches!(
+        result,
+        Err(OrbitError::Store(message)) if message.contains("already has a local checkout")
+    ));
+}
+
+#[test]
 fn bind_workspace_rejects_explicit_workspace_id_conflict() {
     let temp = TempDir::new().expect("tempdir");
     let store = store(&temp);
