@@ -3,8 +3,8 @@
 //! Complements the narrower `orbit skill doctor` / `orbit tool doctor`
 //! surfaces with whole-workspace checks: config validity, store database
 //! integrity and schema-ledger version, free disk space on the volume
-//! holding `.orbit`, semantic/graph index staleness, leftover lock files
-//! from crashed holders, orphaned `running`/`pending` job runs, and task
+//! holding `.orbit`, semantic-index staleness, leftover lock files from
+//! crashed holders, orphaned `running`/`pending` job runs, and task
 //! relation/dependency targets that no longer resolve in the registry
 //! (grandfathered relations that block index rebuilds — ORB-10305).
 //!
@@ -12,8 +12,8 @@
 //! fresh workspace report [`WorkspaceDoctorStatus::Skipped`], and probe
 //! failures become `Warning`/`Error` rows instead of aborting the whole
 //! diagnosis. The cheap probes shared with the dashboard's
-//! `/healthz?detailed=true` ([`DoctorCommands::health_check_store_writable`],
-//! [`DoctorCommands::health_check_graph_index`]) also live here.
+//! `/healthz?detailed=true` ([`DoctorCommands::health_check_store_writable`])
+//! also live here.
 
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
@@ -79,17 +79,13 @@ pub trait DoctorCommands {
     /// is currently held by another process.
     fn remove_stale_lock_files(&self) -> Result<usize, OrbitError>;
 
+    /// Remove retired graph state from the exact worktree-local and shared
+    /// workspace locations. Missing locations are a successful no-op.
+    fn remove_retired_graph_state(&self) -> Result<usize, OrbitError>;
+
     /// Cheap store write probe for health endpoints: open the store and
     /// acquire + roll back the write lock without mutating anything.
     fn health_check_store_writable(&self) -> Result<String, OrbitError>;
-
-    /// Cheap read probe of the newest code-graph database, if one exists.
-    /// Returns `None` when no graph index has been built (fresh workspace),
-    /// so callers can skip rather than fail.
-    ///
-    /// Deliberately opens the SQLite file directly instead of adding an
-    /// orbit-cmd → orbit-graph dependency edge (see `ARCHITECTURE.md`).
-    fn health_check_graph_index(&self) -> Option<Result<String, OrbitError>>;
 }
 
 impl DoctorCommands for OrbitRuntime {
@@ -99,7 +95,6 @@ impl DoctorCommands for OrbitRuntime {
             doctor_check_database(self),
             doctor_check_disk_space(self),
             doctor_check_semantic_index(self),
-            doctor_check_graph_index(self),
             doctor_check_stale_locks(self),
             doctor_check_job_runs(self),
             doctor_check_task_relations(self),
@@ -116,16 +111,24 @@ impl DoctorCommands for OrbitRuntime {
         Ok(removed)
     }
 
+    fn remove_retired_graph_state(&self) -> Result<usize, OrbitError> {
+        let targets = [
+            (self.local_root(), Path::new("graph")),
+            (self.shared_root(), Path::new("knowledge/graph")),
+        ];
+        let mut removed = 0;
+        for (root, relative) in targets {
+            if remove_workspace_subtree(&root, relative)? {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
     fn health_check_store_writable(&self) -> Result<String, OrbitError> {
         let store = self.sqlite_store()?;
         store.check_writable()?;
         Ok("store database accepts writes".to_string())
-    }
-
-    fn health_check_graph_index(&self) -> Option<Result<String, OrbitError>> {
-        let graph_dir = self.local_root().join("graph");
-        let newest = newest_graph_db(&graph_dir)?;
-        Some(read_graph_db(&newest))
     }
 }
 
@@ -239,28 +242,6 @@ fn doctor_check_semantic_index(runtime: &OrbitRuntime) -> WorkspaceDoctorResult 
     }
 }
 
-/// Code-graph index presence + readability (skip when never built).
-fn doctor_check_graph_index(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
-    match runtime.health_check_graph_index() {
-        None => check(
-            "graph-index",
-            WorkspaceDoctorStatus::Skipped,
-            "no graph index built (the code-graph CLI surface was removed in ORB-10357; \
-             this check is a legacy vestige with no build command)"
-                .to_string(),
-        ),
-        Some(Ok(detail)) => check("graph-index", WorkspaceDoctorStatus::Ok, detail),
-        Some(Err(error)) => check(
-            "graph-index",
-            WorkspaceDoctorStatus::Warning,
-            format!(
-                "graph index unreadable ({error}); no rebuild command exists \
-                 (the code-graph CLI surface was removed in ORB-10357)"
-            ),
-        ),
-    }
-}
-
 /// Lock files whose recorded holder PID is dead. Advisory `flock`s are
 /// released by the OS on process death, so these are leftover metadata
 /// from crashed holders — a crash signal, not an availability problem.
@@ -348,6 +329,53 @@ fn remove_stale_lock_file(path: &Path) -> Result<bool, OrbitError> {
         ))
     })?;
     Ok(true)
+}
+
+/// Remove one fixed workspace-relative subtree without following a symlink at
+/// the subtree boundary. The relative path is validated even though current
+/// callers pass constants, keeping future cleanup additions inside the
+/// resolved Orbit root by construction.
+fn remove_workspace_subtree(root: &Path, relative: &Path) -> Result<bool, OrbitError> {
+    if relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(OrbitError::InvalidInput(format!(
+            "cleanup path '{}' must remain relative to Orbit root '{}'",
+            relative.display(),
+            root.display()
+        )));
+    }
+    let target = root.join(relative);
+    let metadata = match std::fs::symlink_metadata(&target) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(OrbitError::Io(format!(
+                "inspect retired graph state {}: {error}",
+                target.display()
+            )));
+        }
+    };
+    let result = if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        std::fs::remove_file(&target)
+    } else {
+        std::fs::remove_dir_all(&target)
+    };
+    match result {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(OrbitError::Io(format!(
+            "remove retired graph state {}: {error}",
+            target.display()
+        ))),
+    }
 }
 
 /// `running`/`pending` job runs with no live worker process — dead recorded
@@ -547,43 +575,6 @@ pub(crate) fn process_is_alive(_pid: u32) -> bool {
     true
 }
 
-/// Newest `*.db` file in the graph directory, by modification time.
-fn newest_graph_db(graph_dir: &Path) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(graph_dir).ok()?;
-    entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "db") && path.is_file())
-        .max_by_key(|path| {
-            std::fs::metadata(path)
-                .and_then(|meta| meta.modified())
-                .ok()
-        })
-}
-
-/// Open a graph database read-only and prove it answers a trivial query.
-fn read_graph_db(path: &Path) -> Result<String, OrbitError> {
-    let conn =
-        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|error| OrbitError::Store(format!("open {}: {error}", path.display())))?;
-    let objects: i64 = conn
-        .query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get(0))
-        .map_err(|error| OrbitError::Store(format!("read {}: {error}", path.display())))?;
-    let age_suffix = std::fs::metadata(path)
-        .and_then(|meta| meta.modified())
-        .ok()
-        .and_then(|modified| modified.elapsed().ok())
-        .map(|age| format!(", last synced {}", human_age(age)))
-        .unwrap_or_default();
-    let name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string());
-    Ok(format!(
-        "{name} readable ({objects} schema objects{age_suffix})"
-    ))
-}
-
 fn human_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -596,18 +587,5 @@ fn human_bytes(bytes: u64) -> String {
         format!("{bytes} B")
     } else {
         format!("{value:.1} {}", UNITS[unit])
-    }
-}
-
-fn human_age(age: std::time::Duration) -> String {
-    let secs = age.as_secs();
-    if secs < 60 {
-        format!("{secs}s ago")
-    } else if secs < 3600 {
-        format!("{}m ago", secs / 60)
-    } else if secs < 86_400 {
-        format!("{}h ago", secs / 3600)
-    } else {
-        format!("{}d ago", secs / 86_400)
     }
 }

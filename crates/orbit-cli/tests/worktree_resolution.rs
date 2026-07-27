@@ -82,6 +82,72 @@ fn config_show_reports_shared_and_local_roots_for_git_worktrees_and_overrides() 
 }
 
 #[test]
+fn doctor_graph_cleanup_uses_split_roots_and_keeps_json_stdout_clean() {
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let main_repo = temp.path().join("repo");
+    let linked_worktree = temp.path().join("repo-doctor");
+    fs::create_dir_all(&home).expect("create home");
+    fs::create_dir_all(&main_repo).expect("create main repo");
+
+    init_git_repo(&main_repo);
+    run_git(
+        &main_repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "orbit-worktree-doctor",
+            linked_worktree.to_str().expect("utf8 worktree path"),
+        ],
+    );
+    run_orbit_success(&main_repo, &home, &["workspace", "init"], None);
+
+    let local_marker = linked_worktree.join(".orbit/graph/local.db");
+    let shared_marker = main_repo.join(".orbit/knowledge/graph/shared.db");
+    for marker in [&local_marker, &shared_marker] {
+        fs::create_dir_all(marker.parent().expect("graph parent")).expect("create graph parent");
+        fs::write(marker, b"retired").expect("write graph marker");
+    }
+
+    let ordinary = run_orbit_json(&linked_worktree, &home, &["doctor", "--json"], None);
+    assert!(local_marker.exists());
+    assert!(shared_marker.exists());
+    assert!(
+        ordinary
+            .as_array()
+            .expect("doctor rows")
+            .iter()
+            .all(|row| row["check"] != "graph-index")
+    );
+
+    let cleaned = run_orbit_json(
+        &linked_worktree,
+        &home,
+        &["doctor", "--remove-graph", "--json"],
+        None,
+    );
+    assert!(!local_marker.exists());
+    assert!(!shared_marker.exists());
+    assert!(
+        cleaned
+            .as_array()
+            .expect("doctor rows")
+            .iter()
+            .all(|row| row["check"] != "graph-index")
+    );
+
+    // Parsing succeeds again with no cleanup prose mixed into stdout, and
+    // absence remains a successful no-op.
+    run_orbit_json(
+        &linked_worktree,
+        &home,
+        &["doctor", "--remove-graph", "--json"],
+        None,
+    );
+}
+
+#[test]
 fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
     let temp = tempdir().expect("tempdir");
     let home = temp.path().join("home");

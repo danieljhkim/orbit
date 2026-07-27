@@ -338,7 +338,13 @@ pub fn exists_in_workspace(selector: &str, workspace: &Path) -> bool {
     let Ok(anchor) = anchor_path(selector) else {
         return false;
     };
-    resolve_workspace_path(workspace, anchor.as_path()).exists()
+    let Ok(workspace) = workspace.canonicalize() else {
+        return false;
+    };
+    let Ok(resolved) = resolve_workspace_path(&workspace, anchor.as_path()).canonicalize() else {
+        return false;
+    };
+    resolved.starts_with(workspace)
 }
 
 /// Return whether two selector/path scopes overlap on the same filesystem
@@ -478,15 +484,55 @@ fn normalize_workspace_anchor(path: &str, workspace: &Path) -> Result<String, Se
         input: path.to_string(),
         reason,
     })?;
-    let resolved = PathBuf::from(&normalized);
-    if resolved.is_absolute() {
-        let stripped = resolved
-            .strip_prefix(workspace)
-            .ok()
-            .map(|path| path.to_string_lossy().replace('\\', "/"));
-        return Ok(stripped.unwrap_or(normalized));
+    let workspace = workspace
+        .canonicalize()
+        .map_err(|error| SelectorParseError {
+            input: path.to_string(),
+            reason: format!(
+                "workspace root `{}` cannot be canonicalized: {error}",
+                workspace.display()
+            ),
+        })?;
+    let anchor = PathBuf::from(&normalized);
+    if anchor
+        .components()
+        .any(|component| component == std::path::Component::ParentDir)
+    {
+        return Err(SelectorParseError {
+            input: path.to_string(),
+            reason: format!(
+                "selector anchor `{normalized}` must remain inside workspace `{}`",
+                workspace.display()
+            ),
+        });
     }
-    Ok(normalized)
+    let resolved = if anchor.is_absolute() {
+        anchor
+    } else {
+        workspace.join(&anchor)
+    };
+    let contained = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
+    if !contained.starts_with(&workspace) {
+        return Err(SelectorParseError {
+            input: path.to_string(),
+            reason: format!(
+                "selector anchor `{}` must remain inside workspace `{}`",
+                resolved.display(),
+                workspace.display()
+            ),
+        });
+    }
+    resolved
+        .strip_prefix(&workspace)
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .map_err(|_| SelectorParseError {
+            input: path.to_string(),
+            reason: format!(
+                "selector anchor `{}` must remain inside workspace `{}`",
+                resolved.display(),
+                workspace.display()
+            ),
+        })
 }
 
 fn normalize_path_text(raw: &str) -> Result<String, String> {

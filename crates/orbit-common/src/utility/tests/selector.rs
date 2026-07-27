@@ -172,6 +172,49 @@ mod parse {
     }
 
     #[test]
+    fn canonical_selector_in_workspace_rejects_anchors_outside_the_workspace() {
+        let workspace = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let outside_file = outside.path().join("outside.rs");
+        std::fs::write(&outside_file, "fn outside() {}\n").unwrap();
+
+        assert!(
+            canonical_selector_in_workspace(
+                &format!("symbol:{}#run:function", outside_file.display()),
+                workspace.path()
+            )
+            .is_err()
+        );
+        assert!(
+            canonical_selector_in_workspace("symbol:../outside.rs#run:function", workspace.path())
+                .is_err()
+        );
+        assert!(!exists_in_workspace(
+            &format!("symbol:{}#run:function", outside_file.display()),
+            workspace.path()
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_containment_follows_anchor_symlinks() {
+        let workspace = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let outside_file = outside.path().join("outside.rs");
+        std::fs::write(&outside_file, "fn outside() {}\n").unwrap();
+        std::os::unix::fs::symlink(&outside_file, workspace.path().join("linked.rs")).unwrap();
+
+        assert!(
+            canonical_selector_in_workspace("symbol:linked.rs#run:function", workspace.path())
+                .is_err()
+        );
+        assert!(!exists_in_workspace(
+            "symbol:linked.rs#run:function",
+            workspace.path()
+        ));
+    }
+
+    #[test]
     fn symbol_selector_preserves_opaque_qualified_name() {
         let selector: Selector = "symbol:src/lib.rs#<Foo as Runnable>::run#2:method"
             .parse()

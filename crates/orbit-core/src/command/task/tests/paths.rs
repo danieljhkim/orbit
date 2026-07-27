@@ -5,7 +5,10 @@
 use orbit_common::types::OrbitError;
 use tempfile::tempdir;
 
-use crate::command::task::paths::normalize_workspace_path;
+use crate::command::task::paths::{
+    canonicalize_context_files_for_read, normalize_context_files_for_write,
+    normalize_workspace_path, task_path_exists,
+};
 
 fn expect_invalid_input(result: Result<Option<String>, OrbitError>) -> String {
     match result {
@@ -126,4 +129,41 @@ fn path_to_a_file_is_rejected_as_not_a_directory() {
         message.contains("directory"),
         "error must state a directory is required: {message}"
     );
+}
+
+#[test]
+fn symbol_context_validation_uses_only_the_workspace_file_anchor() {
+    let workspace = tempdir().expect("create workspace");
+    std::fs::create_dir_all(workspace.path().join("src")).expect("create src");
+    std::fs::write(workspace.path().join("src/lib.rs"), b"pub fn run() {}\n")
+        .expect("write anchor");
+    let selector = "symbol:src/lib.rs#not::a::real::symbol:invented-kind";
+
+    let normalized =
+        normalize_context_files_for_write(vec![selector.to_string()], workspace.path())
+            .expect("opaque symbol metadata must not be resolved");
+
+    assert_eq!(normalized, vec![selector]);
+    assert!(task_path_exists(workspace.path(), selector));
+    assert_eq!(
+        canonicalize_context_files_for_read(&normalized, workspace.path()),
+        normalized
+    );
+}
+
+#[test]
+fn symbol_context_validation_rejects_missing_and_outside_anchors() {
+    let workspace = tempdir().expect("create workspace");
+    let outside = tempdir().expect("create outside root");
+    let outside_file = outside.path().join("outside.rs");
+    std::fs::write(&outside_file, b"fn outside() {}\n").expect("write outside anchor");
+
+    assert!(!task_path_exists(
+        workspace.path(),
+        "symbol:src/missing.rs#run:function"
+    ));
+    assert!(!task_path_exists(
+        workspace.path(),
+        &format!("symbol:{}#run:function", outside_file.display())
+    ));
 }

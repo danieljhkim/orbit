@@ -16,6 +16,10 @@ pub struct DoctorCommand {
     /// Remove lock files whose recorded holder process is dead before diagnosing the workspace.
     #[arg(long)]
     pub fix_stale_locks: bool,
+
+    /// Remove retired graph state from this worktree and the shared workspace.
+    #[arg(long)]
+    pub remove_graph: bool,
 }
 
 impl Execute for DoctorCommand {
@@ -24,6 +28,12 @@ impl Execute for DoctorCommand {
             let removed = runtime.remove_stale_lock_files()?;
             if !self.json {
                 println!("Removed {removed} stale lock file(s).");
+            }
+        }
+        if self.remove_graph {
+            let removed = runtime.remove_retired_graph_state()?;
+            if !self.json {
+                println!("Removed {removed} retired graph location(s).");
             }
         }
         let results = runtime.doctor_workspace()?;

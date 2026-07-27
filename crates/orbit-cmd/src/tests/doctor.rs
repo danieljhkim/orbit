@@ -29,12 +29,23 @@ fn workspace_runtime(temp: &tempfile::TempDir) -> OrbitRuntime {
     OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime")
 }
 
+fn split_root_runtime(temp: &tempfile::TempDir) -> OrbitRuntime {
+    let global_root = temp.path().join("global");
+    let shared_root = temp.path().join("main").join(".orbit");
+    let local_root = temp.path().join("worktree").join(".orbit");
+    for root in [&global_root, &shared_root, &local_root] {
+        fs::create_dir_all(root).expect("create runtime root");
+    }
+    OrbitRuntime::from_resolved_roots(&global_root, &shared_root, &local_root)
+        .expect("build split-root runtime")
+}
+
 #[test]
 fn healthy_fresh_workspace_has_no_failures() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let results = runtime.doctor_workspace().expect("doctor");
 
-    assert_eq!(results.len(), 8, "one row per check: {results:?}");
+    assert_eq!(results.len(), 7, "one row per check: {results:?}");
     assert!(
         results
             .iter()
@@ -54,9 +65,9 @@ fn healthy_fresh_workspace_has_no_failures() {
         status_of(&results, "semantic-index").status,
         WorkspaceDoctorStatus::Skipped
     );
-    assert_eq!(
-        status_of(&results, "graph-index").status,
-        WorkspaceDoctorStatus::Skipped
+    assert!(
+        results.iter().all(|row| row.check_name != "graph-index"),
+        "retired graph state is not a health subsystem: {results:?}"
     );
     assert_eq!(
         status_of(&results, "stale-locks").status,
@@ -449,30 +460,80 @@ fn collect_lock_files_scans_the_store_lock_locations() {
 }
 
 #[test]
-fn graph_index_probe_skips_absent_and_reads_present() {
+fn retired_graph_cleanup_removes_only_the_two_resolved_locations() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let runtime = workspace_runtime(&temp);
+    let runtime = split_root_runtime(&temp);
+    let local_graph = runtime.local_root().join("graph");
+    let shared_graph = runtime.shared_root().join("knowledge/graph");
+    let unrelated = runtime.shared_root().join("knowledge/keep.txt");
+    fs::create_dir_all(&local_graph).expect("create local graph");
+    fs::create_dir_all(&shared_graph).expect("create shared graph");
+    fs::write(local_graph.join("local.db"), b"retired").expect("write local graph");
+    fs::write(shared_graph.join("shared.db"), b"retired").expect("write shared graph");
+    fs::write(&unrelated, b"keep").expect("write unrelated state");
 
-    assert!(
-        runtime.health_check_graph_index().is_none(),
-        "no graph dir yet → absent"
+    assert_eq!(
+        runtime
+            .remove_retired_graph_state()
+            .expect("remove retired graph state"),
+        2
     );
+    assert!(!local_graph.exists());
+    assert!(!shared_graph.exists());
+    assert!(unrelated.exists(), "cleanup must preserve sibling state");
+    assert_eq!(
+        runtime
+            .remove_retired_graph_state()
+            .expect("repeat cleanup"),
+        0,
+        "cleanup is idempotent when both locations are absent"
+    );
+}
 
-    // A real (empty) SQLite database in the graph dir is readable.
-    let graph_dir = temp.path().join("repo").join(".orbit").join("graph");
-    fs::create_dir_all(&graph_dir).expect("create graph dir");
-    let db_path = graph_dir.join("main.4.db");
-    rusqlite::Connection::open(&db_path).expect("create graph db");
-    let probe = runtime
-        .health_check_graph_index()
-        .expect("index present")
-        .expect("index readable");
-    assert!(probe.contains("main.4.db"), "probe names the db: {probe}");
+#[test]
+fn ordinary_doctor_leaves_retired_graph_locations_untouched() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = split_root_runtime(&temp);
+    let local_marker = runtime.local_root().join("graph/local.db");
+    let shared_marker = runtime.shared_root().join("knowledge/graph/shared.db");
+    for marker in [&local_marker, &shared_marker] {
+        fs::create_dir_all(marker.parent().expect("graph parent")).expect("create graph parent");
+        fs::write(marker, b"retired").expect("write graph marker");
+    }
 
-    // Garbage in the (sole, hence newest) db is a probe failure, not a panic.
-    fs::remove_file(&db_path).expect("remove healthy db");
-    let garbage = graph_dir.join("garbage.4.db");
-    fs::write(&garbage, b"garbage bytes, not sqlite").expect("write garbage db");
-    let probe = runtime.health_check_graph_index().expect("index present");
-    assert!(probe.is_err(), "garbage db must fail the probe: {probe:?}");
+    let results = runtime.doctor_workspace().expect("doctor");
+
+    assert!(local_marker.exists());
+    assert!(shared_marker.exists());
+    assert!(results.iter().all(|row| row.check_name != "graph-index"));
+}
+
+#[cfg(unix)]
+#[test]
+fn retired_graph_cleanup_unlinks_boundaries_without_following_them() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = split_root_runtime(&temp);
+    let outside = temp.path().join("outside");
+    fs::create_dir_all(&outside).expect("create outside");
+    let outside_marker = outside.join("keep.db");
+    fs::write(&outside_marker, b"keep").expect("write outside marker");
+    let local_graph = runtime.local_root().join("graph");
+    let shared_graph = runtime.shared_root().join("knowledge/graph");
+    fs::create_dir_all(shared_graph.parent().expect("knowledge parent"))
+        .expect("create knowledge parent");
+    std::os::unix::fs::symlink(&outside, &local_graph).expect("link local graph");
+    std::os::unix::fs::symlink(&outside, &shared_graph).expect("link shared graph");
+
+    assert_eq!(
+        runtime
+            .remove_retired_graph_state()
+            .expect("remove graph links"),
+        2
+    );
+    assert!(
+        outside_marker.exists(),
+        "cleanup must not follow graph symlinks"
+    );
+    assert!(fs::symlink_metadata(local_graph).is_err());
+    assert!(fs::symlink_metadata(shared_graph).is_err());
 }
