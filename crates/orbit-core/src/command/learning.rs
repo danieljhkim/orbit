@@ -127,9 +127,9 @@ impl OrbitRuntime {
     ///
     /// [ORB-10364] Deliberately ungated: by the time a caller reaches finalize
     /// the global id is already consumed and cannot be released, so a refusal
-    /// here would burn an id. When ORB-10274 (F3) routes public
-    /// `orbit.learning.add` through the broker, the caller-role gate belongs in
-    /// the preflight *before* `compose_preallocated_knowledge_add` allocates —
+    /// here would burn an id. When public `orbit.learning.add` traverses the
+    /// broker, the caller-role gate belongs in the preflight *before*
+    /// `compose_preallocated_knowledge_add` allocates —
     /// see [`crate::command::learning_authoring::ensure_learning_write_allowed`].
     pub fn finalize_preallocated_learning(
         &self,

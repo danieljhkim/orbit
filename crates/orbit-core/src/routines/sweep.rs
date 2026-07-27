@@ -28,7 +28,7 @@ use super::validation::{
     RoutinePlacementProvider, RoutineRegistryStatus, RoutineRegistryView, validate_routine_pins,
 };
 
-/// Dispatch seam for the sweep [ORB-00421]. The production impl
+/// Dispatch seam for the sweep. The production impl
 /// ([`RuntimeDispatch`]) wraps one `OrbitRuntime` per source workspace and
 /// dispatches through `submit_pipeline_run` / `show_job_run`; tests supply a
 /// fake so the sweep's fire / retry / overlap / outcome-sync orchestration is
@@ -136,7 +136,7 @@ pub fn run_sweep_with_providers(
     // The OS clock invokes this every minute forever; on macOS launchd
     // redirects stdout/stderr into `logs/sweep.log`. Opportunistically roll +
     // prune it here (rename-based, best-effort) so an always-on host cannot
-    // grow it without bound [ORB-00423]. No-op until the file exceeds the
+    // grow it without bound. No-op until the file exceeds the
     // configured per-file budget. `run_sweep_at_with_providers` (the explicit
     // root seam) is left
     // untouched so tests never rotate real logs.
@@ -221,7 +221,7 @@ pub fn run_sweep_at_with_providers(
     })
 }
 
-/// The dispatch-agnostic core of one sweep pass [ORB-00421]: outcome-sync
+/// The dispatch-agnostic core of one sweep pass: outcome-sync
 /// (unless dry-run), then per-routine due evaluation and fire/skip. Split out
 /// from [`run_sweep_at_with_providers`] — which owns the lock, store, and workspace discovery
 /// — so the orchestration can be driven against a temp store, a hand-built
@@ -417,7 +417,7 @@ fn sweep_routine(
 /// backoff has elapsed.
 ///
 /// Retryable means `Failed` — a run-level failure *or* a synchronous dispatch
-/// failure ([ORB-00422]): `fire` records a `submit_pipeline_run` that returns
+/// failure: `fire` records a `submit_pipeline_run` that returns
 /// `Err` as `Failed` (not `Error`) precisely because nothing dispatched, so it
 /// is unambiguously safe to re-dispatch under the same slot. `Error` is
 /// reserved for the *ambiguous* case — a crashed sweep's stale intent reclaimed
@@ -528,7 +528,7 @@ fn fire(
         Err(error) => {
             // A synchronous dispatch failure means nothing was dispatched, so
             // record it as `Failed` — retryable under the same slot within
-            // `policy.retries` ([ORB-00422]) — rather than the terminal `Error`
+            // `policy.retries` — rather than the terminal `Error`
             // the outcome sync reserves for an ambiguous crash-orphaned intent.
             store.routine_mark_fire_outcome(
                 name,

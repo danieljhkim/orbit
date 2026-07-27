@@ -412,7 +412,7 @@ fn doctor_check_job_runs(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
 /// Task relation/dependency targets that no longer resolve to a registered
 /// task bundle — the "grandfathered" relations that make a generated task
 /// index fail to rebuild against its relation validator, forcing an unbounded
-/// bundle-scan fallback (ORB-10305 / ORB-10246). Scoped to the current
+/// bundle-scan fallback (ORB-10305). Scoped to the current
 /// workspace; surfacing them here lets an operator fix or remove the offending
 /// relation before the validator trips over it at rebuild time.
 fn doctor_check_task_relations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {

@@ -2,8 +2,8 @@ use clap::{CommandFactory, Parser, error::ErrorKind};
 
 use crate::command::Cli;
 
-/// The trimmed `orbit task` surface has 12 subcommands. ORB-10428 supersedes
-/// the ORB-00420/ORB-10000 placement and returns lock administration here.
+/// The trimmed `orbit task` surface has 12 subcommands. ORB-10428 returns lock
+/// administration here.
 const EXPECTED_TASK_SUBCOMMANDS: [&str; 12] = [
     "add", "artifact", "locks", "list", "show", "lint", "update", "start", "archive", "export",
     "import", "reindex",
@@ -111,14 +111,14 @@ fn root_help_groups_scheduler_commands_in_layer_order() {
 
 #[test]
 fn lock_administration_lives_under_task() {
-    // `--locked` was removed from `task list` (ORB-00420).
+    // `--locked` was removed from `task list`.
     let err = match Cli::try_parse_from(["orbit", "task", "list", "--locked"]) {
         Ok(_) => panic!("`task list --locked` should no longer parse"),
         Err(err) => err,
     };
     assert_eq!(err.kind(), ErrorKind::UnknownArgument);
 
-    // ORB-10428 supersedes the ORB-00420/ORB-10000 placement: locks are task administration.
+    // ORB-10428: locks are task administration.
     Cli::try_parse_from(["orbit", "task", "locks", "list"]).expect("task locks list parses");
     Cli::try_parse_from(["orbit", "task", "locks", "list", "--json"])
         .expect("task locks list --json parses");

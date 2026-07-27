@@ -5,7 +5,7 @@
 //!
 //! Parsing is fail-closed: an invalid file is an error, never a routine that
 //! fires with defaults. Targets are catalog references only — there is no
-//! inline command form (ADR-0194 / ADR-0206 posture).
+//! inline command form (ADR-0206 posture).
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 

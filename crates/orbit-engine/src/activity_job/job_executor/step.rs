@@ -94,7 +94,7 @@ pub(super) fn run_step_with_retry(
                 }
                 // Treat a "not-success-but-no-error" outcome as retryable:
                 // another attempt may succeed. This is the block-level outcome
-                // contract (ADR-0194), and the CLI agent-loop leaf reaches it
+                // contract, and the CLI agent-loop leaf reaches it
                 // for every provider-level failure — timeout, nonzero exit, and
                 // the [ORB-10449] step-completion protocol violation.
                 last_err = None;

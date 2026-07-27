@@ -298,7 +298,7 @@ pub(super) fn resolve_workspace_argument(
     input: &mut Value,
     tool_name: &str,
 ) -> Result<String, OrbitError> {
-    // ADR-0181: MCP workspace defaults come from explicit session context, never process cwd.
+    // MCP workspace defaults come from explicit session context, never process cwd.
     let explicit = optional_string_alias(input, &["workspace"])?;
     let session = ctx
         .session_context

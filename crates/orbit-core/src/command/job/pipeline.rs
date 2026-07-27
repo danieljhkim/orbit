@@ -717,7 +717,7 @@ impl OrbitRuntime {
             });
         }
 
-        // L-0090: discover detached workers by registered cwd, never explicit --root.
+        // Discover detached workers by registered cwd, never explicit --root.
         // Start the observer before the process so every successfully spawned
         // worker has a parent-side path that can terminalize a pre-claim exit.
         // Passing `--root` here used to pin both the workspace and global roots

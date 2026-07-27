@@ -464,7 +464,7 @@ pub(super) fn session_context_from_initialize(
     request: &InitializeRequestParams,
     transport_meta: &rmcp::model::Meta,
 ) -> ToolSessionContext {
-    // ADR-0181: clients deliberately announce workspace through initialize `_meta`.
+    // Clients deliberately announce workspace through initialize `_meta`.
     //
     // rmcp's wire deserializer strips `_meta` out of the request params and
     // parks it on the request extensions (surfaced here as the request

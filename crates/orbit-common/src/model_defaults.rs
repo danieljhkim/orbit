@@ -14,7 +14,7 @@
 //! source of truth" means using the provider alias directly in the asset and
 //! keeping this module authoritative for production Rust paths. The executor
 //! asset ↔ const agreement is guarded by a test in orbit-core's executor
-//! command module. See ADR-0211 for the de-hardcode + centralization decision.
+//! command module.
 //!
 //! ## Aliases vs. version pins
 //!

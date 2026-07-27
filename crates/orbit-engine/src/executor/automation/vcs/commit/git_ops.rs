@@ -11,7 +11,7 @@ pub(super) fn git_commit_with_identity(
     message: &str,
     resolved_model: Option<&str>,
 ) -> Result<(), OrbitError> {
-    // L-0112 / ADR-0249: one persisted value drives both the ambient author
+    // ADR-0249: one persisted value drives both the ambient author
     // and prepare-commit-msg Agent-Model trailer. The generic fallback remains
     // commit-capable when a run has no resolved model.
     let author = resolved_model

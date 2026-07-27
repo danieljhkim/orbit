@@ -1,4 +1,4 @@
-//! Sweep-orchestration tests [ORB-00421]: exercise the fire / idempotency /
+//! Sweep-orchestration tests exercise the fire / idempotency /
 //! overlap / retry / outcome-sync logic in `routines/sweep.rs` that shipped
 //! untested in [ORB-10021].
 //!
@@ -382,7 +382,7 @@ fn sync_reclaims_stale_intent_and_dispatched_past_timeout() {
     );
 }
 
-// ---- dispatch-error retry [ORB-00422] -------------------------------------
+// ---- dispatch-error retry --------------------------------------------------
 
 #[test]
 fn dispatch_error_is_retry_eligible_under_the_same_slot() {

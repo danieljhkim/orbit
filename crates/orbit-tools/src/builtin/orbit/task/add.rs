@@ -22,7 +22,7 @@ impl Tool for OrbitTaskAddTool {
                 param_type: "string".to_string(),
                 required: true,
             },
-            // ADR-0149: `workspace` is the binding key for ~/.orbit/tasks/workspaces/<id>/
+            // `workspace` is the binding key for ~/.orbit/tasks/workspaces/<id>/
             // home-store projection; ambient MCP session context may supply this field,
             // but process cwd must never be used as the fallback.
             ToolParam {

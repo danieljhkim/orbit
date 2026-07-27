@@ -7,9 +7,9 @@
 //! correlation contract that ties those two halves together.
 //!
 //! It is deliberately gated inactive for F2: public `orbit.adr.add` /
-//! `orbit.learning.add` stay on the standalone compatibility allocator until F3
-//! (ORB-10274) atomically disables the legacy authoring paths, enables global
-//! issuance, and wires the D3-selected owner-finalize capability to
+//! `orbit.learning.add` stay on the standalone compatibility allocator until
+//! broker preflight atomically disables the legacy authoring paths, enables
+//! global issuance, and wires the D3-selected owner-finalize capability to
 //! [`orbit_core::OrbitRuntime::finalize_preallocated_adr`] /
 //! `finalize_preallocated_learning` plus the correlated owner-finalization
 //! audit.
