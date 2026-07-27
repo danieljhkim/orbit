@@ -209,6 +209,17 @@ pub(super) fn supersede(
     }))
 }
 
+pub(super) fn archive(
+    runtime: &OrbitRuntime,
+    input: Value,
+    _agent: Option<String>,
+    _model: Option<String>,
+) -> Result<Value, OrbitError> {
+    let id = required_string(&input, &["id"], "id")?;
+    let learning = runtime.author_learning_archive(&id)?;
+    Ok(learning_to_json(&learning))
+}
+
 pub(super) fn sync(runtime: &OrbitRuntime, _input: Value) -> Result<Value, OrbitError> {
     runtime.stores().learnings().sync_learnings()?;
     let active = runtime

@@ -191,6 +191,45 @@ fn cli_update_scope_fields_preserve_omitted_fields_and_empty_tag_clears() {
 }
 
 #[test]
+fn cli_archive_retires_a_single_active_learning_without_a_replacement() {
+    let workspace = TestWorkspace::new();
+    let learning = workspace.add_learning("obsolete rule", &[], &[]);
+    let id = learning["id"].as_str().unwrap();
+
+    let archived = workspace.run_json(&["learning", "archive", id, "--json"], "archive");
+    assert_eq!(archived["status"], "superseded");
+    assert!(archived["superseded_by"].is_null());
+
+    let active_ids = workspace.learning_projection("active");
+    assert!(
+        active_ids
+            .iter()
+            .all(|row| !row.starts_with(&format!("{id}|")))
+    );
+}
+
+#[test]
+fn cli_archive_is_idempotent_and_rejects_a_missing_id() {
+    let workspace = TestWorkspace::new();
+    let learning = workspace.add_learning("obsolete rule", &[], &[]);
+    let id = learning["id"].as_str().unwrap();
+
+    workspace.run(
+        &["learning", "archive", id, "--json"],
+        None,
+        "first archive",
+    );
+    let second = workspace.run_json(
+        &["learning", "archive", id, "--json"],
+        "second archive is a no-op success",
+    );
+    assert_eq!(second["status"], "superseded");
+
+    let missing = workspace.try_run_as(&["learning", "archive", "L-9999999"], HUMAN);
+    assert!(!missing.status.success(), "missing id must fail");
+}
+
+#[test]
 fn cli_sync_returns_rebuilt_count() {
     let workspace = TestWorkspace::new();
     workspace.add_learning("a", &[], &[]);
@@ -456,6 +495,26 @@ fn executor_context_learning_update_and_supersede_are_refused_leaving_records_un
 }
 
 #[test]
+fn executor_context_learning_archive_is_refused_leaving_the_record_untouched() {
+    let workspace = TestWorkspace::new();
+    let learning = workspace.add_learning("obsolete rule", &[], &[]);
+    let id = learning["id"].as_str().expect("id");
+    let before = workspace.learning_projection("active");
+
+    let archive = workspace.try_run_as(&["learning", "archive", id], EXECUTOR);
+    assert!(
+        !archive.status.success(),
+        "executor archive must be refused"
+    );
+    let stderr = String::from_utf8_lossy(&archive.stderr);
+    assert!(
+        stderr.contains("orbit friction add") && stderr.contains(id),
+        "stderr: {stderr}"
+    );
+    assert_eq!(workspace.learning_projection("active"), before);
+}
+
+#[test]
 fn executor_context_learning_tools_are_refused_with_the_same_redirect() {
     let workspace = TestWorkspace::new();
     let old = workspace.add_learning("tool original", &[], &[]);
@@ -467,6 +526,7 @@ fn executor_context_learning_tools_are_refused_with_the_same_redirect() {
     let add_input = json!({ "summary": "tool observation", "body": "tool body" }).to_string();
     let update_input = json!({ "id": old_id, "summary": "tool rewrite" }).to_string();
     let supersede_input = json!({ "id": old_id, "with": new_id }).to_string();
+    let archive_input = json!({ "id": old_id }).to_string();
     let attempts = [
         ("orbit.learning.add", &add_input, "tool observation"),
         ("orbit.learning.update", &update_input, "tool rewrite"),
@@ -475,6 +535,7 @@ fn executor_context_learning_tools_are_refused_with_the_same_redirect() {
             &supersede_input,
             old_id.as_str(),
         ),
+        ("orbit.learning.archive", &archive_input, old_id.as_str()),
     ];
 
     for (tool, input, echoed) in attempts {
@@ -588,6 +649,45 @@ fn the_orchestrator_opt_in_authors_learnings_from_an_agent_context() {
     assert_eq!(shown["summary"], "curated rule, narrowed");
     assert_eq!(shown["status"], "superseded");
     assert_eq!(shown["superseded_by"], replacement_id);
+}
+
+#[test]
+fn human_context_archives_a_learning_without_a_replacement() {
+    let workspace = TestWorkspace::new();
+    let learning = workspace.add_learning("human obsolete rule", &[], &[]);
+    let id = learning["id"].as_str().expect("id").to_string();
+
+    workspace.run_as(&["learning", "archive", &id], HUMAN, "human archive");
+
+    let shown = workspace.run_json(&["learning", "show", &id, "--json"], "show archived");
+    assert_eq!(shown["status"], "superseded");
+    assert!(shown["superseded_by"].is_null());
+}
+
+#[test]
+fn the_orchestrator_opt_in_archives_a_learning_from_an_agent_context() {
+    let workspace = TestWorkspace::new();
+    let added: Value = serde_json::from_slice(
+        &workspace
+            .run_as(
+                &["learning", "add", "--summary", "curated obsolete", "--json"],
+                ORCHESTRATOR,
+                "opt-in add",
+            )
+            .stdout,
+    )
+    .expect("opt-in add JSON");
+    let id = added["id"].as_str().expect("id").to_string();
+
+    workspace.run_as(
+        &["learning", "archive", &id],
+        ORCHESTRATOR,
+        "opt-in archive",
+    );
+
+    let shown = workspace.run_json(&["learning", "show", &id, "--json"], "show archived");
+    assert_eq!(shown["status"], "superseded");
+    assert!(shown["superseded_by"].is_null());
 }
 
 #[test]

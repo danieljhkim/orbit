@@ -40,6 +40,9 @@ pub(super) fn execute(
             super::friction_tools::dispatch(runtime, verb, input, model)
         }
         OrbitBuiltinAction::LearningAdd => super::learning_tools::add(runtime, input, agent, model),
+        OrbitBuiltinAction::LearningArchive => {
+            super::learning_tools::archive(runtime, input, agent, model)
+        }
         OrbitBuiltinAction::LearningList => super::learning_tools::list(runtime, input),
         OrbitBuiltinAction::LearningPrune => super::learning_tools::prune(runtime, input),
         OrbitBuiltinAction::LearningSync => super::learning_tools::sync(runtime, input),

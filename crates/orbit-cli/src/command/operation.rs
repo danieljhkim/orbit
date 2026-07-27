@@ -537,6 +537,7 @@ impl Commands {
                     LearningSubcommand::Stats(_) => ("stats", RuntimeNeed::Required, false),
                     LearningSubcommand::Update(_) => ("update", RuntimeNeed::Required, false),
                     LearningSubcommand::Supersede(_) => ("supersede", RuntimeNeed::Required, false),
+                    LearningSubcommand::Archive(_) => ("archive", RuntimeNeed::Required, false),
                     LearningSubcommand::Sync(_) => ("sync", RuntimeNeed::Required, false),
                     LearningSubcommand::MigrateLayout(_) => {
                         ("migrate-layout", RuntimeNeed::Forbidden, false)

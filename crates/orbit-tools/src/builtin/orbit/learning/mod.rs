@@ -1,4 +1,5 @@
 pub mod add;
+pub mod archive;
 pub mod list;
 pub mod prune;
 pub mod show;

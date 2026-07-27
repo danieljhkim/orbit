@@ -70,6 +70,7 @@ fn no_agent_identity_env_preserves_the_existing_authoring_policy() {
         })
         .is_ok()
     );
+    assert!(ensure_learning_write_allowed(LearningWriteAttempt::Archive { id: "L-0001" }).is_ok());
 }
 
 #[test]
@@ -151,6 +152,21 @@ fn executor_update_and_supersede_are_refused_and_echo_their_own_payloads() {
 }
 
 #[test]
+fn executor_archive_is_refused_and_echoes_the_id() {
+    let _env = scoped_identity_env(&[("ORBIT_AGENT_MODEL", "claude-opus-5")]);
+
+    let message = denial_message(ensure_learning_write_allowed(
+        LearningWriteAttempt::Archive { id: "L-0042" },
+    ));
+    assert!(message.contains("learning archive"));
+    assert!(message.contains("L-0042"));
+    assert!(
+        message.contains("orbit friction add") && message.contains("orbit.friction.add"),
+        "redirects to the friction surface: {message}"
+    );
+}
+
+#[test]
 fn a_long_body_is_truncated_in_the_echo_rather_than_dropped() {
     let body = "x".repeat(4000);
     let _env = scoped_identity_env(&[("ORBIT_AGENT_MODEL", "claude-opus-5")]);
@@ -181,6 +197,9 @@ fn the_explicit_orchestrator_opt_in_allows_agent_context_writes() {
             "`{truthy}` opts in"
         );
         assert!(ensure_learning_write_allowed(add_attempt()).is_ok());
+        assert!(
+            ensure_learning_write_allowed(LearningWriteAttempt::Archive { id: "L-0042" }).is_ok()
+        );
     }
 }
 
