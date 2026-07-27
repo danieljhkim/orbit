@@ -4,7 +4,7 @@ summary: Check Orbit workspace, database, dashboard, log-sink, job-run, and rout
 tags: [operations, health, doctor, dashboard, routines]
 paths: ["crates/orbit-cmd/src/doctor.rs", "crates/orbit-core/src/command/job/run/reconcile.rs"]
 related_features: [orbit-core, activity-job, routines]
-related_artifacts: [ORB-10005, ORB-10070, ORB-10473, ADR-0291]
+related_artifacts: [ORB-10005, ORB-10070, ORB-10473, ORB-10501, ADR-0291, ADR-0296]
 ---
 
 # Check Orbit Health
@@ -14,7 +14,7 @@ database recovery, or upgrade.
 
 ## Run `orbit doctor`
 
-`orbit doctor` performs seven checks in order. Every check degrades to a row rather than
+`orbit doctor` performs eight checks in order. Every check degrades to a row rather than
 aborting unless the store itself cannot open.
 
 | Check | What it verifies |
@@ -26,6 +26,7 @@ aborting unless the store itself cannot open.
 | `stale-locks` | `.lock` files under `state/`, `tasks/`, `learnings/`, and `adrs/.locks/` whose recorded holder PID is dead |
 | `job-runs` | orphaned `pending` or `running` runs whose owner process is gone |
 | `task-relations` | unresolved relation/dependency targets that would block a task-index rebuild |
+| `id-allocations` | learning/ADR ids pinned to a worktree that no longer exists, with no readable body |
 
 Example:
 
@@ -41,6 +42,7 @@ $ orbit doctor
 │                            (dead pid 154488, op: layout upgrade, since 2026-07-04T09:25…)   │
 │ job-runs         ok        no orphaned job runs                                              │
 │ task-relations   ok        no unresolved relation/dependency targets                        │
+│ id-allocations   ok        no learning/ADR allocations pinned to a missing worktree         │
 0 failure(s), 1 warning(s).
 ```
 
@@ -48,6 +50,15 @@ The command exits nonzero only when at least one check is `ERROR`; warnings and 
 zero. `--json` emits an array of objects with `check`, `status`, and `message` fields; statuses
 are lowercase. Lock files flagged by `stale-locks` include holder diagnostics and are safe to
 delete only after confirming the holder PID is dead.
+
+An `id-allocations` warning means an id was allocated inside a worktree that has since been
+reaped, before its body was merged: the body is unrecoverable and the row would otherwise stay
+in `orbit learning list --include-remote` (and the ADR list) forever. Confirm the named
+worktrees really are gone — a volume that is merely unmounted reads the same way — then retire
+the rows with `orbit doctor --fix-orphaned-allocations`. The repair re-verifies every row
+before writing, refuses any that became readable again, and flips the row to `abandoned`
+instead of deleting it, so the retired ids are never reissued (ADR-0296, ORB-10501). Without
+the flag, `orbit doctor` only reports.
 
 Graph is retired under ADR-0291 and is not inspected by ordinary health checks. To remove
 leftover state explicitly, run `orbit doctor --remove-graph`. This deletes only the current

@@ -1,7 +1,7 @@
 //! Sibling tests for `command/doctor.rs` — workspace self-diagnostics [ORB-10005].
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use fs2::FileExt;
@@ -45,7 +45,7 @@ fn healthy_fresh_workspace_has_no_failures() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let results = runtime.doctor_workspace().expect("doctor");
 
-    assert_eq!(results.len(), 7, "one row per check: {results:?}");
+    assert_eq!(results.len(), 8, "one row per check: {results:?}");
     assert!(
         results
             .iter()
@@ -80,6 +80,11 @@ fn healthy_fresh_workspace_has_no_failures() {
     // No tasks yet → no unresolved relation/dependency targets.
     assert_eq!(
         status_of(&results, "task-relations").status,
+        WorkspaceDoctorStatus::Ok
+    );
+    // No ids allocated yet → nothing pinned to a reaped worktree.
+    assert_eq!(
+        status_of(&results, "id-allocations").status,
         WorkspaceDoctorStatus::Ok
     );
 }
@@ -398,6 +403,100 @@ fn fresh_pending_run_is_not_reported_as_orphan() {
     let results = runtime.doctor_workspace().expect("doctor");
     let job_runs = status_of(&results, "job-runs");
     assert_eq!(job_runs.status, WorkspaceDoctorStatus::Ok, "{job_runs:?}");
+}
+
+/// [ORB-10501] Allocate a learning id from a worktree that is then reaped —
+/// the steady state behind F2026-07-161, where a job-run worktree is GC'd
+/// before its learning body was ever merged. Returns the stranded id.
+fn seed_learning_allocation_in(runtime: &OrbitRuntime, worktree: &Path, reap: bool) -> String {
+    fs::create_dir_all(worktree).expect("seed worktree");
+    let paths = runtime.paths();
+    // The effective semantic.db path is config-resolved, so read it from the
+    // runtime rather than reconstructing the default layout.
+    let semantic_db = PathBuf::from(
+        runtime.persistence_config_json()["semantic"]["path"]
+            .as_str()
+            .expect("semantic db path"),
+    );
+    let allocator = orbit_store::IdAllocator::open(orbit_store::IdAllocatorConfig::new(
+        semantic_db,
+        paths.state_dir.join(".id_alloc.lock"),
+        paths.orbit_dir.clone(),
+        worktree.to_path_buf(),
+        paths.adrs_dir.clone(),
+        paths.learnings_dir.clone(),
+    ))
+    .expect("open allocator");
+    let id = allocator.allocate_learning().expect("allocate learning").id;
+    drop(allocator);
+    if reap {
+        fs::remove_dir_all(worktree).expect("reap worktree");
+    }
+    id
+}
+
+#[test]
+fn allocation_pinned_to_a_reaped_worktree_is_reported_and_repairable() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    let id = seed_learning_allocation_in(&runtime, &temp.path().join("ghost-worktree"), true);
+
+    let row = status_of(
+        &runtime.doctor_workspace().expect("doctor"),
+        "id-allocations",
+    )
+    .clone();
+    assert_eq!(row.status, WorkspaceDoctorStatus::Warning, "{row:?}");
+    assert!(
+        row.message.contains(&id) && row.message.contains("--fix-orphaned-allocations"),
+        "message names the orphan and its repair: {}",
+        row.message
+    );
+
+    assert_eq!(
+        runtime
+            .clear_orphaned_id_allocations()
+            .expect("clear orphaned allocations"),
+        1
+    );
+    assert_eq!(
+        status_of(
+            &runtime.doctor_workspace().expect("doctor"),
+            "id-allocations"
+        )
+        .status,
+        WorkspaceDoctorStatus::Ok
+    );
+    assert_eq!(
+        runtime
+            .clear_orphaned_id_allocations()
+            .expect("repeat repair"),
+        0,
+        "repair is idempotent once the row is abandoned"
+    );
+}
+
+/// An allocation whose worktree is still on disk is an ordinary remote stub —
+/// its body may yet be merged — so neither the check nor the repair touches it.
+#[test]
+fn allocation_with_a_live_worktree_is_left_alone() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    let _id = seed_learning_allocation_in(&runtime, &temp.path().join("live-worktree"), false);
+
+    assert_eq!(
+        status_of(
+            &runtime.doctor_workspace().expect("doctor"),
+            "id-allocations"
+        )
+        .status,
+        WorkspaceDoctorStatus::Ok
+    );
+    assert_eq!(
+        runtime.clear_orphaned_id_allocations().expect("clear"),
+        0,
+        "a live worktree is not an orphan"
+    );
 }
 
 #[cfg(unix)]

@@ -20,6 +20,11 @@ pub struct DoctorCommand {
     /// Remove retired graph state from this worktree and the shared workspace.
     #[arg(long)]
     pub remove_graph: bool,
+
+    /// Abandon learning/ADR id allocations whose pinned worktree is gone and whose body is
+    /// unreadable, before diagnosing the workspace. The ids are never reissued.
+    #[arg(long)]
+    pub fix_orphaned_allocations: bool,
 }
 
 impl Execute for DoctorCommand {
@@ -34,6 +39,12 @@ impl Execute for DoctorCommand {
             let removed = runtime.remove_retired_graph_state()?;
             if !self.json {
                 println!("Removed {removed} retired graph location(s).");
+            }
+        }
+        if self.fix_orphaned_allocations {
+            let cleared = runtime.clear_orphaned_id_allocations()?;
+            if !self.json {
+                println!("Abandoned {cleared} orphaned id allocation(s).");
             }
         }
         let results = runtime.doctor_workspace()?;

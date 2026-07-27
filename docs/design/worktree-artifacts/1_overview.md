@@ -3,14 +3,14 @@ summary: "Worktree Artifacts - Overview"
 type: design
 title: "Worktree Artifacts - Overview"
 owner: codex
-last_updated: 2026-05-20
+last_updated: 2026-07-27
 status: Accepted
 feature: worktree-artifacts
 doc_role: overview
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ADR-0177"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10501", "ADR-0177", "ADR-0296"]
 ---
 
 # Worktree Artifacts - Overview
@@ -35,7 +35,8 @@ The three-task sequence split this apart:
 | Local root | The current worktree `.orbit/`, used for ADR and learning body files. |
 | Allocation row | A row in `id_allocations` recording ID, kind, allocation status, recorded worktree, branch, and `body_path`. |
 | Local-readable artifact | An allocation whose recorded body path exists and can be read by the current process. |
-| Remote stub | A list row for an allocation whose body is not locally readable, shown only with `include_remote`. |
+| Remote stub | A list row for an allocation whose body is not locally readable, shown only with `include_remote`. Assumes the body still exists in *some* worktree. |
+| Orphaned allocation | An allocation whose pinned worktree is gone from disk *and* whose body is unreadable everywhere locally — a remote stub that can never resolve again. Detected by the `id-allocations` doctor check and retired by `orbit doctor --fix-orphaned-allocations` [ORB-10501]. |
 
 ## 3. At a Glance
 
@@ -46,12 +47,14 @@ The three-task sequence split this apart:
 | ADR body storage and federation | `crates/orbit-store/src/file/adr_store/api/` | [ORB-00201] |
 | Learning body storage and federation | `crates/orbit-store/src/file/learning_store/api/crud.rs` | [ORB-00201] |
 | CLI/tool remote listing | `crates/orbit-core/src/runtime/orbit_tool_host/` and `crates/orbit-cli/src/command/learning/` | [ORB-00201] |
-| Decision log | `docs/design/worktree-artifacts/4_decisions.md` | [ADR-0177] |
+| Orphaned-allocation detection and repair | `crates/orbit-core/src/command/id_allocation.rs`, `crates/orbit-cmd/src/doctor.rs` | [ORB-10501] |
+| Decision log | `docs/design/worktree-artifacts/4_decisions.md` | [ADR-0177], [ADR-0296] |
 
 ## Task References
 
 - [ORB-00199] split Orbit runtime resolution into shared and local roots.
 - [ORB-00200] introduced the global ADR/Learning allocator and `L-NNNN` learning IDs.
 - [ORB-00201] moved ADR/Learning body writes to the current worktree and added read federation.
+- [ORB-10501] added detection and guarded repair for allocations pinned to a worktree that no longer exists.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -348,6 +348,65 @@ impl LearningFileStore {
         Ok(Some(remote_stub_from_allocation(&record)))
     }
 
+    /// [ORB-10501] Learning allocations that can never resolve to a body
+    /// again: the worktree they were pinned to is gone from disk *and* no
+    /// canonical or recorded copy of the body is readable here.
+    ///
+    /// Both conditions are required. A live sibling worktree is an ordinary
+    /// remote stub, and a canonically-present body makes a stale
+    /// `worktree_root` harmless — neither is dead weight.
+    pub(crate) fn list_orphaned_learning_allocations(
+        &self,
+    ) -> Result<Vec<IdAllocationRecord>, OrbitError> {
+        let mut orphaned = Vec::new();
+        for record in self.id_allocator.learning_allocations()? {
+            if !record.worktree_is_missing() {
+                continue;
+            }
+            if self.read_learning_allocation(&record)?.is_some() {
+                continue;
+            }
+            orphaned.push(record);
+        }
+        Ok(orphaned)
+    }
+
+    /// [ORB-10501] Clear one orphaned allocation row, re-verifying both orphan
+    /// conditions immediately before the write. Returns `false` when `id` has
+    /// no live allocation row; refuses with `InvalidInput` when the row is
+    /// still recoverable, so a caller working from a stale scan cannot retire
+    /// a readable learning.
+    pub(crate) fn abandon_orphaned_learning_allocation(
+        &self,
+        id: &str,
+    ) -> Result<bool, OrbitError> {
+        validate_learning_id(id)?;
+        let Some(record) = self.id_allocator.learning_allocation(id)? else {
+            return Ok(false);
+        };
+        if !record.worktree_is_missing() {
+            return Err(OrbitError::InvalidInput(format!(
+                "learning '{id}' is not orphaned: its recorded worktree '{}' still exists",
+                record.worktree_root.display()
+            )));
+        }
+        if self.read_learning_allocation(&record)?.is_some() {
+            return Err(OrbitError::InvalidInput(format!(
+                "learning '{id}' is not orphaned: its body is still readable"
+            )));
+        }
+        if !self.id_allocator.abandon_orphaned_learning(id)? {
+            return Ok(false);
+        }
+        // The envelope index row is pinned to the same dead body; leaving it
+        // behind is the stale-`reserved`-row half of F2026-07-094.
+        if let Some(index) = &self.index {
+            index.delete_learning_index_row(&self.workspace_id, id)?;
+        }
+        self.invalidate_envelope_cache();
+        Ok(true)
+    }
+
     pub(crate) fn update_learning(
         &self,
         id: &str,

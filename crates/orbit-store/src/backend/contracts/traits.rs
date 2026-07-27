@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 
 use super::params::*;
 
+use crate::sqlite::id_allocator::IdAllocationRecord;
+
 use crate::sqlite::audit_event_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
     AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
@@ -78,6 +80,16 @@ pub trait AdrStoreBackend: Send + Sync {
         include_remote: bool,
     ) -> Result<Vec<AdrListEntry>, OrbitError>;
     fn get_adr_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError>;
+
+    /// [ORB-10501] Allocations pinned to a worktree that no longer exists and
+    /// whose bundle is not readable anywhere locally — permanently orphaned
+    /// index rows, reported by `orbit doctor`.
+    fn list_orphaned_adr_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError>;
+
+    /// [ORB-10501] Abandon one orphaned allocation row. `false` when the id
+    /// has no live allocation; an error when it is still recoverable.
+    fn abandon_orphaned_adr_allocation(&self, id: &str) -> Result<bool, OrbitError>;
+
     fn update_adr_status(&self, id: &str, new_status: AdrStatus) -> Result<(), OrbitError>;
     fn update_adr_document(
         &self,
@@ -393,6 +405,16 @@ pub trait LearningStoreBackend: Send + Sync {
         include_remote: bool,
     ) -> Result<Vec<LearningListEntry>, OrbitError>;
     fn get_learning_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError>;
+
+    /// [ORB-10501] Allocations pinned to a worktree that no longer exists and
+    /// whose body is not readable anywhere locally — permanently orphaned
+    /// index rows, reported by `orbit doctor`.
+    fn list_orphaned_learning_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError>;
+
+    /// [ORB-10501] Abandon one orphaned allocation row. `false` when the id
+    /// has no live allocation; an error when it is still recoverable.
+    fn abandon_orphaned_learning_allocation(&self, id: &str) -> Result<bool, OrbitError>;
+
     fn search_learnings(
         &self,
         params: LearningSearchParams,

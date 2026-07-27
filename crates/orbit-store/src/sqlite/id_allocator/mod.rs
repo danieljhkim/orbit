@@ -7,7 +7,9 @@ use chrono::{DateTime, Utc};
 use orbit_common::types::OrbitError;
 use orbit_common::utility::fs::atomic_write_text;
 use orbit_common::utility::git::{CurrentBranchStatus, current_branch};
-use rusqlite::{Connection, Transaction, TransactionBehavior, params, types::Type};
+use rusqlite::{
+    Connection, OptionalExtension, Transaction, TransactionBehavior, params, types::Type,
+};
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
@@ -62,6 +64,18 @@ impl IdAllocationRecord {
                 self.worktree_root.join(body_path)
             }
         })
+    }
+
+    /// [ORB-10501] Whether the worktree this id was allocated in is gone from
+    /// disk.
+    ///
+    /// This is what separates a transient "remote stub" — the body lives in a
+    /// sibling checkout that simply is not this one — from a permanent orphan:
+    /// once the pinned worktree is reaped, a `body_path` recorded relative to
+    /// it can never resolve again, so the row is dead weight the index carries
+    /// forever.
+    pub fn worktree_is_missing(&self) -> bool {
+        !self.worktree_root.exists()
     }
 }
 
@@ -230,6 +244,19 @@ impl IdAllocator {
     /// partial ADR create does not leak a half-visible ID.
     pub fn abandon_adr(&self, id: &str) -> Result<(), OrbitError> {
         self.abandon(IdAllocationKind::Adr, id)
+    }
+
+    /// [ORB-10501] Abandon a learning allocation whose pinned worktree is gone.
+    /// See [`Self::abandon_orphaned`] for the guard and how this differs from
+    /// [`Self::abandon_learning`].
+    pub fn abandon_orphaned_learning(&self, id: &str) -> Result<bool, OrbitError> {
+        self.abandon_orphaned(IdAllocationKind::Learning, id)
+    }
+
+    /// [ORB-10501] Abandon an ADR allocation whose pinned worktree is gone.
+    /// See [`Self::abandon_orphaned`].
+    pub fn abandon_orphaned_adr(&self, id: &str) -> Result<bool, OrbitError> {
+        self.abandon_orphaned(IdAllocationKind::Adr, id)
     }
 
     pub fn adr_allocation(&self, id: &str) -> Result<Option<IdAllocationRecord>, OrbitError> {
@@ -566,6 +593,59 @@ impl IdAllocator {
         tx.commit()
             .map_err(|error| OrbitError::Store(error.to_string()))?;
         Ok(())
+    }
+
+    /// [ORB-10501] Abandon an allocation whose pinned worktree no longer
+    /// exists, so the index stops carrying a row nothing can ever resolve.
+    ///
+    /// Two things separate this from [`Self::abandon`], which exists for
+    /// create-rollback: it accepts a `merged` row that already recorded a
+    /// `body_path` (that path died with its worktree), and it is guarded on
+    /// the worktree being gone rather than on the row never having been
+    /// finalized. The guard is re-checked inside the write transaction — the
+    /// caller's classifying scan and this repair are separate steps, and a
+    /// worktree can be re-created in between.
+    ///
+    /// Returns `false` when `id` has no live allocation row (already
+    /// abandoned, or never allocated). The row keeps its recorded worktree,
+    /// branch, and `body_path` for forensics; only `status` moves. Sequence
+    /// density is unaffected: [`max_sequence`] counts abandoned rows too, so
+    /// an abandoned id is never handed out again.
+    fn abandon_orphaned(&self, kind: IdAllocationKind, id: &str) -> Result<bool, OrbitError> {
+        let _lock = self.acquire_lock()?;
+        let mut conn = self.lock_conn()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let worktree_root = tx
+            .query_row(
+                "SELECT worktree_root
+                 FROM id_allocations
+                 WHERE kind = ?1 AND id = ?2 AND status != ?3",
+                params![kind.as_str(), id, STATUS_ABANDONED],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let Some(worktree_root) = worktree_root else {
+            return Ok(false);
+        };
+        if Path::new(&worktree_root).exists() {
+            return Err(OrbitError::InvalidInput(format!(
+                "refusing to abandon {} {id}: its recorded worktree '{worktree_root}' still exists",
+                kind.as_str()
+            )));
+        }
+        tx.execute(
+            "UPDATE id_allocations
+             SET status = ?3
+             WHERE kind = ?1 AND id = ?2",
+            params![kind.as_str(), id, STATUS_ABANDONED],
+        )
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+        tx.commit()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(true)
     }
 
     fn allocation(
