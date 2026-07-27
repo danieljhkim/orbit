@@ -431,6 +431,8 @@ After [ORB-10470] / [ADR-0289], resume is a durable *submission* scoped by expli
 
 After [ORB-10070], orphan reconciliation also covers `pending` runs. Pipeline workers claim their queued run at startup (`claim_pending_job_run_owner` records `pid` + start-time token while the run is still `pending`), so a queued run polling for its admission slot carries a probeable owner exactly like a running run. Reconcile finalizes a pending run as `interrupted` (`Pending + Interrupt` is now a legal transition) in two conclusive cases: its claimed owner is `Mismatch`/`Missing`, or it was never claimed and is older than a 30-minute grace window (covering workers that died before claiming and queued runs written by pre-claim binaries, e.g. stranded by a host reboot after their parent run was interrupted). Inconclusive probes and fresh unclaimed runs stay `pending`. `orbit doctor`'s `job-runs` check reports both orphan classes read-only, and `orbit run cancel <run_id>` gives operators a direct terminalization path.
 
+After [ORB-10461], every detached pipeline worker appends stdout and stderr to the private run-addressable path `.orbit/state/logs/<run_id>.worker.log`. The parent-side startup observer records that path in claimed/failure audit events. If the child exits before setting its pending-run owner, the observer terminalizes the same run as `interrupted` and copies a redacted, bounded tail of the worker output into the synthetic diagnostic step; startup and action-registration errors are therefore inspectable by run id without waiting for the stale-run grace window. Normal claimed-worker execution and admission polling are unchanged.
+
 The loop shares one pipeline map and session map across iterations, which makes cross-iteration `session:` meaningful.
 
 ### 8.7 Invocation metrics
@@ -672,6 +674,7 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[ORB-10414]** — Make HTTP replay an explicit default-off cargo feature and keep replay environment variables inert in default builds.
 - **[ORB-10434]** — Extend the replay opt-in to orbit-core (`orbit-core/replay`) so its fixture-backed v2_host test keeps running hermetically instead of demanding a live credential.
 - **[ORB-10456]** — Resolve provider launchers at the shared CLI spawn boundary and report provider-aware searched-location diagnostics.
+- **[ORB-10461]** — Persist detached pipeline-worker output by run id and terminalize pre-claim exits with the captured startup diagnostic.
 - **[ORB-10464]** — Verify that done dependencies are delivered into the pinned base before a worktree is created.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

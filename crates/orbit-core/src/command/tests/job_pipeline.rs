@@ -1,6 +1,8 @@
 use std::ffi::OsStr;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use orbit_common::types::{AuditEventStatus, JobRunState, OrbitError};
@@ -10,7 +12,8 @@ use tempfile::TempDir;
 use crate::OrbitRuntime;
 use crate::command::job::JobRunListParams;
 use crate::command::job::pipeline::{
-    configure_pipeline_worker_command, resolve_pipeline_worker_executable,
+    configure_pipeline_worker_command, configure_pipeline_worker_stdio, pipeline_worker_log_path,
+    resolve_pipeline_worker_executable,
 };
 use crate::command::task::TaskAddParams;
 use crate::command::workflow::ShipMode;
@@ -113,24 +116,22 @@ fn worker_exit_before_claim_terminalizes_persisted_run_with_diagnostic() {
         .jobs()
         .insert_job_run("task_gate_pipeline", 1, Utc::now(), None, None)
         .expect("insert pending run");
-    let child = Command::new("sh")
-        .args(["-c", "exit 23"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn failing worker fixture");
+    let mut command = Command::new("sh");
+    command.args([
+        "-c",
+        "printf 'worker stdout context\\n'; \
+         printf 'action registration missing: routine_dispatch\\n' >&2; \
+         exit 23",
+    ]);
+    let log_path =
+        configure_pipeline_worker_stdio(&mut command, &runtime.paths().logs_dir, &run.run_id)
+            .expect("configure worker log");
 
     runtime
-        .monitor_pipeline_worker_startup(
-            &run.run_id,
-            child,
-            &runtime.paths().repo_root,
-            Some("test"),
-        )
-        .expect("observe worker exit");
+        .spawn_pipeline_worker_process(&run.run_id, Some("test"), command, log_path.clone())
+        .expect("spawn detached failing worker fixture");
 
-    let stored = runtime.show_job_run(&run.run_id).expect("show failed run");
+    let stored = wait_for_worker_ownership_outcome(&runtime, &run.run_id);
     assert_eq!(stored.state, JobRunState::Interrupted);
     assert!(stored.finished_at.is_some());
     assert!(stored.pid.is_none());
@@ -145,6 +146,22 @@ fn worker_exit_before_claim_terminalizes_persisted_run_with_diagnostic() {
     );
     assert!(message.contains("exit status: 23"), "{message}");
     assert!(message.contains("registered workspace"), "{message}");
+    assert!(
+        message.contains("action registration missing: routine_dispatch"),
+        "{message}"
+    );
+    assert!(
+        message.contains(&log_path.display().to_string()),
+        "{message}"
+    );
+
+    assert_eq!(
+        log_path,
+        pipeline_worker_log_path(&runtime.paths().logs_dir, &run.run_id)
+    );
+    let durable_output = std::fs::read_to_string(&log_path).expect("read durable worker log");
+    assert!(durable_output.contains("worker stdout context"));
+    assert!(durable_output.contains("action registration missing: routine_dispatch"));
 
     let audits = runtime
         .list_audit_events(None, None, Some(AuditEventStatus::Failure), None, 20)
@@ -157,6 +174,103 @@ fn worker_exit_before_claim_terminalizes_persisted_run_with_diagnostic() {
                 .as_deref()
                 .is_some_and(|error| error.contains("before claiming"))
     }));
+}
+
+#[cfg(unix)]
+#[test]
+fn routine_style_detached_worker_is_claimed_within_ownership_window() {
+    let (_root, runtime) = test_runtime();
+    let run = runtime
+        .stores()
+        .jobs()
+        .insert_job_run("auto_task_scheduler_pipeline", 1, Utc::now(), None, None)
+        .expect("insert routine-dispatched run");
+    let mut command = Command::new("sh");
+    command.args(["-c", "printf 'routine worker startup\\n' >&2; sleep 0.25"]);
+    let log_path =
+        configure_pipeline_worker_stdio(&mut command, &runtime.paths().logs_dir, &run.run_id)
+            .expect("configure routine worker log");
+
+    let started = Instant::now();
+    let worker_pid = runtime
+        .spawn_pipeline_worker_process(
+            &run.run_id,
+            Some("routine-sweep"),
+            command,
+            log_path.clone(),
+        )
+        .expect("spawn detached routine worker fixture");
+    runtime
+        .stores()
+        .jobs()
+        .claim_pending_job_run_owner(&run.run_id, worker_pid)
+        .expect("claim routine run");
+
+    let stored = wait_for_worker_ownership_outcome(&runtime, &run.run_id);
+    assert_eq!(stored.state, JobRunState::Pending);
+    assert_eq!(stored.pid, Some(worker_pid));
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "detached routine worker exceeded ownership window"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let audits = runtime
+            .list_audit_events(None, None, None, None, 20)
+            .expect("list claimed-worker audit");
+        if audits.iter().any(|audit| {
+            audit.tool_name.as_deref() == Some("pipeline.worker.claimed")
+                && audit.target_id.as_deref() == Some(run.run_id.as_str())
+        }) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "ownership observer did not persist a claimed audit"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    assert_eq!(
+        log_path,
+        pipeline_worker_log_path(&runtime.paths().logs_dir, &run.run_id)
+    );
+    let durable_output = wait_for_log_contains(&log_path, "routine worker startup");
+    assert!(durable_output.contains("routine worker startup"));
+}
+
+fn wait_for_worker_ownership_outcome(
+    runtime: &OrbitRuntime,
+    run_id: &str,
+) -> orbit_common::types::JobRun {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let stored = runtime.show_job_run(run_id).expect("show worker run");
+        if stored.pid.is_some() || stored.state != JobRunState::Pending {
+            return stored;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "worker remained pending and unclaimed beyond ownership window"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn wait_for_log_contains(path: &Path, expected: &str) -> String {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let output = std::fs::read_to_string(path).expect("read durable worker log");
+        if output.contains(expected) {
+            return output;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "worker log did not contain expected output: {expected}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]
