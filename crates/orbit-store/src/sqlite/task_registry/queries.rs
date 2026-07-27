@@ -22,6 +22,30 @@ pub(super) fn workspace_by_orbit_dir(
     .map_err(|e| OrbitError::Store(e.to_string()))
 }
 
+/// Machine-local checkout for a `repo_root` + `workspace_path` pair. Those two
+/// normalized paths identify the checkout itself, so a repeat bind for the same
+/// logical checkout resolves back to its existing workspace id even when the
+/// caller brought a different orbit dir (ORB-10507). Ties are broken the same
+/// way `find_rebind_candidates` orders candidates, so a registry that already
+/// holds duplicate path rows resolves deterministically.
+pub(super) fn workspace_checkout_by_paths(
+    conn: &Connection,
+    repo_root: &Path,
+    workspace_path: &Path,
+) -> Result<Option<WorkspaceCheckoutBinding>, OrbitError> {
+    conn.query_row(
+        "SELECT workspace_id, repo_root, workspace_path, orbit_dir, created_at, updated_at
+         FROM workspace_checkout_bindings
+         WHERE repo_root = ?1 AND workspace_path = ?2
+         ORDER BY updated_at DESC, workspace_id ASC
+         LIMIT 1",
+        params![path_to_string(repo_root), path_to_string(workspace_path)],
+        decode_workspace_checkout_binding,
+    )
+    .optional()
+    .map_err(|e| OrbitError::Store(e.to_string()))
+}
+
 pub(super) fn workspace_by_id(
     conn: &Connection,
     workspace_id: &str,
