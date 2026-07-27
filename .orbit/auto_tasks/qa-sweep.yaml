@@ -27,7 +27,7 @@ template:
   - qa-sweep
   - no-diff-expected
   priority: medium
-  crew: qa
+  crew: sonnet
   status: backlog
 dedupe: skip_if_open
 created_by: system
